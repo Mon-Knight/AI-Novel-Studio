@@ -388,6 +388,74 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_context_records_chapter_id ON context_records(chapter_id);
         CREATE INDEX IF NOT EXISTS idx_context_records_type ON context_records(context_type);
         CREATE INDEX IF NOT EXISTS idx_context_records_active ON context_records(is_active);
+
+        CREATE TABLE IF NOT EXISTS quality_check_reports (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            draft_id TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'current_draft',
+            status TEXT NOT NULL DEFAULT 'pending',
+            overall_score INTEGER,
+            summary TEXT,
+            ai_task_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (draft_id) REFERENCES chapter_drafts(id),
+            FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quality_check_reports_chapter_id ON quality_check_reports(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_quality_check_reports_draft_id ON quality_check_reports(draft_id);
+
+        CREATE TABLE IF NOT EXISTS quality_check_items (
+            id TEXT PRIMARY KEY,
+            report_id TEXT NOT NULL,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            draft_id TEXT NOT NULL,
+            issue_type TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'medium',
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            evidence TEXT,
+            suggestion TEXT,
+            start_offset INTEGER,
+            end_offset INTEGER,
+            is_resolved INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (report_id) REFERENCES quality_check_reports(id),
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (draft_id) REFERENCES chapter_drafts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quality_check_items_report_id ON quality_check_items(report_id);
+        CREATE INDEX IF NOT EXISTS idx_quality_check_items_issue_type ON quality_check_items(issue_type);
+        CREATE INDEX IF NOT EXISTS idx_quality_check_items_severity ON quality_check_items(severity);
+
+        CREATE TABLE IF NOT EXISTS polish_records (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            source_draft_id TEXT NOT NULL,
+            result_draft_id TEXT,
+            mode TEXT NOT NULL,
+            instruction TEXT,
+            ai_task_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (source_draft_id) REFERENCES chapter_drafts(id),
+            FOREIGN KEY (result_draft_id) REFERENCES chapter_drafts(id),
+            FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_polish_records_chapter_id ON polish_records(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_polish_records_source_draft_id ON polish_records(source_draft_id);
         ",
     )?;
     Ok(())
