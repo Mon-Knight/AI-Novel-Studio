@@ -1,0 +1,46 @@
+/**
+ * AI Novel Studio - ComingSoon 页面样式
+ */
+
+.coming-soon-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  user-select: none;
+}
+
+.coming-soon-card {
+  text-align: center;
+  padding: var(--spacing-3xl);
+  max-width: 480px;
+}
+
+.coming-soon-icon {
+  font-size: 64px;
+  margin-bottom: var(--spacing-xl);
+  opacity: 0.3;
+}
+
+.coming-soon-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--spacing-md);
+}
+
+.coming-soon-desc {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+  margin-bottom: var(--spacing-2xl);
+}
+
+.coming-soon-version {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-md);
+  display: inline-block;
+}

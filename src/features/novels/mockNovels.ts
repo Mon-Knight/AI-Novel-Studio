@@ -1,0 +1,52 @@
+/**
+ * AI Novel Studio - Mock 小说数据
+ */
+import type { Novel } from '../../types/novel';
+
+export const mockNovels: Novel[] = [
+  {
+    id: 'novel-001',
+    title: '星海归途',
+    description: '在遥远的未来，人类已经遍布银河系。一场突如其来的星际灾难让殖民地与地球失去联系，一位年轻的工程师必须找到回家的路。',
+    genre: '科幻',
+    coverUrl: '',
+    status: 'writing',
+    currentVolumeId: 'vol-001',
+    currentChapterId: 'ch-003',
+    totalWords: 12450,
+    targetWords: 300000,
+    createdAt: '2026-03-15T08:00:00Z',
+    updatedAt: '2026-05-16T14:30:00Z',
+    volumes: [],
+  },
+  {
+    id: 'novel-002',
+    title: '剑道苍穹',
+    description: '修仙世界，一个不能修炼的废柴少年在意外获得上古剑魂后，踏上了一条与众不同的剑修之路。',
+    genre: '仙侠',
+    coverUrl: '',
+    status: 'writing',
+    currentVolumeId: 'vol-003',
+    currentChapterId: 'ch-006',
+    totalWords: 28900,
+    targetWords: 500000,
+    createdAt: '2026-02-20T10:00:00Z',
+    updatedAt: '2026-05-17T09:15:00Z',
+    volumes: [],
+  },
+  {
+    id: 'novel-003',
+    title: '暗影代理人',
+    description: '一个普通上班族意外发现自己能进入他人的梦境，在梦境中他是一名情报代理人，但梦境开始侵蚀现实。',
+    genre: '都市悬疑',
+    coverUrl: '',
+    status: 'planning',
+    currentVolumeId: '',
+    currentChapterId: '',
+    totalWords: 0,
+    targetWords: 200000,
+    createdAt: '2026-05-01T16:00:00Z',
+    updatedAt: '2026-05-10T11:00:00Z',
+    volumes: [],
+  },
+];

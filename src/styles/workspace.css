@@ -1,0 +1,298 @@
+/**
+ * AI Novel Studio - 写作工作台样式
+ */
+
+.workspace-page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* === 左侧卷章目录树 === */
+.workspace-sidebar {
+  width: 240px;
+  min-width: 240px;
+  height: 100%;
+  background: var(--color-bg-sidebar);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+}
+
+.workspace-sidebar-header {
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workspace-sidebar-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-sm) 0;
+}
+
+.tree-novel-root {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.tree-volume {
+  margin-top: var(--spacing-xs);
+}
+
+.tree-volume-header {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.tree-volume-header:hover {
+  background: var(--color-bg-hover);
+}
+
+.tree-volume-header .tree-arrow {
+  font-size: 10px;
+  transition: transform var(--transition-fast);
+}
+
+.tree-volume-header .tree-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.tree-chapter {
+  padding: 6px var(--spacing-lg) 6px 44px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  transition: all var(--transition-fast);
+  border-radius: 0;
+}
+
+.tree-chapter:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.tree-chapter.active {
+  background: var(--color-bg-active);
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.tree-chapter .chapter-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chapter-status-dot.unwritten {
+  background: var(--color-text-muted);
+}
+
+.chapter-status-dot.ai_draft {
+  background: var(--color-warning);
+}
+
+.chapter-status-dot.user_revised {
+  background: var(--color-info);
+}
+
+.chapter-status-dot.adopted {
+  background: var(--color-success);
+}
+
+.chapter-status-dot.summarized {
+  background: var(--color-primary);
+}
+
+.tree-add-btn {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  margin: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.tree-add-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-primary);
+}
+
+/* === 中间正文编辑区 === */
+.workspace-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.editor-toolbar {
+  height: 44px;
+  min-height: 44px;
+  background: var(--color-bg-sidebar);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--spacing-lg);
+  gap: var(--spacing-sm);
+}
+
+.editor-toolbar .toolbar-btn {
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.editor-toolbar .toolbar-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.editor-toolbar .toolbar-btn.primary {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.editor-toolbar .toolbar-btn.primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.editor-toolbar .toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  margin: 0 var(--spacing-sm);
+}
+
+.editor-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-3xl) var(--spacing-3xl);
+  background: var(--color-bg-editor);
+}
+
+.editor-chapter-title {
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  text-align: center;
+  margin-bottom: var(--spacing-3xl);
+  padding-bottom: var(--spacing-xl);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.editor-body {
+  max-width: 720px;
+  margin: 0 auto;
+  font-family: var(--font-family-editor);
+  font-size: var(--font-size-xl);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.editor-body:focus {
+  outline: none;
+}
+
+.editor-body[contenteditable='true'] {
+  cursor: text;
+}
+
+.editor-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-lg);
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.editor-empty-icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+
+/* === 底部状态栏 === */
+.workspace-statusbar {
+  height: var(--statusbar-height);
+  min-height: var(--statusbar-height);
+  background: var(--color-bg-sidebar);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--spacing-lg);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  gap: var(--spacing-lg);
+  user-select: none;
+}
+
+.statusbar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.statusbar-separator {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border-light);
+}
+
+.statusbar-item .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.status-dot.saved {
+  background: var(--color-success);
+}
+
+.status-dot.unsaved {
+  background: var(--color-warning);
+}
+
+.status-dot.generating {
+  background: var(--color-info);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
