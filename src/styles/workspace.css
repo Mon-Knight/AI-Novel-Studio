@@ -296,3 +296,110 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* === v0.4.0 新增：工作台顶部栏 === */
+.workspace-topbar {
+  height: 40px;
+  min-height: 40px;
+  background: var(--color-bg-sidebar);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  justify-content: space-between;
+  user-select: none;
+}
+
+/* === v0.4.0 新增：纸张风格正文编辑区 === */
+.editor-paper {
+  max-width: 880px;
+  margin: 0 auto 24px;
+  background: #ffffff;
+  border: 1px solid #e5eaf0;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  overflow: hidden;
+}
+
+.editor-textarea {
+  width: 100%;
+  min-height: 420px;
+  padding: 36px 44px;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: var(--font-family-editor);
+  font-size: 18px;
+  line-height: 1.9;
+  color: var(--color-text-primary);
+  background: transparent;
+}
+
+.editor-textarea::placeholder {
+  color: var(--color-text-placeholder);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+/* === v0.4.0 新增：章节信息卡片 === */
+.editor-info-card {
+  max-width: 880px;
+  margin: 0 auto 20px;
+  padding: 16px 20px;
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.editor-info-section {
+  margin-bottom: 10px;
+}
+
+.editor-info-section:last-child {
+  margin-bottom: 0;
+}
+
+.editor-info-label {
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.editor-info-text {
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.editor-info-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* === v0.4.0 新增：大纲提示横幅 === */
+.editor-hint-banner {
+  max-width: 880px;
+  margin: 0 auto 16px;
+  padding: 10px 16px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #e65100;
+  text-align: center;
+}
+
+/* === v0.4.0 新增：空状态引导 === */
+.editor-empty-state {
+  text-align: center;
+  padding: 32px 20px;
+  color: var(--color-text-muted);
+}
