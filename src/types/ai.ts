@@ -1,6 +1,45 @@
 /**
- * AI Novel Studio - AI 任务类型定义
+ * AI Novel Studio - AI 类型定义（v0.5.0 增强版）
  */
+
+// ==================== AI 设置 ====================
+
+export interface AiSettings {
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutSeconds?: number;
+  mockMode: boolean;
+}
+
+// ==================== AI 请求/响应 ====================
+
+export interface AiChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface AiGenerateRequest {
+  messages: AiChatMessage[];
+  modelName?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface AiGenerateResponse {
+  text: string;
+  raw?: unknown;
+  tokenInput?: number;
+  tokenOutput?: number;
+}
+
+export interface AiClient {
+  generate(request: AiGenerateRequest): Promise<AiGenerateResponse>;
+}
+
+// ==================== AI 任务记录 ====================
 
 export type AiTaskType =
   | 'setting_structure'
@@ -18,21 +57,25 @@ export type AiTaskType =
   | 'chapter_summarize'
   | 'context_update';
 
-export type AiTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface AiTaskRecord {
   id: string;
-  novelId: string;
+  novelId?: string;
   chapterId?: string;
   taskType: AiTaskType;
   status: AiTaskStatus;
-  modelName: string;
-  inputSummary: string;
-  promptTemplateName: string;
-  outputResult?: string;
+  modelName?: string;
+  promptTemplateId?: string;
+  inputSummary?: string;
+  promptSnapshot?: string;
+  resultText?: string;
+  resultJson?: string;
   errorMessage?: string;
-  startedAt: string;
-  endedAt?: string;
+  tokenInput?: number;
+  tokenOutput?: number;
+  startedAt?: string;
+  finishedAt?: string;
   createdAt: string;
 }
 
@@ -52,3 +95,63 @@ export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   chapter_summarize: '章节总结',
   context_update: '上下文更新',
 };
+
+// ==================== 草稿来源 ====================
+
+export type DraftSource =
+  | 'ai_generated'
+  | 'ai_regenerated'
+  | 'user_edited'
+  | 'ai_polished'
+  | 'imported'
+  | 'manual_placeholder';
+
+export interface ChapterDraft {
+  id: string;
+  novelId: string;
+  chapterId: string;
+  title?: string;
+  content: string;
+  source: DraftSource;
+  versionNo: number;
+  wordCount: number;
+  isAdopted: boolean;
+  aiTaskId?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateChapterDraftInput {
+  novelId: string;
+  chapterId: string;
+  content: string;
+  source: DraftSource;
+  title?: string;
+  aiTaskId?: string;
+  note?: string;
+}
+
+// ==================== 生成上下文 ====================
+
+export interface ChapterGenerationContext {
+  novelTitle: string;
+  novelGenre?: string;
+  worldBackground?: string;
+  ruleSystems?: string;
+  protagonist?: string;
+  specialAbility?: string;
+  abilityLimits?: string;
+  forbiddenBehaviors?: string;
+  volumeTitle?: string;
+  volumeGoal?: string;
+  volumeConflict?: string;
+  chapterTitle: string;
+  chapterOutline?: string;
+  chapterGoal?: string;
+  targetWordCount?: number;
+  styleProfile?: string;
+  outputProfile?: string;
+  previousContext?: string;
+  userInstruction?: string;
+}

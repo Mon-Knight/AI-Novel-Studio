@@ -1,68 +1,214 @@
+import { useState } from 'react';
 import type { Chapter } from '../../../types/chapter';
+import type { ChapterDraft } from '../../../types/ai';
+import { ChapterStatusLabels } from '../../../types/chapter';
+import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient';
+import { buildChapterContext } from '../../../services/prompt/contextBuilder';
+import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
+import { draftVersionService } from '../../../services/database/draftVersionService';
+import { aiTaskService } from '../../../services/ai/aiTaskService';
 
 interface AiGeneratePanelProps {
   novelId?: string;
   chapter?: Chapter;
+  onGenerated?: (draft: ChapterDraft) => void;
+  onAdopted?: () => void;
 }
 
-function AiGeneratePanel({ novelId, chapter }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGeneratePanelProps) {
+  const [userInstruction, setUserInstruction] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
+
+  const settings = aiSettingsService.getSettings();
+
+  const handleGenerate = async () => {
+    if (!novelId || !chapter) return;
+    setGenerating(true);
+    setStatusMsg('正在生成正文...');
+    setErrorMsg('');
+
+    // 创建 AI 任务记录
+    const task = await aiTaskService.create('chapter_generate', {
+      novelId,
+      chapterId: chapter.id,
+      modelName: settings.mockMode ? 'Mock' : settings.modelName,
+      inputSummary: `生成第${chapter.chapterNumber}章：${chapter.title}`,
+    }).catch(() => null);
+
+    try {
+      // 1. 构建上下文
+      const context = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+
+      // 2. 组装提示词
+      const request = await buildGenerateRequest(context);
+
+      // 3. 调用 AI
+      const client = createAiClient();
+      const response = await client.generate(request);
+
+      // 4. 保存为草稿
+      const draft = await draftVersionService.create({
+        novelId,
+        chapterId: chapter.id,
+        content: response.text,
+        source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
+        aiTaskId: task?.id,
+      });
+
+      // 5. 更新 AI 任务记录
+      if (task) {
+        await aiTaskService.markSucceeded(task.id, {
+          resultText: response.text,
+          tokenInput: response.tokenInput,
+          tokenOutput: response.tokenOutput,
+        });
+      }
+
+      setStatusMsg(`生成成功！已保存为草稿 v${draft.versionNo}（${draft.wordCount.toLocaleString()} 字）`);
+      setGenerating(false);
+      onGenerated?.(draft);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '生成失败';
+      setErrorMsg(msg);
+      setStatusMsg('');
+      setGenerating(false);
+
+      if (task) {
+        await aiTaskService.markFailed(task.id, msg);
+      }
+    }
+  };
+
+  const handleAdopt = async () => {
+    if (!chapter) return;
+    const latest = await draftVersionService.getLatestByChapterId(chapter.id);
+    if (!latest) {
+      setErrorMsg('没有可采用的草稿');
+      return;
+    }
+    if (!confirm(`确认采用草稿 v${latest.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。`)) return;
+
+    await draftVersionService.adopt(latest.id, chapter.id);
+    setStatusMsg('已采用为正式正文！');
+    setTimeout(() => setStatusMsg(''), 3000);
+    onAdopted?.();
+  };
+
+  if (!chapter) {
+    return (
+      <div className="text-sm text-muted" style={{ padding: 16, textAlign: 'center' }}>
+        请先在左侧目录树中选择一个章节
+      </div>
+    );
+  }
+
   return (
     <div>
+      {/* AI 设置状态 */}
+      <div className="panel-section">
+        <div className="panel-section-title">AI 状态</div>
+        <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+          <div>模式：{settings.mockMode ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+          {!settings.mockMode && (
+            <div>模型：{settings.modelName || '未配置'}</div>
+          )}
+          {!settings.mockMode && !settings.apiKey && (
+            <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
+              ⚠️ 未配置 API Key，请先到设置中心配置
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 当前章节 */}
       <div className="panel-section">
         <div className="panel-section-title">当前章节</div>
-        {chapter ? (
-          <>
-            <div className="panel-field">
-              <div className="panel-field-label">章节</div>
-              <div className="panel-field-value">第{chapter.chapterNumber}章：{chapter.title}</div>
-            </div>
-            <div className="panel-field" style={{ marginTop: 8 }}>
-              <div className="panel-field-label">目标字数</div>
-              <div className="panel-field-value">{chapter.targetWordCount?.toLocaleString() || 4000} 字</div>
-            </div>
-            <div className="panel-field" style={{ marginTop: 8 }}>
-              <div className="panel-field-label">当前状态</div>
-              <div className="panel-field-value">{chapter.status === 'not_started' ? '未开始' : chapter.status === 'outline_ready' ? '已有大纲' : chapter.status}</div>
-            </div>
-          </>
-        ) : (
-          <div className="text-sm text-muted">请先在左侧选择章节</div>
-        )}
-      </div>
-
-      <div className="panel-section">
-        <div className="panel-section-title">方案选择</div>
         <div className="panel-field">
-          <div className="panel-field-label">风格方案</div>
-          <select className="panel-select" defaultValue="style-001">
-            <option value="style-001">科幻快节奏</option>
-            <option value="style-002">仙侠厚重</option>
-          </select>
+          <div className="panel-field-label">章节</div>
+          <div className="panel-field-value">第{chapter.chapterNumber}章：{chapter.title}</div>
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
-          <div className="panel-field-label">输出控制方案</div>
-          <select className="panel-select" defaultValue="output-001">
-            <option value="output-001">默认输出方案</option>
-            <option value="output-002">第一人称方案</option>
-          </select>
+          <div className="panel-field-label">目标字数</div>
+          <div className="panel-field-value">{chapter.targetWordCount?.toLocaleString() || 4000} 字</div>
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
-          <div className="panel-field-label">生成模式</div>
-          <select className="panel-select" defaultValue="full">
-            <option value="full">完整生成</option>
-            <option value="continue">续写模式</option>
-            <option value="outline_first">先生成大纲再写</option>
-          </select>
+          <div className="panel-field-label">状态</div>
+          <div className="panel-field-value">{ChapterStatusLabels[chapter.status]}</div>
         </div>
       </div>
 
+      {/* 生成模式 */}
       <div className="panel-section">
-        <button className="panel-btn panel-btn-primary">🤖 生成本章</button>
-        <button className="panel-btn panel-btn-secondary">🔄 重新生成</button>
-        <button className="panel-btn panel-btn-secondary">✏️ 根据当前稿修改</button>
-        <button className="panel-btn panel-btn-warning">✅ 确认采用</button>
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 8 }}>
-          AI 正文生成功能将在 v0.5.0 开放
+        <div className="panel-section-title">生成模式</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className={`panel-btn ${genMode === 'new' ? 'panel-btn-primary' : 'panel-btn-secondary'}`}
+            onClick={() => setGenMode('new')}
+            style={{ flex: 1 }}
+          >
+            生成新稿
+          </button>
+          <button
+            className={`panel-btn ${genMode === 'rewrite' ? 'panel-btn-primary' : 'panel-btn-secondary'}`}
+            onClick={() => setGenMode('rewrite')}
+            style={{ flex: 1 }}
+          >
+            重新生成
+          </button>
+        </div>
+      </div>
+
+      {/* 额外要求 */}
+      <div className="panel-section">
+        <div className="panel-section-title">本次生成额外要求</div>
+        <textarea
+          className="form-textarea"
+          value={userInstruction}
+          onChange={(e) => setUserInstruction(e.target.value)}
+          placeholder="例如：本章开头要压抑一些，结尾留下悬念..."
+          style={{ width: '100%', height: 70, resize: 'vertical', fontSize: 13 }}
+        />
+      </div>
+
+      {/* 状态消息 */}
+      {statusMsg && (
+        <div style={{
+          fontSize: 13, padding: '8px 12px', borderRadius: 6, marginBottom: 12,
+          background: statusMsg.includes('成功') ? '#e8f5e9' : 'var(--color-primary-light)',
+          color: statusMsg.includes('成功') ? '#2e7d32' : 'var(--color-primary)',
+        }}>
+          {statusMsg}
+        </div>
+      )}
+      {errorMsg && (
+        <div style={{
+          fontSize: 13, padding: '8px 12px', borderRadius: 6, marginBottom: 12,
+          background: '#ffebee', color: '#c62828',
+        }}>
+          {errorMsg}
+        </div>
+      )}
+
+      {/* 操作按钮 */}
+      <div className="panel-section">
+        <button
+          className="panel-btn panel-btn-primary"
+          onClick={handleGenerate}
+          disabled={generating || (!settings.mockMode && !settings.apiKey)}
+        >
+          {generating ? '⏳ 正在生成...' : `🤖 ${genMode === 'rewrite' ? '重新生成' : '生成本章'}`}
+        </button>
+        <button
+          className="panel-btn panel-btn-secondary"
+          onClick={handleAdopt}
+        >
+          ✅ 确认采用
+        </button>
+        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 6 }}>
+          AI 生成结果将保存为草稿版本，需手动确认采用
         </div>
       </div>
     </div>

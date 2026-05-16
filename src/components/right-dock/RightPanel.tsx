@@ -1,5 +1,6 @@
 import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePage';
 import type { Chapter } from '../../types/chapter';
+import type { ChapterDraft } from '../../types/ai';
 import AiGeneratePanel from './panels/AiGeneratePanel';
 import OutlinePanel from './panels/OutlinePanel';
 import CharactersPanel from './panels/CharactersPanel';
@@ -14,9 +15,11 @@ interface RightPanelProps {
   onClose: () => void;
   novelId?: string;
   chapter?: Chapter;
+  onGenerated?: (draft: ChapterDraft) => void;
+  onAdopted?: () => void;
 }
 
-const panelConfig: Record<string, { title: string; component: React.FC<{ novelId?: string; chapter?: Chapter }> }> = {
+const panelConfig: Record<string, { title: string; component: React.FC<{ novelId?: string; chapter?: Chapter; onGenerated?: (draft: ChapterDraft) => void; onAdopted?: () => void }> }> = {
   'ai-generate': { title: 'AI 章节生成', component: AiGeneratePanel },
   'outline': { title: '大纲查看', component: OutlinePanel },
   'characters': { title: '角色管理', component: CharactersPanel },
@@ -27,7 +30,7 @@ const panelConfig: Record<string, { title: string; component: React.FC<{ novelId
   'polish': { title: '润色优化', component: PolishPanel },
 };
 
-function RightPanel({ panelType, onClose, novelId, chapter }: RightPanelProps) {
+function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted }: RightPanelProps) {
   if (!panelType) return null;
   const config = panelConfig[panelType];
   if (!config) return null;
@@ -46,7 +49,7 @@ function RightPanel({ panelType, onClose, novelId, chapter }: RightPanelProps) {
           </button>
         </div>
         <div className="right-panel-body">
-          <PanelComponent novelId={novelId} chapter={chapter} />
+          <PanelComponent novelId={novelId} chapter={chapter} onGenerated={onGenerated} onAdopted={onAdopted} />
         </div>
       </div>
     </>

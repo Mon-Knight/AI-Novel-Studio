@@ -165,6 +165,52 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_volumes_novel_id ON volumes(novel_id);
         CREATE INDEX IF NOT EXISTS idx_chapters_novel_id ON chapters(novel_id);
         CREATE INDEX IF NOT EXISTS idx_chapters_volume_id ON chapters(volume_id);
+
+        CREATE TABLE IF NOT EXISTS chapter_drafts (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            title TEXT,
+            content TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'manual_placeholder',
+            version_no INTEGER NOT NULL DEFAULT 1,
+            word_count INTEGER NOT NULL DEFAULT 0,
+            is_adopted INTEGER NOT NULL DEFAULT 0,
+            ai_task_id TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chapter_drafts_chapter_id ON chapter_drafts(chapter_id);
+
+        CREATE TABLE IF NOT EXISTS ai_task_records (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT,
+            chapter_id TEXT,
+            task_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            model_name TEXT,
+            prompt_template_id TEXT,
+            input_summary TEXT,
+            prompt_snapshot TEXT,
+            result_text TEXT,
+            result_json TEXT,
+            error_message TEXT,
+            token_input INTEGER,
+            token_output INTEGER,
+            started_at TEXT,
+            finished_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_task_records_novel_id ON ai_task_records(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_task_records_chapter_id ON ai_task_records(chapter_id);
         ",
     )?;
     Ok(())

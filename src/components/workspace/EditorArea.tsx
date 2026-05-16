@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Chapter } from '../../types/chapter';
-import type { ChapterDraftPreview } from '../../services/database/draftService';
-import { draftService } from '../../services/database/draftService';
+import type { ChapterDraft } from '../../types/ai';
+import { draftVersionService } from '../../services/database/draftVersionService';
 import { ChapterStatusLabels } from '../../types/chapter';
 
 interface EditorAreaProps {
   chapter?: Chapter;
   novelTitle?: string;
   novelId?: string;
+  currentDraft?: ChapterDraft | null;
   onOpenPanel?: (panel: string) => void;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
 }
@@ -20,70 +21,58 @@ function countWords(text: string): number {
   return cjk + words;
 }
 
-function EditorArea({ chapter, novelTitle, novelId, onOpenPanel, onDraftChange }: EditorAreaProps) {
-  const [draft, setDraft] = useState<ChapterDraftPreview | null>(null);
+function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, onDraftChange }: EditorAreaProps) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
-  const [lastSaved, setLastSaved] = useState<string>('');
+  const [lastSaved, setLastSaved] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 加载草稿
+  // 加载当前草稿
   useEffect(() => {
-    if (chapter) {
-      draftService.getByChapterId(chapter.id).then((d) => {
-        setDraft(d);
-        setContent(d?.content || '');
-        setIsDirty(false);
-        setLastSaved(d?.updatedAt ? new Date(d.updatedAt).toLocaleTimeString('zh-CN') : '');
-        onDraftChange?.(d?.wordCount || 0, false);
-      }).catch(() => {
-        setDraft(null);
-        setContent('');
-        setIsDirty(false);
-      });
-    } else {
-      setDraft(null);
+    if (currentDraft) {
+      setContent(currentDraft.content);
+      setIsDirty(false);
+      setLastSaved(new Date(currentDraft.updatedAt).toLocaleTimeString('zh-CN'));
+      onDraftChange?.(currentDraft.wordCount, false);
+    } else if (chapter) {
       setContent('');
       setIsDirty(false);
+      setLastSaved('');
+      onDraftChange?.(0, false);
     }
-  }, [chapter?.id]);
+  }, [currentDraft?.id, chapter?.id]);
 
   const handleContentChange = (value: string) => {
     setContent(value);
     const wc = countWords(value);
-    setIsDirty(wc !== (draft?.wordCount || 0) || value !== (draft?.content || ''));
-    onDraftChange?.(wc, value !== (draft?.content || ''));
+    setIsDirty(wc !== (currentDraft?.wordCount || 0) || value !== (currentDraft?.content || ''));
+    onDraftChange?.(wc, value !== (currentDraft?.content || ''));
   };
 
   const handleSave = useCallback(async () => {
     if (!chapter || !novelId) return;
     try {
-      const result = await draftService.save({
-        novelId,
-        chapterId: chapter.id,
-        content,
-        source: 'user_edited',
-      });
-      setDraft(result);
+      if (currentDraft && !currentDraft.isAdopted) {
+        await draftVersionService.update(currentDraft.id, chapter.id, content, 'user_edited');
+      } else {
+        await draftVersionService.create({
+          novelId, chapterId: chapter.id, content, source: 'user_edited',
+        });
+      }
       setIsDirty(false);
       setSaveMsg('已保存');
       setLastSaved(new Date().toLocaleTimeString('zh-CN'));
-      onDraftChange?.(result.wordCount, false);
       setTimeout(() => setSaveMsg(''), 2000);
     } catch {
       setSaveMsg('保存失败');
       setTimeout(() => setSaveMsg(''), 3000);
     }
-  }, [chapter, novelId, content, onDraftChange]);
+  }, [chapter, novelId, content, currentDraft]);
 
-  // Ctrl+S 保存
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        if (isDirty) handleSave();
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (isDirty) handleSave(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -101,100 +90,80 @@ function EditorArea({ chapter, novelTitle, novelId, onOpenPanel, onDraftChange }
     );
   }
 
+  const draftSourceLabel: Record<string, string> = {
+    ai_generated: 'AI 初稿', ai_regenerated: 'AI 重生成',
+    user_edited: '用户编辑', ai_polished: 'AI 润色',
+    imported: '导入', manual_placeholder: '手动占位',
+  };
+
   return (
     <div className="editor-content">
-      {/* 工具栏 */}
       <div className="editor-toolbar">
-        <button
-          className={`toolbar-btn ${isDirty ? '' : ''}`}
-          onClick={handleSave}
-          title="Ctrl+S 保存"
-          style={{ color: isDirty ? 'var(--color-warning)' : undefined }}
-        >
+        <button className={`toolbar-btn`} onClick={handleSave} title="Ctrl+S 保存"
+          style={{ color: isDirty ? 'var(--color-warning)' : undefined }}>
           💾 {saveMsg || (isDirty ? '保存草稿 *' : '保存草稿')}
         </button>
         <span className="toolbar-separator" />
-        <button className="toolbar-btn" onClick={() => onOpenPanel?.('ai-generate')}>
-          🤖 AI 生成
-        </button>
-        <button className="toolbar-btn" onClick={() => onOpenPanel?.('outline')}>
-          📋 查看大纲
-        </button>
+        <button className="toolbar-btn" onClick={() => onOpenPanel?.('ai-generate')}>🤖 AI 生成</button>
+        <button className="toolbar-btn" onClick={() => onOpenPanel?.('outline')}>📋 查看大纲</button>
+        <button className="toolbar-btn" onClick={() => onOpenPanel?.('draft-history')}>📋 草稿历史</button>
         <span className="toolbar-separator" />
-        <button className="toolbar-btn" onClick={() => {
-          const cleaned = content.replace(/\n{3,}/g, '\n\n').trim();
-          handleContentChange(cleaned);
-          setSaveMsg('已排版');
-          setTimeout(() => setSaveMsg(''), 2000);
+        <button className="toolbar-btn" onClick={() => { handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim()); setSaveMsg('已排版'); setTimeout(() => setSaveMsg(''), 2000); }}>📐 一键排版</button>
+        <span className="toolbar-separator" />
+        <button className="toolbar-btn primary" onClick={() => onOpenPanel?.('ai-generate')}>✅ 确认采用</button>
+      </div>
+
+      <div className="editor-chapter-title">第{chapter.chapterNumber}章：{chapter.title}</div>
+
+      {/* 草稿版本信息 */}
+      {currentDraft && (
+        <div style={{
+          maxWidth: 880, margin: '0 auto 12px', padding: '8px 16px',
+          background: currentDraft.isAdopted ? '#e8f5e9' : 'var(--color-bg-hover)',
+          borderRadius: 6, fontSize: 13, display: 'flex', alignItems: 'center', gap: 16,
+          border: currentDraft.isAdopted ? '1px solid #c8e6c9' : '1px solid var(--color-border-light)',
         }}>
-          📐 一键排版
-        </button>
-        <span className="toolbar-separator" />
-        <button className="toolbar-btn primary" onClick={() => setSaveMsg('正式采用功能将在 v0.5.0 接入')}>
-          ✅ 确认采用
-        </button>
-      </div>
-
-      {/* 章节标题 */}
-      <div className="editor-chapter-title">
-        第{chapter.chapterNumber}章：{chapter.title}
-      </div>
-
-      {/* 章节信息卡片 */}
-      <div className="editor-info-card">
-        {chapter.outline && (
-          <div className="editor-info-section">
-            <div className="editor-info-label">📋 章节大纲</div>
-            <div className="editor-info-text">{chapter.outline}</div>
-          </div>
-        )}
-        {chapter.goal && (
-          <div className="editor-info-section">
-            <div className="editor-info-label">🎯 本章目标</div>
-            <div className="editor-info-text">{chapter.goal}</div>
-          </div>
-        )}
-        <div className="editor-info-meta">
-          <span>状态：{ChapterStatusLabels[chapter.status]}</span>
-          <span>目标字数：{(chapter.targetWordCount || 0).toLocaleString()} 字</span>
-          {lastSaved && <span>上次保存：{lastSaved}</span>}
-        </div>
-      </div>
-
-      {!chapter.outline && (
-        <div className="editor-hint-banner">
-          💡 当前章节还没有大纲，建议先在作品详情页补充章节大纲，后续 AI 将根据大纲生成正文。
+          <span>📄 草稿 v{currentDraft.versionNo}</span>
+          <span>来源：{draftSourceLabel[currentDraft.source] || currentDraft.source}</span>
+          <span>字数：{currentDraft.wordCount.toLocaleString()}</span>
+          {currentDraft.isAdopted && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>✅ 已采用</span>}
         </div>
       )}
 
-      {/* 正文编辑区 - 纸张风格 */}
+      {/* 章节信息卡片 */}
+      {(chapter.outline || chapter.goal) && (
+        <div className="editor-info-card">
+          {chapter.outline && <div className="editor-info-section"><div className="editor-info-label">📋 章节大纲</div><div className="editor-info-text">{chapter.outline}</div></div>}
+          {chapter.goal && <div className="editor-info-section"><div className="editor-info-label">🎯 本章目标</div><div className="editor-info-text">{chapter.goal}</div></div>}
+          <div className="editor-info-meta">
+            <span>状态：{ChapterStatusLabels[chapter.status]}</span>
+            <span>目标字数：{(chapter.targetWordCount || 0).toLocaleString()} 字</span>
+            {lastSaved && <span>上次保存：{lastSaved}</span>}
+          </div>
+        </div>
+      )}
+
+      {!chapter.outline && (
+        <div className="editor-hint-banner">💡 当前章节还没有大纲，建议先在作品详情页补充章节大纲，后续 AI 将根据大纲生成正文。</div>
+      )}
+
       <div className="editor-paper">
-        <textarea
-          ref={textareaRef}
-          className="editor-textarea"
-          value={content}
+        <textarea ref={textareaRef} className="editor-textarea" value={content}
           onChange={(e) => handleContentChange(e.target.value)}
-          placeholder="在这里输入或粘贴正文内容...&#10;&#10;v0.5.0 将支持 AI 根据大纲自动生成正文。"
-          spellCheck={false}
-        />
+          placeholder="在这里输入或粘贴正文内容...&#10;&#10;点击右侧 AI 生成面板，AI 将根据章节大纲生成正文。"
+          spellCheck={false} />
       </div>
 
-      {/* 空状态提示 */}
       {!content && (
         <div className="editor-empty-state">
           <div className="editor-empty-icon">✍️</div>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>当前章节还没有正文</div>
           <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
-            你可以先查看本章大纲、选择风格和输出控制。
-            <br />v0.5.0 将在这里接入 AI 正文生成。
+            点击右侧 AI 生成面板，AI 将根据章节大纲自动生成正文。
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-            <button className="btn btn-primary btn-sm" onClick={() => onOpenPanel?.('ai-generate')}>
-              🤖 打开 AI 生成面板
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => onOpenPanel?.('outline')}>
-              📋 查看大纲
-            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => onOpenPanel?.('ai-generate')}>🤖 打开 AI 生成面板</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => onOpenPanel?.('outline')}>📋 查看大纲</button>
           </div>
         </div>
       )}

@@ -5,16 +5,19 @@ import EditorArea from '../../components/workspace/EditorArea';
 import StatusBar from '../../components/workspace/StatusBar';
 import RightToolbar from '../../components/right-dock/RightToolbar';
 import RightPanel from '../../components/right-dock/RightPanel';
+import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
+import { draftVersionService } from '../../services/database/draftVersionService';
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
+import type { ChapterDraft } from '../../types/ai';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
 
 export type PanelType =
   | 'ai-generate' | 'outline' | 'characters' | 'events'
-  | 'setting' | 'style' | 'check' | 'polish' | null;
+  | 'setting' | 'style' | 'check' | 'polish' | 'draft-history' | null;
 
 function WritingWorkspacePage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -24,8 +27,18 @@ function WritingWorkspacePage() {
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [activeChapterId, setActiveChapterId] = useState<string>('');
+  const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
   const [draftWordCount, setDraftWordCount] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
+
+  const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
+
+  const loadChapterDraft = useCallback(async (chapterId: string) => {
+    const draft = await draftVersionService.getLatestByChapterId(chapterId);
+    setCurrentDraft(draft);
+    setDraftWordCount(draft?.wordCount || 0);
+    setIsDirty(false);
+  }, []);
 
   useEffect(() => {
     if (novelId) {
@@ -42,14 +55,11 @@ function WritingWorkspacePage() {
     }
   }, [novelId, searchParams]);
 
-  const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
-
   const handleSelectChapter = useCallback((chapterId: string) => {
     setActiveChapterId(chapterId);
     setActivePanel(null); // 切换章节关闭面板
-    setDraftWordCount(0);
-    setIsDirty(false);
-  }, []);
+    loadChapterDraft(chapterId);
+  }, [loadChapterDraft]);
 
   const handleTogglePanel = useCallback((panel: PanelType) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
@@ -121,6 +131,9 @@ function WritingWorkspacePage() {
             <button className="btn btn-secondary btn-sm" onClick={() => handleOpenPanel('ai-generate')}>
               🤖 AI生成
             </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => handleOpenPanel('draft-history')}>
+              📋 草稿历史
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={() => setActivePanel(null)}>
               🖊️ 专注模式
             </button>
@@ -131,6 +144,7 @@ function WritingWorkspacePage() {
           chapter={activeChapter}
           novelTitle={novel?.title}
           novelId={novelId}
+          currentDraft={currentDraft}
           onOpenPanel={handleOpenPanel}
           onDraftChange={handleDraftChange}
         />
@@ -138,20 +152,32 @@ function WritingWorkspacePage() {
           chapter={activeChapter}
           draftWordCount={draftWordCount}
           isDirty={isDirty}
-          draftVersion="v0 占位"
+          draftVersion={currentDraft ? `v${currentDraft.versionNo}` : 'v0 占位'}
         />
       </div>
 
       {/* 右侧工具栏 */}
       <RightToolbar activePanel={activePanel} onTogglePanel={handleTogglePanel} />
 
+      {/* 草稿历史面板 */}
+      {activePanel === 'draft-history' && (
+        <DraftHistoryPanel
+          chapterId={activeChapterId}
+          currentDraftId={currentDraft?.id}
+          onLoadDraft={(draft) => { setCurrentDraft(draft); setDraftWordCount(draft.wordCount); setIsDirty(false); setActivePanel(null); }}
+          onClose={handleClosePanel}
+        />
+      )}
+
       {/* 右侧弹出面板 */}
-      {activePanel && (
+      {activePanel && activePanel !== 'draft-history' && (
         <RightPanel
           panelType={activePanel}
           onClose={handleClosePanel}
           novelId={novelId}
           chapter={activeChapter}
+          onGenerated={(draft) => { setCurrentDraft(draft); setDraftWordCount(draft.wordCount); setIsDirty(false); }}
+          onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
         />
       )}
     </div>
