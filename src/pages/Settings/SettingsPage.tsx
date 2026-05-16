@@ -127,12 +127,30 @@ function SettingsPage() {
       <div className="detail-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <span style={{ fontSize: 18 }}>💾</span>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>关于</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>数据与存储</span>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
+          <div>存储方式：LocalStorage（浏览器本地存储）</div>
+          <div>数据库：SQLite（Tauri 环境下自动启用）</div>
+          <div>数据保存位置：浏览器缓存 / 应用数据目录</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted)' }}>
+            💡 完整数据备份与恢复功能将在后续版本增强
+          </div>
+        </div>
+      </div>
+
+      <div className="detail-card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 18 }}>ℹ️</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
         </div>
         <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div>AI Novel Studio v0.5.0</div>
+          <div><strong>AI Novel Studio v1.0.0</strong></div>
           <div>Windows 桌面端 AI 小说创作工作台</div>
           <div>技术路线：Tauri + React + TypeScript + SQLite</div>
+          <div>本地路径：F:\ai-novel-studio</div>
+          <div>项目定位：逐章辅助完成长篇小说创作</div>
+          <div style={{ marginTop: 8 }}>GitHub：<a href="https://github.com/Mon-Knight/AI-Novel-Studio" target="_blank" rel="noopener">Mon-Knight/AI-Novel-Studio</a></div>
         </div>
       </div>
 

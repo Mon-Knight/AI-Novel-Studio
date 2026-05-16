@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { novelRepository } from '../../services/database/novelRepository';
 import NovelCard from '../../components/novel-card/NovelCard';
+import FirstTimeGuide from '../../components/common/FirstTimeGuide';
 import type { Novel } from '../../types/novel';
 import '../../styles/home.css';
 
@@ -62,6 +63,9 @@ function HomePage() {
 
   return (
     <div className="home-page">
+      {/* v1.0.0 首次使用引导 */}
+      <FirstTimeGuide />
+
       {/* 横幅 */}
       <div className="home-banner">
         <div className="home-banner-icon">📝</div>

@@ -12,6 +12,7 @@ import {
 import OutlineManager from '../../components/outline/OutlineManager';
 import CharacterLibraryCard from '../../components/novel-card/CharacterLibraryCard';
 import ContextOverviewCard from '../../components/novel-card/ContextOverviewCard';
+import ExportCard from '../../components/novel-card/ExportCard';
 import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
@@ -188,6 +189,9 @@ function NovelDetailPage() {
         </div>
         <CharacterLibraryCard novelId={novel.id} />
         <ContextOverviewCard novelId={novel.id} />
+        <div style={{ gridColumn: '1 / -1' }}>
+          <ExportCard novelId={novel.id} novelTitle={novel.title} />
+        </div>
       </div>
     </div>
   );
