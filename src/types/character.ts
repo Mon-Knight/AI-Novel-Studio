@@ -26,7 +26,14 @@ export interface Character {
 export interface CharacterState {
   id: string; novelId: string; characterId: string; chapterId?: string;
   stateSummary: string; relationshipChanges?: string; goalChanges?: string;
-  location?: string; healthState?: string; knowledgeState?: string; createdAt: string;
+  location?: string; healthState?: string; knowledgeState?: string;
+  createdAt: string;
+}
+
+export interface CreateCharacterStateInput {
+  novelId: string; characterId: string; chapterId?: string;
+  stateSummary: string; relationshipChanges?: string; goalChanges?: string;
+  location?: string; healthState?: string; knowledgeState?: string;
 }
 
 export interface ChapterCharacter {

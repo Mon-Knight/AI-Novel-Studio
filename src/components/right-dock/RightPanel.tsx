@@ -9,6 +9,8 @@ import SettingPanel from './panels/SettingPanel';
 import StylePanel from './panels/StylePanel';
 import CheckPanel from './panels/CheckPanel';
 import PolishPanel from './panels/PolishPanel';
+import ChapterSummaryPanel from './panels/ChapterSummaryPanel';
+import ContextViewPanel from './panels/ContextViewPanel';
 
 interface RightPanelProps {
   panelType: PanelType;
@@ -28,6 +30,8 @@ const panelConfig: Record<string, { title: string; component: React.FC<{ novelId
   'style': { title: '风格方案', component: StylePanel },
   'check': { title: '质量检查', component: CheckPanel },
   'polish': { title: '润色优化', component: PolishPanel },
+  'chapter-summary': { title: '章节总结', component: ChapterSummaryPanel },
+  'context-view': { title: '上下文记录', component: ContextViewPanel },
 };
 
 function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted }: RightPanelProps) {

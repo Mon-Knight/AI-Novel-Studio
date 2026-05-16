@@ -13,6 +13,8 @@ const toolbarButtons: ToolbarButton[] = [
   { id: 'events', icon: '⚡', label: '事件' },
   { id: 'setting', icon: '🌍', label: '设定' },
   { id: 'style', icon: '🎨', label: '风格' },
+  { id: 'context-view', icon: '📦', label: '上下文' },
+  { id: 'chapter-summary', icon: '📝', label: '总结' },
   { id: 'check', icon: '🔍', label: '检查' },
   { id: 'polish', icon: '✨', label: '润色' },
 ];

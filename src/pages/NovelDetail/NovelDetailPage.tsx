@@ -11,6 +11,7 @@ import {
 } from '../../components/novel-detail/NovelDetailCards';
 import OutlineManager from '../../components/outline/OutlineManager';
 import CharacterLibraryCard from '../../components/novel-card/CharacterLibraryCard';
+import ContextOverviewCard from '../../components/novel-card/ContextOverviewCard';
 import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
@@ -186,6 +187,7 @@ function NovelDetailPage() {
           <OutlineManager novelId={novel.id} />
         </div>
         <CharacterLibraryCard novelId={novel.id} />
+        <ContextOverviewCard novelId={novel.id} />
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
 import { ChapterStatusLabels } from '../../../types/chapter';
@@ -7,6 +7,7 @@ import { buildChapterContext } from '../../../services/prompt/contextBuilder';
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
+import { contextRecordService } from '../../../services/context/contextRecordService';
 
 interface AiGeneratePanelProps {
   novelId?: string;
@@ -21,6 +22,17 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
+
+  // v0.8.0 上下文加载状态
+  const [contextCount, setContextCount] = useState(0);
+
+  useEffect(() => {
+    if (novelId) {
+      contextRecordService.getForGeneration({ novelId, maxCount: 15 })
+        .then((records) => setContextCount(records.length))
+        .catch(() => setContextCount(0));
+    }
+  }, [novelId]);
 
   const settings = aiSettingsService.getSettings();
 
@@ -118,6 +130,24 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           {!settings.mockMode && !settings.apiKey && (
             <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
               ⚠️ 未配置 API Key，请先到设置中心配置
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* v0.8.0 上下文加载状态 */}
+      <div className="panel-section">
+        <div className="panel-section-title">📦 上下文加载状态</div>
+        <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+          <div>已加载上下文：<strong>{contextCount}</strong> 条</div>
+          {contextCount === 0 && (
+            <div style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+              暂无前文上下文记录，可先在已采用章节中生成总结
+            </div>
+          )}
+          {contextCount > 0 && (
+            <div style={{ color: 'var(--color-success)', marginTop: 2 }}>
+              ✅ 下一章生成时将自动加载以上下文摘要
             </div>
           )}
         </div>

@@ -347,6 +347,47 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             FOREIGN KEY (chapter_id) REFERENCES chapters(id)
         );
         CREATE INDEX IF NOT EXISTS idx_chapter_events_chapter_id ON chapter_events(chapter_id);
+
+        CREATE TABLE IF NOT EXISTS chapter_summaries (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            adopted_draft_id TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            key_events TEXT,
+            character_changes TEXT,
+            relationship_changes TEXT,
+            new_foreshadows TEXT,
+            resolved_foreshadows TEXT,
+            next_chapter_hints TEXT,
+            ai_task_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (adopted_draft_id) REFERENCES chapter_drafts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chapter_summaries_novel_id ON chapter_summaries(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_chapter_summaries_chapter_id ON chapter_summaries(chapter_id);
+
+        CREATE TABLE IF NOT EXISTS context_records (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT,
+            context_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            importance INTEGER NOT NULL DEFAULT 3,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_context_records_novel_id ON context_records(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_context_records_chapter_id ON context_records(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_context_records_type ON context_records(context_type);
+        CREATE INDEX IF NOT EXISTS idx_context_records_active ON context_records(is_active);
         ",
     )?;
     Ok(())

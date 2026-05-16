@@ -10,6 +10,7 @@ import { outputProfileService } from '../styles/outputProfileService';
 import { characterService } from '../characters/characterService';
 import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
+import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
 import type { ChapterGenerationContext } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
 import type { StyleProfile } from '../../types/style';
@@ -93,6 +94,17 @@ export async function buildChapterContext(
     }
   }
 
+  // v0.8.0 加载前文上下文记录
+  let previousContext: string | undefined;
+  try {
+    const records = await contextRecordService.getForGeneration({
+      novelId, chapterId: chapter.id, maxCount: 15,
+    });
+    if (records.length > 0) {
+      previousContext = buildContextSummary(records);
+    }
+  } catch { /* 上下文加载失败不影响生成 */ }
+
   return {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
@@ -115,6 +127,7 @@ export async function buildChapterContext(
     outputProfile: outputProfileSummary,
     chapterCharacters: chapterCharacterSummary,
     chapterEvents: chapterEventSummary,
+    previousContext,
     userInstruction: extractText(userInstruction),
   };
 }
