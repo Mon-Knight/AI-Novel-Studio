@@ -11,9 +11,10 @@ import PolishPanel from './panels/PolishPanel';
 interface RightPanelProps {
   panelType: PanelType;
   onClose: () => void;
+  novelId?: string;
 }
 
-const panelConfig: Record<string, { title: string; component: React.FC }> = {
+const panelConfig: Record<string, { title: string; component: React.FC<{ novelId?: string }> }> = {
   'ai-generate': { title: 'AI 章节生成', component: AiGeneratePanel },
   'outline': { title: '大纲查看', component: OutlinePanel },
   'characters': { title: '角色管理', component: CharactersPanel },
@@ -24,7 +25,7 @@ const panelConfig: Record<string, { title: string; component: React.FC }> = {
   'polish': { title: '润色优化', component: PolishPanel },
 };
 
-function RightPanel({ panelType, onClose }: RightPanelProps) {
+function RightPanel({ panelType, onClose, novelId }: RightPanelProps) {
   if (!panelType) return null;
   const config = panelConfig[panelType];
   if (!config) return null;
@@ -43,7 +44,7 @@ function RightPanel({ panelType, onClose }: RightPanelProps) {
           </button>
         </div>
         <div className="right-panel-body">
-          <PanelComponent />
+          <PanelComponent novelId={novelId} />
         </div>
       </div>
     </>

@@ -1,57 +1,84 @@
-function SettingPanel() {
+import { useState, useEffect } from 'react';
+import { settingRepository } from '../../../services/database/settingRepository';
+import { protagonistRepository } from '../../../services/database/protagonistRepository';
+import type { WorldSetting, RuleSystem } from '../../../types/setting';
+import type { Protagonist } from '../../../types/protagonist';
+
+interface SettingPanelProps {
+  novelId?: string;
+}
+
+function SettingPanel({ novelId }: SettingPanelProps) {
+  const [worldSettings, setWorldSettings] = useState<WorldSetting[]>([]);
+  const [ruleSystems, setRuleSystems] = useState<RuleSystem[]>([]);
+  const [protagonist, setProtagonist] = useState<Protagonist | null>(null);
+
+  useEffect(() => {
+    if (novelId) {
+      settingRepository.getWorldSettings(novelId).then(setWorldSettings).catch(() => {});
+      settingRepository.getRuleSystems(novelId).then(setRuleSystems).catch(() => {});
+      protagonistRepository.getByNovelId(novelId).then(setProtagonist).catch(() => {});
+    }
+  }, [novelId]);
+
+  const activeWorld = worldSettings.find((s) => s.isActive) || worldSettings[0];
+  const activeRules = ruleSystems.filter((r) => r.isActive);
+
   return (
     <div>
       <div className="panel-section">
         <div className="panel-section-title">世界背景</div>
-        <div className="panel-field">
-          <div className="panel-field-label">时代设定</div>
-          <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)' }}>
-            遥远的未来，人类已经遍布银河系。星际旅行通过传送系统实现，各星域由联盟统一管理。
-          </div>
-        </div>
-        <div className="panel-field" style={{ marginTop: 12 }}>
-          <div className="panel-field-label">当前地点</div>
-          <div className="panel-field-value">第七前哨站 · 边界星域中转基地</div>
-        </div>
+        {activeWorld ? (
+          <>
+            <div className="panel-field">
+              <div className="panel-field-label">{activeWorld.title}</div>
+              <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' }}>
+                {activeWorld.content.slice(0, 200)}{activeWorld.content.length > 200 ? '...' : ''}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-sm text-muted">尚未设置世界背景</div>
+        )}
       </div>
 
       <div className="panel-section">
         <div className="panel-section-title">规则体系</div>
-        <div className="panel-field">
-          <div className="panel-field-label">传送系统</div>
-          <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)' }}>
-            联盟掌握的超光速传送技术，可将人员/物资在星域间瞬间传输。传送过程中记忆可能出现暂时性模糊。
-          </div>
-        </div>
-        <div className="panel-field" style={{ marginTop: 12 }}>
-          <div className="panel-field-label">联盟管理</div>
-          <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)' }}>
-            银河联盟对各星域实施统一管理，前哨站是边界星域的管理节点。指导员制度是联盟对新公民的管理方式。
-          </div>
-        </div>
+        {activeRules.length > 0 ? (
+          activeRules.map((r) => (
+            <div key={r.id} className="panel-field" style={{ marginBottom: 8 }}>
+              <div className="panel-field-label">{r.title}</div>
+              <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' }}>
+                {r.content.slice(0, 120)}{r.content.length > 120 ? '...' : ''}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-sm text-muted">尚未设置规则体系</div>
+        )}
       </div>
 
       <div className="panel-section">
         <div className="panel-section-title">主角特殊能力</div>
-        <div className="panel-field">
-          <div className="panel-field-label">能力名称</div>
-          <div className="panel-field-value">未觉醒（当前章节尚未展现）</div>
-        </div>
-        <div className="panel-field" style={{ marginTop: 12 }}>
-          <div className="panel-field-label">能力说明</div>
-          <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)' }}>
-            林远拥有异常的空间感知能力，这与传送系统存在某种未知的共振。此能力将在后续章节逐渐展现。
+        {protagonist?.specialAbility ? (
+          <div className="panel-field">
+            <div className="panel-field-label">{protagonist.name} · 特殊能力</div>
+            <div className="panel-field-value" style={{ fontSize: 13, fontWeight: 400, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' }}>
+              {protagonist.specialAbility.slice(0, 150)}{protagonist.specialAbility.length > 150 ? '...' : ''}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="text-sm text-muted">尚未设置主角特殊能力</div>
+        )}
       </div>
 
       <div className="panel-section">
         <div className="panel-section-title">本章特殊限制</div>
-        <ul style={{ fontSize: 13, color: 'var(--color-text-secondary)', paddingLeft: 16, lineHeight: 1.8 }}>
-          <li>能力尚未觉醒</li>
-          <li>不出现战斗场景</li>
-          <li>不揭示核心秘密</li>
-        </ul>
+        <div className="text-sm text-muted">
+          {protagonist?.forbiddenBehaviors
+            ? protagonist.forbiddenBehaviors.slice(0, 100)
+            : '未设置特殊限制'}
+        </div>
       </div>
     </div>
   );

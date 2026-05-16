@@ -4,22 +4,54 @@
 
 import type { Chapter } from './chapter';
 
-export type NovelStatus = 'planning' | 'writing' | 'completed' | 'paused';
+export type NovelStatus =
+  | 'draft'
+  | 'planning'
+  | 'writing'
+  | 'paused'
+  | 'completed'
+  | 'archived';
 
 export interface Novel {
   id: string;
   title: string;
-  description: string;
-  genre: string;
+  subtitle?: string;
+  description?: string;
+  genre?: string;
+  coverPath?: string;
   coverUrl?: string;
   status: NovelStatus;
   currentVolumeId?: string;
   currentChapterId?: string;
+  totalWordCount: number;
   totalWords: number;
+  targetWordCount?: number;
   targetWords: number;
+  lastOpenedAt?: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
   volumes: Volume[];
+}
+
+export interface CreateNovelInput {
+  title: string;
+  subtitle?: string;
+  description?: string;
+  genre?: string;
+  targetWordCount?: number;
+}
+
+export interface UpdateNovelInput {
+  title?: string;
+  subtitle?: string;
+  description?: string;
+  genre?: string;
+  status?: NovelStatus;
+  targetWordCount?: number;
+  currentVolumeId?: string;
+  currentChapterId?: string;
+  totalWordCount?: number;
 }
 
 export interface Volume {

@@ -62,7 +62,7 @@ function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <span className="version">v0.1.0</span>
+        <span className="version">v0.2.0</span>
       </div>
     </aside>
   );

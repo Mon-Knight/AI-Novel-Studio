@@ -3,9 +3,10 @@ import type { Chapter, ChapterDraft } from '../../types/chapter';
 interface EditorAreaProps {
   chapter?: Chapter;
   draft?: ChapterDraft;
+  novelTitle?: string;
 }
 
-function EditorArea({ chapter, draft }: EditorAreaProps) {
+function EditorArea({ chapter, draft, novelTitle }: EditorAreaProps) {
   if (!chapter) {
     return (
       <div className="editor-content">

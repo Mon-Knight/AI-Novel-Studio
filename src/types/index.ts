@@ -8,3 +8,5 @@ export * from './character';
 export * from './style';
 export * from './output';
 export * from './ai';
+export * from './setting';
+export * from './protagonist';

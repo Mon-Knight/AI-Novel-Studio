@@ -6,6 +6,8 @@ import StatusBar from '../../components/workspace/StatusBar';
 import RightToolbar from '../../components/right-dock/RightToolbar';
 import RightPanel from '../../components/right-dock/RightPanel';
 import { mockChapters, mockVolumes, mockDrafts } from '../../features/chapters/mockChapters';
+import { novelRepository } from '../../services/database/novelRepository';
+import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
@@ -26,40 +28,45 @@ function WritingWorkspacePage() {
   const navigate = useNavigate();
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [activeChapterId, setActiveChapterId] = useState<string>('ch-001');
+  const [novel, setNovel] = useState<Novel | null>(null);
+
+  useEffect(() => {
+    if (novelId) {
+      novelRepository.getById(novelId).then(setNovel).catch(console.error);
+    }
+  }, [novelId]);
 
   const activeChapter = mockChapters.find((ch) => ch.id === activeChapterId);
   const activeDraft = activeChapterId ? mockDrafts[activeChapterId]?.[0] : undefined;
 
-  // 切换面板
   const handleTogglePanel = useCallback((panel: PanelType) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
   }, []);
 
-  // 关闭面板
   const handleClosePanel = useCallback(() => {
     setActivePanel(null);
   }, []);
 
-  // 按 Esc 关闭面板
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setActivePanel(null);
-      }
+      if (e.key === 'Escape') setActivePanel(null);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // 点击正文区关闭面板
   const handleEditorClick = useCallback(() => {
     setActivePanel(null);
   }, []);
 
   return (
     <div className="workspace-page">
-      {/* 左侧卷章目录树 */}
       <div className="workspace-sidebar">
+        {novel && (
+          <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border-light)', fontSize: '13px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+            📖 {novel.title}
+          </div>
+        )}
         <VolumeTree
           volumes={mockVolumes}
           chapters={mockChapters}
@@ -68,30 +75,15 @@ function WritingWorkspacePage() {
         />
       </div>
 
-      {/* 中间正文编辑区 */}
       <div className="workspace-editor" onClick={handleEditorClick}>
-        <EditorArea
-          chapter={activeChapter}
-          draft={activeDraft}
-        />
-        <StatusBar
-          chapter={activeChapter}
-          draft={activeDraft}
-        />
+        <EditorArea chapter={activeChapter} draft={activeDraft} novelTitle={novel?.title} />
+        <StatusBar chapter={activeChapter} draft={activeDraft} />
       </div>
 
-      {/* 右侧工具栏 */}
-      <RightToolbar
-        activePanel={activePanel}
-        onTogglePanel={handleTogglePanel}
-      />
+      <RightToolbar activePanel={activePanel} onTogglePanel={handleTogglePanel} />
 
-      {/* 右侧弹出面板 */}
       {activePanel && (
-        <RightPanel
-          panelType={activePanel}
-          onClose={handleClosePanel}
-        />
+        <RightPanel panelType={activePanel} onClose={handleClosePanel} novelId={novelId} />
       )}
     </div>
   );

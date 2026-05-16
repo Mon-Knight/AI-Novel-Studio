@@ -25,7 +25,7 @@ function TopBar() {
     <header className="app-topbar">
       <span className="topbar-title">{title}</span>
       <div className="topbar-actions">
-        <span className="text-sm text-muted">v0.1.0 · Windows 桌面端</span>
+        <span className="text-sm text-muted">v0.2.0 · Windows 桌面端</span>
       </div>
     </header>
   );
