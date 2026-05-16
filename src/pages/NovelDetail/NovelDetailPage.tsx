@@ -9,6 +9,7 @@ import {
   RuleSystemCard,
   ProtagonistCard,
 } from '../../components/novel-detail/NovelDetailCards';
+import OutlineManager from '../../components/outline/OutlineManager';
 import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
@@ -180,12 +181,8 @@ function NovelDetailPage() {
             onSave={handleSaveRuleSystem} onDelete={handleDeleteRuleSystem} />
         </div>
         <ProtagonistCard novelId={novel.id} protagonist={protagonist} onSave={handleSaveProtagonist} />
-        <div className="detail-card" style={{ opacity: 0.6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 18 }}>📋</span>
-            <span style={{ fontSize: 16, fontWeight: 600 }}>大纲管理</span>
-          </div>
-          <div className="detail-card-desc" style={{ marginTop: 8 }}>分卷大纲与章节大纲规划（v0.3.0）</div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <OutlineManager novelId={novel.id} />
         </div>
         <div className="detail-card" style={{ opacity: 0.6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

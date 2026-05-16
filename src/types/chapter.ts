@@ -3,11 +3,23 @@
  */
 
 export type ChapterStatus =
-  | 'unwritten'
-  | 'ai_draft'
-  | 'user_revised'
+  | 'not_started'
+  | 'outline_ready'
+  | 'draft_generated'
+  | 'editing'
+  | 'polished'
   | 'adopted'
   | 'summarized';
+
+export const ChapterStatusLabels: Record<ChapterStatus, string> = {
+  not_started: '未开始',
+  outline_ready: '已有大纲',
+  draft_generated: '已生成初稿',
+  editing: '修改中',
+  polished: '已润色',
+  adopted: '已采用',
+  summarized: '已总结',
+};
 
 export type DraftSource =
   | 'ai_generate'
@@ -19,18 +31,44 @@ export type DraftSource =
 export interface Chapter {
   id: string;
   novelId: string;
-  volumeId: string;
+  volumeId?: string;
   title: string;
+  outline?: string;
+  goal?: string;
   chapterNumber: number;
+  orderIndex: number;
+  sortOrder: number;
   status: ChapterStatus;
-  targetWords: number;
-  currentWords: number;
   adoptedDraftId?: string;
+  wordCount: number;
+  currentWords: number;
+  targetWordCount?: number;
+  targetWords: number;
   drafts: ChapterDraft[];
   summary?: string;
-  sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
+}
+
+export interface CreateChapterInput {
+  novelId: string;
+  volumeId?: string;
+  title: string;
+  outline?: string;
+  goal?: string;
+  targetWordCount?: number;
+  orderIndex?: number;
+}
+
+export interface UpdateChapterInput {
+  volumeId?: string;
+  title?: string;
+  outline?: string;
+  goal?: string;
+  orderIndex?: number;
+  status?: ChapterStatus;
+  targetWordCount?: number;
 }
 
 export interface ChapterDraft {

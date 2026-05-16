@@ -496,6 +496,215 @@ fn get_protagonist_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Protag
     .map_err(|e| e.to_string())
 }
 
+// ==================== Volume ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VolumeDto {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub goal: Option<String>,
+    pub main_conflict: Option<String>,
+    pub order_index: i64,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateVolumeInput {
+    pub novel_id: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub goal: Option<String>,
+    pub main_conflict: Option<String>,
+    pub order_index: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateVolumeInput {
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub goal: Option<String>,
+    pub main_conflict: Option<String>,
+    pub order_index: Option<i64>,
+    pub status: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_volumes_by_novel_id(novel_id: String) -> Result<Vec<VolumeDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at FROM volumes WHERE novel_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
+        .map_err(|e| e.to_string())?;
+    let items = stmt.query_map(params![novel_id], |row| {
+        Ok(VolumeDto {
+            id: row.get(0)?, novel_id: row.get(1)?, title: row.get(2)?,
+            summary: row.get(3)?, goal: row.get(4)?, main_conflict: row.get(5)?,
+            order_index: row.get(6)?, status: row.get(7)?,
+            created_at: row.get(8)?, updated_at: row.get(9)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn create_volume(input: CreateVolumeInput) -> Result<VolumeDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let order = input.order_index.unwrap_or(0);
+    conn.execute(
+        "INSERT INTO volumes (id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'planned',?8,?8)",
+        params![id, input.novel_id, input.title, input.summary, input.goal, input.main_conflict, order, now],
+    ).map_err(|e| e.to_string())?;
+    get_volume_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_volume(id: String, input: UpdateVolumeInput) -> Result<VolumeDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut sets = vec![format!("updated_at = '{}'", now)];
+    if let Some(ref v) = input.title { sets.push(format!("title = '{}'", v.replace('\'', "''"))); }
+    if let Some(ref v) = input.summary { sets.push(format!("summary = '{}'", v.replace('\'', "''"))); }
+    if let Some(ref v) = input.goal { sets.push(format!("goal = '{}'", v.replace('\'', "''"))); }
+    if let Some(ref v) = input.main_conflict { sets.push(format!("main_conflict = '{}'", v.replace('\'', "''"))); }
+    if let Some(v) = input.order_index { sets.push(format!("order_index = {}", v)); }
+    if let Some(ref v) = input.status { sets.push(format!("status = '{}'", v)); }
+    let sql = format!("UPDATE volumes SET {} WHERE id = '{}'", sets.join(", "), id);
+    conn.execute(&sql, []).map_err(|e| e.to_string())?;
+    get_volume_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn delete_volume(id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM chapters WHERE volume_id = ?1 AND deleted_at IS NULL", params![id], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if count > 0 { return Err("该分卷下仍有章节，请先移动或删除章节".into()); }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE volumes SET deleted_at = ?1 WHERE id = ?2", params![now, id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn get_volume_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<VolumeDto, String> {
+    let mut stmt = conn.prepare("SELECT id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at FROM volumes WHERE id = ?1").map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], |row| Ok(VolumeDto {
+        id: row.get(0)?, novel_id: row.get(1)?, title: row.get(2)?,
+        summary: row.get(3)?, goal: row.get(4)?, main_conflict: row.get(5)?,
+        order_index: row.get(6)?, status: row.get(7)?,
+        created_at: row.get(8)?, updated_at: row.get(9)?,
+    })).map_err(|e| e.to_string())
+}
+
+// ==================== Chapter ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChapterDto {
+    pub id: String,
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub title: String,
+    pub outline: Option<String>,
+    pub goal: Option<String>,
+    pub order_index: i64,
+    pub status: String,
+    pub adopted_draft_id: Option<String>,
+    pub word_count: i64,
+    pub target_word_count: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateChapterInput {
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub title: String,
+    pub outline: Option<String>,
+    pub goal: Option<String>,
+    pub target_word_count: Option<i64>,
+    pub order_index: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateChapterInput {
+    pub volume_id: Option<String>,
+    pub title: Option<String>,
+    pub outline: Option<String>,
+    pub goal: Option<String>,
+    pub order_index: Option<i64>,
+    pub status: Option<String>,
+    pub target_word_count: Option<i64>,
+}
+
+#[tauri::command]
+pub fn get_chapters_by_novel_id(novel_id: String) -> Result<Vec<ChapterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at FROM chapters WHERE novel_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
+        .map_err(|e| e.to_string())?;
+    let items = stmt.query_map(params![novel_id], |row| Ok(ChapterDto {
+        id: row.get(0)?, novel_id: row.get(1)?, volume_id: row.get(2)?,
+        title: row.get(3)?, outline: row.get(4)?, goal: row.get(5)?,
+        order_index: row.get(6)?, status: row.get(7)?,
+        adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
+        target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
+    })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn create_chapter(input: CreateChapterInput) -> Result<ChapterDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let order = input.order_index.unwrap_or(0);
+    let status = if input.outline.is_some() { "outline_ready" } else { "not_started" };
+    conn.execute(
+        "INSERT INTO chapters (id, novel_id, volume_id, title, outline, goal, order_index, status, word_count, target_word_count, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?10,?10)",
+        params![id, input.novel_id, input.volume_id, input.title, input.outline, input.goal, order, status, input.target_word_count, now],
+    ).map_err(|e| e.to_string())?;
+    get_chapter_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut sets = vec![format!("updated_at = '{}'", now)];
+    if let Some(ref v) = input.volume_id { sets.push(format!("volume_id = '{}'", v)); }
+    if let Some(ref v) = input.title { sets.push(format!("title = '{}'", v.replace('\'', "''"))); }
+    if let Some(ref v) = input.outline { sets.push(format!("outline = '{}'", v.replace('\'', "''"))); }
+    if let Some(ref v) = input.goal { sets.push(format!("goal = '{}'", v.replace('\'', "''"))); }
+    if let Some(v) = input.order_index { sets.push(format!("order_index = {}", v)); }
+    if let Some(ref v) = input.status { sets.push(format!("status = '{}'", v)); }
+    if let Some(v) = input.target_word_count { sets.push(format!("target_word_count = {}", v)); }
+    let sql = format!("UPDATE chapters SET {} WHERE id = '{}'", sets.join(", "), id);
+    conn.execute(&sql, []).map_err(|e| e.to_string())?;
+    get_chapter_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn delete_chapter(id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE chapters SET deleted_at = ?1 WHERE id = ?2", params![now, id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn get_chapter_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<ChapterDto, String> {
+    let mut stmt = conn.prepare("SELECT id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at FROM chapters WHERE id = ?1").map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], |row| Ok(ChapterDto {
+        id: row.get(0)?, novel_id: row.get(1)?, volume_id: row.get(2)?,
+        title: row.get(3)?, outline: row.get(4)?, goal: row.get(5)?,
+        order_index: row.get(6)?, status: row.get(7)?,
+        adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
+        target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
+    })).map_err(|e| e.to_string())
+}
+
 // Optional helper for QueryRow
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;

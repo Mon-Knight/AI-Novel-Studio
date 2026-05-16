@@ -3,6 +3,7 @@
  */
 
 export * from './novel';
+export * from './volume';
 export * from './chapter';
 export * from './character';
 export * from './style';

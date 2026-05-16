@@ -1,4 +1,7 @@
 import type { Novel } from '../../types/novel';
+import { useState, useEffect } from 'react';
+import { volumeRepository } from '../../services/database/volumeRepository';
+import { chapterRepository } from '../../services/database/chapterRepository';
 
 interface NovelCardProps {
   novel: Novel;
@@ -28,6 +31,33 @@ function NovelCard({ novel, onClick, onEnterWorkspace }: NovelCardProps) {
   const icon = genreIcons[novel.genre || ''] || '📖';
   const wordCount = novel.totalWordCount ?? novel.totalWords ?? 0;
   const targetCount = novel.targetWordCount ?? novel.targetWords ?? 0;
+  const [progressLabel, setProgressLabel] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [volumes, chapters] = await Promise.all([
+          volumeRepository.getByNovelId(novel.id),
+          chapterRepository.getByNovelId(novel.id),
+        ]);
+        if (cancelled) return;
+        const vol = volumes.find((v) => v.id === novel.currentVolumeId) || volumes[0];
+        const ch = chapters.find((c) => c.id === novel.currentChapterId) || chapters[0];
+        if (vol && ch) {
+          setProgressLabel(`${vol.title} / 第${ch.chapterNumber}章 ${ch.title}`);
+        } else if (vol) {
+          setProgressLabel(`${vol.title} · ${chapters.length} 章`);
+        } else if (chapters.length > 0) {
+          setProgressLabel(`${chapters.length} 章`);
+        } else {
+          setProgressLabel('尚未创建章节');
+        }
+      } catch { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [novel.id, novel.currentVolumeId, novel.currentChapterId]);
 
   return (
     <div className="novel-card" onClick={onClick}>

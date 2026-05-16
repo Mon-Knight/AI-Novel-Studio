@@ -127,6 +127,44 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             category TEXT,
             updated_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS volumes (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            goal TEXT,
+            main_conflict TEXT,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'planned',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            FOREIGN KEY (novel_id) REFERENCES novels(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS chapters (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            volume_id TEXT,
+            title TEXT NOT NULL,
+            outline TEXT,
+            goal TEXT,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'not_started',
+            adopted_draft_id TEXT,
+            word_count INTEGER NOT NULL DEFAULT 0,
+            target_word_count INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (volume_id) REFERENCES volumes(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_volumes_novel_id ON volumes(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_chapters_novel_id ON chapters(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_chapters_volume_id ON chapters(volume_id);
         ",
     )?;
     Ok(())

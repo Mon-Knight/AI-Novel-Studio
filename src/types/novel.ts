@@ -2,7 +2,7 @@
  * AI Novel Studio - 小说作品类型定义
  */
 
-import type { Chapter } from './chapter';
+import type { Volume } from './volume';
 
 export type NovelStatus =
   | 'draft'
@@ -52,14 +52,4 @@ export interface UpdateNovelInput {
   currentVolumeId?: string;
   currentChapterId?: string;
   totalWordCount?: number;
-}
-
-export interface Volume {
-  id: string;
-  novelId: string;
-  title: string;
-  volumeNumber: number;
-  summary: string;
-  chapters: Chapter[];
-  sortOrder: number;
 }

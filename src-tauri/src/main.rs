@@ -23,6 +23,14 @@ fn main() {
             commands::delete_rule_system,
             commands::get_protagonist,
             commands::save_protagonist,
+            commands::get_volumes_by_novel_id,
+            commands::create_volume,
+            commands::update_volume,
+            commands::delete_volume,
+            commands::get_chapters_by_novel_id,
+            commands::create_chapter,
+            commands::update_chapter,
+            commands::delete_chapter,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
