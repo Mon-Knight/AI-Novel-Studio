@@ -1,6 +1,5 @@
 /**
- * AI Novel Studio - 上下文构建器
- * 根据当前章节组装 AI 生成所需的所有上下文信息
+ * AI Novel Studio - 上下文构建器（v0.7.0 增强版）
  */
 import { novelRepository } from '../database/novelRepository';
 import { settingRepository } from '../database/settingRepository';
@@ -8,6 +7,9 @@ import { protagonistRepository } from '../database/protagonistRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { styleProfileService } from '../styles/styleProfileService';
 import { outputProfileService } from '../styles/outputProfileService';
+import { characterService } from '../characters/characterService';
+import { chapterCharacterService } from '../characters/chapterCharacterService';
+import { chapterEventService } from '../characters/chapterEventService';
 import type { ChapterGenerationContext } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
 import type { StyleProfile } from '../../types/style';
@@ -59,6 +61,38 @@ export async function buildChapterContext(
     if (outputs) outputProfileSummary = buildOutputSummary(outputs);
   }
 
+  // v0.7.0 加载本章出场角色和事件
+  let chapterCharacterSummary: string | undefined;
+  let chapterEventSummary: string | undefined;
+  if (chapter.id) {
+    const [chapterChars, chapterEvents] = await Promise.all([
+      chapterCharacterService.getByChapterId(chapter.id),
+      chapterEventService.getByChapterId(chapter.id),
+    ]);
+    if (chapterChars.length > 0) {
+      const chars = await characterService.getByNovelId(novelId);
+      chapterCharacterSummary = chapterChars.map((cc) => {
+        const ch = chars.find((c) => c.id === cc.characterId);
+        const parts = [`- ${ch?.name || cc.characterName || '未知'}（出场方式：${cc.mustAppear ? '必须出场' : '可选'}; 角色：${cc.roleInChapter}）`];
+        if (ch?.personality) parts.push(`  性格：${ch.personality}`);
+        if (ch?.goal) parts.push(`  目标：${ch.goal}`);
+        if (ch?.forbiddenBehaviors) parts.push(`  禁止行为：${ch.forbiddenBehaviors}`);
+        return parts.join('\n');
+      }).join('\n');
+    }
+    if (chapterEvents.length > 0) {
+      chapterEventSummary = chapterEvents
+        .filter((e) => e.status !== 'forbidden' && e.status !== 'discarded')
+        .map((e) => {
+          const statusTag = e.status === 'required' ? '【必须发生！】' : e.status === 'selected' ? '【已选择】' : '';
+          const parts = [`- ${statusTag}${e.title}：${e.description}`];
+          if (e.impact) parts.push(`  影响：${e.impact}`);
+          if (e.risk) parts.push(`  风险：${e.risk}`);
+          return parts.join('\n');
+        }).join('\n');
+    }
+  }
+
   return {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
@@ -79,6 +113,8 @@ export async function buildChapterContext(
     targetWordCount: chapter.targetWordCount || 4000,
     styleProfile: styleProfileSummary,
     outputProfile: outputProfileSummary,
+    chapterCharacters: chapterCharacterSummary,
+    chapterEvents: chapterEventSummary,
     userInstruction: extractText(userInstruction),
   };
 }

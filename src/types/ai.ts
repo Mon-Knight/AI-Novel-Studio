@@ -152,6 +152,8 @@ export interface ChapterGenerationContext {
   targetWordCount?: number;
   styleProfile?: string;
   outputProfile?: string;
+  chapterCharacters?: string;
+  chapterEvents?: string;
   previousContext?: string;
   userInstruction?: string;
 }

@@ -10,6 +10,7 @@ import {
   ProtagonistCard,
 } from '../../components/novel-detail/NovelDetailCards';
 import OutlineManager from '../../components/outline/OutlineManager';
+import CharacterLibraryCard from '../../components/novel-card/CharacterLibraryCard';
 import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
@@ -184,13 +185,7 @@ function NovelDetailPage() {
         <div style={{ gridColumn: '1 / -1' }}>
           <OutlineManager novelId={novel.id} />
         </div>
-        <div className="detail-card" style={{ opacity: 0.6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 18 }}>👥</span>
-            <span style={{ fontSize: 16, fontWeight: 600 }}>角色库</span>
-          </div>
-          <div className="detail-card-desc" style={{ marginTop: 8 }}>已确认角色、角色关系与状态记录（v0.5.0）</div>
-        </div>
+        <CharacterLibraryCard novelId={novel.id} />
       </div>
     </div>
   );

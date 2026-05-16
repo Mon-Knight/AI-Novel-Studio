@@ -272,6 +272,81 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             created_at TEXT NOT NULL,
             FOREIGN KEY (novel_id) REFERENCES novels(id)
         );
+
+        CREATE TABLE IF NOT EXISTS characters (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            role_type TEXT,
+            identity TEXT,
+            faction TEXT,
+            relation_to_protagonist TEXT,
+            goal TEXT,
+            personality TEXT,
+            behavior_limits TEXT,
+            forbidden_behaviors TEXT,
+            first_appearance_chapter_id TEXT,
+            current_state TEXT,
+            source TEXT NOT NULL DEFAULT 'manual',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_characters_novel_id ON characters(novel_id);
+
+        CREATE TABLE IF NOT EXISTS character_states (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            character_id TEXT NOT NULL,
+            chapter_id TEXT,
+            state_summary TEXT NOT NULL DEFAULT '',
+            relationship_changes TEXT,
+            goal_changes TEXT,
+            location TEXT,
+            health_state TEXT,
+            knowledge_state TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (character_id) REFERENCES characters(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_character_states_character_id ON character_states(character_id);
+
+        CREATE TABLE IF NOT EXISTS chapter_characters (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            character_id TEXT NOT NULL,
+            character_name TEXT,
+            role_in_chapter TEXT NOT NULL DEFAULT 'supporting',
+            must_appear INTEGER NOT NULL DEFAULT 0,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (character_id) REFERENCES characters(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chapter_characters_chapter_id ON chapter_characters(chapter_id);
+
+        CREATE TABLE IF NOT EXISTS chapter_events (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            involved_character_ids TEXT,
+            impact TEXT,
+            risk TEXT,
+            status TEXT NOT NULL DEFAULT 'candidate',
+            source TEXT NOT NULL DEFAULT 'manual',
+            ai_task_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chapter_events_chapter_id ON chapter_events(chapter_id);
         ",
     )?;
     Ok(())

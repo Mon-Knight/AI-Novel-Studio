@@ -25,18 +25,26 @@ function renderTemplate(template: string, context: Record<string, string | undef
 // 默认章节生成模板（兜底）
 const DEFAULT_TEMPLATE = `你是一位专业的小说作家。
 
-作品：{{novel_title}}
-题材：{{novel_genre}}
+作品：{{novelTitle}}
+题材：{{novelGenre}}
 主角：{{protagonist}}
-章节：{{chapter_title}}
-{{#chapter_outline}}大纲：{{chapter_outline}}{{/chapter_outline}}
-{{#chapter_goal}}目标：{{chapter_goal}}{{/chapter_goal}}
-目标字数：约 {{target_word_count}} 字
+章节：{{chapterTitle}}
+{{#chapterOutline}}大纲：{{chapterOutline}}{{/chapterOutline}}
+{{#chapterGoal}}目标：{{chapterGoal}}{{/chapterGoal}}
+目标字数：约 {{targetWordCount}} 字
 
-{{#world_background}}世界背景：{{world_background}}{{/world_background}}
-{{#rule_systems}}规则体系：{{rule_systems}}{{/rule_systems}}
-{{#special_ability}}特殊能力：{{special_ability}}{{/special_ability}}
-{{#user_instruction}}特别要求：{{user_instruction}}{{/user_instruction}}
+{{#worldBackground}}世界背景：{{worldBackground}}{{/worldBackground}}
+{{#ruleSystems}}规则体系：{{ruleSystems}}{{/ruleSystems}}
+{{#specialAbility}}特殊能力：{{specialAbility}}{{/specialAbility}}
+{{#chapterCharacters}}
+## 本章出场角色
+{{chapterCharacters}}
+{{/chapterCharacters}}
+{{#chapterEvents}}
+## 本章事件
+{{chapterEvents}}
+{{/chapterEvents}}
+{{#userInstruction}}特别要求：{{userInstruction}}{{/userInstruction}}
 
 请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。`;
 
@@ -57,6 +65,9 @@ export async function buildGenerateRequest(
   const ctx: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(context)) {
     ctx[k] = v != null ? String(v) : undefined;
+    // 同时提供 snake_case 键以兼容模板
+    const snakeKey = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
+    if (snakeKey !== k) ctx[snakeKey] = v != null ? String(v) : undefined;
   }
 
   const systemPrompt = renderTemplate(template, ctx);

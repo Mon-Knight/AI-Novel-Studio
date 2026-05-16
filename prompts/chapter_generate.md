@@ -52,6 +52,20 @@
 9. 结尾自然，但可以留下适度悬念
 10. 段落分明，对话与描写交替进行
 
+{{#chapter_characters}}
+## 本章出场角色
+{{chapter_characters}}
+
+写作时严格遵循上述角色的性格、目标和行为限制，不要让角色做出其禁止行为。
+{{/chapter_characters}}
+
+{{#chapter_events}}
+## 本章必须发生的事件
+{{chapter_events}}
+
+写作时必须完整涵盖上述事件，尤其确保标记为「必须发生」的事件在本章中真实发生。
+{{/chapter_events}}
+
 {{#previous_context}}
 ## 前文摘要
 {{previous_context}}
