@@ -6,8 +6,12 @@ import { novelRepository } from '../database/novelRepository';
 import { settingRepository } from '../database/settingRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { volumeRepository } from '../database/volumeRepository';
+import { styleProfileService } from '../styles/styleProfileService';
+import { outputProfileService } from '../styles/outputProfileService';
 import type { ChapterGenerationContext } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
+import type { StyleProfile } from '../../types/style';
+import type { OutputProfile } from '../../types/output';
 
 function extractText(summary: string | undefined | null): string | undefined {
   return summary?.trim() || undefined;
@@ -17,6 +21,8 @@ export async function buildChapterContext(
   novelId: string,
   chapter: Chapter,
   userInstruction?: string,
+  styleId?: string,
+  outputId?: string,
 ): Promise<ChapterGenerationContext> {
   const [novel, worldSettings, ruleSystems, protagonist] = await Promise.all([
     novelRepository.getById(novelId),
@@ -41,6 +47,18 @@ export async function buildChapterContext(
     }
   }
 
+  // 加载风格和输出控制方案
+  let styleProfileSummary: string | undefined;
+  let outputProfileSummary: string | undefined;
+  if (styleId || outputId) {
+    const [styles, outputs] = await Promise.all([
+      styleId ? styleProfileService.getById(styleId) : Promise.resolve(null),
+      outputId ? outputProfileService.getById(outputId) : Promise.resolve(null),
+    ]);
+    if (styles) styleProfileSummary = buildStyleSummary(styles);
+    if (outputs) outputProfileSummary = buildOutputSummary(outputs);
+  }
+
   return {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
@@ -59,6 +77,35 @@ export async function buildChapterContext(
     chapterOutline: extractText(chapter.outline),
     chapterGoal: extractText(chapter.goal),
     targetWordCount: chapter.targetWordCount || 4000,
+    styleProfile: styleProfileSummary,
+    outputProfile: outputProfileSummary,
     userInstruction: extractText(userInstruction),
   };
+}
+
+function buildStyleSummary(s: StyleProfile): string {
+  const parts: string[] = [];
+  if (s.narrativePerspective) parts.push(`叙事人称：${s.narrativePerspective}`);
+  if (s.tone) parts.push(`文风语气：${s.tone}`);
+  if (s.pace) parts.push(`节奏：${s.pace}`);
+  if (s.sentenceStyle) parts.push(`句式特点：${s.sentenceStyle}`);
+  parts.push(`对话比例：${Math.round(s.dialogueRatio * 100)}%，描写比例：${Math.round(s.descriptionRatio * 100)}%`);
+  if (s.battleStyle) parts.push(`战斗描写：${s.battleStyle}`);
+  if (s.emotionTendency) parts.push(`情绪倾向：${s.emotionTendency}`);
+  if (s.chapterEnding) parts.push(`章节结尾：${s.chapterEnding}`);
+  if (s.styleSummary) parts.push(`风格总结：${s.styleSummary}`);
+  if (s.prohibitedStyles?.length) parts.push(`禁用写法：${s.prohibitedStyles.join('、')}`);
+  return parts.join('\n');
+}
+
+function buildOutputSummary(o: OutputProfile): string {
+  const parts: string[] = [];
+  parts.push(`目标字数：${o.targetWordCount || o.chapterWordRange.default} 字`);
+  if (o.paceLevel) parts.push(`节奏等级：${o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}`);
+  if (o.battleIntensity) parts.push(`战斗强度：${o.battleIntensity}`);
+  if (o.emotionTendency) parts.push(`情绪倾向：${o.emotionTendency}`);
+  if (o.endingHookRequired) parts.push('结尾必须有钩子');
+  if (o.extraRequirements) parts.push(`额外要求：${o.extraRequirements}`);
+  if (o.forbiddenItems?.length) parts.push(`禁止项：${o.forbiddenItems.join('、')}`);
+  return parts.join('\n');
 }

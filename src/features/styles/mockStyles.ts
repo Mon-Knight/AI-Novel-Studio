@@ -1,5 +1,5 @@
 /**
- * AI Novel Studio - Mock 风格数据
+ * AI Novel Studio - Mock 风格数据（v0.6.0 更新）
  */
 import type { StyleProfile } from '../../types/style';
 import type { OutputProfile } from '../../types/output';
@@ -7,57 +7,33 @@ import type { Character } from '../../types/character';
 
 export const mockStyleProfiles: StyleProfile[] = [
   {
-    id: 'style-001',
-    novelId: 'novel-001',
-    name: '科幻快节奏',
-    description: '适合科幻小说的快节奏风格，注重情节推进和场景转换',
-    targetWordsPerChapter: 4000,
-    rhythmPreference: 'fast',
-    dialogueRatio: 0.35,
-    descriptionRatio: 0.25,
-    prohibitedStyles: ['过度心理描写', '长篇景物描写', '说教式表达'],
-    createdAt: '2026-05-10T08:00:00Z',
-    updatedAt: '2026-05-10T08:00:00Z',
+    id: 'style-001', novelId: 'novel-001', name: '科幻快节奏', sourceType: 'system_default',
+    description: '适合科幻小说的快节奏风格', targetWordsPerChapter: 4000, rhythmPreference: 'fast',
+    dialogueRatio: 0.35, descriptionRatio: 0.25, prohibitedStyles: ['过度心理描写', '长篇景物描写'],
+    isActive: true, createdAt: '2026-05-10T08:00:00Z', updatedAt: '2026-05-10T08:00:00Z',
   },
   {
-    id: 'style-002',
-    novelId: 'novel-001',
-    name: '仙侠厚重',
-    description: '适合仙侠小说的厚重风格，注重意境营造和打斗场面描写',
-    targetWordsPerChapter: 5000,
-    rhythmPreference: 'moderate',
-    dialogueRatio: 0.3,
-    descriptionRatio: 0.4,
-    prohibitedStyles: ['现代口语', '西式表达', '网络流行语'],
-    createdAt: '2026-05-10T09:00:00Z',
-    updatedAt: '2026-05-10T09:00:00Z',
+    id: 'style-002', novelId: 'novel-001', name: '仙侠厚重', sourceType: 'system_default',
+    description: '适合仙侠小说的厚重风格', targetWordsPerChapter: 5000, rhythmPreference: 'moderate',
+    dialogueRatio: 0.3, descriptionRatio: 0.4, prohibitedStyles: ['现代口语', '西式表达'],
+    isActive: true, createdAt: '2026-05-10T09:00:00Z', updatedAt: '2026-05-10T09:00:00Z',
   },
 ];
 
 export const mockOutputProfiles: OutputProfile[] = [
   {
-    id: 'output-001',
-    novelId: 'novel-001',
-    name: '默认输出方案',
-    description: '标准章节输出配置',
-    chapterWordRange: { min: 3000, max: 6000, default: 4000 },
-    paragraphLength: 'medium',
-    povType: 'third_person_limited',
-    tenseType: 'past',
-    createdAt: '2026-05-10T10:00:00Z',
-    updatedAt: '2026-05-10T10:00:00Z',
+    id: 'output-001', novelId: 'novel-001', name: '默认输出方案', description: '标准章节输出配置',
+    chapterWordRange: { min: 3000, max: 6000, default: 4000 }, paragraphLength: 'medium',
+    povType: 'third_person_limited', tenseType: 'past',
+    endingHookRequired: true, isDefault: true,
+    createdAt: '2026-05-10T10:00:00Z', updatedAt: '2026-05-10T10:00:00Z',
   },
   {
-    id: 'output-002',
-    novelId: 'novel-001',
-    name: '第一人称方案',
-    description: '使用第一人称视角写作',
-    chapterWordRange: { min: 2500, max: 5000, default: 3500 },
-    paragraphLength: 'medium',
-    povType: 'first_person',
-    tenseType: 'present',
-    createdAt: '2026-05-10T11:00:00Z',
-    updatedAt: '2026-05-10T11:00:00Z',
+    id: 'output-002', novelId: 'novel-001', name: '第一人称方案', description: '使用第一人称视角',
+    chapterWordRange: { min: 2500, max: 5000, default: 3500 }, paragraphLength: 'medium',
+    povType: 'first_person', tenseType: 'present',
+    endingHookRequired: false, isDefault: false,
+    createdAt: '2026-05-10T11:00:00Z', updatedAt: '2026-05-10T11:00:00Z',
   },
 ];
 

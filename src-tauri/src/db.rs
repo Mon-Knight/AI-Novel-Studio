@@ -211,6 +211,67 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
 
         CREATE INDEX IF NOT EXISTS idx_ai_task_records_novel_id ON ai_task_records(novel_id);
         CREATE INDEX IF NOT EXISTS idx_ai_task_records_chapter_id ON ai_task_records(chapter_id);
+
+        CREATE TABLE IF NOT EXISTS style_profiles (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT,
+            name TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            source_asset_id TEXT,
+            narrative_perspective TEXT,
+            tone TEXT,
+            pace TEXT,
+            sentence_style TEXT,
+            dialogue_ratio REAL,
+            description_ratio REAL,
+            psychological_ratio REAL,
+            battle_style TEXT,
+            battle_intensity TEXT,
+            emotion_tendency TEXT,
+            chapter_ending TEXT,
+            forbidden_styles TEXT,
+            style_summary TEXT,
+            raw_config_json TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS output_profiles (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT,
+            name TEXT NOT NULL,
+            target_word_count INTEGER,
+            min_word_count INTEGER,
+            max_word_count INTEGER,
+            pace_level TEXT,
+            dialogue_ratio REAL,
+            description_ratio REAL,
+            battle_intensity TEXT,
+            emotion_tendency TEXT,
+            ending_hook_required INTEGER NOT NULL DEFAULT 0,
+            extra_requirements TEXT,
+            forbidden_items TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS imported_assets (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT,
+            file_name TEXT NOT NULL,
+            file_path TEXT,
+            file_type TEXT NOT NULL,
+            asset_type TEXT NOT NULL,
+            content_preview TEXT,
+            parsed_json TEXT,
+            related_style_profile_id TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id)
+        );
         ",
     )?;
     Ok(())

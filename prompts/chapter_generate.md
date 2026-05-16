@@ -57,6 +57,18 @@
 {{previous_context}}
 {{/previous_context}}
 
+{{#style_profile}}
+## 写作风格约束
+{{style_profile}}
+
+以上是抽象风格约束，不允许复制任何参考文本中的具体句子、段落、人物、地名、组织名、特殊设定。
+{{/style_profile}}
+
+{{#output_profile}}
+## 输出控制
+{{output_profile}}
+{{/output_profile}}
+
 {{#user_instruction}}
 ## 本章特别要求
 {{user_instruction}}
