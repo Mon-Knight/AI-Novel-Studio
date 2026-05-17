@@ -15,18 +15,26 @@ function SettingsPage() {
   }, []);
 
   const handleSave = () => {
-    aiSettingsService.saveSettings(settings);
-    setMessage('AI 设置已保存');
+    // 保存前确保 mockMode 与 runtimeMode 一致
+    const final = { ...settings, mockMode: settings.runtimeMode === 'mock' };
+    aiSettingsService.saveSettings(final);
+    setSettings(final);
+    setMessage('✅ AI 设置已保存');
     setTimeout(() => setMessage(''), 2000);
   };
 
   const handleTestConnection = async () => {
-    if (settings.mockMode) { setMessage('Mock 模式无需测试连接'); setTimeout(() => setMessage(''), 2000); return; }
+    if (settings.runtimeMode === 'mock') { setMessage('Mock 模式无需测试连接，Mock 工作流可用'); setTimeout(() => setMessage(''), 3000); return; }
     if (!settings.baseUrl || !settings.apiKey || !settings.modelName) { setMessage('请先填写 API Base URL、API Key 和模型名称'); setTimeout(() => setMessage(''), 3000); return; }
     setTesting(true); setMessage('正在测试连接...');
+    const start = Date.now();
     try {
       const result = await aiSettingsService.testConnection(settings);
-      setMessage(result.ok ? '✅ 连接成功！' : `❌ 连接失败：${result.message}`);
+      const latency = Date.now() - start;
+      const updated = { ...settings, lastTestAt: new Date().toISOString(), lastTestOk: result.ok, lastTestMessage: result.message };
+      aiSettingsService.saveSettings(updated);
+      setSettings(updated);
+      setMessage(result.ok ? `✅ 连接成功！（${latency}ms）` : `❌ 连接失败：${result.message}`);
     } catch (e: any) { setMessage(`❌ 连接失败：${e.message || '未知错误'}`); }
     finally { setTesting(false); }
   };
@@ -46,20 +54,29 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>AI 接口设置</span>
         </div>
 
+        {/* 当前 AI 模式 */}
+        <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 10, background: settings.runtimeMode === 'mock' ? '#e8f5e9' : '#e3f2fd', border: settings.runtimeMode === 'mock' ? '1px solid #c8e6c9' : '1px solid #bbdefb' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>
+            当前模式：{settings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API 模式'}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            {settings.runtimeMode === 'mock' ? '所有 AI 功能使用本地模拟，不请求外部 API。' : `模型：${settings.modelName || '未配置'}`}
+            {settings.lastTestAt && <> · 最近测试：{settings.lastTestOk ? '✅ 成功' : '❌ 失败'}</>}
+          </div>
+        </div>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Mock 模式 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: settings.mockMode ? '#e8f5e9' : '#e3f2fd', borderRadius: 8, border: settings.mockMode ? '1px solid #c8e6c9' : '1px solid #bbdefb' }}>
-            <input type="checkbox" id="mockMode" checked={settings.mockMode}
-              onChange={(e) => update({ mockMode: e.target.checked })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fafafa', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+            <input type="checkbox" id="mockMode" checked={settings.runtimeMode === 'mock'}
+              onChange={(e) => update({ runtimeMode: e.target.checked ? 'mock' : 'api' })}
               style={{ width: 18, height: 18, cursor: 'pointer' }} />
             <div>
               <label htmlFor="mockMode" style={{ fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>
-                Mock 模式 {settings.mockMode ? '✅ 已开启' : '🔷 已关闭（真实 API 模式）'}
+                Mock 模式 {settings.runtimeMode === 'mock' ? '✅ 已开启' : '❌ 已关闭'}
               </label>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                {settings.mockMode
-                  ? '当前使用模拟 AI 返回，不会请求外部接口。下方 API 配置可选填写。'
-                  : '当前使用真实 AI API。下方 Base URL、API Key 和模型名称必须填写。'}
+                开启后所有 AI 功能使用本地模拟结果，关闭后使用真实 API。两种模式互斥。
               </div>
             </div>
           </div>
@@ -182,7 +199,7 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
         </div>
         <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div><strong>AI Novel Studio v1.0.5</strong></div>
+          <div><strong>AI Novel Studio v1.0.6</strong></div>
           <div>Windows 桌面端 AI 小说创作工作台</div>
           <div>技术路线：Tauri + React + TypeScript + SQLite</div>
           <div>本地路径：F:\ai-novel-studio</div>

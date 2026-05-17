@@ -9,7 +9,7 @@ import { aiSettingsService } from './aiSettingsService';
 export function createAiClient(): AiClient {
   const settings = aiSettingsService.getSettings();
 
-  if (settings.mockMode) {
+  if (settings.runtimeMode === 'mock' || settings.mockMode) {
     return new MockAiClient();
   }
 

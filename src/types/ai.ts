@@ -1,12 +1,14 @@
 /**
- * AI Novel Studio - AI 类型定义（v1.0.3 增强版）
+ * AI Novel Studio - AI 类型定义（v1.0.6 增强版）
  */
 
 // ==================== AI 设置 ====================
 
+export type AiRuntimeMode = 'mock' | 'api';
 export type AiProvider = 'mock' | 'openai_compatible';
 
 export interface AiSettings {
+  runtimeMode: AiRuntimeMode;
   provider: AiProvider;
   baseUrl: string;
   apiKey: string;
@@ -14,7 +16,10 @@ export interface AiSettings {
   temperature?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
-  mockMode: boolean;
+  mockMode: boolean; // 兼容旧字段，从 runtimeMode 派生
+  lastTestAt?: string;
+  lastTestOk?: boolean;
+  lastTestMessage?: string;
 }
 
 export interface AiConnectionTestResult {

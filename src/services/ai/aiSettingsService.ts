@@ -7,6 +7,7 @@ import type { AiSettings } from '../../types/ai';
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 
 const defaultSettings: AiSettings = {
+  runtimeMode: 'mock',
   provider: 'openai_compatible',
   baseUrl: '',
   apiKey: '',
@@ -17,13 +18,26 @@ const defaultSettings: AiSettings = {
   mockMode: true,
 };
 
+function migrateSettings(stored: Partial<AiSettings>): AiSettings {
+  const merged = { ...defaultSettings, ...stored } as AiSettings;
+  // 兼容旧数据：如果没有 runtimeMode，从 mockMode 派生
+  if (!merged.runtimeMode) {
+    merged.runtimeMode = merged.mockMode ? 'mock' : 'api';
+  }
+  // 确保 mockMode 与 runtimeMode 一致
+  merged.mockMode = merged.runtimeMode === 'mock';
+  return merged;
+}
+
 export const aiSettingsService = {
   getSettings(): AiSettings {
-    const stored = lsGet<AiSettings>(AI_SETTINGS_KEY);
-    return stored ? { ...defaultSettings, ...stored } : { ...defaultSettings };
+    const stored = lsGet<Partial<AiSettings>>(AI_SETTINGS_KEY);
+    return stored ? migrateSettings(stored) : { ...defaultSettings };
   },
 
   saveSettings(settings: AiSettings): void {
+    // 保存前统一状态
+    settings.mockMode = settings.runtimeMode === 'mock';
     lsSet(AI_SETTINGS_KEY, settings);
   },
 
