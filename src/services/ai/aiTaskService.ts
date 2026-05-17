@@ -335,4 +335,29 @@ export const aiTaskService = {
       total,
     };
   },
+
+  // v1.0.27 删除/清空方法
+
+  /** 删除单条任务记录 */
+  async deleteOne(id: string): Promise<void> {
+    const tasks = getLocalTasks().filter((t) => t.id !== id);
+    saveLocalTasks(tasks);
+    // 反查
+    const check = getLocalTasks().find((t) => t.id === id);
+    if (check) throw new Error('AI 任务记录删除后仍可读取');
+  },
+
+  /** 批量删除 */
+  async deleteMany(ids: string[]): Promise<void> {
+    const idSet = new Set(ids);
+    const tasks = getLocalTasks().filter((t) => !idSet.has(t.id));
+    saveLocalTasks(tasks);
+  },
+
+  /** 清空全部记录 */
+  async clearAll(): Promise<void> {
+    saveLocalTasks([]);
+    const check = getLocalTasks();
+    if (check.length > 0) throw new Error('AI 任务记录清空后仍有残留');
+  },
 };

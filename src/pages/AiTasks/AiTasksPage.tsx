@@ -1,5 +1,5 @@
 /**
- * AI Novel Studio - AI 任务记录页面
+ * AI Novel Studio - AI 任务记录页面 (v1.0.27 增强版)
  */
 import { useState, useEffect } from 'react';
 import BackButton from '../../components/common/BackButton';
@@ -17,21 +17,124 @@ function AiTasksPage() {
   const [typeFilter, setTypeFilter] = useState<AiTaskType | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<AiTaskStatus | 'all'>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [msg, setMsg] = useState('');
 
-  useEffect(() => {
-    aiTaskService.getAll(1, 200).then((r) => setTasks(r.items));
-  }, []);
+  // v1.0.27 多选状态
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const loadTasks = async () => {
+    const result = await aiTaskService.getAll(1, 500);
+    setTasks(result.items);
+  };
+
+  useEffect(() => { loadTasks(); }, []);
 
   const filtered = tasks
     .filter((t) => typeFilter === 'all' || t.taskType === typeFilter)
     .filter((t) => statusFilter === 'all' || t.status === statusFilter)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
+  // 切换选择
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((t) => t.id)));
+    }
+  };
+
+  // 单条删除
+  const handleDeleteOne = async (task: AiTaskRecord) => {
+    if (!confirm(`确定删除这条「${AiTaskTypeLabels[task.taskType]}」记录吗？`)) return;
+    try {
+      await aiTaskService.deleteOne(task.id);
+      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
+      setMsg('已删除');
+      setTimeout(() => setMsg(''), 2000);
+    } catch (e: any) {
+      setMsg('删除失败：' + (e?.message || '未知错误'));
+    }
+  };
+
+  // 批量删除
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定删除选中的 ${selectedIds.size} 条 AI 任务记录吗？`)) return;
+    setDeleting(true);
+    try {
+      await aiTaskService.deleteMany([...selectedIds]);
+      await loadTasks();
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      setMsg(`已删除 ${selectedIds.size} 条记录`);
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e: any) {
+      setMsg('删除失败：' + (e?.message || '未知错误'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // 清空全部
+  const handleClearAll = async () => {
+    if (!confirm(
+      '确定清空所有 AI 任务记录吗？\n\n' +
+      '这只会删除 AI 调用历史，不会删除作品、章节、草稿、大纲、角色或设定。\n\n' +
+      '此操作无法恢复。'
+    )) return;
+    setDeleting(true);
+    try {
+      await aiTaskService.clearAll();
+      await loadTasks();
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      setMsg('已清空全部 AI 任务记录');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e: any) {
+      setMsg('清空失败：' + (e?.message || '未知错误'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div style={{ padding: 32, maxWidth: 900, margin: '0 auto', height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>🤖 AI 任务记录</div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>查看所有 AI 生成、分析、检查和润色任务的执行记录</div>
+
+      {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: msg.includes('失败') ? '#ffebee' : 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: msg.includes('失败') ? '#c62828' : 'var(--color-primary)' }}>{msg}</div>}
+
+      {/* 操作按钮区 */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className={`btn btn-sm ${selectMode ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}>
+          {selectMode ? '✕ 取消选择' : '☑️ 多选'}
+        </button>
+        {selectMode && (
+          <>
+            <button className="btn btn-sm btn-secondary" onClick={toggleSelectAll}>
+              {selectedIds.size === filtered.length ? '☐ 取消全选' : '☑️ 全选'}
+            </button>
+            <button className="btn btn-sm btn-danger" onClick={handleDeleteSelected} disabled={deleting || selectedIds.size === 0}>
+              {deleting ? '⏳ 删除中...' : `🗑️ 删除选中（${selectedIds.size}）`}
+            </button>
+          </>
+        )}
+        <button className="btn btn-sm btn-danger" onClick={handleClearAll} disabled={deleting || tasks.length === 0}>
+          {deleting ? '⏳ ...' : '🗑️ 清空全部记录'}
+        </button>
+      </div>
 
       {/* 筛选 */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -51,6 +154,26 @@ function AiTasksPage() {
         ))}
       </div>
 
+      {/* v1.0.27 筛选后快速清空 */}
+      {(typeFilter !== 'all' || statusFilter !== 'all') && filtered.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <button className="btn btn-xs btn-danger" onClick={async () => {
+            if (!confirm(`确定删除当前筛选的 ${filtered.length} 条记录吗？`)) return;
+            setDeleting(true);
+            try {
+              await aiTaskService.deleteMany(filtered.map((t) => t.id));
+              await loadTasks();
+              setMsg(`已删除 ${filtered.length} 条筛选记录`);
+              setTimeout(() => setMsg(''), 3000);
+            } catch (e: any) {
+              setMsg('删除失败：' + (e?.message || '未知错误'));
+            } finally { setDeleting(false); }
+          }} disabled={deleting}>
+            🗑️ 删除当前筛选的 {filtered.length} 条记录
+          </button>
+        </div>
+      )}
+
       {/* 任务列表 */}
       {filtered.length === 0 ? (
         <div className="detail-card" style={{ textAlign: 'center', padding: 32 }}>
@@ -63,11 +186,17 @@ function AiTasksPage() {
       ) : (
         <div style={{ display: 'grid', gap: 8 }}>
           {filtered.map((task) => (
-            <div key={task.id} className="detail-card" style={{ cursor: 'pointer', borderLeft: task.status === 'failed' ? '3px solid var(--color-error)' : task.status === 'succeeded' ? '3px solid var(--color-success)' : '3px solid var(--color-warning)' }}
-              onClick={() => setExpandedId(expandedId === task.id ? null : task.id)}>
+            <div key={task.id} className="detail-card" style={{
+              cursor: 'pointer',
+              borderLeft: task.status === 'failed' ? '3px solid var(--color-error)' : task.status === 'succeeded' ? '3px solid var(--color-success)' : '3px solid var(--color-warning)',
+              background: selectedIds.has(task.id) ? 'var(--color-primary-light)' : undefined,
+            }} onClick={() => { if (selectMode) toggleSelect(task.id); else setExpandedId(expandedId === task.id ? null : task.id); }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                    {selectMode && (
+                      <input type="checkbox" checked={selectedIds.has(task.id)} onChange={() => toggleSelect(task.id)} onClick={(e) => e.stopPropagation()} />
+                    )}
                     <span style={{ fontWeight: 600, fontSize: 13 }}>{AiTaskTypeLabels[task.taskType]}</span>
                     <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: task.status === 'succeeded' ? '#dcfce7' : task.status === 'failed' ? '#fee2e2' : '#fef3c7', color: task.status === 'succeeded' ? '#166534' : task.status === 'failed' ? '#991b1b' : '#92400e' }}>
                       {task.status === 'succeeded' ? '成功' : task.status === 'failed' ? '失败' : task.status === 'running' ? '运行中' : '等待'}
@@ -82,6 +211,15 @@ function AiTasksPage() {
                     {task.finishedAt && ` → ${formatDateTime(task.finishedAt)}`}
                   </div>
                 </div>
+                {/* 删除按钮 */}
+                {!selectMode && (
+                  <button className="btn btn-text btn-sm" style={{ color: 'var(--color-error)', fontSize: 16, flexShrink: 0, marginLeft: 8 }}
+                    onClick={(e) => { e.stopPropagation(); handleDeleteOne(task); }}
+                    title="删除此记录"
+                  >
+                    🗑️
+                  </button>
+                )}
               </div>
               {expandedId === task.id && (
                 <div style={{ marginTop: 8, padding: 8, background: 'var(--color-bg-primary)', borderRadius: 4, fontSize: 11 }}>
