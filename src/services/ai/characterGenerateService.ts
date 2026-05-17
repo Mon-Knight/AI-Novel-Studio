@@ -45,6 +45,8 @@ export const characterGenerateService = {
     const task = await aiTaskService.create('character_generate', {
       novelId: input.novelId,
       chapterId: input.chapterId,
+      runtimeMode: settings.runtimeMode,
+      provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
       inputSummary: `为章节生成候选角色（已有角色：${existingNames.join('、') || '无'}）`,
     }).catch(() => null);

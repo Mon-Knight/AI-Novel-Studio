@@ -12,7 +12,7 @@ import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
-import { createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
+import { createVolumeForNovel, createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
 import { chapterSummarizeService } from '../../services/ai/chapterSummarizeService';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
 import { contextRecordService } from '../../services/context/contextRecordService';
@@ -240,7 +240,7 @@ function WritingWorkspacePage() {
   // v1.0.19 工作台内创建分卷和章节（统一走父组件单一数据源）
   const [creating, setCreating] = useState(false);
 
-  const handleCreateFirstChapter = useCallback(async () => {
+  const handleCreateFirstChapter = useCallback(async (chapterTitle?: string) => {
     if (!novelId || creating) {
       console.warn('[Workspace] createFirstChapter skip: novelId=', novelId, 'creating=', creating);
       return;
@@ -249,7 +249,9 @@ function WritingWorkspacePage() {
     setCreating(true);
     try {
       // 统一服务：创建 volume + chapter + draft + 每步反查
-      const result = await createFirstVolumeAndChapter(novelId);
+      const result = await createFirstVolumeAndChapter(novelId, {
+        chapterTitle: chapterTitle?.trim() || '第1章',
+      });
       console.info('[Workspace] createFirstChapter done, chapterId=', result.chapter.id);
 
       // 直接设置 state（无需 refreshKey）
@@ -275,7 +277,7 @@ function WritingWorkspacePage() {
   const handleCreateVolume = useCallback(async (title: string) => {
     if (!novelId) throw new Error('novelId 缺失');
     console.info('[Workspace] handleCreateVolume, title=', title);
-    await volumeRepository.create({ novelId, title });
+    await createVolumeForNovel(novelId, title);
     await reloadWorkspaceData();
   }, [novelId, reloadWorkspaceData]);
 
@@ -283,7 +285,9 @@ function WritingWorkspacePage() {
   const handleCreateChapter = useCallback(async (volumeId: string, title: string) => {
     if (!novelId) throw new Error('novelId 缺失');
     console.info('[Workspace] handleCreateChapter, volumeId=', volumeId, 'title=', title);
-    const result = await createChapterInVolume(novelId, volumeId, title);
+    const result = volumeId
+      ? await createChapterInVolume(novelId, volumeId, title)
+      : await createFirstVolumeAndChapter(novelId, { chapterTitle: title });
     // 重载并选中新章节
     setVolumes(await volumeRepository.getByNovelId(novelId));
     setChapters(await chapterRepository.getByNovelId(novelId));
@@ -339,7 +343,7 @@ function WritingWorkspacePage() {
               你可以直接在工作台创建第一卷和第一章，开始写作。
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button className="btn btn-primary btn-sm" onClick={handleCreateFirstChapter} disabled={creating}>
+              <button className="btn btn-primary btn-sm" onClick={() => handleCreateFirstChapter()} disabled={creating}>
                 {creating ? '⏳ 创建中...' : '📖 创建第一卷并新建第一章'}
               </button>
               <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
@@ -377,6 +381,7 @@ function WritingWorkspacePage() {
             onSelectChapter={handleSelectChapter}
             onCreateVolume={handleCreateVolume}
             onCreateChapter={handleCreateChapter}
+            onCreateFirstChapter={handleCreateFirstChapter}
           />
         )}
       </div>

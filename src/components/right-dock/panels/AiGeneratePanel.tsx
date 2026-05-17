@@ -47,7 +47,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
     const task = await aiTaskService.create('chapter_generate', {
       novelId,
       chapterId: chapter.id,
-      modelName: settings.mockMode ? 'Mock' : settings.modelName,
+      runtimeMode: settings.runtimeMode,
+      provider: settings.provider,
+      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
       inputSummary: `生成第${chapter.chapterNumber}章：${chapter.title}`,
     }).catch(() => null);
 
@@ -124,11 +126,11 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       <div className="panel-section">
         <div className="panel-section-title">AI 状态</div>
         <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-          <div>模式：{settings.mockMode ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
-          {!settings.mockMode && (
+          <div>模式：{settings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+          {settings.runtimeMode === 'api' && (
             <div>模型：{settings.modelName || '未配置'}</div>
           )}
-          {!settings.mockMode && !settings.apiKey && (
+          {settings.runtimeMode === 'api' && !settings.apiKey && (
             <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
               ⚠️ 未配置 API Key，请先到设置中心配置
             </div>
@@ -228,7 +230,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         <button
           className="panel-btn panel-btn-primary"
           onClick={handleGenerate}
-          disabled={generating || (!settings.mockMode && !settings.apiKey)}
+          disabled={generating || (settings.runtimeMode === 'api' && !settings.apiKey)}
         >
           {generating ? '⏳ 正在生成...' : `🤖 ${genMode === 'rewrite' ? '重新生成' : '生成本章'}`}
         </button>

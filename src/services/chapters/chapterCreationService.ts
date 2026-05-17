@@ -1,13 +1,13 @@
 /**
- * AI Novel Studio - 统一章节创建服务 v1.0.20
- * 确保 volume → chapter → draft 完整闭环，创建后必须反查验证
+ * AI Novel Studio - 统一章节创建服务
+ * 串起 volume -> chapter -> draft，并在每一步写入后反查。
  */
 
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
-import type { Volume } from '../../types/volume';
-import type { Chapter } from '../../types/chapter';
+import type { Volume, CreateVolumeInput } from '../../types/volume';
+import type { Chapter, CreateChapterInput } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 
 export interface ChapterCreationResult {
@@ -16,83 +16,99 @@ export interface ChapterCreationResult {
   draft: ChapterDraft;
 }
 
-/**
- * 创建第一卷 + 第一章 + 空草稿（完整闭环 + 每步反查）
- */
-export async function createFirstVolumeAndChapter(novelId: string): Promise<ChapterCreationResult> {
-  if (!novelId) throw new Error('novelId 缺失，无法创建章节');
-
-  // 1. 创建分卷
-  const volume = await volumeRepository.create({ novelId, title: '第一卷' });
-  if (!volume?.id) throw new Error('创建分卷失败：未返回有效 volume.id');
-
-  // 反查
-  const volsAfter = await volumeRepository.getByNovelId(novelId);
-  if (!volsAfter.some((v) => v.id === volume.id)) {
-    throw new Error('分卷创建后无法从存储中读取，请检查 volumeService');
-  }
-
-  // 2. 创建章节
-  const chapter = await chapterRepository.create({
-    novelId, volumeId: volume.id, title: '第1章',
-  });
-  if (!chapter?.id) throw new Error('创建章节失败：未返回有效 chapter.id');
-
-  // 反查
-  const chsAfter = await chapterRepository.getByNovelId(novelId);
-  if (!chsAfter.some((c) => c.id === chapter.id)) {
-    throw new Error('章节创建后无法从存储中读取，请检查 chapterService');
-  }
-
-  // 3. 创建空草稿
-  const draft = await draftVersionService.create({
-    novelId, chapterId: chapter.id, title: chapter.title,
-    content: '', source: 'user_edited',
-  });
-  if (!draft?.id) throw new Error('创建草稿失败：未返回有效 draft.id');
-
-  // 反查草稿
-  const loadedDraft = await draftVersionService.getLatestByChapterId(chapter.id);
-  if (!loadedDraft?.id) {
-    throw new Error('草稿创建后无法从存储中读取，请检查 draftService');
-  }
-
-  return { volume, chapter, draft: loadedDraft };
+interface FirstChapterOptions {
+  volumeTitle?: string;
+  chapterTitle?: string;
+  outline?: string;
+  goal?: string;
+  targetWordCount?: number;
 }
 
-/**
- * 在已有分卷中创建章节 + 空草稿（完整闭环 + 每步反查）
- */
+type ChapterOptions = Pick<CreateChapterInput, 'outline' | 'goal' | 'targetWordCount' | 'orderIndex'>;
+
+export async function createVolumeForNovel(
+  novelId: string,
+  title = '第一卷',
+  options: Partial<Omit<CreateVolumeInput, 'novelId' | 'title'>> = {},
+): Promise<Volume> {
+  if (!novelId) throw new Error('novelId 缺失，无法创建分卷');
+  if (!title?.trim()) throw new Error('分卷标题不能为空');
+
+  console.info('[chapterCreation] create volume start');
+  const volume = await volumeRepository.create({ ...options, novelId, title: title.trim() });
+  if (!volume?.id) throw new Error('创建分卷失败：未返回有效 volume.id');
+  console.info(`[chapterCreation] create volume result id=${volume.id}`);
+
+  const volumesAfter = await volumeRepository.getByNovelId(novelId);
+  console.info(`[chapterCreation] volumes after count=${volumesAfter.length}`);
+  if (!volumesAfter.some((v) => v.id === volume.id)) {
+    throw new Error('分卷创建后无法读取，请检查存储');
+  }
+
+  return volume;
+}
+
+export async function createFirstVolumeAndChapter(
+  novelId: string,
+  options: FirstChapterOptions = {},
+): Promise<ChapterCreationResult> {
+  if (!novelId) throw new Error('novelId 缺失，无法创建章节');
+
+  const volume = await createVolumeForNovel(novelId, options.volumeTitle || '第一卷');
+  const { chapter, draft } = await createChapterInVolume(
+    novelId,
+    volume.id,
+    options.chapterTitle || '第1章',
+    {
+      outline: options.outline,
+      goal: options.goal,
+      targetWordCount: options.targetWordCount,
+    },
+  );
+
+  return { volume, chapter, draft };
+}
+
 export async function createChapterInVolume(
   novelId: string,
   volumeId: string,
   title: string,
+  options: ChapterOptions = {},
 ): Promise<{ chapter: Chapter; draft: ChapterDraft }> {
   if (!novelId) throw new Error('novelId 缺失');
   if (!volumeId) throw new Error('volumeId 缺失');
   if (!title?.trim()) throw new Error('章节标题不能为空');
 
-  // 1. 创建章节
-  const chapter = await chapterRepository.create({ novelId, volumeId, title: title.trim() });
+  console.info('[chapterCreation] create chapter start');
+  const chapter = await chapterRepository.create({
+    ...options,
+    novelId,
+    volumeId,
+    title: title.trim(),
+  });
   if (!chapter?.id) throw new Error('创建章节失败：未返回有效 chapter.id');
+  console.info(`[chapterCreation] create chapter result id=${chapter.id}`);
 
-  // 反查
-  const chsAfter = await chapterRepository.getByNovelId(novelId);
-  if (!chsAfter.some((c) => c.id === chapter.id)) {
-    throw new Error('章节创建后无法从存储中读取，请检查 chapterService');
+  const chaptersAfter = await chapterRepository.getByNovelId(novelId);
+  console.info(`[chapterCreation] chapters after count=${chaptersAfter.length}`);
+  if (!chaptersAfter.some((c) => c.id === chapter.id)) {
+    throw new Error('章节创建后无法读取，请检查存储');
   }
 
-  // 2. 创建空草稿
+  console.info('[chapterCreation] create draft start');
   const draft = await draftVersionService.create({
-    novelId, chapterId: chapter.id, title: chapter.title,
-    content: '', source: 'user_edited',
+    novelId,
+    chapterId: chapter.id,
+    title: chapter.title,
+    content: '',
+    source: 'manual_placeholder',
   });
   if (!draft?.id) throw new Error('创建草稿失败：未返回有效 draft.id');
+  console.info(`[chapterCreation] draft result id=${draft.id}`);
 
-  // 反查草稿
   const loadedDraft = await draftVersionService.getLatestByChapterId(chapter.id);
   if (!loadedDraft?.id) {
-    throw new Error('草稿创建后无法从存储中读取，请检查 draftService');
+    throw new Error('草稿创建后无法读取，请检查存储');
   }
 
   return { chapter, draft: loadedDraft };

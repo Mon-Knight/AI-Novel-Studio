@@ -18,6 +18,8 @@ export interface Novel {
   subtitle?: string;
   description?: string;
   genre?: string;
+  protagonistName?: string;
+  worldBackground?: string;
   coverPath?: string;
   coverUrl?: string;
   status: NovelStatus;

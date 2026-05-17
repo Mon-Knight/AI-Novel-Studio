@@ -58,8 +58,8 @@ export function getDbMode(): DbMode {
 }
 
 /**
- * 统一调用入口：根据环境自动选择 Tauri invoke 或 localStorage
- * Tauri 模式下若 3 秒内未响应，自动降级到 localStorage
+ * 统一调用入口：桌面端使用 Tauri/SQLite，浏览器开发态使用 localStorage。
+ * Tauri 模式下不静默降级，避免同一业务链路写入和读取落到不同存储。
  */
 export async function dbCall<T>(
   command: string,
@@ -76,11 +76,8 @@ export async function dbCall<T>(
       ]);
       return result;
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : '';
-      // Tauri 超时或不可用 → 降级到 localStorage
-      if (msg === 'tauri_timeout' || msg.includes('invoke') || msg.includes('tauri')) {
-        console.warn('[db] Tauri unavailable, falling back to localStorage');
-      }
+      console.error(`[db] Tauri command failed: ${command}`, e);
+      throw e;
     }
   }
   if (fallback) {

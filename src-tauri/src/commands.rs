@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 // ==================== Novel ====================
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NovelDto {
     pub id: String,
     pub title: String,
@@ -23,6 +24,7 @@ pub struct NovelDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateNovelInput {
     pub title: String,
     pub subtitle: Option<String>,
@@ -32,6 +34,7 @@ pub struct CreateNovelInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateNovelInput {
     pub title: Option<String>,
     pub subtitle: Option<String>,
@@ -175,6 +178,7 @@ pub fn delete_novel(id: String) -> Result<(), String> {
 // ==================== World Setting ====================
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorldSettingDto {
     pub id: String,
     pub novel_id: String,
@@ -187,6 +191,7 @@ pub struct WorldSettingDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveWorldSettingInput {
     pub novel_id: String,
     pub title: String,
@@ -284,6 +289,7 @@ pub fn save_world_setting(id: Option<String>, input: SaveWorldSettingInput) -> R
 // ==================== Rule System ====================
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuleSystemDto {
     pub id: String,
     pub novel_id: String,
@@ -298,6 +304,7 @@ pub struct RuleSystemDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveRuleSystemInput {
     pub novel_id: String,
     pub title: String,
@@ -392,6 +399,7 @@ pub fn delete_rule_system(id: String) -> Result<(), String> {
 // ==================== Protagonist ====================
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProtagonistDto {
     pub id: String,
     pub novel_id: String,
@@ -408,6 +416,7 @@ pub struct ProtagonistDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveProtagonistInput {
     pub novel_id: String,
     pub name: String,
@@ -499,6 +508,7 @@ fn get_protagonist_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Protag
 // ==================== Volume ====================
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VolumeDto {
     pub id: String,
     pub novel_id: String,
@@ -513,6 +523,7 @@ pub struct VolumeDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateVolumeInput {
     pub novel_id: String,
     pub title: String,
@@ -523,6 +534,7 @@ pub struct CreateVolumeInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateVolumeInput {
     pub title: Option<String>,
     pub summary: Option<String>,
@@ -547,6 +559,16 @@ pub fn get_volumes_by_novel_id(novel_id: String) -> Result<Vec<VolumeDto>, Strin
         })
     }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
     Ok(items)
+}
+
+#[tauri::command]
+pub fn get_volume_by_id(id: String) -> Result<Option<VolumeDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    match get_volume_by_id_internal(&conn, &id) {
+        Ok(volume) => Ok(Some(volume)),
+        Err(err) if err.contains("Query returned no rows") => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 #[tauri::command]
@@ -601,6 +623,7 @@ fn get_volume_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<Vo
 // ==================== Chapter ====================
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChapterDto {
     pub id: String,
     pub novel_id: String,
@@ -618,6 +641,7 @@ pub struct ChapterDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateChapterInput {
     pub novel_id: String,
     pub volume_id: Option<String>,
@@ -629,6 +653,7 @@ pub struct CreateChapterInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateChapterInput {
     pub volume_id: Option<String>,
     pub title: Option<String>,
@@ -653,6 +678,32 @@ pub fn get_chapters_by_novel_id(novel_id: String) -> Result<Vec<ChapterDto>, Str
         target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
     })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
     Ok(items)
+}
+
+#[tauri::command]
+pub fn get_chapters_by_volume_id(volume_id: String) -> Result<Vec<ChapterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at FROM chapters WHERE volume_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
+        .map_err(|e| e.to_string())?;
+    let items = stmt.query_map(params![volume_id], |row| Ok(ChapterDto {
+        id: row.get(0)?, novel_id: row.get(1)?, volume_id: row.get(2)?,
+        title: row.get(3)?, outline: row.get(4)?, goal: row.get(5)?,
+        order_index: row.get(6)?, status: row.get(7)?,
+        adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
+        target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
+    })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn get_chapter_by_id(id: String) -> Result<Option<ChapterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    match get_chapter_by_id_internal(&conn, &id) {
+        Ok(chapter) => Ok(Some(chapter)),
+        Err(err) if err.contains("Query returned no rows") => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 #[tauri::command]
@@ -703,6 +754,188 @@ fn get_chapter_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<C
         adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
         target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
     })).map_err(|e| e.to_string())
+}
+
+// ==================== Chapter Draft ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterDraftDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub title: Option<String>,
+    pub content: String,
+    pub source: String,
+    pub version_no: i64,
+    pub word_count: i64,
+    pub is_adopted: bool,
+    pub ai_task_id: Option<String>,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateChapterDraftInput {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub title: Option<String>,
+    pub content: String,
+    pub source: String,
+    pub ai_task_id: Option<String>,
+    pub note: Option<String>,
+}
+
+fn count_words(content: &str) -> i64 {
+    content.chars().filter(|c| !c.is_whitespace()).count() as i64
+}
+
+fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterDraftDto> {
+    let is_adopted: i64 = row.get(8)?;
+    Ok(ChapterDraftDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        title: row.get(3)?,
+        content: row.get(4)?,
+        source: row.get(5)?,
+        version_no: row.get(6)?,
+        word_count: row.get(7)?,
+        is_adopted: is_adopted != 0,
+        ai_task_id: row.get(9)?,
+        note: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
+}
+
+fn get_draft_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<ChapterDraftDto, String> {
+    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE id = ?1").map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], map_draft_row).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_drafts_by_chapter_id(chapter_id: String) -> Result<Vec<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC")
+        .map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![chapter_id], map_draft_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn get_latest_draft_by_chapter_id(chapter_id: String) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no DESC LIMIT 1")
+        .map_err(|e| e.to_string())?;
+    match stmt.query_row(params![chapter_id], map_draft_row) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDraftDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let max_version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version_no), 0) FROM chapter_drafts WHERE chapter_id = ?1",
+            params![&input.chapter_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let word_count = count_words(&input.content);
+    let ai_task_id = match input.ai_task_id {
+        Some(task_id) if !task_id.is_empty() => {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_task_records WHERE id = ?1",
+                    params![&task_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if exists > 0 { Some(task_id) } else { None }
+        }
+        _ => None,
+    };
+
+    conn.execute(
+        "INSERT INTO chapter_drafts (id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?10,?11,?11)",
+        params![
+            &id,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.title,
+            &input.content,
+            &input.source,
+            max_version + 1,
+            word_count,
+            &ai_task_id,
+            &input.note,
+            now
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    get_draft_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_chapter_draft(id: String, chapter_id: String, content: String, source: Option<String>) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let source = source.unwrap_or_else(|| "user_edited".to_string());
+    let word_count = count_words(&content);
+    conn.execute(
+        "UPDATE chapter_drafts SET content = ?1, source = ?2, word_count = ?3, updated_at = ?4 WHERE id = ?5 AND chapter_id = ?6",
+        params![content, source, word_count, now, &id, chapter_id],
+    ).map_err(|e| e.to_string())?;
+
+    match get_draft_by_id_internal(&conn, &id) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(err) if err.contains("Query returned no rows") => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+#[tauri::command]
+pub fn adopt_chapter_draft(draft_id: String, chapter_id: String) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
+        params![&now, &chapter_id],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3",
+        params![&now, &draft_id, &chapter_id],
+    ).map_err(|e| e.to_string())?;
+
+    match get_draft_by_id_internal(&conn, &draft_id) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(err) if err.contains("Query returned no rows") => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+#[tauri::command]
+pub fn delete_chapter_draft(id: String, chapter_id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?2",
+        params![id, chapter_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // Optional helper for QueryRow

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
-import { createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
+import { createVolumeForNovel, createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
 import VolumeCard from './VolumeCard';
 import VolumeFormModal from './VolumeFormModal';
 import ChapterFormModal from './ChapterFormModal';
@@ -45,13 +45,12 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   // v1.0.20 创建分卷：写入 + 反查 + 重载
   const handleCreateVolume = async (input: CreateVolumeInput) => {
     try {
-      const created = await volumeRepository.create(input);
-      if (!created?.id) throw new Error('分卷创建返回无效数据');
-      // 反查验证
-      const volsAfter = await volumeRepository.getByNovelId(novelId);
-      if (!volsAfter.some((v) => v.id === created.id)) {
-        throw new Error('分卷创建后无法读取，请检查存储');
-      }
+      await createVolumeForNovel(novelId, input.title, {
+        summary: input.summary,
+        goal: input.goal,
+        mainConflict: input.mainConflict,
+        orderIndex: input.orderIndex,
+      });
       await loadData();
       setShowVolumeForm(false);
       flash('✅ 分卷创建成功');
@@ -87,14 +86,23 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       if (!volumeId) {
         // 无分卷时创建第一卷
         flash('⏳ 正在创建第一卷和第一章...');
-        const result = await createFirstVolumeAndChapter(novelId);
+        const result = await createFirstVolumeAndChapter(novelId, {
+          chapterTitle: input.title,
+          outline: input.outline,
+          goal: input.goal,
+          targetWordCount: input.targetWordCount,
+        });
         await loadData();
         setShowChapterForm(false);
         setTargetVolumeId(undefined);
         flash('✅ 已创建第一卷和第1章（含空草稿）');
         console.info('[OutlineManager] createFirstVolumeAndChapter done, chapterId=', result.chapter.id);
       } else {
-        const result = await createChapterInVolume(novelId, volumeId, input.title);
+        const result = await createChapterInVolume(novelId, volumeId, input.title, {
+          outline: input.outline,
+          goal: input.goal,
+          targetWordCount: input.targetWordCount,
+        });
         await loadData();
         setShowChapterForm(false);
         setTargetVolumeId(undefined);

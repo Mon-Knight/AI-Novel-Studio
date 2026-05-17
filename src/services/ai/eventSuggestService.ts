@@ -73,6 +73,8 @@ export const eventSuggestService = {
     const task = await aiTaskService.create('event_suggest', {
       novelId: input.novelId,
       chapterId: input.chapterId,
+      runtimeMode: settings.runtimeMode,
+      provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
       inputSummary: `为章节推荐关键事件（出场角色：${characterNames.join('、') || '无'}）`,
     }).catch(() => null);

@@ -24,13 +24,22 @@ fn main() {
             commands::get_protagonist,
             commands::save_protagonist,
             commands::get_volumes_by_novel_id,
+            commands::get_volume_by_id,
             commands::create_volume,
             commands::update_volume,
             commands::delete_volume,
             commands::get_chapters_by_novel_id,
+            commands::get_chapters_by_volume_id,
+            commands::get_chapter_by_id,
             commands::create_chapter,
             commands::update_chapter,
             commands::delete_chapter,
+            commands::get_drafts_by_chapter_id,
+            commands::get_latest_draft_by_chapter_id,
+            commands::create_chapter_draft,
+            commands::update_chapter_draft,
+            commands::adopt_chapter_draft,
+            commands::delete_chapter_draft,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

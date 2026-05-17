@@ -47,6 +47,8 @@ export const qualityCheckAiService = {
     const task = await aiTaskService.create('quality_check', {
       novelId: input.novelId,
       chapterId: input.chapterId,
+      runtimeMode: settings.runtimeMode,
+      provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
       inputSummary: `检查章节「${input.chapterTitle}」质量`,
     }).catch(() => null);

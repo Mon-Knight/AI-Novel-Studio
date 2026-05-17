@@ -79,6 +79,8 @@ export interface AiTaskRecord {
   chapterId?: string;
   taskType: AiTaskType;
   status: AiTaskStatus;
+  runtimeMode?: 'mock' | 'api';
+  provider?: string;
   modelName?: string;
   promptTemplateId?: string;
   inputSummary?: string;

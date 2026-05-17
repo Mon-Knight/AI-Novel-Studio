@@ -24,6 +24,8 @@ export const polishAiService = {
     const task = await aiTaskService.create('chapter_polish', {
       novelId: input.novelId,
       chapterId: input.chapterId,
+      runtimeMode: settings.runtimeMode,
+      provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
       inputSummary: `润色章节「${input.chapterTitle}」，模式：${input.options.mode}`,
     }).catch(() => null);

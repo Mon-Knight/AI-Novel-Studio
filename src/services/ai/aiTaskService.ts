@@ -22,6 +22,8 @@ export const aiTaskService = {
       chapterId?: string;
       modelName?: string;
       inputSummary?: string;
+      runtimeMode?: 'mock' | 'api';
+      provider?: string;
     },
   ): Promise<AiTaskRecord> {
     const tasks = getLocalTasks();
@@ -32,6 +34,8 @@ export const aiTaskService = {
       chapterId: input.chapterId,
       taskType,
       status: 'running',
+      runtimeMode: input.runtimeMode,
+      provider: input.provider,
       modelName: input.modelName,
       inputSummary: input.inputSummary,
       startedAt: now,

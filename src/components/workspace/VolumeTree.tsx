@@ -11,6 +11,7 @@ interface VolumeTreeProps {
   onSelectChapter: (chapterId: string) => void;
   onCreateVolume: (title: string) => Promise<void>;
   onCreateChapter: (volumeId: string, title: string) => Promise<void>;
+  onCreateFirstChapter?: (title?: string) => Promise<void>;
 }
 
 const statusDotColors: Record<string, string> = {
@@ -34,7 +35,7 @@ const xsBtnSecondary: React.CSSProperties = {
 
 function VolumeTree({
   volumes, chapters, activeChapterId, loading,
-  onSelectChapter, onCreateVolume, onCreateChapter,
+  onSelectChapter, onCreateVolume, onCreateChapter, onCreateFirstChapter,
 }: VolumeTreeProps) {
   const [expandedVolumes, setExpandedVolumes] = useState<Record<string, boolean>>({});
   const [showNewVolume, setShowNewVolume] = useState(false);
@@ -70,7 +71,21 @@ function VolumeTree({
     if (!newChapterTitle.trim() || creating) return;
     const volumeId = newChapterVolumeId || volumes[0]?.id;
     if (!volumeId) {
-      alert('当前无分卷，请先创建分卷。');
+      if (!onCreateFirstChapter) {
+        alert('当前无分卷，请先创建分卷。');
+        return;
+      }
+      setCreating(true);
+      try {
+        await onCreateFirstChapter(newChapterTitle.trim());
+        setNewChapterTitle('');
+        setShowNewChapter(false);
+        setNewChapterVolumeId('');
+      } catch (e: any) {
+        alert('创建章节失败：' + (e?.message || '未知错误'));
+      } finally {
+        setCreating(false);
+      }
       return;
     }
     setCreating(true);
@@ -85,7 +100,7 @@ function VolumeTree({
     } finally {
       setCreating(false);
     }
-  }, [newChapterTitle, newChapterVolumeId, volumes, creating, onCreateChapter]);
+  }, [newChapterTitle, newChapterVolumeId, volumes, creating, onCreateChapter, onCreateFirstChapter]);
 
   const handleOpenNewChapter = useCallback((volumeId?: string) => {
     if (volumes.length === 0 && !volumeId) {

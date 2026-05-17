@@ -105,18 +105,18 @@ function SettingsPage() {
           {/* API 配置区域 — 始终可见 */}
           <div style={{ padding: '10px 14px', background: '#fafafa', borderRadius: 8, border: '1px solid #e5e7eb' }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--color-text-secondary)' }}>
-              🔧 API 接口配置{settings.mockMode ? '（Mock 模式下可选）' : '（必填）'}
+              🔧 API 接口配置{settings.runtimeMode === 'mock' ? '（Mock 模式下可选）' : '（必填）'}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
-                <label className="panel-field-label">API Base URL {!settings.mockMode && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
+                <label className="panel-field-label">API Base URL {settings.runtimeMode === 'api' && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
                 <input type="text" className="form-input" value={settings.baseUrl}
                   onChange={(e) => update({ baseUrl: e.target.value })}
                   placeholder="例如：https://api.deepseek.com/v1 或你的 OpenAI 兼容服务地址"
                   style={{ width: '100%', fontSize: 13 }} />
               </div>
               <div>
-                <label className="panel-field-label">API Key {!settings.mockMode && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
+                <label className="panel-field-label">API Key {settings.runtimeMode === 'api' && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
                 <input type="password" className="form-input" value={settings.apiKey}
                   onChange={(e) => update({ apiKey: e.target.value })}
                   placeholder="sk-..."
@@ -132,7 +132,7 @@ function SettingsPage() {
                 )}
               </div>
               <div>
-                <label className="panel-field-label">模型名称 {!settings.mockMode && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
+                <label className="panel-field-label">模型名称 {settings.runtimeMode === 'api' && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
                 <input type="text" className="form-input" value={settings.modelName}
                   onChange={(e) => update({ modelName: e.target.value })}
                   placeholder="例如：deepseek-chat / deepseek-reasoner"
