@@ -13,6 +13,7 @@ interface VolumeTreeProps {
   onSelectChapter: (chapterId: string) => void;
   onChapterCreated?: (chapterId: string) => void;
   onChaptersRefresh?: () => Promise<Chapter[]>;
+  refreshKey?: number;
 }
 
 const statusDotColors: Record<string, string> = {
@@ -25,7 +26,7 @@ const statusDotColors: Record<string, string> = {
   summarized: '#059669',
 };
 
-function VolumeTree({ novelId, activeChapterId, onSelectChapter, onChapterCreated, onChaptersRefresh }: VolumeTreeProps) {
+function VolumeTree({ novelId, activeChapterId, onSelectChapter, onChapterCreated, onChaptersRefresh, refreshKey }: VolumeTreeProps) {
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [expandedVolumes, setExpandedVolumes] = useState<Record<string, boolean>>({});
@@ -60,7 +61,7 @@ function VolumeTree({ novelId, activeChapterId, onSelectChapter, onChapterCreate
     }
     load();
     return () => { cancelled = true; };
-  }, [novelId]);
+  }, [novelId, refreshKey]);
 
   const refreshTree = useCallback(async () => {
     try {

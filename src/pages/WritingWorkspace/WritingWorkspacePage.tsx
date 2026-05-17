@@ -220,6 +220,9 @@ function WritingWorkspacePage() {
     await handleGenerateSummary();
   }, [handleGenerateSummary]);
 
+  // v1.0.18 章节树刷新令牌：创建数据后递增，强制 VolumeTree 重载
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+
   // v1.0.16 工作台内创建分卷和章节
   const [creating, setCreating] = useState(false);
 
@@ -264,8 +267,13 @@ function WritingWorkspacePage() {
         source: 'user_edited',
       });
       console.info('[WorkspaceEmptyState] create draft done');
-      // 4. 刷新章节列表
-      console.info('[WorkspaceEmptyState] reload tree start');
+      // 4. 验证数据已持久化
+      const volsAfter = await volumeRepository.getByNovelId(novelId);
+      const chsAfter = await chapterRepository.getByNovelId(novelId);
+      console.info('[WorkspaceEmptyState] verify: volumes=', volsAfter.length, 'chapters=', chsAfter.length);
+      if (volsAfter.length === 0) throw new Error('分卷创建后无法读取，请检查存储');
+      if (chsAfter.length === 0) throw new Error('章节创建后无法读取，请检查存储');
+      // 5. 刷新章节列表并强制章节树重载
       const list = await refreshChapters();
       setChapters(list);
       setActiveChapterId(ch.id);
@@ -273,7 +281,8 @@ function WritingWorkspacePage() {
       setCurrentDraft(null);
       setDraftWordCount(0);
       setIsDirty(false);
-      console.info('[WorkspaceEmptyState] done, chapters=', list.length, 'activeChapterId=', ch.id);
+      setTreeRefreshKey((k) => k + 1);
+      console.info('[WorkspaceEmptyState] done, chapters=', list.length, 'activeChapterId=', ch.id, 'treeRefreshKey incremented');
     } catch (e: any) {
       console.error('[WorkspaceEmptyState] error:', e);
       alert('创建失败：' + (e?.message || '未知错误'));
@@ -373,6 +382,7 @@ function WritingWorkspacePage() {
             onSelectChapter={handleSelectChapter}
             onChapterCreated={handleChapterCreated}
             onChaptersRefresh={refreshChapters}
+            refreshKey={treeRefreshKey}
           />
         )}
       </div>
