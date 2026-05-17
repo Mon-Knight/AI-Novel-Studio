@@ -30,4 +30,20 @@ export const aiSettingsService = {
     if (!key || key.length < 8) return key;
     return key.slice(0, 4) + '...' + key.slice(-4);
   },
+
+  async testConnection(settings: AiSettings): Promise<{ ok: boolean; message: string }> {
+    try {
+      const resp = await fetch(settings.baseUrl + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
+        body: JSON.stringify({ model: settings.modelName, messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (resp.ok) return { ok: true, message: 'API 连接正常' };
+      const text = await resp.text();
+      return { ok: false, message: `HTTP ${resp.status}: ${text.slice(0, 100)}` };
+    } catch (e: any) {
+      return { ok: false, message: e.message || '网络请求失败' };
+    }
+  },
 };

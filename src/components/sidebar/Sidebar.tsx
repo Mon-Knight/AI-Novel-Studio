@@ -8,14 +8,14 @@ interface NavItem {
 
 const mainNavItems: NavItem[] = [
   { path: '/', label: '小说作品', icon: '📖' },
-  { path: '/coming-soon?from=assets', label: '创作资产', icon: '📦' },
+  { path: '/assets', label: '创作资产', icon: '📦' },
   { path: '/styles', label: '风格方案', icon: '🎨' },
-  { path: '/coming-soon?from=templates', label: '模板中心', icon: '📋' },
-  { path: '/coming-soon?from=ai-tasks', label: 'AI任务记录', icon: '🤖' },
+  { path: '/templates', label: '模板中心', icon: '📋' },
+  { path: '/ai-tasks', label: 'AI任务记录', icon: '🤖' },
 ];
 
 const toolNavItems: NavItem[] = [
-  { path: '/coming-soon?from=import-export', label: '导入导出', icon: '📥' },
+  { path: '/import-export', label: '导入导出', icon: '📥' },
   { path: '/settings', label: '设置中心', icon: '⚙️' },
 ];
 
@@ -62,7 +62,7 @@ function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <span className="version">v1.0.0</span>
+        <span className="version">v1.0.1</span>
       </div>
     </aside>
   );

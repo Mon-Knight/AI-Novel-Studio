@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import BackButton from '../../components/common/BackButton';
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
 import { importedAssetService } from '../../services/styles/importedAssetService';
@@ -96,7 +97,8 @@ function StyleProfilesPage() {
 
   return (
     <div style={{ padding: 32, maxWidth: 1000, margin: '0 auto', height: '100%', overflowY: 'auto' }}>
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>🎨 风格方案管理</div>
+      <BackButton label="返回首页" to="/" />
+      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>🎨 风格方案管理</div>
       <div className="text-sm text-muted" style={{ marginBottom: 20 }}>管理可复用的写作风格画像和输出控制方案。</div>
       {msg && <div style={{ fontSize: 13, padding: '6px 12px', background: 'var(--color-primary-light)', borderRadius: 6, marginBottom: 16, color: 'var(--color-primary)' }}>{msg}</div>}
 

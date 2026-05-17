@@ -8,6 +8,10 @@ import StyleProfilesPage from './pages/StyleProfiles/StyleProfilesPage';
 import SettingsPage from './pages/Settings/SettingsPage';
 import ComingSoonPage from './pages/ComingSoon/ComingSoonPage';
 import NotFoundPage from './pages/NotFound/NotFoundPage';
+import AssetsPage from './pages/Assets/AssetsPage';
+import TemplatesPage from './pages/Templates/TemplatesPage';
+import AiTasksPage from './pages/AiTasks/AiTasksPage';
+import ImportExportPage from './pages/ImportExport/ImportExportPage';
 
 function App() {
   return (
@@ -19,6 +23,10 @@ function App() {
           <Route path="/novels/:novelId/workspace" element={<WritingWorkspacePage />} />
           <Route path="/styles" element={<StyleProfilesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
+          <Route path="/ai-tasks" element={<AiTasksPage />} />
+          <Route path="/import-export" element={<ImportExportPage />} />
           <Route path="/coming-soon" element={<ComingSoonPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

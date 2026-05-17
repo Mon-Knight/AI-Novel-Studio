@@ -1,4 +1,5 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import BackButton from '../../components/common/BackButton';
 import '../../styles/coming-soon.css';
 
 const moduleInfo: Record<string, { title: string; desc: string }> = {
@@ -27,6 +28,7 @@ function ComingSoonPage() {
 
   return (
     <div className="coming-soon-page">
+      <BackButton label="返回首页" to="/" />
       <div className="coming-soon-card">
         <div className="coming-soon-icon">🚧</div>
         <div className="coming-soon-title">{info.title}</div>

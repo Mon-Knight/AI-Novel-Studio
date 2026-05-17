@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import BackButton from '../../components/common/BackButton';
 import { novelRepository } from '../../services/database/novelRepository';
 import { settingRepository } from '../../services/database/settingRepository';
 import { protagonistRepository } from '../../services/database/protagonistRepository';

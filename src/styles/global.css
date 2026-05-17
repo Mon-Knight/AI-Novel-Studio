@@ -77,6 +77,23 @@ select {
   color: var(--color-text-primary);
 }
 
+/* 返回按钮 */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #374151;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.back-button:hover { background: #f3f4f6; }
+
 /* 通用工具类 */
 .text-muted {
   color: var(--color-text-muted);

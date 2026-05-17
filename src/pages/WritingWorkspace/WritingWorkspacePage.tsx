@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import BackButton from '../../components/common/BackButton';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import VolumeTree from '../../components/workspace/VolumeTree';
 import EditorArea from '../../components/workspace/EditorArea';
@@ -178,13 +179,14 @@ function WritingWorkspacePage() {
       <div className="workspace-sidebar">
         {/* 顶部导航区 */}
         <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border-light)' }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => navigate(`/novels/${novelId}`)}
-            style={{ width: '100%', justifyContent: 'center' }}
-          >
-            ← 返回作品详情
-          </button>
+          <BackButton
+            label="返回作品详情"
+            to={`/novels/${novelId}`}
+            onBeforeBack={() => {
+              if (isDirty) return confirm('当前正文有未保存修改，直接返回可能丢失修改。是否继续？');
+              return true;
+            }}
+          />
         </div>
         {novel && (
           <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border-light)', fontSize: 13, fontWeight: 500 }}>
@@ -205,9 +207,14 @@ function WritingWorkspacePage() {
         {/* 顶部信息栏 */}
         <div className="workspace-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
-              ← 返回
-            </button>
+            <BackButton
+              label="返回作品"
+              to={`/novels/${novelId}`}
+              onBeforeBack={() => {
+                if (isDirty) return confirm('当前正文有未保存修改，直接返回可能丢失修改。是否继续？');
+                return true;
+              }}
+            />
             <span style={{ fontWeight: 600, fontSize: 14 }}>{novel?.title || '未选择作品'}</span>
           </div>
           {activeChapter && (

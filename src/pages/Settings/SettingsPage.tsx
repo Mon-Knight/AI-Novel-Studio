@@ -8,6 +8,7 @@ function SettingsPage() {
   const navigate = useNavigate();
   const [settings, setSettings] = useState<AiSettings>(aiSettingsService.getSettings());
   const [message, setMessage] = useState('');
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     setSettings(aiSettingsService.getSettings());
@@ -17,6 +18,17 @@ function SettingsPage() {
     aiSettingsService.saveSettings(settings);
     setMessage('AI 设置已保存');
     setTimeout(() => setMessage(''), 2000);
+  };
+
+  const handleTestConnection = async () => {
+    if (settings.mockMode) { setMessage('Mock 模式无需测试连接'); setTimeout(() => setMessage(''), 2000); return; }
+    if (!settings.baseUrl || !settings.apiKey || !settings.modelName) { setMessage('请先填写 API Base URL、API Key 和模型名称'); setTimeout(() => setMessage(''), 3000); return; }
+    setTesting(true); setMessage('正在测试连接...');
+    try {
+      const result = await aiSettingsService.testConnection(settings);
+      setMessage(result.ok ? '✅ 连接成功！' : `❌ 连接失败：${result.message}`);
+    } catch (e: any) { setMessage(`❌ 连接失败：${e.message || '未知错误'}`); }
+    finally { setTesting(false); }
   };
 
   const update = (patch: Partial<AiSettings>) => {
@@ -106,7 +118,10 @@ function SettingsPage() {
               {message}
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleTestConnection} disabled={testing}>
+              {testing ? '⏳ 测试中...' : '🔌 测试连接'}
+            </button>
             <button className="btn btn-primary btn-sm" onClick={handleSave}>💾 保存设置</button>
           </div>
         </div>
@@ -145,7 +160,7 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
         </div>
         <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div><strong>AI Novel Studio v1.0.0</strong></div>
+          <div><strong>AI Novel Studio v1.0.1</strong></div>
           <div>Windows 桌面端 AI 小说创作工作台</div>
           <div>技术路线：Tauri + React + TypeScript + SQLite</div>
           <div>本地路径：F:\ai-novel-studio</div>
