@@ -13,7 +13,7 @@ const defaultSettings: AiSettings = {
   apiKey: '',
   modelName: '',
   temperature: 0.7,
-  maxTokens: 4000,
+  maxTokens: 8000,
   timeoutSeconds: 120,
   mockMode: true,
 };

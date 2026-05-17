@@ -1,23 +1,86 @@
 /**
- * AI Novel Studio - AI 角色生成（模拟版）
+ * AI Novel Studio - AI 角色生成 (v1.0.21 统一 aiClient)
  */
-import { generateId, nowISO } from '../database/db';
-import type { Character, CreateCharacterInput, CharacterCandidate } from '../../types/character';
+import { createAiClient, aiSettingsService } from './aiClient';
+import { buildCharacterGeneratePrompt } from './promptBuilder';
+import { aiTaskService } from './aiTaskService';
+import { novelRepository } from '../database/novelRepository';
+import type { Character, CharacterCandidate } from '../../types/character';
 
-function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
+function safeJsonParse<T>(text: string, fallback: T): T {
+  try {
+    // 处理 markdown code fences
+    let json = text.trim();
+    const m = json.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (m) json = m[1].trim();
+    return JSON.parse(json) as T;
+  } catch {
+    return fallback;
+  }
+}
 
 export const characterGenerateService = {
   async generateCandidates(input: {
-    novelId: string; chapterId: string; chapterOutline: string; existingCharacters: Character[];
+    novelId: string;
+    chapterId: string;
+    chapterOutline: string;
+    existingCharacters: Character[];
   }): Promise<CharacterCandidate[]> {
-    await sleep(800);
-    const existing = input.existingCharacters.map((c) => c.name);
-    const pool: CharacterCandidate[] = [
-      { name: '路明非', roleType: 'protagonist', identity: '卡塞尔学院学生', faction: '卡塞尔学院', relationToProtagonist: '本人', goal: '存活并保护同伴', personality: '内向自卑，关键时刻勇敢', behaviorLimits: '不会主动伤害无辜者', forbiddenBehaviors: '不会背叛同伴', currentState: '刚接受S级身份', chapterFunction: '本章视角人物' },
-      { name: '陈墨瞳', roleType: 'supporting', identity: '学生会主席', faction: '卡塞尔学院', relationToProtagonist: '前辈/导师', goal: '维持学生会地位', personality: '果断冷静，责任感强', behaviorLimits: '不会公开对抗校方', forbiddenBehaviors: '不会放弃弱者', currentState: '观察主角中', chapterFunction: '提供关键指引' },
-      { name: '楚天骄', roleType: 'antagonist', identity: '龙族裔', faction: '龙族势力', relationToProtagonist: '宿敌', goal: '复活龙王', personality: '高傲冷酷', behaviorLimits: '不会主动暴露身份', forbiddenBehaviors: '不会在公开场合使用龙族之力', currentState: '伪装潜伏', chapterFunction: '本章冲突源' },
-      { name: '酒德麻衣', roleType: 'neutral', identity: '执行部探员', faction: '卡塞尔学院', relationToProtagonist: '潜在盟友', goal: '执行学院任务', personality: '洒脱不拘', behaviorLimits: '不会偏离任务目标', forbiddenBehaviors: '不会伤害无辜', currentState: '正在执行任务', chapterFunction: '提供情报' },
-    ];
-    return pool.filter((c) => !existing.includes(c.name)).slice(0, 3);
+    const settings = aiSettingsService.getSettings();
+    const novel = await novelRepository.getById(input.novelId);
+    const existingNames = input.existingCharacters.map((c) => c.name);
+
+    // 构建 prompt
+    const request = buildCharacterGeneratePrompt({
+      novelTitle: novel?.title || '未命名作品',
+      novelGenre: novel?.genre,
+      protagonist: novel?.protagonistName,
+      worldBackground: novel?.worldBackground?.slice(0, 500),
+      chapterTitle: input.chapterOutline.slice(0, 50) || '未命名章节',
+      chapterOutline: input.chapterOutline,
+      existingCharacterNames: existingNames,
+    });
+
+    // 创建 AI 任务记录
+    const task = await aiTaskService.create('character_generate', {
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+      inputSummary: `为章节生成候选角色（已有角色：${existingNames.join('、') || '无'}）`,
+    }).catch(() => null);
+
+    try {
+      const client = createAiClient();
+      const response = await client.generate(request);
+      const text = response.text || '';
+
+      // 尝试 JSON 解析
+      const parsed = safeJsonParse<{ characters: CharacterCandidate[] }>(text, { characters: [] });
+
+      if (parsed.characters?.length > 0) {
+        const filtered = parsed.characters.filter(
+          (c) => c.name && !existingNames.includes(c.name)
+        );
+        await aiTaskService.markSucceeded(task?.id || '', {
+          resultText: `生成了 ${filtered.length} 个候选角色`,
+          tokenInput: response.tokenInput,
+          tokenOutput: response.tokenOutput,
+        });
+        return filtered;
+      }
+
+      // JSON 解析失败，尝试文本解析
+      await aiTaskService.markSucceeded(task?.id || '', {
+        resultText: '模型返回格式不规范，已尝试文本解析',
+        tokenInput: response.tokenInput,
+        tokenOutput: response.tokenOutput,
+      });
+      return [];
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : '角色生成失败';
+      if (task) await aiTaskService.markFailed(task.id, msg);
+      throw err;
+    }
   },
 };
+

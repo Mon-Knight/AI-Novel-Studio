@@ -6,6 +6,7 @@ import { PolishModeLabels } from '../../../types/polish';
 import { polishService } from '../../../services/quality/polishService';
 import { polishAiService } from '../../../services/ai/polishAiService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { aiSettingsService } from '../../../services/ai/aiClient';
 
 interface PolishPanelProps {
   novelId?: string; chapter?: Chapter;
@@ -58,8 +59,23 @@ function PolishPanel({ novelId, chapter, onGenerated, onAdopted }: PolishPanelPr
 
   if (!chapter) return <div style={{ padding: 16, color: 'var(--color-text-muted)' }}>请先选择章节</div>;
 
+  const aiSettings = aiSettingsService.getSettings();
+
   return (
     <div>
+      {/* AI 模式状态 */}
+      <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
+        <div className="panel-section-title">🤖 AI 状态</div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        {aiSettings.runtimeMode === 'api' && (
+          <>
+            <div>模型：{aiSettings.modelName || '未配置'}</div>
+            {!aiSettings.apiKey && (
+              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>⚠️ 未配置 API Key，请先到设置中心配置</div>
+            )}
+          </>
+        )}
+      </div>
       <div className="panel-section">
         <div className="panel-section-title">✨ 润色模式</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>第{chapter.chapterNumber}章 {chapter.title}</div>

@@ -1,32 +1,56 @@
 /**
- * AI Novel Studio - AI 正文润色（Mock）
+ * AI Novel Studio - AI 正文润色 (v1.0.21 统一 aiClient)
  */
-import type { RunPolishInput, PolishMode } from '../../types/polish';
-
-function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
-
-const modeMarkers: Record<PolishMode, string> = {
-  keep_plot: '【润色版：保持剧情不变，优化表达】',
-  enhance_description: '【润色版：增强描写，丰富细节】',
-  reduce_redundancy: '【润色版：精简冗余，提升节奏】',
-  strengthen_conflict: '【润色版：强化冲突，突出张力】',
-  adjust_pacing: '【润色版：调整节奏，平滑推进】',
-  unify_style: '【润色版：统一文风，保持一致性】',
-  fix_language: '【润色版：修正语言问题，优化可读性】',
-  custom: '【润色版：按自定义要求优化】',
-};
+import { createAiClient, aiSettingsService } from './aiClient';
+import { buildChapterPolishPrompt } from './promptBuilder';
+import { aiTaskService } from './aiTaskService';
+import { novelRepository } from '../database/novelRepository';
+import type { RunPolishInput } from '../../types/polish';
 
 export const polishAiService = {
   async runPolish(input: RunPolishInput): Promise<string> {
-    await sleep(1500);
-    const marker = modeMarkers[input.options.mode] || modeMarkers.keep_plot;
-    const original = input.draftContent || '（空正文）';
-    const processed = original
-      .replace(/他说/g, '他低声说')
-      .replace(/她说/g, '她轻声说');
-    const extra = input.options.customInstruction
-      ? `\n\n// 自定义要求已应用：${input.options.customInstruction}`
-      : '';
-    return `${marker}\n\n${processed}\n\n// 润色完成。保留了核心剧情、人物关系和关键事件。${extra}`;
+    const settings = aiSettingsService.getSettings();
+    const novel = await novelRepository.getById(input.novelId);
+
+    const request = buildChapterPolishPrompt({
+      novelTitle: novel?.title || '未命名作品',
+      chapterTitle: input.chapterTitle,
+      chapterOutline: input.chapterOutline,
+      draftContent: input.draftContent,
+      polishMode: input.options.mode,
+      customInstruction: input.options.customInstruction,
+    });
+
+    const task = await aiTaskService.create('chapter_polish', {
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+      inputSummary: `润色章节「${input.chapterTitle}」，模式：${input.options.mode}`,
+    }).catch(() => null);
+
+    try {
+      const client = createAiClient();
+      const response = await client.generate(request);
+      const text = response.text || '';
+
+      // 去除 markdown 标记
+      const cleaned = text
+        .replace(/^【润色版[：:][^】]*】\s*/gm, '')
+        .replace(/\/\/\s*润色完成[^\n]*/g, '')
+        .trim();
+
+      await aiTaskService.markSucceeded(task?.id || '', {
+        resultText: `润色完成（${input.options.mode}）`,
+        tokenInput: response.tokenInput,
+        tokenOutput: response.tokenOutput,
+      });
+
+      return cleaned || text; // 如果清理后为空，返回原始文本
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : '润色失败';
+      if (task) await aiTaskService.markFailed(task.id, msg);
+      throw err;
+    }
   },
 };
+

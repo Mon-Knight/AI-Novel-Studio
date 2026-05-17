@@ -54,7 +54,14 @@ function SettingsPage() {
   };
 
   const update = (patch: Partial<AiSettings>) => {
-    setSettings((s) => ({ ...s, ...patch }));
+    setSettings((s) => {
+      const next = { ...s, ...patch };
+      // 保持 mockMode 与 runtimeMode 同步
+      if ('runtimeMode' in patch) {
+        next.mockMode = next.runtimeMode === 'mock';
+      }
+      return next;
+    });
   };
 
   return (
@@ -140,9 +147,9 @@ function SettingsPage() {
                 </div>
                 <div>
                   <label className="panel-field-label">最大输出 Token</label>
-                  <input type="number" className="form-input" value={settings.maxTokens || 4000}
+                  <input type="number" className="form-input" value={settings.maxTokens || 8000}
                     onChange={(e) => update({ maxTokens: Number(e.target.value) })}
-                    min={100} max={32000} style={{ width: '100%' }} />
+                    min={100} max={64000} style={{ width: '100%' }} />
                 </div>
               </div>
               <div>
