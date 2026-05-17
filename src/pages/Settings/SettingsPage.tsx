@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiSettingsService } from '../../services/ai/aiClient';
+import { novelRepository } from '../../services/database/novelRepository';
 import type { AiSettings } from '../../types/ai';
 import '../../styles/novel-detail.css';
 
@@ -9,6 +10,18 @@ function SettingsPage() {
   const [settings, setSettings] = useState<AiSettings>(aiSettingsService.getSettings());
   const [message, setMessage] = useState('');
   const [testing, setTesting] = useState(false);
+  const [repairMsg, setRepairMsg] = useState('');
+
+  const handleRepairData = async () => {
+    if (!confirm('将尝试修复异常作品数据，修复前会自动备份。是否继续？')) return;
+    try {
+      const result = await novelRepository.repairData();
+      setRepairMsg(`✅ 修复完成：${result.before} 条 → ${result.after} 条（已备份原数据）`);
+      setTimeout(() => setRepairMsg(''), 4000);
+    } catch (e: any) {
+      setRepairMsg(`❌ 修复失败：${e.message || '未知错误'}`);
+    }
+  };
 
   useEffect(() => {
     setSettings(aiSettingsService.getSettings());
@@ -192,6 +205,16 @@ function SettingsPage() {
             · 在首页使用「📋 导入 JSON」恢复已备份的作品<br />
             · 备份文件包含作品、章节、草稿、设定、角色、事件等
           </div>
+          <div style={{ marginTop: 8 }}>
+            <strong>🔧 数据修复：</strong><br />
+            <button className="btn btn-secondary btn-sm" onClick={handleRepairData} style={{ marginTop: 4 }}>
+              🔧 修复异常作品数据
+            </button>
+            {repairMsg && <div style={{ marginTop: 4, fontSize: 12, color: repairMsg.includes('✅') ? 'var(--color-success)' : 'var(--color-error)' }}>{repairMsg}</div>}
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+              修复缺失字段、异常日期、损坏记录。修复前自动备份。
+            </div>
+          </div>
         </div>
       </div>
 
@@ -201,7 +224,7 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
         </div>
         <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div><strong>AI Novel Studio v1.0.11</strong></div>
+          <div><strong>AI Novel Studio v1.0.12</strong></div>
           <div>Windows 桌面端 AI 小说创作工作台</div>
           <div>技术路线：Tauri + React + TypeScript + SQLite</div>
           <div>本地路径：F:\ai-novel-studio</div>
