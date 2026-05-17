@@ -61,6 +61,7 @@ export function getDbMode(): DbMode {
 
 /**
  * 统一调用入口：根据环境自动选择 Tauri invoke 或 localStorage
+ * Tauri 模式下若 3 秒内未响应，自动降级到 localStorage
  */
 export async function dbCall<T>(
   command: string,
@@ -68,7 +69,21 @@ export async function dbCall<T>(
   fallback?: () => T,
 ): Promise<T> {
   if (isTauri()) {
-    return tauriInvoke<T>(command, args);
+    try {
+      const result = await Promise.race([
+        tauriInvoke<T>(command, args),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('tauri_timeout')), 3000)
+        ),
+      ]);
+      return result;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '';
+      // Tauri 超时或不可用 → 降级到 localStorage
+      if (msg === 'tauri_timeout' || msg.includes('invoke') || msg.includes('tauri')) {
+        console.warn('[db] Tauri unavailable, falling back to localStorage');
+      }
+    }
   }
   if (fallback) {
     return fallback();

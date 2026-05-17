@@ -18,6 +18,13 @@ const genreIcons: Record<string, string> = {
   '言情': '💕',
 };
 
+function formatDate(value?: string): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('zh-CN');
+}
+
 const statusLabels: Record<string, string> = {
   'draft': '草稿',
   'planning': '规划中',
@@ -76,7 +83,7 @@ function NovelCard({ novel, onClick, onEnterWorkspace }: NovelCardProps) {
             目标 {targetCount.toLocaleString()} 字
           </span>
           <span className="novel-card-meta-item">
-            {new Date(novel.updatedAt).toLocaleDateString('zh-CN')}
+            {formatDate(novel.updatedAt)}
           </span>
         </div>
         <div className="novel-card-footer">

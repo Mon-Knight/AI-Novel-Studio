@@ -40,6 +40,7 @@ function HomePage() {
   }, [loadNovels]);
 
   const handleCreateNovel = async () => {
+    if (creating) return; // 防重复提交
     if (!newTitle.trim()) {
       setCreateError('请输入作品名称');
       return;
@@ -56,6 +57,7 @@ function HomePage() {
       setNewTitle('');
       setNewGenre('');
       setNewDesc('');
+      // 先切换路由再重置状态，避免状态冲突
       navigate(`/novels/${novel.id}`);
     } catch (e) {
       setCreateError('创建失败，请重试');
