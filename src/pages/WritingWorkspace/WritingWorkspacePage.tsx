@@ -12,6 +12,7 @@ import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
+import { createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
 import { chapterSummarizeService } from '../../services/ai/chapterSummarizeService';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
 import { contextRecordService } from '../../services/context/contextRecordService';
@@ -247,43 +248,28 @@ function WritingWorkspacePage() {
     console.info('[Workspace] createFirstChapter start, novelId=', novelId);
     setCreating(true);
     try {
-      console.info('[Workspace] create volume start');
-      const vol = await volumeRepository.create({ novelId, title: '第一卷' });
-      console.info('[Workspace] create volume done, volumeId=', vol.id);
+      // 统一服务：创建 volume + chapter + draft + 每步反查
+      const result = await createFirstVolumeAndChapter(novelId);
+      console.info('[Workspace] createFirstChapter done, chapterId=', result.chapter.id);
 
-      console.info('[Workspace] create chapter start');
-      const ch = await chapterRepository.create({ novelId, volumeId: vol.id, title: '第1章' });
-      console.info('[Workspace] create chapter done, chapterId=', ch.id);
-
-      console.info('[Workspace] create draft start');
-      await draftVersionService.create({ novelId, chapterId: ch.id, title: ch.title, content: '', source: 'user_edited' });
-      console.info('[Workspace] create draft done');
-
-      // 验证持久化
+      // 直接设置 state（无需 refreshKey）
       const volsAfter = await volumeRepository.getByNovelId(novelId);
       const chsAfter = await chapterRepository.getByNovelId(novelId);
-      console.info('[Workspace] verify: volumes=', volsAfter.length, 'chapters=', chsAfter.length);
-      if (volsAfter.length === 0) throw new Error('分卷创建后无法读取');
-      if (chsAfter.length === 0) throw new Error('章节创建后无法读取');
-
-      // 统一重载，选中新章节
       setVolumes(volsAfter);
       setChapters(chsAfter);
-      setActiveChapterId(ch.id);
+      setActiveChapterId(result.chapter.id);
       setLoadState('ready');
-      setCurrentDraft(null);
+      setCurrentDraft(result.draft);
       setDraftWordCount(0);
       setIsDirty(false);
-      console.info('[Workspace] createFirstChapter done');
+      console.info('[Workspace] UI updated: volumes=', volsAfter.length, 'chapters=', chsAfter.length);
     } catch (e: any) {
       console.error('[Workspace] createFirstChapter error:', e);
       alert('创建失败：' + (e?.message || '未知错误'));
-      // 失败后尝试重载以恢复一致性
-      try { await reloadWorkspaceData(); } catch { /* ignore */ }
     } finally {
       setCreating(false);
     }
-  }, [novelId, creating, reloadWorkspaceData]);
+  }, [novelId, creating]);
 
   // v1.0.19 VolumeTree 回调：创建分卷（父组件执行写入+重载）
   const handleCreateVolume = useCallback(async (title: string) => {
@@ -293,22 +279,21 @@ function WritingWorkspacePage() {
     await reloadWorkspaceData();
   }, [novelId, reloadWorkspaceData]);
 
-  // v1.0.19 VolumeTree 回调：创建章节（父组件执行写入+空草稿+重载+选中）
+  // v1.0.20 VolumeTree 回调：创建章节（统一服务 + 反查 + 刷新）
   const handleCreateChapter = useCallback(async (volumeId: string, title: string) => {
     if (!novelId) throw new Error('novelId 缺失');
     console.info('[Workspace] handleCreateChapter, volumeId=', volumeId, 'title=', title);
-    const ch = await chapterRepository.create({ novelId, volumeId, title });
-    // 自动创建空草稿
-    try {
-      await draftVersionService.create({ novelId, chapterId: ch.id, title: ch.title, content: '', source: 'user_edited' });
-    } catch { /* 草稿失败不阻塞 */ }
+    const result = await createChapterInVolume(novelId, volumeId, title);
     // 重载并选中新章节
     setVolumes(await volumeRepository.getByNovelId(novelId));
     setChapters(await chapterRepository.getByNovelId(novelId));
-    setActiveChapterId(ch.id);
+    setActiveChapterId(result.chapter.id);
     setLoadState('ready');
-    loadChapterDraft(ch.id);
-  }, [novelId, loadChapterDraft]);
+    setCurrentDraft(result.draft);
+    setDraftWordCount(0);
+    setIsDirty(false);
+    console.info('[Workspace] handleCreateChapter done, chapterId=', result.chapter.id);
+  }, [novelId]);
 
   return (
     <div className="workspace-page">

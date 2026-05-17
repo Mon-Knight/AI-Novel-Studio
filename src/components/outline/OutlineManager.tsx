@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
+import { createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
 import VolumeCard from './VolumeCard';
 import VolumeFormModal from './VolumeFormModal';
 import ChapterFormModal from './ChapterFormModal';
@@ -39,13 +40,25 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const flash = (msg: string) => { setMessage(msg); setTimeout(() => setMessage(''), 2000); };
+  const flash = (msg: string) => { setMessage(msg); setTimeout(() => setMessage(''), 3000); };
 
+  // v1.0.20 创建分卷：写入 + 反查 + 重载
   const handleCreateVolume = async (input: CreateVolumeInput) => {
-    await volumeRepository.create(input);
-    await loadData();
-    setShowVolumeForm(false);
-    flash('分卷创建成功');
+    try {
+      const created = await volumeRepository.create(input);
+      if (!created?.id) throw new Error('分卷创建返回无效数据');
+      // 反查验证
+      const volsAfter = await volumeRepository.getByNovelId(novelId);
+      if (!volsAfter.some((v) => v.id === created.id)) {
+        throw new Error('分卷创建后无法读取，请检查存储');
+      }
+      await loadData();
+      setShowVolumeForm(false);
+      flash('✅ 分卷创建成功');
+    } catch (e: any) {
+      flash('❌ 创建失败：' + (e?.message || '未知错误'));
+      console.error('[OutlineManager] createVolume error:', e);
+    }
   };
 
   const handleUpdateVolume = async (id: string, input: UpdateVolumeInput) => {
@@ -67,12 +80,31 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     flash('分卷已删除');
   };
 
+  // v1.0.20 创建章节：统一服务（chapter + draft + 反查 + 重载）
   const handleCreateChapter = async (input: CreateChapterInput) => {
-    await chapterRepository.create(input);
-    await loadData();
-    setShowChapterForm(false);
-    setTargetVolumeId(undefined);
-    flash('章节创建成功');
+    try {
+      const volumeId = input.volumeId || '';
+      if (!volumeId) {
+        // 无分卷时创建第一卷
+        flash('⏳ 正在创建第一卷和第一章...');
+        const result = await createFirstVolumeAndChapter(novelId);
+        await loadData();
+        setShowChapterForm(false);
+        setTargetVolumeId(undefined);
+        flash('✅ 已创建第一卷和第1章（含空草稿）');
+        console.info('[OutlineManager] createFirstVolumeAndChapter done, chapterId=', result.chapter.id);
+      } else {
+        const result = await createChapterInVolume(novelId, volumeId, input.title);
+        await loadData();
+        setShowChapterForm(false);
+        setTargetVolumeId(undefined);
+        flash('✅ 章节创建成功（含空草稿）');
+        console.info('[OutlineManager] createChapterInVolume done, chapterId=', result.chapter.id);
+      }
+    } catch (e: any) {
+      flash('❌ 创建失败：' + (e?.message || '未知错误'));
+      console.error('[OutlineManager] createChapter error:', e);
+    }
   };
 
   const handleUpdateChapter = async (id: string, input: UpdateChapterInput) => {
