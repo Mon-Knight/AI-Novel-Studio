@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { aiSettingsService } from '../../services/ai/aiClient';
 import { novelRepository } from '../../services/database/novelRepository';
 import type { AiSettings } from '../../types/ai';
+import { APP_VERSION, APP_PLATFORM_LABEL } from '../../constants/version';
 import '../../styles/novel-detail.css';
 
 function SettingsPage() {
@@ -224,8 +225,8 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
         </div>
         <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div><strong>AI Novel Studio v1.0.16</strong></div>
-          <div>Windows 桌面端 AI 小说创作工作台</div>
+          <div><strong>AI Novel Studio {APP_VERSION}</strong></div>
+          <div>{APP_PLATFORM_LABEL} AI 小说创作工作台</div>
           <div>技术路线：Tauri + React + TypeScript + SQLite</div>
           <div>本地路径：F:\ai-novel-studio</div>
           <div>项目定位：逐章辅助完成长篇小说创作</div>

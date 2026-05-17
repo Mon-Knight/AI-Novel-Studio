@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
+import { APP_VERSION } from '../../constants/version';
 
 interface NavItem {
   path: string;
@@ -62,7 +63,7 @@ function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <span className="version">v1.0.13</span>
+        <span className="version">{APP_VERSION}</span>
       </div>
     </aside>
   );

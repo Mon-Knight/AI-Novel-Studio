@@ -232,21 +232,30 @@ function WritingWorkspacePage() {
   }, [novelId]);
 
   const handleCreateFirstChapter = useCallback(async () => {
-    if (!novelId || creating) return;
+    if (!novelId || creating) {
+      console.warn('[WorkspaceEmptyState] skip: novelId=', novelId, 'creating=', creating);
+      return;
+    }
+    console.info('[WorkspaceEmptyState] create first chapter start, novelId=', novelId);
     setCreating(true);
     try {
       // 1. 创建第一卷
+      console.info('[WorkspaceEmptyState] create volume start');
       const vol = await volumeRepository.create({
         novelId,
         title: '第一卷',
       });
+      console.info('[WorkspaceEmptyState] create volume done, volumeId=', vol.id);
       // 2. 创建第一章
+      console.info('[WorkspaceEmptyState] create chapter start');
       const ch = await chapterRepository.create({
         novelId,
         volumeId: vol.id,
         title: '第1章',
       });
+      console.info('[WorkspaceEmptyState] create chapter done, chapterId=', ch.id);
       // 3. 自动创建空草稿
+      console.info('[WorkspaceEmptyState] create draft start');
       await draftVersionService.create({
         novelId,
         chapterId: ch.id,
@@ -254,7 +263,9 @@ function WritingWorkspacePage() {
         content: '',
         source: 'user_edited',
       });
+      console.info('[WorkspaceEmptyState] create draft done');
       // 4. 刷新章节列表
+      console.info('[WorkspaceEmptyState] reload tree start');
       const list = await refreshChapters();
       setChapters(list);
       setActiveChapterId(ch.id);
@@ -262,7 +273,9 @@ function WritingWorkspacePage() {
       setCurrentDraft(null);
       setDraftWordCount(0);
       setIsDirty(false);
+      console.info('[WorkspaceEmptyState] done, chapters=', list.length, 'activeChapterId=', ch.id);
     } catch (e: any) {
+      console.error('[WorkspaceEmptyState] error:', e);
       alert('创建失败：' + (e?.message || '未知错误'));
     } finally {
       setCreating(false);

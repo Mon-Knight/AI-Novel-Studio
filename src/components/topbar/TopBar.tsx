@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom';
+import { APP_VERSION, APP_PLATFORM_LABEL } from '../../constants/version';
 
 const pageTitles: Record<string, string> = {
   '/': 'AI Novel Studio',
@@ -25,7 +26,7 @@ function TopBar() {
     <header className="app-topbar">
       <span className="topbar-title">{title}</span>
       <div className="topbar-actions">
-        <span className="text-sm text-muted">v1.0.13 · Windows 桌面端</span>
+        <span className="text-sm text-muted">{APP_VERSION} · {APP_PLATFORM_LABEL}</span>
       </div>
     </header>
   );
