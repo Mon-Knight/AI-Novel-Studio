@@ -10,6 +10,7 @@ import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPa
 import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
+import { volumeRepository } from '../../services/database/volumeRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
 import { chapterSummarizeService } from '../../services/ai/chapterSummarizeService';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
@@ -219,6 +220,66 @@ function WritingWorkspacePage() {
     await handleGenerateSummary();
   }, [handleGenerateSummary]);
 
+  // v1.0.16 工作台内创建分卷和章节
+  const [creating, setCreating] = useState(false);
+
+  const refreshChapters = useCallback(async (): Promise<Chapter[]> => {
+    if (!novelId) return [];
+    try {
+      const list = await chapterRepository.getByNovelId(novelId);
+      return list;
+    } catch { return []; }
+  }, [novelId]);
+
+  const handleCreateFirstChapter = useCallback(async () => {
+    if (!novelId || creating) return;
+    setCreating(true);
+    try {
+      // 1. 创建第一卷
+      const vol = await volumeRepository.create({
+        novelId,
+        title: '第一卷',
+      });
+      // 2. 创建第一章
+      const ch = await chapterRepository.create({
+        novelId,
+        volumeId: vol.id,
+        title: '第1章',
+      });
+      // 3. 自动创建空草稿
+      await draftVersionService.create({
+        novelId,
+        chapterId: ch.id,
+        title: ch.title,
+        content: '',
+        source: 'user_edited',
+      });
+      // 4. 刷新章节列表
+      const list = await refreshChapters();
+      setChapters(list);
+      setActiveChapterId(ch.id);
+      setLoadState('ready');
+      setCurrentDraft(null);
+      setDraftWordCount(0);
+      setIsDirty(false);
+    } catch (e: any) {
+      alert('创建失败：' + (e?.message || '未知错误'));
+    } finally {
+      setCreating(false);
+    }
+  }, [novelId, creating, refreshChapters]);
+
+  const handleChapterCreated = useCallback(async (chapterId: string) => {
+    setActiveChapterId(chapterId);
+    setActivePanel(null);
+    try {
+      const draft = await draftVersionService.getLatestByChapterId(chapterId);
+      setCurrentDraft(draft);
+      setDraftWordCount(draft?.wordCount || 0);
+      setIsDirty(false);
+    } catch { /* ignore */ }
+  }, []);
+
   return (
     <div className="workspace-page">
       {pageLoading && (
@@ -256,15 +317,20 @@ function WritingWorkspacePage() {
       {/* 无章节空状态 */}
       {loadState === 'ready' && chapters.length === 0 && !pageLoading && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
-          <div style={{ textAlign: 'center', maxWidth: 400 }}>
+          <div style={{ textAlign: 'center', maxWidth: 420 }}>
             <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📝</div>
             <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>当前作品还没有章节</div>
-            <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-              请先返回作品详情页创建分卷和章节，或稍后在后续版本中直接在工作台创建。
+            <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
+              你可以直接在工作台创建第一卷和第一章，开始写作。
             </div>
-            <button className="btn btn-primary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
-              ← 返回作品详情
-            </button>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-sm" onClick={handleCreateFirstChapter} disabled={creating}>
+                {creating ? '⏳ 创建中...' : '📖 创建第一卷并新建第一章'}
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
+                ← 返回作品详情
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -292,6 +358,8 @@ function WritingWorkspacePage() {
             novelId={novelId}
             activeChapterId={activeChapterId}
             onSelectChapter={handleSelectChapter}
+            onChapterCreated={handleChapterCreated}
+            onChaptersRefresh={refreshChapters}
           />
         )}
       </div>
