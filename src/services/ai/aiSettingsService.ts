@@ -7,6 +7,7 @@ import type { AiSettings } from '../../types/ai';
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 
 const defaultSettings: AiSettings = {
+  provider: 'openai_compatible',
   baseUrl: '',
   apiKey: '',
   modelName: '',
