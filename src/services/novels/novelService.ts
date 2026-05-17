@@ -25,6 +25,11 @@ export const novelService = {
     return novelRepository.remove(id);
   },
 
+  /** v1.0.26 级联删除作品及所有关联数据 */
+  deleteNovelCascade(novelId: string): Promise<void> {
+    return novelRepository.deleteCascade(novelId);
+  },
+
   repairLocalData(): Promise<NovelRepairResult> {
     return novelRepository.repairData();
   },

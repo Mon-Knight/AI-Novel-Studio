@@ -37,8 +37,8 @@ export async function buildChapterContext(
   const activeWorld = worldSettings.find((w) => w.isActive) || worldSettings[0];
   const activeRules = ruleSystems.filter((r) => r.isActive);
 
-  // v1.0.25 作品总大纲（从 description 读取）
-  const novelOutline = extractText(novel?.description);
+  // v1.0.26 作品总大纲（优先使用 novel.outline，降级使用 novel.description）
+  const novelOutline = extractText(novel?.outline) || extractText(novel?.description);
 
   let volumeTitle: string | undefined;
   let volumeOutline: string | undefined;
@@ -130,7 +130,7 @@ export async function buildChapterContext(
   return {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
-    novelDescription: extractText(novel?.description),
+    novelDescription: extractText(novel?.description),   // v1.0.26 简介独立传递
     novelOutline,
     worldBackground: extractText(activeWorld?.content),
     ruleSystems: activeRules.length > 0

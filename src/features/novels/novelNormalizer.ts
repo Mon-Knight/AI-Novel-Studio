@@ -56,6 +56,7 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   const genre = resolveGenre(raw, mark);
 
   const description = typeof raw.description === 'string' ? raw.description : (raw.description == null ? '' : (mark(), toSafeString(raw.description, '')));
+  const outline = typeof raw.outline === 'string' ? raw.outline : (raw.outline == null ? '' : (mark(), toSafeString(raw.outline, '')));
   const subtitle = typeof raw.subtitle === 'string' ? raw.subtitle : undefined;
   const coverPath = typeof raw.coverPath === 'string' ? raw.coverPath : undefined;
   const coverUrl = typeof raw.coverUrl === 'string' ? raw.coverUrl : undefined;
@@ -101,6 +102,7 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
     title,
     subtitle,
     description,
+    outline,
     genre,
     coverPath,
     coverUrl,

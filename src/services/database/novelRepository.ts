@@ -121,6 +121,7 @@ export const novelRepository = {
         title: input.title,
         subtitle: input.subtitle,
         description: input.description ?? '',
+        outline: input.outline ?? '',
         genre: input.genre || '未分类',
         coverPath: undefined,
         coverUrl: undefined,
@@ -168,5 +169,55 @@ export const novelRepository = {
       const novels = getLocalNovels().filter((n) => n.id !== id);
       saveLocalNovels(novels);
     });
+  },
+
+  /** v1.0.26 级联删除作品及其所有关联数据 */
+  async deleteCascade(novelId: string): Promise<void> {
+    const { lsGet, lsSet } = await import('./db');
+
+    // 清理函数：过滤掉与 novelId 相关的记录
+    const purge = (key: string) => {
+      try {
+        const data = lsGet<unknown>(key);
+        if (Array.isArray(data)) {
+          const filtered = data.filter((item: any) => {
+            if (!item || typeof item !== 'object') return true;
+            return item.novelId !== novelId;
+          });
+          if (filtered.length !== data.length) lsSet(key, filtered);
+        }
+      } catch { /* ignore */ }
+    };
+
+    // 级联清理所有可能包含 novelId 的本地存储集合
+    const keys = [
+      'ai_novel_studio_volumes',
+      'ai_novel_studio_chapters',
+      'ai_novel_studio_chapter_drafts',
+      'ai_novel_studio_characters',
+      'ai_novel_studio_chapter_characters',
+      'ai_novel_studio_chapter_events',
+      'ai_novel_studio_world_settings',
+      'ai_novel_studio_rule_systems',
+      'ai_novel_studio_chapter_summaries',
+      'ai_novel_studio_context_records',
+      'ai_novel_studio_character_states',
+      'ai_novel_studio_ai_task_records',
+      'ai_novel_studio_style_profiles',
+      'ai_novel_studio_output_profiles',
+      'ai_novel_studio_polish_records',
+      'ai_novel_studio_quality_check_reports',
+      'ai_novel_studio_quality_check_items',
+      'ai_novel_studio_protagonists',
+      'ai_novel_studio_imported_assets',
+    ];
+    for (const key of keys) purge(key);
+
+    // 删除作品本身
+    await this.remove(novelId);
+
+    // 反查确认
+    const check = await this.getById(novelId);
+    if (check) throw new Error('作品删除后仍可读取，请检查删除链路');
   },
 };

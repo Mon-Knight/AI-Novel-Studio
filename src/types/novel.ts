@@ -17,6 +17,7 @@ export interface Novel {
   title: string;
   subtitle?: string;
   description?: string;
+  outline?: string;
   genre?: string;
   protagonistName?: string;
   worldBackground?: string;
@@ -42,6 +43,7 @@ export interface CreateNovelInput {
   title: string;
   subtitle?: string;
   description?: string;
+  outline?: string;
   genre?: string;
   targetWordCount?: number;
 }
@@ -50,6 +52,7 @@ export interface UpdateNovelInput {
   title?: string;
   subtitle?: string;
   description?: string;
+  outline?: string;
   genre?: string;
   status?: NovelStatus;
   targetWordCount?: number;

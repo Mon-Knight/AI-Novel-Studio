@@ -9,6 +9,7 @@ interface NovelCardProps {
   novel: Novel;
   onClick: () => void;
   onEnterWorkspace: () => void;
+  onDelete?: (novelId: string) => void;
 }
 
 const genreIcons: Record<string, string> = {
@@ -29,7 +30,7 @@ const statusLabels: Record<string, string> = {
   'archived': '已归档',
 };
 
-function NovelCard({ novel, onClick, onEnterWorkspace }: NovelCardProps) {
+function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProps) {
   const icon = genreIcons[novel.genre || ''] || '📖';
   const wordCount = novel.totalWordCount ?? novel.totalWords ?? 0;
   const targetCount = novel.targetWordCount ?? novel.targetWords ?? 0;
@@ -63,6 +64,19 @@ function NovelCard({ novel, onClick, onEnterWorkspace }: NovelCardProps) {
 
   return (
     <div className="novel-card" onClick={onClick}>
+      {/* v1.0.26 删除按钮 */}
+      {onDelete && (
+        <button
+          className="novel-card-delete-btn"
+          title="删除作品"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(novel.id);
+          }}
+        >
+          🗑️
+        </button>
+      )}
       <div className="novel-card-cover">
         <span className="novel-card-cover-icon">{icon}</span>
         <span className="novel-card-genre">{novel.genre || '未分类'}</span>

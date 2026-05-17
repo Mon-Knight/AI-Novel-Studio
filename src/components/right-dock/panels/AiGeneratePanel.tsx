@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft, ChapterGenerationContext } from '../../../types/ai';
+import type { StyleProfile } from '../../../types/style';
+import type { OutputProfile } from '../../../types/output';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient';
 import { buildChapterContext } from '../../../services/prompt/contextBuilder';
@@ -8,6 +10,8 @@ import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrato
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
+import { styleProfileService } from '../../../services/styles/styleProfileService';
+import { outputProfileService } from '../../../services/styles/outputProfileService';
 import { formatNumber } from '../../../utils/format';
 
 interface AiGeneratePanelProps {
@@ -31,6 +35,12 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
   // v0.8.0 上下文加载状态
   const [contextCount, setContextCount] = useState(0);
 
+  // v1.0.26 风格方案与输出控制选择
+  const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
+  const [availableOutputs, setAvailableOutputs] = useState<OutputProfile[]>([]);
+  const [selectedStyleId, setSelectedStyleId] = useState('');
+  const [selectedOutputId, setSelectedOutputId] = useState('');
+
   useEffect(() => {
     if (novelId) {
       contextRecordService.getForGeneration({ novelId, maxCount: 15 })
@@ -39,11 +49,26 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
     }
   }, [novelId]);
 
+  // v1.0.26 加载可用风格方案和输出控制
+  useEffect(() => {
+    if (novelId) {
+      styleProfileService.getAll(novelId).then((list) => {
+        setAvailableStyles(list);
+        if (list.length > 0 && !selectedStyleId) setSelectedStyleId(list[0].id);
+      }).catch(() => {});
+      outputProfileService.getAll(novelId).then((list) => {
+        setAvailableOutputs(list);
+        const def = list.find((o) => o.isDefault) || list[0];
+        if (def && !selectedOutputId) setSelectedOutputId(def.id);
+      }).catch(() => {});
+    }
+  }, [novelId]);
+
   // v1.0.25 预加载上下文摘要
   const handlePreviewContext = useCallback(async () => {
     if (!novelId || !chapter) return;
     try {
-      const ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+      const ctx = await buildChapterContext(novelId, chapter, undefined, selectedStyleId || undefined, selectedOutputId || undefined);
       setContextSummary(ctx);
       setShowContext(true);
     } catch { /* ignore */ }
@@ -72,13 +97,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
     // v1.0.25 构建详细的 inputSummary
     let ctx: ChapterGenerationContext | undefined;
     try {
-      ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+      ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
     } catch { /* 上下文构建失败不阻止生成 */ }
 
     const hasOutline = ctx?.chapterOutline ? '有' : '无';
     const charCount = ctx?.chapterCharacters ? (ctx.chapterCharacters.match(/\n- /g)?.length || 1) : 0;
     const eventCount = ctx?.chapterEvents ? (ctx.chapterEvents.match(/\n- /g)?.length || 1) : 0;
     const hasPrevContext = ctx?.previousContext ? '有' : '无';
+    const styleName = availableStyles.find((s) => s.id === selectedStyleId)?.name || '默认';
+    const outputName = availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认';
 
     const inputSummary = [
       `生成：${novelId.slice(0,8)}/${chapter.title}`,
@@ -86,6 +113,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       `角色：${charCount}个`,
       `事件：${eventCount}个`,
       `前文：${hasPrevContext}`,
+      `风格：${styleName}`,
+      `输出：${outputName}`,
       `字数：${chapter.targetWordCount || 4000}`,
     ].join('，');
 
@@ -103,7 +132,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       setStatusMsg('正在组装提示词...');
       // 1. 构建上下文（如果前面没构建过）
       if (!ctx) {
-        ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+        ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
       }
 
       // 2. 组装提示词
@@ -245,6 +274,60 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         </div>
       </div>
 
+      {/* v1.0.26 风格方案与输出控制选择 */}
+      <div className="panel-section">
+        <div className="panel-section-title">🎨 风格与输出配置</div>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+          选择本章生成时的写作风格和输出控制方案
+        </div>
+        <div className="panel-field" style={{ marginBottom: 8 }}>
+          <div className="panel-field-label">风格方案</div>
+          <select
+            className="panel-select"
+            value={selectedStyleId}
+            onChange={(e) => setSelectedStyleId(e.target.value)}
+            style={{ fontSize: 12 }}
+          >
+            {availableStyles.length === 0 && (
+              <option value="">无可用方案</option>
+            )}
+            {availableStyles.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="panel-field">
+          <div className="panel-field-label">输出控制</div>
+          <select
+            className="panel-select"
+            value={selectedOutputId}
+            onChange={(e) => setSelectedOutputId(e.target.value)}
+            style={{ fontSize: 12 }}
+          >
+            {availableOutputs.length === 0 && (
+              <option value="">无可用方案</option>
+            )}
+            {availableOutputs.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+        </div>
+        {selectedStyleId && (
+          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+            {(() => {
+              const s = availableStyles.find((x) => x.id === selectedStyleId);
+              if (!s) return null;
+              return [
+                s.narrativePerspective && `👁️ ${s.narrativePerspective}`,
+                s.tone && `🎭 ${s.tone}`,
+                s.pace && `⚡ ${s.pace}`,
+                `💬${Math.round(s.dialogueRatio * 100)}% 🖊️${Math.round(s.descriptionRatio * 100)}%`
+              ].filter(Boolean).join(' · ');
+            })()}
+          </div>
+        )}
+      </div>
+
       {/* 额外要求 */}
       <div className="panel-section">
         <div className="panel-section-title">本次生成额外要求</div>
@@ -282,7 +365,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             <div>⚡ 本章事件：{contextSummary.chapterEvents ? (contextSummary.chapterEvents.match(/\n- /g)?.length || 1) : 0} 个</div>
             <div>🌍 世界设定：{contextSummary.worldBackground ? '✅ 有' : '❌ 无'}</div>
             <div>📦 前文总结：{contextSummary.previousContext ? '✅ 有' : '❌ 无'}</div>
-            <div>🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'}</div>
+            <div>🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'} {availableStyles.find((s) => s.id === selectedStyleId)?.name ? `→ ${availableStyles.find((s) => s.id === selectedStyleId)!.name}` : ''}</div>
+            <div>⚙️ 输出控制：{availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认'}</div>
             <div>📊 目标字数：{contextSummary.targetWordCount || 4000} 字</div>
           </div>
         )}

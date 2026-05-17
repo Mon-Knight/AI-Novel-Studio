@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { novelRepository } from '../../services/database/novelRepository';
+import { novelService } from '../../services/novels/novelService';
 import NovelCard from '../../components/novel-card/NovelCard';
 import FirstTimeGuide from '../../components/common/FirstTimeGuide';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
@@ -66,6 +67,30 @@ function HomePage() {
     }
   };
 
+  // v1.0.26 删除作品（级联删除 + 二次确认）
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteNovel = async (novelId: string) => {
+    if (deletingId) return;
+    const novel = novels.find((n) => n.id === novelId);
+    if (!novel) return;
+    if (!confirm(
+      `确定要删除作品《${novel.title}》吗？\n\n` +
+      `此操作会删除该作品下的分卷、章节、草稿、大纲、角色、事件、设定、上下文总结和相关 AI 任务记录。\n\n` +
+      `删除后无法恢复。`
+    )) return;
+
+    setDeletingId(novelId);
+    try {
+      await novelService.deleteNovelCascade(novelId);
+      setNovels((prev) => prev.filter((n) => n.id !== novelId));
+    } catch (e: any) {
+      alert('删除失败：' + (e?.message || '未知错误'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="home-page">
       {/* v1.0.0 首次使用引导 */}
@@ -122,6 +147,7 @@ function HomePage() {
               novel={novel}
               onClick={() => navigate(`/novels/${novel.id}`)}
               onEnterWorkspace={() => navigate(`/novels/${novel.id}/workspace`)}
+              onDelete={handleDeleteNovel}
             />
           ))}
         </div>
