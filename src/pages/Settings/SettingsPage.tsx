@@ -184,11 +184,13 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>数据与存储</span>
         </div>
         <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div>存储方式：LocalStorage（浏览器本地存储）</div>
-          <div>数据库：SQLite（Tauri 环境下自动启用）</div>
-          <div>数据保存位置：浏览器缓存 / 应用数据目录</div>
-          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted)' }}>
-            💡 完整数据备份与恢复功能将在后续版本增强
+          <div>存储方式：LocalStorage（浏览器模式）/ SQLite（Tauri 桌面模式）</div>
+          <div>数据目录：<code>C:\Users\...\AppData\Local\AI Novel Studio\</code></div>
+          <div style={{ marginTop: 8 }}>
+            <strong>📦 备份与恢复：</strong><br />
+            · 在作品详情页使用「💾 备份完整 JSON」导出全部数据<br />
+            · 在首页使用「📋 导入 JSON」恢复已备份的作品<br />
+            · 备份文件包含作品、章节、草稿、设定、角色、事件等
           </div>
         </div>
       </div>
@@ -199,7 +201,7 @@ function SettingsPage() {
           <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
         </div>
         <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div><strong>AI Novel Studio v1.0.6</strong></div>
+          <div><strong>AI Novel Studio v1.0.7</strong></div>
           <div>Windows 桌面端 AI 小说创作工作台</div>
           <div>技术路线：Tauri + React + TypeScript + SQLite</div>
           <div>本地路径：F:\ai-novel-studio</div>

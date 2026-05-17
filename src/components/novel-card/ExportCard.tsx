@@ -29,9 +29,12 @@ function ExportCard({ novelId, novelTitle }: ExportCardProps) {
         <button className="btn btn-secondary btn-sm" onClick={() => handleExport(() => exportService.exportNovelToMarkdown(novelId))}>
           📝 导出整本 Markdown
         </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => handleExport(() => exportService.exportNovelBackupJson(novelId))}>
+          💾 备份完整 JSON
+        </button>
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
-        仅导出已采用的章节正文。未采用的章节不会被导出。
+        仅导出已采用的章节正文。JSON 备份包含完整作品数据，可用于恢复。
       </div>
       {msg && <div style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4 }}>{msg}</div>}
       {err && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 4 }}>{err}</div>}

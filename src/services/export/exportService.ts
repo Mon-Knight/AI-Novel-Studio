@@ -1,10 +1,19 @@
 /**
- * AI Novel Studio - 导出服务（TXT / Markdown）
+ * AI Novel Studio - 导出服务（TXT / Markdown / JSON 备份）
  */
 import { novelRepository } from '../database/novelRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
+import { settingRepository } from '../database/settingRepository';
+import { protagonistRepository } from '../database/protagonistRepository';
+import { characterService } from '../characters/characterService';
+import { chapterCharacterService } from '../characters/chapterCharacterService';
+import { chapterEventService } from '../characters/chapterEventService';
+import { styleProfileService } from '../styles/styleProfileService';
+import { outputProfileService } from '../styles/outputProfileService';
+import { chapterSummaryService } from '../context/chapterSummaryService';
+import { contextRecordService } from '../context/contextRecordService';
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[<>:"/\\|?*]/g, '_').trim() || '未命名';
@@ -99,7 +108,57 @@ export async function exportNovelToMarkdown(novelId: string): Promise<void> {
   downloadBlob(md, `${sanitizeFilename(novel.title)}_全文.md`, 'text/markdown;charset=utf-8');
 }
 
+export async function exportNovelBackupJson(novelId: string): Promise<void> {
+  const novel = await novelRepository.getById(novelId);
+  if (!novel) throw new Error('作品不存在');
+
+  const [
+    volumes, chapters, worldSettings, ruleSystems, protagonist,
+    characters, styles, outputs, summaries, contexts,
+  ] = await Promise.all([
+    volumeRepository.getByNovelId(novelId),
+    chapterRepository.getByNovelId(novelId),
+    settingRepository.getWorldSettings(novelId),
+    settingRepository.getRuleSystems(novelId),
+    protagonistRepository.getByNovelId(novelId),
+    characterService.getByNovelId(novelId),
+    styleProfileService.getAll(novelId),
+    outputProfileService.getAll?.(novelId) ?? Promise.resolve([]),
+    chapterSummaryService.getByNovelId(novelId),
+    contextRecordService.getByNovelId(novelId),
+  ]);
+
+  const chapterChars: any[] = [];
+  const chapterEvents: any[] = [];
+
+  const backup = {
+    type: 'ai_novel_studio_project',
+    version: '1.0.7',
+    exportedAt: new Date().toISOString(),
+    novel: { ...novel },
+    volumes,
+    chapters,
+    worldSettings: worldSettings || [],
+    ruleSystems: ruleSystems || [],
+    protagonist: protagonist || null,
+    characters: characters || [],
+    chapterCharacters: chapterChars,
+    chapterEvents: chapterEvents,
+    styleProfiles: styles || [],
+    outputProfiles: outputs || [],
+    chapterSummaries: summaries || [],
+    contextRecords: contexts || [],
+  };
+
+  downloadBlob(
+    JSON.stringify(backup, null, 2),
+    `${sanitizeFilename(novel.title)}_备份_${new Date().toISOString().slice(0, 10)}.json`,
+    'application/json;charset=utf-8',
+  );
+}
+
 export const exportService = {
   exportChapterToTxt, exportChapterToMarkdown,
   exportNovelToTxt, exportNovelToMarkdown,
+  exportNovelBackupJson,
 };
