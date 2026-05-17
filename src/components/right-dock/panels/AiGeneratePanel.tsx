@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
-import type { ChapterDraft } from '../../../types/ai';
+import type { ChapterDraft, ChapterGenerationContext } from '../../../types/ai';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient';
 import { buildChapterContext } from '../../../services/prompt/contextBuilder';
@@ -24,6 +24,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
   const [errorMsg, setErrorMsg] = useState('');
   const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
 
+  // v1.0.25 上下文摘要状态
+  const [contextSummary, setContextSummary] = useState<ChapterGenerationContext | null>(null);
+  const [showContext, setShowContext] = useState(false);
+
   // v0.8.0 上下文加载状态
   const [contextCount, setContextCount] = useState(0);
 
@@ -35,13 +39,55 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
     }
   }, [novelId]);
 
+  // v1.0.25 预加载上下文摘要
+  const handlePreviewContext = useCallback(async () => {
+    if (!novelId || !chapter) return;
+    try {
+      const ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+      setContextSummary(ctx);
+      setShowContext(true);
+    } catch { /* ignore */ }
+  }, [novelId, chapter, userInstruction]);
+
   const settings = aiSettingsService.getSettings();
 
   const handleGenerate = async () => {
     if (!novelId || !chapter) return;
+
+    // v1.0.25 缺少章节大纲时给出警告
+    if (!chapter.outline?.trim()) {
+      const ok = confirm(
+        '⚠️ 当前章节没有章节大纲。\n\n' +
+        '没有大纲的情况下，AI 可能无法准确把握本章方向，生成内容可能与你的规划脱节。\n\n' +
+        '建议先在大纲面板中生成或填写章节大纲。\n\n' +
+        '是否仍然继续生成？'
+      );
+      if (!ok) return;
+    }
+
     setGenerating(true);
-    setStatusMsg('正在生成正文...');
+    setStatusMsg('正在构建上下文...');
     setErrorMsg('');
+
+    // v1.0.25 构建详细的 inputSummary
+    let ctx: ChapterGenerationContext | undefined;
+    try {
+      ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+    } catch { /* 上下文构建失败不阻止生成 */ }
+
+    const hasOutline = ctx?.chapterOutline ? '有' : '无';
+    const charCount = ctx?.chapterCharacters ? (ctx.chapterCharacters.match(/\n- /g)?.length || 1) : 0;
+    const eventCount = ctx?.chapterEvents ? (ctx.chapterEvents.match(/\n- /g)?.length || 1) : 0;
+    const hasPrevContext = ctx?.previousContext ? '有' : '无';
+
+    const inputSummary = [
+      `生成：${novelId.slice(0,8)}/${chapter.title}`,
+      `大纲：${hasOutline}`,
+      `角色：${charCount}个`,
+      `事件：${eventCount}个`,
+      `前文：${hasPrevContext}`,
+      `字数：${chapter.targetWordCount || 4000}`,
+    ].join('，');
 
     // 创建 AI 任务记录
     const task = await aiTaskService.create('chapter_generate', {
@@ -50,17 +96,21 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       runtimeMode: settings.runtimeMode,
       provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `生成第${chapter.chapterNumber}章：${chapter.title}`,
+      inputSummary,
     }).catch(() => null);
 
     try {
-      // 1. 构建上下文
-      const context = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+      setStatusMsg('正在组装提示词...');
+      // 1. 构建上下文（如果前面没构建过）
+      if (!ctx) {
+        ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined);
+      }
 
       // 2. 组装提示词
-      const request = await buildGenerateRequest(context);
+      const request = await buildGenerateRequest(ctx);
 
       // 3. 调用 AI
+      setStatusMsg('正在调用 AI 生成正文...');
       const client = createAiClient(settings);
       const response = await client.generate(request);
 
@@ -76,14 +126,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       // 5. 更新 AI 任务记录
       if (task) {
         await aiTaskService.markSucceeded(task.id, {
-          resultText: response.text,
+          resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}`,
           tokenInput: response.tokenInput,
           tokenOutput: response.tokenOutput,
           tokenTotal: response.tokenTotal,
         });
       }
 
-      setStatusMsg(`生成成功！已保存为草稿 v${draft.versionNo}（${formatNumber(draft.wordCount)} 字）`);
+      setStatusMsg(`✅ 生成成功！已保存为草稿 v${draft.versionNo}（${formatNumber(draft.wordCount)} 字）`);
       setGenerating(false);
       onGenerated?.(draft);
     } catch (err: unknown) {
@@ -205,6 +255,40 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           placeholder="例如：本章开头要压抑一些，结尾留下悬念..."
           style={{ width: '100%', height: 70, resize: 'vertical', fontSize: 13 }}
         />
+      </div>
+
+      {/* v1.0.25 上下文摘要预览 */}
+      <div className="panel-section">
+        <div className="panel-section-title">📋 本次将使用的上下文</div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={handlePreviewContext}
+          disabled={generating}
+          style={{ width: '100%', marginBottom: 6 }}
+        >
+          🔍 查看上下文摘要
+        </button>
+        {!chapter.outline?.trim() && (
+          <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
+            ⚠️ 当前章节没有章节大纲，AI 可能偏离规划方向
+          </div>
+        )}
+        {showContext && contextSummary && (
+          <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--color-text-secondary)', marginTop: 8, padding: 8, background: 'var(--color-bg-primary)', borderRadius: 4 }}>
+            <div>📖 总大纲：{contextSummary.novelOutline ? '✅ 有' : '❌ 无'}</div>
+            <div>📋 分卷大纲：{contextSummary.volumeOutline ? '✅ 有' : '❌ 无'}</div>
+            <div>📝 章节大纲：{contextSummary.chapterOutline ? `✅ 有（${contextSummary.chapterOutline.length} 字）` : '❌ 无'}</div>
+            <div>👥 出场角色：{contextSummary.chapterCharacters ? (contextSummary.chapterCharacters.match(/\n- /g)?.length || 1) : 0} 个</div>
+            <div>⚡ 本章事件：{contextSummary.chapterEvents ? (contextSummary.chapterEvents.match(/\n- /g)?.length || 1) : 0} 个</div>
+            <div>🌍 世界设定：{contextSummary.worldBackground ? '✅ 有' : '❌ 无'}</div>
+            <div>📦 前文总结：{contextSummary.previousContext ? '✅ 有' : '❌ 无'}</div>
+            <div>🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'}</div>
+            <div>📊 目标字数：{contextSummary.targetWordCount || 4000} 字</div>
+          </div>
+        )}
+        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          点击「查看上下文摘要」可预览 AI 将收到的全部配置信息
+        </div>
       </div>
 
       {/* 状态消息 */}

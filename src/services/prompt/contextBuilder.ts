@@ -37,7 +37,11 @@ export async function buildChapterContext(
   const activeWorld = worldSettings.find((w) => w.isActive) || worldSettings[0];
   const activeRules = ruleSystems.filter((r) => r.isActive);
 
+  // v1.0.25 作品总大纲（从 description 读取）
+  const novelOutline = extractText(novel?.description);
+
   let volumeTitle: string | undefined;
+  let volumeOutline: string | undefined;
   let volumeGoal: string | undefined;
   let volumeConflict: string | undefined;
 
@@ -47,6 +51,11 @@ export async function buildChapterContext(
       volumeTitle = volume.title;
       volumeGoal = extractText(volume.goal);
       volumeConflict = extractText(volume.mainConflict);
+      // v1.0.25 分卷大纲（从 summary 和 goal 组合）
+      volumeOutline = [volume.summary, volume.goal]
+        .filter(Boolean)
+        .join('\n')
+        .trim() || undefined;
     }
   }
 
@@ -61,6 +70,19 @@ export async function buildChapterContext(
     if (styles) styleProfileSummary = buildStyleSummary(styles);
     if (outputs) outputProfileSummary = buildOutputSummary(outputs);
   }
+
+  // v1.0.25 加载本章设定补充
+  let chapterSettingsSummary: string | undefined;
+  try {
+    const allSettings = await settingRepository.getWorldSettings(novelId);
+    // 取最近的几条激活设定作为本章可用设定
+    const activeSettings = allSettings.filter((s) => s.isActive).slice(-6);
+    if (activeSettings.length > 0) {
+      chapterSettingsSummary = activeSettings
+        .map((s) => `- ${s.title}：${s.content?.slice(0, 300)}`)
+        .join('\n');
+    }
+  } catch { /* 设定加载失败不影响生成 */ }
 
   // v0.7.0 加载本章出场角色和事件
   let chapterCharacterSummary: string | undefined;
@@ -108,6 +130,8 @@ export async function buildChapterContext(
   return {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
+    novelDescription: extractText(novel?.description),
+    novelOutline,
     worldBackground: extractText(activeWorld?.content),
     ruleSystems: activeRules.length > 0
       ? activeRules.map((r) => `【${r.title}】${r.content}`).join('\n')
@@ -117,6 +141,7 @@ export async function buildChapterContext(
     abilityLimits: extractText(protagonist?.abilityLimits),
     forbiddenBehaviors: extractText(protagonist?.forbiddenBehaviors),
     volumeTitle,
+    volumeOutline,
     volumeGoal,
     volumeConflict,
     chapterTitle: `${chapter.title}`,
@@ -127,6 +152,7 @@ export async function buildChapterContext(
     outputProfile: outputProfileSummary,
     chapterCharacters: chapterCharacterSummary,
     chapterEvents: chapterEventSummary,
+    chapterSettings: chapterSettingsSummary,
     previousContext,
     userInstruction: extractText(userInstruction),
   };

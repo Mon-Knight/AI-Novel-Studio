@@ -23,11 +23,19 @@ function renderTemplate(template: string, context: Record<string, string | undef
 }
 
 // 默认章节生成模板（兜底）
-const DEFAULT_TEMPLATE = `你是一位专业的小说作家。
+const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根据已确认的大纲、设定、角色、事件和风格来生成章节正文。
 
 作品：{{novelTitle}}
 题材：{{novelGenre}}
+{{#novelDescription}}简介：{{novelDescription}}{{/novelDescription}}
 主角：{{protagonist}}
+{{#novelOutline}}
+## 作品总大纲
+{{novelOutline}}
+{{/novelOutline}}
+分卷：{{volumeTitle}}
+{{#volumeOutline}}分卷大纲：{{volumeOutline}}{{/volumeOutline}}
+{{#volumeGoal}}分卷目标：{{volumeGoal}}{{/volumeGoal}}
 章节：{{chapterTitle}}
 {{#chapterOutline}}大纲：{{chapterOutline}}{{/chapterOutline}}
 {{#chapterGoal}}目标：{{chapterGoal}}{{/chapterGoal}}
@@ -36,6 +44,11 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。
 {{#worldBackground}}世界背景：{{worldBackground}}{{/worldBackground}}
 {{#ruleSystems}}规则体系：{{ruleSystems}}{{/ruleSystems}}
 {{#specialAbility}}特殊能力：{{specialAbility}}{{/specialAbility}}
+{{#abilityLimits}}能力限制：{{abilityLimits}}{{/abilityLimits}}
+{{#chapterSettings}}
+## 本章可用设定
+{{chapterSettings}}
+{{/chapterSettings}}
 {{#chapterCharacters}}
 ## 本章出场角色
 {{chapterCharacters}}
@@ -44,9 +57,21 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。
 ## 本章事件
 {{chapterEvents}}
 {{/chapterEvents}}
+{{#previousContext}}
+## 前文上下文
+{{previousContext}}
+{{/previousContext}}
+{{#styleProfile}}
+## 风格约束
+{{styleProfile}}
+{{/styleProfile}}
+{{#outputProfile}}
+## 输出控制
+{{outputProfile}}
+{{/outputProfile}}
 {{#userInstruction}}特别要求：{{userInstruction}}{{/userInstruction}}
 
-请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。`;
+请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。不得凭空新增未列出的重要角色。`;
 
 export async function buildGenerateRequest(
   context: ChapterGenerationContext,

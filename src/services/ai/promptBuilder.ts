@@ -9,6 +9,8 @@ import type { AiGenerateRequest, AiChatMessage } from '../../types/ai';
 export interface ChapterGeneratePromptContext {
   novelTitle: string;
   novelGenre?: string;
+  novelDescription?: string;
+  novelOutline?: string;
   protagonist?: string;
   worldBackground?: string;
   ruleSystems?: string;
@@ -16,12 +18,16 @@ export interface ChapterGeneratePromptContext {
   abilityLimits?: string;
   forbiddenBehaviors?: string;
   volumeTitle?: string;
+  volumeOutline?: string;
+  volumeGoal?: string;
+  volumeConflict?: string;
   chapterTitle: string;
   chapterOutline?: string;
   chapterGoal?: string;
   targetWordCount: number;
   chapterCharacters?: string;
   chapterEvents?: string;
+  chapterSettings?: string;
   styleProfile?: string;
   outputProfile?: string;
   previousContext?: string;
@@ -123,14 +129,21 @@ function userPrompt(text: string): AiChatMessage {
 /** 构建章节正文生成请求 */
 export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): AiGenerateRequest {
   const system = [
-    '你是一位专业的小说作家，擅长创作引人入胜的长篇小说。',
+    '你是一位专业的小说作家，擅长创作引人入胜的长篇小说。你必须严格根据已确认的大纲、设定、角色、事件和风格来生成章节正文。',
     '',
     `作品：《${ctx.novelTitle}》`,
     ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
+    ctx.novelDescription ? `作品简介：${ctx.novelDescription}` : '',
     ctx.protagonist ? `主角：${ctx.protagonist}` : '',
     '',
+    ctx.novelOutline ? `## 作品总大纲\n${ctx.novelOutline}\n` : '',
+    '',
+    ctx.volumeTitle ? `分卷：${ctx.volumeTitle}` : '',
+    ctx.volumeOutline ? `分卷大纲：${ctx.volumeOutline}` : '',
+    ctx.volumeGoal ? `分卷目标：${ctx.volumeGoal}` : '',
+    ctx.volumeConflict ? `分卷冲突：${ctx.volumeConflict}` : '',
+    '',
     `当前章节：${ctx.chapterTitle}`,
-    ctx.volumeTitle ? `所属分卷：${ctx.volumeTitle}` : '',
     ctx.chapterOutline ? `章节大纲：${ctx.chapterOutline}` : '',
     ctx.chapterGoal ? `本章目标：${ctx.chapterGoal}` : '',
     `目标字数：约 ${ctx.targetWordCount} 字`,
@@ -141,16 +154,20 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     ctx.abilityLimits ? `能力限制：${ctx.abilityLimits}` : '',
     ctx.forbiddenBehaviors ? `主角禁止行为：${ctx.forbiddenBehaviors}` : '',
     '',
-    ctx.chapterCharacters ? `本章出场角色：\n${ctx.chapterCharacters}` : '',
-    ctx.chapterEvents ? `本章关键事件：\n${ctx.chapterEvents}` : '',
-    ctx.styleProfile ? `风格约束：\n${ctx.styleProfile}` : '',
-    ctx.outputProfile ? `输出控制：\n${ctx.outputProfile}` : '',
+    ctx.chapterSettings ? `## 本章可用设定\n${ctx.chapterSettings}\n` : '',
     '',
-    ctx.previousContext ? `前文上下文摘要：\n${ctx.previousContext}` : '',
+    ctx.chapterCharacters ? `## 本章出场角色\n${ctx.chapterCharacters}` : '',
+    ctx.chapterEvents ? `## 本章关键事件\n${ctx.chapterEvents}` : '',
+    ctx.styleProfile ? `## 风格约束\n${ctx.styleProfile}` : '',
+    ctx.outputProfile ? `## 输出控制\n${ctx.outputProfile}` : '',
+    '',
+    ctx.previousContext ? `## 前文上下文摘要\n${ctx.previousContext}` : '',
     '',
     ctx.userInstruction ? `特别要求：${ctx.userInstruction}` : '',
     '',
     '请严格围绕大纲，直接输出小说正文。不要写"以下是正文"等引导语，只输出正文内容。',
+    '不得凭空添加未在出场角色列表中列出的重要角色。',
+    '如果章节大纲中描述了具体场景或道具，必须如实写入正文。',
   ].filter(Boolean).join('\n');
 
   return {

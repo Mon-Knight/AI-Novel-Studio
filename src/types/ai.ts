@@ -167,6 +167,8 @@ export interface CreateChapterDraftInput {
 export interface ChapterGenerationContext {
   novelTitle: string;
   novelGenre?: string;
+  novelDescription?: string;
+  novelOutline?: string;
   worldBackground?: string;
   ruleSystems?: string;
   protagonist?: string;
@@ -174,6 +176,7 @@ export interface ChapterGenerationContext {
   abilityLimits?: string;
   forbiddenBehaviors?: string;
   volumeTitle?: string;
+  volumeOutline?: string;
   volumeGoal?: string;
   volumeConflict?: string;
   chapterTitle: string;
@@ -184,6 +187,7 @@ export interface ChapterGenerationContext {
   outputProfile?: string;
   chapterCharacters?: string;
   chapterEvents?: string;
+  chapterSettings?: string;
   previousContext?: string;
   userInstruction?: string;
 }
