@@ -45,6 +45,14 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{#ruleSystems}}规则体系：{{ruleSystems}}{{/ruleSystems}}
 {{#specialAbility}}特殊能力：{{specialAbility}}{{/specialAbility}}
 {{#abilityLimits}}能力限制：{{abilityLimits}}{{/abilityLimits}}
+{{#protagonistsSummary}}
+## 主角详细设定
+{{protagonistsSummary}}
+{{/protagonistsSummary}}
+{{#dualProtagonistSummary}}
+## 双主角关系
+{{dualProtagonistSummary}}
+{{/dualProtagonistSummary}}
 {{#chapterSettings}}
 ## 本章可用设定
 {{chapterSettings}}

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import type { Novel } from '../../types/novel';
+import type { Novel, ProtagonistProfile, DualProtagonistRelation } from '../../types/novel';
 import type { WorldSetting } from '../../types/setting';
 import type { RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
+import { generateId } from '../../services/database/db';
 import { formatNumber } from '../../utils/format';
 import { formatDate } from '../../utils/date';
 
@@ -558,68 +559,242 @@ function RuleEditForm({
 
 // ==================== 主角设定卡片 ====================
 
+// v1.0.28 主角关系类型标签
+const RELATION_TYPE_LABELS: Record<string, string> = {
+  partner: '伙伴', romance: '恋爱', rival: '竞争', bound: '绑定',
+  mentor_student: '师徒', family: '亲属', enemy_to_ally: '敌对转盟友',
+  parallel: '平行双线', custom: '自定义',
+};
+const NARRATIVE_WEIGHT_LABELS: Record<string, string> = {
+  balanced: '双主角均衡', primary_main: '主角A更核心', secondary_main: '主角B更核心',
+};
+
 interface ProtagonistCardProps {
   novelId: string;
+  novel: Novel | null;
   protagonist: Protagonist | null;
-  onSave: (id: string | null, data: {
-    name: string;
-    identity?: string;
-    personality?: string;
-    goal?: string;
-    specialAbility?: string;
-    abilityLimits?: string;
-    forbiddenBehaviors?: string;
-    currentState?: string;
+  onSave: (data: {
+    protagonistMode: string;
+    protagonists: ProtagonistProfile[];
+    dualProtagonistRelation?: DualProtagonistRelation;
   }) => Promise<void>;
 }
 
-function ProtagonistCard({ novelId, protagonist, onSave }: ProtagonistCardProps) {
+function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCardProps) {
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(protagonist?.name || '');
-  const [identity, setIdentity] = useState(protagonist?.identity || '');
-  const [personality, setPersonality] = useState(protagonist?.personality || '');
-  const [goal, setGoal] = useState(protagonist?.goal || '');
-  const [specialAbility, setSpecialAbility] = useState(protagonist?.specialAbility || '');
-  const [abilityLimits, setAbilityLimits] = useState(protagonist?.abilityLimits || '');
-  const [forbiddenBehaviors, setForbiddenBehaviors] = useState(protagonist?.forbiddenBehaviors || '');
-  const [currentState, setCurrentState] = useState(protagonist?.currentState || '');
-  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // v1.0.28 双主角状态
+  const [mode, setMode] = useState<'single' | 'dual'>(novel?.protagonistMode || 'single');
+  const [protA, setProtA] = useState(novel?.protagonists?.[0] || { id: generateId(), label: 'primary' as const, name: '' });
+  const [protB, setProtB] = useState(novel?.protagonists?.[1] || { id: generateId(), label: 'secondary' as const, name: '' });
+  const [relation, setRelation] = useState(novel?.dualProtagonistRelation || { type: 'partner' as const, description: '' });
 
   useEffect(() => {
-    setName(protagonist?.name || '');
-    setIdentity(protagonist?.identity || '');
-    setPersonality(protagonist?.personality || '');
-    setGoal(protagonist?.goal || '');
-    setSpecialAbility(protagonist?.specialAbility || '');
-    setAbilityLimits(protagonist?.abilityLimits || '');
-    setForbiddenBehaviors(protagonist?.forbiddenBehaviors || '');
-    setCurrentState(protagonist?.currentState || '');
-  }, [protagonist]);
+    setMode(novel?.protagonistMode || 'single');
+    setProtA(novel?.protagonists?.[0] || { id: generateId(), label: 'primary', name: '' });
+    setProtB(novel?.protagonists?.[1] || { id: generateId(), label: 'secondary', name: '' });
+    setRelation(novel?.dualProtagonistRelation || { type: 'partner', description: '' });
+  }, [novel]);
+
+  // 旧数据兼容：从 protagonist 迁移到 novel.protagonists
+  useEffect(() => {
+    if (protagonist && (!novel?.protagonists || novel.protagonists.length === 0)) {
+      setProtA({
+        id: protagonist.id,
+        label: 'primary',
+        name: protagonist.name,
+        identity: protagonist.identity,
+        personality: protagonist.personality,
+        goal: protagonist.goal,
+        specialAbility: protagonist.specialAbility,
+        abilityLimits: protagonist.abilityLimits,
+        forbiddenBehaviors: protagonist.forbiddenBehaviors,
+        notes: protagonist.currentState,
+      });
+    }
+  }, [protagonist, novel]);
 
   const handleSave = async () => {
-    if (!name.trim()) { setMessage('主角姓名不能为空'); return; }
-    setSaving(true);
-    setMessage('');
+    if (!protA.name.trim()) { setMessage('主角A姓名不能为空'); return; }
+    if (mode === 'dual' && !protB.name.trim()) { setMessage('主角B姓名不能为空'); return; }
+
+    setSaving(true); setMessage('');
     try {
-      await onSave(protagonist?.id || null, {
-        name: name.trim(),
-        identity: identity.trim() || undefined,
-        personality: personality.trim() || undefined,
-        goal: goal.trim() || undefined,
-        specialAbility: specialAbility.trim() || undefined,
-        abilityLimits: abilityLimits.trim() || undefined,
-        forbiddenBehaviors: forbiddenBehaviors.trim() || undefined,
-        currentState: currentState.trim() || undefined,
+      const protagonists = mode === 'dual'
+        ? [protA, protB]
+        : [protA];
+      await onSave({
+        protagonistMode: mode,
+        protagonists,
+        dualProtagonistRelation: mode === 'dual' ? relation : undefined,
       });
       setMessage('保存成功');
       setEditing(false);
       setTimeout(() => setMessage(''), 2000);
-    } catch {
-      setMessage('保存失败');
-    } finally {
-      setSaving(false);
+    } catch { setMessage('保存失败'); }
+    finally { setSaving(false); }
+  };
+
+  const renderProtagonistFields = (
+    p: ProtagonistProfile,
+    setP: (p: ProtagonistProfile) => void,
+    label: string,
+  ) => (
+    <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 8, padding: 12, marginBottom: 8 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--color-primary)' }}>
+        {label}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <label className="panel-field-label">姓名 *</label>
+          <input type="text" value={p.name} onChange={(e) => setP({ ...p, name: e.target.value })}
+            className="form-input" placeholder="姓名" style={{ width: '100%' }} />
+        </div>
+        <div>
+          <label className="panel-field-label">性别</label>
+          <input type="text" value={p.gender || ''} onChange={(e) => setP({ ...p, gender: e.target.value })}
+            className="form-input" placeholder="男/女" style={{ width: '100%' }} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+        <div>
+          <label className="panel-field-label">身份</label>
+          <input type="text" value={p.identity || ''} onChange={(e) => setP({ ...p, identity: e.target.value })}
+            className="form-input" placeholder="如：航天工程师" style={{ width: '100%' }} />
+        </div>
+        <div>
+          <label className="panel-field-label">动机</label>
+          <input type="text" value={p.motivation || ''} onChange={(e) => setP({ ...p, motivation: e.target.value })}
+            className="form-input" placeholder="行为动机" style={{ width: '100%' }} />
+        </div>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <label className="panel-field-label">性格</label>
+        <textarea value={p.personality || ''} onChange={(e) => setP({ ...p, personality: e.target.value })}
+          className="form-textarea" placeholder="性格特点..." rows={2} style={{ width: '100%', resize: 'vertical' }} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <label className="panel-field-label">目标</label>
+        <textarea value={p.goal || ''} onChange={(e) => setP({ ...p, goal: e.target.value })}
+          className="form-textarea" placeholder="长期目标..." rows={2} style={{ width: '100%', resize: 'vertical' }} />
+      </div>
+      <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 8, marginTop: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)', marginBottom: 6 }}>
+          ⚡ 能力与限制
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div>
+            <label className="panel-field-label">特殊能力</label>
+            <textarea value={p.specialAbility || ''} onChange={(e) => setP({ ...p, specialAbility: e.target.value })}
+              className="form-textarea" placeholder="特殊能力..." rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 13 }} />
+          </div>
+          <div>
+            <label className="panel-field-label">能力限制</label>
+            <textarea value={p.abilityLimits || ''} onChange={(e) => setP({ ...p, abilityLimits: e.target.value })}
+              className="form-textarea" placeholder="能力限制..." rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 13 }} />
+          </div>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <label className="panel-field-label">禁止行为</label>
+          <textarea value={p.forbiddenBehaviors || ''} onChange={(e) => setP({ ...p, forbiddenBehaviors: e.target.value })}
+            className="form-textarea" placeholder="绝对不能做的行为..." rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 13 }} />
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <label className="panel-field-label">背景经历</label>
+          <textarea value={p.background || ''} onChange={(e) => setP({ ...p, background: e.target.value })}
+            className="form-textarea" placeholder="人物背景..." rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 13 }} />
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <label className="panel-field-label">人物成长线</label>
+          <input type="text" value={p.arc || ''} onChange={(e) => setP({ ...p, arc: e.target.value })}
+            className="form-input" placeholder="角色弧光/成长方向" style={{ width: '100%', fontSize: 13 }} />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderRelationForm = () => (
+    <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 8, padding: 12, marginBottom: 8, background: 'var(--color-bg-primary)' }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--color-primary)' }}>
+        🔗 双主角关系
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <label className="panel-field-label">关系类型</label>
+          <select className="panel-select" value={relation.type} onChange={(e) => setRelation({ ...relation, type: e.target.value as any })}
+            style={{ width: '100%', fontSize: 13 }}>
+            {Object.entries(RELATION_TYPE_LABELS).map(([k, v]) => (<option key={k} value={k}>{v}</option>))}
+          </select>
+        </div>
+        <div>
+          <label className="panel-field-label">叙事权重</label>
+          <select className="panel-select" value={relation.narrativeWeight || 'balanced'} onChange={(e) => setRelation({ ...relation, narrativeWeight: e.target.value as any })}
+            style={{ width: '100%', fontSize: 13 }}>
+            {Object.entries(NARRATIVE_WEIGHT_LABELS).map(([k, v]) => (<option key={k} value={k}>{v}</option>))}
+          </select>
+        </div>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <label className="panel-field-label">关系说明</label>
+        <textarea value={relation.description} onChange={(e) => setRelation({ ...relation, description: e.target.value })}
+          className="form-textarea" placeholder="描述两位主角之间的关系..." rows={2} style={{ width: '100%', resize: 'vertical' }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+        <div>
+          <label className="panel-field-label">核心冲突</label>
+          <input type="text" value={relation.conflict || ''} onChange={(e) => setRelation({ ...relation, conflict: e.target.value })}
+            className="form-input" placeholder="两人之间的主要冲突" style={{ width: '100%', fontSize: 13 }} />
+        </div>
+        <div>
+          <label className="panel-field-label">合作方式</label>
+          <input type="text" value={relation.cooperation || ''} onChange={(e) => setRelation({ ...relation, cooperation: e.target.value })}
+            className="form-input" placeholder="合作模式" style={{ width: '100%', fontSize: 13 }} />
+        </div>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <label className="panel-field-label">关系推进</label>
+        <input type="text" value={relation.emotionalProgression || ''} onChange={(e) => setRelation({ ...relation, emotionalProgression: e.target.value })}
+          className="form-input" placeholder="关系发展路线" style={{ width: '100%', fontSize: 13 }} />
+      </div>
+    </div>
+  );
+
+  const renderDisplay = () => {
+    const prots = novel?.protagonists;
+    const hasData = prots && prots.length > 0 && prots[0]?.name;
+    if (!hasData) {
+      return <div style={{ color: 'var(--color-text-muted)', fontSize: 14, fontStyle: 'italic' }}>尚未设定主角，点击编辑开始填写</div>;
     }
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-primary)', fontWeight: 500 }}>
+          主角模式：{novel?.protagonistMode === 'dual' ? '双主角' : '单主角'}
+        </div>
+        {prots!.map((p, i) => (
+          <div key={p.id} style={{ border: '1px solid var(--color-border-light)', borderRadius: 6, padding: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              {p.label === 'primary' ? '⭐ 主角A' : '🌟 主角B'}：{p.name}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 13 }}>
+              {p.identity && <div><span className="text-sm text-muted">身份：</span>{p.identity}</div>}
+              {p.personality && <div><span className="text-sm text-muted">性格：</span>{p.personality.slice(0, 60)}{p.personality.length > 60 && '…'}</div>}
+              {p.goal && <div><span className="text-sm text-muted">目标：</span>{p.goal.slice(0, 60)}{p.goal.length > 60 && '…'}</div>}
+              {p.specialAbility && <div style={{ gridColumn: '1 / -1' }}><span className="text-sm" style={{ color: 'var(--color-primary)' }}>⚡ {p.specialAbility.slice(0, 80)}{p.specialAbility.length > 80 && '…'}</span></div>}
+            </div>
+          </div>
+        ))}
+        {novel?.dualProtagonistRelation?.description && (
+          <div style={{ border: '1px solid var(--color-primary-light)', borderRadius: 6, padding: 10, background: 'var(--color-bg-primary)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>🔗 双主角关系</div>
+            <div style={{ fontSize: 13 }}>{RELATION_TYPE_LABELS[novel.dualProtagonistRelation.type] || novel.dualProtagonistRelation.type}</div>
+            <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>{novel.dualProtagonistRelation.description}</div>
+            {novel.dualProtagonistRelation.conflict && <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>冲突：{novel.dualProtagonistRelation.conflict}</div>}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -636,63 +811,26 @@ function ProtagonistCard({ novelId, protagonist, onSave }: ProtagonistCardProps)
 
       {editing ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div>
-              <label className="panel-field-label">主角姓名 *</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                className="form-input" placeholder="请输入主角姓名" style={{ width: '100%' }} />
-            </div>
-            <div>
-              <label className="panel-field-label">身份</label>
-              <input type="text" value={identity} onChange={(e) => setIdentity(e.target.value)}
-                className="form-input" placeholder="如：航天工程师" style={{ width: '100%' }} />
-            </div>
-          </div>
+          {/* 主角模式选择 */}
           <div>
-            <label className="panel-field-label">性格</label>
-            <textarea value={personality} onChange={(e) => setPersonality(e.target.value)}
-              className="form-textarea" placeholder="描述主角的性格特点..."
-              style={{ width: '100%', height: 80, resize: 'vertical', fontSize: 14 }} />
-          </div>
-          <div>
-            <label className="panel-field-label">长期目标</label>
-            <textarea value={goal} onChange={(e) => setGoal(e.target.value)}
-              className="form-textarea" placeholder="主角的长期目标是什么？"
-              style={{ width: '100%', height: 80, resize: 'vertical', fontSize: 14 }} />
-          </div>
-          <div>
-            <label className="panel-field-label">当前状态</label>
-            <input type="text" value={currentState} onChange={(e) => setCurrentState(e.target.value)}
-              className="form-input" placeholder="当前章节中主角的状态" style={{ width: '100%' }} />
-          </div>
-          <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--color-primary)' }}>
-              ⚡ 特殊能力
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
-              主角特殊能力是后续正文生成的重要约束。能力限制和不能做出的行为必须保存，用于避免 AI 写出设定冲突内容。
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div>
-                <label className="panel-field-label">特殊能力</label>
-                <textarea value={specialAbility} onChange={(e) => setSpecialAbility(e.target.value)}
-                  className="form-textarea" placeholder="描述主角的特殊能力..."
-                  style={{ width: '100%', height: 100, resize: 'vertical', fontSize: 14 }} />
-              </div>
-              <div>
-                <label className="panel-field-label">能力限制</label>
-                <textarea value={abilityLimits} onChange={(e) => setAbilityLimits(e.target.value)}
-                  className="form-textarea" placeholder="能力的限制条件..."
-                  style={{ width: '100%', height: 80, resize: 'vertical', fontSize: 14 }} />
-              </div>
-              <div>
-                <label className="panel-field-label">不能做出的行为</label>
-                <textarea value={forbiddenBehaviors} onChange={(e) => setForbiddenBehaviors(e.target.value)}
-                  className="form-textarea" placeholder="主角绝对不能做的行为..."
-                  style={{ width: '100%', height: 80, resize: 'vertical', fontSize: 14 }} />
-              </div>
+            <label className="panel-field-label">主角模式</label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setMode('single')}>👤 单主角</button>
+              <button className={`btn btn-sm ${mode === 'dual' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setMode('dual')}>👥 双主角</button>
             </div>
           </div>
+
+          {/* 主角A表单 */}
+          {renderProtagonistFields(protA, setProtA, '⭐ 主角A')}
+
+          {/* 主角B表单 */}
+          {mode === 'dual' && renderProtagonistFields(protB, setProtB, '🌟 主角B')}
+
+          {/* 双主角关系 */}
+          {mode === 'dual' && renderRelationForm()}
+
           {message && (
             <div style={{ fontSize: 13, color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)' }}>
               {message}
@@ -705,43 +843,7 @@ function ProtagonistCard({ novelId, protagonist, onSave }: ProtagonistCardProps)
             </button>
           </div>
         </div>
-      ) : (
-        <div>
-          {protagonist ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <div>
-                  <span className="text-sm text-muted">姓名</span>
-                  <div style={{ fontWeight: 500 }}>{protagonist.name}</div>
-                </div>
-                <div>
-                  <span className="text-sm text-muted">身份</span>
-                  <div>{protagonist.identity || '未设置'}</div>
-                </div>
-              </div>
-              {protagonist.personality && (
-                <div>
-                  <span className="text-sm text-muted">性格</span>
-                  <div style={{ fontSize: 14, color: 'var(--color-text-secondary)' }}>{protagonist.personality}</div>
-                </div>
-              )}
-              {protagonist.specialAbility && (
-                <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 8 }}>
-                  <span className="text-sm" style={{ color: 'var(--color-primary)', fontWeight: 500 }}>⚡ 特殊能力</span>
-                  <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', marginTop: 4 }}>{protagonist.specialAbility}</div>
-                </div>
-              )}
-              <div className="text-sm text-muted">
-                最后更新：{formatDate(protagonist.updatedAt)}
-              </div>
-            </div>
-          ) : (
-            <div style={{ color: 'var(--color-text-muted)', fontSize: 14, fontStyle: 'italic' }}>
-              尚未设定主角，点击编辑开始填写
-            </div>
-          )}
-        </div>
-      )}
+      ) : renderDisplay()}
     </div>
   );
 }

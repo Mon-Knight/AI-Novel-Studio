@@ -1,7 +1,7 @@
 /**
  * AI Novel Studio - Novel 数据归一化
  */
-import type { Novel, NovelStatus } from '../../types/novel';
+import type { Novel, NovelStatus, ProtagonistMode, ProtagonistProfile, DualProtagonistRelation } from '../../types/novel';
 import { generateId, nowISO } from '../../services/database/db';
 import { isPlainObject, toSafeNumber, toSafeString } from '../../utils/dataGuard';
 import { toValidDate } from '../../utils/date';
@@ -97,6 +97,31 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
 
   const volumes = Array.isArray(raw.volumes) ? raw.volumes : (raw.volumes ? (mark(), []) : []);
 
+  // v1.0.28 主角模式
+  const protagonistMode: ProtagonistMode = raw.protagonistMode === 'dual' ? 'dual' : 'single';
+  const protagonistRaw = raw.protagonists;
+  let protagonists: ProtagonistProfile[];
+  if (Array.isArray(protagonistRaw) && protagonistRaw.length > 0) {
+    protagonists = protagonistRaw.filter((p: any) => p && typeof p === 'object' && typeof p.name === 'string');
+  } else {
+    const pName = typeof raw.protagonistName === 'string' ? raw.protagonistName : (typeof raw.mainCharacter === 'string' ? raw.mainCharacter : '');
+    protagonists = pName ? [{ id: generateId(), label: 'primary', name: pName }] : [];
+    if (pName) mark();
+  }
+
+  let dualProtagonistRelation: DualProtagonistRelation | undefined;
+  if (raw.dualProtagonistRelation && typeof raw.dualProtagonistRelation === 'object') {
+    const rel = raw.dualProtagonistRelation as any;
+    dualProtagonistRelation = {
+      type: rel.type || 'partner',
+      description: typeof rel.description === 'string' ? rel.description : '',
+      conflict: typeof rel.conflict === 'string' ? rel.conflict : undefined,
+      cooperation: typeof rel.cooperation === 'string' ? rel.cooperation : undefined,
+      emotionalProgression: typeof rel.emotionalProgression === 'string' ? rel.emotionalProgression : undefined,
+      narrativeWeight: rel.narrativeWeight || 'balanced',
+    };
+  }
+
   const normalized: Novel = {
     id,
     title,
@@ -104,6 +129,10 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
     description,
     outline,
     genre,
+    protagonistName: protagonists[0]?.name,
+    protagonistMode,
+    protagonists,
+    dualProtagonistRelation,
     coverPath,
     coverUrl,
     status,

@@ -127,19 +127,54 @@ export async function buildChapterContext(
     }
   } catch { /* 上下文加载失败不影响生成 */ }
 
+  // v1.0.28 构建主角信息摘要
+  const protagonistMode = novel?.protagonistMode || 'single';
+  let protagonistsSummary: string | undefined;
+  let dualProtagonistSummary: string | undefined;
+  const prots = novel?.protagonists;
+  if (prots && prots.length > 0) {
+    protagonistsSummary = prots.map((p) => {
+      const parts = [`- ${p.label === 'primary' ? '主角A' : '主角B'}：${p.name}`];
+      if (p.identity) parts.push(`  身份：${p.identity}`);
+      if (p.personality) parts.push(`  性格：${p.personality}`);
+      if (p.goal) parts.push(`  目标：${p.goal}`);
+      if (p.motivation) parts.push(`  动机：${p.motivation}`);
+      if (p.specialAbility) parts.push(`  特殊能力：${p.specialAbility}`);
+      if (p.abilityLimits) parts.push(`  能力限制：${p.abilityLimits}`);
+      if (p.forbiddenBehaviors) parts.push(`  禁止行为：${p.forbiddenBehaviors}`);
+      if (p.background) parts.push(`  背景：${p.background}`);
+      if (p.arc) parts.push(`  人物成长线：${p.arc}`);
+      return parts.join('\n');
+    }).join('\n\n');
+  }
+  if (novel?.dualProtagonistRelation?.description) {
+    const rel = novel.dualProtagonistRelation;
+    const relParts: string[] = [];
+    relParts.push(`关系类型：${rel.type}`);
+    relParts.push(`关系说明：${rel.description}`);
+    if (rel.conflict) relParts.push(`核心冲突：${rel.conflict}`);
+    if (rel.cooperation) relParts.push(`合作方式：${rel.cooperation}`);
+    if (rel.emotionalProgression) relParts.push(`关系推进：${rel.emotionalProgression}`);
+    if (rel.narrativeWeight) relParts.push(`叙事权重：${rel.narrativeWeight === 'balanced' ? '双主角均衡' : rel.narrativeWeight === 'primary_main' ? '主角A更核心' : '主角B更核心'}`);
+    dualProtagonistSummary = relParts.join('\n');
+  }
+
   return {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
-    novelDescription: extractText(novel?.description),   // v1.0.26 简介独立传递
+    novelDescription: extractText(novel?.description),
     novelOutline,
     worldBackground: extractText(activeWorld?.content),
     ruleSystems: activeRules.length > 0
       ? activeRules.map((r) => `【${r.title}】${r.content}`).join('\n')
       : undefined,
-    protagonist: protagonist?.name,
-    specialAbility: extractText(protagonist?.specialAbility),
-    abilityLimits: extractText(protagonist?.abilityLimits),
-    forbiddenBehaviors: extractText(protagonist?.forbiddenBehaviors),
+    protagonist: protagonist?.name || prots?.[0]?.name,
+    specialAbility: extractText(protagonist?.specialAbility) || prots?.[0]?.specialAbility,
+    abilityLimits: extractText(protagonist?.abilityLimits) || prots?.[0]?.abilityLimits,
+    forbiddenBehaviors: extractText(protagonist?.forbiddenBehaviors) || prots?.[0]?.forbiddenBehaviors,
+    protagonistMode,
+    protagonistsSummary,
+    dualProtagonistSummary,
     volumeTitle,
     volumeOutline,
     volumeGoal,

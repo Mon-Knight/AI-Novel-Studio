@@ -175,6 +175,9 @@ export interface ChapterGenerationContext {
   specialAbility?: string;
   abilityLimits?: string;
   forbiddenBehaviors?: string;
+  protagonistMode?: string;
+  protagonistsSummary?: string;
+  dualProtagonistSummary?: string;
   volumeTitle?: string;
   volumeOutline?: string;
   volumeGoal?: string;

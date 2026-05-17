@@ -12,6 +12,34 @@ export type NovelStatus =
   | 'completed'
   | 'archived';
 
+export type ProtagonistMode = 'single' | 'dual';
+
+export interface ProtagonistProfile {
+  id: string;
+  label: 'primary' | 'secondary';
+  name: string;
+  gender?: string;
+  identity?: string;
+  personality?: string;
+  goal?: string;
+  motivation?: string;
+  specialAbility?: string;
+  abilityLimits?: string;
+  forbiddenBehaviors?: string;
+  background?: string;
+  arc?: string;
+  notes?: string;
+}
+
+export interface DualProtagonistRelation {
+  type: 'partner' | 'romance' | 'rival' | 'bound' | 'mentor_student' | 'family' | 'enemy_to_ally' | 'parallel' | 'custom';
+  description: string;
+  conflict?: string;
+  cooperation?: string;
+  emotionalProgression?: string;
+  narrativeWeight?: 'balanced' | 'primary_main' | 'secondary_main';
+}
+
 export interface Novel {
   id: string;
   title: string;
@@ -20,6 +48,9 @@ export interface Novel {
   outline?: string;
   genre?: string;
   protagonistName?: string;
+  protagonistMode: ProtagonistMode;
+  protagonists: ProtagonistProfile[];
+  dualProtagonistRelation?: DualProtagonistRelation;
   worldBackground?: string;
   coverPath?: string;
   coverUrl?: string;

@@ -12,6 +12,9 @@ export interface ChapterGeneratePromptContext {
   novelDescription?: string;
   novelOutline?: string;
   protagonist?: string;
+  protagonistMode?: string;
+  protagonistsSummary?: string;
+  dualProtagonistSummary?: string;
   worldBackground?: string;
   ruleSystems?: string;
   specialAbility?: string;
@@ -135,6 +138,10 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
     ctx.novelDescription ? `作品简介：${ctx.novelDescription}` : '',
     ctx.protagonist ? `主角：${ctx.protagonist}` : '',
+    ctx.protagonistMode ? `主角模式：${ctx.protagonistMode}` : '',
+    '',
+    ctx.protagonistsSummary ? `## 主角详细设定\n${ctx.protagonistsSummary}\n` : '',
+    ctx.dualProtagonistSummary ? `## 双主角关系\n${ctx.dualProtagonistSummary}\n` : '',
     '',
     ctx.novelOutline ? `## 作品总大纲\n${ctx.novelOutline}\n` : '',
     '',
@@ -168,6 +175,14 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     '请严格围绕大纲，直接输出小说正文。不要写"以下是正文"等引导语，只输出正文内容。',
     '不得凭空添加未在出场角色列表中列出的重要角色。',
     '如果章节大纲中描述了具体场景或道具，必须如实写入正文。',
+    ...(ctx.protagonistMode === 'dual' ? [
+      '',
+      '## 双主角写作约束：',
+      '- 必须同时考虑两位主角的目标和限制，不能忽略第二主角',
+      '- 不要把第二主角写成普通配角或路人',
+      '- 如果本章涉及双主角关系线，应推进关系冲突或合作',
+      '- 不得违背任一主角的特殊能力限制和行为禁令',
+    ] : []),
   ].filter(Boolean).join('\n');
 
   return {

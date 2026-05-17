@@ -24,6 +24,9 @@
 
 ## 角色信息
 - 主角：{{protagonist}}
+{{#protagonist_mode}}
+- 主角模式：{{protagonist_mode}}
+{{/protagonist_mode}}
 {{#special_ability}}
 - 特殊能力：{{special_ability}}
 {{/special_ability}}
@@ -33,6 +36,25 @@
 {{#forbidden_behaviors}}
 - 不能做出的行为：{{forbidden_behaviors}}
 {{/forbidden_behaviors}}
+
+{{#protagonists_summary}}
+## 主角详细设定
+{{protagonists_summary}}
+
+写作时必须严格围绕上述主角的性格、目标、能力和限制展开叙事，不要让主角做出违反设定的行为。
+{{/protagonists_summary}}
+
+{{#dual_protagonist_summary}}
+## 双主角关系
+{{dual_protagonist_summary}}
+
+写作时注意事项：
+1. 如果是双主角模式，必须同时考虑两位主角的目标和限制
+2. 不要把第二主角写成普通配角
+3. 如果本章涉及双主角关系，应推进关系冲突或合作
+4. 不得违背任一主角的特殊能力限制
+5. 叙事权重要符合设置
+{{/dual_protagonist_summary}}
 
 ## 当前进度
 - 分卷：{{volume_title}}

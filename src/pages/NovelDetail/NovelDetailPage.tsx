@@ -191,7 +191,21 @@ function NovelDetailPage() {
           <RuleSystemCard novelId={novel.id} ruleSystems={ruleSystems}
             onSave={handleSaveRuleSystem} onDelete={handleDeleteRuleSystem} />
         </div>
-        <ProtagonistCard novelId={novel.id} protagonist={protagonist} onSave={handleSaveProtagonist} />
+        <ProtagonistCard
+          novelId={novel.id}
+          novel={novel}
+          protagonist={protagonist}
+          onSave={async (data: any) => {
+            if (!novelId) return;
+            const updated = await novelService.updateNovel(novelId, {
+              protagonistMode: data.protagonistMode,
+              // @ts-ignore - protagonists stored as json
+              protagonists: data.protagonists,
+              dualProtagonistRelation: data.dualProtagonistRelation,
+            } as any);
+            if (updated) setNovel(updated);
+          }}
+        />
         <div style={{ gridColumn: '1 / -1' }}>
           <OutlineManager novelId={novel.id} />
         </div>
