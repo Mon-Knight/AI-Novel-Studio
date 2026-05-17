@@ -44,21 +44,27 @@ function NovelDetailPage() {
     setLoading(true);
     setError('');
     try {
-      const [n, ws, rs, p] = await Promise.all([
-        novelRepository.getById(novelId),
+      // 分阶段加载：先加载核心数据，再加载次要数据
+      const n = await novelRepository.getById(novelId);
+      if (!n) { setError('作品未找到'); setLoading(false); return; }
+      setNovel(n);
+      setLoading(false); // 核心数据完成，立即渲染
+
+      // 次要数据独立加载，失败不阻塞页面
+      Promise.all([
         settingRepository.getWorldSettings(novelId),
         settingRepository.getRuleSystems(novelId),
         protagonistRepository.getByNovelId(novelId),
-      ]);
-      if (!n) { setError('作品未找到'); setLoading(false); return; }
-      setNovel(n);
-      setWorldSettings(ws);
-      setRuleSystems(rs);
-      setProtagonist(p);
+      ]).then(([ws, rs, p]) => {
+        setWorldSettings(ws);
+        setRuleSystems(rs);
+        setProtagonist(p);
+      }).catch((e) => {
+        console.error('次要数据加载失败:', e);
+      });
     } catch (e) {
-      setError('加载数据失败');
+      setError('加载作品失败，请返回首页重试');
       console.error(e);
-    } finally {
       setLoading(false);
     }
   }, [novelId]);
