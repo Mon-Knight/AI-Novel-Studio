@@ -102,7 +102,25 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   const protagonistRaw = raw.protagonists;
   let protagonists: ProtagonistProfile[];
   if (Array.isArray(protagonistRaw) && protagonistRaw.length > 0) {
-    protagonists = protagonistRaw.filter((p: any) => p && typeof p === 'object' && typeof p.name === 'string');
+    // v1.0.29 修复：不再过滤掉 name 为空字符串的项，保留项并为其生成 id
+    protagonists = protagonistRaw
+      .filter((p: any) => p && typeof p === 'object')
+      .map((p: any, i: number) => ({
+        id: typeof p.id === 'string' && p.id ? p.id : generateId(),
+        label: (p.label === 'secondary' ? 'secondary' : 'primary') as 'primary' | 'secondary',
+        name: typeof p.name === 'string' ? p.name : '',
+        gender: typeof p.gender === 'string' ? p.gender : undefined,
+        identity: typeof p.identity === 'string' ? p.identity : undefined,
+        personality: typeof p.personality === 'string' ? p.personality : undefined,
+        goal: typeof p.goal === 'string' ? p.goal : undefined,
+        motivation: typeof p.motivation === 'string' ? p.motivation : undefined,
+        specialAbility: typeof p.specialAbility === 'string' ? p.specialAbility : (typeof p.ability === 'string' ? p.ability : undefined),
+        abilityLimits: typeof p.abilityLimits === 'string' ? p.abilityLimits : (typeof p.limitation === 'string' ? p.limitation : undefined),
+        forbiddenBehaviors: typeof p.forbiddenBehaviors === 'string' ? p.forbiddenBehaviors : undefined,
+        background: typeof p.background === 'string' ? p.background : undefined,
+        arc: typeof p.arc === 'string' ? p.arc : undefined,
+        notes: typeof p.notes === 'string' ? p.notes : undefined,
+      }));
   } else {
     const pName = typeof raw.protagonistName === 'string' ? raw.protagonistName : (typeof raw.mainCharacter === 'string' ? raw.mainCharacter : '');
     protagonists = pName ? [{ id: generateId(), label: 'primary', name: pName }] : [];

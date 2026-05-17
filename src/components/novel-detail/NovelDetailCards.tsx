@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Novel, ProtagonistProfile, DualProtagonistRelation } from '../../types/novel';
+import type { Novel, ProtagonistProfile, DualProtagonistRelation, ProtagonistMode } from '../../types/novel';
 import type { WorldSetting } from '../../types/setting';
 import type { RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
@@ -574,7 +574,7 @@ interface ProtagonistCardProps {
   novel: Novel | null;
   protagonist: Protagonist | null;
   onSave: (data: {
-    protagonistMode: string;
+    protagonistMode: ProtagonistMode;
     protagonists: ProtagonistProfile[];
     dualProtagonistRelation?: DualProtagonistRelation;
   }) => Promise<void>;
@@ -633,8 +633,11 @@ function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCar
       setMessage('保存成功');
       setEditing(false);
       setTimeout(() => setMessage(''), 2000);
-    } catch { setMessage('保存失败'); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      setMessage('保存失败：' + (e?.message || '未知错误'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const renderProtagonistFields = (

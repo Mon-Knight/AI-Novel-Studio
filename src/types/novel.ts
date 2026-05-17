@@ -90,4 +90,7 @@ export interface UpdateNovelInput {
   currentVolumeId?: string;
   currentChapterId?: string;
   totalWordCount?: number;
+  protagonistMode?: ProtagonistMode;
+  protagonists?: ProtagonistProfile[];
+  dualProtagonistRelation?: DualProtagonistRelation | null;
 }

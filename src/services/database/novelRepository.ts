@@ -155,6 +155,7 @@ export const novelRepository = {
       const updated: Novel = {
         ...novels[idx],
         ...input,
+        dualProtagonistRelation: input.dualProtagonistRelation === null ? undefined : (input.dualProtagonistRelation ?? novels[idx].dualProtagonistRelation),
         totalWordCount: input.totalWordCount ?? novels[idx].totalWordCount,
         totalWords: input.totalWordCount ?? novels[idx].totalWords,
         targetWordCount: input.targetWordCount ?? novels[idx].targetWordCount,

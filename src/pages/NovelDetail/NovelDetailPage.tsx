@@ -195,15 +195,19 @@ function NovelDetailPage() {
           novelId={novel.id}
           novel={novel}
           protagonist={protagonist}
-          onSave={async (data: any) => {
+          onSave={async (data) => {
             if (!novelId) return;
-            const updated = await novelService.updateNovel(novelId, {
-              protagonistMode: data.protagonistMode,
-              // @ts-ignore - protagonists stored as json
-              protagonists: data.protagonists,
-              dualProtagonistRelation: data.dualProtagonistRelation,
-            } as any);
-            if (updated) setNovel(updated);
+            try {
+              const updated = await novelService.updateNovel(novelId, {
+                protagonistMode: data.protagonistMode,
+                protagonists: data.protagonists,
+                dualProtagonistRelation: data.dualProtagonistRelation,
+              });
+              if (updated) setNovel(updated);
+            } catch (e: any) {
+              alert('保存主角设定失败：' + (e?.message || '未知错误'));
+              throw e; // 重新抛出让卡片组件显示错误
+            }
           }}
         />
         <div style={{ gridColumn: '1 / -1' }}>
