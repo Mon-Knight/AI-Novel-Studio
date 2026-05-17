@@ -1,19 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { volumeRepository } from '../../services/database/volumeRepository';
-import { chapterRepository } from '../../services/database/chapterRepository';
-import { draftVersionService } from '../../services/database/draftVersionService';
+import { useState, useCallback } from 'react';
 import type { Volume } from '../../types/volume';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
 
 interface VolumeTreeProps {
-  novelId: string;
+  volumes: Volume[];
+  chapters: Chapter[];
   activeChapterId: string;
+  loading?: boolean;
   onSelectChapter: (chapterId: string) => void;
-  onChapterCreated?: (chapterId: string) => void;
-  onChaptersRefresh?: () => Promise<Chapter[]>;
-  refreshKey?: number;
+  onCreateVolume: (title: string) => Promise<void>;
+  onCreateChapter: (volumeId: string, title: string) => Promise<void>;
 }
 
 const statusDotColors: Record<string, string> = {
@@ -26,14 +23,20 @@ const statusDotColors: Record<string, string> = {
   summarized: '#059669',
 };
 
-function VolumeTree({ novelId, activeChapterId, onSelectChapter, onChapterCreated, onChaptersRefresh, refreshKey }: VolumeTreeProps) {
-  const [volumes, setVolumes] = useState<Volume[]>([]);
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [expandedVolumes, setExpandedVolumes] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+const xsBtnPrimary: React.CSSProperties = {
+  padding: '2px 8px', fontSize: 11, borderRadius: 4,
+  border: '1px solid var(--color-primary)', background: 'var(--color-primary)', color: '#fff', cursor: 'pointer',
+};
+const xsBtnSecondary: React.CSSProperties = {
+  padding: '2px 8px', fontSize: 11, borderRadius: 4,
+  border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', cursor: 'pointer',
+};
 
-  // v1.0.16 新建分卷/章节弹窗状态
+function VolumeTree({
+  volumes, chapters, activeChapterId, loading,
+  onSelectChapter, onCreateVolume, onCreateChapter,
+}: VolumeTreeProps) {
+  const [expandedVolumes, setExpandedVolumes] = useState<Record<string, boolean>>({});
   const [showNewVolume, setShowNewVolume] = useState(false);
   const [newVolumeTitle, setNewVolumeTitle] = useState('');
   const [showNewChapter, setShowNewChapter] = useState(false);
@@ -41,142 +44,48 @@ function VolumeTree({ novelId, activeChapterId, onSelectChapter, onChapterCreate
   const [newChapterVolumeId, setNewChapterVolumeId] = useState('');
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const [v, c] = await Promise.all([
-          volumeRepository.getByNovelId(novelId),
-          chapterRepository.getByNovelId(novelId),
-        ]);
-        if (cancelled) return;
-        setVolumes(v);
-        setChapters(c);
-        setExpandedVolumes(v.reduce((acc, vol) => ({ ...acc, [vol.id]: true }), {}));
-      } catch (e) {
-        console.error('Failed to load volume tree:', e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [novelId, refreshKey]);
+  const toggleVolume = (volumeId: string) => {
+    setExpandedVolumes((prev) => ({ ...prev, [volumeId]: !prev[volumeId] }));
+  };
 
-  const refreshTree = useCallback(async () => {
-    try {
-      const [v, c] = await Promise.all([
-        volumeRepository.getByNovelId(novelId),
-        chapterRepository.getByNovelId(novelId),
-      ]);
-      setVolumes(v);
-      setChapters(c);
-      // 通知父组件刷新
-      onChaptersRefresh?.();
-      // 保持展开状态并新增分卷自动展开
-      setExpandedVolumes((prev) => {
-        const next = { ...prev };
-        v.forEach((vol) => { if (!(vol.id in next)) next[vol.id] = true; });
-        return next;
-      });
-      return { volumes: v, chapters: c };
-    } catch (e) {
-      console.error('Failed to refresh tree:', e);
-      return { volumes, chapters };
-    }
-  }, [novelId, volumes, chapters, onChaptersRefresh]);
+  const ensureExpanded = (volumeId: string) => {
+    setExpandedVolumes((prev) => ({ ...prev, [volumeId]: true }));
+  };
 
   const handleCreateVolume = useCallback(async () => {
     if (!newVolumeTitle.trim() || creating) return;
     setCreating(true);
     try {
-      const vols = await volumeRepository.getByNovelId(novelId);
-      const maxNum = vols.reduce((max, v) => Math.max(max, v.volumeNumber), 0);
-      await volumeRepository.create({
-        novelId,
-        title: newVolumeTitle.trim(),
-        orderIndex: vols.length,
-      });
+      await onCreateVolume(newVolumeTitle.trim());
       setNewVolumeTitle('');
       setShowNewVolume(false);
-      await refreshTree();
     } catch (e: any) {
       alert('创建分卷失败：' + (e?.message || '未知错误'));
     } finally {
       setCreating(false);
     }
-  }, [novelId, newVolumeTitle, creating, refreshTree]);
+  }, [newVolumeTitle, creating, onCreateVolume]);
 
   const handleCreateChapter = useCallback(async () => {
     if (!newChapterTitle.trim() || creating) return;
     const volumeId = newChapterVolumeId || volumes[0]?.id;
     if (!volumeId) {
-      // 无分卷时自动创建第一卷
-      setCreating(true);
-      try {
-        const vol = await volumeRepository.create({ novelId, title: '第一卷' });
-        await refreshTree();
-        // 递归调用以使用新分卷
-        const ch = await chapterRepository.create({
-          novelId,
-          volumeId: vol.id,
-          title: newChapterTitle.trim() || '第1章',
-        });
-        // 自动创建空草稿
-        try {
-          await draftVersionService.create({
-            novelId,
-            chapterId: ch.id,
-            title: ch.title,
-            content: '',
-            source: 'user_edited',
-          });
-        } catch { /* 草稿创建失败不阻塞 */ }
-        setNewChapterTitle('');
-        setShowNewChapter(false);
-        await refreshTree();
-        onSelectChapter(ch.id);
-        onChapterCreated?.(ch.id);
-      } catch (e: any) {
-        alert('创建章节失败：' + (e?.message || '未知错误'));
-      } finally {
-        setCreating(false);
-      }
+      alert('当前无分卷，请先创建分卷。');
       return;
     }
-
     setCreating(true);
     try {
-      const chs = await chapterRepository.getByVolumeId(volumeId);
-      const maxNum = chs.reduce((max, c) => Math.max(max, c.chapterNumber), 0);
-      const ch = await chapterRepository.create({
-        novelId,
-        volumeId,
-        title: newChapterTitle.trim(),
-        orderIndex: chs.length,
-      });
-      // 自动创建空草稿
-      try {
-        await draftVersionService.create({
-          novelId,
-          chapterId: ch.id,
-          title: ch.title,
-          content: '',
-          source: 'user_edited',
-        });
-      } catch { /* 草稿创建失败不阻塞 */ }
+      await onCreateChapter(volumeId, newChapterTitle.trim());
       setNewChapterTitle('');
       setShowNewChapter(false);
       setNewChapterVolumeId('');
-      await refreshTree();
-      onSelectChapter(ch.id);
-      onChapterCreated?.(ch.id);
+      ensureExpanded(volumeId);
     } catch (e: any) {
       alert('创建章节失败：' + (e?.message || '未知错误'));
     } finally {
       setCreating(false);
     }
-  }, [novelId, newChapterTitle, newChapterVolumeId, volumes, creating, refreshTree, onSelectChapter, onChapterCreated]);
+  }, [newChapterTitle, newChapterVolumeId, volumes, creating, onCreateChapter]);
 
   const handleOpenNewChapter = useCallback((volumeId?: string) => {
     if (volumes.length === 0 && !volumeId) {
@@ -188,10 +97,6 @@ function VolumeTree({ novelId, activeChapterId, onSelectChapter, onChapterCreate
     setNewChapterTitle('');
     setShowNewChapter(true);
   }, [volumes]);
-
-  const toggleVolume = (volumeId: string) => {
-    setExpandedVolumes((prev) => ({ ...prev, [volumeId]: !prev[volumeId] }));
-  };
 
   const getVolumeChapters = (volumeId: string) =>
     chapters.filter((ch) => ch.volumeId === volumeId).sort((a, b) => a.orderIndex - b.orderIndex);
