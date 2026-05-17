@@ -7,7 +7,21 @@
 
 ## 本次更新
 
-### 🔧 修复：写作工作台右侧 AI 功能按钮真实功能修复
+### 🔧 修复 1：写作工作台右侧栏点击即自动收回问题
+
+**根因**：
+1. `--z-overlay: 300` > `--z-right-panel: 160`，overlay 的 z-index 高于 panel，透明 overlay 覆盖在 panel 上方拦截所有点击事件
+2. overlay 与 panel 是兄弟 DOM 元素，panel 的 `stopPropagation` 无法阻止兄弟 overlay 的 `onClick={onClose}`
+3. overlay 的 z-index (300) 同时高于 toolbar (150)，导致 toolbar 图标被遮挡无法点击
+
+**修复**：
+1. 交换 z-index：`--z-right-panel: 350` > `--z-overlay: 300`
+2. DOM 重构：panel 嵌套到 overlay 内部，使 `stopPropagation` 正确生效
+3. 添加 `pointer-events: none` 到 overlay，`pointer-events: auto` 到 panel，确保 toolbar 可点击
+4. 新增全局 `document.addEventListener('mousedown')` 精确判断 click-outside
+5. panel 所有区域（header/body/close button）添加 `onMouseDown` + `onClick` stopPropagation
+
+### ✨ 新增功能：工作台右侧面板 AI 功能补全
 
 修复了写作工作台右侧面板中缺失 AI 生成按钮的问题，三个面板现已具备完整的 AI 功能链路。
 
