@@ -1,7 +1,7 @@
 /**
  * AI Novel Studio - TXT 导入确认弹窗
  */
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { novelRepository } from '../../services/database/novelRepository';
 import { volumeRepository } from '../../services/database/volumeRepository';
@@ -16,6 +16,7 @@ interface ImportTxtDialogProps {
 
 function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<'select' | 'analyze' | 'importing' | 'done'>('select');
   const [fileName, setFileName] = useState('');
   const [content, setContent] = useState('');
@@ -82,11 +83,11 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
               选择要导入的 TXT 文件，支持 UTF-8 编码的中文小说文本。
             </div>
-            <label style={{ display: 'block', padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
+            <div onClick={() => fileInputRef.current?.click()} style={{ padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
               <div style={{ fontSize: 14 }}>点击选择 TXT 文件</div>
-              <input type="file" accept=".txt,.TXT" onChange={handleFileSelect} style={{ display: 'none' }} />
-            </label>
+            </div>
+            <input ref={fileInputRef} type="file" accept=".txt,.TXT" onChange={handleFileSelect} style={{ display: 'none' }} />
           </div>
         )}
 

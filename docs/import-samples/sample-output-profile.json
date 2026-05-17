@@ -1,0 +1,10 @@
+{
+  "type": "output_profile",
+  "name": "测试输出控制",
+  "targetWordCount": 3000,
+  "paceLevel": "medium",
+  "battleIntensity": "medium",
+  "dialogueRatio": 0.35,
+  "descriptionRatio": 0.4,
+  "endingHookRequired": true
+}

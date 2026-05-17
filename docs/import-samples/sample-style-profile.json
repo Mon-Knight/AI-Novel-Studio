@@ -1,0 +1,9 @@
+{
+  "type": "style_profile",
+  "name": "测试风格方案",
+  "tone": "沉稳、紧张、克制",
+  "pace": "中等",
+  "dialogueRatio": 0.3,
+  "descriptionRatio": 0.45,
+  "styleSummary": "用于测试导入风格方案功能。文风沉稳，节奏中等，适合玄幻长篇。"
+}

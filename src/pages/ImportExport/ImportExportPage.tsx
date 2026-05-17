@@ -4,6 +4,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
+import ImportTxtDialog from '../../components/import/ImportTxtDialog';
+import ImportJsonDialog from '../../components/import/ImportJsonDialog';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { exportService } from '../../services/export/exportService';
@@ -18,6 +20,8 @@ function ImportExportPage() {
   const [selectedChapterId, setSelectedChapterId] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [showTxtImport, setShowTxtImport] = useState(false);
+  const [showJsonImport, setShowJsonImport] = useState(false);
 
   useEffect(() => {
     novelRepository.getAll().then((list) => { setNovels(list); if (list.length > 0) setSelectedNovelId(list[0].id); });
@@ -122,19 +126,23 @@ function ImportExportPage() {
           <span style={{ fontWeight: 600 }}>导入</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/styles')}>
-            🎨 风格方案管理
+          <button className="btn btn-primary btn-sm" onClick={() => setShowTxtImport(true)}>
+            📄 导入 TXT
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/templates')}>
-            📋 模板中心
+          <button className="btn btn-primary btn-sm" onClick={() => setShowJsonImport(true)}>
+            📋 导入 JSON
           </button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 8 }}>
-          导入外部 TXT/JSON 文件功能将在后续版本增强。当前可以先在风格方案页面和模板中心管理创作资源。
+          支持导入 TXT 小说文件（自动识别章节标题切分）和 JSON 配置文件（风格方案/输出控制）
         </div>
       </div>
 
       <button className="btn btn-secondary btn-sm" onClick={() => navigate('/')}>← 返回首页</button>
+
+      {/* 导入弹窗 */}
+      {showTxtImport && <ImportTxtDialog onClose={() => setShowTxtImport(false)} />}
+      {showJsonImport && <ImportJsonDialog onClose={() => setShowJsonImport(false)} />}
     </div>
   );
 }

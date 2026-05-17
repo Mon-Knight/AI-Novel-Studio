@@ -1,7 +1,7 @@
 /**
  * AI Novel Studio - JSON 导入确认弹窗
  */
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { novelRepository } from '../../services/database/novelRepository';
 import { styleProfileService } from '../../services/styles/styleProfileService';
@@ -15,6 +15,7 @@ interface ImportJsonDialogProps {
 
 function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<'select' | 'confirm' | 'done'>('select');
   const [detectResult, setDetectResult] = useState<JsonDetectResult | null>(null);
   const [rawData, setRawData] = useState<unknown>(null);
@@ -92,11 +93,11 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
               选择 JSON 文件。支持：AI Novel Studio 完整作品 JSON、风格方案、输出控制方案。
             </div>
-            <label style={{ display: 'block', padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
+            <div onClick={() => fileInputRef.current?.click()} style={{ padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
               <div style={{ fontSize: 14 }}>点击选择 JSON 文件</div>
-              <input type="file" accept=".json,.JSON" onChange={handleFileSelect} style={{ display: 'none' }} />
-            </label>
+            </div>
+            <input ref={fileInputRef} type="file" accept=".json,.JSON" onChange={handleFileSelect} style={{ display: 'none' }} />
           </div>
         )}
 
