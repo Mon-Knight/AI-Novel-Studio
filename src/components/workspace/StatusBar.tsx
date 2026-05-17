@@ -1,3 +1,4 @@
+import { fmtNumber } from '../../utils/format';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
 

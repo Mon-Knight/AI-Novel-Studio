@@ -3,6 +3,7 @@
  */
 import { useState, useEffect } from 'react';
 import BackButton from '../../components/common/BackButton';
+import { fmtDateTime } from '../../utils/format';
 import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { AiTaskRecord, AiTaskType, AiTaskStatus } from '../../types/ai';
 import { AiTaskTypeLabels } from '../../types/ai';
@@ -76,8 +77,8 @@ function AiTasksPage() {
                     {task.inputSummary && task.inputSummary.slice(0, 60)}{task.inputSummary && task.inputSummary.length > 60 && '…'}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {new Date(task.createdAt).toLocaleString('zh-CN')}
-                    {task.finishedAt && ` → ${new Date(task.finishedAt).toLocaleString('zh-CN')}`}
+                    {fmtDateTime(task.createdAt)}
+                    {task.finishedAt && ` → ${fmtDateTime(task.finishedAt)}`}
                   </div>
                 </div>
               </div>

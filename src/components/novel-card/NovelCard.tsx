@@ -2,6 +2,7 @@ import type { Novel } from '../../types/novel';
 import { useState, useEffect } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
+import { fmtNumber, fmtDate } from '../../utils/format';
 
 interface NovelCardProps {
   novel: Novel;
@@ -77,13 +78,13 @@ function NovelCard({ novel, onClick, onEnterWorkspace }: NovelCardProps) {
         <div className="novel-card-desc">{novel.description || ''}</div>
         <div className="novel-card-meta">
           <span className="novel-card-meta-item">
-            {wordCount.toLocaleString()} 字
+            {fmtNumber(wordCount)} 字
           </span>
           <span className="novel-card-meta-item">
-            目标 {targetCount.toLocaleString()} 字
+            目标 {fmtNumber(targetCount)} 字
           </span>
           <span className="novel-card-meta-item">
-            {formatDate(novel.updatedAt)}
+            {fmtDate(novel.updatedAt)}
           </span>
         </div>
         <div className="novel-card-footer">
