@@ -3,7 +3,8 @@
  */
 import { useState, useEffect } from 'react';
 import BackButton from '../../components/common/BackButton';
-import { fmtDateTime } from '../../utils/format';
+import { formatDateTime } from '../../utils/date';
+import { formatTokenCount } from '../../utils/format';
 import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { AiTaskRecord, AiTaskType, AiTaskStatus } from '../../types/ai';
 import { AiTaskTypeLabels } from '../../types/ai';
@@ -77,8 +78,8 @@ function AiTasksPage() {
                     {task.inputSummary && task.inputSummary.slice(0, 60)}{task.inputSummary && task.inputSummary.length > 60 && '…'}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {fmtDateTime(task.createdAt)}
-                    {task.finishedAt && ` → ${fmtDateTime(task.finishedAt)}`}
+                    {formatDateTime(task.createdAt)}
+                    {task.finishedAt && ` → ${formatDateTime(task.finishedAt)}`}
                   </div>
                 </div>
               </div>
@@ -88,8 +89,8 @@ function AiTasksPage() {
                   {task.novelId && <div><strong>作品 ID：</strong>{task.novelId}</div>}
                   {task.chapterId && <div><strong>章节 ID：</strong>{task.chapterId}</div>}
                   {task.modelName && <div><strong>模型：</strong>{task.modelName}</div>}
-                  {task.tokenInput != null && <div><strong>输入 Token：</strong>{task.tokenInput}</div>}
-                  {task.tokenOutput != null && <div><strong>输出 Token：</strong>{task.tokenOutput}</div>}
+                  {task.tokenInput != null && <div><strong>输入 Token：</strong>{formatTokenCount(task.tokenInput)}</div>}
+                  {task.tokenOutput != null && <div><strong>输出 Token：</strong>{formatTokenCount(task.tokenOutput)}</div>}
                   {task.errorMessage && <div style={{ color: 'var(--color-error)', marginTop: 4 }}><strong>错误：</strong>{task.errorMessage}</div>}
                   {task.resultText && <div style={{ marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto', background: '#f8f8f8', padding: 6, borderRadius: 3 }}>{task.resultText.slice(0, 300)}{task.resultText.length > 300 && '…'}</div>}
                 </div>

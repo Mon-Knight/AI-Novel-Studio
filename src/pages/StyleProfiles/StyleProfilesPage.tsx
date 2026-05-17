@@ -9,6 +9,7 @@ import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { StyleProfile, StyleAnalyzeResult } from '../../types/style';
 import type { OutputProfile } from '../../types/output';
 import type { ImportedAsset } from '../../types/importedAsset';
+import { formatNumber } from '../../utils/format';
 
 type TabType = 'styles' | 'outputs' | 'imports';
 
@@ -140,7 +141,7 @@ function StyleProfilesPage() {
           {outputs.map((o) => (
             <div key={o.id} style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: 16, background: o.isDefault ? 'var(--color-primary-light)' : 'var(--color-bg-card)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontWeight: 600, fontSize: 15 }}>{o.name}</span>{o.isDefault && <span style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600 }}>默认</span>}</div>
-              <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 8 }}><div>📊 {o.targetWordCount?.toLocaleString() || o.chapterWordRange.default.toLocaleString()} 字</div><div>⚡ {o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}</div></div>
+              <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 8 }}><div>📊 {formatNumber(o.targetWordCount ?? o.chapterWordRange.default)} 字</div><div>⚡ {o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}</div></div>
               <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => { setEditingOutput(o); setOutputForm({ name: o.name, targetWordCount: o.targetWordCount || 4000, paceLevel: o.paceLevel || 'medium', dialogueRatio: 35, descriptionRatio: 40 }); setShowOutputForm(true); }}>✏️</button>
                 {!o.isDefault && <button className="btn btn-secondary btn-sm" onClick={() => deleteOutput(o.id, o.name)} style={{ color: 'var(--color-error)' }}>🗑️</button>}

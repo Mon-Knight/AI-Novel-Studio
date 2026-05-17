@@ -3,7 +3,7 @@
  */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { novelRepository } from '../../services/database/novelRepository';
+import { novelService } from '../../services/novels/novelService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
 import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
@@ -66,7 +66,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
       } else if (detectResult.type === 'ai_novel_studio_project') {
         const novelData = obj.novel as Record<string, any>;
         if (!novelData?.title) { setError('作品 JSON 缺少必要字段'); setImporting(false); return; }
-        const novel = await novelRepository.create({ title: novelData.title, genre: novelData.genre, description: novelData.description });
+        const novel = await novelService.createNovel({ title: novelData.title, genre: novelData.genre, description: novelData.description });
         // v1.0.4 基础导入：仅恢复作品基本信息，完整恢复后续版本增强
         setResultMsg(`作品「${novelData.title}」导入成功！后续版本将支持完整数据恢复。`);
       }

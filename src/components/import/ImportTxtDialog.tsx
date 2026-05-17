@@ -3,12 +3,13 @@
  */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { novelRepository } from '../../services/database/novelRepository';
+import { novelService } from '../../services/novels/novelService';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
 import { readTextFile, analyzeTxtForChapters } from '../../services/import/txtImportService';
 import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
+import { formatNumber } from '../../utils/format';
 
 interface ImportTxtDialogProps {
   onClose: () => void;
@@ -48,7 +49,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
     if (!analyzeResult || !novelTitle.trim()) return;
     setImporting(true); setError('');
     try {
-      const novel = await novelRepository.create({ title: novelTitle.trim(), genre: genre.trim() || undefined, description: desc.trim() || '由 TXT 导入' });
+      const novel = await novelService.createNovel({ title: novelTitle.trim(), genre: genre.trim() || undefined, description: desc.trim() || '由 TXT 导入' });
       const volume = await volumeRepository.create({ novelId: novel.id, title: '第一卷', orderIndex: 1 });
       let count = 0;
       for (const ch of analyzeResult.chapters) {
@@ -94,7 +95,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         {step === 'analyze' && analyzeResult && (
           <div>
             <div style={{ fontSize: 13, marginBottom: 12, padding: 8, background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae6fd' }}>
-              📄 {fileName} · {analyzeResult.totalChars.toLocaleString()} 字符 · {analyzeResult.totalWords.toLocaleString()} 字
+              📄 {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 · {formatNumber(analyzeResult.totalWords)} 字
               {analyzeResult.detectedChapterCount > 0 && <> · 识别到 <strong>{analyzeResult.detectedChapterCount}</strong> 个章节</>}
             </div>
             {analyzeResult.warnings.map((w, i) => (

@@ -3,6 +3,8 @@ import type { Novel } from '../../types/novel';
 import type { WorldSetting } from '../../types/setting';
 import type { RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
+import { formatNumber } from '../../utils/format';
+import { formatDate } from '../../utils/date';
 
 interface NovelBasicInfoCardProps {
   novel: Novel;
@@ -211,11 +213,11 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
             </div>
             <div>
               <span className="text-sm text-muted">目标字数</span>
-              <div>{(novel.targetWordCount || 0).toLocaleString()} 字</div>
+              <div>{formatNumber(novel.targetWordCount || 0)} 字</div>
             </div>
             <div>
               <span className="text-sm text-muted">最后更新</span>
-              <div>{new Date(novel.updatedAt).toLocaleDateString('zh-CN')}</div>
+              <div>{formatDate(novel.updatedAt)}</div>
             </div>
           </div>
         </div>
@@ -319,7 +321,7 @@ function WorldSettingCard({ novelId, settings, onSave }: WorldSettingCardProps) 
           )}
           {activeSetting && (
             <div className="text-sm text-muted" style={{ marginTop: 8 }}>
-              最后更新：{new Date(activeSetting.updatedAt).toLocaleDateString('zh-CN')}
+              最后更新：{formatDate(activeSetting.updatedAt)}
             </div>
           )}
         </div>
@@ -730,7 +732,7 @@ function ProtagonistCard({ novelId, protagonist, onSave }: ProtagonistCardProps)
                 </div>
               )}
               <div className="text-sm text-muted">
-                最后更新：{new Date(protagonist.updatedAt).toLocaleDateString('zh-CN')}
+                最后更新：{formatDate(protagonist.updatedAt)}
               </div>
             </div>
           ) : (

@@ -2,24 +2,36 @@
  * AI Novel Studio - 安全格式化工具
  */
 
-export function fmtNumber(value: unknown, fallback = '0'): string {
-  if (typeof value === 'number' && Number.isFinite(value)) return value.toLocaleString();
-  if (typeof value === 'string') { const n = Number(value); if (Number.isFinite(n)) return n.toLocaleString(); }
+export function formatNumber(value: unknown, fallback = '0'): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toLocaleString();
+  }
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n.toLocaleString();
+  }
   return fallback;
 }
 
-export function fmtWordCount(value: unknown): string {
-  return fmtNumber(value) + ' 字';
+export function formatWordCount(value: unknown): string {
+  return `${formatNumber(value)} 字`;
 }
 
-export function fmtDate(value: unknown, fallback = ''): string {
-  if (!value) return fallback;
-  try { const d = new Date(value as any); if (isNaN(d.getTime())) return fallback; return d.toLocaleDateString('zh-CN'); }
-  catch { return fallback; }
+export function formatTokenCount(value: unknown): string {
+  return `${formatNumber(value)} tokens`;
 }
 
-export function fmtDateTime(value: unknown, fallback = ''): string {
-  if (!value) return fallback;
-  try { const d = new Date(value as any); if (isNaN(d.getTime())) return fallback; return d.toLocaleString('zh-CN'); }
-  catch { return fallback; }
+export function formatFileSize(value: unknown): string {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return '0 B';
+  if (n < 1024) return `${n.toLocaleString()} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+export function formatPercent(value: unknown): string {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return '0%';
+  return `${n.toFixed(1)}%`;
 }

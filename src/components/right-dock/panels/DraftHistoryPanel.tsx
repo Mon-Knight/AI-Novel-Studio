@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { formatDateTime } from '../../../utils/date';
+import { formatNumber } from '../../../utils/format';
 
 interface DraftHistoryPanelProps {
   chapterId: string;
@@ -78,11 +80,11 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
                       {draft.isAdopted && <span style={{ color: 'var(--color-success)', fontSize: 12, marginLeft: 6 }}>✅ 已采用</span>}
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                      {draft.wordCount.toLocaleString()} 字
+                      {formatNumber(draft.wordCount)} 字
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>
-                    {sourceLabels[draft.source] || draft.source} · {new Date(draft.createdAt).toLocaleString('zh-CN')}
+                    {sourceLabels[draft.source] || draft.source} · {formatDateTime(draft.createdAt)}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => onLoadDraft(draft)}

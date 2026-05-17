@@ -2,7 +2,8 @@ import type { Novel } from '../../types/novel';
 import { useState, useEffect } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
-import { fmtNumber, fmtDate } from '../../utils/format';
+import { formatNumber } from '../../utils/format';
+import { formatDate } from '../../utils/date';
 
 interface NovelCardProps {
   novel: Novel;
@@ -18,13 +19,6 @@ const genreIcons: Record<string, string> = {
   '历史': '📜',
   '言情': '💕',
 };
-
-function formatDate(value?: string): string {
-  if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('zh-CN');
-}
 
 const statusLabels: Record<string, string> = {
   'draft': '草稿',
@@ -78,13 +72,13 @@ function NovelCard({ novel, onClick, onEnterWorkspace }: NovelCardProps) {
         <div className="novel-card-desc">{novel.description || ''}</div>
         <div className="novel-card-meta">
           <span className="novel-card-meta-item">
-            {fmtNumber(wordCount)} 字
+            {formatNumber(wordCount)} 字
           </span>
           <span className="novel-card-meta-item">
-            目标 {fmtNumber(targetCount)} 字
+            目标 {formatNumber(targetCount)} 字
           </span>
           <span className="novel-card-meta-item">
-            {fmtDate(novel.updatedAt)}
+            {formatDate(novel.updatedAt)}
           </span>
         </div>
         <div className="novel-card-footer">

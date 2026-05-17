@@ -3,6 +3,8 @@ import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import { draftVersionService } from '../../services/database/draftVersionService';
 import { ChapterStatusLabels } from '../../types/chapter';
+import { formatDateTime } from '../../utils/date';
+import { formatNumber } from '../../utils/format';
 
 interface EditorAreaProps {
   chapter?: Chapter;
@@ -33,7 +35,7 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
     if (currentDraft) {
       setContent(currentDraft.content);
       setIsDirty(false);
-      setLastSaved(new Date(currentDraft.updatedAt).toLocaleTimeString('zh-CN'));
+      setLastSaved(formatDateTime(currentDraft.updatedAt));
       onDraftChange?.(currentDraft.wordCount, false);
     } else if (chapter) {
       setContent('');
@@ -62,7 +64,7 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
       }
       setIsDirty(false);
       setSaveMsg('已保存');
-      setLastSaved(new Date().toLocaleTimeString('zh-CN'));
+      setLastSaved(formatDateTime(new Date()));
       setTimeout(() => setSaveMsg(''), 2000);
     } catch {
       setSaveMsg('保存失败');
@@ -125,7 +127,7 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
         }}>
           <span>📄 草稿 v{currentDraft.versionNo}</span>
           <span>来源：{draftSourceLabel[currentDraft.source] || currentDraft.source}</span>
-          <span>字数：{currentDraft.wordCount.toLocaleString()}</span>
+          <span>字数：{formatNumber(currentDraft.wordCount)}</span>
           {currentDraft.isAdopted && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>✅ 已采用</span>}
         </div>
       )}
@@ -137,7 +139,7 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
           {chapter.goal && <div className="editor-info-section"><div className="editor-info-label">🎯 本章目标</div><div className="editor-info-text">{chapter.goal}</div></div>}
           <div className="editor-info-meta">
             <span>状态：{ChapterStatusLabels[chapter.status]}</span>
-            <span>目标字数：{(chapter.targetWordCount || 0).toLocaleString()} 字</span>
+            <span>目标字数：{formatNumber(chapter.targetWordCount || 0)} 字</span>
             {lastSaved && <span>上次保存：{lastSaved}</span>}
           </div>
         </div>

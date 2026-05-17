@@ -27,6 +27,8 @@ export interface Novel {
   totalWords: number;
   targetWordCount?: number;
   targetWords: number;
+  chapterCount?: number;
+  volumeCount?: number;
   lastOpenedAt?: string;
   createdAt: string;
   updatedAt: string;

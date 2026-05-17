@@ -8,6 +8,7 @@ import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrato
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
+import { formatNumber } from '../../../utils/format';
 
 interface AiGeneratePanelProps {
   novelId?: string;
@@ -79,7 +80,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         });
       }
 
-      setStatusMsg(`生成成功！已保存为草稿 v${draft.versionNo}（${draft.wordCount.toLocaleString()} 字）`);
+      setStatusMsg(`生成成功！已保存为草稿 v${draft.versionNo}（${formatNumber(draft.wordCount)} 字）`);
       setGenerating(false);
       onGenerated?.(draft);
     } catch (err: unknown) {
@@ -162,7 +163,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
           <div className="panel-field-label">目标字数</div>
-          <div className="panel-field-value">{chapter.targetWordCount?.toLocaleString() || 4000} 字</div>
+          <div className="panel-field-value">{formatNumber(chapter.targetWordCount ?? 4000)} 字</div>
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
           <div className="panel-field-label">状态</div>

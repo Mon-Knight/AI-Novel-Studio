@@ -1,4 +1,4 @@
-import { fmtNumber } from '../../utils/format';
+import { formatNumber } from '../../utils/format';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
 
@@ -27,8 +27,8 @@ function StatusBar({ chapter, draftWordCount, isDirty, draftVersion }: StatusBar
       )}
       <div className="statusbar-item">
         <span>字数：</span>
-        <strong>{wordCount.toLocaleString()}</strong>
-        <span className="text-muted"> / {targetWords.toLocaleString()}</span>
+        <strong>{formatNumber(wordCount)}</strong>
+        <span className="text-muted"> / {formatNumber(targetWords)}</span>
       </div>
       <span className="statusbar-separator" />
       <div className="statusbar-item">

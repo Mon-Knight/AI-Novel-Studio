@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Volume } from '../../types/volume';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
+import { formatNumber } from '../../utils/format';
 
 const volumeStatusLabels: Record<string, string> = {
   planned: '规划中',
@@ -98,12 +99,12 @@ function VolumeCard({ volume, chapters, onEdit, onDelete, onAddChapter, onEditCh
               </span>
               {ch.targetWordCount && (
                 <span className="text-sm text-muted" style={{ marginRight: 8 }}>
-                  目标 {ch.targetWordCount.toLocaleString()} 字
+                  目标 {formatNumber(ch.targetWordCount)} 字
                 </span>
               )}
               {ch.wordCount > 0 && (
                 <span className="text-sm text-muted" style={{ marginRight: 8 }}>
-                  {ch.wordCount.toLocaleString()} 字
+                  {formatNumber(ch.wordCount)} 字
                 </span>
               )}
               <button className="btn btn-secondary btn-sm" onClick={() => onEditChapter(ch)} style={{ marginRight: 4 }}>✏️</button>

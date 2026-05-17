@@ -51,6 +51,10 @@ function WritingWorkspacePage() {
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState('');
 
+  // 工作台加载状态机
+  type WorkspaceLoadState = 'loading' | 'ready' | 'novel_not_found' | 'error';
+  const [loadState, setLoadState] = useState<WorkspaceLoadState>('loading');
+
   const loadChapterDraft = useCallback(async (chapterId: string) => {
     try {
       const draft = await draftVersionService.getLatestByChapterId(chapterId);
@@ -65,6 +69,7 @@ function WritingWorkspacePage() {
     let cancelled = false;
     setPageLoading(true);
     setPageError('');
+    setLoadState('loading');
 
     // 并行加载，任一失败不影响
     Promise.allSettled([
@@ -72,8 +77,20 @@ function WritingWorkspacePage() {
       chapterRepository.getByNovelId(novelId),
     ]).then(([nr, cr]) => {
       if (cancelled) return;
-      if (nr.status === 'fulfilled') setNovel(nr.value);
-      else setPageError('作品加载失败');
+      if (nr.status === 'fulfilled') {
+        if (nr.value) {
+          setNovel(nr.value);
+        } else {
+          setLoadState('novel_not_found');
+          setPageLoading(false);
+          return;
+        }
+      } else {
+        setPageError('作品加载失败');
+        setLoadState('error');
+        setPageLoading(false);
+        return;
+      }
 
       if (cr.status === 'fulfilled') {
         const list = cr.value;
@@ -84,12 +101,20 @@ function WritingWorkspacePage() {
         } else if (list.length > 0) {
           setActiveChapterId(list[0].id);
         }
+        // 有章节时加载第一个章节的草稿
+        const targetId = urlChapterId && list.find((c) => c.id === urlChapterId)
+          ? urlChapterId
+          : list[0]?.id;
+        if (targetId) {
+          loadChapterDraft(targetId);
+        }
       }
+      setLoadState('ready');
       setPageLoading(false);
     });
 
     return () => { cancelled = true; };
-  }, [novelId, searchParams]);
+  }, [novelId, searchParams, loadChapterDraft]);
 
   const handleSelectChapter = useCallback((chapterId: string) => {
     setActiveChapterId(chapterId);
@@ -210,6 +235,36 @@ function WritingWorkspacePage() {
             <div style={{ fontSize: 32, marginBottom: 12 }}>❌</div>
             <div style={{ color: 'var(--color-error)', marginBottom: 12 }}>{pageError}</div>
             <button className="btn btn-primary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>← 返回作品详情</button>
+          </div>
+        </div>
+      )}
+
+      {/* 作品未找到状态 */}
+      {loadState === 'novel_not_found' && !pageLoading && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.3 }}>📖</div>
+            <div style={{ color: 'var(--color-text-muted)', marginBottom: 12 }}>作品不存在或本地数据已损坏</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>← 返回首页</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => navigate('/settings')}>🔧 修复本地数据</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 无章节空状态 */}
+      {loadState === 'ready' && chapters.length === 0 && !pageLoading && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
+          <div style={{ textAlign: 'center', maxWidth: 400 }}>
+            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📝</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>当前作品还没有章节</div>
+            <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 16 }}>
+              请先返回作品详情页创建分卷和章节，或稍后在后续版本中直接在工作台创建。
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
+              ← 返回作品详情
+            </button>
           </div>
         </div>
       )}

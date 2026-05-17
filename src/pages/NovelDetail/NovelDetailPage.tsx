@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
-import { novelRepository } from '../../services/database/novelRepository';
+import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
 import { protagonistRepository } from '../../services/database/protagonistRepository';
 import {
@@ -17,6 +17,7 @@ import ExportCard from '../../components/novel-card/ExportCard';
 import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
+import { formatNumber } from '../../utils/format';
 import '../../styles/novel-detail.css';
 
 const statusLabels: Record<string, string> = {
@@ -45,7 +46,7 @@ function NovelDetailPage() {
     setError('');
     try {
       // 分阶段加载：先加载核心数据，再加载次要数据
-      const n = await novelRepository.getById(novelId);
+      const n = await novelService.getNovelById(novelId);
       if (!n) { setError('作品未找到'); setLoading(false); return; }
       setNovel(n);
       setLoading(false); // 核心数据完成，立即渲染
@@ -76,7 +77,7 @@ function NovelDetailPage() {
     description: string; status: string; targetWordCount: number;
   }) => {
     if (!novelId) return;
-    const updated = await novelRepository.update(novelId, {
+    const updated = await novelService.updateNovel(novelId, {
       title: data.title, subtitle: data.subtitle, genre: data.genre,
       description: data.description, status: data.status as Novel['status'],
       targetWordCount: data.targetWordCount,
@@ -163,11 +164,11 @@ function NovelDetailPage() {
           <div className="detail-desc">{novel.description || '暂无简介'}</div>
           <div className="detail-progress">
             <div className="detail-progress-item">
-              <div className="detail-progress-value">{novel.totalWordCount.toLocaleString()}</div>
+              <div className="detail-progress-value">{formatNumber(novel.totalWordCount)}</div>
               <div className="detail-progress-label">总字数</div>
             </div>
             <div className="detail-progress-item">
-              <div className="detail-progress-value">{(novel.targetWordCount || 0).toLocaleString()}</div>
+              <div className="detail-progress-value">{formatNumber(novel.targetWordCount || 0)}</div>
               <div className="detail-progress-label">目标字数</div>
             </div>
             <div className="detail-progress-item">

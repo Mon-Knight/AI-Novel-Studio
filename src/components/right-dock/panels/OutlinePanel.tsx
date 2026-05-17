@@ -3,6 +3,7 @@ import { volumeRepository } from '../../../services/database/volumeRepository';
 import type { Chapter } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
 import { ChapterStatusLabels } from '../../../types/chapter';
+import { formatNumber } from '../../../utils/format';
 
 interface OutlinePanelProps {
   novelId?: string;
@@ -61,7 +62,7 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
         {chapter.targetWordCount && (
           <div className="panel-field" style={{ marginTop: 8 }}>
             <div className="panel-field-label">目标字数</div>
-            <div className="panel-field-value">{chapter.targetWordCount.toLocaleString()} 字</div>
+            <div className="panel-field-value">{formatNumber(chapter.targetWordCount)} 字</div>
           </div>
         )}
       </div>

@@ -3,6 +3,8 @@
  * Tauri 环境下使用 Rust SQLite，浏览器开发环境使用 localStorage 回退
  */
 
+import { safeJsonParse } from '../../utils/dataGuard';
+
 // 检测是否在 Tauri 环境中
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI__' in window;
@@ -17,12 +19,8 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
 // ==================== localStorage 回退实现 ====================
 
 function lsGet<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  const raw = localStorage.getItem(key);
+  return safeJsonParse<T | null>(raw, null);
 }
 
 function lsSet(key: string, value: unknown): void {

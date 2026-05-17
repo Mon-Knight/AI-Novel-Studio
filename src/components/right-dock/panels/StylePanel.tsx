@@ -4,6 +4,7 @@ import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
 import { styleProfileService } from '../../../services/styles/styleProfileService';
 import { outputProfileService } from '../../../services/styles/outputProfileService';
+import { formatNumber } from '../../../utils/format';
 
 interface StylePanelProps {
   novelId?: string;
@@ -75,9 +76,9 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
         </select>
         {selectedOutput && (
           <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 8, lineHeight: 1.6 }}>
-            <div>📊 {selectedOutput.targetWordCount?.toLocaleString() || selectedOutput.chapterWordRange.default.toLocaleString()} 字</div>
+            <div>📊 {formatNumber(selectedOutput.targetWordCount ?? selectedOutput.chapterWordRange.default)} 字</div>
             <div>⚡ {selectedOutput.paceLevel === 'fast' ? '快节奏' : selectedOutput.paceLevel === 'slow' ? '慢节奏' : '中等节奏'}</div>
-            {chapter && <div style={{ marginTop: 4 }}>章节目标：{chapter.targetWordCount?.toLocaleString() || 4000} 字</div>}
+            {chapter && <div style={{ marginTop: 4 }}>章节目标：{formatNumber(chapter.targetWordCount ?? 4000)} 字</div>}
           </div>
         )}
       </div>

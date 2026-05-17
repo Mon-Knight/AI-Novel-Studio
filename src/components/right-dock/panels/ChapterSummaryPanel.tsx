@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterSummary } from '../../../types/chapterSummary';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
+import { formatDateTime } from '../../../utils/date';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
@@ -78,7 +79,7 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
 
       <div className="panel-section">
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-          创建于：{new Date(summary.createdAt).toLocaleString('zh-CN')}
+          创建于：{formatDateTime(summary.createdAt)}
         </div>
       </div>
     </div>

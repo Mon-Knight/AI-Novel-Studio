@@ -14,6 +14,8 @@ import { styleProfileService } from '../styles/styleProfileService';
 import { outputProfileService } from '../styles/outputProfileService';
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { contextRecordService } from '../context/contextRecordService';
+import { formatDateTime } from '../../utils/date';
+import { formatNumber } from '../../utils/format';
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[<>:"/\\|?*]/g, '_').trim() || '未命名';
@@ -50,7 +52,7 @@ export async function exportChapterToTxt(chapterId: string): Promise<void> {
   if (!content) throw new Error('该章节没有已采用的正文，无法导出');
   const volume = chapter.volumeId ? await volumeRepository.getById(chapter.volumeId) : null;
   const header = volume ? `第${chapter.chapterNumber}章 ${chapter.title}` : `第${chapter.chapterNumber}章 ${chapter.title}`;
-  const text = buildTxt(novel?.title || '', `${header}\n\n${content}\n\n字数：${chapter.wordCount} 字\n导出时间：${new Date().toLocaleString('zh-CN')}`);
+  const text = buildTxt(novel?.title || '', `${header}\n\n${content}\n\n字数：${formatNumber(chapter.wordCount)} 字\n导出时间：${formatDateTime(new Date())}`);
   downloadBlob(text, `${sanitizeFilename(novel?.title || '作品')}_第${chapter.chapterNumber}章_${sanitizeFilename(chapter.title)}.txt`, 'text/plain;charset=utf-8');
 }
 
@@ -60,7 +62,7 @@ export async function exportChapterToMarkdown(chapterId: string): Promise<void> 
   const novel = await novelRepository.getById(chapter.novelId);
   const content = await getAdoptedContent(chapterId);
   if (!content) throw new Error('该章节没有已采用的正文，无法导出');
-  const md = `# ${novel?.title || ''}\n\n## 第${chapter.chapterNumber}章 ${chapter.title}\n\n${content}\n\n---\n\n*字数：${chapter.wordCount} 字 · 导出时间：${new Date().toLocaleString('zh-CN')}*`;
+  const md = `# ${novel?.title || ''}\n\n## 第${chapter.chapterNumber}章 ${chapter.title}\n\n${content}\n\n---\n\n*字数：${formatNumber(chapter.wordCount)} 字 · 导出时间：${formatDateTime(new Date())}*`;
   downloadBlob(md, `${sanitizeFilename(novel?.title || '作品')}_第${chapter.chapterNumber}章_${sanitizeFilename(chapter.title)}.md`, 'text/markdown;charset=utf-8');
 }
 
@@ -80,7 +82,7 @@ export async function exportNovelToTxt(novelId: string): Promise<void> {
     if (volume) text += `${volume.title}\n`;
     text += `第${ch.chapterNumber}章 ${ch.title}\n${'-'.repeat(40)}\n\n${content}\n\n`;
   }
-  text += `\n总字数：${adoptedChapters.reduce((s, c) => s + c.wordCount, 0)} 字\n导出时间：${new Date().toLocaleString('zh-CN')}`;
+  text += `\n总字数：${formatNumber(adoptedChapters.reduce((s, c) => s + c.wordCount, 0))} 字\n导出时间：${formatDateTime(new Date())}`;
   downloadBlob(text, `${sanitizeFilename(novel.title)}_全文.txt`, 'text/plain;charset=utf-8');
 }
 
@@ -104,7 +106,7 @@ export async function exportNovelToMarkdown(novelId: string): Promise<void> {
   }
   const orphanChapters = adoptedChapters.filter((c) => !c.volumeId).sort((a, b) => a.orderIndex - b.orderIndex);
   orphanChapters.forEach((ch) => { md += `### 第${ch.chapterNumber}章 ${ch.title}\n\n（未关联分卷）\n\n---\n\n`; });
-  md += `\n*总字数：${adoptedChapters.reduce((s, c) => s + c.wordCount, 0)} 字 · 导出时间：${new Date().toLocaleString('zh-CN')}*`;
+  md += `\n*总字数：${formatNumber(adoptedChapters.reduce((s, c) => s + c.wordCount, 0))} 字 · 导出时间：${formatDateTime(new Date())}*`;
   downloadBlob(md, `${sanitizeFilename(novel.title)}_全文.md`, 'text/markdown;charset=utf-8');
 }
 
