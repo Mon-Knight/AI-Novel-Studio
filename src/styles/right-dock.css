@@ -62,6 +62,8 @@
   right: 0;
   bottom: var(--statusbar-height);
   z-index: var(--z-overlay);
+  /* v1.0.24: 允许点击穿透 overlay 到达 toolbar，panel 内部 pointer-events: auto 覆盖 */
+  pointer-events: none;
 }
 
 .right-panel {
@@ -77,6 +79,8 @@
   flex-direction: column;
   z-index: var(--z-right-panel);
   animation: panelSlideIn 0.2s ease;
+  /* v1.0.24: 恢复面板内部交互 */
+  pointer-events: auto;
 }
 
 @keyframes panelSlideIn {

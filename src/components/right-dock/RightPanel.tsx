@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePage';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
@@ -40,23 +41,53 @@ function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopt
   if (!config) return null;
 
   const PanelComponent = config.component;
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // v1.0.24: 阻止面板内部所有交互事件冒泡到外部
+  const stopAll = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation?.();
+  };
+
+  // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
+  useEffect(() => {
+    function handleDocumentMouseDown(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      // 点击在面板内部 → 不关闭
+      if (panelRef.current?.contains(target)) return;
+      // 点击在右侧工具栏图标上 → 不关闭（由工具栏自身逻辑处理）
+      if (target.closest('.right-toolbar')) return;
+      // 其他情况 → 关闭面板
+      onClose();
+    }
+
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [onClose]);
 
   return (
-    <>
-      {/* 遮罩层，点击关闭 */}
-      <div className="right-panel-overlay" onClick={onClose} />
-      <div className="right-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="right-panel-overlay">
+      <div
+        ref={panelRef}
+        className="right-panel"
+        onMouseDown={stopAll}
+        onClick={stopAll}
+      >
         <div className="right-panel-header">
           <span className="right-panel-title">{config.title}</span>
-          <button className="right-panel-close" onClick={onClose}>
+          <button
+            className="right-panel-close"
+            onMouseDown={stopAll}
+            onClick={(e) => { stopAll(e); onClose(); }}
+          >
             ✕
           </button>
         </div>
-        <div className="right-panel-body">
+        <div className="right-panel-body" onMouseDown={stopAll} onClick={stopAll}>
           <PanelComponent novelId={novelId} chapter={chapter} onGenerated={onGenerated} onAdopted={onAdopted} />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
