@@ -2,7 +2,7 @@
  * AI Novel Studio - 风格方案类型定义（v0.6.0 增强版）
  */
 
-export type StyleSourceType = 'manual' | 'txt_analysis' | 'json_import' | 'system_default';
+export type StyleSourceType = 'manual' | 'txt_analysis' | 'json_import' | 'system_default' | 'ai_analyzed';
 
 export interface StyleProfile {
   id: string;
