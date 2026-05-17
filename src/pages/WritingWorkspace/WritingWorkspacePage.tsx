@@ -48,17 +48,35 @@ function WritingWorkspacePage() {
 
   const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
 
+  const [pageLoading, setPageLoading] = useState(true);
+  const [pageError, setPageError] = useState('');
+
   const loadChapterDraft = useCallback(async (chapterId: string) => {
-    const draft = await draftVersionService.getLatestByChapterId(chapterId);
-    setCurrentDraft(draft);
-    setDraftWordCount(draft?.wordCount || 0);
-    setIsDirty(false);
+    try {
+      const draft = await draftVersionService.getLatestByChapterId(chapterId);
+      setCurrentDraft(draft);
+      setDraftWordCount(draft?.wordCount || 0);
+      setIsDirty(false);
+    } catch { /* 草稿加载失败不影响页面 */ }
   }, []);
 
   useEffect(() => {
-    if (novelId) {
-      novelRepository.getById(novelId).then(setNovel).catch(console.error);
-      chapterRepository.getByNovelId(novelId).then((list) => {
+    if (!novelId) return;
+    let cancelled = false;
+    setPageLoading(true);
+    setPageError('');
+
+    // 并行加载，任一失败不影响
+    Promise.allSettled([
+      novelRepository.getById(novelId),
+      chapterRepository.getByNovelId(novelId),
+    ]).then(([nr, cr]) => {
+      if (cancelled) return;
+      if (nr.status === 'fulfilled') setNovel(nr.value);
+      else setPageError('作品加载失败');
+
+      if (cr.status === 'fulfilled') {
+        const list = cr.value;
         setChapters(list);
         const urlChapterId = searchParams.get('chapterId');
         if (urlChapterId && list.find((c) => c.id === urlChapterId)) {
@@ -66,8 +84,11 @@ function WritingWorkspacePage() {
         } else if (list.length > 0) {
           setActiveChapterId(list[0].id);
         }
-      }).catch(console.error);
-    }
+      }
+      setPageLoading(false);
+    });
+
+    return () => { cancelled = true; };
   }, [novelId, searchParams]);
 
   const handleSelectChapter = useCallback((chapterId: string) => {
@@ -175,6 +196,24 @@ function WritingWorkspacePage() {
 
   return (
     <div className="workspace-page">
+      {pageLoading && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
+          <div style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
+            <div>正在加载写作工作台...</div>
+          </div>
+        </div>
+      )}
+      {pageError && !pageLoading && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>❌</div>
+            <div style={{ color: 'var(--color-error)', marginBottom: 12 }}>{pageError}</div>
+            <button className="btn btn-primary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>← 返回作品详情</button>
+          </div>
+        </div>
+      )}
+
       {/* 左侧卷章目录树 */}
       <div className="workspace-sidebar">
         {/* 顶部导航区 */}
