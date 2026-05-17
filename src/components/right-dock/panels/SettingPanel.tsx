@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react';
 import { settingRepository } from '../../../services/database/settingRepository';
 import { protagonistRepository } from '../../../services/database/protagonistRepository';
+import { settingExpandService, type SettingSuggestion } from '../../../services/ai/settingExpandService';
 import type { WorldSetting, RuleSystem } from '../../../types/setting';
 import type { Protagonist } from '../../../types/protagonist';
+import type { Chapter } from '../../../types/chapter';
 
 interface SettingPanelProps {
   novelId?: string;
+  chapter?: Chapter;
 }
 
-function SettingPanel({ novelId }: SettingPanelProps) {
+function SettingPanel({ novelId, chapter }: SettingPanelProps) {
   const [worldSettings, setWorldSettings] = useState<WorldSetting[]>([]);
   const [ruleSystems, setRuleSystems] = useState<RuleSystem[]>([]);
   const [protagonist, setProtagonist] = useState<Protagonist | null>(null);
+  const [suggestions, setSuggestions] = useState<SettingSuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (novelId) {
@@ -24,8 +30,67 @@ function SettingPanel({ novelId }: SettingPanelProps) {
   const activeWorld = worldSettings.find((s) => s.isActive) || worldSettings[0];
   const activeRules = ruleSystems.filter((r) => r.isActive);
 
+  const handleSuggestSettings = async () => {
+    if (!novelId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const list = await settingExpandService.suggestSettings({
+        novelId,
+        chapterId: chapter?.id,
+        chapterTitle: chapter?.title,
+        chapterOutline: chapter?.outline || chapter?.goal,
+      });
+      setSuggestions(list);
+    } catch (e: any) {
+      setError(e.message || '设定补充失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAdoptSuggestion = async (suggestion: SettingSuggestion) => {
+    if (!novelId) return;
+    const content = [
+      suggestion.description,
+      suggestion.usageInChapter ? `\n本章用途：${suggestion.usageInChapter}` : '',
+      suggestion.risk ? `\n风险提示：${suggestion.risk}` : '',
+    ].filter(Boolean).join('\n');
+    const saved = await settingRepository.saveWorldSetting(null, {
+      novelId,
+      title: suggestion.name,
+      content,
+      isActive: true,
+    });
+    setWorldSettings((prev) => [...prev, saved]);
+    setSuggestions((prev) => prev.filter((item) => item.name !== suggestion.name));
+  };
+
   return (
     <div>
+      <div className="panel-section">
+        <div className="panel-section-title">AI 设定补充</div>
+        <button className="btn btn-primary btn-sm" onClick={handleSuggestSettings} disabled={loading || !novelId} style={{ width: '100%', marginBottom: 8 }}>
+          {loading ? '生成中...' : '生成本章设定建议'}
+        </button>
+        {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 8 }}>{error}</div>}
+        {suggestions.map((item, index) => (
+          <div key={`${item.name}-${index}`} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
+            <div className="panel-field-label">{item.name}{item.category ? ` · ${item.category}` : ''}</div>
+            <div className="panel-field-value" style={{ fontSize: 12, fontWeight: 400, whiteSpace: 'pre-wrap' }}>
+              {item.rawText || item.description}
+            </div>
+            {item.usageInChapter && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-text-muted)' }}>本章用途：{item.usageInChapter}</div>}
+            {item.risk && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-warning)' }}>风险：{item.risk}</div>}
+            {!item.rawText && (
+              <button className="btn btn-primary btn-sm" onClick={() => handleAdoptSuggestion(item)} style={{ marginTop: 6 }}>
+                确认加入设定库
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
       <div className="panel-section">
         <div className="panel-section-title">世界背景</div>
         {activeWorld ? (

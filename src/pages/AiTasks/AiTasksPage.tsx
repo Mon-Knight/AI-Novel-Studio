@@ -9,7 +9,7 @@ import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { AiTaskRecord, AiTaskType, AiTaskStatus } from '../../types/ai';
 import { AiTaskTypeLabels } from '../../types/ai';
 
-const TYPE_FILTERS: (AiTaskType | 'all')[] = ['all', 'chapter_generate', 'character_generate', 'event_suggest', 'chapter_summarize', 'quality_check', 'chapter_polish'];
+const TYPE_FILTERS: (AiTaskType | 'all')[] = ['all', 'connection_test', 'chapter_generate', 'character_generate', 'event_suggest', 'setting_expand', 'outline_generate', 'volume_outline_generate', 'chapter_outline_generate', 'context_summarize', 'style_analyze', 'quality_check', 'chapter_polish'];
 const STATUS_FILTERS: (AiTaskStatus | 'all')[] = ['all', 'succeeded', 'failed', 'pending', 'running'];
 
 function AiTasksPage() {

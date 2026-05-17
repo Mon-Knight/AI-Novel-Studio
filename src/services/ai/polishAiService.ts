@@ -31,7 +31,7 @@ export const polishAiService = {
     }).catch(() => null);
 
     try {
-      const client = createAiClient();
+      const client = createAiClient(settings);
       const response = await client.generate(request);
       const text = response.text || '';
 
@@ -45,6 +45,7 @@ export const polishAiService = {
         resultText: `润色完成（${input.options.mode}）`,
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
+        tokenTotal: response.tokenTotal,
       });
 
       return cleaned || text; // 如果清理后为空，返回原始文本

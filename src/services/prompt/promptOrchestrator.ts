@@ -73,6 +73,7 @@ export async function buildGenerateRequest(
   const systemPrompt = renderTemplate(template, ctx);
 
   return {
+    taskType: 'chapter_generate',
     messages: [
       {
         role: 'system',

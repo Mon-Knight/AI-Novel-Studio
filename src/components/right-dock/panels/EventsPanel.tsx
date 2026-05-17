@@ -47,7 +47,11 @@ function EventsPanel({ novelId, chapter, onGenerated, onAdopted }: EventsPanelPr
         .map((cc) => characters.find((c) => c.id === cc.characterId))
         .filter(Boolean) as Character[];
       const list = await eventSuggestService.suggestEvents({
-        novelId, chapterId: chapter.id, chapterOutline: chapter.title, characters: chapterCharacters,
+        novelId,
+        chapterId: chapter.id,
+        chapterTitle: chapter.title,
+        chapterOutline: chapter.outline || chapter.goal || chapter.title,
+        characters: chapterCharacters,
       });
       setSuggestions(list);
     } catch (e: any) { setError(e.message || '生成失败'); }
@@ -146,16 +150,18 @@ function EventsPanel({ novelId, chapter, onGenerated, onAdopted }: EventsPanelPr
         {suggestions.map((s, i) => (
           <div key={i} className="event-item" style={{ borderColor: 'var(--color-primary-light)' }}>
             <strong>{s.title}</strong>
-            <div style={{ fontSize: 12, marginTop: 2, color: 'var(--color-text-secondary)' }}>{s.description}</div>
+            <div style={{ fontSize: 12, marginTop: 2, color: 'var(--color-text-secondary)', whiteSpace: s.rawText ? 'pre-wrap' : undefined }}>{s.rawText || s.description}</div>
             {s.impact && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>影响：{s.impact}</div>}
             {s.risk && <div style={{ fontSize: 11, color: 'var(--color-warning)' }}>风险：{s.risk}</div>}
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => handleAdoptSuggestion(s)}
-              style={{ marginTop: 4 }}
-            >
-              ✅ 采用建议
-            </button>
+            {!s.rawText && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => handleAdoptSuggestion(s)}
+                style={{ marginTop: 4 }}
+              >
+                ✅ 采用建议
+              </button>
+            )}
           </div>
         ))}
         {suggestions.length === 0 && !loading && (

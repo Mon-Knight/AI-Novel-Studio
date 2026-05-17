@@ -61,7 +61,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       const request = await buildGenerateRequest(context);
 
       // 3. 调用 AI
-      const client = createAiClient();
+      const client = createAiClient(settings);
       const response = await client.generate(request);
 
       // 4. 保存为草稿
@@ -79,6 +79,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           resultText: response.text,
           tokenInput: response.tokenInput,
           tokenOutput: response.tokenOutput,
+          tokenTotal: response.tokenTotal,
         });
       }
 
@@ -230,7 +231,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         <button
           className="panel-btn panel-btn-primary"
           onClick={handleGenerate}
-          disabled={generating || (settings.runtimeMode === 'api' && !settings.apiKey)}
+          disabled={generating}
         >
           {generating ? '⏳ 正在生成...' : `🤖 ${genMode === 'rewrite' ? '重新生成' : '生成本章'}`}
         </button>

@@ -6,23 +6,13 @@ import { buildCharacterGeneratePrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import type { Character, CharacterCandidate } from '../../types/character';
-
-function safeJsonParse<T>(text: string, fallback: T): T {
-  try {
-    // 处理 markdown code fences
-    let json = text.trim();
-    const m = json.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (m) json = m[1].trim();
-    return JSON.parse(json) as T;
-  } catch {
-    return fallback;
-  }
-}
+import { safeJsonParse } from './jsonUtils';
 
 export const characterGenerateService = {
   async generateCandidates(input: {
     novelId: string;
     chapterId: string;
+    chapterTitle?: string;
     chapterOutline: string;
     existingCharacters: Character[];
   }): Promise<CharacterCandidate[]> {
@@ -36,7 +26,7 @@ export const characterGenerateService = {
       novelGenre: novel?.genre,
       protagonist: novel?.protagonistName,
       worldBackground: novel?.worldBackground?.slice(0, 500),
-      chapterTitle: input.chapterOutline.slice(0, 50) || '未命名章节',
+      chapterTitle: input.chapterTitle || input.chapterOutline.slice(0, 50) || '未命名章节',
       chapterOutline: input.chapterOutline,
       existingCharacterNames: existingNames,
     });
@@ -52,7 +42,7 @@ export const characterGenerateService = {
     }).catch(() => null);
 
     try {
-      const client = createAiClient();
+      const client = createAiClient(settings);
       const response = await client.generate(request);
       const text = response.text || '';
 
@@ -67,6 +57,7 @@ export const characterGenerateService = {
           resultText: `生成了 ${filtered.length} 个候选角色`,
           tokenInput: response.tokenInput,
           tokenOutput: response.tokenOutput,
+          tokenTotal: response.tokenTotal,
         });
         return filtered;
       }
@@ -76,8 +67,15 @@ export const characterGenerateService = {
         resultText: '模型返回格式不规范，已尝试文本解析',
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
+        tokenTotal: response.tokenTotal,
       });
-      return [];
+      return [{
+        name: 'AI 原始返回',
+        roleType: 'neutral',
+        identity: text.slice(0, 500),
+        chapterFunction: '模型未返回可解析 JSON，请根据原始文本手动整理角色。',
+        rawText: text,
+      } as CharacterCandidate];
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : '角色生成失败';
       if (task) await aiTaskService.markFailed(task.id, msg);

@@ -17,7 +17,20 @@ function delay(ms?: number): Promise<void> {
 }
 
 /** 从系统提示词中检测任务类型 */
-type MockTaskType = 'chapter_generate' | 'character_generate' | 'event_suggest' | 'setting_expand' | 'quality_check' | 'chapter_polish' | 'connection_test' | 'unknown';
+type MockTaskType =
+  | 'chapter_generate'
+  | 'character_generate'
+  | 'event_suggest'
+  | 'setting_expand'
+  | 'quality_check'
+  | 'chapter_polish'
+  | 'connection_test'
+  | 'context_summarize'
+  | 'outline_generate'
+  | 'volume_outline_generate'
+  | 'chapter_outline_generate'
+  | 'style_analyze'
+  | 'unknown';
 
 function detectTaskType(messages: { role: string; content: string }[]): MockTaskType {
   const systemMsg = messages.find((m) => m.role === 'system')?.content || '';
@@ -134,6 +147,59 @@ function mockQualityCheck(info: ReturnType<typeof extractInfo>): string {
   });
 }
 
+function mockChapterSummary(info: ReturnType<typeof extractInfo>): string {
+  return JSON.stringify({
+    summary: `本章《${info.chapterTitle}》推进了主线，并留下后续承接点。`,
+    keyEvents: ['主角进入关键场景', '重要冲突被触发', '获得新的线索'],
+    characterChanges: [
+      { characterName: info.protagonist, stateSummary: '经历本章事件后目标更明确。', relationshipChanges: '与同伴信任上升', goalChanges: '准备追查下一条线索' },
+    ],
+    relationshipChanges: [],
+    newForeshadows: ['关键线索背后仍有隐藏势力'],
+    resolvedForeshadows: [],
+    nextChapterHints: '下一章可以承接本章线索，继续推进调查和冲突。',
+    contextRecords: [
+      { contextType: 'chapter_summary', title: `${info.chapterTitle}摘要`, content: `本章核心事件：${info.chapterOutline || '主线推进'}`, importance: 4 },
+    ],
+  });
+}
+
+function mockOutlineGenerate(info: ReturnType<typeof extractInfo>): string {
+  return `# ${info.novelTitle} 总大纲\n\n主线围绕${info.protagonist}的成长与关键冲突展开，分为开端、升级、反转和终局四个阶段。\n\n## 分卷规划\n1. 第一卷：建立世界规则与主角目标。\n2. 第二卷：扩大冲突，揭示敌对势力。\n3. 第三卷：回收伏笔，完成核心决战。`;
+}
+
+function mockVolumeOutline(): string {
+  return JSON.stringify({
+    title: '第一卷：启程',
+    summary: '主角进入新的事件漩涡，逐步理解世界规则，并确立短期目标。',
+    goal: '建立主角目标、核心同伴和主要敌对关系。',
+    mainConflict: '主角个人选择与外部势力规则之间的冲突。',
+  });
+}
+
+function mockChapterOutlines(): string {
+  return JSON.stringify({
+    chapters: [
+      { title: '第一章 余波', outline: '主角处理上一事件的后果，并发现新的线索。', goal: '承接前文并开启新冲突', targetWordCount: 4000 },
+      { title: '第二章 暗线', outline: '同伴提供情报，隐藏势力第一次露出痕迹。', goal: '抛出新的调查方向', targetWordCount: 4000 },
+      { title: '第三章 试探', outline: '主角与对手进行间接交锋，确认危险等级。', goal: '制造冲突升级', targetWordCount: 4000 },
+    ],
+  });
+}
+
+function mockStyleAnalyze(): string {
+  return JSON.stringify({
+    name: 'Mock 风格分析',
+    narrativePerspective: '第三人称有限视角',
+    tone: '克制、紧凑',
+    pace: 'medium',
+    sentenceStyle: '中短句结合，动作与心理交替',
+    dialogueRatio: 0.35,
+    descriptionRatio: 0.4,
+    styleSummary: '整体风格偏向紧凑叙事，注重情节推进和关键情绪节点。',
+  });
+}
+
 function mockChapterPolish(info: ReturnType<typeof extractInfo>, messages: { role: string; content: string }[]): string {
   // 从用户消息中提取原文
   const userMsg = messages.find((m) => m.role === 'user')?.content || '';
@@ -152,7 +218,7 @@ function mockChapterPolish(info: ReturnType<typeof extractInfo>, messages: { rol
 export class MockAiClient implements AiClient {
   async generate(request: AiGenerateRequest): Promise<AiGenerateResponse> {
     await delay();
-    const taskType = detectTaskType(request.messages);
+    const taskType = (request.taskType as MockTaskType | undefined) || detectTaskType(request.messages);
     const info = extractInfo(request.messages);
     let text: string;
 
@@ -174,6 +240,21 @@ export class MockAiClient implements AiClient {
         break;
       case 'chapter_polish':
         text = mockChapterPolish(info, request.messages);
+        break;
+      case 'context_summarize':
+        text = mockChapterSummary(info);
+        break;
+      case 'outline_generate':
+        text = mockOutlineGenerate(info);
+        break;
+      case 'volume_outline_generate':
+        text = mockVolumeOutline();
+        break;
+      case 'chapter_outline_generate':
+        text = mockChapterOutlines();
+        break;
+      case 'style_analyze':
+        text = mockStyleAnalyze();
         break;
       case 'chapter_generate':
       default:

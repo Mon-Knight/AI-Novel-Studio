@@ -193,6 +193,8 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             chapter_id TEXT,
             task_type TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
+            runtime_mode TEXT,
+            provider TEXT,
             model_name TEXT,
             prompt_template_id TEXT,
             input_summary TEXT,
@@ -202,6 +204,8 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             error_message TEXT,
             token_input INTEGER,
             token_output INTEGER,
+            token_total INTEGER,
+            duration_ms INTEGER,
             started_at TEXT,
             finished_at TEXT,
             created_at TEXT NOT NULL,
@@ -458,5 +462,30 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_polish_records_source_draft_id ON polish_records(source_draft_id);
         ",
     )?;
+    ensure_ai_task_record_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(ai_task_records)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<SqliteResult<Vec<String>>>()?;
+
+    let has_column = |name: &str| columns.iter().any(|column| column == name);
+
+    if !has_column("runtime_mode") {
+        conn.execute("ALTER TABLE ai_task_records ADD COLUMN runtime_mode TEXT", [])?;
+    }
+    if !has_column("provider") {
+        conn.execute("ALTER TABLE ai_task_records ADD COLUMN provider TEXT", [])?;
+    }
+    if !has_column("token_total") {
+        conn.execute("ALTER TABLE ai_task_records ADD COLUMN token_total INTEGER", [])?;
+    }
+    if !has_column("duration_ms") {
+        conn.execute("ALTER TABLE ai_task_records ADD COLUMN duration_ms INTEGER", [])?;
+    }
+
     Ok(())
 }

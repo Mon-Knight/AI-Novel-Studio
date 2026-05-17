@@ -938,6 +938,199 @@ pub fn delete_chapter_draft(id: String, chapter_id: String) -> Result<(), String
     Ok(())
 }
 
+// ==================== AI Task Records ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTaskRecordDto {
+    pub id: String,
+    pub novel_id: Option<String>,
+    pub chapter_id: Option<String>,
+    pub task_type: String,
+    pub status: String,
+    pub runtime_mode: Option<String>,
+    pub provider: Option<String>,
+    pub model_name: Option<String>,
+    pub prompt_template_id: Option<String>,
+    pub input_summary: Option<String>,
+    pub prompt_snapshot: Option<String>,
+    pub result_text: Option<String>,
+    pub result_json: Option<String>,
+    pub error_message: Option<String>,
+    pub token_input: Option<i64>,
+    pub token_output: Option<i64>,
+    pub token_total: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAiTaskRecordInput {
+    pub id: String,
+    pub novel_id: Option<String>,
+    pub chapter_id: Option<String>,
+    pub task_type: String,
+    pub status: String,
+    pub runtime_mode: Option<String>,
+    pub provider: Option<String>,
+    pub model_name: Option<String>,
+    pub input_summary: Option<String>,
+    pub started_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkAiTaskSucceededInput {
+    pub result_text: Option<String>,
+    pub prompt_snapshot: Option<String>,
+    pub result_json: Option<String>,
+    pub token_input: Option<i64>,
+    pub token_output: Option<i64>,
+    pub token_total: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub finished_at: String,
+}
+
+fn map_ai_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTaskRecordDto> {
+    Ok(AiTaskRecordDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        task_type: row.get(3)?,
+        status: row.get(4)?,
+        runtime_mode: row.get(5)?,
+        provider: row.get(6)?,
+        model_name: row.get(7)?,
+        prompt_template_id: row.get(8)?,
+        input_summary: row.get(9)?,
+        prompt_snapshot: row.get(10)?,
+        result_text: row.get(11)?,
+        result_json: row.get(12)?,
+        error_message: row.get(13)?,
+        token_input: row.get(14)?,
+        token_output: row.get(15)?,
+        token_total: row.get(16)?,
+        duration_ms: row.get(17)?,
+        started_at: row.get(18)?,
+        finished_at: row.get(19)?,
+        created_at: row.get(20)?,
+    })
+}
+
+fn ai_task_select_sql() -> &'static str {
+    "SELECT id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, prompt_template_id, input_summary, prompt_snapshot, result_text, result_json, error_message, token_input, token_output, token_total, duration_ms, started_at, finished_at, created_at FROM ai_task_records"
+}
+
+#[tauri::command]
+pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRecordDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = input.id.clone();
+    conn.execute(
+        "INSERT OR REPLACE INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        params![
+            input.id,
+            input.novel_id,
+            input.chapter_id,
+            input.task_type,
+            input.status,
+            input.runtime_mode,
+            input.provider,
+            input.model_name,
+            input.input_summary,
+            input.started_at,
+            input.created_at,
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    get_ai_task_record_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6, duration_ms = ?7, finished_at = ?8 WHERE id = ?9",
+        params![
+            input.result_text,
+            input.prompt_snapshot,
+            input.result_json,
+            input.token_input,
+            input.token_output,
+            input.token_total,
+            input.duration_ms,
+            input.finished_at,
+            id,
+        ],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn mark_ai_task_failed(id: String, error_message: String, finished_at: String, duration_ms: Option<i64>) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE ai_task_records SET status = 'failed', error_message = ?1, duration_ms = ?2, finished_at = ?3 WHERE id = ?4",
+        params![error_message, duration_ms, finished_at, id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_ai_task_records(page: Option<i64>, size: Option<i64>) -> Result<Vec<AiTaskRecordDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let page = page.unwrap_or(1).max(1);
+    let size = size.unwrap_or(20).clamp(1, 500);
+    let offset = (page - 1) * size;
+    let sql = format!("{} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2", ai_task_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let result = stmt.query_map(params![size, offset], map_ai_task_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
+
+#[tauri::command]
+pub fn count_ai_task_records() -> Result<i64, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.query_row("SELECT COUNT(*) FROM ai_task_records", [], |row| row.get(0))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_ai_task_records_by_chapter_id(chapter_id: String) -> Result<Vec<AiTaskRecordDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let sql = format!("{} WHERE chapter_id = ?1 ORDER BY created_at DESC", ai_task_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let result = stmt.query_map(params![chapter_id], map_ai_task_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
+
+#[tauri::command]
+pub fn get_ai_task_records_by_novel_id(novel_id: String) -> Result<Vec<AiTaskRecordDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let sql = format!("{} WHERE novel_id = ?1 ORDER BY created_at DESC", ai_task_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let result = stmt.query_map(params![novel_id], map_ai_task_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
+
+fn get_ai_task_record_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<AiTaskRecordDto, String> {
+    let sql = format!("{} WHERE id = ?1", ai_task_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], map_ai_task_row).map_err(|e| e.to_string())
+}
+
 // Optional helper for QueryRow
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;

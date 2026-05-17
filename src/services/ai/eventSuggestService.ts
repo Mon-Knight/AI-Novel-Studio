@@ -8,6 +8,7 @@ import { novelRepository } from '../database/novelRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
 import type { Character } from '../../types/character';
+import { safeJsonParse } from './jsonUtils';
 
 export interface EventSuggestion {
   title: string;
@@ -17,23 +18,14 @@ export interface EventSuggestion {
   impact?: string;
   risk?: string;
   mustHappen?: boolean;
-}
-
-function safeJsonParse<T>(text: string, fallback: T): T {
-  try {
-    let json = text.trim();
-    const m = json.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (m) json = m[1].trim();
-    return JSON.parse(json) as T;
-  } catch {
-    return fallback;
-  }
+  rawText?: string;
 }
 
 export const eventSuggestService = {
   async suggestEvents(input: {
     novelId: string;
     chapterId: string;
+    chapterTitle?: string;
     chapterOutline: string;
     characters: Character[];
     previousSummary?: string;
@@ -62,7 +54,7 @@ export const eventSuggestService = {
       novelTitle: novel?.title || '未命名作品',
       novelGenre: novel?.genre,
       protagonist: novel?.protagonistName,
-      chapterTitle: input.chapterOutline.slice(0, 50) || '未命名章节',
+      chapterTitle: input.chapterTitle || input.chapterOutline.slice(0, 50) || '未命名章节',
       chapterOutline: input.chapterOutline,
       volumeGoal,
       previousContext: input.previousSummary || previousContext,
@@ -80,7 +72,7 @@ export const eventSuggestService = {
     }).catch(() => null);
 
     try {
-      const client = createAiClient();
+      const client = createAiClient(settings);
       const response = await client.generate(request);
       const text = response.text || '';
 
@@ -91,6 +83,7 @@ export const eventSuggestService = {
           resultText: `推荐了 ${parsed.events.length} 个候选事件`,
           tokenInput: response.tokenInput,
           tokenOutput: response.tokenOutput,
+          tokenTotal: response.tokenTotal,
         });
         return parsed.events.map((e) => ({
           ...e,
@@ -100,9 +93,17 @@ export const eventSuggestService = {
       }
 
       await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: '模型返回格式不规范',
+        resultText: '模型返回格式不规范，已展示原始文本',
+        tokenInput: response.tokenInput,
+        tokenOutput: response.tokenOutput,
+        tokenTotal: response.tokenTotal,
       });
-      return [];
+      return [{
+        title: 'AI 原始返回',
+        description: text.slice(0, 1000),
+        rawText: text,
+        mustHappen: false,
+      }];
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : '事件推荐失败';
       if (task) await aiTaskService.markFailed(task.id, msg);

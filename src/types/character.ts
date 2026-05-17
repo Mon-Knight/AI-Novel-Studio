@@ -53,4 +53,5 @@ export interface CharacterCandidate {
   name: string; roleType?: string; identity?: string; faction?: string;
   relationToProtagonist?: string; goal?: string; personality?: string;
   behaviorLimits?: string; forbiddenBehaviors?: string; currentState?: string; chapterFunction?: string;
+  rawText?: string;
 }

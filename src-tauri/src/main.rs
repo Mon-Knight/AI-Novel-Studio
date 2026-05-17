@@ -4,6 +4,7 @@
 )]
 
 mod commands;
+mod ai;
 mod db;
 
 fn main() {
@@ -40,6 +41,14 @@ fn main() {
             commands::update_chapter_draft,
             commands::adopt_chapter_draft,
             commands::delete_chapter_draft,
+            commands::create_ai_task_record,
+            commands::mark_ai_task_succeeded,
+            commands::mark_ai_task_failed,
+            commands::get_ai_task_records,
+            commands::count_ai_task_records,
+            commands::get_ai_task_records_by_chapter_id,
+            commands::get_ai_task_records_by_novel_id,
+            ai::ai_chat_completion,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

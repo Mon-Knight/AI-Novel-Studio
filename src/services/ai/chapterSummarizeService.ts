@@ -1,31 +1,95 @@
 /**
- * AI Novel Studio - AI 章节总结（模拟版）
+ * AI Novel Studio - AI chapter context summarization.
  */
 import type { ChapterSummarizeResult, SummarizeAdoptedChapterInput } from '../../types/chapterSummary';
+import type { ContextRecordType } from '../../types/context';
+import { createAiClient, aiSettingsService } from './aiClient';
+import { aiTaskService } from './aiTaskService';
+import { buildChapterSummarizePrompt } from './promptBuilder';
+import { safeJsonParse } from './jsonUtils';
+import { novelRepository } from '../database/novelRepository';
 
-function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
+function normalizeImportance(value: unknown): 1 | 2 | 3 | 4 | 5 {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 3;
+  return Math.min(5, Math.max(1, n)) as 1 | 2 | 3 | 4 | 5;
+}
+
+function normalizeContextType(value: unknown): ContextRecordType {
+  const allowed: ContextRecordType[] = ['chapter_summary', 'volume_summary', 'character_state', 'foreshadow', 'rule', 'relationship', 'plot_progress', 'other'];
+  return allowed.includes(value as ContextRecordType) ? value as ContextRecordType : 'other';
+}
+
+function normalizeResult(result: Partial<ChapterSummarizeResult>, fallbackText: string): ChapterSummarizeResult {
+  return {
+    summary: result.summary?.trim() || fallbackText.slice(0, 800) || '模型返回了空总结。',
+    keyEvents: Array.isArray(result.keyEvents) ? result.keyEvents.map(String).filter(Boolean) : [],
+    characterChanges: Array.isArray(result.characterChanges) ? result.characterChanges.map((item: any) => ({
+      characterName: String(item.characterName || item.name || '未命名角色'),
+      characterId: typeof item.characterId === 'string' ? item.characterId : undefined,
+      stateSummary: String(item.stateSummary || item.summary || ''),
+      relationshipChanges: item.relationshipChanges ? String(item.relationshipChanges) : undefined,
+      goalChanges: item.goalChanges ? String(item.goalChanges) : undefined,
+      location: item.location ? String(item.location) : undefined,
+      healthState: item.healthState ? String(item.healthState) : undefined,
+      knowledgeState: item.knowledgeState ? String(item.knowledgeState) : undefined,
+    })).filter((item) => item.stateSummary) : [],
+    relationshipChanges: Array.isArray(result.relationshipChanges) ? result.relationshipChanges.map((item: any) => ({
+      fromCharacterName: String(item.fromCharacterName || item.from || ''),
+      toCharacterName: String(item.toCharacterName || item.to || ''),
+      change: String(item.change || ''),
+    })).filter((item) => item.fromCharacterName || item.toCharacterName || item.change) : [],
+    newForeshadows: Array.isArray(result.newForeshadows) ? result.newForeshadows.map(String).filter(Boolean) : [],
+    resolvedForeshadows: Array.isArray(result.resolvedForeshadows) ? result.resolvedForeshadows.map(String).filter(Boolean) : [],
+    nextChapterHints: result.nextChapterHints?.trim() || '',
+    contextRecords: Array.isArray(result.contextRecords) ? result.contextRecords.map((item: any) => ({
+      contextType: normalizeContextType(item.contextType),
+      title: String(item.title || '上下文记录'),
+      content: String(item.content || ''),
+      importance: normalizeImportance(item.importance),
+    })).filter((item) => item.content) : [],
+  };
+}
 
 export const chapterSummarizeService = {
   async summarize(input: SummarizeAdoptedChapterInput): Promise<ChapterSummarizeResult> {
-    await sleep(1000);
-    return {
-      summary: `本章「${input.chapterTitle}」中，主角完成了关键剧情推进。${input.chapterOutline ? '按照大纲设定，' + input.chapterOutline.slice(0, 60) + '……' : ''}本章核心事件在于角色在关键场景中做出选择，为后续剧情埋下伏笔。`,
-      keyEvents: ['主角抵达关键场景', '与对立角色发生冲突', '做出关键决策'],
-      characterChanges: [
-        { characterName: '主角', stateSummary: '经历本章事件后，对周围环境有了更深认识，开始意识到隐藏的线索。', relationshipChanges: '与同伴的信任关系有所加深。', goalChanges: '短期目标更加明确。', healthState: '轻微疲惫', knowledgeState: '获得关键情报线索' },
-      ],
-      relationshipChanges: [
-        { fromCharacterName: '主角', toCharacterName: '主要配角', change: '信任度上升，从陌生人变为临时盟友' },
-      ],
-      newForeshadows: ['主角的特殊能力可能与主线阴谋有关', '某角色对主角的真实身份有所察觉'],
-      resolvedForeshadows: [],
-      nextChapterHints: '下一章可以推进主角的调查，揭示本章伏笔的一角，同时保持更多线索隐藏。',
-      contextRecords: [
-        { contextType: 'chapter_summary', title: `${input.chapterTitle}摘要`, content: `本章核心：${input.chapterOutline?.slice(0, 80) || '主线推进'}。主角在关键场景做出决策，获得重要线索。`, importance: 5 },
-        { contextType: 'character_state', title: '主角状态更新', content: '主角短期目标更为明确，对周围环境提高了警觉，获得关键情报线索。', importance: 4 },
-        { contextType: 'foreshadow', title: '能力与主线关联', content: '主角的特殊能力可能与主线阴谋存在深层联系，后续需要继续推进此线索。', importance: 4 },
-        { contextType: 'plot_progress', title: '剧情进度', content: '本章推进了主线剧情的一环，主要角色关系开始转变。', importance: 3 },
-      ],
-    };
+    const settings = aiSettingsService.getSettings();
+    const novel = await novelRepository.getById(input.novelId).catch(() => null);
+    const request = buildChapterSummarizePrompt({
+      novelTitle: novel?.title,
+      chapterTitle: input.chapterTitle,
+      chapterOutline: input.chapterOutline,
+      adoptedContent: input.adoptedContent,
+      chapterCharacters: input.chapterCharacters,
+      chapterEvents: input.chapterEvents,
+    });
+
+    const task = await aiTaskService.create('context_summarize', {
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      runtimeMode: settings.runtimeMode,
+      provider: settings.provider,
+      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+      inputSummary: `总结章节「${input.chapterTitle}」`,
+    }).catch(() => null);
+
+    try {
+      const client = createAiClient(settings);
+      const response = await client.generate(request);
+      const parsed = safeJsonParse<Partial<ChapterSummarizeResult>>(response.text, {});
+      const result = normalizeResult(parsed, response.text);
+
+      await aiTaskService.markSucceeded(task?.id || '', {
+        resultText: result.summary,
+        tokenInput: response.tokenInput,
+        tokenOutput: response.tokenOutput,
+        tokenTotal: response.tokenTotal,
+      });
+
+      return result;
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '章节总结失败';
+      if (task) await aiTaskService.markFailed(task.id, message);
+      throw e;
+    }
   },
 };

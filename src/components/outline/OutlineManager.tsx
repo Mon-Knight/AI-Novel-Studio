@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
+import { settingRepository } from '../../services/database/settingRepository';
 import { createVolumeForNovel, createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
+import { outlineGenerateService, type ChapterOutlineCandidate, type VolumeOutlineCandidate } from '../../services/ai/outlineGenerateService';
 import VolumeCard from './VolumeCard';
 import VolumeFormModal from './VolumeFormModal';
 import ChapterFormModal from './ChapterFormModal';
@@ -22,6 +24,10 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   const [targetVolumeId, setTargetVolumeId] = useState<string | undefined>(undefined);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState('');
+  const [novelOutline, setNovelOutline] = useState('');
+  const [volumeCandidate, setVolumeCandidate] = useState<VolumeOutlineCandidate | null>(null);
+  const [chapterCandidates, setChapterCandidates] = useState<ChapterOutlineCandidate[]>([]);
 
   const loadData = useCallback(async () => {
     try {
@@ -129,6 +135,112 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     flash('章节已删除');
   };
 
+  const handleGenerateNovelOutline = async () => {
+    setAiLoading('novel');
+    setNovelOutline('');
+    setVolumeCandidate(null);
+    setChapterCandidates([]);
+    try {
+      setNovelOutline(await outlineGenerateService.generateNovelOutline(novelId));
+      flash('AI 作品总大纲已生成，请确认后保存');
+    } catch (e: any) {
+      flash('AI 作品总大纲生成失败：' + (e?.message || '未知错误'));
+    } finally {
+      setAiLoading('');
+    }
+  };
+
+  const handleSaveNovelOutline = async () => {
+    if (!novelOutline.trim()) return;
+    await settingRepository.saveWorldSetting(null, {
+      novelId,
+      title: 'AI 作品总大纲',
+      content: novelOutline,
+      isActive: false,
+    });
+    setNovelOutline('');
+    flash('作品总大纲已保存到设定库');
+  };
+
+  const handleGenerateVolumeOutline = async () => {
+    const target = volumes.find((volume) => volume.id === targetVolumeId);
+    setAiLoading('volume');
+    setVolumeCandidate(null);
+    setChapterCandidates([]);
+    try {
+      setVolumeCandidate(await outlineGenerateService.generateVolumeOutline({
+        novelId,
+        volumeTitle: target?.title,
+      }));
+      flash('AI 分卷大纲已生成，请确认后保存');
+    } catch (e: any) {
+      flash('AI 分卷大纲生成失败：' + (e?.message || '未知错误'));
+    } finally {
+      setAiLoading('');
+    }
+  };
+
+  const handleSaveVolumeCandidate = async () => {
+    if (!volumeCandidate) return;
+    if (targetVolumeId) {
+      await volumeRepository.update(targetVolumeId, {
+        title: volumeCandidate.title,
+        summary: volumeCandidate.summary,
+        goal: volumeCandidate.goal,
+        mainConflict: volumeCandidate.mainConflict,
+      });
+    } else {
+      await createVolumeForNovel(novelId, volumeCandidate.title, {
+        summary: volumeCandidate.summary,
+        goal: volumeCandidate.goal,
+        mainConflict: volumeCandidate.mainConflict,
+      });
+    }
+    setVolumeCandidate(null);
+    await loadData();
+    flash('分卷大纲已保存');
+  };
+
+  const handleGenerateChapterOutlines = async () => {
+    const volumeId = targetVolumeId || volumes[0]?.id;
+    setAiLoading('chapters');
+    setChapterCandidates([]);
+    try {
+      setChapterCandidates(await outlineGenerateService.generateChapterOutlines({
+        novelId,
+        volumeId,
+        chapterCount: 6,
+      }));
+      flash('AI 章节大纲已生成，请逐条确认保存');
+    } catch (e: any) {
+      flash('AI 章节大纲生成失败：' + (e?.message || '未知错误'));
+    } finally {
+      setAiLoading('');
+    }
+  };
+
+  const handleSaveChapterCandidate = async (candidate: ChapterOutlineCandidate) => {
+    let volumeId = targetVolumeId || volumes[0]?.id || '';
+    if (!volumeId) {
+      const created = await createFirstVolumeAndChapter(novelId, {
+        chapterTitle: candidate.title,
+        outline: candidate.outline,
+        goal: candidate.goal,
+        targetWordCount: candidate.targetWordCount,
+      });
+      volumeId = created.chapter.volumeId || '';
+    } else {
+      await createChapterInVolume(novelId, volumeId, candidate.title, {
+        outline: candidate.outline,
+        goal: candidate.goal,
+        targetWordCount: candidate.targetWordCount,
+      });
+    }
+    setChapterCandidates((prev) => prev.filter((item) => item !== candidate));
+    await loadData();
+    flash('章节大纲已保存为新章节');
+  };
+
   if (loading) {
     return <div className="text-sm text-muted" style={{ padding: 16 }}>加载中...</div>;
   }
@@ -151,6 +263,63 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
           {message}
         </div>
       )}
+
+      <div className="detail-card" style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>AI 大纲生成</div>
+          <select className="panel-select" value={targetVolumeId || ''} onChange={(e) => setTargetVolumeId(e.target.value || undefined)} style={{ minWidth: 180 }}>
+            <option value="">默认分卷/新分卷</option>
+            {volumes.map((volume) => <option key={volume.id} value={volume.id}>{volume.title}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary btn-sm" onClick={handleGenerateNovelOutline} disabled={!!aiLoading}>
+            {aiLoading === 'novel' ? '生成中...' : '生成作品总大纲'}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={handleGenerateVolumeOutline} disabled={!!aiLoading}>
+            {aiLoading === 'volume' ? '生成中...' : '生成分卷大纲'}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={handleGenerateChapterOutlines} disabled={!!aiLoading}>
+            {aiLoading === 'chapters' ? '生成中...' : '生成章节大纲'}
+          </button>
+        </div>
+
+        {novelOutline && (
+          <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--color-border-light)', borderRadius: 6 }}>
+            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 220, overflowY: 'auto' }}>{novelOutline}</div>
+            <button className="btn btn-primary btn-sm" onClick={handleSaveNovelOutline} style={{ marginTop: 8 }}>确认保存到设定库</button>
+          </div>
+        )}
+
+        {volumeCandidate && (
+          <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--color-border-light)', borderRadius: 6 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>{volumeCandidate.title}</div>
+            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{volumeCandidate.summary}</div>
+            {volumeCandidate.goal && <div style={{ fontSize: 12, marginTop: 4 }}>目标：{volumeCandidate.goal}</div>}
+            {volumeCandidate.mainConflict && <div style={{ fontSize: 12, marginTop: 4 }}>冲突：{volumeCandidate.mainConflict}</div>}
+            <button className="btn btn-primary btn-sm" onClick={handleSaveVolumeCandidate} style={{ marginTop: 8 }}>
+              {targetVolumeId ? '确认更新分卷' : '确认创建分卷'}
+            </button>
+          </div>
+        )}
+
+        {chapterCandidates.length > 0 && (
+          <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+            {chapterCandidates.map((candidate, index) => (
+              <div key={`${candidate.title}-${index}`} style={{ padding: 10, border: '1px solid var(--color-border-light)', borderRadius: 6 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>{candidate.title}</div>
+                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{candidate.rawText || candidate.outline}</div>
+                {candidate.goal && <div style={{ fontSize: 12, marginTop: 4 }}>目标：{candidate.goal}</div>}
+                {!candidate.rawText && (
+                  <button className="btn btn-primary btn-sm" onClick={() => handleSaveChapterCandidate(candidate)} style={{ marginTop: 8 }}>
+                    确认保存为章节
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {volumes.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 32, color: 'var(--color-text-muted)', border: '1px dashed var(--color-border)', borderRadius: 8 }}>

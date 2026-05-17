@@ -5,7 +5,7 @@
 // ==================== AI 设置 ====================
 
 export type AiRuntimeMode = 'mock' | 'api';
-export type AiProvider = 'mock' | 'openai_compatible';
+export type AiProvider = 'mock' | 'deepseek' | 'openai_compatible';
 
 export interface AiSettings {
   runtimeMode: AiRuntimeMode;
@@ -36,6 +36,7 @@ export interface AiChatMessage {
 }
 
 export interface AiGenerateRequest {
+  taskType?: AiTaskType;
   messages: AiChatMessage[];
   modelName?: string;
   temperature?: number;
@@ -47,6 +48,7 @@ export interface AiGenerateResponse {
   raw?: unknown;
   tokenInput?: number;
   tokenOutput?: number;
+  tokenTotal?: number;
 }
 
 export interface AiClient {
@@ -56,6 +58,11 @@ export interface AiClient {
 // ==================== AI 任务记录 ====================
 
 export type AiTaskType =
+  | 'connection_test'
+  | 'setting_expand'
+  | 'outline_generate'
+  | 'volume_outline_generate'
+  | 'context_summarize'
   | 'setting_structure'
   | 'rule_structure'
   | 'protagonist_structure'
@@ -90,12 +97,19 @@ export interface AiTaskRecord {
   errorMessage?: string;
   tokenInput?: number;
   tokenOutput?: number;
+  tokenTotal?: number;
+  durationMs?: number;
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;
 }
 
 export const AiTaskTypeLabels: Record<AiTaskType, string> = {
+  connection_test: '连接测试',
+  setting_expand: '设定补充',
+  outline_generate: '作品大纲生成',
+  volume_outline_generate: '分卷大纲生成',
+  context_summarize: '上下文总结',
   setting_structure: '设定整理',
   rule_structure: '规则整理',
   protagonist_structure: '主角设定',

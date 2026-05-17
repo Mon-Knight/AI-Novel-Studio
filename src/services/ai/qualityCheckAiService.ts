@@ -7,17 +7,7 @@ import { aiTaskService } from './aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import type { QualityCheckResult, RunQualityCheckInput } from '../../types/qualityCheck';
-
-function safeJsonParse<T>(text: string, fallback: T): T {
-  try {
-    let json = text.trim();
-    const m = json.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (m) json = m[1].trim();
-    return JSON.parse(json) as T;
-  } catch {
-    return fallback;
-  }
-}
+import { safeJsonParse } from './jsonUtils';
 
 export const qualityCheckAiService = {
   async runCheck(input: RunQualityCheckInput): Promise<QualityCheckResult> {
@@ -54,7 +44,7 @@ export const qualityCheckAiService = {
     }).catch(() => null);
 
     try {
-      const client = createAiClient();
+      const client = createAiClient(settings);
       const response = await client.generate(request);
       const text = response.text || '';
 
@@ -68,6 +58,7 @@ export const qualityCheckAiService = {
         resultText: `评分 ${parsed.overallScore}，发现 ${parsed.items?.length || 0} 个问题`,
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
+        tokenTotal: response.tokenTotal,
       });
 
       return parsed;

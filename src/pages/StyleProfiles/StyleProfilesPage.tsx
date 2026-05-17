@@ -5,7 +5,6 @@ import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
 import { importedAssetService } from '../../services/styles/importedAssetService';
 import { analyzeStyle } from '../../services/styles/styleAnalyzeService';
-import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { StyleProfile, StyleAnalyzeResult } from '../../types/style';
 import type { OutputProfile } from '../../types/output';
 import type { ImportedAsset } from '../../types/importedAsset';
@@ -80,7 +79,6 @@ function StyleProfilesPage() {
     if (!analyzeText.trim()) return setAnalyzeError('请输入参考文本');
     setAnalyzing(true); setAnalyzeError(''); setAnalyzeResult(null);
     try {
-      await aiTaskService.create('style_analyze', { inputSummary: '风格分析' });
       const result = await analyzeStyle(analyzeText);
       setAnalyzeResult(result);
       setStyleForm({ name: result.name || '分析结果', narrativePerspective: result.narrativePerspective || '', tone: result.tone || '', pace: result.pace || '', sentenceStyle: result.sentenceStyle || '', dialogueRatio: Math.round((result.dialogueRatio || 0.35) * 100), descriptionRatio: Math.round((result.descriptionRatio || 0.4) * 100), styleSummary: result.styleSummary || '' });

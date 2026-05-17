@@ -79,6 +79,37 @@ export interface PolishPromptContext {
   styleProfile?: string;
 }
 
+export interface ChapterSummarizePromptContext {
+  novelTitle?: string;
+  chapterTitle: string;
+  chapterOutline?: string;
+  adoptedContent: string;
+  chapterCharacters?: string;
+  chapterEvents?: string;
+}
+
+export interface OutlineGeneratePromptContext {
+  novelTitle: string;
+  novelGenre?: string;
+  description?: string;
+  worldBackground?: string;
+  ruleSystems?: string;
+  protagonist?: string;
+  specialAbility?: string;
+  existingVolumes?: string;
+  existingChapters?: string;
+}
+
+export interface VolumeOutlineGeneratePromptContext extends OutlineGeneratePromptContext {
+  volumeTitle?: string;
+}
+
+export interface ChapterOutlineGeneratePromptContext extends OutlineGeneratePromptContext {
+  volumeTitle?: string;
+  volumeSummary?: string;
+  chapterCount?: number;
+}
+
 // ==================== 提示词构建器 ====================
 
 function systemPrompt(text: string): AiChatMessage {
@@ -123,6 +154,7 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
   ].filter(Boolean).join('\n');
 
   return {
+    taskType: 'chapter_generate',
     messages: [systemPrompt(system), userPrompt(`请开始写《${ctx.chapterTitle}》的正文。`)],
     maxTokens: ctx.targetWordCount > 6000 ? 12000 : 8000,
   };
@@ -169,7 +201,7 @@ export function buildCharacterGeneratePrompt(ctx: CharacterGeneratePromptContext
     '```',
   ].filter(Boolean).join('\n');
 
-  return { messages: [systemPrompt(system), userPrompt('请为本章推荐候选角色。')], maxTokens: 4000 };
+  return { taskType: 'character_generate', messages: [systemPrompt(system), userPrompt('请为本章推荐候选角色。')], maxTokens: 4000 };
 }
 
 /** 构建事件推荐请求 */
@@ -208,7 +240,7 @@ export function buildEventSuggestPrompt(ctx: EventSuggestPromptContext): AiGener
     '```',
   ].filter(Boolean).join('\n');
 
-  return { messages: [systemPrompt(system), userPrompt('请为本章推荐关键事件。')], maxTokens: 4000 };
+  return { taskType: 'event_suggest', messages: [systemPrompt(system), userPrompt('请为本章推荐关键事件。')], maxTokens: 4000 };
 }
 
 /** 构建设定补充请求 */
@@ -242,7 +274,7 @@ export function buildSettingExpandPrompt(ctx: SettingExpandPromptContext): AiGen
     '```',
   ].filter(Boolean).join('\n');
 
-  return { messages: [systemPrompt(system), userPrompt('请为本章补充相关设定。')], maxTokens: 5000 };
+  return { taskType: 'setting_expand', messages: [systemPrompt(system), userPrompt('请为本章补充相关设定。')], maxTokens: 5000 };
 }
 
 /** 构建质量检查请求 */
@@ -282,7 +314,7 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
     ctx.draftContent.slice(0, 8000),
   ].filter(Boolean).join('\n');
 
-  return { messages: [systemPrompt(system), userPrompt('请对以上正文进行质量检查。')], maxTokens: 6000 };
+  return { taskType: 'quality_check', messages: [systemPrompt(system), userPrompt('请对以上正文进行质量检查。')], maxTokens: 6000 };
 }
 
 /** 构建润色请求 */
@@ -321,12 +353,119 @@ export function buildChapterPolishPrompt(ctx: PolishPromptContext): AiGenerateRe
     ctx.draftContent.slice(0, 8000),
   ].filter(Boolean).join('\n');
 
-  return { messages: [systemPrompt(system), userPrompt('请对以上正文进行润色。')], maxTokens: 8000 };
+  return { taskType: 'chapter_polish', messages: [systemPrompt(system), userPrompt('请对以上正文进行润色。')], maxTokens: 8000 };
+}
+
+/** 构建章节总结请求 */
+export function buildChapterSummarizePrompt(ctx: ChapterSummarizePromptContext): AiGenerateRequest {
+  const system = [
+    '你是长篇小说上下文整理助手。请从已采用的章节正文中提炼后续创作必须记住的信息。',
+    '',
+    ctx.novelTitle ? `作品：${ctx.novelTitle}` : '',
+    `章节：${ctx.chapterTitle}`,
+    ctx.chapterOutline ? `章节大纲：${ctx.chapterOutline}` : '',
+    ctx.chapterCharacters ? `本章角色：\n${ctx.chapterCharacters}` : '',
+    ctx.chapterEvents ? `本章事件：\n${ctx.chapterEvents}` : '',
+    '',
+    '请严格返回 JSON，不要输出解释文字：',
+    '```json',
+    '{',
+    '  "summary": "本章摘要，一段话",',
+    '  "keyEvents": ["关键事件1", "关键事件2"],',
+    '  "characterChanges": [',
+    '    { "characterName": "角色名", "stateSummary": "状态变化", "relationshipChanges": "关系变化", "goalChanges": "目标变化", "location": "位置", "healthState": "健康状态", "knowledgeState": "掌握的信息" }',
+    '  ],',
+    '  "relationshipChanges": [',
+    '    { "fromCharacterName": "角色A", "toCharacterName": "角色B", "change": "关系变化" }',
+    '  ],',
+    '  "newForeshadows": ["新伏笔"],',
+    '  "resolvedForeshadows": ["已回收伏笔"],',
+    '  "nextChapterHints": "下一章承接建议",',
+    '  "contextRecords": [',
+    '    { "contextType": "chapter_summary", "title": "记录标题", "content": "需要长期记住的内容", "importance": 4 }',
+    '  ]',
+    '}',
+    '```',
+    '',
+    '已采用正文：',
+    ctx.adoptedContent.slice(0, 10000),
+  ].filter(Boolean).join('\n');
+
+  return { taskType: 'context_summarize', messages: [systemPrompt(system), userPrompt('请总结本章上下文。')], maxTokens: 5000 };
+}
+
+/** 构建作品总大纲请求 */
+export function buildOutlineGeneratePrompt(ctx: OutlineGeneratePromptContext): AiGenerateRequest {
+  const system = [
+    '你是长篇小说大纲策划。请基于作品基础信息生成可执行的作品总大纲。',
+    `作品：${ctx.novelTitle}`,
+    ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
+    ctx.description ? `简介：${ctx.description}` : '',
+    ctx.worldBackground ? `世界背景：${ctx.worldBackground}` : '',
+    ctx.ruleSystems ? `规则体系：${ctx.ruleSystems}` : '',
+    ctx.protagonist ? `主角：${ctx.protagonist}` : '',
+    ctx.specialAbility ? `主角特殊能力：${ctx.specialAbility}` : '',
+    ctx.existingVolumes ? `已有分卷：\n${ctx.existingVolumes}` : '',
+    ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
+    '',
+    '请返回完整作品总大纲，包含主线、阶段目标、主要冲突、分卷规划和章节方向。可以使用 Markdown，但不要写无关说明。',
+  ].filter(Boolean).join('\n');
+
+  return { taskType: 'outline_generate', messages: [systemPrompt(system), userPrompt('请生成作品总大纲。')], maxTokens: 8000 };
+}
+
+/** 构建分卷大纲请求 */
+export function buildVolumeOutlineGeneratePrompt(ctx: VolumeOutlineGeneratePromptContext): AiGenerateRequest {
+  const system = [
+    '你是长篇小说分卷策划。请生成一个分卷大纲，要求能直接保存到分卷摘要、目标和主冲突中。',
+    `作品：${ctx.novelTitle}`,
+    ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
+    ctx.description ? `简介：${ctx.description}` : '',
+    ctx.worldBackground ? `世界背景：${ctx.worldBackground}` : '',
+    ctx.protagonist ? `主角：${ctx.protagonist}` : '',
+    ctx.volumeTitle ? `目标分卷：${ctx.volumeTitle}` : '',
+    ctx.existingVolumes ? `已有分卷：\n${ctx.existingVolumes}` : '',
+    ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
+    '',
+    '请严格返回 JSON，不要输出解释文字：',
+    '```json',
+    '{ "title": "分卷标题", "summary": "分卷摘要", "goal": "分卷目标", "mainConflict": "主要冲突" }',
+    '```',
+  ].filter(Boolean).join('\n');
+
+  return { taskType: 'volume_outline_generate', messages: [systemPrompt(system), userPrompt('请生成分卷大纲。')], maxTokens: 4000 };
+}
+
+/** 构建章节大纲请求 */
+export function buildChapterOutlineGeneratePrompt(ctx: ChapterOutlineGeneratePromptContext): AiGenerateRequest {
+  const system = [
+    '你是长篇小说章节大纲策划。请为当前分卷生成多个可执行章节大纲。',
+    `作品：${ctx.novelTitle}`,
+    ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
+    ctx.description ? `简介：${ctx.description}` : '',
+    ctx.worldBackground ? `世界背景：${ctx.worldBackground}` : '',
+    ctx.protagonist ? `主角：${ctx.protagonist}` : '',
+    ctx.volumeTitle ? `分卷：${ctx.volumeTitle}` : '',
+    ctx.volumeSummary ? `分卷摘要：${ctx.volumeSummary}` : '',
+    ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
+    '',
+    `请生成 ${ctx.chapterCount || 6} 个章节候选。严格返回 JSON，不要输出解释文字：`,
+    '```json',
+    '{',
+    '  "chapters": [',
+    '    { "title": "章节标题", "outline": "章节大纲", "goal": "本章目标", "targetWordCount": 4000 }',
+    '  ]',
+    '}',
+    '```',
+  ].filter(Boolean).join('\n');
+
+  return { taskType: 'chapter_outline_generate', messages: [systemPrompt(system), userPrompt('请生成章节大纲。')], maxTokens: 7000 };
 }
 
 /** 构建连接测试请求 */
 export function buildConnectionTestPrompt(): AiGenerateRequest {
   return {
+    taskType: 'connection_test',
     messages: [
       systemPrompt('You are an AI assistant. Reply with "OK" only.'),
       userPrompt('hi'),

@@ -32,7 +32,7 @@ function SettingsPage() {
     // 保存前确保 mockMode 与 runtimeMode 一致
     const final = { ...settings, mockMode: settings.runtimeMode === 'mock' };
     aiSettingsService.saveSettings(final);
-    setSettings(final);
+    setSettings(aiSettingsService.getSettings());
     setMessage('✅ AI 设置已保存');
     setTimeout(() => setMessage(''), 2000);
   };
@@ -59,6 +59,7 @@ function SettingsPage() {
       // 保持 mockMode 与 runtimeMode 同步
       if ('runtimeMode' in patch) {
         next.mockMode = next.runtimeMode === 'mock';
+        next.provider = next.runtimeMode === 'mock' ? 'mock' : (next.provider === 'mock' ? 'openai_compatible' : next.provider);
       }
       return next;
     });
@@ -108,6 +109,20 @@ function SettingsPage() {
               🔧 API 接口配置{settings.runtimeMode === 'mock' ? '（Mock 模式下可选）' : '（必填）'}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <label className="panel-field-label">Provider</label>
+                <select
+                  className="panel-select"
+                  value={settings.runtimeMode === 'mock' ? 'mock' : settings.provider}
+                  onChange={(e) => update({ provider: e.target.value as AiSettings['provider'] })}
+                  disabled={settings.runtimeMode === 'mock'}
+                  style={{ width: '100%' }}
+                >
+                  <option value="mock" disabled={settings.runtimeMode === 'api'}>mock</option>
+                  <option value="deepseek">deepseek</option>
+                  <option value="openai_compatible">openai_compatible</option>
+                </select>
+              </div>
               <div>
                 <label className="panel-field-label">API Base URL {settings.runtimeMode === 'api' && <span style={{ color: 'var(--color-error)' }}>*</span>}</label>
                 <input type="text" className="form-input" value={settings.baseUrl}

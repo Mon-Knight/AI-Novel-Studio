@@ -39,7 +39,8 @@ function CharactersPanel({ novelId, chapter, onGenerated, onAdopted }: Character
     try {
       const list = await characterGenerateService.generateCandidates({
         novelId, chapterId: chapter.id,
-        chapterOutline: chapter.title,
+        chapterTitle: chapter.title,
+        chapterOutline: chapter.outline || chapter.goal || chapter.title,
         existingCharacters: characters,
       });
       setCandidates(list);
@@ -164,14 +165,17 @@ function CharactersPanel({ novelId, chapter, onGenerated, onAdopted }: Character
               </div>
               {candidate.goal && <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>目标：{candidate.goal}</div>}
               {candidate.chapterFunction && <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>本章作用：{candidate.chapterFunction}</div>}
+              {candidate.rawText && <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap', marginTop: 4 }}>{candidate.rawText}</div>}
             </div>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => handleConfirmCandidate(candidate)}
-              disabled={characters.some((c) => c.name === candidate.name)}
-            >
-              ✅ 确认入库
-            </button>
+            {!candidate.rawText && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => handleConfirmCandidate(candidate)}
+                disabled={characters.some((c) => c.name === candidate.name)}
+              >
+                ✅ 确认入库
+              </button>
+            )}
           </div>
         ))}
         {candidates.length === 0 && !loading && (

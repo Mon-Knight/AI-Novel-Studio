@@ -1,25 +1,25 @@
 /**
  * AI Novel Studio - AI Client 工厂
  */
-import type { AiClient } from '../../types/ai';
+import type { AiClient, AiSettings } from '../../types/ai';
 import { MockAiClient } from './mockAiClient';
 import { RealAiClient } from './realAiClient';
 import { aiSettingsService } from './aiSettingsService';
 
-export function createAiClient(): AiClient {
-  const settings = aiSettingsService.getSettings();
+export function createAiClient(settings?: AiSettings): AiClient {
+  const resolvedSettings = settings ?? aiSettingsService.getSettings();
 
-  if (settings.runtimeMode === 'mock' || settings.mockMode) {
+  if (resolvedSettings.runtimeMode === 'mock') {
     return new MockAiClient();
   }
 
   return new RealAiClient({
-    baseUrl: settings.baseUrl,
-    apiKey: settings.apiKey,
-    modelName: settings.modelName,
-    temperature: settings.temperature,
-    maxTokens: settings.maxTokens,
-    timeoutSeconds: settings.timeoutSeconds,
+    baseUrl: resolvedSettings.baseUrl,
+    apiKey: resolvedSettings.apiKey,
+    modelName: resolvedSettings.modelName,
+    temperature: resolvedSettings.temperature,
+    maxTokens: resolvedSettings.maxTokens,
+    timeoutSeconds: resolvedSettings.timeoutSeconds,
   });
 }
 
