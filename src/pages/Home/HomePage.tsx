@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { novelRepository } from '../../services/database/novelRepository';
 import NovelCard from '../../components/novel-card/NovelCard';
 import FirstTimeGuide from '../../components/common/FirstTimeGuide';
+import ImportTxtDialog from '../../components/import/ImportTxtDialog';
+import ImportJsonDialog from '../../components/import/ImportJsonDialog';
 import type { Novel } from '../../types/novel';
 import '../../styles/home.css';
 
 const quickActions = [
-  { icon: '📥', label: '导入作品', path: '/coming-soon?from=import-novel' },
-  { icon: '📄', label: '导入 TXT', path: '/coming-soon?from=import-txt' },
-  { icon: '📋', label: '导入 JSON', path: '/coming-soon?from=import-json' },
-  { icon: '🎨', label: '模板中心', path: '/coming-soon?from=templates' },
+  { icon: '📄', label: '导入 TXT', action: 'import-txt' as const },
+  { icon: '📋', label: '导入 JSON', action: 'import-json' as const },
+  { icon: '🎨', label: '模板中心', path: '/templates' },
 ];
 
 function HomePage() {
@@ -22,6 +23,8 @@ function HomePage() {
   const [newDesc, setNewDesc] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [showTxtImport, setShowTxtImport] = useState(false);
+  const [showJsonImport, setShowJsonImport] = useState(false);
 
   const loadNovels = useCallback(async () => {
     try {
@@ -84,7 +87,14 @@ function HomePage() {
           <div className="qa-label" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>新建作品</div>
         </div>
         {quickActions.map((action) => (
-          <div key={action.label} className="quick-action-card" onClick={() => navigate(action.path)}>
+          <div key={action.label} className="quick-action-card" onClick={() => {
+            if ('action' in action) {
+              if (action.action === 'import-txt') setShowTxtImport(true);
+              else if (action.action === 'import-json') setShowJsonImport(true);
+            } else if ('path' in action) {
+              navigate(action.path);
+            }
+          }}>
             <div className="qa-icon">{action.icon}</div>
             <div className="qa-label">{action.label}</div>
           </div>
@@ -153,6 +163,10 @@ function HomePage() {
           </div>
         </div>
       )}
+
+      {/* 导入弹窗 */}
+      {showTxtImport && <ImportTxtDialog onClose={() => { setShowTxtImport(false); loadNovels(); }} />}
+      {showJsonImport && <ImportJsonDialog onClose={() => { setShowJsonImport(false); loadNovels(); }} />}
     </div>
   );
 }

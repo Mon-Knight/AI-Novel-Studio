@@ -1,0 +1,132 @@
+/**
+ * AI Novel Studio - JSON 导入确认弹窗
+ */
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { novelRepository } from '../../services/database/novelRepository';
+import { styleProfileService } from '../../services/styles/styleProfileService';
+import { outputProfileService } from '../../services/styles/outputProfileService';
+import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
+import type { JsonDetectResult } from '../../services/import/jsonImportService';
+
+interface ImportJsonDialogProps {
+  onClose: () => void;
+}
+
+function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
+  const navigate = useNavigate();
+  const [step, setStep] = useState<'select' | 'confirm' | 'done'>('select');
+  const [detectResult, setDetectResult] = useState<JsonDetectResult | null>(null);
+  const [rawData, setRawData] = useState<unknown>(null);
+  const [error, setError] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [resultMsg, setResultMsg] = useState('');
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+    try {
+      const text = await file.text();
+      const data = parseJsonFile(text);
+      const result = detectJsonImportType(data);
+      setRawData(data);
+      setDetectResult(result);
+      if (result.type === 'unknown') { setError('无法识别该 JSON 格式。当前支持：AI Novel Studio 作品 JSON、风格方案、输出控制方案。'); return; }
+      setStep('confirm');
+    } catch (err: any) { setError(err.message || '解析失败'); }
+  };
+
+  const handleImport = async () => {
+    if (!detectResult || !rawData) return;
+    setImporting(true); setError('');
+    try {
+      const obj = rawData as Record<string, unknown>;
+      if (detectResult.type === 'style_profile') {
+        await styleProfileService.create({
+          name: (obj.name as string) || '导入风格',
+          sourceType: 'json_import',
+          narrativePerspective: obj.narrativePerspective as any,
+          tone: obj.tone as any, pace: obj.pace as any,
+          dialogueRatio: (obj.dialogueRatio as number) || 0.35,
+          descriptionRatio: (obj.descriptionRatio as number) || 0.4,
+          styleSummary: (obj.styleSummary as string) || '',
+        });
+        setResultMsg('风格方案导入成功！');
+      } else if (detectResult.type === 'output_profile') {
+        await outputProfileService.create({
+          name: (obj.name as string) || '导入输出方案',
+          targetWordCount: (obj.targetWordCount as number) || 4000,
+          paceLevel: obj.paceLevel as any, dialogueRatio: (obj.dialogueRatio as number) || 0.35,
+          descriptionRatio: (obj.descriptionRatio as number) || 0.4,
+          endingHookRequired: !!obj.endingHookRequired,
+        });
+        setResultMsg('输出控制方案导入成功！');
+      } else if (detectResult.type === 'ai_novel_studio_project') {
+        const novelData = obj.novel as Record<string, any>;
+        if (!novelData?.title) { setError('作品 JSON 缺少必要字段'); setImporting(false); return; }
+        const novel = await novelRepository.create({ title: novelData.title, genre: novelData.genre, description: novelData.description });
+        // v1.0.4 基础导入：仅恢复作品基本信息，完整恢复后续版本增强
+        setResultMsg(`作品「${novelData.title}」导入成功！后续版本将支持完整数据恢复。`);
+      }
+      setImporting(false); setStep('done');
+      setTimeout(() => {
+        onClose();
+        if (detectResult.type === 'style_profile' || detectResult.type === 'output_profile') navigate('/styles');
+        else navigate('/');
+      }, 1500);
+    } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }
+  };
+
+  return (
+    <>
+      <div className="modal-overlay" onClick={onClose} />
+      <div className="modal-content" style={{ maxWidth: 500, width: '90%' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>📋 导入 JSON</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+
+        {step === 'select' && (
+          <div>
+            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
+              选择 JSON 文件。支持：AI Novel Studio 完整作品 JSON、风格方案、输出控制方案。
+            </div>
+            <label style={{ display: 'block', padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+              <div style={{ fontSize: 14 }}>点击选择 JSON 文件</div>
+              <input type="file" accept=".json,.JSON" onChange={handleFileSelect} style={{ display: 'none' }} />
+            </label>
+          </div>
+        )}
+
+        {step === 'confirm' && detectResult && (
+          <div>
+            <div style={{ padding: 12, background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae6fd', marginBottom: 16, fontSize: 13 }}>
+              <div>类型：<strong>{detectResult.type === 'ai_novel_studio_project' ? '完整作品' : detectResult.type === 'style_profile' ? '风格方案' : '输出控制方案'}</strong></div>
+              {detectResult.name && <div>名称：{detectResult.name}</div>}
+              {detectResult.summary && <div>摘要：{detectResult.summary}</div>}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-secondary btn-sm" onClick={onClose}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing}>
+                {importing ? '⏳ 导入中...' : '✅ 确认导入'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'done' && (
+          <div style={{ textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>{resultMsg}</div>
+          </div>
+        )}
+
+        {error && <div style={{ padding: 8, background: '#fee2e2', borderRadius: 6, color: 'var(--color-error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
+      </div>
+    </>
+  );
+}
+
+export default ImportJsonDialog;
