@@ -474,9 +474,10 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
 }
 
 fn table_columns(conn: &Connection, table_name: &str) -> SqliteResult<Vec<String>> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table_name))?;
+    let quoted_table_name = table_name.replace('"', "\"\"");
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{}\")", quoted_table_name))?;
     let columns = stmt
-        .query_map([], |row| row.get::<_, String>(1))?
+        .query_map(rusqlite::params![], |row| row.get::<_, String>(1))?
         .collect::<SqliteResult<Vec<String>>>()?;
     Ok(columns)
 }
