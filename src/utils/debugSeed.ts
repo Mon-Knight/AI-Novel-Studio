@@ -15,10 +15,8 @@ export function seedBadNovels() {
   ];
   try {
     lsSet(key, data);
-    // eslint-disable-next-line no-console
     console.info('[debugSeed] seeded bad novels into localStorage');
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error('[debugSeed] seed failed', e);
   }
 }

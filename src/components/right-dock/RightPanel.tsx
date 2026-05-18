@@ -37,34 +37,32 @@ const panelConfig: Record<string, { title: string; component: React.FC<{ novelId
 };
 
 function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted, onChapterOutlineApplied }: RightPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
+  useEffect(() => {
+    if (!panelType) return; // 无面板时不需要监听
+    function handleDocumentMouseDown(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (panelRef.current?.contains(target)) return;
+      if (target.closest('.right-toolbar')) return;
+      onClose();
+    }
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [onClose, panelType]);
+
   if (!panelType) return null;
   const config = panelConfig[panelType];
   if (!config) return null;
 
   const PanelComponent = config.component;
-  const panelRef = useRef<HTMLDivElement>(null);
 
   // v1.0.24: 阻止面板内部所有交互事件冒泡到外部
   const stopAll = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation?.();
   };
-
-  // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
-  useEffect(() => {
-    function handleDocumentMouseDown(e: MouseEvent) {
-      const target = e.target as HTMLElement;
-      // 点击在面板内部 → 不关闭
-      if (panelRef.current?.contains(target)) return;
-      // 点击在右侧工具栏图标上 → 不关闭（由工具栏自身逻辑处理）
-      if (target.closest('.right-toolbar')) return;
-      // 其他情况 → 关闭面板
-      onClose();
-    }
-
-    document.addEventListener('mousedown', handleDocumentMouseDown, true);
-    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
-  }, [onClose]);
 
   return (
     <div className="right-panel-overlay">
