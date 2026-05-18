@@ -15,6 +15,7 @@ import { protagonistRepository } from '../database/protagonistRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { styleProfileService } from '../styles/styleProfileService';
+import { masterOutlineService, volumeOutlineService } from '../outlines/outlineService';
 
 export interface VolumeOutlineCandidate {
   title: string;
@@ -32,7 +33,7 @@ export interface ChapterOutlineCandidate {
   rawText?: string;
 }
 
-async function buildOutlineContext(novelId: string) {
+async function buildOutlineContext(novelId: string, volumeId?: string) {
   const [novel, worldSettings, ruleSystems, protagonist, volumes, chapters] = await Promise.all([
     novelRepository.getById(novelId),
     settingRepository.getWorldSettings(novelId).catch(() => []),
@@ -44,6 +45,44 @@ async function buildOutlineContext(novelId: string) {
 
   const activeWorld = worldSettings.find((item) => item.isActive) || worldSettings[0];
   const activeRules = ruleSystems.filter((item) => item.isActive);
+
+  // v1.0.35: 加载当前采用总纲
+  let activeMasterOutline: string | undefined;
+  let activeMasterOutlineId: string | undefined;
+  try {
+    const masterOutline = await masterOutlineService.getActive(novelId);
+    if (masterOutline) {
+      activeMasterOutline = masterOutline.content;
+      activeMasterOutlineId = masterOutline.id;
+    } else {
+      // 降级：读取最近更新的总纲
+      const versions = await masterOutlineService.getVersions(novelId);
+      if (versions.length > 0) {
+        activeMasterOutline = versions[0].content;
+        activeMasterOutlineId = versions[0].id;
+      }
+    }
+  } catch { /* 总纲加载失败不影响生成 */ }
+
+  // v1.0.35: 加载当前采用分卷大纲
+  let activeVolumeOutline: string | undefined;
+  let activeVolumeOutlineId: string | undefined;
+  if (volumeId) {
+    try {
+      const volumeOutline = await volumeOutlineService.getActive(novelId, volumeId);
+      if (volumeOutline) {
+        activeVolumeOutline = volumeOutline.content;
+        activeVolumeOutlineId = volumeOutline.id;
+      } else {
+        // 降级：读取最近更新的该分卷大纲
+        const versions = await volumeOutlineService.getVersions(novelId, volumeId);
+        if (versions.length > 0) {
+          activeVolumeOutline = versions[0].content;
+          activeVolumeOutlineId = versions[0].id;
+        }
+      }
+    } catch { /* 分卷大纲加载失败不影响生成 */ }
+  }
 
   // v1.0.33: 加载当前采用风格方案
   let styleSummary: string | undefined;
@@ -62,6 +101,14 @@ async function buildOutlineContext(novelId: string) {
     }
   } catch { /* 风格加载失败不影响生成 */ }
 
+  // v1.0.35: 构建上下文快照（记录使用的大纲 ID）
+  const contextSnapshot = JSON.stringify({
+    used_master_outline_id: activeMasterOutlineId || null,
+    used_volume_outline_id: activeVolumeOutlineId || null,
+    has_active_master: !!activeMasterOutline,
+    has_active_volume: !!activeVolumeOutline,
+  });
+
   return {
     novelTitle: novel?.title || '未命名作品',
     novelGenre: novel?.genre,
@@ -73,6 +120,11 @@ async function buildOutlineContext(novelId: string) {
     existingVolumes: volumes.map((item) => `- ${item.title}：${item.summary || item.goal || ''}`).join('\n'),
     existingChapters: chapters.map((item) => `- ${item.title}：${item.outline || item.goal || ''}`).join('\n').slice(0, 3000),
     styleSummary,
+    activeMasterOutline,
+    activeMasterOutlineId,
+    activeVolumeOutline,
+    activeVolumeOutlineId,
+    contextSnapshot,
   };
 }
 
@@ -109,13 +161,26 @@ export const outlineGenerateService = {
   async generateVolumeOutline(input: { novelId: string; volumeTitle?: string }): Promise<VolumeOutlineCandidate> {
     const settings = aiSettingsService.getSettings();
     const context = await buildOutlineContext(input.novelId);
-    const request = buildVolumeOutlineGeneratePrompt({ ...context, volumeTitle: input.volumeTitle });
+    const request = buildVolumeOutlineGeneratePrompt({
+      novelTitle: context.novelTitle,
+      novelGenre: context.novelGenre,
+      description: context.description,
+      worldBackground: context.worldBackground,
+      ruleSystems: context.ruleSystems,
+      protagonist: context.protagonist,
+      specialAbility: context.specialAbility,
+      existingVolumes: context.existingVolumes,
+      existingChapters: context.existingChapters,
+      volumeTitle: input.volumeTitle,
+      activeMasterOutline: context.activeMasterOutline,
+      styleSummary: context.styleSummary,
+    });
     const task = await aiTaskService.create('volume_outline_generate', {
       novelId: input.novelId,
       runtimeMode: settings.runtimeMode,
       provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `生成分卷大纲：${input.volumeTitle || context.novelTitle}`,
+      inputSummary: `生成分卷大纲：${input.volumeTitle || context.novelTitle}${context.activeMasterOutline ? '（已结合总纲）' : '（⚠️ 缺少总纲）'}`,
     }).catch(() => null);
 
     try {
@@ -130,7 +195,7 @@ export const outlineGenerateService = {
         rawText: response.text,
       };
       await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: `${result.title}：${result.summary}`,
+        resultText: `${result.title}：${result.summary}${context.activeMasterOutlineId ? ` [使用总纲:${context.activeMasterOutlineId.slice(0, 8)}]` : ''}`,
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
         tokenTotal: response.tokenTotal,
@@ -150,21 +215,38 @@ export const outlineGenerateService = {
   }): Promise<ChapterOutlineCandidate[]> {
     const settings = aiSettingsService.getSettings();
     const [context, volume] = await Promise.all([
-      buildOutlineContext(input.novelId),
+      buildOutlineContext(input.novelId, input.volumeId),
       input.volumeId ? volumeRepository.getById(input.volumeId).catch(() => null) : Promise.resolve(null),
     ]);
     const request = buildChapterOutlineGeneratePrompt({
-      ...context,
-      volumeTitle: volume?.title,
+      novelTitle: context.novelTitle,
+      novelGenre: context.novelGenre,
+      description: context.description,
+      worldBackground: context.worldBackground,
+      ruleSystems: context.ruleSystems,
+      protagonist: context.protagonist,
+      specialAbility: context.specialAbility,
+      existingVolumes: context.existingVolumes,
+      existingChapters: context.existingChapters,
+      volumeTitle: volume?.title || context.novelTitle,
       volumeSummary: volume?.summary || volume?.goal,
       chapterCount: input.chapterCount,
+      activeMasterOutline: context.activeMasterOutline,
+      activeVolumeOutline: context.activeVolumeOutline,
+      styleSummary: context.styleSummary,
     });
+
+    const parentInfo: string[] = [];
+    if (context.activeMasterOutline) parentInfo.push('有总纲');
+    if (context.activeVolumeOutline) parentInfo.push('有分卷大纲');
+    const parentTag = parentInfo.length > 0 ? `（${parentInfo.join('、')}）` : '（⚠️ 无上级大纲）';
+
     const task = await aiTaskService.create('chapter_outline_generate', {
       novelId: input.novelId,
       runtimeMode: settings.runtimeMode,
       provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `生成章节大纲：${volume?.title || context.novelTitle}`,
+      inputSummary: `生成章节大纲：${volume?.title || context.novelTitle}${parentTag}`,
     }).catch(() => null);
 
     try {
@@ -178,8 +260,14 @@ export const outlineGenerateService = {
         }))
         : [];
 
+      const usedOutlines: string[] = [];
+      if (context.activeMasterOutlineId) usedOutlines.push(`总纲:${context.activeMasterOutlineId.slice(0, 8)}`);
+      if (context.activeVolumeOutlineId) usedOutlines.push(`分卷大纲:${context.activeVolumeOutlineId.slice(0, 8)}`);
+
       await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: chapters.length > 0 ? `生成了 ${chapters.length} 个章节大纲` : response.text,
+        resultText: chapters.length > 0
+          ? `生成了 ${chapters.length} 个章节大纲${usedOutlines.length > 0 ? ` [${usedOutlines.join(', ')}]` : ''}`
+          : response.text,
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
         tokenTotal: response.tokenTotal,

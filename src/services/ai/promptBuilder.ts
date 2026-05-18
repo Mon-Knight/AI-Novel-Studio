@@ -107,6 +107,8 @@ export interface OutlineGeneratePromptContext {
   specialAbility?: string;
   existingVolumes?: string;
   existingChapters?: string;
+  activeMasterOutline?: string;
+  styleSummary?: string;
 }
 
 export interface VolumeOutlineGeneratePromptContext extends OutlineGeneratePromptContext {
@@ -117,6 +119,7 @@ export interface ChapterOutlineGeneratePromptContext extends OutlineGenerateProm
   volumeTitle?: string;
   volumeSummary?: string;
   chapterCount?: number;
+  activeVolumeOutline?: string;
 }
 
 // ==================== 提示词构建器 ====================
@@ -449,19 +452,39 @@ export function buildOutlineGeneratePrompt(ctx: OutlineGeneratePromptContext): A
 /** 构建分卷大纲请求 */
 export function buildVolumeOutlineGeneratePrompt(ctx: VolumeOutlineGeneratePromptContext): AiGenerateRequest {
   const system = [
-    '你是长篇小说分卷策划。请生成一个分卷大纲，要求能直接保存到分卷摘要、目标和主冲突中。',
+    '你是长篇小说分卷策划。请严格基于当前作品总纲生成一个分卷大纲，要求能直接保存到分卷摘要、目标和主冲突中。',
     `作品：${ctx.novelTitle}`,
     ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
     ctx.description ? `简介：${ctx.description}` : '',
     ctx.worldBackground ? `世界背景：${ctx.worldBackground}` : '',
     ctx.protagonist ? `主角：${ctx.protagonist}` : '',
+    ctx.specialAbility ? `主角特殊能力：${ctx.specialAbility}` : '',
     ctx.volumeTitle ? `目标分卷：${ctx.volumeTitle}` : '',
     ctx.existingVolumes ? `已有分卷：\n${ctx.existingVolumes}` : '',
     ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
+    ctx.styleSummary ? `风格方案：\n${ctx.styleSummary}` : '',
+    ctx.activeMasterOutline
+      ? [
+          '',
+          '【当前采用总纲】',
+          '请严格基于以下总纲生成当前分卷大纲：',
+          ctx.activeMasterOutline.slice(0, 4000),
+          '',
+          '要求：',
+          '1. 本分卷必须服务于总纲中的主线推进、人物成长和阶段冲突',
+          '2. 不得生成与总纲主线冲突的分卷方向',
+          '3. 需明确本卷在总纲中的位置和承接关系',
+        ].join('\n')
+      : [
+          '',
+          '⚠️ 当前作品尚未设置采用总纲',
+          '请根据作品背景、世界设定和已有分卷信息，为当前分卷规划合理的发展方向。',
+          '建议用户先生成并采用总纲后再生成分卷大纲，可以提高连贯性。',
+        ].join('\n'),
     '',
     '请严格返回 JSON，不要输出解释文字：',
     '```json',
-    '{ "title": "分卷标题", "summary": "分卷摘要", "goal": "分卷目标", "mainConflict": "主要冲突" }',
+    '{ "title": "分卷标题", "summary": "分卷摘要（详细描述本卷从开始到结束的完整故事线）", "goal": "分卷目标（本卷要达成的核心目标）", "mainConflict": "主要冲突（本卷的核心矛盾）" }',
     '```',
   ].filter(Boolean).join('\n');
 
@@ -471,21 +494,61 @@ export function buildVolumeOutlineGeneratePrompt(ctx: VolumeOutlineGeneratePromp
 /** 构建章节大纲请求 */
 export function buildChapterOutlineGeneratePrompt(ctx: ChapterOutlineGeneratePromptContext): AiGenerateRequest {
   const system = [
-    '你是长篇小说章节大纲策划。请为当前分卷生成多个可执行章节大纲。',
+    '你是长篇小说章节大纲策划。请严格基于当前分卷大纲和总纲，为当前分卷生成多个可执行章节大纲。',
     `作品：${ctx.novelTitle}`,
     ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
+    '',
+    // v1.0.35: 总纲优先
+    ctx.activeMasterOutline
+      ? [
+          '【当前采用总纲】',
+          ctx.activeMasterOutline.slice(0, 3000),
+          '',
+        ].join('\n')
+      : '⚠️ 当前作品尚未设置采用总纲，章节大纲可能与主线脱节。',
+    '',
+    // v1.0.35: 分卷大纲其次
+    ctx.activeVolumeOutline
+      ? [
+          '【当前采用分卷大纲】',
+          ctx.activeVolumeOutline.slice(0, 3000),
+          '',
+          '请严格基于上述分卷大纲生成本章大纲。',
+          '本章必须服务于当前分卷的核心冲突、事件链和阶段目标，不得脱离分卷大纲另开新线。',
+        ].join('\n')
+      : ctx.volumeSummary
+        ? [
+            '【分卷摘要（降级使用）】',
+            ctx.volumeSummary.slice(0, 2000),
+            '',
+            '⚠️ 当前分卷尚未设置采用分卷大纲，使用分卷摘要替代。',
+            '建议先完善分卷大纲后再生成章节大纲。',
+          ].join('\n')
+        : [
+            '⚠️ 当前分卷尚未设置采用分卷大纲，也没有分卷摘要。',
+            '请尽量结合总纲和作品背景生成合理章节大纲。',
+          ].join('\n'),
+    '',
     ctx.description ? `简介：${ctx.description}` : '',
     ctx.worldBackground ? `世界背景：${ctx.worldBackground}` : '',
     ctx.protagonist ? `主角：${ctx.protagonist}` : '',
+    ctx.specialAbility ? `主角特殊能力：${ctx.specialAbility}` : '',
     ctx.volumeTitle ? `分卷：${ctx.volumeTitle}` : '',
-    ctx.volumeSummary ? `分卷摘要：${ctx.volumeSummary}` : '',
     ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
+    ctx.styleSummary ? `风格方案：\n${ctx.styleSummary}` : '',
     '',
-    `请生成 ${ctx.chapterCount || 6} 个章节候选。严格返回 JSON，不要输出解释文字：`,
+    `请生成 ${ctx.chapterCount || 6} 个章节候选。`,
+    '输出时请体现：',
+    '1. 本章在分卷中的作用',
+    '2. 本章推进分卷中的哪个关键事件',
+    '3. 本章如何体现主角目标和冲突',
+    '4. 本章结尾如何推动下一章',
+    '',
+    '严格返回 JSON，不要输出解释文字：',
     '```json',
     '{',
     '  "chapters": [',
-    '    { "title": "章节标题", "outline": "章节大纲", "goal": "本章目标", "targetWordCount": 4000 }',
+    '    { "title": "章节标题", "outline": "章节大纲（详细描述本章的情节推进）", "goal": "本章目标（本章要达成的创作目标）", "targetWordCount": 4000 }',
     '  ]',
     '}',
     '```',

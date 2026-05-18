@@ -37,6 +37,9 @@ function buildChapterPromptContext(
     existingChapters: base.existingChapters,
     volumeTitle: chapterTitle,
     chapterCount: 6,
+    activeMasterOutline: base.activeMasterOutline,
+    activeVolumeOutline: (base as any).activeVolumeOutline,
+    styleSummary: base.styleSummary,
   };
 }
 
@@ -102,7 +105,11 @@ function OutlineEditor({
       await runWithLoading(
         {
           title: `AI 正在生成${typeLabel}`,
-          initialMessage: `正在读取作品设定、主角背景和世界设定……`,
+          initialMessage: outlineType === 'volume'
+            ? '正在读取当前采用总纲……'
+            : outlineType === 'chapter'
+              ? '正在读取当前采用分卷大纲和总纲……'
+              : '正在读取作品设定、主角背景和世界设定……',
           successMessage: `${typeLabel}生成完成，请检查并保存`,
           errorMessage: `${typeLabel}生成失败`,
         },
@@ -117,7 +124,10 @@ function OutlineEditor({
           if (!ctx.protagonistName) warnings.push('缺少主角设定');
           if (!ctx.worldBackground) warnings.push('缺少世界背景');
           if (outlineType === 'volume' && !ctx.activeMasterOutline) warnings.push('缺少总纲（建议先生成总纲）');
-          if (outlineType === 'chapter' && !ctx.activeMasterOutline) warnings.push('缺少总纲');
+          if (outlineType === 'chapter') {
+            if (!ctx.activeMasterOutline) warnings.push('缺少总纲');
+            if (!(ctx as any).activeVolumeOutline) warnings.push('缺少分卷大纲（建议先生成分卷大纲）');
+          }
           if (warnings.length > 0) {
             setStage(`⚠️ ${warnings.join('、')}，将生成简化版`);
           }
@@ -147,6 +157,8 @@ function OutlineEditor({
               specialAbility: ctx.protagonistAbility,
               existingVolumes: ctx.existingVolumes || undefined,
               volumeTitle: targetTitle,
+              activeMasterOutline: ctx.activeMasterOutline,
+              styleSummary: ctx.styleSummary,
             };
             request = buildVolumeOutlineGeneratePrompt(promptCtx);
           } else {

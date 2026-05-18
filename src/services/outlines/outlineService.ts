@@ -87,7 +87,65 @@ export const chapterOutlineService = {
 // ==================== Context ====================
 
 export async function loadOutlineContext(projectId: string): Promise<OutlineGenerationContext> {
-  return dbCall<OutlineGenerationContext>('build_outline_context', { projectId }, () => ({
-    novelTitle: '未命名作品（浏览器模式）',
-  }));
+  // 优先使用后端 Rust 命令，降级使用前端 fallback
+  try {
+    const result = await dbCall<OutlineGenerationContext | null>('build_outline_context', { projectId }, () => null);
+    if (result && result.novelTitle) return result;
+  } catch { /* 降级到前端构建 */ }
+
+  // 前端 fallback：从 localStorage 构建基础上下文
+  try {
+    const { novelRepository } = await import('../database/novelRepository');
+    const { settingRepository } = await import('../database/settingRepository');
+    const { protagonistRepository } = await import('../database/protagonistRepository');
+    const { volumeRepository } = await import('../database/volumeRepository');
+    const { chapterRepository } = await import('../database/chapterRepository');
+
+    const [novel, worldSettings, ruleSystems, protagonist, volumes, chapters] = await Promise.all([
+      novelRepository.getById(projectId),
+      settingRepository.getWorldSettings(projectId).catch(() => []),
+      settingRepository.getRuleSystems(projectId).catch(() => []),
+      protagonistRepository.getByNovelId(projectId).catch(() => null),
+      volumeRepository.getByNovelId(projectId).catch(() => []),
+      chapterRepository.getByNovelId(projectId).catch(() => []),
+    ]);
+
+    const activeWorld = worldSettings.find((item) => item.isActive) || worldSettings[0];
+    const activeRules = ruleSystems.filter((item) => item.isActive);
+
+    // v1.0.35: 加载上层大纲
+    let activeMasterOutline: string | undefined;
+    let activeVolumeOutline: string | undefined;
+    try {
+      const masterOutline = await masterOutlineService.getActive(projectId);
+      if (masterOutline) activeMasterOutline = masterOutline.content;
+      else {
+        const versions = await masterOutlineService.getVersions(projectId);
+        if (versions.length > 0) activeMasterOutline = versions[0].content;
+      }
+    } catch { /* ignore */ }
+
+    return {
+      novelTitle: novel?.title || '未命名作品',
+      novelGenre: novel?.genre,
+      description: novel?.description,
+      targetWordCount: novel?.targetWordCount,
+      worldBackground: activeWorld?.content?.slice(0, 1600),
+      ruleSystems: activeRules.map((item) => `《${item.title}》${item.content}`).join('\n').slice(0, 2400),
+      protagonistName: protagonist?.name,
+      protagonistIdentity: protagonist?.identity,
+      protagonistPersonality: protagonist?.personality,
+      protagonistGoal: protagonist?.goal,
+      protagonistAbility: protagonist?.specialAbility,
+      protagonistAbilityLimits: protagonist?.abilityLimits,
+      protagonistForbidden: protagonist?.forbiddenBehaviors,
+      activeMasterOutline,
+      existingVolumes: volumes.map((item) => `- ${item.title}：${item.summary || item.goal || ''}`).join('\n'),
+      existingChapters: chapters.map((item) => `- ${item.title}：${item.outline || item.goal || ''}`).join('\n').slice(0, 3000),
+    };
+  } catch {
+    return {
+      novelTitle: '未命名作品（浏览器模式）',
+    };
+  }
 }

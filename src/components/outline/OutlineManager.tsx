@@ -214,12 +214,12 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       await runWithLoading(
         {
           title: 'AI 正在生成分卷大纲',
-          initialMessage: '正在读取分卷和作品设定……',
+          initialMessage: '正在读取当前采用总纲……',
           successMessage: '分卷大纲已生成，请确认后保存',
           errorMessage: '分卷大纲生成失败',
         },
         async ({ setStage }) => {
-          setStage('正在分析分卷结构……');
+          setStage('正在基于总纲分析分卷结构……');
           const candidate = await outlineGenerateService.generateVolumeOutline({
             novelId,
             volumeTitle: target?.title,
@@ -263,12 +263,12 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       await runWithLoading(
         {
           title: 'AI 正在生成章节大纲',
-          initialMessage: '正在读取分卷大纲和设定……',
+          initialMessage: '正在读取当前采用分卷大纲和总纲……',
           successMessage: '章节大纲已生成，请逐条确认保存',
           errorMessage: '章节大纲生成失败',
         },
         async ({ setStage }) => {
-          setStage('AI 正在规划章节结构……');
+          setStage('AI 正在基于上级大纲规划章节结构……');
           const candidates = await outlineGenerateService.generateChapterOutlines({
             novelId,
             volumeId,

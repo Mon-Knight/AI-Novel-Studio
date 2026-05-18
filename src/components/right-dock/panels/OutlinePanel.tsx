@@ -81,15 +81,16 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
     try {
       await runWithLoading({
         title: 'AI 正在生成分卷大纲',
-        initialMessage: '正在读取分卷和作品设定……',
+        initialMessage: '正在读取当前采用总纲……',
         successMessage: '分卷大纲生成完成',
         errorMessage: '分卷大纲生成失败',
-      }, async ({ setStage }) => {
+      }, async ({ setStage, setMessage }) => {
         setStage('正在分析分卷结构……');
         const result = await outlineGenerateService.generateVolumeOutline({
           novelId, volumeTitle: volume.title,
         });
         setVolumeOutline(result);
+        setMessage('正在基于总纲整理分卷逻辑……');
         setStage('生成完成');
       });
     } catch (e: any) {
@@ -109,7 +110,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
     try {
       await runWithLoading({
         title: 'AI 正在生成章节大纲',
-        initialMessage: '正在读取当前分卷、总纲和风格方案……',
+        initialMessage: '正在读取当前采用分卷大纲和总纲……',
         successMessage: '章节大纲生成完成',
         errorMessage: '章节大纲生成失败',
       }, async ({ setMessage, setStage }) => {
@@ -118,7 +119,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
           novelId, volumeId: chapter.volumeId, chapterCount: 3,
         });
         setChapterOutlines(result);
-        setMessage(`已生成 ${result.length} 个章节大纲候选`);
+        setMessage(`已生成 ${result.length} 个章节大纲候选（基于上级大纲）`);
         setStage('生成完成');
       });
     } catch (e: any) {
