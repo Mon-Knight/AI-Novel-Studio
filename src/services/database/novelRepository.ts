@@ -1,10 +1,19 @@
 /**
- * AI Novel Studio - 小说 Repository
+ * AI Novel Studio - Novel repository.
  */
-import type { Novel, CreateNovelInput, UpdateNovelInput } from '../../types/novel';
+import type {
+  CreateNovelInput,
+  DualProtagonistRelation,
+  Novel,
+  ProtagonistMode,
+  ProtagonistProfile,
+  UpdateNovelInput,
+} from '../../types/novel';
 import { dbCall, lsGet, lsSet, generateId, nowISO } from './db';
 import { mockNovels } from '../../features/novels/mockNovels';
 import {
+  getDefaultDualProtagonistRelation,
+  normalizeDualProtagonistRelation,
   normalizeNovel,
   normalizeNovelsWithReport,
   type NovelNormalizeReport,
@@ -27,15 +36,22 @@ export interface NovelRepairSummary {
   totalCount: number;
 }
 
+export interface UpdateNovelProtagonistsInput {
+  protagonistMode: ProtagonistMode;
+  protagonists: ProtagonistProfile[];
+  dualProtagonistRelation?: DualProtagonistRelation | null;
+}
+
 let lastRepairSummary: NovelRepairSummary | null = null;
 
 function buildSeedNovels(): Novel[] {
-  const seed = mockNovels.map((n) => normalizeNovel({
-    ...n,
-    totalWordCount: n.totalWords ?? n.totalWordCount,
-    targetWordCount: n.targetWords ?? n.targetWordCount,
-  })).filter((n): n is Novel => n !== null);
-  return seed;
+  return mockNovels
+    .map((n) => normalizeNovel({
+      ...n,
+      totalWordCount: n.totalWords ?? n.totalWordCount,
+      targetWordCount: n.targetWords ?? n.targetWordCount,
+    }))
+    .filter((n): n is Novel => n !== null);
 }
 
 function setRepairSummary(report: NovelNormalizeReport, totalCount: number) {
@@ -48,6 +64,12 @@ function setRepairSummary(report: NovelNormalizeReport, totalCount: number) {
   } else {
     lastRepairSummary = null;
   }
+}
+
+function normalizeNovelOrThrow(raw: unknown, message: string): Novel {
+  const normalized = normalizeNovel(raw);
+  if (!normalized) throw new Error(message);
+  return normalized;
 }
 
 function getLocalNovels(): Novel[] {
@@ -77,16 +99,42 @@ function createBackupKey(): string {
   return `${NOVELS_KEY}_backup_${stamp}`;
 }
 
+function normalizePatch(existing: Novel, input: UpdateNovelInput): Novel {
+  const mergedRelation = input.dualProtagonistRelation === null
+    ? getDefaultDualProtagonistRelation()
+    : normalizeDualProtagonistRelation(input.dualProtagonistRelation ?? existing.dualProtagonistRelation);
+  const merged = normalizeNovel({
+    ...existing,
+    ...input,
+    dualProtagonistRelation: mergedRelation,
+    totalWordCount: input.totalWordCount ?? existing.totalWordCount,
+    totalWords: input.totalWordCount ?? existing.totalWords,
+    targetWordCount: input.targetWordCount ?? existing.targetWordCount,
+    targetWords: input.targetWordCount ?? existing.targetWords,
+    mainCharacter: input.mainCharacter ?? input.protagonists?.[0]?.name ?? existing.mainCharacter,
+    protagonistAbility:
+      input.protagonistAbility
+      ?? input.protagonists?.[0]?.ability
+      ?? input.protagonists?.[0]?.specialAbility
+      ?? existing.protagonistAbility,
+    updatedAt: toIsoDateOrNow(new Date()),
+  });
+  if (!merged) throw new Error('作品更新数据无效，无法保存');
+  return merged;
+}
+
 export const novelRepository = {
   async getAll(): Promise<Novel[]> {
-    return dbCall<Novel[]>('get_all_novels', undefined, () => getLocalNovels());
+    const raw = await dbCall<unknown[]>('get_all_novels', undefined, () => getLocalNovels());
+    return normalizeNovelsWithReport(raw).items;
   },
 
   async getById(id: string): Promise<Novel | null> {
-    return dbCall<Novel | null>('get_novel_by_id', { id }, () => {
+    const raw = await dbCall<unknown | null>('get_novel_by_id', { id }, () => {
       const novels = getLocalNovels();
       return novels.find((n) => n.id === id) ?? null;
     });
+    return normalizeNovel(raw);
   },
 
   getLastRepairSummary(): NovelRepairSummary | null {
@@ -113,20 +161,21 @@ export const novelRepository = {
   },
 
   async create(input: CreateNovelInput): Promise<Novel> {
-    return dbCall<Novel>('create_novel', { input }, () => {
+    const raw = await dbCall<unknown>('create_novel', { input }, () => {
       const novels = getLocalNovels();
       const now = nowISO();
-      const novel: Novel = {
+      const novel = normalizeNovel({
         id: generateId(),
         title: input.title,
         subtitle: input.subtitle,
         description: input.description ?? '',
         outline: input.outline ?? '',
-        genre: input.genre || '未分类',
-        protagonistName: '',
+        genre: input.genre ?? '',
         protagonistMode: 'single',
         protagonists: [],
-        dualProtagonistRelation: undefined,
+        dualProtagonistRelation: getDefaultDualProtagonistRelation(),
+        mainCharacter: '',
+        protagonistAbility: '',
         coverPath: undefined,
         coverUrl: undefined,
         status: 'draft',
@@ -138,35 +187,51 @@ export const novelRepository = {
         createdAt: now,
         updatedAt: now,
         volumes: [],
-      };
-      const normalized = normalizeNovel(novel) ?? novel;
-      novels.unshift(normalized);
+      });
+      if (!novel) throw new Error('作品创建数据无效');
+      novels.unshift(novel);
       saveLocalNovels(novels);
-      return normalized;
+      return novel;
     });
+
+    return normalizeNovelOrThrow(raw, '作品创建返回无效数据');
   },
 
   async update(id: string, input: UpdateNovelInput): Promise<Novel | null> {
-    return dbCall<Novel>('update_novel', { id, input }, () => {
+    const existing = await this.getById(id);
+    if (!existing) throw new Error('作品不存在，无法保存');
+
+    const merged = normalizePatch(existing, input);
+    const raw = await dbCall<unknown>('update_novel', { id, input: merged }, () => {
       const novels = getLocalNovels();
       const idx = novels.findIndex((n) => n.id === id);
-      if (idx === -1) return null as unknown as Novel;
-
-      const updated: Novel = {
-        ...novels[idx],
-        ...input,
-        dualProtagonistRelation: input.dualProtagonistRelation === null ? undefined : (input.dualProtagonistRelation ?? novels[idx].dualProtagonistRelation),
-        totalWordCount: input.totalWordCount ?? novels[idx].totalWordCount,
-        totalWords: input.totalWordCount ?? novels[idx].totalWords,
-        targetWordCount: input.targetWordCount ?? novels[idx].targetWordCount,
-        targetWords: input.targetWordCount ?? novels[idx].targetWords,
-        updatedAt: toIsoDateOrNow(new Date()),
-      };
-      const normalized = normalizeNovel(updated) ?? updated;
-      novels[idx] = normalized;
+      if (idx === -1) throw new Error('作品不存在，无法保存');
+      novels[idx] = merged;
       saveLocalNovels(novels);
-      return normalized;
+      return merged;
     });
+
+    const saved = normalizeNovelOrThrow(raw, '作品保存返回无效数据');
+    const reread = await this.getById(id);
+    if (!reread) throw new Error('作品保存后无法读取');
+    if (saved.protagonistMode !== reread.protagonistMode) {
+      throw new Error('主角模式保存后反查不一致');
+    }
+    return reread;
+  },
+
+  async updateProtagonists(
+    novelId: string,
+    input: UpdateNovelProtagonistsInput,
+  ): Promise<Novel> {
+    const relation = input.dualProtagonistRelation ?? getDefaultDualProtagonistRelation();
+    const updated = await this.update(novelId, {
+      protagonistMode: input.protagonistMode,
+      protagonists: input.protagonists,
+      dualProtagonistRelation: relation,
+    });
+    if (!updated) throw new Error('主角设定保存后无法读取作品');
+    return updated;
   },
 
   async remove(id: string): Promise<void> {
@@ -176,11 +241,9 @@ export const novelRepository = {
     });
   },
 
-  /** v1.0.26 级联删除作品及其所有关联数据 */
   async deleteCascade(novelId: string): Promise<void> {
     const { lsGet, lsSet } = await import('./db');
 
-    // 清理函数：过滤掉与 novelId 相关的记录
     const purge = (key: string) => {
       try {
         const data = lsGet<unknown>(key);
@@ -194,7 +257,6 @@ export const novelRepository = {
       } catch { /* ignore */ }
     };
 
-    // 级联清理所有可能包含 novelId 的本地存储集合
     const keys = [
       'ai_novel_studio_volumes',
       'ai_novel_studio_chapters',
@@ -218,10 +280,8 @@ export const novelRepository = {
     ];
     for (const key of keys) purge(key);
 
-    // 删除作品本身
     await this.remove(novelId);
 
-    // 反查确认
     const check = await this.getById(novelId);
     if (check) throw new Error('作品删除后仍可读取，请检查删除链路');
   },

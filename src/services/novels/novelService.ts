@@ -2,7 +2,7 @@
  * AI Novel Studio - Novel Service
  */
 import type { Novel, CreateNovelInput, UpdateNovelInput } from '../../types/novel';
-import { novelRepository, type NovelRepairResult, type NovelRepairSummary } from '../database/novelRepository';
+import { novelRepository, type NovelRepairResult, type NovelRepairSummary, type UpdateNovelProtagonistsInput } from '../database/novelRepository';
 
 export const novelService = {
   listNovels(): Promise<Novel[]> {
@@ -19,6 +19,10 @@ export const novelService = {
 
   updateNovel(id: string, input: UpdateNovelInput): Promise<Novel | null> {
     return novelRepository.update(id, input);
+  },
+
+  updateNovelProtagonists(id: string, input: UpdateNovelProtagonistsInput): Promise<Novel> {
+    return novelRepository.updateProtagonists(id, input);
   },
 
   deleteNovel(id: string): Promise<void> {

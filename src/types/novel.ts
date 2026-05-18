@@ -18,39 +18,43 @@ export interface ProtagonistProfile {
   id: string;
   label: 'primary' | 'secondary';
   name: string;
-  gender?: string;
-  identity?: string;
-  personality?: string;
-  goal?: string;
-  motivation?: string;
+  gender: string;
+  identity: string;
+  personality: string;
+  goal: string;
+  motivation: string;
+  ability: string;
+  limitation: string;
+  background: string;
+  arc: string;
+  notes: string;
   specialAbility?: string;
   abilityLimits?: string;
   forbiddenBehaviors?: string;
-  background?: string;
-  arc?: string;
-  notes?: string;
 }
 
 export interface DualProtagonistRelation {
   type: 'partner' | 'romance' | 'rival' | 'bound' | 'mentor_student' | 'family' | 'enemy_to_ally' | 'parallel' | 'custom';
   description: string;
-  conflict?: string;
-  cooperation?: string;
-  emotionalProgression?: string;
-  narrativeWeight?: 'balanced' | 'primary_main' | 'secondary_main';
+  conflict: string;
+  cooperation: string;
+  emotionalProgression: string;
+  narrativeWeight: 'balanced' | 'primary_main' | 'secondary_main';
 }
 
 export interface Novel {
   id: string;
   title: string;
   subtitle?: string;
-  description?: string;
-  outline?: string;
+  description: string;
+  outline: string;
   genre?: string;
   protagonistName?: string;
   protagonistMode: ProtagonistMode;
   protagonists: ProtagonistProfile[];
-  dualProtagonistRelation?: DualProtagonistRelation;
+  dualProtagonistRelation: DualProtagonistRelation;
+  mainCharacter?: string;
+  protagonistAbility?: string;
   worldBackground?: string;
   coverPath?: string;
   coverUrl?: string;
@@ -93,4 +97,6 @@ export interface UpdateNovelInput {
   protagonistMode?: ProtagonistMode;
   protagonists?: ProtagonistProfile[];
   dualProtagonistRelation?: DualProtagonistRelation | null;
+  mainCharacter?: string;
+  protagonistAbility?: string;
 }

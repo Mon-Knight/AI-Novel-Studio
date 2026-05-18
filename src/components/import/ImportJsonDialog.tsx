@@ -7,6 +7,7 @@ import { novelService } from '../../services/novels/novelService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
 import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
+import { normalizeNovel } from '../../features/novels/novelNormalizer';
 import type { JsonDetectResult } from '../../services/import/jsonImportService';
 
 interface ImportJsonDialogProps {
@@ -66,9 +67,31 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
       } else if (detectResult.type === 'ai_novel_studio_project') {
         const novelData = obj.novel as Record<string, any>;
         if (!novelData?.title) { setError('作品 JSON 缺少必要字段'); setImporting(false); return; }
-        const novel = await novelService.createNovel({ title: novelData.title, genre: novelData.genre, description: novelData.description });
-        // v1.0.4 基础导入：仅恢复作品基本信息，完整恢复后续版本增强
-        setResultMsg(`作品「${novelData.title}」导入成功！后续版本将支持完整数据恢复。`);
+        const normalizedNovel = normalizeNovel(novelData);
+        const novel = await novelService.createNovel({
+          title: normalizedNovel?.title ?? novelData.title,
+          genre: normalizedNovel?.genre ?? novelData.genre,
+          description: normalizedNovel?.description ?? novelData.description,
+          outline: normalizedNovel?.outline ?? '',
+          targetWordCount: normalizedNovel?.targetWordCount,
+        });
+        if (normalizedNovel) {
+          await novelService.updateNovel(novel.id, {
+            title: normalizedNovel.title,
+            subtitle: normalizedNovel.subtitle,
+            genre: normalizedNovel.genre,
+            description: normalizedNovel.description,
+            outline: normalizedNovel.outline,
+            status: normalizedNovel.status,
+            targetWordCount: normalizedNovel.targetWordCount,
+            protagonistMode: normalizedNovel.protagonistMode,
+            protagonists: normalizedNovel.protagonists,
+            dualProtagonistRelation: normalizedNovel.dualProtagonistRelation,
+            mainCharacter: normalizedNovel.mainCharacter,
+            protagonistAbility: normalizedNovel.protagonistAbility,
+          });
+        }
+        setResultMsg(`作品「${novelData.title}」导入成功！`);
       }
       setImporting(false); setStep('done');
       setTimeout(() => {

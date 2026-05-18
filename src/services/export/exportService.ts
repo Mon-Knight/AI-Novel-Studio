@@ -135,9 +135,15 @@ export async function exportNovelBackupJson(novelId: string): Promise<void> {
 
   const backup = {
     type: 'ai_novel_studio_project',
-    version: '1.0.7',
+    version: '1.0.30',
     exportedAt: new Date().toISOString(),
-    novel: { ...novel },
+    novel: {
+      ...novel,
+      outline: novel.outline ?? '',
+      protagonistMode: novel.protagonistMode ?? 'single',
+      protagonists: novel.protagonists ?? [],
+      dualProtagonistRelation: novel.dualProtagonistRelation ?? {},
+    },
     volumes,
     chapters,
     worldSettings: worldSettings || [],

@@ -198,14 +198,14 @@ function NovelDetailPage() {
           onSave={async (data) => {
             if (!novelId) return;
             try {
-              const updated = await novelService.updateNovel(novelId, {
+              const updated = await novelService.updateNovelProtagonists(novelId, {
                 protagonistMode: data.protagonistMode,
                 protagonists: data.protagonists,
                 dualProtagonistRelation: data.dualProtagonistRelation,
               });
               if (updated) setNovel(updated);
             } catch (e: any) {
-              alert('保存主角设定失败：' + (e?.message || '未知错误'));
+              alert('保存失败：' + (e?.message || '未知错误'));
               throw e; // 重新抛出让卡片组件显示错误
             }
           }}

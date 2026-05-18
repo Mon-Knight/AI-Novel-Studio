@@ -2,8 +2,8 @@
  * AI Novel Studio - 数据安全工具
  */
 
-export function safeJsonParse<T>(value: string | null, fallback: T): T {
-  if (!value) return fallback;
+export function safeJsonParse<T>(value: unknown, fallback: T): T {
+  if (typeof value !== 'string' || value.trim() === '') return fallback;
   try {
     return JSON.parse(value) as T;
   } catch {

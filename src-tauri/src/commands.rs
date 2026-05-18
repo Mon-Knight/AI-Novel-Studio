@@ -1,8 +1,41 @@
 use crate::db::get_connection;
-use rusqlite::params;
+use rusqlite::{params, Row};
 use serde::{Deserialize, Serialize};
 
 // ==================== Novel ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtagonistProfileDto {
+    pub id: String,
+    pub label: String,
+    pub name: String,
+    pub gender: String,
+    pub identity: String,
+    pub personality: String,
+    pub goal: String,
+    pub motivation: String,
+    pub ability: String,
+    pub limitation: String,
+    pub background: String,
+    pub arc: String,
+    pub notes: String,
+    pub special_ability: Option<String>,
+    pub ability_limits: Option<String>,
+    pub forbidden_behaviors: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DualProtagonistRelationDto {
+    #[serde(rename = "type")]
+    pub relation_type: String,
+    pub description: String,
+    pub conflict: String,
+    pub cooperation: String,
+    pub emotional_progression: String,
+    pub narrative_weight: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +45,7 @@ pub struct NovelDto {
     pub subtitle: Option<String>,
     pub genre: Option<String>,
     pub description: Option<String>,
+    pub outline: String,
     pub cover_path: Option<String>,
     pub status: String,
     pub current_volume_id: Option<String>,
@@ -19,6 +53,11 @@ pub struct NovelDto {
     pub total_word_count: i64,
     pub target_word_count: Option<i64>,
     pub last_opened_at: Option<String>,
+    pub protagonist_mode: String,
+    pub protagonists: Vec<ProtagonistProfileDto>,
+    pub dual_protagonist_relation: DualProtagonistRelationDto,
+    pub main_character: String,
+    pub protagonist_ability: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -29,6 +68,7 @@ pub struct CreateNovelInput {
     pub title: String,
     pub subtitle: Option<String>,
     pub description: Option<String>,
+    pub outline: Option<String>,
     pub genre: Option<String>,
     pub target_word_count: Option<i64>,
 }
@@ -39,40 +79,115 @@ pub struct UpdateNovelInput {
     pub title: Option<String>,
     pub subtitle: Option<String>,
     pub description: Option<String>,
+    pub outline: Option<String>,
     pub genre: Option<String>,
     pub status: Option<String>,
     pub target_word_count: Option<i64>,
     pub current_volume_id: Option<String>,
     pub current_chapter_id: Option<String>,
     pub total_word_count: Option<i64>,
+    pub protagonist_mode: Option<String>,
+    pub protagonists: Option<Vec<ProtagonistProfileDto>>,
+    pub dual_protagonist_relation: Option<DualProtagonistRelationDto>,
+    pub main_character: Option<String>,
+    pub protagonist_ability: Option<String>,
+}
+
+fn default_dual_relation() -> DualProtagonistRelationDto {
+    DualProtagonistRelationDto {
+        relation_type: "partner".to_string(),
+        description: String::new(),
+        conflict: String::new(),
+        cooperation: String::new(),
+        emotional_progression: String::new(),
+        narrative_weight: "balanced".to_string(),
+    }
+}
+
+fn parse_protagonists_json(value: &str) -> Vec<ProtagonistProfileDto> {
+    serde_json::from_str::<Vec<ProtagonistProfileDto>>(value).unwrap_or_default()
+}
+
+fn parse_dual_relation_json(value: &str) -> DualProtagonistRelationDto {
+    serde_json::from_str::<DualProtagonistRelationDto>(value)
+        .unwrap_or_else(|_| default_dual_relation())
+}
+
+fn protagonist_name_from_json(value: &str) -> String {
+    parse_protagonists_json(value)
+        .first()
+        .map(|item| item.name.clone())
+        .unwrap_or_default()
+}
+
+fn protagonist_ability_from_json(value: &str) -> String {
+    parse_protagonists_json(value)
+        .first()
+        .map(|item| {
+            if !item.ability.is_empty() {
+                item.ability.clone()
+            } else {
+                item.special_ability.clone().unwrap_or_default()
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn novel_select_sql() -> &'static str {
+    "SELECT id, title, subtitle, genre, description, outline, cover_path, status, current_volume_id, current_chapter_id, total_word_count, target_word_count, last_opened_at, protagonist_mode, protagonists_json, dual_protagonist_relation_json, main_character, protagonist_ability, created_at, updated_at FROM novels"
+}
+
+fn map_novel_row(row: &Row<'_>) -> rusqlite::Result<NovelDto> {
+    let protagonists_json: String = row.get(14)?;
+    let relation_json: String = row.get(15)?;
+    let main_character: String = row.get(16)?;
+    let protagonist_ability: String = row.get(17)?;
+    let fallback_main_character = if main_character.is_empty() {
+        protagonist_name_from_json(&protagonists_json)
+    } else {
+        main_character
+    };
+    let fallback_protagonist_ability = if protagonist_ability.is_empty() {
+        protagonist_ability_from_json(&protagonists_json)
+    } else {
+        protagonist_ability
+    };
+
+    Ok(NovelDto {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        subtitle: row.get(2)?,
+        genre: row.get(3)?,
+        description: row.get(4)?,
+        outline: row.get(5)?,
+        cover_path: row.get(6)?,
+        status: row.get(7)?,
+        current_volume_id: row.get(8)?,
+        current_chapter_id: row.get(9)?,
+        total_word_count: row.get(10)?,
+        target_word_count: row.get(11)?,
+        last_opened_at: row.get(12)?,
+        protagonist_mode: row.get(13)?,
+        protagonists: parse_protagonists_json(&protagonists_json),
+        dual_protagonist_relation: parse_dual_relation_json(&relation_json),
+        main_character: fallback_main_character,
+        protagonist_ability: fallback_protagonist_ability,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
+    })
 }
 
 #[tauri::command]
 pub fn get_all_novels() -> Result<Vec<NovelDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, title, subtitle, genre, description, cover_path, status, current_volume_id, current_chapter_id, total_word_count, target_word_count, last_opened_at, created_at, updated_at FROM novels WHERE deleted_at IS NULL ORDER BY updated_at DESC")
-        .map_err(|e| e.to_string())?;
+    let sql = format!(
+        "{} WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+        novel_select_sql()
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let novels = stmt
-        .query_map([], |row| {
-            Ok(NovelDto {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                subtitle: row.get(2)?,
-                genre: row.get(3)?,
-                description: row.get(4)?,
-                cover_path: row.get(5)?,
-                status: row.get(6)?,
-                current_volume_id: row.get(7)?,
-                current_chapter_id: row.get(8)?,
-                total_word_count: row.get(9)?,
-                target_word_count: row.get(10)?,
-                last_opened_at: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
-            })
-        })
+        .query_map([], map_novel_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -81,31 +196,17 @@ pub fn get_all_novels() -> Result<Vec<NovelDto>, String> {
 }
 
 #[tauri::command]
-pub fn get_novel_by_id(id: String) -> Result<NovelDto, String> {
+pub fn get_novel_by_id(id: String) -> Result<Option<NovelDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, title, subtitle, genre, description, cover_path, status, current_volume_id, current_chapter_id, total_word_count, target_word_count, last_opened_at, created_at, updated_at FROM novels WHERE id = ?1 AND deleted_at IS NULL")
-        .map_err(|e| e.to_string())?;
+    let sql = format!(
+        "{} WHERE id = ?1 AND deleted_at IS NULL",
+        novel_select_sql()
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
-    stmt.query_row(params![id], |row| {
-        Ok(NovelDto {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            subtitle: row.get(2)?,
-            genre: row.get(3)?,
-            description: row.get(4)?,
-            cover_path: row.get(5)?,
-            status: row.get(6)?,
-            current_volume_id: row.get(7)?,
-            current_chapter_id: row.get(8)?,
-            total_word_count: row.get(9)?,
-            target_word_count: row.get(10)?,
-            last_opened_at: row.get(11)?,
-            created_at: row.get(12)?,
-            updated_at: row.get(13)?,
-        })
-    })
-    .map_err(|e| e.to_string())
+    stmt.query_row(params![id], map_novel_row)
+        .optional()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -113,54 +214,73 @@ pub fn create_novel(input: CreateNovelInput) -> Result<NovelDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    let relation_json =
+        serde_json::to_string(&default_dual_relation()).unwrap_or_else(|_| "{}".to_string());
 
     conn.execute(
-        "INSERT INTO novels (id, title, subtitle, genre, description, status, total_word_count, target_word_count, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'draft', 0, ?6, ?7, ?7)",
-        params![id, input.title, input.subtitle, input.genre, input.description, input.target_word_count, now],
+        "INSERT INTO novels (id, title, subtitle, genre, description, outline, status, total_word_count, target_word_count, protagonist_mode, protagonists_json, dual_protagonist_relation_json, main_character, protagonist_ability, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'draft', 0, ?7, 'single', '[]', ?8, '', '', ?9, ?9)",
+        params![&id, input.title, input.subtitle, input.genre, input.description, input.outline.unwrap_or_default(), input.target_word_count, relation_json, now],
     )
     .map_err(|e| e.to_string())?;
 
-    get_novel_by_id(id)
+    get_novel_by_id(id)?.ok_or_else(|| "作品创建后无法读取".to_string())
 }
 
 #[tauri::command]
 pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
+    let protagonists_json = input
+        .protagonists
+        .as_ref()
+        .map(|items| serde_json::to_string(items).unwrap_or_else(|_| "[]".to_string()));
+    let relation_json = input
+        .dual_protagonist_relation
+        .as_ref()
+        .map(|relation| serde_json::to_string(relation).unwrap_or_else(|_| "{}".to_string()));
 
-    let mut updates: Vec<String> = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref title) = input.title {
-        updates.push(format!("title = '{}'", title.replace('\'', "''")));
-    }
-    if let Some(ref subtitle) = input.subtitle {
-        updates.push(format!("subtitle = '{}'", subtitle.replace('\'', "''")));
-    }
-    if let Some(ref description) = input.description {
-        updates.push(format!("description = '{}'", description.replace('\'', "''")));
-    }
-    if let Some(ref genre) = input.genre {
-        updates.push(format!("genre = '{}'", genre.replace('\'', "''")));
-    }
-    if let Some(ref status) = input.status {
-        updates.push(format!("status = '{}'", status));
-    }
-    if let Some(target) = input.target_word_count {
-        updates.push(format!("target_word_count = {}", target));
-    }
-    if let Some(ref vid) = input.current_volume_id {
-        updates.push(format!("current_volume_id = '{}'", vid));
-    }
-    if let Some(ref cid) = input.current_chapter_id {
-        updates.push(format!("current_chapter_id = '{}'", cid));
-    }
-    if let Some(twc) = input.total_word_count {
-        updates.push(format!("total_word_count = {}", twc));
-    }
+    conn.execute(
+        "UPDATE novels SET
+            title = COALESCE(?1, title),
+            subtitle = COALESCE(?2, subtitle),
+            description = COALESCE(?3, description),
+            outline = COALESCE(?4, outline),
+            genre = COALESCE(?5, genre),
+            status = COALESCE(?6, status),
+            target_word_count = COALESCE(?7, target_word_count),
+            current_volume_id = COALESCE(?8, current_volume_id),
+            current_chapter_id = COALESCE(?9, current_chapter_id),
+            total_word_count = COALESCE(?10, total_word_count),
+            protagonist_mode = COALESCE(?11, protagonist_mode),
+            protagonists_json = COALESCE(?12, protagonists_json),
+            dual_protagonist_relation_json = COALESCE(?13, dual_protagonist_relation_json),
+            main_character = COALESCE(?14, main_character),
+            protagonist_ability = COALESCE(?15, protagonist_ability),
+            updated_at = ?16
+         WHERE id = ?17",
+        params![
+            input.title,
+            input.subtitle,
+            input.description,
+            input.outline,
+            input.genre,
+            input.status,
+            input.target_word_count,
+            input.current_volume_id,
+            input.current_chapter_id,
+            input.total_word_count,
+            input.protagonist_mode,
+            protagonists_json,
+            relation_json,
+            input.main_character,
+            input.protagonist_ability,
+            now,
+            &id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
 
-    let sql = format!("UPDATE novels SET {} WHERE id = '{}'", updates.join(", "), id);
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
-
-    get_novel_by_id(id)
+    get_novel_by_id(id)?.ok_or_else(|| "作品保存后无法读取".to_string())
 }
 
 #[tauri::command]
@@ -232,7 +352,10 @@ pub fn get_world_settings(novel_id: String) -> Result<Vec<WorldSettingDto>, Stri
 }
 
 #[tauri::command]
-pub fn save_world_setting(id: Option<String>, input: SaveWorldSettingInput) -> Result<WorldSettingDto, String> {
+pub fn save_world_setting(
+    id: Option<String>,
+    input: SaveWorldSettingInput,
+) -> Result<WorldSettingDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -345,7 +468,10 @@ pub fn get_rule_systems(novel_id: String) -> Result<Vec<RuleSystemDto>, String> 
 }
 
 #[tauri::command]
-pub fn save_rule_system(id: Option<String>, input: SaveRuleSystemInput) -> Result<RuleSystemDto, String> {
+pub fn save_rule_system(
+    id: Option<String>,
+    input: SaveRuleSystemInput,
+) -> Result<RuleSystemDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -460,7 +586,10 @@ pub fn get_protagonist(novel_id: String) -> Result<Option<ProtagonistDto>, Strin
 }
 
 #[tauri::command]
-pub fn save_protagonist(id: Option<String>, input: SaveProtagonistInput) -> Result<ProtagonistDto, String> {
+pub fn save_protagonist(
+    id: Option<String>,
+    input: SaveProtagonistInput,
+) -> Result<ProtagonistDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -550,14 +679,24 @@ pub fn get_volumes_by_novel_id(novel_id: String) -> Result<Vec<VolumeDto>, Strin
     let mut stmt = conn
         .prepare("SELECT id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at FROM volumes WHERE novel_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
         .map_err(|e| e.to_string())?;
-    let items = stmt.query_map(params![novel_id], |row| {
-        Ok(VolumeDto {
-            id: row.get(0)?, novel_id: row.get(1)?, title: row.get(2)?,
-            summary: row.get(3)?, goal: row.get(4)?, main_conflict: row.get(5)?,
-            order_index: row.get(6)?, status: row.get(7)?,
-            created_at: row.get(8)?, updated_at: row.get(9)?,
+    let items = stmt
+        .query_map(params![novel_id], |row| {
+            Ok(VolumeDto {
+                id: row.get(0)?,
+                novel_id: row.get(1)?,
+                title: row.get(2)?,
+                summary: row.get(3)?,
+                goal: row.get(4)?,
+                main_conflict: row.get(5)?,
+                order_index: row.get(6)?,
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
         })
-    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(items)
 }
 
@@ -589,12 +728,24 @@ pub fn update_volume(id: String, input: UpdateVolumeInput) -> Result<VolumeDto, 
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let mut sets = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref v) = input.title { sets.push(format!("title = '{}'", v.replace('\'', "''"))); }
-    if let Some(ref v) = input.summary { sets.push(format!("summary = '{}'", v.replace('\'', "''"))); }
-    if let Some(ref v) = input.goal { sets.push(format!("goal = '{}'", v.replace('\'', "''"))); }
-    if let Some(ref v) = input.main_conflict { sets.push(format!("main_conflict = '{}'", v.replace('\'', "''"))); }
-    if let Some(v) = input.order_index { sets.push(format!("order_index = {}", v)); }
-    if let Some(ref v) = input.status { sets.push(format!("status = '{}'", v)); }
+    if let Some(ref v) = input.title {
+        sets.push(format!("title = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(ref v) = input.summary {
+        sets.push(format!("summary = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(ref v) = input.goal {
+        sets.push(format!("goal = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(ref v) = input.main_conflict {
+        sets.push(format!("main_conflict = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(v) = input.order_index {
+        sets.push(format!("order_index = {}", v));
+    }
+    if let Some(ref v) = input.status {
+        sets.push(format!("status = '{}'", v));
+    }
     let sql = format!("UPDATE volumes SET {} WHERE id = '{}'", sets.join(", "), id);
     conn.execute(&sql, []).map_err(|e| e.to_string())?;
     get_volume_by_id_internal(&conn, &id)
@@ -603,21 +754,42 @@ pub fn update_volume(id: String, input: UpdateVolumeInput) -> Result<VolumeDto, 
 #[tauri::command]
 pub fn delete_volume(id: String) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM chapters WHERE volume_id = ?1 AND deleted_at IS NULL", params![id], |r| r.get(0)).map_err(|e| e.to_string())?;
-    if count > 0 { return Err("该分卷下仍有章节，请先移动或删除章节".into()); }
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chapters WHERE volume_id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if count > 0 {
+        return Err("该分卷下仍有章节，请先移动或删除章节".into());
+    }
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute("UPDATE volumes SET deleted_at = ?1 WHERE id = ?2", params![now, id]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE volumes SET deleted_at = ?1 WHERE id = ?2",
+        params![now, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn get_volume_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<VolumeDto, String> {
     let mut stmt = conn.prepare("SELECT id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at FROM volumes WHERE id = ?1").map_err(|e| e.to_string())?;
-    stmt.query_row(params![id], |row| Ok(VolumeDto {
-        id: row.get(0)?, novel_id: row.get(1)?, title: row.get(2)?,
-        summary: row.get(3)?, goal: row.get(4)?, main_conflict: row.get(5)?,
-        order_index: row.get(6)?, status: row.get(7)?,
-        created_at: row.get(8)?, updated_at: row.get(9)?,
-    })).map_err(|e| e.to_string())
+    stmt.query_row(params![id], |row| {
+        Ok(VolumeDto {
+            id: row.get(0)?,
+            novel_id: row.get(1)?,
+            title: row.get(2)?,
+            summary: row.get(3)?,
+            goal: row.get(4)?,
+            main_conflict: row.get(5)?,
+            order_index: row.get(6)?,
+            status: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })
+    .map_err(|e| e.to_string())
 }
 
 // ==================== Chapter ====================
@@ -670,13 +842,27 @@ pub fn get_chapters_by_novel_id(novel_id: String) -> Result<Vec<ChapterDto>, Str
     let mut stmt = conn
         .prepare("SELECT id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at FROM chapters WHERE novel_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
         .map_err(|e| e.to_string())?;
-    let items = stmt.query_map(params![novel_id], |row| Ok(ChapterDto {
-        id: row.get(0)?, novel_id: row.get(1)?, volume_id: row.get(2)?,
-        title: row.get(3)?, outline: row.get(4)?, goal: row.get(5)?,
-        order_index: row.get(6)?, status: row.get(7)?,
-        adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
-        target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
-    })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![novel_id], |row| {
+            Ok(ChapterDto {
+                id: row.get(0)?,
+                novel_id: row.get(1)?,
+                volume_id: row.get(2)?,
+                title: row.get(3)?,
+                outline: row.get(4)?,
+                goal: row.get(5)?,
+                order_index: row.get(6)?,
+                status: row.get(7)?,
+                adopted_draft_id: row.get(8)?,
+                word_count: row.get(9)?,
+                target_word_count: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(items)
 }
 
@@ -686,13 +872,27 @@ pub fn get_chapters_by_volume_id(volume_id: String) -> Result<Vec<ChapterDto>, S
     let mut stmt = conn
         .prepare("SELECT id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at FROM chapters WHERE volume_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
         .map_err(|e| e.to_string())?;
-    let items = stmt.query_map(params![volume_id], |row| Ok(ChapterDto {
-        id: row.get(0)?, novel_id: row.get(1)?, volume_id: row.get(2)?,
-        title: row.get(3)?, outline: row.get(4)?, goal: row.get(5)?,
-        order_index: row.get(6)?, status: row.get(7)?,
-        adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
-        target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
-    })).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![volume_id], |row| {
+            Ok(ChapterDto {
+                id: row.get(0)?,
+                novel_id: row.get(1)?,
+                volume_id: row.get(2)?,
+                title: row.get(3)?,
+                outline: row.get(4)?,
+                goal: row.get(5)?,
+                order_index: row.get(6)?,
+                status: row.get(7)?,
+                adopted_draft_id: row.get(8)?,
+                word_count: row.get(9)?,
+                target_word_count: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(items)
 }
 
@@ -712,7 +912,11 @@ pub fn create_chapter(input: CreateChapterInput) -> Result<ChapterDto, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let order = input.order_index.unwrap_or(0);
-    let status = if input.outline.is_some() { "outline_ready" } else { "not_started" };
+    let status = if input.outline.is_some() {
+        "outline_ready"
+    } else {
+        "not_started"
+    };
     conn.execute(
         "INSERT INTO chapters (id, novel_id, volume_id, title, outline, goal, order_index, status, word_count, target_word_count, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?10,?10)",
         params![id, input.novel_id, input.volume_id, input.title, input.outline, input.goal, order, status, input.target_word_count, now],
@@ -725,14 +929,32 @@ pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDt
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let mut sets = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref v) = input.volume_id { sets.push(format!("volume_id = '{}'", v)); }
-    if let Some(ref v) = input.title { sets.push(format!("title = '{}'", v.replace('\'', "''"))); }
-    if let Some(ref v) = input.outline { sets.push(format!("outline = '{}'", v.replace('\'', "''"))); }
-    if let Some(ref v) = input.goal { sets.push(format!("goal = '{}'", v.replace('\'', "''"))); }
-    if let Some(v) = input.order_index { sets.push(format!("order_index = {}", v)); }
-    if let Some(ref v) = input.status { sets.push(format!("status = '{}'", v)); }
-    if let Some(v) = input.target_word_count { sets.push(format!("target_word_count = {}", v)); }
-    let sql = format!("UPDATE chapters SET {} WHERE id = '{}'", sets.join(", "), id);
+    if let Some(ref v) = input.volume_id {
+        sets.push(format!("volume_id = '{}'", v));
+    }
+    if let Some(ref v) = input.title {
+        sets.push(format!("title = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(ref v) = input.outline {
+        sets.push(format!("outline = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(ref v) = input.goal {
+        sets.push(format!("goal = '{}'", v.replace('\'', "''")));
+    }
+    if let Some(v) = input.order_index {
+        sets.push(format!("order_index = {}", v));
+    }
+    if let Some(ref v) = input.status {
+        sets.push(format!("status = '{}'", v));
+    }
+    if let Some(v) = input.target_word_count {
+        sets.push(format!("target_word_count = {}", v));
+    }
+    let sql = format!(
+        "UPDATE chapters SET {} WHERE id = '{}'",
+        sets.join(", "),
+        id
+    );
     conn.execute(&sql, []).map_err(|e| e.to_string())?;
     get_chapter_by_id_internal(&conn, &id)
 }
@@ -741,19 +963,34 @@ pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDt
 pub fn delete_chapter(id: String) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute("UPDATE chapters SET deleted_at = ?1 WHERE id = ?2", params![now, id]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE chapters SET deleted_at = ?1 WHERE id = ?2",
+        params![now, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn get_chapter_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<ChapterDto, String> {
     let mut stmt = conn.prepare("SELECT id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at FROM chapters WHERE id = ?1").map_err(|e| e.to_string())?;
-    stmt.query_row(params![id], |row| Ok(ChapterDto {
-        id: row.get(0)?, novel_id: row.get(1)?, volume_id: row.get(2)?,
-        title: row.get(3)?, outline: row.get(4)?, goal: row.get(5)?,
-        order_index: row.get(6)?, status: row.get(7)?,
-        adopted_draft_id: row.get(8)?, word_count: row.get(9)?,
-        target_word_count: row.get(10)?, created_at: row.get(11)?, updated_at: row.get(12)?,
-    })).map_err(|e| e.to_string())
+    stmt.query_row(params![id], |row| {
+        Ok(ChapterDto {
+            id: row.get(0)?,
+            novel_id: row.get(1)?,
+            volume_id: row.get(2)?,
+            title: row.get(3)?,
+            outline: row.get(4)?,
+            goal: row.get(5)?,
+            order_index: row.get(6)?,
+            status: row.get(7)?,
+            adopted_draft_id: row.get(8)?,
+            word_count: row.get(9)?,
+            target_word_count: row.get(10)?,
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
+        })
+    })
+    .map_err(|e| e.to_string())
 }
 
 // ==================== Chapter Draft ====================
@@ -811,9 +1048,13 @@ fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterDraftDto> {
     })
 }
 
-fn get_draft_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<ChapterDraftDto, String> {
+fn get_draft_by_id_internal(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<ChapterDraftDto, String> {
     let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE id = ?1").map_err(|e| e.to_string())?;
-    stmt.query_row(params![id], map_draft_row).map_err(|e| e.to_string())
+    stmt.query_row(params![id], map_draft_row)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -831,7 +1072,9 @@ pub fn get_drafts_by_chapter_id(chapter_id: String) -> Result<Vec<ChapterDraftDt
 }
 
 #[tauri::command]
-pub fn get_latest_draft_by_chapter_id(chapter_id: String) -> Result<Option<ChapterDraftDto>, String> {
+pub fn get_latest_draft_by_chapter_id(
+    chapter_id: String,
+) -> Result<Option<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no DESC LIMIT 1")
@@ -865,7 +1108,11 @@ pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDra
                     |r| r.get(0),
                 )
                 .unwrap_or(0);
-            if exists > 0 { Some(task_id) } else { None }
+            if exists > 0 {
+                Some(task_id)
+            } else {
+                None
+            }
         }
         _ => None,
     };
@@ -891,7 +1138,12 @@ pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDra
 }
 
 #[tauri::command]
-pub fn update_chapter_draft(id: String, chapter_id: String, content: String, source: Option<String>) -> Result<Option<ChapterDraftDto>, String> {
+pub fn update_chapter_draft(
+    id: String,
+    chapter_id: String,
+    content: String,
+    source: Option<String>,
+) -> Result<Option<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let source = source.unwrap_or_else(|| "user_edited".to_string());
@@ -909,13 +1161,17 @@ pub fn update_chapter_draft(id: String, chapter_id: String, content: String, sou
 }
 
 #[tauri::command]
-pub fn adopt_chapter_draft(draft_id: String, chapter_id: String) -> Result<Option<ChapterDraftDto>, String> {
+pub fn adopt_chapter_draft(
+    draft_id: String,
+    chapter_id: String,
+) -> Result<Option<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
         params![&now, &chapter_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3",
         params![&now, &draft_id, &chapter_id],
@@ -934,7 +1190,8 @@ pub fn delete_chapter_draft(id: String, chapter_id: String) -> Result<(), String
     conn.execute(
         "DELETE FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?2",
         params![id, chapter_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1070,7 +1327,12 @@ pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Re
 }
 
 #[tauri::command]
-pub fn mark_ai_task_failed(id: String, error_message: String, finished_at: String, duration_ms: Option<i64>) -> Result<(), String> {
+pub fn mark_ai_task_failed(
+    id: String,
+    error_message: String,
+    finished_at: String,
+    duration_ms: Option<i64>,
+) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE ai_task_records SET status = 'failed', error_message = ?1, duration_ms = ?2, finished_at = ?3 WHERE id = ?4",
@@ -1080,14 +1342,21 @@ pub fn mark_ai_task_failed(id: String, error_message: String, finished_at: Strin
 }
 
 #[tauri::command]
-pub fn get_ai_task_records(page: Option<i64>, size: Option<i64>) -> Result<Vec<AiTaskRecordDto>, String> {
+pub fn get_ai_task_records(
+    page: Option<i64>,
+    size: Option<i64>,
+) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let page = page.unwrap_or(1).max(1);
     let size = size.unwrap_or(20).clamp(1, 500);
     let offset = (page - 1) * size;
-    let sql = format!("{} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2", ai_task_select_sql());
+    let sql = format!(
+        "{} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+        ai_task_select_sql()
+    );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let result = stmt.query_map(params![size, offset], map_ai_task_row)
+    let result = stmt
+        .query_map(params![size, offset], map_ai_task_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
@@ -1102,11 +1371,17 @@ pub fn count_ai_task_records() -> Result<i64, String> {
 }
 
 #[tauri::command]
-pub fn get_ai_task_records_by_chapter_id(chapter_id: String) -> Result<Vec<AiTaskRecordDto>, String> {
+pub fn get_ai_task_records_by_chapter_id(
+    chapter_id: String,
+) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let sql = format!("{} WHERE chapter_id = ?1 ORDER BY created_at DESC", ai_task_select_sql());
+    let sql = format!(
+        "{} WHERE chapter_id = ?1 ORDER BY created_at DESC",
+        ai_task_select_sql()
+    );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let result = stmt.query_map(params![chapter_id], map_ai_task_row)
+    let result = stmt
+        .query_map(params![chapter_id], map_ai_task_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
@@ -1116,19 +1391,27 @@ pub fn get_ai_task_records_by_chapter_id(chapter_id: String) -> Result<Vec<AiTas
 #[tauri::command]
 pub fn get_ai_task_records_by_novel_id(novel_id: String) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let sql = format!("{} WHERE novel_id = ?1 ORDER BY created_at DESC", ai_task_select_sql());
+    let sql = format!(
+        "{} WHERE novel_id = ?1 ORDER BY created_at DESC",
+        ai_task_select_sql()
+    );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let result = stmt.query_map(params![novel_id], map_ai_task_row)
+    let result = stmt
+        .query_map(params![novel_id], map_ai_task_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
     result
 }
 
-fn get_ai_task_record_by_id_internal(conn: &rusqlite::Connection, id: &str) -> Result<AiTaskRecordDto, String> {
+fn get_ai_task_record_by_id_internal(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<AiTaskRecordDto, String> {
     let sql = format!("{} WHERE id = ?1", ai_task_select_sql());
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    stmt.query_row(params![id], map_ai_task_row).map_err(|e| e.to_string())
+    stmt.query_row(params![id], map_ai_task_row)
+        .map_err(|e| e.to_string())
 }
 
 // Optional helper for QueryRow

@@ -1,9 +1,12 @@
-/**
- * AI Novel Studio - Novel 数据归一化
- */
-import type { Novel, NovelStatus, ProtagonistMode, ProtagonistProfile, DualProtagonistRelation } from '../../types/novel';
+import type {
+  DualProtagonistRelation,
+  Novel,
+  NovelStatus,
+  ProtagonistMode,
+  ProtagonistProfile,
+} from '../../types/novel';
 import { generateId, nowISO } from '../../services/database/db';
-import { isPlainObject, toSafeNumber, toSafeString } from '../../utils/dataGuard';
+import { isPlainObject, safeJsonParse, toSafeNumber, toSafeString } from '../../utils/dataGuard';
 import { toValidDate } from '../../utils/date';
 
 export interface NovelNormalizeReport {
@@ -14,6 +17,24 @@ export interface NovelNormalizeReport {
 
 const VALID_STATUS: NovelStatus[] = [
   'draft', 'planning', 'writing', 'paused', 'completed', 'archived',
+];
+
+const VALID_RELATION_TYPES: DualProtagonistRelation['type'][] = [
+  'partner',
+  'romance',
+  'rival',
+  'bound',
+  'mentor_student',
+  'family',
+  'enemy_to_ally',
+  'parallel',
+  'custom',
+];
+
+const VALID_NARRATIVE_WEIGHTS: DualProtagonistRelation['narrativeWeight'][] = [
+  'balanced',
+  'primary_main',
+  'secondary_main',
 ];
 
 function normalizeDate(value: unknown): string | null {
@@ -36,13 +57,150 @@ function resolveTitle(raw: Record<string, unknown>, mark: () => void): string {
 }
 
 function resolveGenre(raw: Record<string, unknown>, mark: () => void): string {
-  if (typeof raw.genre === 'string' && raw.genre.trim()) return raw.genre.trim();
-  if (typeof raw.category === 'string' && raw.category.trim()) {
+  if (typeof raw.genre === 'string') return raw.genre;
+  if (typeof raw.category === 'string') {
     mark();
-    return raw.category.trim();
+    return raw.category;
   }
-  mark();
-  return '未分类';
+  return '';
+}
+
+function readJsonField<T>(
+  raw: Record<string, unknown>,
+  camelName: string,
+  snakeName: string,
+  fallback: T,
+): T {
+  const camelValue = raw[camelName];
+  if (typeof camelValue === 'string') return safeJsonParse<T>(camelValue, fallback);
+  if (camelValue !== undefined) return camelValue as T;
+
+  const snakeValue = raw[snakeName];
+  if (typeof snakeValue === 'string') return safeJsonParse<T>(snakeValue, fallback);
+  if (snakeValue !== undefined) return snakeValue as T;
+
+  return fallback;
+}
+
+export function getDefaultDualProtagonistRelation(): DualProtagonistRelation {
+  return {
+    type: 'partner',
+    description: '',
+    conflict: '',
+    cooperation: '',
+    emotionalProgression: '',
+    narrativeWeight: 'balanced',
+  };
+}
+
+export function getDefaultProtagonistProfile(
+  label: ProtagonistProfile['label'] = 'primary',
+): ProtagonistProfile {
+  return {
+    id: generateId(),
+    label,
+    name: '',
+    gender: '',
+    identity: '',
+    personality: '',
+    goal: '',
+    motivation: '',
+    ability: '',
+    limitation: '',
+    background: '',
+    arc: '',
+    notes: '',
+    specialAbility: '',
+    abilityLimits: '',
+    forbiddenBehaviors: '',
+  };
+}
+
+export function normalizeProtagonistProfile(
+  raw: unknown,
+  fallbackLabel: ProtagonistProfile['label'] = 'primary',
+): ProtagonistProfile {
+  const source = isPlainObject(raw) ? raw : {};
+  const ability = toSafeString(source.ability ?? source.specialAbility, '');
+  const limitation = toSafeString(source.limitation ?? source.abilityLimits, '');
+
+  return {
+    id: typeof source.id === 'string' && source.id ? source.id : generateId(),
+    label: source.label === 'secondary' ? 'secondary' : fallbackLabel,
+    name: toSafeString(source.name, ''),
+    gender: toSafeString(source.gender, ''),
+    identity: toSafeString(source.identity, ''),
+    personality: toSafeString(source.personality, ''),
+    goal: toSafeString(source.goal, ''),
+    motivation: toSafeString(source.motivation, ''),
+    ability,
+    limitation,
+    background: toSafeString(source.background, ''),
+    arc: toSafeString(source.arc, ''),
+    notes: toSafeString(source.notes ?? source.currentState, ''),
+    specialAbility: ability,
+    abilityLimits: limitation,
+    forbiddenBehaviors: toSafeString(source.forbiddenBehaviors, ''),
+  };
+}
+
+export function normalizeDualProtagonistRelation(raw: unknown): DualProtagonistRelation {
+  if (!isPlainObject(raw)) return getDefaultDualProtagonistRelation();
+
+  const type = VALID_RELATION_TYPES.includes(raw.type as DualProtagonistRelation['type'])
+    ? raw.type as DualProtagonistRelation['type']
+    : 'partner';
+  const narrativeWeight = VALID_NARRATIVE_WEIGHTS.includes(raw.narrativeWeight as DualProtagonistRelation['narrativeWeight'])
+    ? raw.narrativeWeight as DualProtagonistRelation['narrativeWeight']
+    : 'balanced';
+
+  return {
+    type,
+    description: toSafeString(raw.description, ''),
+    conflict: toSafeString(raw.conflict, ''),
+    cooperation: toSafeString(raw.cooperation, ''),
+    emotionalProgression: toSafeString(raw.emotionalProgression, ''),
+    narrativeWeight,
+  };
+}
+
+function normalizeProtagonists(
+  raw: Record<string, unknown>,
+  mode: ProtagonistMode,
+): ProtagonistProfile[] {
+  const rawProtagonists = readJsonField<unknown[]>(raw, 'protagonists', 'protagonists_json', []);
+  const list = Array.isArray(rawProtagonists)
+    ? rawProtagonists
+      .filter((item) => isPlainObject(item))
+      .map((item, index) => normalizeProtagonistProfile(item, index === 1 ? 'secondary' : 'primary'))
+    : [];
+
+  const mainCharacter = toSafeString(raw.mainCharacter ?? raw.main_character ?? raw.protagonistName, '');
+  const protagonistAbility = toSafeString(raw.protagonistAbility ?? raw.protagonist_ability, '');
+
+  if (list.length === 0) {
+    const primary = getDefaultProtagonistProfile('primary');
+    primary.name = mainCharacter;
+    primary.ability = protagonistAbility;
+    primary.specialAbility = protagonistAbility;
+    list.push(primary);
+  } else if (mainCharacter && !list[0].name) {
+    list[0].name = mainCharacter;
+  }
+
+  if (protagonistAbility && !list[0].ability && !list[0].specialAbility) {
+    list[0].ability = protagonistAbility;
+    list[0].specialAbility = protagonistAbility;
+  }
+
+  list[0] = { ...list[0], label: 'primary' };
+  if (mode === 'dual') {
+    if (!list[1]) list[1] = getDefaultProtagonistProfile('secondary');
+    list[1] = { ...list[1], label: 'secondary' };
+    return list.slice(0, 2);
+  }
+
+  return [list[0]];
 }
 
 function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: boolean } {
@@ -55,22 +213,22 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   const title = resolveTitle(raw, mark);
   const genre = resolveGenre(raw, mark);
 
-  const description = typeof raw.description === 'string' ? raw.description : (raw.description == null ? '' : (mark(), toSafeString(raw.description, '')));
-  const outline = typeof raw.outline === 'string' ? raw.outline : (raw.outline == null ? '' : (mark(), toSafeString(raw.outline, '')));
+  const description = toSafeString(raw.description, '');
+  const outline = toSafeString(raw.outline, '');
   const subtitle = typeof raw.subtitle === 'string' ? raw.subtitle : undefined;
-  const coverPath = typeof raw.coverPath === 'string' ? raw.coverPath : undefined;
+  const coverPath = toSafeString(raw.coverPath ?? raw.cover_path, '') || undefined;
   const coverUrl = typeof raw.coverUrl === 'string' ? raw.coverUrl : undefined;
-  const status = VALID_STATUS.includes(raw.status as NovelStatus) ? raw.status as NovelStatus : (mark(), 'draft');
+  const status = VALID_STATUS.includes(raw.status as NovelStatus)
+    ? raw.status as NovelStatus
+    : (mark(), 'draft');
 
-  const totalWordCountSource = raw.totalWordCount ?? raw.totalWords ?? raw.wordCount;
+  const totalWordCountSource = raw.totalWordCount ?? raw.total_word_count ?? raw.totalWords ?? raw.wordCount;
   const totalWordCount = toSafeNumber(totalWordCountSource, 0);
-  if (raw.totalWordCount == null && (raw.totalWords != null || raw.wordCount != null)) mark();
-  if (!Number.isFinite(totalWordCount)) mark();
+  if (raw.totalWordCount == null && raw.total_word_count == null && (raw.totalWords != null || raw.wordCount != null)) mark();
 
-  const targetWordCountSource = raw.targetWordCount ?? raw.targetWords;
+  const targetWordCountSource = raw.targetWordCount ?? raw.target_word_count ?? raw.targetWords;
   const targetWordCount = toSafeNumber(targetWordCountSource, 0);
-  if (raw.targetWordCount == null && raw.targetWords != null) mark();
-  if (!Number.isFinite(targetWordCount)) mark();
+  if (raw.targetWordCount == null && raw.target_word_count == null && raw.targetWords != null) mark();
 
   const chapterCountSource = raw.chapterCount ?? raw.chapterTotal ?? raw.chapterNum;
   const chapterCount = toSafeNumber(chapterCountSource, 0);
@@ -80,8 +238,8 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   const volumeCount = toSafeNumber(volumeCountSource, 0);
   if (raw.volumeCount == null && volumeCountSource != null) mark();
 
-  const createdAtRaw = normalizeDate(raw.createdAt);
-  const updatedAtRaw = normalizeDate(raw.updatedAt);
+  const createdAtRaw = normalizeDate(raw.createdAt ?? raw.created_at);
+  const updatedAtRaw = normalizeDate(raw.updatedAt ?? raw.updated_at);
   const legacyUpdated = normalizeDate(raw.lastUpdatedAt) ?? normalizeDate(raw.lastEditedAt);
   const createdAt = createdAtRaw ?? (mark(), now);
   const updatedAt = updatedAtRaw ?? legacyUpdated ?? createdAt ?? (mark(), now);
@@ -89,56 +247,30 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   if (!updatedAtRaw) mark();
   if (!updatedAtRaw && legacyUpdated) mark();
 
-  const lastOpenedAt = normalizeDate(raw.lastOpenedAt) ?? undefined;
-  const deletedAt = normalizeDate(raw.deletedAt) ?? undefined;
+  const lastOpenedAt = normalizeDate(raw.lastOpenedAt ?? raw.last_opened_at) ?? undefined;
+  const deletedAt = normalizeDate(raw.deletedAt ?? raw.deleted_at) ?? undefined;
 
-  const currentVolumeId = typeof raw.currentVolumeId === 'string' ? raw.currentVolumeId : undefined;
-  const currentChapterId = typeof raw.currentChapterId === 'string' ? raw.currentChapterId : undefined;
+  const currentVolumeId = toSafeString(raw.currentVolumeId ?? raw.current_volume_id, '') || undefined;
+  const currentChapterId = toSafeString(raw.currentChapterId ?? raw.current_chapter_id, '') || undefined;
 
   const volumes = Array.isArray(raw.volumes) ? raw.volumes : (raw.volumes ? (mark(), []) : []);
 
-  // v1.0.28 主角模式
-  const protagonistMode: ProtagonistMode = raw.protagonistMode === 'dual' ? 'dual' : 'single';
-  const protagonistRaw = raw.protagonists;
-  let protagonists: ProtagonistProfile[];
-  if (Array.isArray(protagonistRaw) && protagonistRaw.length > 0) {
-    // v1.0.29 修复：不再过滤掉 name 为空字符串的项，保留项并为其生成 id
-    protagonists = protagonistRaw
-      .filter((p: any) => p && typeof p === 'object')
-      .map((p: any, i: number) => ({
-        id: typeof p.id === 'string' && p.id ? p.id : generateId(),
-        label: (p.label === 'secondary' ? 'secondary' : 'primary') as 'primary' | 'secondary',
-        name: typeof p.name === 'string' ? p.name : '',
-        gender: typeof p.gender === 'string' ? p.gender : undefined,
-        identity: typeof p.identity === 'string' ? p.identity : undefined,
-        personality: typeof p.personality === 'string' ? p.personality : undefined,
-        goal: typeof p.goal === 'string' ? p.goal : undefined,
-        motivation: typeof p.motivation === 'string' ? p.motivation : undefined,
-        specialAbility: typeof p.specialAbility === 'string' ? p.specialAbility : (typeof p.ability === 'string' ? p.ability : undefined),
-        abilityLimits: typeof p.abilityLimits === 'string' ? p.abilityLimits : (typeof p.limitation === 'string' ? p.limitation : undefined),
-        forbiddenBehaviors: typeof p.forbiddenBehaviors === 'string' ? p.forbiddenBehaviors : undefined,
-        background: typeof p.background === 'string' ? p.background : undefined,
-        arc: typeof p.arc === 'string' ? p.arc : undefined,
-        notes: typeof p.notes === 'string' ? p.notes : undefined,
-      }));
-  } else {
-    const pName = typeof raw.protagonistName === 'string' ? raw.protagonistName : (typeof raw.mainCharacter === 'string' ? raw.mainCharacter : '');
-    protagonists = pName ? [{ id: generateId(), label: 'primary', name: pName }] : [];
-    if (pName) mark();
-  }
+  const rawMode = raw.protagonistMode ?? raw.protagonist_mode;
+  const protagonistMode: ProtagonistMode = rawMode === 'dual' ? 'dual' : 'single';
+  const protagonists = normalizeProtagonists(raw, protagonistMode);
+  const dualRelationRaw = readJsonField<unknown>(
+    raw,
+    'dualProtagonistRelation',
+    'dual_protagonist_relation_json',
+    {},
+  );
+  const dualProtagonistRelation = normalizeDualProtagonistRelation(dualRelationRaw);
 
-  let dualProtagonistRelation: DualProtagonistRelation | undefined;
-  if (raw.dualProtagonistRelation && typeof raw.dualProtagonistRelation === 'object') {
-    const rel = raw.dualProtagonistRelation as any;
-    dualProtagonistRelation = {
-      type: rel.type || 'partner',
-      description: typeof rel.description === 'string' ? rel.description : '',
-      conflict: typeof rel.conflict === 'string' ? rel.conflict : undefined,
-      cooperation: typeof rel.cooperation === 'string' ? rel.cooperation : undefined,
-      emotionalProgression: typeof rel.emotionalProgression === 'string' ? rel.emotionalProgression : undefined,
-      narrativeWeight: rel.narrativeWeight || 'balanced',
-    };
-  }
+  const mainCharacter = toSafeString(raw.mainCharacter ?? raw.main_character ?? protagonists[0]?.name, '');
+  const protagonistAbility = toSafeString(
+    raw.protagonistAbility ?? raw.protagonist_ability ?? protagonists[0]?.ability ?? protagonists[0]?.specialAbility,
+    '',
+  );
 
   const normalized: Novel = {
     id,
@@ -147,10 +279,12 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
     description,
     outline,
     genre,
-    protagonistName: protagonists[0]?.name,
+    protagonistName: protagonists[0]?.name ?? '',
     protagonistMode,
     protagonists,
     dualProtagonistRelation,
+    mainCharacter,
+    protagonistAbility,
     coverPath,
     coverUrl,
     status,

@@ -66,6 +66,12 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             subtitle TEXT,
             genre TEXT,
             description TEXT,
+            outline TEXT NOT NULL DEFAULT '',
+            protagonist_mode TEXT NOT NULL DEFAULT 'single',
+            protagonists_json TEXT NOT NULL DEFAULT '[]',
+            dual_protagonist_relation_json TEXT NOT NULL DEFAULT '{}',
+            main_character TEXT NOT NULL DEFAULT '',
+            protagonist_ability TEXT NOT NULL DEFAULT '',
             cover_path TEXT,
             status TEXT NOT NULL DEFAULT 'draft',
             current_volume_id TEXT,
@@ -462,29 +468,96 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_polish_records_source_draft_id ON polish_records(source_draft_id);
         ",
     )?;
+    ensure_novel_columns(conn)?;
     ensure_ai_task_record_columns(conn)?;
     Ok(())
 }
 
-fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
-    let mut stmt = conn.prepare("PRAGMA table_info(ai_task_records)")?;
+fn table_columns(conn: &Connection, table_name: &str) -> SqliteResult<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table_name))?;
     let columns = stmt
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<SqliteResult<Vec<String>>>()?;
+    Ok(columns)
+}
 
+fn add_column_if_missing(
+    conn: &Connection,
+    table_name: &str,
+    column_name: &str,
+    alter_sql: &str,
+) -> SqliteResult<()> {
+    let columns = table_columns(conn, table_name)?;
+    if !columns.iter().any(|column| column == column_name) {
+        conn.execute(alter_sql, [])?;
+    }
+    Ok(())
+}
+
+fn ensure_novel_columns(conn: &Connection) -> SqliteResult<()> {
+    add_column_if_missing(
+        conn,
+        "novels",
+        "outline",
+        "ALTER TABLE novels ADD COLUMN outline TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        conn,
+        "novels",
+        "protagonist_mode",
+        "ALTER TABLE novels ADD COLUMN protagonist_mode TEXT NOT NULL DEFAULT 'single'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "novels",
+        "protagonists_json",
+        "ALTER TABLE novels ADD COLUMN protagonists_json TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "novels",
+        "dual_protagonist_relation_json",
+        "ALTER TABLE novels ADD COLUMN dual_protagonist_relation_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "novels",
+        "main_character",
+        "ALTER TABLE novels ADD COLUMN main_character TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        conn,
+        "novels",
+        "protagonist_ability",
+        "ALTER TABLE novels ADD COLUMN protagonist_ability TEXT NOT NULL DEFAULT ''",
+    )?;
+    Ok(())
+}
+
+fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
+    let columns = table_columns(conn, "ai_task_records")?;
     let has_column = |name: &str| columns.iter().any(|column| column == name);
 
     if !has_column("runtime_mode") {
-        conn.execute("ALTER TABLE ai_task_records ADD COLUMN runtime_mode TEXT", [])?;
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN runtime_mode TEXT",
+            [],
+        )?;
     }
     if !has_column("provider") {
         conn.execute("ALTER TABLE ai_task_records ADD COLUMN provider TEXT", [])?;
     }
     if !has_column("token_total") {
-        conn.execute("ALTER TABLE ai_task_records ADD COLUMN token_total INTEGER", [])?;
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN token_total INTEGER",
+            [],
+        )?;
     }
     if !has_column("duration_ms") {
-        conn.execute("ALTER TABLE ai_task_records ADD COLUMN duration_ms INTEGER", [])?;
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN duration_ms INTEGER",
+            [],
+        )?;
     }
 
     Ok(())

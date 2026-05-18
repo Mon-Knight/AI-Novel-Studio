@@ -3,7 +3,12 @@ import type { Novel, ProtagonistProfile, DualProtagonistRelation, ProtagonistMod
 import type { WorldSetting } from '../../types/setting';
 import type { RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
-import { generateId } from '../../services/database/db';
+import {
+  getDefaultDualProtagonistRelation,
+  getDefaultProtagonistProfile,
+  normalizeDualProtagonistRelation,
+  normalizeProtagonistProfile,
+} from '../../features/novels/novelNormalizer';
 import { formatNumber } from '../../utils/format';
 import { formatDate } from '../../utils/date';
 
@@ -587,48 +592,58 @@ function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCar
 
   // v1.0.28 双主角状态
   const [mode, setMode] = useState<'single' | 'dual'>(novel?.protagonistMode || 'single');
-  const [protA, setProtA] = useState(novel?.protagonists?.[0] || { id: generateId(), label: 'primary' as const, name: '' });
-  const [protB, setProtB] = useState(novel?.protagonists?.[1] || { id: generateId(), label: 'secondary' as const, name: '' });
-  const [relation, setRelation] = useState(novel?.dualProtagonistRelation || { type: 'partner' as const, description: '' });
+  const [protA, setProtA] = useState<ProtagonistProfile>(
+    normalizeProtagonistProfile(novel?.protagonists?.[0], 'primary'),
+  );
+  const [protB, setProtB] = useState<ProtagonistProfile>(
+    normalizeProtagonistProfile(novel?.protagonists?.[1], 'secondary'),
+  );
+  const [relation, setRelation] = useState<DualProtagonistRelation>(
+    normalizeDualProtagonistRelation(novel?.dualProtagonistRelation),
+  );
 
   useEffect(() => {
     setMode(novel?.protagonistMode || 'single');
-    setProtA(novel?.protagonists?.[0] || { id: generateId(), label: 'primary', name: '' });
-    setProtB(novel?.protagonists?.[1] || { id: generateId(), label: 'secondary', name: '' });
-    setRelation(novel?.dualProtagonistRelation || { type: 'partner', description: '' });
+    setProtA(normalizeProtagonistProfile(novel?.protagonists?.[0], 'primary'));
+    setProtB(normalizeProtagonistProfile(novel?.protagonists?.[1], 'secondary'));
+    setRelation(normalizeDualProtagonistRelation(novel?.dualProtagonistRelation));
   }, [novel]);
 
   // 旧数据兼容：从 protagonist 迁移到 novel.protagonists
   useEffect(() => {
     if (protagonist && (!novel?.protagonists || novel.protagonists.length === 0)) {
       setProtA({
+        ...getDefaultProtagonistProfile('primary'),
         id: protagonist.id,
         label: 'primary',
         name: protagonist.name,
-        identity: protagonist.identity,
-        personality: protagonist.personality,
-        goal: protagonist.goal,
-        specialAbility: protagonist.specialAbility,
-        abilityLimits: protagonist.abilityLimits,
-        forbiddenBehaviors: protagonist.forbiddenBehaviors,
-        notes: protagonist.currentState,
+        identity: protagonist.identity ?? '',
+        personality: protagonist.personality ?? '',
+        goal: protagonist.goal ?? '',
+        ability: protagonist.specialAbility ?? '',
+        limitation: protagonist.abilityLimits ?? '',
+        specialAbility: protagonist.specialAbility ?? '',
+        abilityLimits: protagonist.abilityLimits ?? '',
+        forbiddenBehaviors: protagonist.forbiddenBehaviors ?? '',
+        notes: protagonist.currentState ?? '',
       });
     }
   }, [protagonist, novel]);
 
   const handleSave = async () => {
-    if (!protA.name.trim()) { setMessage('主角A姓名不能为空'); return; }
-    if (mode === 'dual' && !protB.name.trim()) { setMessage('主角B姓名不能为空'); return; }
-
     setSaving(true); setMessage('');
     try {
+      const primary = normalizeProtagonistProfile({ ...protA, label: 'primary' }, 'primary');
+      const secondary = normalizeProtagonistProfile({ ...protB, label: 'secondary' }, 'secondary');
       const protagonists = mode === 'dual'
-        ? [protA, protB]
-        : [protA];
+        ? [primary, secondary]
+        : [primary];
       await onSave({
         protagonistMode: mode,
         protagonists,
-        dualProtagonistRelation: mode === 'dual' ? relation : undefined,
+        dualProtagonistRelation: mode === 'dual'
+          ? normalizeDualProtagonistRelation(relation)
+          : getDefaultDualProtagonistRelation(),
       });
       setMessage('保存成功');
       setEditing(false);
@@ -690,12 +705,12 @@ function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCar
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>
             <label className="panel-field-label">特殊能力</label>
-            <textarea value={p.specialAbility || ''} onChange={(e) => setP({ ...p, specialAbility: e.target.value })}
+            <textarea value={p.specialAbility || p.ability || ''} onChange={(e) => setP({ ...p, ability: e.target.value, specialAbility: e.target.value })}
               className="form-textarea" placeholder="特殊能力..." rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 13 }} />
           </div>
           <div>
             <label className="panel-field-label">能力限制</label>
-            <textarea value={p.abilityLimits || ''} onChange={(e) => setP({ ...p, abilityLimits: e.target.value })}
+            <textarea value={p.abilityLimits || p.limitation || ''} onChange={(e) => setP({ ...p, limitation: e.target.value, abilityLimits: e.target.value })}
               className="form-textarea" placeholder="能力限制..." rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 13 }} />
           </div>
         </div>
@@ -784,7 +799,7 @@ function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCar
               {p.identity && <div><span className="text-sm text-muted">身份：</span>{p.identity}</div>}
               {p.personality && <div><span className="text-sm text-muted">性格：</span>{p.personality.slice(0, 60)}{p.personality.length > 60 && '…'}</div>}
               {p.goal && <div><span className="text-sm text-muted">目标：</span>{p.goal.slice(0, 60)}{p.goal.length > 60 && '…'}</div>}
-              {p.specialAbility && <div style={{ gridColumn: '1 / -1' }}><span className="text-sm" style={{ color: 'var(--color-primary)' }}>⚡ {p.specialAbility.slice(0, 80)}{p.specialAbility.length > 80 && '…'}</span></div>}
+              {(p.specialAbility || p.ability) && <div style={{ gridColumn: '1 / -1' }}><span className="text-sm" style={{ color: 'var(--color-primary)' }}>⚡ {(p.specialAbility || p.ability).slice(0, 80)}{(p.specialAbility || p.ability).length > 80 && '…'}</span></div>}
             </div>
           </div>
         ))}
