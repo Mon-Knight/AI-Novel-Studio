@@ -18,3 +18,4 @@ export * from './chapterSummary';
 export * from './qualityCheck';
 export * from './polish';
 export * from './largeTextSave';
+export * from './outline';

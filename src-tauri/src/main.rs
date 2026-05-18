@@ -7,6 +7,7 @@ mod commands;
 mod ai;
 mod db;
 mod large_text_save;
+mod outline_commands;
 
 fn main() {
     db::init_database();
@@ -57,6 +58,19 @@ fn main() {
             large_text_save::cleanup_expired_large_text_save_sessions,
             large_text_save::read_large_text_content,
             large_text_save::update_large_text_ref,
+            outline_commands::save_master_outline,
+            outline_commands::get_master_outline,
+            outline_commands::get_master_outline_versions,
+            outline_commands::set_active_master_outline,
+            outline_commands::save_volume_outline,
+            outline_commands::get_volume_outline,
+            outline_commands::get_volume_outline_versions,
+            outline_commands::set_active_volume_outline,
+            outline_commands::save_chapter_outline,
+            outline_commands::get_chapter_outline,
+            outline_commands::get_chapter_outline_versions,
+            outline_commands::set_active_chapter_outline,
+            outline_commands::build_outline_context,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

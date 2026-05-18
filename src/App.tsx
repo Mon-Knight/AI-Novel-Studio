@@ -14,6 +14,7 @@ import AssetsPage from './pages/Assets/AssetsPage';
 import TemplatesPage from './pages/Templates/TemplatesPage';
 import AiTasksPage from './pages/AiTasks/AiTasksPage';
 import ImportExportPage from './pages/ImportExport/ImportExportPage';
+import OutlineEditorPage from './pages/OutlineEditor/OutlineEditorPage';
 
 function App() {
   const globalLoading = useGlobalLoadingModal(1200);
@@ -31,6 +32,7 @@ function App() {
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/ai-tasks" element={<AiTasksPage />} />
           <Route path="/import-export" element={<ImportExportPage />} />
+          <Route path="/novels/:novelId/outline" element={<OutlineEditorPage />} />
           <Route path="/coming-soon" element={<ComingSoonPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

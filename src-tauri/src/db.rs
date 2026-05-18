@@ -472,6 +472,7 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
     ensure_ai_task_record_columns(conn)?;
     ensure_large_text_ref_columns(conn)?;
     crate::large_text_save::create_large_text_tables(conn)?;
+    crate::outline_commands::create_outline_tables(conn)?;
     Ok(())
 }
 
