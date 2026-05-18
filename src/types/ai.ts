@@ -180,6 +180,7 @@ export interface ChapterGenerationContext {
   protagonistMode?: string;
   protagonistsSummary?: string;
   dualProtagonistSummary?: string;
+  protagonistNames?: string;
   volumeTitle?: string;
   volumeOutline?: string;
   volumeGoal?: string;

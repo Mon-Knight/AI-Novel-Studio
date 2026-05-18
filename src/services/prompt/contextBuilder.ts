@@ -62,13 +62,17 @@ export async function buildChapterContext(
   // 加载风格和输出控制方案
   let styleProfileSummary: string | undefined;
   let outputProfileSummary: string | undefined;
+  let resolvedOutputProfile: OutputProfile | null = null;
   if (styleId || outputId) {
     const [styles, outputs] = await Promise.all([
       styleId ? styleProfileService.getById(styleId) : Promise.resolve(null),
       outputId ? outputProfileService.getById(outputId) : Promise.resolve(null),
     ]);
     if (styles) styleProfileSummary = buildStyleSummary(styles);
-    if (outputs) outputProfileSummary = buildOutputSummary(outputs);
+    if (outputs) {
+      outputProfileSummary = buildOutputSummary(outputs);
+      resolvedOutputProfile = outputs;
+    }
   }
 
   // v1.0.25 加载本章设定补充
@@ -131,6 +135,7 @@ export async function buildChapterContext(
   const protagonistMode = novel?.protagonistMode || 'single';
   let protagonistsSummary: string | undefined;
   let dualProtagonistSummary: string | undefined;
+  let protagonistNames: string | undefined;
   const prots = novel?.protagonists;
   if (prots && prots.length > 0) {
     protagonistsSummary = prots.map((p) => {
@@ -146,6 +151,11 @@ export async function buildChapterContext(
       if (p.arc) parts.push(`  人物成长线：${p.arc}`);
       return parts.join('\n');
     }).join('\n\n');
+    // v1.0.36: 提取主角名用于硬性约束
+    protagonistNames = prots.map((p) => p.name).filter(Boolean).join('、');
+  }
+  if (!protagonistNames && protagonist?.name) {
+    protagonistNames = protagonist.name;
   }
   if (novel?.dualProtagonistRelation?.description) {
     const rel = novel.dualProtagonistRelation;
@@ -157,6 +167,21 @@ export async function buildChapterContext(
     if (rel.emotionalProgression) relParts.push(`关系推进：${rel.emotionalProgression}`);
     if (rel.narrativeWeight) relParts.push(`叙事权重：${rel.narrativeWeight === 'balanced' ? '双主角均衡' : rel.narrativeWeight === 'primary_main' ? '主角A更核心' : '主角B更核心'}`);
     dualProtagonistSummary = relParts.join('\n');
+  }
+
+  // v1.0.36: 输出控制方案的目标字数覆盖章节默认值
+  let resolvedTargetWordCount = chapter.targetWordCount || 4000;
+  let resolvedOutputProfileSummary = outputProfileSummary;
+  if (resolvedOutputProfile) {
+    const outputTarget = resolvedOutputProfile.targetWordCount
+      || resolvedOutputProfile.chapterWordRange?.default;
+    if (outputTarget && outputTarget > 0) {
+      resolvedTargetWordCount = outputTarget;
+    }
+    // 附加字数强调
+    if (resolvedOutputProfileSummary && !resolvedOutputProfileSummary.includes('必须')) {
+      resolvedOutputProfileSummary += `\n本章必须尽量接近目标字数 ${resolvedTargetWordCount} 字，不要默认生成 4000 字。`;
+    }
   }
 
   return {
@@ -175,6 +200,7 @@ export async function buildChapterContext(
     protagonistMode,
     protagonistsSummary,
     dualProtagonistSummary,
+    protagonistNames,
     volumeTitle,
     volumeOutline,
     volumeGoal,
@@ -182,9 +208,9 @@ export async function buildChapterContext(
     chapterTitle: `${chapter.title}`,
     chapterOutline: extractText(chapter.outline),
     chapterGoal: extractText(chapter.goal),
-    targetWordCount: chapter.targetWordCount || 4000,
+    targetWordCount: resolvedTargetWordCount,
     styleProfile: styleProfileSummary,
-    outputProfile: outputProfileSummary,
+    outputProfile: resolvedOutputProfileSummary,
     chapterCharacters: chapterCharacterSummary,
     chapterEvents: chapterEventSummary,
     chapterSettings: chapterSettingsSummary,

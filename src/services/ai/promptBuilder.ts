@@ -137,13 +137,33 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
   const system = [
     '你是一位专业的小说作家，擅长创作引人入胜的长篇小说。你必须严格根据已确认的大纲、设定、角色、事件和风格来生成章节正文。',
     '',
+    // v1.0.36: 硬性角色约束放在最前面
+    ctx.protagonistsSummary
+      ? [
+          '【硬性角色约束（最高优先级）】',
+          '必须严格按照以下主角设定写作，严禁改变主角姓名：',
+          ctx.protagonistsSummary,
+          '',
+          '严禁将主角名字改为任何其他名字。如果需要称呼主角，只能使用以上列出的名字及自然代词。',
+          '',
+        ].join('\n')
+      : '',
     `作品：《${ctx.novelTitle}》`,
     ctx.novelGenre ? `题材：${ctx.novelGenre}` : '',
     ctx.novelDescription ? `作品简介：${ctx.novelDescription}` : '',
     ctx.protagonist ? `主角：${ctx.protagonist}` : '',
     ctx.protagonistMode ? `主角模式：${ctx.protagonistMode}` : '',
     '',
-    ctx.protagonistsSummary ? `## 主角详细设定\n${ctx.protagonistsSummary}\n` : '',
+    // v1.0.36: 风格方案提前，并加"必须遵守"
+    ctx.styleProfile
+      ? [
+          '【写作风格约束（必须遵守）】',
+          ctx.styleProfile,
+          '',
+          '你必须严格按照以上风格生成本章正文，不要使用默认网文模板。',
+          '',
+        ].join('\n')
+      : '',
     ctx.dualProtagonistSummary ? `## 双主角关系\n${ctx.dualProtagonistSummary}\n` : '',
     '',
     ctx.novelOutline ? `## 作品总大纲\n${ctx.novelOutline}\n` : '',
@@ -168,15 +188,23 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     '',
     ctx.chapterCharacters ? `## 本章出场角色\n${ctx.chapterCharacters}` : '',
     ctx.chapterEvents ? `## 本章关键事件\n${ctx.chapterEvents}` : '',
-    ctx.styleProfile ? `## 风格约束\n${ctx.styleProfile}` : '',
-    ctx.outputProfile ? `## 输出控制\n${ctx.outputProfile}` : '',
     '',
     ctx.previousContext ? `## 前文上下文摘要\n${ctx.previousContext}` : '',
     '',
+    // v1.0.36: 输出控制加"必须遵守"
+    ctx.outputProfile
+      ? [
+          '【输出控制（必须遵守）】',
+          ctx.outputProfile,
+          '',
+        ].join('\n')
+      : '',
     ctx.userInstruction ? `特别要求：${ctx.userInstruction}` : '',
     '',
     '请严格围绕大纲，直接输出小说正文。不要写"以下是正文"等引导语，只输出正文内容。',
     '不得凭空添加未在出场角色列表中列出的重要角色。',
+    '**必须严格使用主角姓名，不得改名。**',
+    `字数尽量接近目标字数 ${ctx.targetWordCount} 字。`,
     '如果章节大纲中描述了具体场景或道具，必须如实写入正文。',
     ...(ctx.protagonistMode === 'dual' ? [
       '',

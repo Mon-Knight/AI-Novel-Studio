@@ -25,10 +25,26 @@ function renderTemplate(template: string, context: Record<string, string | undef
 // 默认章节生成模板（兜底）
 const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根据已确认的大纲、设定、角色、事件和风格来生成章节正文。
 
+{{#protagonist_names}}
+【硬性角色约束（最高优先级）】
+本作品主角固定为：{{protagonist_names}}。
+严禁将主角名字改为任何其他名字。
+严禁新增替代主角或使用其他姓名替代主角。
+如果需要称呼主角，只能使用以上列出的名字及其自然代词。
+{{/protagonist_names}}
+
 作品：{{novelTitle}}
 题材：{{novelGenre}}
 {{#novelDescription}}简介：{{novelDescription}}{{/novelDescription}}
 主角：{{protagonist}}
+
+{{#styleProfile}}
+【写作风格约束（必须遵守）】
+{{styleProfile}}
+
+你必须严格按照以上风格生成本章正文，不要使用默认网文模板。
+{{/styleProfile}}
+
 {{#novelOutline}}
 ## 作品总大纲
 {{novelOutline}}
@@ -69,17 +85,15 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 ## 前文上下文
 {{previousContext}}
 {{/previousContext}}
-{{#styleProfile}}
-## 风格约束
-{{styleProfile}}
-{{/styleProfile}}
 {{#outputProfile}}
-## 输出控制
+【输出控制（必须遵守）】
 {{outputProfile}}
 {{/outputProfile}}
 {{#userInstruction}}特别要求：{{userInstruction}}{{/userInstruction}}
 
-请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。不得凭空新增未列出的重要角色。`;
+请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。不得凭空新增未列出的重要角色。
+**必须严格使用主角姓名，不得改名。**
+字数尽量接近目标字数 {{targetWordCount}} 字。`;
 
 export async function buildGenerateRequest(
   context: ChapterGenerationContext,

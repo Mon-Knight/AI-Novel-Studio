@@ -77,6 +77,18 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
 
   const settings = aiSettingsService.getSettings();
 
+  // v1.0.36: 解析实际目标字数（输出控制 > 章节 > 默认4000）
+  const resolvedTargetWordCount = (() => {
+    if (selectedOutputId) {
+      const output = availableOutputs.find((o) => o.id === selectedOutputId);
+      if (output) {
+        const ot = output.targetWordCount || output.chapterWordRange?.default;
+        if (ot && ot > 0) return ot;
+      }
+    }
+    return chapter?.targetWordCount || 4000;
+  })();
+
   const handleGenerate = async () => {
     if (!novelId || !chapter) return;
 
@@ -125,7 +137,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             `前文：${hasPrevContext}`,
             `风格：${styleName}`,
             `输出：${outputName}`,
-            `字数：${chapter.targetWordCount || 4000}`,
+            `字数：${resolvedTargetWordCount}`,
           ].join('，');
 
           // 创建 AI 任务记录
@@ -171,12 +183,27 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             aiTaskId: task?.id,
           });
 
+          setPercent(90);
+          setStage('正在校验生成结果……');
+
+          // v1.0.36: 生成后主角名校验
+          let validationWarning: string | undefined;
+          if (ctx?.protagonistNames) {
+            const names = ctx.protagonistNames.split('、');
+            const missingNames = names.filter((name) => !response.text.includes(name));
+            if (missingNames.length === names.length && names.length > 0) {
+              validationWarning = `⚠️ 生成正文中未出现主角名：${ctx.protagonistNames}。建议检查风格方案、角色设定或重新生成。`;
+            } else if (missingNames.length > 0) {
+              validationWarning = `⚠️ 生成正文中未出现部分主角名：${missingNames.join('、')}。`;
+            }
+          }
+
           setPercent(95);
 
           // 5. 更新 AI 任务记录
           if (task) {
             await aiTaskService.markSucceeded(task.id, {
-              resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}`,
+              resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}${validationWarning ? ' ' + validationWarning : ''}`,
               tokenInput: response.tokenInput,
               tokenOutput: response.tokenOutput,
               tokenTotal: response.tokenTotal,
@@ -186,7 +213,25 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           setPercent(100);
           setStage('生成完成');
 
+          // v1.0.36: 调试日志（不输出敏感信息）
+          console.info('[AiGenerate] 生成完成:', {
+            chapterId: chapter.id,
+            novelId,
+            styleProfileId: selectedStyleId || '(未选择)',
+            outputControlId: selectedOutputId || '(未选择)',
+            targetWordCount: ctx?.targetWordCount,
+            protagonistNames: ctx?.protagonistNames,
+            wordCount: draft.wordCount,
+            model: settings.modelName,
+            provider: settings.provider,
+          });
+
           onGenerated?.(draft);
+
+          // 校验警告提示
+          if (validationWarning) {
+            setErrorMsg(validationWarning);
+          }
         },
       );
 
@@ -272,7 +317,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
           <div className="panel-field-label">目标字数</div>
-          <div className="panel-field-value">{formatNumber(chapter.targetWordCount ?? 4000)} 字</div>
+          <div className="panel-field-value">{formatNumber(resolvedTargetWordCount)} 字</div>
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
           <div className="panel-field-label">状态</div>
