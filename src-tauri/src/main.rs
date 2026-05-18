@@ -76,6 +76,15 @@ fn main() {
             commands::save_style_profile,
             commands::set_active_style_profile,
             commands::delete_style_profile,
+            commands::sync_protagonist_to_character_library,
+            commands::get_protagonist_character,
+            commands::list_characters,
+            commands::create_character,
+            commands::update_character,
+            commands::delete_character,
+            commands::add_chapter_character,
+            commands::list_chapter_characters,
+            commands::remove_chapter_character,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

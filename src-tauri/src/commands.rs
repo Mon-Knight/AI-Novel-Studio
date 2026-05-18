@@ -1668,6 +1668,519 @@ fn get_style_profile_by_id_internal(
         .map_err(|e| e.to_string())
 }
 
+// ==================== Character Library ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterDto {
+    pub id: String,
+    pub novel_id: String,
+    pub name: String,
+    pub role_type: Option<String>,
+    pub identity: Option<String>,
+    pub faction: Option<String>,
+    pub relation_to_protagonist: Option<String>,
+    pub goal: Option<String>,
+    pub personality: Option<String>,
+    pub behavior_limits: Option<String>,
+    pub forbidden_behaviors: Option<String>,
+    pub first_appearance_chapter_id: Option<String>,
+    pub current_state: Option<String>,
+    pub source: String,
+    pub is_protagonist: bool,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn map_character_row(row: &rusqlite::Row) -> rusqlite::Result<CharacterDto> {
+    Ok(CharacterDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        name: row.get(2)?,
+        role_type: row.get(3)?,
+        identity: row.get(4)?,
+        faction: row.get(5)?,
+        relation_to_protagonist: row.get(6)?,
+        goal: row.get(7)?,
+        personality: row.get(8)?,
+        behavior_limits: row.get(9)?,
+        forbidden_behaviors: row.get(10)?,
+        first_appearance_chapter_id: row.get(11)?,
+        current_state: row.get(12)?,
+        source: row.get(13)?,
+        is_protagonist: row.get::<_, i64>(14)? != 0,
+        is_active: row.get::<_, i64>(15)? != 0,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+    })
+}
+
+fn character_select_sql() -> &'static str {
+    "SELECT id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, is_protagonist, is_active, created_at, updated_at FROM characters"
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCharacterInput {
+    pub novel_id: String,
+    pub name: String,
+    pub role_type: Option<String>,
+    pub identity: Option<String>,
+    pub faction: Option<String>,
+    pub relation_to_protagonist: Option<String>,
+    pub goal: Option<String>,
+    pub personality: Option<String>,
+    pub behavior_limits: Option<String>,
+    pub forbidden_behaviors: Option<String>,
+    pub current_state: Option<String>,
+    #[serde(default)]
+    pub is_protagonist: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCharacterInput {
+    pub name: Option<String>,
+    pub role_type: Option<String>,
+    pub identity: Option<String>,
+    pub faction: Option<String>,
+    pub relation_to_protagonist: Option<String>,
+    pub goal: Option<String>,
+    pub personality: Option<String>,
+    pub behavior_limits: Option<String>,
+    pub forbidden_behaviors: Option<String>,
+    pub current_state: Option<String>,
+    pub is_protagonist: Option<bool>,
+    pub is_active: Option<bool>,
+}
+
+/// 同步主角：从 protagonists 表 / novels 表读取主角信息，upsert 到 characters 表
+#[tauri::command]
+pub fn sync_protagonist_to_character_library(
+    novel_id: String,
+) -> Result<Option<CharacterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 尝试从 protagonists 表读取主角
+    let protagonist = conn
+        .query_row(
+            "SELECT id, novel_id, name, identity, personality, goal, special_ability, ability_limits, forbidden_behaviors, current_state, created_at, updated_at FROM protagonists WHERE novel_id = ?1 LIMIT 1",
+            params![&novel_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(2)?,  // name
+                    row.get::<_, Option<String>>(3)?,  // identity
+                    row.get::<_, Option<String>>(4)?,  // personality
+                    row.get::<_, Option<String>>(5)?,  // goal
+                    row.get::<_, Option<String>>(6)?,  // special_ability
+                    row.get::<_, Option<String>>(7)?,  // ability_limits
+                    row.get::<_, Option<String>>(8)?,  // forbidden_behaviors
+                    row.get::<_, Option<String>>(9)?,  // current_state
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let (protag_name, identity, personality, goal, ability, ability_limits, forbidden_behaviors, current_state) =
+        match protagonist {
+            Some(p) => p,
+            None => {
+                // 尝试从 novels 表读取主角信息（main_character 或 protagonists_json）
+                let novel_info: Option<(String, String, String)> = conn
+                    .query_row(
+                        "SELECT main_character, protagonist_ability, protagonists_json FROM novels WHERE id = ?1 AND deleted_at IS NULL",
+                        params![&novel_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())?;
+
+                match novel_info {
+                    Some((main_char, ability_str, protagonists_json)) => {
+                        // 优先从 protagonists_json 解析
+                        if !protagonists_json.is_empty() && protagonists_json != "[]" {
+                            if let Ok(profiles) = serde_json::from_str::<Vec<ProtagonistProfileDto>>(&protagonists_json) {
+                                if let Some(first) = profiles.first() {
+                                    (
+                                        first.name.clone(),
+                                        Some(first.identity.clone()),
+                                        Some(first.personality.clone()),
+                                        Some(first.goal.clone()),
+                                        Some(first.ability.clone()),
+                                        first.ability_limits.clone(),
+                                        first.forbidden_behaviors.clone(),
+                                        None,
+                                    )
+                                } else {
+                                    return Ok(None);
+                                }
+                            } else {
+                                return Ok(None);
+                            }
+                        } else if !main_char.is_empty() {
+                            (
+                                main_char,
+                                None,
+                                None,
+                                None,
+                                if ability_str.is_empty() { None } else { Some(ability_str) },
+                                None,
+                                None,
+                                None,
+                            )
+                        } else {
+                            return Ok(None); // 无主角信息
+                        }
+                    }
+                    None => return Ok(None),
+                }
+            }
+        };
+
+    // 查找是否已存在 is_protagonist=1 的角色记录
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM characters WHERE novel_id = ?1 AND is_protagonist = 1 LIMIT 1",
+            params![&novel_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(existing_id) = existing {
+        // 更新已有主角
+        conn.execute(
+            "UPDATE characters SET name = ?1, role_type = 'protagonist', identity = ?2, personality = ?3, goal = ?4, behavior_limits = ?5, forbidden_behaviors = ?6, current_state = ?7, updated_at = ?8 WHERE id = ?9",
+            params![&protag_name, identity, personality, goal, ability_limits, forbidden_behaviors, current_state, now, &existing_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let sql = format!("{} WHERE id = ?1", character_select_sql());
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        stmt.query_row(params![&existing_id], map_character_row)
+            .optional()
+            .map_err(|e| e.to_string())
+    } else {
+        // 插入新主角
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let special_ability_text = ability.unwrap_or_default();
+        let behavior_limits_text = ability_limits.unwrap_or_default();
+        let personality_notes = personality.unwrap_or_default();
+        let goal_text = goal.unwrap_or_default();
+        let current_state_text = current_state.unwrap_or_default();
+
+        conn.execute(
+            "INSERT INTO characters (id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, is_protagonist, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 'protagonist', ?4, NULL, NULL, ?5, ?6, ?7, ?8, NULL, ?9, 'protagonist_profile', 1, 1, ?10, ?10)",
+            params![
+                &new_id,
+                &novel_id,
+                &protag_name,
+                identity,
+                goal_text,
+                personality_notes,
+                behavior_limits_text,
+                forbidden_behaviors,
+                current_state_text,
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        // 将 special_ability 也写入角色的 goal/behaviorLimits 作为补充
+        if !special_ability_text.is_empty() {
+            let _ = conn.execute(
+                "UPDATE characters SET goal = goal || ?1 WHERE id = ?2",
+                params![format!("\n特殊能力：{}", special_ability_text), &new_id],
+            );
+        }
+
+        let sql = format!("{} WHERE id = ?1", character_select_sql());
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        stmt.query_row(params![&new_id], map_character_row)
+            .optional()
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 获取主角角色（从 characters 表）
+#[tauri::command]
+pub fn get_protagonist_character(novel_id: String) -> Result<Option<CharacterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let sql = format!(
+        "{} WHERE novel_id = ?1 AND is_protagonist = 1 LIMIT 1",
+        character_select_sql()
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_row(params![&novel_id], map_character_row)
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
+/// 列出作品的所有角色
+#[tauri::command]
+pub fn list_characters(novel_id: String) -> Result<Vec<CharacterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let sql = format!(
+        "{} WHERE novel_id = ?1 AND is_active = 1 ORDER BY is_protagonist DESC, updated_at DESC",
+        character_select_sql()
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![&novel_id], map_character_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+/// 创建角色
+#[tauri::command]
+pub fn create_character(input: CreateCharacterInput) -> Result<CharacterDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let is_protagonist = if input.is_protagonist { 1 } else { 0 };
+
+    conn.execute(
+        "INSERT INTO characters (id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, current_state, source, is_protagonist, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'manual', ?13, 1, ?14, ?14)",
+        params![
+            &id,
+            &input.novel_id,
+            &input.name,
+            input.role_type.unwrap_or_else(|| "supporting".to_string()),
+            input.identity,
+            input.faction,
+            input.relation_to_protagonist,
+            input.goal,
+            input.personality,
+            input.behavior_limits,
+            input.forbidden_behaviors,
+            input.current_state,
+            is_protagonist,
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let sql = format!("{} WHERE id = ?1", character_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_row(params![&id], map_character_row)
+        .map_err(|e| e.to_string())
+}
+
+/// 更新角色
+#[tauri::command]
+pub fn update_character(id: String, input: UpdateCharacterInput) -> Result<CharacterDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE characters SET
+            name = COALESCE(?1, name),
+            role_type = COALESCE(?2, role_type),
+            identity = COALESCE(?3, identity),
+            faction = COALESCE(?4, faction),
+            relation_to_protagonist = COALESCE(?5, relation_to_protagonist),
+            goal = COALESCE(?6, goal),
+            personality = COALESCE(?7, personality),
+            behavior_limits = COALESCE(?8, behavior_limits),
+            forbidden_behaviors = COALESCE(?9, forbidden_behaviors),
+            current_state = COALESCE(?10, current_state),
+            is_protagonist = COALESCE(?11, is_protagonist),
+            is_active = COALESCE(?12, is_active),
+            updated_at = ?13
+         WHERE id = ?14",
+        params![
+            input.name,
+            input.role_type,
+            input.identity,
+            input.faction,
+            input.relation_to_protagonist,
+            input.goal,
+            input.personality,
+            input.behavior_limits,
+            input.forbidden_behaviors,
+            input.current_state,
+            input.is_protagonist.map(|b| b as i64),
+            input.is_active.map(|b| b as i64),
+            now,
+            &id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let sql = format!("{} WHERE id = ?1", character_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_row(params![&id], map_character_row)
+        .map_err(|e| e.to_string())
+}
+
+/// 删除角色（软删除）
+#[tauri::command]
+pub fn delete_character(id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE characters SET is_active = 0, updated_at = ?1 WHERE id = ?2",
+        params![now, &id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ==================== Chapter Character ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterCharacterDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub character_id: String,
+    pub character_name: Option<String>,
+    pub role_in_chapter: String,
+    pub must_appear: bool,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn map_chapter_character_row(row: &rusqlite::Row) -> rusqlite::Result<ChapterCharacterDto> {
+    Ok(ChapterCharacterDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        character_id: row.get(3)?,
+        character_name: row.get(4)?,
+        role_in_chapter: row.get(5)?,
+        must_appear: row.get::<_, i64>(6)? != 0,
+        note: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddChapterCharacterInput {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub character_id: String,
+    pub character_name: Option<String>,
+    #[serde(default = "default_role_in_chapter")]
+    pub role_in_chapter: String,
+    #[serde(default)]
+    pub must_appear: bool,
+    pub note: Option<String>,
+}
+
+fn default_role_in_chapter() -> String {
+    "supporting".to_string()
+}
+
+/// 添加章节出场角色
+#[tauri::command]
+pub fn add_chapter_character(input: AddChapterCharacterInput) -> Result<ChapterCharacterDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+
+    // 检查是否已存在
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM chapter_characters WHERE chapter_id = ?1 AND character_id = ?2 LIMIT 1",
+            params![&input.chapter_id, &input.character_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(existing_id) = existing {
+        // 已存在，更新角色
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE chapter_characters SET role_in_chapter = ?1, must_appear = ?2, note = ?3, character_name = ?4, updated_at = ?5 WHERE id = ?6",
+            params![
+                input.role_in_chapter,
+                input.must_appear as i64,
+                input.note,
+                input.character_name,
+                now,
+                &existing_id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut stmt = conn
+            .prepare("SELECT id, novel_id, chapter_id, character_id, character_name, role_in_chapter, must_appear, note, created_at, updated_at FROM chapter_characters WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        stmt.query_row(params![&existing_id], map_chapter_character_row)
+            .map_err(|e| e.to_string())
+    } else {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO chapter_characters (id, novel_id, chapter_id, character_id, character_name, role_in_chapter, must_appear, note, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            params![
+                &id,
+                &input.novel_id,
+                &input.chapter_id,
+                &input.character_id,
+                input.character_name,
+                input.role_in_chapter,
+                input.must_appear as i64,
+                input.note,
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut stmt = conn
+            .prepare("SELECT id, novel_id, chapter_id, character_id, character_name, role_in_chapter, must_appear, note, created_at, updated_at FROM chapter_characters WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        stmt.query_row(params![&id], map_chapter_character_row)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 列出章节出场角色
+#[tauri::command]
+pub fn list_chapter_characters(chapter_id: String) -> Result<Vec<ChapterCharacterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, chapter_id, character_id, character_name, role_in_chapter, must_appear, note, created_at, updated_at FROM chapter_characters WHERE chapter_id = ?1 ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![&chapter_id], map_chapter_character_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+/// 移除章节出场角色
+#[tauri::command]
+pub fn remove_chapter_character(
+    chapter_id: String,
+    character_id: String,
+) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM chapter_characters WHERE chapter_id = ?1 AND character_id = ?2",
+        params![&chapter_id, &character_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // Optional helper for QueryRow
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;

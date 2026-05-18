@@ -298,12 +298,14 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             first_appearance_chapter_id TEXT,
             current_state TEXT,
             source TEXT NOT NULL DEFAULT 'manual',
+            is_protagonist INTEGER NOT NULL DEFAULT 0,
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (novel_id) REFERENCES novels(id)
         );
         CREATE INDEX IF NOT EXISTS idx_characters_novel_id ON characters(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_characters_protagonist ON characters(novel_id, is_protagonist);
 
         CREATE TABLE IF NOT EXISTS character_states (
             id TEXT PRIMARY KEY,
@@ -471,6 +473,7 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
     ensure_novel_columns(conn)?;
     ensure_ai_task_record_columns(conn)?;
     ensure_large_text_ref_columns(conn)?;
+    ensure_character_columns(conn)?;
     crate::large_text_save::create_large_text_tables(conn)?;
     crate::outline_commands::create_outline_tables(conn)?;
     Ok(())
@@ -564,6 +567,21 @@ fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn ensure_character_columns(conn: &Connection) -> SqliteResult<()> {
+    add_column_if_missing(
+        conn,
+        "characters",
+        "is_protagonist",
+        "ALTER TABLE characters ADD COLUMN is_protagonist INTEGER NOT NULL DEFAULT 0",
+    )?;
+    // 为新列补充索引（CREATE INDEX IF NOT EXISTS 幂等安全）
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_characters_protagonist ON characters(novel_id, is_protagonist)",
+        [],
+    )?;
     Ok(())
 }
 
