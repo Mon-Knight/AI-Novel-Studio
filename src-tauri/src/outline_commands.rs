@@ -526,11 +526,37 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
     };
 
     // Read style/profile summary
-    let style_summary: Option<String> = conn
-        .query_row(
-            "SELECT style_summary FROM style_profiles WHERE novel_id = ?1 AND is_active = 1 ORDER BY updated_at DESC LIMIT 1",
-            params![&project_id], |r| r.get::<_, Option<String>>(0),
-        ).ok().flatten();
+    let style_summary: Option<String> = {
+        let mut stmt = conn
+            .prepare("SELECT style_summary, narrative_perspective, tone, pace, dialogue_ratio, description_ratio, forbidden_styles, battle_intensity, emotion_tendency FROM style_profiles WHERE novel_id = ?1 AND is_active = 1 ORDER BY updated_at DESC LIMIT 1")
+            .ok();
+        if let Some(mut s) = stmt {
+            s.query_row(params![&project_id], |r| {
+                let summary: Option<String> = r.get(0)?;
+                let np: Option<String> = r.get(1)?;
+                let tone: Option<String> = r.get(2)?;
+                let pace: Option<String> = r.get(3)?;
+                let dr: f64 = r.get(4)?;
+                let der: f64 = r.get(5)?;
+                let fs: Option<String> = r.get(6)?;
+                let bi: Option<String> = r.get(7)?;
+                let et: Option<String> = r.get(8)?;
+                let parts: Vec<String> = vec![
+                    np.map(|v| format!("叙事人称：{}", v)),
+                    tone.map(|v| format!("文风：{}", v)),
+                    pace.map(|v| format!("节奏：{}", v)),
+                    Some(format!("对话比例：{}%，描写比例：{}%", (dr * 100.0) as i32, (der * 100.0) as i32)),
+                    bi.map(|v| format!("战斗强度：{}", v)),
+                    et.map(|v| format!("情绪倾向：{}", v)),
+                    summary.map(|v| format!("总结：{}", v)),
+                    fs.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+                        .filter(|v| !v.is_empty())
+                        .map(|v| format!("禁用：{}", v.join("、"))),
+                ].into_iter().flatten().collect();
+                Ok::<Option<String>, rusqlite::Error>(if parts.is_empty() { None } else { Some(parts.join("\n")) })
+            }).ok().flatten()
+        } else { None }
+    };
 
     let output_config_summary: Option<String> = conn
         .query_row(

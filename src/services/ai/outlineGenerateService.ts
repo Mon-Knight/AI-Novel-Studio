@@ -14,6 +14,7 @@ import { settingRepository } from '../database/settingRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
+import { styleProfileService } from '../styles/styleProfileService';
 
 export interface VolumeOutlineCandidate {
   title: string;
@@ -44,6 +45,23 @@ async function buildOutlineContext(novelId: string) {
   const activeWorld = worldSettings.find((item) => item.isActive) || worldSettings[0];
   const activeRules = ruleSystems.filter((item) => item.isActive);
 
+  // v1.0.33: 加载当前采用风格方案
+  let styleSummary: string | undefined;
+  try {
+    const activeStyle = await styleProfileService.getActive(novelId);
+    if (activeStyle) {
+      const parts: string[] = [];
+      if (activeStyle.narrativePerspective) parts.push(`叙事人称：${activeStyle.narrativePerspective}`);
+      if (activeStyle.tone) parts.push(`文风：${activeStyle.tone}`);
+      if (activeStyle.pace) parts.push(`节奏：${activeStyle.pace}`);
+      parts.push(`对话比例：${Math.round(activeStyle.dialogueRatio * 100)}%，描写比例：${Math.round(activeStyle.descriptionRatio * 100)}%`);
+      if (activeStyle.battleIntensity) parts.push(`战斗强度：${activeStyle.battleIntensity}`);
+      if (activeStyle.emotionTendency) parts.push(`情绪倾向：${activeStyle.emotionTendency}`);
+      if (activeStyle.prohibitedStyles?.length) parts.push(`禁用：${activeStyle.prohibitedStyles.join('、')}`);
+      styleSummary = parts.join('\n');
+    }
+  } catch { /* 风格加载失败不影响生成 */ }
+
   return {
     novelTitle: novel?.title || '未命名作品',
     novelGenre: novel?.genre,
@@ -54,6 +72,7 @@ async function buildOutlineContext(novelId: string) {
     specialAbility: protagonist?.specialAbility,
     existingVolumes: volumes.map((item) => `- ${item.title}：${item.summary || item.goal || ''}`).join('\n'),
     existingChapters: chapters.map((item) => `- ${item.title}：${item.outline || item.goal || ''}`).join('\n').slice(0, 3000),
+    styleSummary,
   };
 }
 

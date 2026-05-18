@@ -71,6 +71,11 @@ fn main() {
             outline_commands::get_chapter_outline_versions,
             outline_commands::set_active_chapter_outline,
             outline_commands::build_outline_context,
+            commands::list_style_profiles,
+            commands::get_active_style_profile,
+            commands::save_style_profile,
+            commands::set_active_style_profile,
+            commands::delete_style_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

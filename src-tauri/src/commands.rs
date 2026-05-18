@@ -1419,6 +1419,255 @@ fn get_ai_task_record_by_id_internal(
         .map_err(|e| e.to_string())
 }
 
+// ==================== Style Profiles ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleProfileDto {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub narrative_perspective: Option<String>,
+    pub tone: Option<String>,
+    pub pace: Option<String>,
+    pub sentence_style: Option<String>,
+    pub dialogue_ratio: f64,
+    pub description_ratio: f64,
+    pub psychological_ratio: Option<f64>,
+    pub battle_style: Option<String>,
+    pub battle_intensity: Option<String>,
+    pub emotion_tendency: Option<String>,
+    pub chapter_ending: Option<String>,
+    pub forbidden_styles_json: Option<String>,
+    pub style_summary: Option<String>,
+    pub raw_config_json: Option<String>,
+    pub is_active: bool,
+    pub source_type: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveStyleProfileInput {
+    pub project_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub narrative_perspective: Option<String>,
+    pub tone: Option<String>,
+    pub pace: Option<String>,
+    pub sentence_style: Option<String>,
+    pub dialogue_ratio: Option<f64>,
+    pub description_ratio: Option<f64>,
+    pub psychological_ratio: Option<f64>,
+    pub battle_style: Option<String>,
+    pub battle_intensity: Option<String>,
+    pub emotion_tendency: Option<String>,
+    pub chapter_ending: Option<String>,
+    pub forbidden_styles: Option<Vec<String>>,
+    pub style_summary: Option<String>,
+    pub raw_config_json: Option<String>,
+    pub source_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStyleProfileInput {
+    pub id: String,
+    pub project_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub narrative_perspective: Option<String>,
+    pub tone: Option<String>,
+    pub pace: Option<String>,
+    pub sentence_style: Option<String>,
+    pub dialogue_ratio: Option<f64>,
+    pub description_ratio: Option<f64>,
+    pub psychological_ratio: Option<f64>,
+    pub battle_style: Option<String>,
+    pub battle_intensity: Option<String>,
+    pub emotion_tendency: Option<String>,
+    pub chapter_ending: Option<String>,
+    pub forbidden_styles: Option<Vec<String>>,
+    pub style_summary: Option<String>,
+    pub raw_config_json: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetActiveStyleProfileInput {
+    pub project_id: String,
+    pub style_profile_id: String,
+}
+
+fn map_style_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StyleProfileDto> {
+    let is_active: i64 = row.get(17)?;
+    Ok(StyleProfileDto {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        name: row.get(2)?,
+        description: row.get(3)?,
+        narrative_perspective: row.get(4)?,
+        tone: row.get(5)?,
+        pace: row.get(6)?,
+        sentence_style: row.get(7)?,
+        dialogue_ratio: row.get::<_, f64>(8)?,
+        description_ratio: row.get::<_, f64>(9)?,
+        psychological_ratio: row.get(10)?,
+        battle_style: row.get(11)?,
+        battle_intensity: row.get(12)?,
+        emotion_tendency: row.get(13)?,
+        chapter_ending: row.get(14)?,
+        forbidden_styles_json: row.get(15)?,
+        style_summary: row.get(16)?,
+        raw_config_json: row.get::<_, Option<String>>(18).unwrap_or(None),
+        is_active: is_active != 0,
+        source_type: row.get(19)?,
+        created_at: row.get(20)?,
+        updated_at: row.get(21)?,
+    })
+}
+
+fn style_select_sql() -> &'static str {
+    "SELECT id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at FROM style_profiles"
+}
+
+#[tauri::command]
+pub fn list_style_profiles(project_id: String) -> Result<Vec<StyleProfileDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let sql = format!("{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC", style_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![&project_id], map_style_profile_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn get_active_style_profile(project_id: String) -> Result<Option<StyleProfileDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    // Prefer active, fallback to latest
+    let sql = format!("{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC LIMIT 1", style_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    match stmt.query_row(params![&project_id], map_style_profile_row) {
+        Ok(dto) => Ok(Some(dto)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn save_style_profile(
+    id: Option<String>,
+    input: SaveStyleProfileInput,
+) -> Result<StyleProfileDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let forbidden_json = serde_json::to_string(&input.forbidden_styles.unwrap_or_default())
+        .unwrap_or_else(|_| "[]".to_string());
+    let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
+
+    if let Some(existing_id) = id {
+        conn.execute(
+            "UPDATE style_profiles SET name = ?1, description = ?2, narrative_perspective = ?3, tone = ?4, pace = ?5, sentence_style = ?6, dialogue_ratio = ?7, description_ratio = ?8, psychological_ratio = ?9, battle_style = ?10, battle_intensity = ?11, emotion_tendency = ?12, chapter_ending = ?13, forbidden_styles = ?14, style_summary = ?15, raw_config_json = ?16, source_type = ?17, updated_at = ?18 WHERE id = ?19 AND novel_id = ?20",
+            params![
+                &input.name, &input.description,
+                &input.narrative_perspective, &input.tone, &input.pace, &input.sentence_style,
+                input.dialogue_ratio.unwrap_or(0.35), input.description_ratio.unwrap_or(0.4),
+                input.psychological_ratio, &input.battle_style, &input.battle_intensity,
+                &input.emotion_tendency, &input.chapter_ending,
+                &forbidden_json, &input.style_summary, &input.raw_config_json,
+                &source_type, &now, &existing_id, &input.project_id,
+            ],
+        ).map_err(|e| e.to_string())?;
+        get_style_profile_by_id_internal(&conn, &existing_id)
+    } else {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO style_profiles (id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,0,?18,?19,?20,?20)",
+            params![
+                &new_id, &input.project_id, &input.name, &input.description,
+                &input.narrative_perspective, &input.tone, &input.pace, &input.sentence_style,
+                input.dialogue_ratio.unwrap_or(0.35), input.description_ratio.unwrap_or(0.4),
+                input.psychological_ratio, &input.battle_style, &input.battle_intensity,
+                &input.emotion_tendency, &input.chapter_ending,
+                &forbidden_json, &input.style_summary, &input.raw_config_json,
+                &source_type, &now,
+            ],
+        ).map_err(|e| e.to_string())?;
+        get_style_profile_by_id_internal(&conn, &new_id)
+    }
+}
+
+#[tauri::command]
+pub fn set_active_style_profile(
+    input: SetActiveStyleProfileInput,
+) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE style_profiles SET is_active = 0 WHERE novel_id = ?1",
+        params![&input.project_id],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE style_profiles SET is_active = 1, updated_at = ?1 WHERE id = ?2 AND novel_id = ?3",
+        params![&chrono::Utc::now().to_rfc3339(), &input.style_profile_id, &input.project_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_style_profile(
+    project_id: String,
+    style_profile_id: String,
+) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    // Check if active
+    let is_active: i64 = conn
+        .query_row(
+            "SELECT is_active FROM style_profiles WHERE id = ?1 AND novel_id = ?2",
+            params![&style_profile_id, &project_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "DELETE FROM style_profiles WHERE id = ?1 AND novel_id = ?2",
+        params![&style_profile_id, &project_id],
+    ).map_err(|e| e.to_string())?;
+
+    // If deleted was active, activate the latest remaining
+    if is_active != 0 {
+        let latest: Option<String> = conn
+            .query_row(
+                "SELECT id FROM style_profiles WHERE novel_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+                params![&project_id],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(new_active_id) = latest {
+            conn.execute(
+                "UPDATE style_profiles SET is_active = 1 WHERE id = ?1",
+                params![&new_active_id],
+            ).ok();
+        }
+    }
+    Ok(())
+}
+
+fn get_style_profile_by_id_internal(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<StyleProfileDto, String> {
+    let sql = format!("{} WHERE id = ?1", style_select_sql());
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], map_style_profile_row)
+        .map_err(|e| e.to_string())
+}
+
 // Optional helper for QueryRow
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;
