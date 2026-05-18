@@ -58,6 +58,15 @@ pub fn get_connection() -> &'static Mutex<Connection> {
 }
 
 fn create_tables(conn: &Connection) -> SqliteResult<()> {
+    create_base_tables(conn)?;
+    run_migrations(conn)?;
+    create_indexes(conn)?;
+    crate::large_text_save::create_large_text_tables(conn)?;
+    crate::outline_commands::create_outline_tables(conn)?;
+    Ok(())
+}
+
+fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS novels (
@@ -287,17 +296,25 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             id TEXT PRIMARY KEY,
             novel_id TEXT NOT NULL,
             name TEXT NOT NULL,
-            role_type TEXT,
+            role_type TEXT NOT NULL DEFAULT 'supporting',
+            gender TEXT,
             identity TEXT,
+            description TEXT,
             faction TEXT,
             relation_to_protagonist TEXT,
             goal TEXT,
+            goals TEXT,
+            background TEXT,
+            ability TEXT,
             personality TEXT,
+            constraints TEXT,
             behavior_limits TEXT,
             forbidden_behaviors TEXT,
+            relationship_notes TEXT,
             first_appearance_chapter_id TEXT,
             current_state TEXT,
             source TEXT NOT NULL DEFAULT 'manual',
+            source_type TEXT NOT NULL DEFAULT 'manual',
             is_protagonist INTEGER NOT NULL DEFAULT 0,
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
@@ -305,7 +322,6 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
             FOREIGN KEY (novel_id) REFERENCES novels(id)
         );
         CREATE INDEX IF NOT EXISTS idx_characters_novel_id ON characters(novel_id);
-        CREATE INDEX IF NOT EXISTS idx_characters_protagonist ON characters(novel_id, is_protagonist);
 
         CREATE TABLE IF NOT EXISTS character_states (
             id TEXT PRIMARY KEY,
@@ -470,12 +486,24 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_polish_records_source_draft_id ON polish_records(source_draft_id);
         ",
     )?;
+    Ok(())
+}
+
+fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     ensure_novel_columns(conn)?;
     ensure_ai_task_record_columns(conn)?;
     ensure_large_text_ref_columns(conn)?;
-    ensure_character_columns(conn)?;
-    crate::large_text_save::create_large_text_tables(conn)?;
-    crate::outline_commands::create_outline_tables(conn)?;
+    migrate_characters_table(conn)?;
+    Ok(())
+}
+
+fn create_indexes(conn: &Connection) -> SqliteResult<()> {
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_characters_protagonist
+        ON characters(novel_id, is_protagonist);
+        ",
+    )?;
     Ok(())
 }
 
@@ -488,14 +516,36 @@ fn table_columns(conn: &Connection, table_name: &str) -> SqliteResult<Vec<String
     Ok(columns)
 }
 
+fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> SqliteResult<bool> {
+    let columns = table_columns(conn, table_name)?;
+    Ok(columns.iter().any(|column| column == column_name))
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table_name: &str,
+    column_name: &str,
+    column_def: &str,
+) -> SqliteResult<()> {
+    if !column_exists(conn, table_name, column_name)? {
+        let quoted_table_name = table_name.replace('"', "\"\"");
+        let quoted_column_name = column_name.replace('"', "\"\"");
+        let sql = format!(
+            "ALTER TABLE \"{}\" ADD COLUMN \"{}\" {}",
+            quoted_table_name, quoted_column_name, column_def
+        );
+        conn.execute(&sql, [])?;
+    }
+    Ok(())
+}
+
 fn add_column_if_missing(
     conn: &Connection,
     table_name: &str,
     column_name: &str,
     alter_sql: &str,
 ) -> SqliteResult<()> {
-    let columns = table_columns(conn, table_name)?;
-    if !columns.iter().any(|column| column == column_name) {
+    if !column_exists(conn, table_name, column_name)? {
         conn.execute(alter_sql, [])?;
     }
     Ok(())
@@ -570,17 +620,86 @@ fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
     Ok(())
 }
 
-fn ensure_character_columns(conn: &Connection) -> SqliteResult<()> {
-    add_column_if_missing(
+fn migrate_characters_table(conn: &Connection) -> SqliteResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    ensure_column(
         conn,
         "characters",
         "is_protagonist",
-        "ALTER TABLE characters ADD COLUMN is_protagonist INTEGER NOT NULL DEFAULT 0",
+        "INTEGER NOT NULL DEFAULT 0",
     )?;
-    // 为新列补充索引（CREATE INDEX IF NOT EXISTS 幂等安全）
+    ensure_column(
+        conn,
+        "characters",
+        "role_type",
+        "TEXT NOT NULL DEFAULT 'supporting'",
+    )?;
+    ensure_column(conn, "characters", "gender", "TEXT")?;
+    ensure_column(conn, "characters", "identity", "TEXT")?;
+    ensure_column(conn, "characters", "description", "TEXT")?;
+    ensure_column(conn, "characters", "background", "TEXT")?;
+    ensure_column(conn, "characters", "ability", "TEXT")?;
+    ensure_column(conn, "characters", "personality", "TEXT")?;
+    ensure_column(conn, "characters", "goals", "TEXT")?;
+    ensure_column(conn, "characters", "constraints", "TEXT")?;
+    ensure_column(conn, "characters", "relationship_notes", "TEXT")?;
+    ensure_column(
+        conn,
+        "characters",
+        "source_type",
+        "TEXT NOT NULL DEFAULT 'manual'",
+    )?;
+    ensure_column(conn, "characters", "updated_at", "TEXT")?;
+
+    ensure_column(conn, "characters", "faction", "TEXT")?;
+    ensure_column(conn, "characters", "relation_to_protagonist", "TEXT")?;
+    ensure_column(conn, "characters", "goal", "TEXT")?;
+    ensure_column(conn, "characters", "behavior_limits", "TEXT")?;
+    ensure_column(conn, "characters", "forbidden_behaviors", "TEXT")?;
+    ensure_column(conn, "characters", "first_appearance_chapter_id", "TEXT")?;
+    ensure_column(conn, "characters", "current_state", "TEXT")?;
+    ensure_column(
+        conn,
+        "characters",
+        "source",
+        "TEXT NOT NULL DEFAULT 'manual'",
+    )?;
+    ensure_column(
+        conn,
+        "characters",
+        "is_active",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    ensure_column(conn, "characters", "created_at", "TEXT")?;
+
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_characters_protagonist ON characters(novel_id, is_protagonist)",
+        "UPDATE characters SET is_protagonist = 0 WHERE is_protagonist IS NULL",
         [],
+    )?;
+    conn.execute(
+        "UPDATE characters SET role_type = 'supporting' WHERE role_type IS NULL OR TRIM(role_type) = ''",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE characters SET source = 'manual' WHERE source IS NULL OR TRIM(source) = ''",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE characters SET source_type = 'manual' WHERE source_type IS NULL OR TRIM(source_type) = ''",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE characters SET is_active = 1 WHERE is_active IS NULL",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE characters SET created_at = ?1 WHERE created_at IS NULL OR TRIM(created_at) = ''",
+        rusqlite::params![&now],
+    )?;
+    conn.execute(
+        "UPDATE characters SET updated_at = ?1 WHERE updated_at IS NULL OR TRIM(updated_at) = ''",
+        rusqlite::params![&now],
     )?;
     Ok(())
 }
@@ -629,4 +748,74 @@ fn ensure_large_text_ref_columns(conn: &Connection) -> SqliteResult<()> {
         "ALTER TABLE rule_systems ADD COLUMN large_text_ref_id TEXT",
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_legacy_characters_table_before_protagonist_index() -> SqliteResult<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE characters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                name TEXT NOT NULL
+            );
+
+            INSERT INTO characters (id, novel_id, name)
+            VALUES ('legacy-character', 'legacy-novel', 'Legacy Hero');
+            ",
+        )?;
+
+        create_tables(&conn)?;
+
+        for column in [
+            "is_protagonist",
+            "role_type",
+            "gender",
+            "identity",
+            "description",
+            "background",
+            "ability",
+            "personality",
+            "goals",
+            "constraints",
+            "relationship_notes",
+            "source_type",
+            "updated_at",
+        ] {
+            assert!(column_exists(&conn, "characters", column)?);
+        }
+
+        let index_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_characters_protagonist'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(index_count, 1);
+
+        let migrated_values: (i64, String, String, i64) = conn.query_row(
+            "SELECT is_protagonist, role_type, source_type, is_active FROM characters WHERE id = 'legacy-character'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        assert_eq!(
+            migrated_values,
+            (0, "supporting".to_string(), "manual".to_string(), 1)
+        );
+
+        let timestamps: (String, String) = conn.query_row(
+            "SELECT created_at, updated_at FROM characters WHERE id = 'legacy-character'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert!(!timestamps.0.is_empty());
+        assert!(!timestamps.1.is_empty());
+
+        create_tables(&conn)?;
+        Ok(())
+    }
 }
