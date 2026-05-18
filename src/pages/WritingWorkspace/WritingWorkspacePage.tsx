@@ -237,6 +237,19 @@ function WritingWorkspacePage() {
     await handleGenerateSummary();
   }, [handleGenerateSummary]);
 
+  // v1.0.34 章节大纲应用回调：刷新父组件的章节状态
+  const handleChapterOutlineApplied = useCallback(async (chapterId: string) => {
+    if (!chapterId) return;
+    try {
+      const updated = await chapterRepository.getById(chapterId);
+      if (updated) {
+        setChapters((prev) => prev.map((c) => (c.id === chapterId ? updated : c)));
+      }
+    } catch {
+      // 刷新失败时静默处理，不影响用户操作
+    }
+  }, []);
+
   // v1.0.19 工作台内创建分卷和章节（统一走父组件单一数据源）
   const [creating, setCreating] = useState(false);
 
@@ -467,6 +480,7 @@ function WritingWorkspacePage() {
           chapter={activeChapter}
           onGenerated={(draft) => { setCurrentDraft(draft); setDraftWordCount(draft.wordCount); setIsDirty(false); }}
           onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
+          onChapterOutlineApplied={handleChapterOutlineApplied}
         />
       )}
 

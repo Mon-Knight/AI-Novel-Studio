@@ -13,15 +13,18 @@ import { chapterOutlineService } from '../../../services/outlines/outlineService
 interface OutlinePanelProps {
   novelId?: string;
   chapter?: Chapter;
+  onChapterOutlineApplied?: (chapterId: string) => void;
 }
 
 type OutlineGenMode = 'novel' | 'volume' | 'chapter' | null;
 
-function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
+function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePanelProps) {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [loading, setLoading] = useState(false);
   const [genMode, setGenMode] = useState<OutlineGenMode>(null);
   const [error, setError] = useState('');
+  const [applyMsg, setApplyMsg] = useState('');
+  const [applyError, setApplyError] = useState('');
 
   // 作品总大纲结果
   const [novelOutline, setNovelOutline] = useState('');
@@ -122,19 +125,34 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
 
   // 采用章节大纲候选（保存到当前章节）
   const handleAdoptChapterOutline = useCallback(async (candidate: ChapterOutlineCandidate) => {
-    if (!chapter) return;
+    if (!chapter) {
+      setApplyError('请先在左侧目录树中选择一个章节');
+      return;
+    }
+    // 使用编辑后的内容（用户可能在 textarea 中修改过）
+    const editedOutline = candidate.rawText || candidate.outline;
+    if (!editedOutline?.trim()) {
+      setApplyError('章节大纲内容为空，无法应用');
+      return;
+    }
+    setApplyError('');
+    setApplyMsg('正在保存...');
     try {
       await chapterRepository.update(chapter.id, {
         title: candidate.title || chapter.title,
-        outline: candidate.outline,
+        outline: editedOutline,
         goal: candidate.goal || undefined,
         targetWordCount: candidate.targetWordCount,
       });
-      alert(`已保存章节大纲：${candidate.title}`);
+      // 通知父组件刷新章节状态
+      onChapterOutlineApplied?.(chapter.id);
+      setApplyMsg(`✅ 已应用到当前章节：${candidate.title}`);
+      setTimeout(() => setApplyMsg(''), 4000);
     } catch (e: any) {
-      setError(e.message || '保存章节大纲失败');
+      setApplyError(e.message || '保存章节大纲失败');
+      setApplyMsg('');
     }
-  }, [chapter]);
+  }, [chapter, onChapterOutlineApplied]);
 
   // 采用作品总大纲（显示确认）
   const handleAdoptNovelOutline = useCallback(() => {
@@ -216,6 +234,8 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
         )}
 
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 8 }}>{error}</div>}
+        {applyError && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 8 }}>{applyError}</div>}
+        {applyMsg && <div style={{ fontSize: 12, color: 'var(--color-success)', marginBottom: 8, fontWeight: 500 }}>{applyMsg}</div>}
       </div>
 
       {/* 作品总大纲结果 */}
@@ -293,7 +313,11 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
               {cand.targetWordCount && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>建议字数：{formatNumber(cand.targetWordCount)} 字</div>}
               {chapter && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                  <button className="btn btn-primary btn-sm" onClick={() => handleAdoptChapterOutline(cand)}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleAdoptChapterOutline(cand)}
+                    disabled={loading || !(cand.rawText || cand.outline)?.trim()}
+                  >
                     ✅ 应用到当前章节
                   </button>
                 </div>
