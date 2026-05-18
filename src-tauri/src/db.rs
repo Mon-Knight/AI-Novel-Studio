@@ -491,9 +491,11 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
 
 fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     ensure_novel_columns(conn)?;
+    migrate_chapters_table(conn)?;
     ensure_ai_task_record_columns(conn)?;
     ensure_large_text_ref_columns(conn)?;
     migrate_characters_table(conn)?;
+    migrate_chapter_characters_table(conn)?;
     Ok(())
 }
 
@@ -502,6 +504,8 @@ fn create_indexes(conn: &Connection) -> SqliteResult<()> {
         "
         CREATE INDEX IF NOT EXISTS idx_characters_protagonist
         ON characters(novel_id, is_protagonist);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_characters_unique
+        ON chapter_characters(chapter_id, character_id);
         ",
     )?;
     Ok(())
@@ -588,6 +592,60 @@ fn ensure_novel_columns(conn: &Connection) -> SqliteResult<()> {
         "protagonist_ability",
         "ALTER TABLE novels ADD COLUMN protagonist_ability TEXT NOT NULL DEFAULT ''",
     )?;
+    Ok(())
+}
+
+fn migrate_chapters_table(conn: &Connection) -> SqliteResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    ensure_column(conn, "chapters", "volume_id", "TEXT")?;
+    ensure_column(conn, "chapters", "outline", "TEXT")?;
+    ensure_column(conn, "chapters", "goal", "TEXT")?;
+    ensure_column(
+        conn,
+        "chapters",
+        "order_index",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "chapters",
+        "status",
+        "TEXT NOT NULL DEFAULT 'not_started'",
+    )?;
+    ensure_column(conn, "chapters", "adopted_draft_id", "TEXT")?;
+    ensure_column(
+        conn,
+        "chapters",
+        "word_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(conn, "chapters", "target_word_count", "INTEGER")?;
+    ensure_column(conn, "chapters", "created_at", "TEXT")?;
+    ensure_column(conn, "chapters", "updated_at", "TEXT")?;
+    ensure_column(conn, "chapters", "deleted_at", "TEXT")?;
+
+    conn.execute(
+        "UPDATE chapters SET order_index = 0 WHERE order_index IS NULL",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE chapters SET status = 'not_started' WHERE status IS NULL OR TRIM(status) = ''",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE chapters SET word_count = 0 WHERE word_count IS NULL",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE chapters SET created_at = ?1 WHERE created_at IS NULL OR TRIM(created_at) = ''",
+        rusqlite::params![&now],
+    )?;
+    conn.execute(
+        "UPDATE chapters SET updated_at = ?1 WHERE updated_at IS NULL OR TRIM(updated_at) = ''",
+        rusqlite::params![&now],
+    )?;
+
     Ok(())
 }
 
@@ -701,6 +759,61 @@ fn migrate_characters_table(conn: &Connection) -> SqliteResult<()> {
         "UPDATE characters SET updated_at = ?1 WHERE updated_at IS NULL OR TRIM(updated_at) = ''",
         rusqlite::params![&now],
     )?;
+    Ok(())
+}
+
+fn migrate_chapter_characters_table(conn: &Connection) -> SqliteResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    ensure_column(conn, "chapter_characters", "novel_id", "TEXT")?;
+    ensure_column(conn, "chapter_characters", "chapter_id", "TEXT")?;
+    ensure_column(conn, "chapter_characters", "character_id", "TEXT")?;
+    ensure_column(conn, "chapter_characters", "character_name", "TEXT")?;
+    ensure_column(
+        conn,
+        "chapter_characters",
+        "role_in_chapter",
+        "TEXT NOT NULL DEFAULT 'supporting'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_characters",
+        "must_appear",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(conn, "chapter_characters", "note", "TEXT")?;
+    ensure_column(conn, "chapter_characters", "created_at", "TEXT")?;
+    ensure_column(conn, "chapter_characters", "updated_at", "TEXT")?;
+
+    conn.execute(
+        "UPDATE chapter_characters SET role_in_chapter = 'supporting' WHERE role_in_chapter IS NULL OR TRIM(role_in_chapter) = ''",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE chapter_characters SET must_appear = 0 WHERE must_appear IS NULL",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE chapter_characters SET created_at = ?1 WHERE created_at IS NULL OR TRIM(created_at) = ''",
+        rusqlite::params![&now],
+    )?;
+    conn.execute(
+        "UPDATE chapter_characters SET updated_at = ?1 WHERE updated_at IS NULL OR TRIM(updated_at) = ''",
+        rusqlite::params![&now],
+    )?;
+    conn.execute(
+        "DELETE FROM chapter_characters
+         WHERE chapter_id IS NOT NULL
+           AND character_id IS NOT NULL
+           AND rowid NOT IN (
+             SELECT MIN(rowid)
+             FROM chapter_characters
+             WHERE chapter_id IS NOT NULL AND character_id IS NOT NULL
+             GROUP BY chapter_id, character_id
+           )",
+        [],
+    )?;
+
     Ok(())
 }
 

@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "ai-novel-studio"
-version = "1.0.38"
+version = "1.0.41"
 dependencies = [
  "chrono",
  "once_cell",

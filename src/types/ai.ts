@@ -181,6 +181,8 @@ export interface ChapterGenerationContext {
   protagonistsSummary?: string;
   dualProtagonistSummary?: string;
   protagonistNames?: string;
+  protagonistAppearance?: string;
+  protagonistMustAppear?: boolean;
   volumeTitle?: string;
   volumeOutline?: string;
   volumeGoal?: string;

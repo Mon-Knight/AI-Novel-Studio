@@ -118,6 +118,8 @@ export interface VolumeOutlineGeneratePromptContext extends OutlineGeneratePromp
 export interface ChapterOutlineGeneratePromptContext extends OutlineGeneratePromptContext {
   volumeTitle?: string;
   volumeSummary?: string;
+  currentChapterTitle?: string;
+  currentChapterGoal?: string;
   chapterCount?: number;
   activeVolumeOutline?: string;
 }
@@ -562,6 +564,14 @@ export function buildChapterOutlineGeneratePrompt(ctx: ChapterOutlineGeneratePro
     ctx.protagonist ? `主角：${ctx.protagonist}` : '',
     ctx.specialAbility ? `主角特殊能力：${ctx.specialAbility}` : '',
     ctx.volumeTitle ? `分卷：${ctx.volumeTitle}` : '',
+    ctx.currentChapterTitle ? `当前章节：${ctx.currentChapterTitle}` : '',
+    ctx.currentChapterGoal
+      ? [
+          '【用户设定的本章目标】',
+          ctx.currentChapterGoal,
+          '章节大纲必须围绕该目标设计；如果该目标与上级大纲存在细节冲突，以用户最新设置的本章目标为优先，同时保持主线连贯。',
+        ].join('\n')
+      : '',
     ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
     ctx.styleSummary ? `风格方案：\n${ctx.styleSummary}` : '',
     '',

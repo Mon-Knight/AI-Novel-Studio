@@ -27,6 +27,7 @@ function mapToCharacter(dto: any): Character {
     forbiddenBehaviors: dto.forbiddenBehaviors ?? dto.forbidden_behaviors,
     firstAppearanceChapterId: dto.firstAppearanceChapterId ?? dto.first_appearance_chapter_id,
     currentState: dto.currentState ?? dto.current_state,
+    isProtagonist: dto.isProtagonist ?? dto.is_protagonist ?? ((dto.roleType ?? dto.role_type) === 'protagonist'),
     source: dto.source ?? 'manual',
     isActive: dto.isActive ?? dto.is_active ?? true,
     createdAt: dto.createdAt ?? dto.created_at,
@@ -66,6 +67,7 @@ export const characterService = {
         behaviorLimits,
         forbiddenBehaviors,
         currentState,
+        isProtagonist: true,
         updatedAt: nowISO(),
       });
       saveAllLocal(all);
@@ -84,6 +86,7 @@ export const characterService = {
       behaviorLimits,
       forbiddenBehaviors,
       currentState,
+      isProtagonist: true,
       source: 'manual' as any,
       isActive: true,
       createdAt: nowISO(),
@@ -108,7 +111,9 @@ export const characterService = {
       const list = await dbCall<any[]>('list_characters', { novelId });
       return (list ?? []).map(mapToCharacter);
     }
-    return getAllLocal().filter((c) => c.novelId === novelId);
+    return getAllLocal()
+      .filter((c) => c.novelId === novelId)
+      .sort((a, b) => Number(b.isProtagonist || b.roleType === 'protagonist') - Number(a.isProtagonist || a.roleType === 'protagonist'));
   },
 
   async getById(id: string): Promise<Character | null> {

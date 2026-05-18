@@ -32,6 +32,8 @@
 
 ## 角色信息
 - 主角：{{protagonist}}
+【主角档案】
+姓名：{{protagonist}}
 {{#protagonist_mode}}
 - 主角模式：{{protagonist_mode}}
 {{/protagonist_mode}}
@@ -64,6 +66,11 @@
 5. 叙事权重要符合设置
 {{/dual_protagonist_summary}}
 
+{{#protagonist_appearance}}
+## 主角本章出场状态
+{{protagonist_appearance}}
+{{/protagonist_appearance}}
+
 {{#style_profile}}
 ## 写作风格约束（必须遵守）
 {{style_profile}}
@@ -89,7 +96,13 @@
 - 章节大纲：{{chapter_outline}}
 {{/chapter_outline}}
 {{#chapter_goal}}
-- 本章目标：{{chapter_goal}}
+【本章目标】
+{{chapter_goal}}
+正文必须围绕本章目标推进；如果本章目标与章节大纲冲突，以用户最新修改的本章目标为优先。
+{{/chapter_goal}}
+{{^chapter_goal}}
+【本章目标】
+未单独设置本章目标，请根据章节大纲和分卷大纲自然推进。
 {{/chapter_goal}}
 - 目标字数：约 {{target_word_count}} 字
 
@@ -116,7 +129,7 @@
 13. 如果章节大纲中描述了具体场景/道具/对话，必须如实写入正文
 
 {{#chapter_characters}}
-## 本章出场角色
+【本章出场角色】
 {{chapter_characters}}
 
 写作时严格遵循上述角色的性格、目标和行为限制，不要让角色做出其禁止行为。不要凭空新增重要角色。

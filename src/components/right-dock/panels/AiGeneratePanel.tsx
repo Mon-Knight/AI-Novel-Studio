@@ -63,7 +63,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         if (def && !selectedOutputId) setSelectedOutputId(def.id);
       }).catch(() => {});
     }
-  }, [novelId]);
+  }, [novelId, selectedStyleId, selectedOutputId]);
 
   // v1.0.25 预加载上下文摘要
   const handlePreviewContext = useCallback(async () => {
@@ -73,7 +73,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       setContextSummary(ctx);
       setShowContext(true);
     } catch { /* ignore */ }
-  }, [novelId, chapter, userInstruction]);
+  }, [novelId, chapter, selectedStyleId, selectedOutputId]);
 
   const settings = aiSettingsService.getSettings();
 
@@ -128,6 +128,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           } catch { /* 上下文构建失败不阻止生成 */ }
 
           const hasOutline = ctx?.chapterOutline ? '有' : '无';
+          const hasChapterGoal = ctx?.chapterGoal ? '有' : '无';
           const charCount = ctx?.chapterCharacters ? (ctx.chapterCharacters.match(/\n- /g)?.length || 1) : 0;
           const eventCount = ctx?.chapterEvents ? (ctx.chapterEvents.match(/\n- /g)?.length || 1) : 0;
           const hasPrevContext = ctx?.previousContext ? '有' : '无';
@@ -137,6 +138,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           const inputSummary = [
             `生成：${novelId.slice(0,8)}/${chapter.title}`,
             `大纲：${hasOutline}`,
+            `目标：${hasChapterGoal}`,
             `角色：${charCount}个`,
             `事件：${eventCount}个`,
             `前文：${hasPrevContext}`,
@@ -193,7 +195,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
 
           // v1.0.36: 生成后主角名校验
           let validationWarning: string | undefined;
-          if (ctx?.protagonistNames) {
+          if (ctx?.protagonistNames && ctx.protagonistMustAppear) {
             const names = ctx.protagonistNames.split('、');
             const missingNames = names.filter((name) => !response.text.includes(name));
             if (missingNames.length === names.length && names.length > 0) {
@@ -438,6 +440,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             <div>📖 总大纲：{contextSummary.novelOutline ? '✅ 有' : '❌ 无'}</div>
             <div>📋 分卷大纲：{contextSummary.volumeOutline ? '✅ 有' : '❌ 无'}</div>
             <div>📝 章节大纲：{contextSummary.chapterOutline ? `✅ 有（${contextSummary.chapterOutline.length} 字）` : '❌ 无'}</div>
+            <div>🎯 本章目标：{contextSummary.chapterGoal ? `✅ 有（${contextSummary.chapterGoal.length} 字）` : '❌ 无'}</div>
             <div>👥 出场角色：{contextSummary.chapterCharacters ? (contextSummary.chapterCharacters.match(/\n- /g)?.length || 1) : 0} 个</div>
             <div>⚡ 本章事件：{contextSummary.chapterEvents ? (contextSummary.chapterEvents.match(/\n- /g)?.length || 1) : 0} 个</div>
             <div>🌍 世界设定：{contextSummary.worldBackground ? '✅ 有' : '❌ 无'}</div>

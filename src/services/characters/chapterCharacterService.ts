@@ -54,6 +54,18 @@ export const chapterCharacterService = {
       return mapToChapterCharacter(dto);
     }
     const list = getAllLocal(); const now = nowISO();
+    const existing = list.find((item) => item.chapterId === input.chapterId && item.characterId === input.characterId);
+    if (existing) {
+      Object.assign(existing, {
+        characterName: input.characterName ?? existing.characterName,
+        roleInChapter: input.roleInChapter || existing.roleInChapter,
+        mustAppear: input.mustAppear ?? existing.mustAppear,
+        note: input.note ?? existing.note,
+        updatedAt: now,
+      });
+      saveAllLocal(list);
+      return existing;
+    }
     const cc: ChapterCharacter = {
       ...input, id: generateId(),
       roleInChapter: input.roleInChapter || 'supporting',
@@ -85,15 +97,20 @@ export const chapterCharacterService = {
     list[idx] = { ...list[idx], ...input, updatedAt: nowISO() }; saveAllLocal(list); return list[idx];
   },
 
-  async remove(id: string): Promise<void> {
+  async remove(itemOrId: string | ChapterCharacter): Promise<void> {
     if (isTauri()) {
-      const all = getAllLocal();
-      const item = all.find((c) => c.id === id);
-      if (item) {
+      const item = typeof itemOrId === 'string'
+        ? getAllLocal().find((c) => c.id === itemOrId)
+        : itemOrId;
+      if (!item) {
+        throw new Error('缺少章节角色关联信息，无法移除');
+      }
+      if (item.chapterId && item.characterId) {
         await dbCall<void>('remove_chapter_character', { chapterId: item.chapterId, characterId: item.characterId });
       }
       return;
     }
+    const id = typeof itemOrId === 'string' ? itemOrId : itemOrId.id;
     saveAllLocal(getAllLocal().filter((c) => c.id !== id));
   },
 

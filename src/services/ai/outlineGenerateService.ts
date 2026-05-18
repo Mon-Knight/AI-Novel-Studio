@@ -211,6 +211,9 @@ export const outlineGenerateService = {
   async generateChapterOutlines(input: {
     novelId: string;
     volumeId?: string;
+    chapterId?: string;
+    chapterTitle?: string;
+    chapterGoal?: string;
     chapterCount?: number;
   }): Promise<ChapterOutlineCandidate[]> {
     const settings = aiSettingsService.getSettings();
@@ -230,6 +233,8 @@ export const outlineGenerateService = {
       existingChapters: context.existingChapters,
       volumeTitle: volume?.title || context.novelTitle,
       volumeSummary: volume?.summary || volume?.goal,
+      currentChapterTitle: input.chapterTitle,
+      currentChapterGoal: input.chapterGoal,
       chapterCount: input.chapterCount,
       activeMasterOutline: context.activeMasterOutline,
       activeVolumeOutline: context.activeVolumeOutline,
@@ -243,10 +248,11 @@ export const outlineGenerateService = {
 
     const task = await aiTaskService.create('chapter_outline_generate', {
       novelId: input.novelId,
+      chapterId: input.chapterId,
       runtimeMode: settings.runtimeMode,
       provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `生成章节大纲：${volume?.title || context.novelTitle}${parentTag}`,
+      inputSummary: `生成章节大纲：${input.chapterTitle || volume?.title || context.novelTitle}${parentTag}${input.chapterGoal ? '，有本章目标' : ''}`,
     }).catch(() => null);
 
     try {

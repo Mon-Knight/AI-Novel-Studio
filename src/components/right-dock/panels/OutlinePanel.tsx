@@ -8,17 +8,17 @@ import type { Volume } from '../../../types/volume';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { formatNumber } from '../../../utils/format';
 import { runWithLoading } from '../../../lib/runWithLoading';
-import { chapterOutlineService } from '../../../services/outlines/outlineService';
 
 interface OutlinePanelProps {
   novelId?: string;
   chapter?: Chapter;
   onChapterOutlineApplied?: (chapterId: string) => void;
+  onChapterGoalDirtyChange?: (dirty: boolean) => void;
 }
 
 type OutlineGenMode = 'novel' | 'volume' | 'chapter' | null;
 
-function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePanelProps) {
+function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoalDirtyChange }: OutlinePanelProps) {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [loading, setLoading] = useState(false);
   const [genMode, setGenMode] = useState<OutlineGenMode>(null);
@@ -30,6 +30,9 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
   const [isEditingChapterOutline, setIsEditingChapterOutline] = useState(false);
   const [chapterOutlineDraft, setChapterOutlineDraft] = useState('');
   const [chapterOutlineSaveMsg, setChapterOutlineSaveMsg] = useState('');
+  const [chapterGoalDraft, setChapterGoalDraft] = useState('');
+  const [chapterGoalDirty, setChapterGoalDirty] = useState(false);
+  const [chapterGoalSaveMsg, setChapterGoalSaveMsg] = useState('');
 
   // 作品总大纲结果
   const [novelOutline, setNovelOutline] = useState('');
@@ -46,6 +49,21 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
     }
   }, [chapter?.volumeId]);
 
+  const updateChapterGoalDirty = useCallback((dirty: boolean) => {
+    setChapterGoalDirty(dirty);
+    onChapterGoalDirtyChange?.(dirty);
+  }, [onChapterGoalDirtyChange]);
+
+  useEffect(() => {
+    setChapterGoalDraft(chapter?.goal || '');
+    updateChapterGoalDirty(false);
+    setChapterGoalSaveMsg('');
+  }, [chapter?.id, chapter?.goal, updateChapterGoalDirty]);
+
+  useEffect(() => () => {
+    onChapterGoalDirtyChange?.(false);
+  }, [onChapterGoalDirtyChange]);
+
   const aiSettings = aiSettingsService.getSettings();
 
   // 生成作品总大纲
@@ -58,7 +76,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
         initialMessage: '正在读取作品设定和世界观……',
         successMessage: '作品总大纲生成完成',
         errorMessage: '作品总大纲生成失败',
-      }, async ({ setMessage, setStage }) => {
+      }, async ({ setStage }) => {
         setStage('正在分析主角和世界背景……');
         const result = await outlineGenerateService.generateNovelOutline(novelId);
         setNovelOutline(result);
@@ -116,7 +134,12 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
       }, async ({ setMessage, setStage }) => {
         setStage('正在推演本章剧情结构……');
         const result = await outlineGenerateService.generateChapterOutlines({
-          novelId, volumeId: chapter.volumeId, chapterCount: 3,
+          novelId,
+          volumeId: chapter.volumeId,
+          chapterId: chapter.id,
+          chapterTitle: chapter.title,
+          chapterGoal: chapterGoalDraft.trim() || chapter.goal || undefined,
+          chapterCount: 3,
         });
         setChapterOutlines(result);
         setMessage(`已生成 ${result.length} 个章节大纲候选（基于上级大纲）`);
@@ -127,7 +150,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
     } finally {
       setLoading(false); setGenMode(null);
     }
-  }, [novelId, chapter]);
+  }, [novelId, chapter, chapterGoalDraft]);
 
   // 采用章节大纲候选（保存到当前章节）
   const handleAdoptChapterOutline = useCallback(async (candidate: ChapterOutlineCandidate) => {
@@ -189,6 +212,44 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
       setTimeout(() => setChapterOutlineSaveMsg(''), 3000);
     }
   }, [chapter, chapterOutlineDraft, onChapterOutlineApplied]);
+
+  const handleChapterGoalChange = useCallback((value: string) => {
+    setChapterGoalDraft(value);
+    updateChapterGoalDirty(value !== (chapter?.goal || ''));
+    setChapterGoalSaveMsg('');
+  }, [chapter?.goal, updateChapterGoalDirty]);
+
+  const handleSaveChapterGoal = useCallback(async () => {
+    if (!chapter) return;
+    setChapterGoalSaveMsg('正在保存...');
+    try {
+      await runWithLoading({
+        title: '正在保存本章目标',
+        initialMessage: '正在写入当前章节目标……',
+        successMessage: '本章目标已保存',
+        errorMessage: '本章目标保存失败',
+      }, async ({ setStage }) => {
+        setStage('正在更新章节配置……');
+        await chapterRepository.update(chapter.id, {
+          goal: chapterGoalDraft,
+        });
+      });
+      updateChapterGoalDirty(false);
+      onChapterOutlineApplied?.(chapter.id);
+      setChapterGoalSaveMsg('✅ 已保存');
+      setTimeout(() => setChapterGoalSaveMsg(''), 3000);
+    } catch (e: any) {
+      setChapterGoalSaveMsg(`❌ ${e?.message || '保存失败，输入已保留'}`);
+      setTimeout(() => setChapterGoalSaveMsg(''), 4000);
+    }
+  }, [chapter, chapterGoalDraft, onChapterOutlineApplied, updateChapterGoalDirty]);
+
+  const handleApplyGeneratedGoal = useCallback((goal?: string) => {
+    if (!goal?.trim()) return;
+    setChapterGoalDraft(goal);
+    updateChapterGoalDirty(goal !== (chapter?.goal || ''));
+    setChapterGoalSaveMsg('已应用生成目标，保存后生效');
+  }, [chapter?.goal, updateChapterGoalDirty]);
 
   // 采用作品总大纲（显示确认）
   const handleAdoptNovelOutline = useCallback(() => {
@@ -345,7 +406,20 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
                 }}
                 style={{ width: '100%', height: 100, resize: 'vertical', fontSize: 12, lineHeight: 1.6, fontFamily: 'var(--font-family-editor)' }}
               />
-              {cand.goal && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>目标：{cand.goal}</div>}
+              {cand.goal && (
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  目标：{cand.goal}
+                  {chapter && (
+                    <button
+                      className="btn btn-text btn-sm"
+                      onClick={() => handleApplyGeneratedGoal(cand.goal)}
+                      style={{ fontSize: 11, marginLeft: 6 }}
+                    >
+                      应用到本章目标
+                    </button>
+                  )}
+                </div>
+              )}
               {cand.targetWordCount && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>建议字数：{formatNumber(cand.targetWordCount)} 字</div>}
               {chapter && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -449,14 +523,34 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
             )}
           </div>
 
-          {chapter.goal && (
-            <div className="panel-section">
-              <div className="panel-section-title">本章目标</div>
-              <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-                {chapter.goal}
-              </div>
+          <div className="panel-section">
+            <div className="panel-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>本章目标</span>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleSaveChapterGoal}
+                disabled={!chapterGoalDirty}
+                style={{ fontSize: 11 }}
+              >
+                💾 保存本章目标
+              </button>
             </div>
-          )}
+            <textarea
+              className="form-textarea"
+              value={chapterGoalDraft}
+              onChange={(e) => handleChapterGoalChange(e.target.value)}
+              style={{ width: '100%', minHeight: 96, resize: 'vertical', fontSize: 13, lineHeight: 1.8, fontFamily: 'var(--font-family-editor)', marginTop: 6 }}
+              placeholder="填写本章真正要达成的剧情目标，例如：系统开服并触发榜一绑定。"
+            />
+            <div style={{ fontSize: 11, color: chapterGoalDirty ? 'var(--color-warning)' : 'var(--color-text-muted)', marginTop: 4 }}>
+              {chapterGoalDirty ? '本章目标有未保存修改。生成正文前请先保存。' : '本章目标按当前章节独立保存，并会进入正文生成上下文。'}
+            </div>
+            {chapterGoalSaveMsg && (
+              <div style={{ fontSize: 11, marginTop: 4, color: chapterGoalSaveMsg.startsWith('✅') ? 'var(--color-success)' : chapterGoalSaveMsg.startsWith('❌') ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                {chapterGoalSaveMsg}
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

@@ -19,6 +19,7 @@ export interface Character {
   relationToProtagonist?: string; goal?: string; personality?: string;
   behaviorLimits?: string; forbiddenBehaviors?: string;
   firstAppearanceChapterId?: string; currentState?: string;
+  isProtagonist?: boolean;
   source: CharacterSource; isActive: boolean;
   createdAt: string; updatedAt: string;
 }

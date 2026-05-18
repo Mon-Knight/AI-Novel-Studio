@@ -1846,11 +1846,19 @@ pub fn sync_protagonist_to_character_library(
             }
         };
 
+    if protag_name.trim().is_empty() {
+        return Ok(None);
+    }
+
     // 查找是否已存在 is_protagonist=1 的角色记录
     let existing: Option<String> = conn
         .query_row(
-            "SELECT id FROM characters WHERE novel_id = ?1 AND is_protagonist = 1 LIMIT 1",
-            params![&novel_id],
+            "SELECT id FROM characters
+             WHERE novel_id = ?1
+               AND (is_protagonist = 1 OR role_type = 'protagonist' OR name = ?2)
+             ORDER BY is_protagonist DESC, updated_at DESC
+             LIMIT 1",
+            params![&novel_id, &protag_name],
             |row| row.get(0),
         )
         .optional()
@@ -1859,7 +1867,7 @@ pub fn sync_protagonist_to_character_library(
     if let Some(existing_id) = existing {
         // 更新已有主角
         conn.execute(
-            "UPDATE characters SET name = ?1, role_type = 'protagonist', identity = ?2, personality = ?3, goal = ?4, behavior_limits = ?5, forbidden_behaviors = ?6, current_state = ?7, updated_at = ?8 WHERE id = ?9",
+            "UPDATE characters SET name = ?1, role_type = 'protagonist', identity = ?2, personality = ?3, goal = ?4, behavior_limits = ?5, forbidden_behaviors = ?6, current_state = ?7, source = 'protagonist_profile', source_type = 'protagonist_profile', is_protagonist = 1, is_active = 1, updated_at = ?8 WHERE id = ?9",
             params![&protag_name, identity, personality, goal, ability_limits, forbidden_behaviors, current_state, now, &existing_id],
         )
         .map_err(|e| e.to_string())?;
@@ -1879,7 +1887,7 @@ pub fn sync_protagonist_to_character_library(
         let current_state_text = current_state.unwrap_or_default();
 
         conn.execute(
-            "INSERT INTO characters (id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, is_protagonist, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 'protagonist', ?4, NULL, NULL, ?5, ?6, ?7, ?8, NULL, ?9, 'protagonist_profile', 1, 1, ?10, ?10)",
+            "INSERT INTO characters (id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, source_type, is_protagonist, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 'protagonist', ?4, NULL, NULL, ?5, ?6, ?7, ?8, NULL, ?9, 'protagonist_profile', 'protagonist_profile', 1, 1, ?10, ?10)",
             params![
                 &new_id,
                 &novel_id,

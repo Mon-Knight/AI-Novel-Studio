@@ -10,6 +10,10 @@ function renderTemplate(template: string, context: Record<string, string | undef
   let result = template;
 
   // 处理条件块 {{#key}}...{{/key}}
+  result = result.replace(/\{\{\^(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, content: string) => {
+    return context[key] ? '' : content;
+  });
+
   result = result.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, content: string) => {
     return context[key] ? content : '';
   });
@@ -38,6 +42,13 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{#novelDescription}}简介：{{novelDescription}}{{/novelDescription}}
 主角：{{protagonist}}
 
+【主角档案】
+姓名：{{protagonist}}
+{{#protagonistsSummary}}{{protagonistsSummary}}{{/protagonistsSummary}}
+{{#specialAbility}}特殊能力：{{specialAbility}}{{/specialAbility}}
+{{#abilityLimits}}限制：{{abilityLimits}}{{/abilityLimits}}
+{{#forbiddenBehaviors}}禁止行为：{{forbiddenBehaviors}}{{/forbiddenBehaviors}}
+
 {{#styleProfile}}
 【写作风格约束（必须遵守）】
 {{styleProfile}}
@@ -54,7 +65,15 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{#volumeGoal}}分卷目标：{{volumeGoal}}{{/volumeGoal}}
 章节：{{chapterTitle}}
 {{#chapterOutline}}大纲：{{chapterOutline}}{{/chapterOutline}}
-{{#chapterGoal}}目标：{{chapterGoal}}{{/chapterGoal}}
+{{#chapterGoal}}
+【本章目标】
+{{chapterGoal}}
+正文必须围绕本章目标推进；如果本章目标与章节大纲冲突，以用户最新修改的本章目标为优先。
+{{/chapterGoal}}
+{{^chapterGoal}}
+【本章目标】
+未单独设置本章目标，请根据章节大纲和分卷大纲自然推进。
+{{/chapterGoal}}
 目标字数：约 {{targetWordCount}} 字
 
 {{#worldBackground}}世界背景：{{worldBackground}}{{/worldBackground}}
@@ -65,6 +84,10 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 ## 主角详细设定
 {{protagonistsSummary}}
 {{/protagonistsSummary}}
+{{#protagonistAppearance}}
+## 主角本章出场状态
+{{protagonistAppearance}}
+{{/protagonistAppearance}}
 {{#dualProtagonistSummary}}
 ## 双主角关系
 {{dualProtagonistSummary}}
@@ -74,7 +97,7 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{chapterSettings}}
 {{/chapterSettings}}
 {{#chapterCharacters}}
-## 本章出场角色
+【本章出场角色】
 {{chapterCharacters}}
 {{/chapterCharacters}}
 {{#chapterEvents}}
@@ -92,7 +115,8 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{#userInstruction}}特别要求：{{userInstruction}}{{/userInstruction}}
 
 请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。不得凭空新增未列出的重要角色。
-**必须严格使用主角姓名，不得改名。**
+如果本章主角未加入出场角色，不要强行安排主角直接出场；如果主角已加入出场角色，必须写出主角的有效行动。
+**涉及主角时必须严格使用主角姓名，不得改名。**
 字数尽量接近目标字数 {{targetWordCount}} 字。`;
 
 export async function buildGenerateRequest(

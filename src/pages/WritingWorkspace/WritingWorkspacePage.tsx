@@ -42,6 +42,7 @@ function WritingWorkspacePage() {
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
   const [draftWordCount, setDraftWordCount] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
+  const [chapterGoalDirty, setChapterGoalDirty] = useState(false);
 
   // v0.8.0 上下文总结相关状态
   const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
@@ -134,29 +135,44 @@ function WritingWorkspacePage() {
     return () => { cancelled = true; };
   }, [novelId, searchParams, loadChapterDraft]);
 
+  const confirmDiscardChapterGoal = useCallback(() => {
+    if (!chapterGoalDirty) return true;
+    return confirm('本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？');
+  }, [chapterGoalDirty]);
+
   const handleSelectChapter = useCallback((chapterId: string) => {
+    if (!confirmDiscardChapterGoal()) return;
+    setChapterGoalDirty(false);
     setActiveChapterId(chapterId);
     setActivePanel(null); // 切换章节关闭面板
     loadChapterDraft(chapterId);
-  }, [loadChapterDraft]);
+  }, [confirmDiscardChapterGoal, loadChapterDraft]);
 
   const handleTogglePanel = useCallback((panel: PanelType) => {
+    if (activePanel === 'outline' && !confirmDiscardChapterGoal()) return;
+    if (activePanel === 'outline') setChapterGoalDirty(false);
     setActivePanel((prev) => (prev === panel ? null : panel));
-  }, []);
+  }, [activePanel, confirmDiscardChapterGoal]);
 
   const handleOpenPanel = useCallback((panel: string) => {
+    if (activePanel === 'outline' && panel !== 'outline' && !confirmDiscardChapterGoal()) return;
+    if (activePanel === 'outline' && panel !== 'outline') setChapterGoalDirty(false);
     setActivePanel(panel as PanelType);
-  }, []);
+  }, [activePanel, confirmDiscardChapterGoal]);
 
-  const handleClosePanel = useCallback(() => setActivePanel(null), []);
+  const handleClosePanel = useCallback(() => {
+    if (!confirmDiscardChapterGoal()) return;
+    setChapterGoalDirty(false);
+    setActivePanel(null);
+  }, [confirmDiscardChapterGoal]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setActivePanel(null); };
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClosePanel(); };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [handleClosePanel]);
 
-  const handleEditorClick = useCallback(() => setActivePanel(null), []);
+  const handleEditorClick = useCallback(() => handleClosePanel(), [handleClosePanel]);
 
   const handleDraftChange = useCallback((wordCount: number, dirty: boolean) => {
     setDraftWordCount(wordCount);
@@ -375,6 +391,7 @@ function WritingWorkspacePage() {
             label="返回作品详情"
             to={`/novels/${novelId}`}
             onBeforeBack={() => {
+              if (chapterGoalDirty) return confirm('本章目标有未保存修改，直接返回会丢失这些修改。是否继续？');
               if (isDirty) return confirm('当前正文有未保存修改，直接返回可能丢失修改。是否继续？');
               return true;
             }}
@@ -408,6 +425,7 @@ function WritingWorkspacePage() {
               label="返回作品"
               to={`/novels/${novelId}`}
               onBeforeBack={() => {
+                if (chapterGoalDirty) return confirm('本章目标有未保存修改，直接返回会丢失这些修改。是否继续？');
                 if (isDirty) return confirm('当前正文有未保存修改，直接返回可能丢失修改。是否继续？');
                 return true;
               }}
@@ -482,6 +500,7 @@ function WritingWorkspacePage() {
           onGenerated={(draft) => { setCurrentDraft(draft); setDraftWordCount(draft.wordCount); setIsDirty(false); }}
           onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
           onChapterOutlineApplied={handleChapterOutlineApplied}
+          onChapterGoalDirtyChange={setChapterGoalDirty}
         />
       )}
 
