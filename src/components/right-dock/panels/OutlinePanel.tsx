@@ -3,6 +3,7 @@ import { volumeRepository } from '../../../services/database/volumeRepository';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { outlineGenerateService, type VolumeOutlineCandidate, type ChapterOutlineCandidate } from '../../../services/ai/outlineGenerateService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
+import { clearCachedChapterOutlineDraft, setCachedChapterOutlineDraft } from '../../../services/prompt/chapterOutlineDraftCache';
 import type { Chapter } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
 import { ChapterStatusLabels } from '../../../types/chapter';
@@ -185,16 +186,24 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
 
   // v1.0.35 当前章节大纲行内编辑
   const handleStartEditChapterOutline = useCallback(() => {
-    setChapterOutlineDraft(chapter?.outline || '');
+    const draft = chapter?.outline || '';
+    setChapterOutlineDraft(draft);
+    if (chapter?.id) setCachedChapterOutlineDraft(chapter.id, draft);
     setIsEditingChapterOutline(true);
     setChapterOutlineSaveMsg('');
-  }, [chapter?.outline]);
+  }, [chapter?.id, chapter?.outline]);
 
   const handleCancelEditChapterOutline = useCallback(() => {
+    if (chapter?.id) clearCachedChapterOutlineDraft(chapter.id);
     setIsEditingChapterOutline(false);
     setChapterOutlineDraft('');
     setChapterOutlineSaveMsg('');
-  }, []);
+  }, [chapter?.id]);
+
+  const handleChapterOutlineDraftChange = useCallback((value: string) => {
+    setChapterOutlineDraft(value);
+    if (chapter?.id) setCachedChapterOutlineDraft(chapter.id, value);
+  }, [chapter?.id]);
 
   const handleSaveChapterOutline = useCallback(async () => {
     if (!chapter) return;
@@ -203,6 +212,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
       await chapterRepository.update(chapter.id, {
         outline: chapterOutlineDraft,
       });
+      clearCachedChapterOutlineDraft(chapter.id);
       onChapterOutlineApplied?.(chapter.id);
       setIsEditingChapterOutline(false);
       setChapterOutlineSaveMsg('✅ 已保存');
@@ -499,7 +509,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
               <textarea
                 className="form-textarea"
                 value={chapterOutlineDraft}
-                onChange={(e) => setChapterOutlineDraft(e.target.value)}
+                onChange={(e) => handleChapterOutlineDraftChange(e.target.value)}
                 style={{ width: '100%', height: 140, resize: 'vertical', fontSize: 13, lineHeight: 1.8, fontFamily: 'var(--font-family-editor)', marginTop: 6 }}
                 placeholder="编辑章节大纲..."
                 autoFocus

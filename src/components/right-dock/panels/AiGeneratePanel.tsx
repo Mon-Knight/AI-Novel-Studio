@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
-import type { ChapterDraft, ChapterGenerationContext, ChapterPromptDebugInfo } from '../../../types/ai';
+import type { ChapterDraft, ChapterGenerationContext, ChapterPromptDebugInfo, OutlineComplianceResult, OutlineKeyPoint } from '../../../types/ai';
 import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
 import { ChapterStatusLabels } from '../../../types/chapter';
@@ -14,6 +14,8 @@ import { contextRecordService } from '../../../services/context/contextRecordSer
 import { styleProfileService } from '../../../services/styles/styleProfileService';
 import { outputProfileService } from '../../../services/styles/outputProfileService';
 import { runWithLoading } from '../../../lib/runWithLoading';
+import { checkOutlineCompliance } from '../../../services/ai/outlineComplianceChecker';
+import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionService';
 
 function namesText(names: string[]): string {
   return names.length > 0 ? names.join('、') : '无';
@@ -27,29 +29,76 @@ function getRequiredCharacterNames(ctx: ChapterGenerationContext | null | undefi
   return ctx?.requiredCharacters?.map((item) => item.name).filter(Boolean) ?? [];
 }
 
-function extractOutlineSignals(outline?: string): string[] {
-  const text = outline?.trim();
-  if (!text) return [];
-  const quoted = Array.from(text.matchAll(/[《「『“"]([^》」』”"]{2,20})[》」』”"]/g))
-    .map((match) => match[1].trim());
-  const chunks = text
-    .replace(/[#*`>~-]/g, ' ')
-    .split(/[\n\r，。！？；：、,.!?;:]/)
-    .map((part) => part.trim())
-    .filter((part) => part.length >= 2 && part.length <= 24);
-  const tokens = chunks.flatMap((part) => part.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,12}/g) ?? []);
-  return [...new Set([...quoted, ...chunks, ...tokens])]
-    .filter((item) => !['本章', '主角', '剧情', '事件', '冲突', '结尾', '推进', '发现', '开始'].includes(item))
-    .slice(0, 18);
+type ValidationStatus = '通过' | '警告' | '未通过';
+
+interface GenerationValidationState {
+  draftId: string;
+  outlineCompliance: OutlineComplianceResult;
+  requiredNames: string[];
+  missingRequiredNames: string[];
+  note: string;
 }
 
-function buildOutlineWarning(outline: string | undefined, generatedText: string): string | undefined {
-  const signals = extractOutlineSignals(outline);
-  if (signals.length === 0) return undefined;
-  const hitCount = signals.filter((signal) => generatedText.includes(signal)).length;
-  return hitCount === 0
-    ? '⚠️ 生成正文可能未遵循章节大纲，建议重新生成或检查大纲。'
-    : undefined;
+function getOutlineValidationStatus(score: number): ValidationStatus {
+  if (score < 60) return '未通过';
+  if (score < 80) return '警告';
+  return '通过';
+}
+
+function buildValidationNote(input: {
+  outlineCompliance: OutlineComplianceResult;
+  requiredNames: string[];
+  missingRequiredNames: string[];
+}): string {
+  const outlineStatus = getOutlineValidationStatus(input.outlineCompliance.score);
+  const roleStatus = input.missingRequiredNames.length > 0 ? '缺失' : '通过';
+  const missingPoints = input.outlineCompliance.missingPoints.map((point) => point.text).join('；') || '无';
+  return [
+    `大纲遵循检查：${outlineStatus}`,
+    `大纲遵循度：${input.outlineCompliance.score}分`,
+    `已覆盖：${input.outlineCompliance.coveredPoints.length}项`,
+    `缺失：${input.outlineCompliance.missingPoints.length}项`,
+    `缺失大纲关键点：${missingPoints}`,
+    `角色出场检查：${roleStatus}`,
+    `缺失必须出场角色：${input.missingRequiredNames.join('、') || '无'}`,
+  ].join('\n');
+}
+
+function buildValidationSnapshot(ctx: ChapterGenerationContext, generatedText: string) {
+  const outlineCompliance = checkOutlineCompliance(generatedText, ctx.outlineKeyPoints || []);
+  const requiredNames = [...new Set(getRequiredCharacterNames(ctx))];
+  const missingRequiredNames = requiredNames.filter((name) => !generatedText.includes(name));
+  const note = buildValidationNote({ outlineCompliance, requiredNames, missingRequiredNames });
+  return {
+    outlineCompliance,
+    requiredNames,
+    missingRequiredNames,
+    note,
+  };
+}
+
+function buildValidationWarningText(validation: Omit<GenerationValidationState, 'draftId'>): string | undefined {
+  const messages: string[] = [];
+  const outlineStatus = getOutlineValidationStatus(validation.outlineCompliance.score);
+  if (outlineStatus === '未通过') {
+    messages.push(`⚠️ 生成正文未充分遵循章节大纲（${validation.outlineCompliance.score} 分）。建议重新生成或按大纲修正后再确认采用。`);
+  } else if (outlineStatus === '警告') {
+    messages.push(`⚠️ 生成正文只部分遵循章节大纲（${validation.outlineCompliance.score} 分）。建议检查缺失关键点。`);
+  }
+  if (validation.missingRequiredNames.length > 0) {
+    messages.push(`⚠️ 生成正文缺少必须出场角色：${validation.missingRequiredNames.join('、')}。`);
+  }
+  return messages.join('\n') || undefined;
+}
+
+function draftHasAdoptionRisk(draft: ChapterDraft, validationState: GenerationValidationState | null): boolean {
+  if (validationState?.draftId === draft.id) {
+    return validationState.outlineCompliance.score < 80 || validationState.missingRequiredNames.length > 0;
+  }
+  const note = draft.note || '';
+  return note.includes('大纲遵循检查：未通过')
+    || note.includes('大纲遵循检查：警告')
+    || note.includes('角色出场检查：缺失');
 }
 
 interface AiGeneratePanelProps {
@@ -66,6 +115,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
+  const [validationState, setValidationState] = useState<GenerationValidationState | null>(null);
+  const [revising, setRevising] = useState(false);
 
   // v1.0.26 风格方案与输出控制选择
   const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
@@ -77,6 +128,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [wordCountDraft, setWordCountDraft] = useState<number>(0);
   const [wordCountSaving, setWordCountSaving] = useState(false);
   const [wordCountSaved, setWordCountSaved] = useState(false);
+
+  useEffect(() => {
+    setValidationState(null);
+  }, [chapter?.id]);
 
   // 初始化/更新目标字数草稿
   useEffect(() => {
@@ -184,16 +239,26 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     } catch { /* ignore */ }
   }, [novelId, chapter, selectedStyleId, selectedOutputId, wordCountDraft]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (options?: { retryMissingPoints?: OutlineKeyPoint[] }) => {
     if (!novelId || !chapter) return;
 
     let preflightContext: ChapterGenerationContext;
     try {
+      const retryInstruction = options?.retryMissingPoints?.length
+        ? [
+            '上一次生成未遵循章节大纲，本次必须严格覆盖以下缺失点：',
+            ...options.retryMissingPoints.map((point, index) => `${index + 1}. ${point.text}`),
+          ].join('\n')
+        : '';
+      const mergedInstruction = [
+        userInstruction.trim(),
+        retryInstruction,
+      ].filter(Boolean).join('\n\n') || undefined;
       preflightContext = await buildFreshChapterGenerationContext({
         novelId,
         volumeId: chapter.volumeId,
         chapterId: chapter.id,
-        userInstruction: userInstruction.trim() || undefined,
+        userInstruction: mergedInstruction,
         styleId: selectedStyleId || undefined,
         outputId: selectedOutputId || undefined,
         targetWordCount: wordCountDraft || undefined,
@@ -211,12 +276,18 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setStatusMsg('已将本章出场角色默认视为必须出场角色。');
     }
 
-    // v1.0.25 缺少章节大纲时给出警告
-    if (!preflightContext.chapterOutline?.trim()) {
+    const preflightWarnings: string[] = [];
+    if ((preflightContext.chapterOutline?.trim().length || 0) < 30) {
+      preflightWarnings.push('当前章节大纲过短或为空，生成正文可能不遵循规划。');
+    }
+    if ((preflightContext.outlineKeyPoints?.length || 0) === 0) {
+      preflightWarnings.push('未能从章节大纲中提取关键剧情点，建议补充大纲。');
+    }
+    if (preflightWarnings.length > 0) {
       const ok = confirm(
-        '⚠️ 当前章节大纲为空，建议先生成或填写章节大纲。\n\n' +
-        '本次生成将降级使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n' +
-        '建议先在大纲面板中生成或填写章节大纲。\n\n' +
+        `⚠️ ${preflightWarnings.join('\n')}\n\n` +
+        '本次生成将尽量使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n' +
+        '建议先在大纲面板中补充或保存章节大纲。\n\n' +
         '是否仍然继续生成？'
       );
       if (!ok) return;
@@ -224,13 +295,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
     setGenerating(true);
     setErrorMsg('');
+    setValidationState(null);
 
     try {
       await runWithLoading(
         {
           title: genMode === 'rewrite' ? 'AI 正在重新生成正文' : 'AI 正在生成正文',
           initialMessage: '正在构建上下文……',
-          successMessage: `✅ 生成成功！已保存为草稿`,
+          successMessage: '正文已生成，校验结果已显示',
           errorMessage: 'AI 生成失败',
           cancelable: false,
         },
@@ -286,7 +358,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           const response = await client.generate(request);
 
           setPercent(80);
-          setStage('正在整理生成结果……');
+          setStage('正在校验生成结果……');
+          const validation = buildValidationSnapshot(ctx, response.text);
+          const validationWarning = buildValidationWarningText(validation);
           setMessage('正在保存生成结果……');
 
           // 4. 保存为草稿
@@ -296,24 +370,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             content: response.text,
             source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
             aiTaskId: task?.id,
+            note: validation.note,
           });
-
-          setPercent(90);
-          setStage('正在校验生成结果……');
-
-          const validationMessages: string[] = [];
-          const uniqueRequiredNames = [...new Set(getRequiredCharacterNames(ctx))];
-          if (uniqueRequiredNames.length > 0) {
-            const missingNames = uniqueRequiredNames.filter((name) => !response.text.includes(name));
-            if (missingNames.length === uniqueRequiredNames.length) {
-              validationMessages.push(`⚠️ 生成正文缺少必须出场角色：${uniqueRequiredNames.join('、')}。可选择：重新生成 / 自动补写缺失角色 / 保留草稿但不建议采纳。`);
-            } else if (missingNames.length > 0) {
-              validationMessages.push(`⚠️ 生成正文缺少部分必须出场角色：${missingNames.join('、')}。可选择：重新生成 / 自动补写缺失角色 / 保留草稿但不建议采纳。`);
-            }
-          }
-          const outlineWarning = buildOutlineWarning(ctx.chapterOutline, response.text);
-          if (outlineWarning) validationMessages.push(outlineWarning);
-          const validationWarning = validationMessages.join('\n') || undefined;
+          const validationWithDraft: GenerationValidationState = { draftId: draft.id, ...validation };
+          setValidationState(validationWithDraft);
 
           setPercent(95);
 
@@ -321,7 +381,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           if (task) {
             await aiTaskService.markSucceeded(task.id, {
               resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}${validationWarning ? ' ' + validationWarning : ''}`,
-              promptSnapshot: `template=${request.promptTemplateSource || 'unknown'} length=${request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0} chapterOutline=${request.promptDebug?.includesChapterOutlineText ? 'yes' : 'no'} volumeOutline=${request.promptDebug?.includesVolumeOutlineText ? 'yes' : 'no'} masterOutline=${request.promptDebug?.includesMasterOutlineText ? 'yes' : 'no'} requiredCharacters=${request.promptDebug?.requiredCharactersCount || 0}:${request.promptDebug?.requiredCharacterNames.join('、') || ''}`,
+              promptSnapshot: `template=${request.promptTemplateSource || 'unknown'} length=${request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0} chapterOutline=${request.promptDebug?.includesChapterOutlineText ? 'yes' : 'no'} outlineChecklist=${request.promptDebug?.includesOutlineChecklistText ? 'yes' : 'no'} outlineScore=${validation.outlineCompliance.score} volumeOutline=${request.promptDebug?.includesVolumeOutlineText ? 'yes' : 'no'} masterOutline=${request.promptDebug?.includesMasterOutlineText ? 'yes' : 'no'} requiredCharacters=${request.promptDebug?.requiredCharactersCount || 0}:${request.promptDebug?.requiredCharacterNames.join('、') || ''}`,
               tokenInput: response.tokenInput,
               tokenOutput: response.tokenOutput,
               tokenTotal: response.tokenTotal,
@@ -344,9 +404,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             chapterGoal: ctx.chapterGoal ? '有' : '无',
             targetWordCount: ctx.targetWordCount,
             chapterCharacters: namesText(getChapterCharacterNames(ctx)),
-            requiredCharacters: namesText(uniqueRequiredNames),
+            requiredCharacters: namesText(validation.requiredNames),
             protagonistNames: ctx.protagonistNames,
             wordCount: draft.wordCount,
+            outlineKeyPoints: ctx.outlineKeyPoints?.length || 0,
+            outlineComplianceScore: validation.outlineCompliance.score,
+            missingOutlinePoints: validation.outlineCompliance.missingPoints.map((point) => point.text),
+            missingRequiredCharacters: validation.missingRequiredNames,
             model: settings.modelName,
             provider: settings.provider,
             promptTemplateSource: request.promptTemplateSource,
@@ -358,11 +422,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           // 校验警告提示
           if (validationWarning) {
             setErrorMsg(validationWarning);
+            setStatusMsg('正文已生成，但存在校验警告。建议重新生成或按大纲修正后再确认采用。');
+          } else {
+            setErrorMsg('');
+            setStatusMsg('生成完成，大纲遵循检查和角色出场检查通过。');
           }
         },
       );
 
-      setStatusMsg('');
       setGenerating(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '生成失败';
@@ -376,6 +443,122 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     }
   };
 
+  const handleReviseByOutline = async () => {
+    if (!novelId || !chapter) return;
+    setRevising(true);
+    setGenerating(true);
+    setErrorMsg('');
+
+    try {
+      const latest = await draftVersionService.getLatestByChapterId(chapter.id);
+      if (!latest) {
+        setErrorMsg('没有可修正的草稿');
+        return;
+      }
+
+      const ctx = await buildFreshChapterGenerationContext({
+        novelId,
+        volumeId: chapter.volumeId,
+        chapterId: chapter.id,
+        styleId: selectedStyleId || undefined,
+        outputId: selectedOutputId || undefined,
+        targetWordCount: wordCountDraft || undefined,
+      });
+      setContextSummary(ctx);
+
+      const baseCompliance = validationState?.draftId === latest.id
+        ? validationState.outlineCompliance
+        : checkOutlineCompliance(latest.content, ctx.outlineKeyPoints || []);
+      const missingPoints = baseCompliance.missingPoints.length > 0
+        ? baseCompliance.missingPoints
+        : (ctx.outlineKeyPoints || []);
+
+      if ((ctx.outlineKeyPoints?.length || 0) === 0) {
+        setErrorMsg('未能从章节大纲中提取关键剧情点，暂时无法按大纲修正。请先补充章节大纲。');
+        return;
+      }
+
+      await runWithLoading(
+        {
+          title: 'AI 正在按大纲修正正文',
+          initialMessage: '正在读取最新章节大纲和草稿……',
+          successMessage: '修正版正文已生成，校验结果已显示',
+          errorMessage: '按大纲修正失败',
+          cancelable: false,
+        },
+        async ({ setMessage, setStage, setPercent }) => {
+          const task = await aiTaskService.create('chapter_rewrite', {
+            novelId,
+            chapterId: chapter.id,
+            runtimeMode: settings.runtimeMode,
+            provider: settings.provider,
+            modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+            inputSummary: `按大纲修正：${ctx.chapterTitle}，缺失${missingPoints.length}项，原草稿v${latest.versionNo}`,
+          }).catch(() => null);
+
+          setStage('正在组装修正提示词……');
+          setPercent(25);
+          const client = createAiClient(settings);
+          const response = await reviseChapterByOutline({
+            originalDraft: latest.content,
+            chapterTitle: ctx.chapterTitle,
+            chapterOutline: ctx.chapterOutline,
+            outlineChecklistText: ctx.outlineChecklistText,
+            missingPoints,
+            requiredCharacters: ctx.requiredCharacters,
+            targetWordCount: ctx.targetWordCount || wordCountDraft,
+          }, client);
+
+          setPercent(75);
+          setStage('正在校验修正版正文……');
+          const validation = buildValidationSnapshot(ctx, response.text);
+          const validationWarning = buildValidationWarningText(validation);
+
+          setMessage('正在保存修正版草稿……');
+          const draft = await draftVersionService.create({
+            novelId,
+            chapterId: chapter.id,
+            content: response.text,
+            source: 'ai_regenerated',
+            aiTaskId: task?.id,
+            note: validation.note,
+          });
+          const validationWithDraft: GenerationValidationState = { draftId: draft.id, ...validation };
+          setValidationState(validationWithDraft);
+
+          if (task) {
+            await aiTaskService.markSucceeded(task.id, {
+              resultText: `按大纲修正完成。字数：${draft.wordCount}，大纲遵循度：${validation.outlineCompliance.score}分，缺失：${validation.outlineCompliance.missingPoints.length}项`,
+              promptSnapshot: `chapterOutline=${ctx.chapterOutline ? 'yes' : 'no'} outlineChecklist=${ctx.outlineChecklistText ? 'yes' : 'no'} missingPoints=${missingPoints.length} requiredCharacters=${validation.requiredNames.join('、') || 'none'}`,
+              tokenInput: response.tokenInput,
+              tokenOutput: response.tokenOutput,
+              tokenTotal: response.tokenTotal,
+            });
+          }
+
+          setPercent(100);
+          setStage('修正完成');
+          onGenerated?.(draft);
+
+          if (validationWarning) {
+            setErrorMsg(validationWarning);
+            setStatusMsg('修正版正文已生成，但仍存在校验警告。建议再次修正或重新生成。');
+          } else {
+            setErrorMsg('');
+            setStatusMsg('修正版正文已生成，大纲遵循检查和角色出场检查通过。');
+          }
+        },
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '按大纲修正失败';
+      setErrorMsg(msg);
+      setStatusMsg('');
+    } finally {
+      setRevising(false);
+      setGenerating(false);
+    }
+  };
+
   const handleAdopt = async () => {
     if (!chapter) return;
     const latest = await draftVersionService.getLatestByChapterId(chapter.id);
@@ -383,7 +566,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setErrorMsg('没有可采用的草稿');
       return;
     }
-    if (!confirm(`确认采用草稿 v${latest.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。`)) return;
+    if (draftHasAdoptionRisk(latest, validationState)) {
+      const riskText = validationState?.draftId === latest.id
+        ? validationState.note
+        : latest.note || '该正文可能偏离章节大纲。';
+      if (!confirm(`该正文可能偏离章节大纲，仍要采用吗？\n\n${riskText}`)) return;
+    } else if (!confirm(`确认采用草稿 v${latest.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。`)) {
+      return;
+    }
 
     await draftVersionService.adopt(latest.id, chapter.id);
     setStatusMsg('已采用为正式正文！');
@@ -583,6 +773,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-text-secondary)', marginBottom: 6, padding: '6px 8px', background: 'var(--color-bg-primary)', borderRadius: 4 }}>
             <span>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</span>
             <span style={{ marginLeft: 12 }}>📝 章节大纲：{contextSummary.chapterOutline ? '有' : '无'}</span>
+            <span style={{ marginLeft: 12 }}>✅ 大纲关键点：{contextSummary.outlineKeyPoints?.length || 0} 项</span>
             <span style={{ marginLeft: 12 }}>👥 出场角色：{(() => {
               const nameList = getChapterCharacterNames(contextSummary);
               return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';
@@ -606,11 +797,23 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             ⚠️ 当前章节大纲为空，建议先生成或填写章节大纲
           </div>
         )}
+        {contextSummary && contextSummary.chapterOutline?.trim() && contextSummary.chapterOutline.trim().length < 30 && (
+          <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
+            ⚠️ 当前章节大纲过短，生成正文可能不遵循规划
+          </div>
+        )}
+        {contextSummary && (contextSummary.outlineKeyPoints?.length || 0) === 0 && (
+          <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
+            ⚠️ 未能从章节大纲中提取关键剧情点，建议补充更明确的大纲
+          </div>
+        )}
         {showContext && contextSummary && (
           <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--color-text-secondary)', marginTop: 8, padding: 8, background: 'var(--color-bg-primary)', borderRadius: 4 }}>
             <div>📖 总大纲：{(contextSummary.masterOutline || contextSummary.novelOutline) ? `✅ 有（${(contextSummary.masterOutline || contextSummary.novelOutline)!.length} 字）` : '❌ 无'}</div>
             <div>📋 分卷大纲：{contextSummary.volumeOutline ? `✅ 有（${contextSummary.volumeOutline.length} 字）` : '❌ 无'}</div>
             <div>📝 章节大纲：{contextSummary.chapterOutline ? `✅ 有（${contextSummary.chapterOutline.length} 字）` : '❌ 无'}</div>
+            <div>🧭 大纲来源：{contextSummary.chapterOutlineSource || 'empty'}</div>
+            <div>✅ 大纲执行清单：{contextSummary.outlineKeyPoints?.length || 0} 项</div>
             <div>🎯 本章目标：{contextSummary.chapterGoal ? `✅ 有（${contextSummary.chapterGoal.length} 字）` : '❌ 无'}</div>
             <div>👥 出场角色：{(() => {
               const nameList = getChapterCharacterNames(contextSummary);
@@ -631,6 +834,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
                 <div>🧪 最终 prompt 模板：{promptDebug.templateSource}</div>
                 <div>🧪 包含角色块：{promptDebug.hasRequiredCharactersBlock ? '是' : '否'}（{promptDebug.requiredCharactersCount} 个）</div>
                 <div>🧪 包含章节大纲：{promptDebug.includesChapterOutlineText ? '是' : '否'}</div>
+                <div>🧪 包含大纲执行清单：{promptDebug.includesOutlineChecklistText ? '是' : '否'}（{promptDebug.outlineKeyPointCount} 项）</div>
                 <div>🧪 包含分卷大纲：{promptDebug.includesVolumeOutlineText ? '是' : '否'}</div>
                 <div>🧪 包含总纲：{promptDebug.includesMasterOutlineText ? '是' : '否'}</div>
                 <div>🧪 prompt 长度：{promptDebug.promptLength} 字符</div>
@@ -662,18 +866,86 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         </div>
       )}
 
+      {validationState && (
+        <div className="panel-section" style={{
+          border: `1px solid ${validationState.outlineCompliance.score < 60 || validationState.missingRequiredNames.length > 0 ? 'var(--color-error)' : validationState.outlineCompliance.score < 80 ? 'var(--color-warning)' : 'var(--color-border)'}`,
+          borderRadius: 6,
+          padding: 10,
+        }}>
+          <div className="panel-section-title">生成后校验</div>
+          <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+            <div>
+              大纲遵循检查：{getOutlineValidationStatus(validationState.outlineCompliance.score)}
+              <strong style={{ marginLeft: 6 }}>{validationState.outlineCompliance.score} 分</strong>
+            </div>
+            <div>
+              已覆盖：{validationState.outlineCompliance.coveredPoints.length} 项，
+              缺失：{validationState.outlineCompliance.missingPoints.length} 项
+            </div>
+            <div>
+              角色出场检查：{validationState.missingRequiredNames.length > 0 ? `缺失（${validationState.missingRequiredNames.join('、')}）` : '通过'}
+            </div>
+          </div>
+          {validationState.outlineCompliance.missingPoints.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>缺失的大纲关键点</div>
+              <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+                {validationState.outlineCompliance.missingPoints.map((point) => (
+                  <li key={point.id}>{point.text}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {(validationState.outlineCompliance.score < 80 || validationState.missingRequiredNames.length > 0) && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>
+                ⚠️ 正文已生成，但大纲遵循度较低。建议重新生成或按大纲修正后再确认采用。
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleGenerate({
+                    retryMissingPoints: validationState.outlineCompliance.missingPoints.length > 0
+                      ? validationState.outlineCompliance.missingPoints
+                      : contextSummary?.outlineKeyPoints || [],
+                  })}
+                  disabled={generating || revising}
+                >
+                  重新生成
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleReviseByOutline}
+                  disabled={generating || revising}
+                >
+                  按大纲修正
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setStatusMsg('已保留当前草稿，但不建议在修正前确认采用。')}
+                  disabled={generating || revising}
+                >
+                  保留草稿
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 操作按钮 */}
       <div className="panel-section">
         <button
           className="panel-btn panel-btn-primary"
-          onClick={handleGenerate}
-          disabled={generating}
+          onClick={() => handleGenerate()}
+          disabled={generating || revising}
         >
-          {generating ? '⏳ 正在生成...' : `🤖 ${genMode === 'rewrite' ? '重新生成' : '生成本章'}`}
+          {generating ? (revising ? '⏳ 正在修正...' : '⏳ 正在生成...') : `🤖 ${genMode === 'rewrite' ? '重新生成' : '生成本章'}`}
         </button>
         <button
           className="panel-btn panel-btn-secondary"
           onClick={handleAdopt}
+          disabled={generating || revising}
         >
           ✅ 确认采用
         </button>

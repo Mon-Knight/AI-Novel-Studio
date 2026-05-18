@@ -27,6 +27,7 @@ export interface ChapterGeneratePromptContext {
   volumeConflict?: string;
   chapterTitle: string;
   chapterOutline?: string;
+  outlineChecklistText?: string;
   chapterGoal?: string;
   targetWordCount: number;
   chapterCharacters?: string;
@@ -182,6 +183,21 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     ctx.chapterOutline
       ? `【当前章节大纲】\n${ctx.chapterOutline}`
       : '【当前章节大纲】\n（空）\n当前章节大纲为空，建议先生成或填写章节大纲。本次生成必须降级参考本章目标、当前采用分卷大纲和当前采用总纲。',
+    ctx.outlineChecklistText
+      ? [
+          '【章节大纲执行清单】',
+          '以下是本章必须执行的剧情清单。正文必须逐项覆盖，不得跳过：',
+          ctx.outlineChecklistText,
+          '',
+          '【大纲执行硬性规则】',
+          '1. 正文必须围绕“章节大纲执行清单”展开。',
+          '2. 清单中的每一项必须在正文中有对应剧情。',
+          '3. 不允许只写氛围、日常或闲聊而跳过关键事件。',
+          '4. 不允许另起一条与大纲无关的新剧情。',
+          '5. 如果因篇幅无法完全展开，也必须至少覆盖每个关键点的核心动作。',
+          '6. 结尾必须服务于章节大纲中的结尾安排或下一章钩子。',
+        ].join('\n')
+      : '',
     ctx.chapterGoal ? `本章目标：${ctx.chapterGoal}` : '',
     `目标字数：约 ${ctx.targetWordCount} 字`,
     '',
@@ -225,7 +241,7 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
       : '',
     ctx.userInstruction ? `特别要求：${ctx.userInstruction}` : '',
     '',
-    '正文必须优先执行【当前章节大纲】；章节大纲中的关键事件、冲突推进和结尾安排必须保留。',
+    '正文必须优先执行【当前章节大纲】和【章节大纲执行清单】；章节大纲中的关键事件、冲突推进和结尾安排必须保留。',
     '如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。',
     '请严格围绕大纲，直接输出小说正文。不要写"以下是正文"等引导语，只输出正文内容。',
     '不得凭空添加未在出场角色列表中列出的重要角色。',

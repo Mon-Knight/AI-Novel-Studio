@@ -187,17 +187,43 @@ export interface ChapterCharacterContext {
   isProtagonist?: boolean;
 }
 
+export type OutlineKeyPointType =
+  | 'event'
+  | 'character'
+  | 'conflict'
+  | 'turning_point'
+  | 'ending'
+  | 'setting'
+  | 'other';
+
+export interface OutlineKeyPoint {
+  id: string;
+  text: string;
+  type: OutlineKeyPointType;
+  required: boolean;
+}
+
+export interface OutlineComplianceResult {
+  score: number;
+  coveredPoints: OutlineKeyPoint[];
+  missingPoints: OutlineKeyPoint[];
+  warnings: string[];
+}
+
 export interface ChapterPromptDebugInfo {
   templateSource: 'chapter_generate.md' | 'DEFAULT_TEMPLATE';
   hasChapterOutlineBlock: boolean;
+  hasOutlineChecklistBlock: boolean;
   hasVolumeOutlineBlock: boolean;
   hasMasterOutlineBlock: boolean;
   hasChapterGoalBlock: boolean;
   hasChapterCharactersBlock: boolean;
   hasRequiredCharactersBlock: boolean;
   includesChapterOutlineText: boolean;
+  includesOutlineChecklistText: boolean;
   includesVolumeOutlineText: boolean;
   includesMasterOutlineText: boolean;
+  outlineKeyPointCount: number;
   requiredCharactersCount: number;
   requiredCharacterNames: string[];
   promptLength: number;
@@ -227,6 +253,8 @@ export interface ChapterGenerationContext {
   volumeConflict?: string;
   chapterTitle: string;
   chapterOutline?: string;
+  outlineKeyPoints?: OutlineKeyPoint[];
+  outlineChecklistText?: string;
   chapterGoal?: string;
   targetWordCount?: number;
   styleProfile?: string;
@@ -240,7 +268,7 @@ export interface ChapterGenerationContext {
   chapterSettings?: string;
   previousContext?: string;
   userInstruction?: string;
-  chapterOutlineSource?: 'active_outline' | 'chapter_field' | 'none';
+  chapterOutlineSource?: 'active_chapter_outline' | 'chapter_field' | 'draft' | 'empty';
   volumeOutlineSource?: 'active_outline' | 'volume_field' | 'none';
   masterOutlineSource?: 'active_outline' | 'novel_field' | 'novel_description' | 'none';
 }

@@ -43,18 +43,42 @@ function buildPromptDebug(
   return {
     templateSource,
     hasChapterOutlineBlock: systemPrompt.includes('【当前章节大纲】'),
+    hasOutlineChecklistBlock: systemPrompt.includes('【章节大纲执行清单】'),
     hasVolumeOutlineBlock: systemPrompt.includes('【当前采用分卷大纲】'),
     hasMasterOutlineBlock: systemPrompt.includes('【当前采用总纲】'),
     hasChapterGoalBlock: systemPrompt.includes('【本章目标】'),
     hasChapterCharactersBlock: systemPrompt.includes('【本章出场角色】'),
     hasRequiredCharactersBlock: systemPrompt.includes('【本章必须直接出场角色】'),
     includesChapterOutlineText: containsInsertedText(systemPrompt, context.chapterOutline),
+    includesOutlineChecklistText: containsInsertedText(systemPrompt, context.outlineChecklistText),
     includesVolumeOutlineText: containsInsertedText(systemPrompt, context.volumeOutline),
     includesMasterOutlineText: containsInsertedText(systemPrompt, context.masterOutline || context.novelOutline),
+    outlineKeyPointCount: context.outlineKeyPoints?.length || 0,
     requiredCharactersCount: requiredCharacterNames.length,
     requiredCharacterNames,
     promptLength: systemPrompt.length,
   };
+}
+
+function buildUserGenerationPrompt(context: ChapterGenerationContext): string {
+  const parts = [
+    `请开始写《${context.chapterTitle}》的正文。`,
+    '',
+    '以下约束是本次生成最后确认的执行摘要，必须落实到正文中：',
+    '',
+    '【当前章节大纲】',
+    context.chapterOutline?.trim() || '（空）',
+    '',
+    '【章节大纲执行清单】',
+    context.outlineChecklistText?.trim() || context.chapterOutline?.trim() || '（空）',
+    '',
+    '【本章必须直接出场角色】',
+    context.requiredCharactersSummary?.trim() || context.requiredCharacterNames || '无',
+    '',
+    '请直接输出小说正文，不要输出说明、分析或 Markdown 标记。',
+  ];
+
+  return parts.join('\n');
 }
 
 // 默认章节生成模板（兜底）
@@ -108,10 +132,21 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 当前章节大纲为空，建议先生成或填写章节大纲。本次生成必须降级参考本章目标、当前采用分卷大纲和当前采用总纲。
 {{/chapterOutline}}
 
+{{#outlineChecklistText}}
+【章节大纲执行清单】
+以下是本章必须执行的剧情清单。正文必须逐项覆盖，不得跳过：
+{{outlineChecklistText}}
+{{/outlineChecklistText}}
+
 【大纲执行硬性要求】
-正文必须严格依据【当前章节大纲】展开；不得脱离大纲另起剧情；不得忽略大纲中的关键事件、冲突和结尾安排。
-如果当前章节大纲为空，必须优先依据【本章目标】、【当前采用分卷大纲】和【当前采用总纲】推进。
-如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。
+1. 正文必须围绕【章节大纲执行清单】展开。
+2. 清单中的每一项必须在正文中有对应剧情。
+3. 不允许只写氛围、日常或闲聊而跳过关键事件。
+4. 不允许另起一条与大纲无关的新剧情。
+5. 如果因篇幅无法完全展开，也必须至少覆盖每个关键点的核心动作。
+6. 结尾必须服务于章节大纲中的结尾安排或下一章钩子。
+7. 如果当前章节大纲为空，必须优先依据【本章目标】、【当前采用分卷大纲】和【当前采用总纲】推进。
+8. 如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。
 
 目标字数：约 {{targetWordCount}} 字
 
@@ -193,13 +228,16 @@ export async function buildGenerateRequest(
     const snakeKey = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
     if (snakeKey !== k) ctx[snakeKey] = v != null ? String(v) : undefined;
   }
+  ctx.outline_checklist = context.outlineChecklistText || context.chapterOutline;
 
   const systemPrompt = renderTemplate(template, ctx);
-  const promptDebug = buildPromptDebug(systemPrompt, context, templateSource);
+  const userPromptContent = buildUserGenerationPrompt(context);
+  const promptDebug = buildPromptDebug(`${systemPrompt}\n${userPromptContent}`, context, templateSource);
 
   // 开发态只输出摘要，不输出完整 prompt 或 API Key。
   if (import.meta.env.DEV) {
     console.info(`[ChapterGenerate] final prompt includes chapterOutline=${promptDebug.includesChapterOutlineText} length=${context.chapterOutline?.length || 0}`);
+    console.info(`[ChapterGenerate] final prompt includes outlineChecklist=${promptDebug.includesOutlineChecklistText} count=${promptDebug.outlineKeyPointCount}`);
     console.info(`[ChapterGenerate] final prompt includes volumeOutline=${promptDebug.includesVolumeOutlineText} length=${context.volumeOutline?.length || 0}`);
     console.info(`[ChapterGenerate] final prompt includes masterOutline=${promptDebug.includesMasterOutlineText} length=${(context.masterOutline || context.novelOutline)?.length || 0}`);
     console.info(`[ChapterGenerate] final prompt includes requiredCharacters=${promptDebug.requiredCharactersCount} names=${promptDebug.requiredCharacterNames.join(',') || '(none)'}`);
@@ -215,7 +253,7 @@ export async function buildGenerateRequest(
       },
       {
         role: 'user',
-        content: `请开始写《${context.chapterTitle}》的正文。`,
+        content: userPromptContent,
       },
     ],
     promptTemplateSource: templateSource,

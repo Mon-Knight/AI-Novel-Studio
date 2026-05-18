@@ -13,6 +13,8 @@ import { chapterEventService } from '../characters/chapterEventService';
 import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
 import { masterOutlineService, volumeOutlineService, chapterOutlineService } from '../outlines/outlineService';
 import { chapterRepository } from '../database/chapterRepository';
+import { getCachedChapterOutlineDraft } from './chapterOutlineDraftCache';
+import { buildOutlineChecklistText, extractOutlineKeyPoints } from './outlineKeyPointExtractor';
 import type { ChapterCharacterContext, ChapterGenerationContext } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
 import type { StyleProfile } from '../../types/style';
@@ -20,6 +22,18 @@ import type { OutputProfile } from '../../types/output';
 
 function extractText(summary: string | undefined | null): string | undefined {
   return summary?.trim() || undefined;
+}
+
+function parseTimestamp(value?: string): number {
+  if (!value) return NaN;
+  const normalized = value.replace(/\.(\d{3})\d+/, '.$1');
+  return Date.parse(normalized);
+}
+
+function isSameOrNewer(left?: string, right?: string): boolean {
+  const leftTime = parseTimestamp(left);
+  const rightTime = parseTimestamp(right);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime >= rightTime;
 }
 
 async function safeLoad<T>(loader: Promise<T>, fallback: T): Promise<T> {
@@ -154,13 +168,34 @@ export async function buildChapterContext(
     : volumeOutline
       ? 'volume_field'
       : 'none';
+  const cachedChapterOutlineDraft = chapter.id ? getCachedChapterOutlineDraft(chapter.id) : null;
+  const cachedChapterOutlineText = cachedChapterOutlineDraft !== null
+    ? extractText(cachedChapterOutlineDraft)
+    : undefined;
   const activeChapterOutlineText = extractText(activeChapterOutline?.content);
-  const chapterOutline = activeChapterOutlineText || extractText(chapter.outline);
-  const chapterOutlineSource: ChapterGenerationContext['chapterOutlineSource'] = activeChapterOutlineText
-    ? 'active_outline'
-    : chapterOutline
+  const chapterFieldOutlineText = extractText(chapter.outline);
+  const shouldPreferChapterFieldOutline = !!chapterFieldOutlineText
+    && (!activeChapterOutlineText
+      || (
+        chapterFieldOutlineText !== activeChapterOutlineText
+        && isSameOrNewer(chapter.updatedAt, activeChapterOutline?.updatedAt)
+      ));
+  const chapterOutline = cachedChapterOutlineDraft !== null
+    ? cachedChapterOutlineText
+    : shouldPreferChapterFieldOutline
+      ? chapterFieldOutlineText
+      : activeChapterOutlineText || chapterFieldOutlineText;
+  const resolvedChapterOutlineSource: ChapterGenerationContext['chapterOutlineSource'] = cachedChapterOutlineDraft !== null
+    ? 'draft'
+    : shouldPreferChapterFieldOutline
       ? 'chapter_field'
-      : 'none';
+      : activeChapterOutlineText
+        ? 'active_chapter_outline'
+        : chapterFieldOutlineText
+          ? 'chapter_field'
+          : 'empty';
+  const outlineKeyPoints = extractOutlineKeyPoints(chapterOutline || '');
+  const outlineChecklistText = buildOutlineChecklistText(outlineKeyPoints, chapterOutline);
 
   // 加载风格和输出控制方案
   let styleProfileSummary: string | undefined;
@@ -359,7 +394,7 @@ export async function buildChapterContext(
     resolvedTargetWordCount = chapter.targetWordCount;
   }
 
-  return {
+  const generationContext: ChapterGenerationContext = {
     novelTitle: novel?.title || '',
     novelGenre: novel?.genre,
     novelDescription: extractText(novel?.description),
@@ -385,6 +420,8 @@ export async function buildChapterContext(
     volumeConflict,
     chapterTitle: `${chapter.title}`,
     chapterOutline,
+    outlineKeyPoints,
+    outlineChecklistText,
     chapterGoal: extractText(chapter.goal),
     targetWordCount: resolvedTargetWordCount,
     styleProfile: styleProfileSummary,
@@ -398,10 +435,20 @@ export async function buildChapterContext(
     chapterSettings: chapterSettingsSummary,
     previousContext,
     userInstruction: extractText(userInstruction),
-    chapterOutlineSource,
+    chapterOutlineSource: resolvedChapterOutlineSource,
     volumeOutlineSource,
     masterOutlineSource,
   };
+
+  if (import.meta.env.DEV) {
+    console.info(`[ContextBuilder] chapterId=${chapter.id}`);
+    console.info(`[ContextBuilder] chapterTitle=${chapter.title}`);
+    console.info(`[ContextBuilder] chapterOutlineSource=${resolvedChapterOutlineSource}`);
+    console.info(`[ContextBuilder] chapterOutlineLength=${chapterOutline?.length || 0}`);
+    console.info(`[ContextBuilder] outlineKeyPoints=${outlineKeyPoints.length}`, outlineKeyPoints.map((point) => point.text));
+  }
+
+  return generationContext;
 }
 
 function buildStyleSummary(s: StyleProfile): string {

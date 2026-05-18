@@ -95,6 +95,10 @@ function shortBody(body: string): string {
   return text ? ` 服务返回：${text.slice(0, 240)}` : '';
 }
 
+function getLastUserMessage(request: AiGenerateRequest): string {
+  return [...request.messages].reverse().find((message) => message.role === 'user')?.content || '';
+}
+
 export class RealAiClient implements AiClient {
   private config: RealAiClientConfig;
 
@@ -104,6 +108,14 @@ export class RealAiClient implements AiClient {
 
   async generate(request: AiGenerateRequest): Promise<AiGenerateResponse> {
     validateRealAiConfig(this.config);
+
+    if (import.meta.env.DEV) {
+      const lastUserMessage = getLastUserMessage(request);
+      console.info(`[RealAiClient] messages count=${request.messages.length}`);
+      console.info(`[RealAiClient] last user message includes chapterOutline=${lastUserMessage.includes('【当前章节大纲】')}`);
+      console.info(`[RealAiClient] last user message includes outline checklist=${lastUserMessage.includes('【章节大纲执行清单】')}`);
+      console.info(`[RealAiClient] last user message includes requiredCharacters=${lastUserMessage.includes('【本章必须直接出场角色】')}`);
+    }
 
     if (isTauri()) {
       return this.generateViaTauri(request);

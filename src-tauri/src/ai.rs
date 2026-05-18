@@ -116,6 +116,34 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
         .build()
         .map_err(|e| format!("AI 调用失败：HTTP 客户端初始化失败：{}", e))?;
 
+    #[cfg(debug_assertions)]
+    {
+        let last_user_message = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "user")
+            .map(|message| message.content.as_str())
+            .unwrap_or("");
+        println!("[ai_chat_completion] messages count={}", request.messages.len());
+        println!(
+            "[ai_chat_completion] user message length={}",
+            last_user_message.chars().count()
+        );
+        println!(
+            "[ai_chat_completion] contains chapter outline marker={}",
+            last_user_message.contains("【当前章节大纲】")
+        );
+        println!(
+            "[ai_chat_completion] contains outline checklist marker={}",
+            last_user_message.contains("【章节大纲执行清单】")
+        );
+        println!(
+            "[ai_chat_completion] contains required characters marker={}",
+            last_user_message.contains("【本章必须直接出场角色】")
+        );
+    }
+
     let body = json!({
         "model": request.model_name,
         "messages": request.messages,

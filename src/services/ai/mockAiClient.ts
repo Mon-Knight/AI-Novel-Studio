@@ -43,7 +43,7 @@ function detectTaskType(messages: { role: string; content: string }[]): MockTask
   if (systemMsg.includes('世界观构建') || systemMsg.includes('设定补充')) return 'setting_expand';
   if (systemMsg.includes('编辑和质量审查') || systemMsg.includes('质量检查')) return 'quality_check';
   if (systemMsg.includes('文字编辑') || systemMsg.includes('润色')) return 'chapter_polish';
-  if (systemMsg.includes('小说作家') || systemMsg.includes('小说正文')) return 'chapter_generate';
+  if (systemMsg.includes('小说作家') || systemMsg.includes('小说正文') || systemMsg.includes('修稿编辑') || systemMsg.includes('偏离大纲')) return 'chapter_generate';
   return 'unknown';
 }
 
@@ -55,12 +55,14 @@ function extractInfo(messages: { role: string; content: string }[]) {
   const chapterTitle = allText.match(/当前章节：(.+)/)?.[1] || allText.match(/章节：(.+)/)?.[1] || '未命名章节';
   const genre = allText.match(/题材：(.+)/)?.[1];
   const targetWords = parseInt(allText.match(/目标字数：约 (\d+)/)?.[1] || '4000');
-  const chapterOutline = allText.match(/章节大纲：(.+)/)?.[1];
-  return { novelTitle, protagonist, chapterTitle, genre, targetWords, chapterOutline };
+  const chapterOutline = allText.match(/【当前章节大纲】\s*([\s\S]+?)(?:\n\n|【章节大纲执行清单】|【本章必须直接出场角色】)/)?.[1]?.trim()
+    || allText.match(/章节大纲：(.+)/)?.[1];
+  const outlineChecklist = allText.match(/【章节大纲执行清单】\s*([\s\S]+?)(?:\n\n|【本章必须直接出场角色】|【修正要求】|请直接输出)/)?.[1]?.trim();
+  return { novelTitle, protagonist, chapterTitle, genre, targetWords, chapterOutline, outlineChecklist };
 }
 
 function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
-  const { protagonist: protag, chapterOutline, targetWords } = info;
+  const { protagonist: protag, chapterOutline, outlineChecklist, targetWords } = info;
   const hasOutline = !!chapterOutline;
   const paragraphs: string[] = [];
 
@@ -68,6 +70,17 @@ function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
     paragraphs.push(`${protag}站在窗前，望着远方的天际线。${chapterOutline.slice(0, 50)}……这一切要从那天说起。`);
   } else {
     paragraphs.push(`${protag}醒来的时候，周围的一切都显得陌生而又熟悉。`);
+  }
+
+  if (outlineChecklist) {
+    const checklistLines = outlineChecklist
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\d+[.、]\s*/, '').trim())
+      .filter((line) => line.length > 4)
+      .slice(0, 6);
+    for (const line of checklistLines) {
+      paragraphs.push(`${line}。这不是旁白里的计划，而是在本章现场真正发生的变化，${protag}也因此被迫继续向前。`);
+    }
   }
 
   paragraphs.push(`窗外是一片灰蒙蒙的天空，远处的建筑在晨雾中若隐若现。${protag}深吸一口气，空气中带着些许潮湿的味道，像是刚刚下过一场小雨。房间里很安静，只有挂钟的滴答声在不知疲倦地走着。`);
