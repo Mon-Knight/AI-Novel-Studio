@@ -11,13 +11,87 @@ import { characterService } from '../characters/characterService';
 import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
 import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
-import type { ChapterGenerationContext } from '../../types/ai';
+import { masterOutlineService, volumeOutlineService, chapterOutlineService } from '../outlines/outlineService';
+import { chapterRepository } from '../database/chapterRepository';
+import type { ChapterCharacterContext, ChapterGenerationContext } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
 import type { StyleProfile } from '../../types/style';
 import type { OutputProfile } from '../../types/output';
 
 function extractText(summary: string | undefined | null): string | undefined {
   return summary?.trim() || undefined;
+}
+
+async function safeLoad<T>(loader: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await loader;
+  } catch {
+    return fallback;
+  }
+}
+
+function roleLabel(roleInChapter?: string, roleType?: string, isProtagonist?: boolean): string {
+  if (isProtagonist || roleType === 'protagonist') return '主角';
+  if (roleInChapter === 'main') return '主要出场';
+  if (roleInChapter === 'supporting') return '辅助出场';
+  if (roleInChapter === 'mentioned') return '仅提及';
+  if (roleInChapter === 'hidden') return '幕后影响';
+  if (roleType === 'antagonist') return '反派';
+  if (roleType === 'neutral') return '中立';
+  return roleInChapter || roleType || '配角';
+}
+
+function buildChapterCharacterSummary(characters: ChapterCharacterContext[]): string | undefined {
+  if (characters.length === 0) return undefined;
+  return characters.map((item, index) => {
+    const parts = [
+      `${index + 1}. ${item.name}`,
+      `- 角色定位：${roleLabel(item.roleInChapter, item.roleType, item.isProtagonist)}`,
+      `- 本章要求：${item.mustAppear ? '必须直接出场' : '本章出场'}`,
+    ];
+    if (item.identity) parts.push(`- 身份/背景：${item.identity}`);
+    if (item.faction) parts.push(`- 所属阵营：${item.faction}`);
+    if (item.personality) parts.push(`- 性格：${item.personality}`);
+    if (item.goal) parts.push(`- 目标：${item.goal}`);
+    if (item.behaviorLimits) parts.push(`- 行为限制：${item.behaviorLimits}`);
+    if (item.forbiddenBehaviors) parts.push(`- 禁止行为：${item.forbiddenBehaviors}`);
+    if (item.note) parts.push(`- 本章备注：${item.note}`);
+    return parts.join('\n');
+  }).join('\n\n');
+}
+
+function buildRequiredCharactersSummary(characters: ChapterCharacterContext[]): string | undefined {
+  if (characters.length === 0) return undefined;
+  return characters.map((item) => `- ${item.name}：必须在正文中直接出现，并参与本章剧情`).join('\n');
+}
+
+export async function buildFreshChapterGenerationContext(params: {
+  novelId: string;
+  volumeId?: string;
+  chapterId: string;
+  userInstruction?: string;
+  styleId?: string;
+  outputId?: string;
+  targetWordCount?: number;
+}): Promise<ChapterGenerationContext> {
+  const freshChapter = await chapterRepository.getById(params.chapterId);
+  if (!freshChapter) {
+    throw new Error('无法读取当前章节最新配置，生成已停止。');
+  }
+  const effectiveChapter: Chapter = {
+    ...freshChapter,
+    volumeId: freshChapter.volumeId || params.volumeId,
+    targetWordCount: params.targetWordCount && params.targetWordCount > 0
+      ? params.targetWordCount
+      : freshChapter.targetWordCount,
+  };
+  return buildChapterContext(
+    params.novelId,
+    effectiveChapter,
+    params.userInstruction,
+    params.styleId,
+    params.outputId,
+  );
 }
 
 export async function buildChapterContext(
@@ -34,11 +108,27 @@ export async function buildChapterContext(
     protagonistRepository.getByNovelId(novelId),
   ]);
 
+  const [activeMasterOutline, activeVolumeOutline, activeChapterOutline] = await Promise.all([
+    safeLoad(masterOutlineService.getActive(novelId), null),
+    chapter.volumeId ? safeLoad(volumeOutlineService.getActive(novelId, chapter.volumeId), null) : Promise.resolve(null),
+    chapter.id ? safeLoad(chapterOutlineService.getActive(novelId, chapter.id), null) : Promise.resolve(null),
+  ]);
+
   const activeWorld = worldSettings.find((w) => w.isActive) || worldSettings[0];
   const activeRules = ruleSystems.filter((r) => r.isActive);
 
-  // v1.0.26 作品总大纲（优先使用 novel.outline，降级使用 novel.description）
-  const novelOutline = extractText(novel?.outline) || extractText(novel?.description);
+  // 正文生成优先使用“当前采用”的总纲/分卷大纲/章节大纲，字段草稿只作为降级来源。
+  const activeMasterOutlineText = extractText(activeMasterOutline?.content);
+  const novelFieldOutline = extractText(novel?.outline);
+  const novelDescription = extractText(novel?.description);
+  const novelOutline = activeMasterOutlineText || novelFieldOutline || novelDescription;
+  const masterOutlineSource: ChapterGenerationContext['masterOutlineSource'] = activeMasterOutlineText
+    ? 'active_outline'
+    : novelFieldOutline
+      ? 'novel_field'
+      : novelDescription
+        ? 'novel_description'
+        : 'none';
 
   let volumeTitle: string | undefined;
   let volumeOutline: string | undefined;
@@ -51,13 +141,26 @@ export async function buildChapterContext(
       volumeTitle = volume.title;
       volumeGoal = extractText(volume.goal);
       volumeConflict = extractText(volume.mainConflict);
-      // v1.0.25 分卷大纲（从 summary 和 goal 组合）
-      volumeOutline = [volume.summary, volume.goal]
+      const activeVolumeOutlineText = extractText(activeVolumeOutline?.content);
+      // v1.0.25 分卷大纲（优先当前采用分卷大纲，降级从 summary 和 goal 组合）
+      volumeOutline = activeVolumeOutlineText || [volume.summary, volume.goal]
         .filter(Boolean)
         .join('\n')
         .trim() || undefined;
     }
   }
+  const volumeOutlineSource: ChapterGenerationContext['volumeOutlineSource'] = extractText(activeVolumeOutline?.content)
+    ? 'active_outline'
+    : volumeOutline
+      ? 'volume_field'
+      : 'none';
+  const activeChapterOutlineText = extractText(activeChapterOutline?.content);
+  const chapterOutline = activeChapterOutlineText || extractText(chapter.outline);
+  const chapterOutlineSource: ChapterGenerationContext['chapterOutlineSource'] = activeChapterOutlineText
+    ? 'active_outline'
+    : chapterOutline
+      ? 'chapter_field'
+      : 'none';
 
   // 加载风格和输出控制方案
   let styleProfileSummary: string | undefined;
@@ -90,9 +193,12 @@ export async function buildChapterContext(
 
   // v0.7.0 加载本章出场角色和事件
   let chapterCharacterSummary: string | undefined;
+  let requiredCharactersSummary: string | undefined;
+  let requiredCharacterNames: string | undefined;
   let chapterEventSummary: string | undefined;
-  let protagonistInChapter = false;
   let protagonistMustAppear = false;
+  let chapterCharacterContexts: ChapterCharacterContext[] = [];
+  let requiredCharacterContexts: ChapterCharacterContext[] = [];
   const protagonistsInChapterNames: string[] = [];
   const protagonistsNotInChapterNames: string[] = [];
   if (chapter.id) {
@@ -102,28 +208,41 @@ export async function buildChapterContext(
     ]);
     if (chapterChars.length > 0) {
       const chars = await characterService.getByNovelId(novelId);
-      // 收集所有主角 ID（用于判断出场状态）
-      const protagonistIds = new Set(
-        chars.filter((c) => c.isProtagonist || c.roleType === 'protagonist').map((c) => c.id)
-      );
-      chapterCharacterSummary = chapterChars.map((cc) => {
+      chapterCharacterContexts = chapterChars.map((cc) => {
         const ch = chars.find((c) => c.id === cc.characterId);
         const isProtagonist = ch?.isProtagonist || ch?.roleType === 'protagonist';
         if (isProtagonist) {
-          protagonistInChapter = true;
           protagonistMustAppear = protagonistMustAppear || cc.mustAppear || cc.roleInChapter === 'main';
           protagonistsInChapterNames.push(ch?.name || cc.characterName || '未知');
         }
-        const roleLabel = isProtagonist ? '主角' : cc.roleInChapter;
-        const appearance = cc.mustAppear ? '【必须直接出场】' : '本章出场';
-        const parts = [`- ${ch?.name || cc.characterName || '未知'}：${roleLabel}，${appearance}`];
-        if (cc.note) parts.push(`  备注：${cc.note}`);
-        if (ch?.personality) parts.push(`  性格：${ch.personality}`);
-        if (ch?.goal) parts.push(`  目标：${ch.goal}`);
-        if (ch?.forbiddenBehaviors) parts.push(`  禁止行为：${ch.forbiddenBehaviors}`);
-        if (isProtagonist && (ch as any).specialAbility) parts.push(`  特殊能力：${(ch as any).specialAbility}`);
-        return parts.join('\n');
-      }).join('\n');
+        return {
+          id: cc.id,
+          novelId: cc.novelId,
+          chapterId: cc.chapterId,
+          characterId: cc.characterId,
+          name: ch?.name || cc.characterName || '未知',
+          roleInChapter: cc.roleInChapter,
+          roleType: ch?.roleType,
+          identity: ch?.identity,
+          faction: ch?.faction,
+          goal: ch?.goal,
+          personality: ch?.personality,
+          behaviorLimits: ch?.behaviorLimits,
+          forbiddenBehaviors: ch?.forbiddenBehaviors,
+          note: cc.note,
+          mustAppear: cc.mustAppear,
+          isProtagonist,
+        };
+      });
+      requiredCharacterContexts = chapterCharacterContexts.filter((item) => item.mustAppear);
+      if (chapterCharacterContexts.length > 0 && requiredCharacterContexts.length === 0) {
+        // 兼容旧数据：历史 chapter_characters 可能没有 must_appear，默认本章出场角色都必须直接出场。
+        chapterCharacterContexts = chapterCharacterContexts.map((item) => ({ ...item, mustAppear: true }));
+        requiredCharacterContexts = chapterCharacterContexts;
+      }
+      chapterCharacterSummary = buildChapterCharacterSummary(chapterCharacterContexts);
+      requiredCharactersSummary = buildRequiredCharactersSummary(requiredCharacterContexts);
+      requiredCharacterNames = requiredCharacterContexts.map((item) => item.name).filter(Boolean).join('、') || undefined;
       // 找出本章不在出场角色中的主角
       for (const ch of chars) {
         if ((ch.isProtagonist || ch.roleType === 'protagonist') && !protagonistsInChapterNames.includes(ch.name)) {
@@ -245,6 +364,7 @@ export async function buildChapterContext(
     novelGenre: novel?.genre,
     novelDescription: extractText(novel?.description),
     novelOutline,
+    masterOutline: novelOutline,
     worldBackground: extractText(activeWorld?.content),
     ruleSystems: activeRules.length > 0
       ? activeRules.map((r) => `【${r.title}】${r.content}`).join('\n')
@@ -264,16 +384,23 @@ export async function buildChapterContext(
     volumeGoal,
     volumeConflict,
     chapterTitle: `${chapter.title}`,
-    chapterOutline: extractText(chapter.outline),
+    chapterOutline,
     chapterGoal: extractText(chapter.goal),
     targetWordCount: resolvedTargetWordCount,
     styleProfile: styleProfileSummary,
     outputProfile: resolvedOutputProfileSummary,
     chapterCharacters: chapterCharacterSummary,
+    chapterCharacterList: chapterCharacterContexts,
+    requiredCharacters: requiredCharacterContexts,
+    requiredCharactersSummary,
+    requiredCharacterNames,
     chapterEvents: chapterEventSummary,
     chapterSettings: chapterSettingsSummary,
     previousContext,
     userInstruction: extractText(userInstruction),
+    chapterOutlineSource,
+    volumeOutlineSource,
+    masterOutlineSource,
   };
 }
 

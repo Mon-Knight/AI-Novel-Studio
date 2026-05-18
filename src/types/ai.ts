@@ -41,6 +41,8 @@ export interface AiGenerateRequest {
   modelName?: string;
   temperature?: number;
   maxTokens?: number;
+  promptTemplateSource?: string;
+  promptDebug?: ChapterPromptDebugInfo;
 }
 
 export interface AiGenerateResponse {
@@ -166,11 +168,47 @@ export interface CreateChapterDraftInput {
 
 // ==================== 生成上下文 ====================
 
+export interface ChapterCharacterContext {
+  id: string;
+  novelId: string;
+  chapterId: string;
+  characterId: string;
+  name: string;
+  roleInChapter?: string;
+  roleType?: string;
+  identity?: string;
+  faction?: string;
+  goal?: string;
+  personality?: string;
+  behaviorLimits?: string;
+  forbiddenBehaviors?: string;
+  note?: string;
+  mustAppear: boolean;
+  isProtagonist?: boolean;
+}
+
+export interface ChapterPromptDebugInfo {
+  templateSource: 'chapter_generate.md' | 'DEFAULT_TEMPLATE';
+  hasChapterOutlineBlock: boolean;
+  hasVolumeOutlineBlock: boolean;
+  hasMasterOutlineBlock: boolean;
+  hasChapterGoalBlock: boolean;
+  hasChapterCharactersBlock: boolean;
+  hasRequiredCharactersBlock: boolean;
+  includesChapterOutlineText: boolean;
+  includesVolumeOutlineText: boolean;
+  includesMasterOutlineText: boolean;
+  requiredCharactersCount: number;
+  requiredCharacterNames: string[];
+  promptLength: number;
+}
+
 export interface ChapterGenerationContext {
   novelTitle: string;
   novelGenre?: string;
   novelDescription?: string;
   novelOutline?: string;
+  masterOutline?: string;
   worldBackground?: string;
   ruleSystems?: string;
   protagonist?: string;
@@ -194,8 +232,15 @@ export interface ChapterGenerationContext {
   styleProfile?: string;
   outputProfile?: string;
   chapterCharacters?: string;
+  chapterCharacterList?: ChapterCharacterContext[];
+  requiredCharacters?: ChapterCharacterContext[];
+  requiredCharactersSummary?: string;
+  requiredCharacterNames?: string;
   chapterEvents?: string;
   chapterSettings?: string;
   previousContext?: string;
   userInstruction?: string;
+  chapterOutlineSource?: 'active_outline' | 'chapter_field' | 'none';
+  volumeOutlineSource?: 'active_outline' | 'volume_field' | 'none';
+  masterOutlineSource?: 'active_outline' | 'novel_field' | 'novel_description' | 'none';
 }

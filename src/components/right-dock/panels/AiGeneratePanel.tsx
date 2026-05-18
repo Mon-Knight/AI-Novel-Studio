@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
-import type { ChapterDraft, ChapterGenerationContext } from '../../../types/ai';
+import type { ChapterDraft, ChapterGenerationContext, ChapterPromptDebugInfo } from '../../../types/ai';
 import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient';
-import { buildChapterContext } from '../../../services/prompt/contextBuilder';
+import { buildFreshChapterGenerationContext } from '../../../services/prompt/contextBuilder';
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterRepository } from '../../../services/database/chapterRepository';
@@ -13,8 +13,44 @@ import { aiTaskService } from '../../../services/ai/aiTaskService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
 import { styleProfileService } from '../../../services/styles/styleProfileService';
 import { outputProfileService } from '../../../services/styles/outputProfileService';
-import { formatNumber } from '../../../utils/format';
 import { runWithLoading } from '../../../lib/runWithLoading';
+
+function namesText(names: string[]): string {
+  return names.length > 0 ? names.join('、') : '无';
+}
+
+function getChapterCharacterNames(ctx: ChapterGenerationContext | null | undefined): string[] {
+  return ctx?.chapterCharacterList?.map((item) => item.name).filter(Boolean) ?? [];
+}
+
+function getRequiredCharacterNames(ctx: ChapterGenerationContext | null | undefined): string[] {
+  return ctx?.requiredCharacters?.map((item) => item.name).filter(Boolean) ?? [];
+}
+
+function extractOutlineSignals(outline?: string): string[] {
+  const text = outline?.trim();
+  if (!text) return [];
+  const quoted = Array.from(text.matchAll(/[《「『“"]([^》」』”"]{2,20})[》」』”"]/g))
+    .map((match) => match[1].trim());
+  const chunks = text
+    .replace(/[#*`>~-]/g, ' ')
+    .split(/[\n\r，。！？；：、,.!?;:]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2 && part.length <= 24);
+  const tokens = chunks.flatMap((part) => part.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,12}/g) ?? []);
+  return [...new Set([...quoted, ...chunks, ...tokens])]
+    .filter((item) => !['本章', '主角', '剧情', '事件', '冲突', '结尾', '推进', '发现', '开始'].includes(item))
+    .slice(0, 18);
+}
+
+function buildOutlineWarning(outline: string | undefined, generatedText: string): string | undefined {
+  const signals = extractOutlineSignals(outline);
+  if (signals.length === 0) return undefined;
+  const hitCount = signals.filter((signal) => generatedText.includes(signal)).length;
+  return hitCount === 0
+    ? '⚠️ 生成正文可能未遵循章节大纲，建议重新生成或检查大纲。'
+    : undefined;
+}
 
 interface AiGeneratePanelProps {
   novelId?: string;
@@ -74,6 +110,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   // v1.0.25 上下文摘要状态
   const [contextSummary, setContextSummary] = useState<ChapterGenerationContext | null>(null);
+  const [promptDebug, setPromptDebug] = useState<ChapterPromptDebugInfo | null>(null);
   const [showContext, setShowContext] = useState(false);
 
   // v0.8.0 上下文加载状态
@@ -108,13 +145,23 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     let cancelled = false;
     const refresh = async () => {
       try {
-        const ctx = await buildChapterContext(novelId, chapter, undefined, selectedStyleId || undefined, selectedOutputId || undefined);
-        if (!cancelled) setContextSummary(ctx);
+        const ctx = await buildFreshChapterGenerationContext({
+          novelId,
+          volumeId: chapter.volumeId,
+          chapterId: chapter.id,
+          styleId: selectedStyleId || undefined,
+          outputId: selectedOutputId || undefined,
+          targetWordCount: wordCountDraft || undefined,
+        });
+        if (!cancelled) {
+          setContextSummary(ctx);
+          setPromptDebug(null);
+        }
       } catch { /* ignore */ }
     };
     refresh();
     return () => { cancelled = true; };
-  }, [novelId, chapter?.id, chapter?.targetWordCount, selectedStyleId, selectedOutputId, contextVersion]);
+  }, [novelId, chapter?.id, chapter?.volumeId, chapter?.targetWordCount, selectedStyleId, selectedOutputId, wordCountDraft, contextVersion]);
 
   const settings = aiSettingsService.getSettings();
 
@@ -122,27 +169,53 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const handlePreviewContext = useCallback(async () => {
     if (!novelId || !chapter) return;
     try {
-      const ctx = await buildChapterContext(novelId, chapter, undefined, selectedStyleId || undefined, selectedOutputId || undefined);
+      const ctx = await buildFreshChapterGenerationContext({
+        novelId,
+        volumeId: chapter.volumeId,
+        chapterId: chapter.id,
+        styleId: selectedStyleId || undefined,
+        outputId: selectedOutputId || undefined,
+        targetWordCount: wordCountDraft || undefined,
+      });
+      const request = await buildGenerateRequest(ctx);
       setContextSummary(ctx);
+      setPromptDebug(request.promptDebug ?? null);
       setShowContext(true);
     } catch { /* ignore */ }
-  }, [novelId, chapter, selectedStyleId, selectedOutputId]);
+  }, [novelId, chapter, selectedStyleId, selectedOutputId, wordCountDraft]);
 
   const handleGenerate = async () => {
     if (!novelId || !chapter) return;
 
-    // v1.0.43 生成前强制刷新章节最新数据（确保大纲/目标字数等是最新的）
-    let freshChapter: Chapter | undefined;
+    let preflightContext: ChapterGenerationContext;
     try {
-      freshChapter = await chapterRepository.getById(chapter.id) ?? undefined;
-    } catch { /* fallback to prop */ }
-    const effectiveChapter = freshChapter || chapter;
+      preflightContext = await buildFreshChapterGenerationContext({
+        novelId,
+        volumeId: chapter.volumeId,
+        chapterId: chapter.id,
+        userInstruction: userInstruction.trim() || undefined,
+        styleId: selectedStyleId || undefined,
+        outputId: selectedOutputId || undefined,
+        targetWordCount: wordCountDraft || undefined,
+      });
+      setContextSummary(preflightContext);
+      setPromptDebug(null);
+    } catch (e: any) {
+      setErrorMsg(e?.message || '生成前读取最新上下文失败');
+      return;
+    }
+
+    const chapterCharacterCount = preflightContext.chapterCharacterList?.length || 0;
+    const requiredCharacterCount = preflightContext.requiredCharacters?.length || 0;
+    if (chapterCharacterCount > 0 && requiredCharacterCount === 0) {
+      setStatusMsg('已将本章出场角色默认视为必须出场角色。');
+    }
 
     // v1.0.25 缺少章节大纲时给出警告
-    if (!effectiveChapter.outline?.trim()) {
+    if (!preflightContext.chapterOutline?.trim()) {
       const ok = confirm(
-        '⚠️ 当前章节没有章节大纲。\n\n' +
-        '没有大纲的情况下，AI 可能无法准确把握本章方向，生成内容可能与你的规划脱节。\n\n' +
+        '⚠️ 当前章节大纲为空，建议先生成或填写章节大纲。\n\n' +
+        '本次生成将降级使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n' +
         '建议先在大纲面板中生成或填写章节大纲。\n\n' +
         '是否仍然继续生成？'
       );
@@ -162,36 +235,34 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           cancelable: false,
         },
         async ({ setMessage, setStage, setPercent }) => {
-          // v1.0.43 使用刷新后的章节数据构建上下文
-          let ctx: ChapterGenerationContext | undefined;
-          try {
-            ctx = await buildChapterContext(novelId, effectiveChapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
-          } catch { /* 上下文构建失败不阻止生成 */ }
+          // 点击生成前已经强制构建 fresh context；这里沿用同一份上下文进入最终 prompt。
+          const ctx: ChapterGenerationContext = preflightContext;
 
           const hasOutline = ctx?.chapterOutline ? '有' : '无';
           const hasChapterGoal = ctx?.chapterGoal ? '有' : '无';
-          const charCount = ctx?.chapterCharacters ? (ctx.chapterCharacters.match(/\n- /g)?.length || 1) : 0;
+          const charCount = ctx?.chapterCharacterList?.length || 0;
           const eventCount = ctx?.chapterEvents ? (ctx.chapterEvents.match(/\n- /g)?.length || 1) : 0;
           const hasPrevContext = ctx?.previousContext ? '有' : '无';
           const styleName = availableStyles.find((s) => s.id === selectedStyleId)?.name || '默认';
           const outputName = availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认';
 
           const inputSummary = [
-            `生成：${novelId.slice(0,8)}/${effectiveChapter.title}`,
+            `生成：${novelId.slice(0,8)}/${ctx.chapterTitle}`,
             `大纲：${hasOutline}`,
             `目标：${hasChapterGoal}`,
             `角色：${charCount}个`,
+            `必须出场：${ctx.requiredCharacters?.length || 0}个`,
             `事件：${eventCount}个`,
             `前文：${hasPrevContext}`,
             `风格：${styleName}`,
             `输出：${outputName}`,
-            `字数：${wordCountDraft}`,
+            `字数：${ctx.targetWordCount || wordCountDraft}`,
           ].join('，');
 
           // 创建 AI 任务记录
           const task = await aiTaskService.create('chapter_generate', {
             novelId,
-            chapterId: effectiveChapter.id,
+            chapterId: chapter.id,
             runtimeMode: settings.runtimeMode,
             provider: settings.provider,
             modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
@@ -201,15 +272,11 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setStage('正在组装提示词……');
           setPercent(15);
 
-          // 1. 构建上下文（如果前面没构建过）
-          if (!ctx) {
-            ctx = await buildChapterContext(novelId, effectiveChapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
-          }
-
           // 2. 组装提示词
           setStage('正在分析角色、事件和风格方案……');
           setPercent(25);
           const request = await buildGenerateRequest(ctx);
+          setPromptDebug(request.promptDebug ?? null);
 
           // 3. 调用 AI
           setStage('正在请求 AI 生成正文……');
@@ -225,7 +292,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           // 4. 保存为草稿
           const draft = await draftVersionService.create({
             novelId,
-            chapterId: effectiveChapter.id,
+            chapterId: chapter.id,
             content: response.text,
             source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
             aiTaskId: task?.id,
@@ -234,36 +301,19 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setPercent(90);
           setStage('正在校验生成结果……');
 
-          // v1.0.42: 生成后角色名校验（检查主角 + 本章必须出场角色）
-          let validationWarning: string | undefined;
-          const requiredNames: string[] = [];
-          // 收集主角名
-          if (ctx?.protagonistNames && ctx.protagonistMustAppear) {
-            requiredNames.push(...ctx.protagonistNames.split('、'));
-          }
-          // 收集本章出场角色中 mustAppear 的角色名
-          if (ctx?.chapterCharacters) {
-            const charLines = ctx.chapterCharacters.split('\n');
-            for (const line of charLines) {
-              const mustAppearMatch = line.match(/^- (.+?)：.+?【必须直接出场】/);
-              if (mustAppearMatch) {
-                const name = mustAppearMatch[1].trim();
-                if (name && !requiredNames.includes(name)) {
-                  requiredNames.push(name);
-                }
-              }
-            }
-          }
-          // 去重
-          const uniqueRequiredNames = [...new Set(requiredNames.filter(Boolean))];
+          const validationMessages: string[] = [];
+          const uniqueRequiredNames = [...new Set(getRequiredCharacterNames(ctx))];
           if (uniqueRequiredNames.length > 0) {
             const missingNames = uniqueRequiredNames.filter((name) => !response.text.includes(name));
             if (missingNames.length === uniqueRequiredNames.length) {
-              validationWarning = `⚠️ 生成正文中未出现本章必须出场角色：${uniqueRequiredNames.join('、')}。建议重新生成或检查角色设定。`;
+              validationMessages.push(`⚠️ 生成正文缺少必须出场角色：${uniqueRequiredNames.join('、')}。可选择：重新生成 / 自动补写缺失角色 / 保留草稿但不建议采纳。`);
             } else if (missingNames.length > 0) {
-              validationWarning = `⚠️ 生成正文中未出现部分必须出场角色：${missingNames.join('、')}。`;
+              validationMessages.push(`⚠️ 生成正文缺少部分必须出场角色：${missingNames.join('、')}。可选择：重新生成 / 自动补写缺失角色 / 保留草稿但不建议采纳。`);
             }
           }
+          const outlineWarning = buildOutlineWarning(ctx.chapterOutline, response.text);
+          if (outlineWarning) validationMessages.push(outlineWarning);
+          const validationWarning = validationMessages.join('\n') || undefined;
 
           setPercent(95);
 
@@ -271,6 +321,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           if (task) {
             await aiTaskService.markSucceeded(task.id, {
               resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}${validationWarning ? ' ' + validationWarning : ''}`,
+              promptSnapshot: `template=${request.promptTemplateSource || 'unknown'} length=${request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0} chapterOutline=${request.promptDebug?.includesChapterOutlineText ? 'yes' : 'no'} volumeOutline=${request.promptDebug?.includesVolumeOutlineText ? 'yes' : 'no'} masterOutline=${request.promptDebug?.includesMasterOutlineText ? 'yes' : 'no'} requiredCharacters=${request.promptDebug?.requiredCharactersCount || 0}:${request.promptDebug?.requiredCharacterNames.join('、') || ''}`,
               tokenInput: response.tokenInput,
               tokenOutput: response.tokenOutput,
               tokenTotal: response.tokenTotal,
@@ -281,29 +332,25 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setStage('生成完成');
 
           // v1.0.43: 增强调试日志（确认大纲和角色已进入 prompt）
-          const charNamesForLog = (() => {
-            if (!ctx?.chapterCharacters) return '0个';
-            const names = ctx.chapterCharacters.match(/^- (.+?)：/gm);
-            if (!names || names.length === 0) return '0个';
-            return `${names.length}个(${names.map((n) => n.replace(/^- (.+?)：.*$/, '$1')).join(',')})`;
-          })();
           console.info('[AiGenerate] 生成完成:', {
-            chapterId: effectiveChapter.id,
+            chapterId: chapter.id,
             novelId,
             styleProfileId: selectedStyleId || '(未选择)',
             outputControlId: selectedOutputId || '(未选择)',
-            hasOutline: !!ctx?.chapterOutline,
-            outlineLength: ctx?.chapterOutline?.length || 0,
-            hasVolumeOutline: !!ctx?.volumeOutline,
-            hasNovelOutline: !!ctx?.novelOutline,
-            chapterGoal: ctx?.chapterGoal ? '有' : '无',
-            targetWordCount: ctx?.targetWordCount,
-            chapterCharacters: charNamesForLog,
-            protagonistNames: ctx?.protagonistNames,
+            hasOutline: !!ctx.chapterOutline,
+            outlineLength: ctx.chapterOutline?.length || 0,
+            hasVolumeOutline: !!ctx.volumeOutline,
+            hasMasterOutline: !!(ctx.masterOutline || ctx.novelOutline),
+            chapterGoal: ctx.chapterGoal ? '有' : '无',
+            targetWordCount: ctx.targetWordCount,
+            chapterCharacters: namesText(getChapterCharacterNames(ctx)),
+            requiredCharacters: namesText(uniqueRequiredNames),
+            protagonistNames: ctx.protagonistNames,
             wordCount: draft.wordCount,
             model: settings.modelName,
             provider: settings.provider,
-            promptLength: request.messages[0]?.content?.length || 0,
+            promptTemplateSource: request.promptTemplateSource,
+            promptLength: request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0,
           });
 
           onGenerated?.(draft);
@@ -535,12 +582,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         {contextSummary && (
           <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-text-secondary)', marginBottom: 6, padding: '6px 8px', background: 'var(--color-bg-primary)', borderRadius: 4 }}>
             <span>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</span>
+            <span style={{ marginLeft: 12 }}>📝 章节大纲：{contextSummary.chapterOutline ? '有' : '无'}</span>
             <span style={{ marginLeft: 12 }}>👥 出场角色：{(() => {
-              if (!contextSummary.chapterCharacters) return '0 个';
-              const names = contextSummary.chapterCharacters.match(/^- (.+?)：/gm);
-              if (!names || names.length === 0) return '0 个';
-              const nameList = names.map((n) => n.replace(/^- (.+?)：.*$/, '$1'));
-              return `${nameList.length} 个（${nameList.join('、')}）`;
+              const nameList = getChapterCharacterNames(contextSummary);
+              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';
+            })()}</span>
+            <span style={{ marginLeft: 12 }}>⚠️ 必须出场：{(() => {
+              const nameList = getRequiredCharacterNames(contextSummary);
+              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';
             })()}</span>
           </div>
         )}
@@ -552,23 +601,24 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         >
           🔍 查看上下文摘要
         </button>
-        {!chapter.outline?.trim() && (
+        {contextSummary && !contextSummary.chapterOutline?.trim() && (
           <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
-            ⚠️ 当前章节没有章节大纲，AI 可能偏离规划方向
+            ⚠️ 当前章节大纲为空，建议先生成或填写章节大纲
           </div>
         )}
         {showContext && contextSummary && (
           <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--color-text-secondary)', marginTop: 8, padding: 8, background: 'var(--color-bg-primary)', borderRadius: 4 }}>
-            <div>📖 总大纲：{contextSummary.novelOutline ? `✅ 有（${contextSummary.novelOutline.length} 字）` : '❌ 无'}</div>
+            <div>📖 总大纲：{(contextSummary.masterOutline || contextSummary.novelOutline) ? `✅ 有（${(contextSummary.masterOutline || contextSummary.novelOutline)!.length} 字）` : '❌ 无'}</div>
             <div>📋 分卷大纲：{contextSummary.volumeOutline ? `✅ 有（${contextSummary.volumeOutline.length} 字）` : '❌ 无'}</div>
             <div>📝 章节大纲：{contextSummary.chapterOutline ? `✅ 有（${contextSummary.chapterOutline.length} 字）` : '❌ 无'}</div>
             <div>🎯 本章目标：{contextSummary.chapterGoal ? `✅ 有（${contextSummary.chapterGoal.length} 字）` : '❌ 无'}</div>
             <div>👥 出场角色：{(() => {
-              if (!contextSummary.chapterCharacters) return '0 个';
-              const names = contextSummary.chapterCharacters.match(/^- (.+?)：/gm);
-              if (!names || names.length === 0) return '0 个';
-              const nameList = names.map((n) => n.replace(/^- (.+?)：.*$/, '$1'));
-              return `${nameList.length} 个（${nameList.join('、')}）`;
+              const nameList = getChapterCharacterNames(contextSummary);
+              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';
+            })()}</div>
+            <div>⚠️ 必须出场角色：{(() => {
+              const nameList = getRequiredCharacterNames(contextSummary);
+              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';
             })()}</div>
             <div>⚡ 本章事件：{contextSummary.chapterEvents ? (contextSummary.chapterEvents.match(/\n- /g)?.length || 1) : 0} 个</div>
             <div>🌍 世界设定：{contextSummary.worldBackground ? '✅ 有' : '❌ 无'}</div>
@@ -576,6 +626,16 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             <div>🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'} {availableStyles.find((s) => s.id === selectedStyleId)?.name ? `→ ${availableStyles.find((s) => s.id === selectedStyleId)!.name}` : ''}</div>
             <div>⚙️ 输出控制：{availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认'}</div>
             <div>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</div>
+            {promptDebug && (
+              <>
+                <div>🧪 最终 prompt 模板：{promptDebug.templateSource}</div>
+                <div>🧪 包含角色块：{promptDebug.hasRequiredCharactersBlock ? '是' : '否'}（{promptDebug.requiredCharactersCount} 个）</div>
+                <div>🧪 包含章节大纲：{promptDebug.includesChapterOutlineText ? '是' : '否'}</div>
+                <div>🧪 包含分卷大纲：{promptDebug.includesVolumeOutlineText ? '是' : '否'}</div>
+                <div>🧪 包含总纲：{promptDebug.includesMasterOutlineText ? '是' : '否'}</div>
+                <div>🧪 prompt 长度：{promptDebug.promptLength} 字符</div>
+              </>
+            )}
           </div>
         )}
         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>

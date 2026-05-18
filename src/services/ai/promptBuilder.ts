@@ -11,6 +11,7 @@ export interface ChapterGeneratePromptContext {
   novelGenre?: string;
   novelDescription?: string;
   novelOutline?: string;
+  masterOutline?: string;
   protagonist?: string;
   protagonistMode?: string;
   protagonistsSummary?: string;
@@ -29,6 +30,8 @@ export interface ChapterGeneratePromptContext {
   chapterGoal?: string;
   targetWordCount: number;
   chapterCharacters?: string;
+  requiredCharactersSummary?: string;
+  requiredCharacterNames?: string;
   chapterEvents?: string;
   chapterSettings?: string;
   styleProfile?: string;
@@ -168,15 +171,17 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
       : '',
     ctx.dualProtagonistSummary ? `## 双主角关系\n${ctx.dualProtagonistSummary}\n` : '',
     '',
-    ctx.novelOutline ? `## 作品总大纲\n${ctx.novelOutline}\n` : '',
+    (ctx.masterOutline || ctx.novelOutline) ? `【当前采用总纲】\n${ctx.masterOutline || ctx.novelOutline}\n` : '',
     '',
     ctx.volumeTitle ? `分卷：${ctx.volumeTitle}` : '',
-    ctx.volumeOutline ? `分卷大纲：${ctx.volumeOutline}` : '',
+    ctx.volumeOutline ? `【当前采用分卷大纲】\n${ctx.volumeOutline}` : '',
     ctx.volumeGoal ? `分卷目标：${ctx.volumeGoal}` : '',
     ctx.volumeConflict ? `分卷冲突：${ctx.volumeConflict}` : '',
     '',
     `当前章节：${ctx.chapterTitle}`,
-    ctx.chapterOutline ? `章节大纲：${ctx.chapterOutline}` : '',
+    ctx.chapterOutline
+      ? `【当前章节大纲】\n${ctx.chapterOutline}`
+      : '【当前章节大纲】\n（空）\n当前章节大纲为空，建议先生成或填写章节大纲。本次生成必须降级参考本章目标、当前采用分卷大纲和当前采用总纲。',
     ctx.chapterGoal ? `本章目标：${ctx.chapterGoal}` : '',
     `目标字数：约 ${ctx.targetWordCount} 字`,
     '',
@@ -190,14 +195,20 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     '',
     ctx.chapterCharacters
       ? [
-          '## 本章出场角色（强制约束）',
+          '【本章出场角色】',
           ctx.chapterCharacters,
+        ].join('\n')
+      : '',
+    ctx.requiredCharactersSummary
+      ? [
+          '【本章必须直接出场角色】',
+          ctx.requiredCharactersSummary,
           '',
           '【角色出场硬性要求】',
-          '- 以上列出的所有角色必须在正文中直接出现，不能只在摘要或叙述中提到',
-          '- 标记为"必须出场"的角色必须有实际行动、对话、心理或剧情参与',
-          '- 标记为"主角"的角色必须有足够的篇幅来体现其目标和性格',
-          '- 不得将主角写成旁观者或路人',
+          '- 正文中必须出现这些角色姓名',
+          '- 每个角色至少需要行动、对话、心理活动、冲突参与中的一种',
+          '- 不能只在设定说明、旁白总结或章节备注中提到',
+          '- 不能完全忽略本章出场角色',
         ].join('\n')
       : '',
     ctx.chapterEvents ? `## 本章关键事件\n${ctx.chapterEvents}` : '',
@@ -214,6 +225,8 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
       : '',
     ctx.userInstruction ? `特别要求：${ctx.userInstruction}` : '',
     '',
+    '正文必须优先执行【当前章节大纲】；章节大纲中的关键事件、冲突推进和结尾安排必须保留。',
+    '如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。',
     '请严格围绕大纲，直接输出小说正文。不要写"以下是正文"等引导语，只输出正文内容。',
     '不得凭空添加未在出场角色列表中列出的重要角色。',
     '**必须严格使用主角姓名，不得改名。**',

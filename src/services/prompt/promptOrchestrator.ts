@@ -2,7 +2,8 @@
  * AI Novel Studio - 提示词调度中心
  * 负责将上下文组装为 AI 请求
  */
-import type { AiGenerateRequest } from '../../types/ai';
+import chapterGenerateTemplate from '../../../prompts/chapter_generate.md?raw';
+import type { AiGenerateRequest, ChapterPromptDebugInfo } from '../../types/ai';
 import type { ChapterGenerationContext } from '../../types/ai';
 
 // 简单模板引擎：替换 {{variable}} 和处理 {{#variable}}块{{/variable}}
@@ -26,8 +27,41 @@ function renderTemplate(template: string, context: Record<string, string | undef
   return result.trim();
 }
 
+function containsInsertedText(prompt: string, source?: string): boolean {
+  const text = source?.trim();
+  if (!text) return false;
+  const probe = text.length > 120 ? text.slice(0, 120) : text;
+  return prompt.includes(probe);
+}
+
+function buildPromptDebug(
+  systemPrompt: string,
+  context: ChapterGenerationContext,
+  templateSource: ChapterPromptDebugInfo['templateSource'],
+): ChapterPromptDebugInfo {
+  const requiredCharacterNames = context.requiredCharacters?.map((item) => item.name).filter(Boolean) ?? [];
+  return {
+    templateSource,
+    hasChapterOutlineBlock: systemPrompt.includes('【当前章节大纲】'),
+    hasVolumeOutlineBlock: systemPrompt.includes('【当前采用分卷大纲】'),
+    hasMasterOutlineBlock: systemPrompt.includes('【当前采用总纲】'),
+    hasChapterGoalBlock: systemPrompt.includes('【本章目标】'),
+    hasChapterCharactersBlock: systemPrompt.includes('【本章出场角色】'),
+    hasRequiredCharactersBlock: systemPrompt.includes('【本章必须直接出场角色】'),
+    includesChapterOutlineText: containsInsertedText(systemPrompt, context.chapterOutline),
+    includesVolumeOutlineText: containsInsertedText(systemPrompt, context.volumeOutline),
+    includesMasterOutlineText: containsInsertedText(systemPrompt, context.masterOutline || context.novelOutline),
+    requiredCharactersCount: requiredCharacterNames.length,
+    requiredCharacterNames,
+    promptLength: systemPrompt.length,
+  };
+}
+
 // 默认章节生成模板（兜底）
-const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根据已确认的大纲、设定、角色、事件和风格来生成章节正文。
+const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根据已确认的大纲、设定、角色、事件和风格生成章节正文，不得脱离规划另起剧情。
+
+【优先级】
+用户本次额外要求 > 本章目标 > 当前章节大纲 > 当前采用分卷大纲 > 当前采用总纲 > 世界背景 / 主角 / 角色 / 风格方案。
 
 {{#protagonist_names}}
 【硬性角色约束（最高优先级）】
@@ -37,108 +71,120 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 如果需要称呼主角，只能使用以上列出的名字及其自然代词。
 {{/protagonist_names}}
 
+【作品信息】
 作品：{{novelTitle}}
 题材：{{novelGenre}}
 {{#novelDescription}}简介：{{novelDescription}}{{/novelDescription}}
 主角：{{protagonist}}
 
-【主角档案】
-姓名：{{protagonist}}
-{{#protagonistsSummary}}{{protagonistsSummary}}{{/protagonistsSummary}}
-{{#specialAbility}}特殊能力：{{specialAbility}}{{/specialAbility}}
-{{#abilityLimits}}限制：{{abilityLimits}}{{/abilityLimits}}
-{{#forbiddenBehaviors}}禁止行为：{{forbiddenBehaviors}}{{/forbiddenBehaviors}}
+{{#masterOutline}}
+【当前采用总纲】
+{{masterOutline}}
+{{/masterOutline}}
 
-{{#styleProfile}}
-【写作风格约束（必须遵守）】
-{{styleProfile}}
-
-你必须严格按照以上风格生成本章正文，不要使用默认网文模板。
-{{/styleProfile}}
-
-{{#novelOutline}}
-## 作品总大纲
-{{novelOutline}}
-{{/novelOutline}}
 分卷：{{volumeTitle}}
-{{#volumeOutline}}分卷大纲：{{volumeOutline}}{{/volumeOutline}}
-{{#volumeGoal}}分卷目标：{{volumeGoal}}{{/volumeGoal}}
+{{#volumeOutline}}
+【当前采用分卷大纲】
+{{volumeOutline}}
+{{/volumeOutline}}
+
 章节：{{chapterTitle}}
-{{#chapterOutline}}大纲：{{chapterOutline}}{{/chapterOutline}}
 {{#chapterGoal}}
 【本章目标】
 {{chapterGoal}}
-正文必须围绕本章目标推进；如果本章目标与章节大纲冲突，以用户最新修改的本章目标为优先。
 {{/chapterGoal}}
 {{^chapterGoal}}
 【本章目标】
-未单独设置本章目标，请根据章节大纲和分卷大纲自然推进。
+未单独设置本章目标，请根据当前章节大纲、当前采用分卷大纲和当前采用总纲自然推进。
 {{/chapterGoal}}
+
+{{#chapterOutline}}
+【当前章节大纲】
+{{chapterOutline}}
+{{/chapterOutline}}
+{{^chapterOutline}}
+【当前章节大纲】
+（空）
+当前章节大纲为空，建议先生成或填写章节大纲。本次生成必须降级参考本章目标、当前采用分卷大纲和当前采用总纲。
+{{/chapterOutline}}
+
+【大纲执行硬性要求】
+正文必须严格依据【当前章节大纲】展开；不得脱离大纲另起剧情；不得忽略大纲中的关键事件、冲突和结尾安排。
+如果当前章节大纲为空，必须优先依据【本章目标】、【当前采用分卷大纲】和【当前采用总纲】推进。
+如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。
+
 目标字数：约 {{targetWordCount}} 字
 
-{{#worldBackground}}世界背景：{{worldBackground}}{{/worldBackground}}
-{{#ruleSystems}}规则体系：{{ruleSystems}}{{/ruleSystems}}
-{{#specialAbility}}特殊能力：{{specialAbility}}{{/specialAbility}}
-{{#abilityLimits}}能力限制：{{abilityLimits}}{{/abilityLimits}}
+{{#worldBackground}}【世界背景】
+{{worldBackground}}
+{{/worldBackground}}
+{{#ruleSystems}}【规则体系】
+{{ruleSystems}}
+{{/ruleSystems}}
+
 {{#protagonistsSummary}}
-## 主角详细设定
+【主角详细设定】
 {{protagonistsSummary}}
 {{/protagonistsSummary}}
 {{#protagonistAppearance}}
-## 主角本章出场状态
+【主角本章出场状态】
 {{protagonistAppearance}}
 {{/protagonistAppearance}}
 {{#dualProtagonistSummary}}
-## 双主角关系
+【双主角关系】
 {{dualProtagonistSummary}}
 {{/dualProtagonistSummary}}
+{{#styleProfile}}
+【写作风格约束（必须遵守）】
+{{styleProfile}}
+{{/styleProfile}}
 {{#chapterSettings}}
-## 本章可用设定
+【本章可用设定】
 {{chapterSettings}}
 {{/chapterSettings}}
-{{#chapterCharacters}}
-【本章出场角色 — 强制约束】
-{{chapterCharacters}}
 
-必须遵守以下角色出场规则：
-1. 标记为「必须直接出场」的角色必须在正文中直接出现，参与本章剧情
-2. 每个必须出场角色至少应有实际行动、对话或心理描写
-3. 不得只在旁白或设定说明中提到角色
-4. 标记为「主角」的角色必须有足够篇幅，不能写成路人
-5. 不得凭空添加未在本列表中列出的重要新角色
+{{#chapterCharacters}}
+【本章出场角色】
+{{chapterCharacters}}
 {{/chapterCharacters}}
+
+{{#requiredCharactersSummary}}
+【本章必须直接出场角色】
+{{requiredCharactersSummary}}
+
+【强制要求】
+正文中必须出现这些角色姓名。
+每个角色至少有行动、对话、心理活动、冲突参与中的一种。
+不能只在设定说明、旁白总结或备注中提到。
+不能完全忽略本章出场角色。
+{{/requiredCharactersSummary}}
+
 {{#chapterEvents}}
-## 本章事件
+【本章必须发生的事件】
 {{chapterEvents}}
 {{/chapterEvents}}
 {{#previousContext}}
-## 前文上下文
+【前文上下文摘要】
 {{previousContext}}
 {{/previousContext}}
 {{#outputProfile}}
 【输出控制（必须遵守）】
 {{outputProfile}}
 {{/outputProfile}}
-{{#userInstruction}}特别要求：{{userInstruction}}{{/userInstruction}}
+{{#userInstruction}}
+【本章特别要求】
+{{userInstruction}}
+{{/userInstruction}}
 
-请严格围绕大纲，直接输出小说正文，不要写"以下是正文"等引导语。不得凭空新增未列出的重要角色。
-如果本章主角未加入出场角色，不要强行安排主角直接出场；如果主角已加入出场角色，必须写出主角的有效行动。
-**涉及主角时必须严格使用主角姓名，不得改名。**
-字数尽量接近目标字数 {{targetWordCount}} 字。`;
+请直接输出小说正文，不要写“以下是正文”等引导语，不要输出 Markdown 标记。字数尽量接近目标字数 {{targetWordCount}} 字。`;
 
 export async function buildGenerateRequest(
   context: ChapterGenerationContext,
 ): Promise<AiGenerateRequest> {
-  // 尝试加载外部模板
-  let template = DEFAULT_TEMPLATE;
-  try {
-    const resp = await fetch('/prompts/chapter_generate.md');
-    if (resp.ok) {
-      template = await resp.text();
-    }
-  } catch {
-    // 使用默认模板
-  }
+  const template = chapterGenerateTemplate?.trim() ? chapterGenerateTemplate : DEFAULT_TEMPLATE;
+  const templateSource: ChapterPromptDebugInfo['templateSource'] = chapterGenerateTemplate?.trim()
+    ? 'chapter_generate.md'
+    : 'DEFAULT_TEMPLATE';
 
   const ctx: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(context)) {
@@ -149,18 +195,15 @@ export async function buildGenerateRequest(
   }
 
   const systemPrompt = renderTemplate(template, ctx);
+  const promptDebug = buildPromptDebug(systemPrompt, context, templateSource);
 
-  // v1.0.43 调试日志：确认最终 prompt 包含关键内容
-  if (typeof window !== 'undefined' && (window as any).__TAURI__) {
-    console.info('[PromptOrchestrator] 最终 prompt 摘要:', {
-      hasChapterOutline: systemPrompt.includes('章节大纲'),
-      hasVolumeOutline: systemPrompt.includes('分卷大纲'),
-      hasNovelOutline: systemPrompt.includes('作品总大纲'),
-      hasChapterGoal: systemPrompt.includes('本章目标'),
-      hasChapterCharacters: systemPrompt.includes('本章出场角色'),
-      hasMustAppear: systemPrompt.includes('必须直接出场'),
-      promptLength: systemPrompt.length,
-    });
+  // 开发态只输出摘要，不输出完整 prompt 或 API Key。
+  if (import.meta.env.DEV) {
+    console.info(`[ChapterGenerate] final prompt includes chapterOutline=${promptDebug.includesChapterOutlineText} length=${context.chapterOutline?.length || 0}`);
+    console.info(`[ChapterGenerate] final prompt includes volumeOutline=${promptDebug.includesVolumeOutlineText} length=${context.volumeOutline?.length || 0}`);
+    console.info(`[ChapterGenerate] final prompt includes masterOutline=${promptDebug.includesMasterOutlineText} length=${(context.masterOutline || context.novelOutline)?.length || 0}`);
+    console.info(`[ChapterGenerate] final prompt includes requiredCharacters=${promptDebug.requiredCharactersCount} names=${promptDebug.requiredCharacterNames.join(',') || '(none)'}`);
+    console.info(`[ChapterGenerate] final prompt length=${promptDebug.promptLength} templateSource=${promptDebug.templateSource}`);
   }
 
   return {
@@ -175,5 +218,7 @@ export async function buildGenerateRequest(
         content: `请开始写《${context.chapterTitle}》的正文。`,
       },
     ],
+    promptTemplateSource: templateSource,
+    promptDebug,
   };
 }
