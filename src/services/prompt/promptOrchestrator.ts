@@ -97,8 +97,15 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{chapterSettings}}
 {{/chapterSettings}}
 {{#chapterCharacters}}
-【本章出场角色】
+【本章出场角色 — 强制约束】
 {{chapterCharacters}}
+
+必须遵守以下角色出场规则：
+1. 标记为「必须直接出场」的角色必须在正文中直接出现，参与本章剧情
+2. 每个必须出场角色至少应有实际行动、对话或心理描写
+3. 不得只在旁白或设定说明中提到角色
+4. 标记为「主角」的角色必须有足够篇幅，不能写成路人
+5. 不得凭空添加未在本列表中列出的重要新角色
 {{/chapterCharacters}}
 {{#chapterEvents}}
 ## 本章事件

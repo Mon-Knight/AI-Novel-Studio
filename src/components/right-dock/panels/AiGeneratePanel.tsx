@@ -102,7 +102,23 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     }
   }, [novelId, selectedStyleId, selectedOutputId]);
 
-  // v1.0.25 预加载上下文摘要（监听 contextVersion 刷新）
+  // v1.0.42 上下文摘要自动刷新（角色变更/字数变更/章节切换时）
+  useEffect(() => {
+    if (!novelId || !chapter?.id) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const ctx = await buildChapterContext(novelId, chapter, undefined, selectedStyleId || undefined, selectedOutputId || undefined);
+        if (!cancelled) setContextSummary(ctx);
+      } catch { /* ignore */ }
+    };
+    refresh();
+    return () => { cancelled = true; };
+  }, [novelId, chapter?.id, chapter?.targetWordCount, selectedStyleId, selectedOutputId, contextVersion]);
+
+  const settings = aiSettingsService.getSettings();
+
+  // v1.0.25 手动查看上下文摘要
   const handlePreviewContext = useCallback(async () => {
     if (!novelId || !chapter) return;
     try {
@@ -110,9 +126,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setContextSummary(ctx);
       setShowContext(true);
     } catch { /* ignore */ }
-  }, [novelId, chapter?.id, chapter?.goal, chapter?.targetWordCount, selectedStyleId, selectedOutputId, contextVersion]);
-
-  const settings = aiSettingsService.getSettings();
+  }, [novelId, chapter, selectedStyleId, selectedOutputId]);
 
   const handleGenerate = async () => {
     if (!novelId || !chapter) return;
@@ -497,6 +511,19 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       {/* v1.0.25 上下文摘要预览 */}
       <div className="panel-section">
         <div className="panel-section-title">📋 本次将使用的上下文</div>
+        {/* v1.0.42 内联摘要：始终显示出场角色和字数 */}
+        {contextSummary && (
+          <div style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--color-text-secondary)', marginBottom: 6, padding: '6px 8px', background: 'var(--color-bg-primary)', borderRadius: 4 }}>
+            <span>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</span>
+            <span style={{ marginLeft: 12 }}>👥 出场角色：{(() => {
+              if (!contextSummary.chapterCharacters) return '0 个';
+              const names = contextSummary.chapterCharacters.match(/^- (.+?)：/gm);
+              if (!names || names.length === 0) return '0 个';
+              const nameList = names.map((n) => n.replace(/^- (.+?)：.*$/, '$1'));
+              return `${nameList.length} 个（${nameList.join('、')}）`;
+            })()}</span>
+          </div>
+        )}
         <button
           className="btn btn-secondary btn-sm"
           onClick={handlePreviewContext}
@@ -516,7 +543,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             <div>📋 分卷大纲：{contextSummary.volumeOutline ? '✅ 有' : '❌ 无'}</div>
             <div>📝 章节大纲：{contextSummary.chapterOutline ? `✅ 有（${contextSummary.chapterOutline.length} 字）` : '❌ 无'}</div>
             <div>🎯 本章目标：{contextSummary.chapterGoal ? `✅ 有（${contextSummary.chapterGoal.length} 字）` : '❌ 无'}</div>
-            <div>👥 出场角色：{contextSummary.chapterCharacters ? (contextSummary.chapterCharacters.match(/\n- /g)?.length || 1) : 0} 个</div>
+            <div>👥 出场角色：{(() => {
+              if (!contextSummary.chapterCharacters) return '0 个';
+              const names = contextSummary.chapterCharacters.match(/^- (.+?)：/gm);
+              if (!names || names.length === 0) return '0 个';
+              const nameList = names.map((n) => n.replace(/^- (.+?)：.*$/, '$1'));
+              return `${nameList.length} 个（${nameList.join('、')}）`;
+            })()}</div>
             <div>⚡ 本章事件：{contextSummary.chapterEvents ? (contextSummary.chapterEvents.match(/\n- /g)?.length || 1) : 0} 个</div>
             <div>🌍 世界设定：{contextSummary.worldBackground ? '✅ 有' : '❌ 无'}</div>
             <div>📦 前文总结：{contextSummary.previousContext ? '✅ 有' : '❌ 无'}</div>
