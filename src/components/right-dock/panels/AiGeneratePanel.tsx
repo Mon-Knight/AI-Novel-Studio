@@ -131,8 +131,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const handleGenerate = async () => {
     if (!novelId || !chapter) return;
 
+    // v1.0.43 生成前强制刷新章节最新数据（确保大纲/目标字数等是最新的）
+    let freshChapter: Chapter | undefined;
+    try {
+      freshChapter = await chapterRepository.getById(chapter.id) ?? undefined;
+    } catch { /* fallback to prop */ }
+    const effectiveChapter = freshChapter || chapter;
+
     // v1.0.25 缺少章节大纲时给出警告
-    if (!chapter.outline?.trim()) {
+    if (!effectiveChapter.outline?.trim()) {
       const ok = confirm(
         '⚠️ 当前章节没有章节大纲。\n\n' +
         '没有大纲的情况下，AI 可能无法准确把握本章方向，生成内容可能与你的规划脱节。\n\n' +
@@ -155,10 +162,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           cancelable: false,
         },
         async ({ setMessage, setStage, setPercent }) => {
-          // v1.0.25 构建详细的 inputSummary
+          // v1.0.43 使用刷新后的章节数据构建上下文
           let ctx: ChapterGenerationContext | undefined;
           try {
-            ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
+            ctx = await buildChapterContext(novelId, effectiveChapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
           } catch { /* 上下文构建失败不阻止生成 */ }
 
           const hasOutline = ctx?.chapterOutline ? '有' : '无';
@@ -170,7 +177,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           const outputName = availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认';
 
           const inputSummary = [
-            `生成：${novelId.slice(0,8)}/${chapter.title}`,
+            `生成：${novelId.slice(0,8)}/${effectiveChapter.title}`,
             `大纲：${hasOutline}`,
             `目标：${hasChapterGoal}`,
             `角色：${charCount}个`,
@@ -184,7 +191,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           // 创建 AI 任务记录
           const task = await aiTaskService.create('chapter_generate', {
             novelId,
-            chapterId: chapter.id,
+            chapterId: effectiveChapter.id,
             runtimeMode: settings.runtimeMode,
             provider: settings.provider,
             modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
@@ -196,7 +203,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
           // 1. 构建上下文（如果前面没构建过）
           if (!ctx) {
-            ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
+            ctx = await buildChapterContext(novelId, effectiveChapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
           }
 
           // 2. 组装提示词
@@ -218,7 +225,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           // 4. 保存为草稿
           const draft = await draftVersionService.create({
             novelId,
-            chapterId: chapter.id,
+            chapterId: effectiveChapter.id,
             content: response.text,
             source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
             aiTaskId: task?.id,
@@ -273,17 +280,30 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setPercent(100);
           setStage('生成完成');
 
-          // v1.0.36: 调试日志（不输出敏感信息）
+          // v1.0.43: 增强调试日志（确认大纲和角色已进入 prompt）
+          const charNamesForLog = (() => {
+            if (!ctx?.chapterCharacters) return '0个';
+            const names = ctx.chapterCharacters.match(/^- (.+?)：/gm);
+            if (!names || names.length === 0) return '0个';
+            return `${names.length}个(${names.map((n) => n.replace(/^- (.+?)：.*$/, '$1')).join(',')})`;
+          })();
           console.info('[AiGenerate] 生成完成:', {
-            chapterId: chapter.id,
+            chapterId: effectiveChapter.id,
             novelId,
             styleProfileId: selectedStyleId || '(未选择)',
             outputControlId: selectedOutputId || '(未选择)',
+            hasOutline: !!ctx?.chapterOutline,
+            outlineLength: ctx?.chapterOutline?.length || 0,
+            hasVolumeOutline: !!ctx?.volumeOutline,
+            hasNovelOutline: !!ctx?.novelOutline,
+            chapterGoal: ctx?.chapterGoal ? '有' : '无',
             targetWordCount: ctx?.targetWordCount,
+            chapterCharacters: charNamesForLog,
             protagonistNames: ctx?.protagonistNames,
             wordCount: draft.wordCount,
             model: settings.modelName,
             provider: settings.provider,
+            promptLength: request.messages[0]?.content?.length || 0,
           });
 
           onGenerated?.(draft);
@@ -539,8 +559,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         )}
         {showContext && contextSummary && (
           <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--color-text-secondary)', marginTop: 8, padding: 8, background: 'var(--color-bg-primary)', borderRadius: 4 }}>
-            <div>📖 总大纲：{contextSummary.novelOutline ? '✅ 有' : '❌ 无'}</div>
-            <div>📋 分卷大纲：{contextSummary.volumeOutline ? '✅ 有' : '❌ 无'}</div>
+            <div>📖 总大纲：{contextSummary.novelOutline ? `✅ 有（${contextSummary.novelOutline.length} 字）` : '❌ 无'}</div>
+            <div>📋 分卷大纲：{contextSummary.volumeOutline ? `✅ 有（${contextSummary.volumeOutline.length} 字）` : '❌ 无'}</div>
             <div>📝 章节大纲：{contextSummary.chapterOutline ? `✅ 有（${contextSummary.chapterOutline.length} 字）` : '❌ 无'}</div>
             <div>🎯 本章目标：{contextSummary.chapterGoal ? `✅ 有（${contextSummary.chapterGoal.length} 字）` : '❌ 无'}</div>
             <div>👥 出场角色：{(() => {

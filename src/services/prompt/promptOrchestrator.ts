@@ -150,6 +150,19 @@ export async function buildGenerateRequest(
 
   const systemPrompt = renderTemplate(template, ctx);
 
+  // v1.0.43 调试日志：确认最终 prompt 包含关键内容
+  if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+    console.info('[PromptOrchestrator] 最终 prompt 摘要:', {
+      hasChapterOutline: systemPrompt.includes('章节大纲'),
+      hasVolumeOutline: systemPrompt.includes('分卷大纲'),
+      hasNovelOutline: systemPrompt.includes('作品总大纲'),
+      hasChapterGoal: systemPrompt.includes('本章目标'),
+      hasChapterCharacters: systemPrompt.includes('本章出场角色'),
+      hasMustAppear: systemPrompt.includes('必须直接出场'),
+      promptLength: systemPrompt.length,
+    });
+  }
+
   return {
     taskType: 'chapter_generate',
     messages: [
