@@ -17,7 +17,7 @@ function ChapterFormModal({ initial, novelId, volumeId: defaultVolumeId, volumes
   const [volumeId, setVolumeId] = useState(initial?.volumeId || defaultVolumeId || '');
   const [outline, setOutline] = useState(initial?.outline || '');
   const [goal, setGoal] = useState(initial?.goal || '');
-  const [targetWordCount, setTargetWordCount] = useState(initial?.targetWordCount || 4000);
+  const [targetWordCount, setTargetWordCount] = useState(initial?.targetWordCount || 0);
   const [status, setStatus] = useState<ChapterStatus>(initial?.status || 'not_started');
   const [error, setError] = useState('');
 
@@ -27,7 +27,7 @@ function ChapterFormModal({ initial, novelId, volumeId: defaultVolumeId, volumes
       setVolumeId(initial.volumeId || '');
       setOutline(initial.outline || '');
       setGoal(initial.goal || '');
-      setTargetWordCount(initial.targetWordCount || 4000);
+      setTargetWordCount(initial.targetWordCount || 0);
       setStatus(initial.status);
     }
   }, [initial]);
@@ -35,13 +35,13 @@ function ChapterFormModal({ initial, novelId, volumeId: defaultVolumeId, volumes
   const handleSave = () => {
     if (!title.trim()) { setError('章节标题不能为空'); return; }
     if (title.trim().length > 80) { setError('章节标题不超过 80 字'); return; }
-    if (targetWordCount < 500 || targetWordCount > 20000) { setError('目标字数建议 500-20000'); return; }
+    if (targetWordCount > 0 && (targetWordCount < 500 || targetWordCount > 20000)) { setError('目标字数建议 500-20000'); return; }
     onSave({
       title: title.trim(),
       volumeId: volumeId || undefined,
       outline: outline.trim() || undefined,
       goal: goal.trim() || undefined,
-      targetWordCount,
+      targetWordCount: targetWordCount > 0 ? targetWordCount : undefined,
       status,
     });
   };

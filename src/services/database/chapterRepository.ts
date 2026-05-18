@@ -36,7 +36,9 @@ function normalizeChapter(raw: unknown): Chapter | null {
 
   const orderIndex = toNumber(item.orderIndex ?? item.order_index, 0);
   const wordCount = toNumber(item.wordCount ?? item.word_count, 0);
-  const targetWordCount = toNumber(item.targetWordCount ?? item.target_word_count, 4000);
+  // v1.0.37: 不再强制默认4000，允许undefined以支持输出控制方案覆盖
+  const rawTarget = item.targetWordCount ?? item.target_word_count;
+  const targetWordCount = (typeof rawTarget === 'number' && rawTarget > 0) ? rawTarget : undefined;
   const now = nowISO();
 
   return {
@@ -54,7 +56,7 @@ function normalizeChapter(raw: unknown): Chapter | null {
     wordCount,
     currentWords: toNumber(item.currentWords ?? item.current_words, wordCount),
     targetWordCount,
-    targetWords: toNumber(item.targetWords ?? item.target_words, targetWordCount),
+    targetWords: toNumber(item.targetWords ?? item.target_words, targetWordCount ?? 0),
     drafts: Array.isArray(item.drafts) ? item.drafts : [],
     summary: item.summary,
     createdAt: item.createdAt ?? item.created_at ?? now,
@@ -110,13 +112,14 @@ export const chapterRepository = {
     const before = await chapterRepository.getByNovelId(input.novelId);
     const siblings = before.filter((ch) => (ch.volumeId ?? '') === (input.volumeId ?? ''));
     const maxOrder = siblings.reduce((max, ch) => Math.max(max, ch.orderIndex), -1);
+    // v1.0.37: 不强制设默认4000，允许从输出控制方案继承
     const preparedInput = {
       ...input,
       title: input.title.trim(),
       outline: input.outline ?? '',
       goal: input.goal ?? '',
       orderIndex: input.orderIndex ?? maxOrder + 1,
-      targetWordCount: input.targetWordCount ?? 4000,
+      targetWordCount: input.targetWordCount,
     };
     console.info(`[chapterService] before save count=${before.length}`);
 
@@ -138,7 +141,7 @@ export const chapterRepository = {
         wordCount: 0,
         currentWords: 0,
         targetWordCount: preparedInput.targetWordCount,
-        targetWords: preparedInput.targetWordCount,
+        targetWords: preparedInput.targetWordCount ?? 0,
         drafts: [],
         createdAt: now,
         updatedAt: now,

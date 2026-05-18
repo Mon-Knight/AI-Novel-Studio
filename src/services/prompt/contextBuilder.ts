@@ -169,8 +169,8 @@ export async function buildChapterContext(
     dualProtagonistSummary = relParts.join('\n');
   }
 
-  // v1.0.36: 输出控制方案的目标字数覆盖章节默认值
-  let resolvedTargetWordCount = chapter.targetWordCount || 4000;
+  // v1.0.37: 目标字数优先级：章节单独设置 > 输出控制方案 > 系统默认4000
+  let resolvedTargetWordCount = 4000; // 最终降级默认值
   let resolvedOutputProfileSummary = outputProfileSummary;
   if (resolvedOutputProfile) {
     const outputTarget = resolvedOutputProfile.targetWordCount
@@ -182,6 +182,10 @@ export async function buildChapterContext(
     if (resolvedOutputProfileSummary && !resolvedOutputProfileSummary.includes('必须')) {
       resolvedOutputProfileSummary += `\n本章必须尽量接近目标字数 ${resolvedTargetWordCount} 字，不要默认生成 4000 字。`;
     }
+  }
+  // 章节单独设置的目标字数优先级最高，覆盖输出控制方案
+  if (chapter.targetWordCount && chapter.targetWordCount > 0) {
+    resolvedTargetWordCount = chapter.targetWordCount;
   }
 
   return {

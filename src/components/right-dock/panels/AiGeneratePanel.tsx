@@ -77,8 +77,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
 
   const settings = aiSettingsService.getSettings();
 
-  // v1.0.36: 解析实际目标字数（输出控制 > 章节 > 默认4000）
+  // v1.0.37: 解析实际目标字数（章节单独设置 > 输出控制 > 系统默认4000）
   const resolvedTargetWordCount = (() => {
+    // 章节有明确设置的目标字数时优先使用
+    if (chapter?.targetWordCount && chapter.targetWordCount > 0) {
+      return chapter.targetWordCount;
+    }
+    // 否则使用输出控制方案的目标字数
     if (selectedOutputId) {
       const output = availableOutputs.find((o) => o.id === selectedOutputId);
       if (output) {
@@ -86,7 +91,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         if (ot && ot > 0) return ot;
       }
     }
-    return chapter?.targetWordCount || 4000;
+    return 4000; // 最终降级默认值
   })();
 
   const handleGenerate = async () => {
@@ -439,7 +444,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             <div>📦 前文总结：{contextSummary.previousContext ? '✅ 有' : '❌ 无'}</div>
             <div>🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'} {availableStyles.find((s) => s.id === selectedStyleId)?.name ? `→ ${availableStyles.find((s) => s.id === selectedStyleId)!.name}` : ''}</div>
             <div>⚙️ 输出控制：{availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认'}</div>
-            <div>📊 目标字数：{contextSummary.targetWordCount || 4000} 字</div>
+            <div>📊 目标字数：{contextSummary.targetWordCount || resolvedTargetWordCount} 字</div>
           </div>
         )}
         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>

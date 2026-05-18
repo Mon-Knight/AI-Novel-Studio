@@ -256,7 +256,7 @@ export const outlineGenerateService = {
       const chapters = Array.isArray(parsed.chapters)
         ? parsed.chapters.filter((item) => item.title && item.outline).map((item) => ({
           ...item,
-          targetWordCount: Number.isFinite(item.targetWordCount) ? item.targetWordCount : 4000,
+          targetWordCount: (Number.isFinite(item.targetWordCount) && (item.targetWordCount as number) > 0) ? item.targetWordCount : undefined,
         }))
         : [];
 
