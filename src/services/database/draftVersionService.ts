@@ -1,9 +1,13 @@
 /**
  * AI Novel Studio - 章节草稿版本服务
  * Tauri 桌面端使用 SQLite，浏览器开发态使用 localStorage。
+ * 支持大文本分片保存（超过 100KB 自动使用分片管道）。
  */
 import { dbCall, lsGet, lsSet, generateId, nowISO } from '../database/db';
+import { saveLargeTextWithChunks } from '../largeTextSave';
+import { shouldUseLargeTextSave } from '../../types/largeTextSave';
 import type { ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
+import type { LargeTextSaveProgress } from '../../types/largeTextSave';
 
 const DRAFTS_LIST_KEY_PREFIX = 'ai_novel_studio_drafts_list_';
 
@@ -14,6 +18,7 @@ type DraftRecord = Partial<ChapterDraft> & {
   word_count?: number;
   is_adopted?: boolean | number;
   ai_task_id?: string | null;
+  large_text_ref_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -62,6 +67,7 @@ function normalizeDraft(raw: unknown): ChapterDraft | null {
     isAdopted: toBoolean(item.isAdopted ?? item.is_adopted),
     aiTaskId: item.aiTaskId ?? item.ai_task_id ?? undefined,
     note: item.note,
+    largeTextRefId: item.largeTextRefId ?? item.large_text_ref_id ?? undefined,
     createdAt: item.createdAt ?? item.created_at ?? now,
     updatedAt: item.updatedAt ?? item.updated_at ?? now,
   };
@@ -85,6 +91,26 @@ function saveLocalDrafts(chapterId: string, drafts: ChapterDraft[]): void {
   lsSet(draftsKey(chapterId), drafts);
 }
 
+/**
+ * 从大文本存储中读取完整内容
+ */
+async function readFullContent(largeTextRefId: string): Promise<string | null> {
+  // 检测是否在 Tauri 环境
+  if (typeof window !== 'undefined' && '__TAURI__' in window) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/tauri');
+      const result = await invoke<{ content: string }>('read_large_text_content', {
+        input: { documentId: largeTextRefId },
+      });
+      return result?.content ?? null;
+    } catch {
+      return null;
+    }
+  }
+  // 浏览器模式下内容已在 localStorage 中
+  return null;
+}
+
 export const draftVersionService = {
   async getByChapterId(chapterId: string): Promise<ChapterDraft[]> {
     const drafts = await dbCall<unknown[]>(
@@ -92,7 +118,20 @@ export const draftVersionService = {
       { chapterId },
       () => getLocalDrafts(chapterId),
     );
-    return normalizeDrafts(drafts);
+    const normalized = normalizeDrafts(drafts);
+
+    // 加载大文本完整内容
+    for (const draft of normalized) {
+      if (draft.largeTextRefId && draft.content.length < 600) {
+        const fullContent = await readFullContent(draft.largeTextRefId);
+        if (fullContent) {
+          draft.content = fullContent;
+          draft.wordCount = countWords(fullContent);
+        }
+      }
+    }
+
+    return normalized;
   },
 
   async getLatestByChapterId(chapterId: string): Promise<ChapterDraft | null> {
@@ -105,7 +144,18 @@ export const draftVersionService = {
         return drafts.sort((a, b) => b.versionNo - a.versionNo)[0];
       },
     );
-    return normalizeDraft(draft);
+    const normalized = normalizeDraft(draft);
+
+    // 加载大文本完整内容
+    if (normalized?.largeTextRefId && normalized.content.length < 600) {
+      const fullContent = await readFullContent(normalized.largeTextRefId);
+      if (fullContent) {
+        normalized.content = fullContent;
+        normalized.wordCount = countWords(fullContent);
+      }
+    }
+
+    return normalized;
   },
 
   async getAdoptedByChapterId(chapterId: string): Promise<ChapterDraft | null> {
@@ -113,10 +163,41 @@ export const draftVersionService = {
     return drafts.find((d) => d.isAdopted) ?? null;
   },
 
-  async create(input: CreateChapterDraftInput): Promise<ChapterDraft> {
+  async create(input: CreateChapterDraftInput, onProgress?: (p: LargeTextSaveProgress) => void): Promise<ChapterDraft> {
+    // 如果内容较大，先通过大文本管道保存
+    let largeTextRefId: string | undefined;
+    let contentForDb = input.content;
+
+    if (shouldUseLargeTextSave(input.content)) {
+      onProgress?.({ stage: 'creating', percent: 0, message: '正在准备保存大文本...' });
+      const saveResult = await saveLargeTextWithChunks({
+        targetType: 'draft',
+        targetId: input.chapterId,
+        fieldName: 'content',
+        title: input.title,
+        content: input.content,
+        onProgress,
+      });
+
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || '大文本保存失败');
+      }
+
+      if (saveResult.documentId) {
+        largeTextRefId = saveResult.documentId;
+        // 存储截断预览到 content 字段（前 500 字符）
+        contentForDb = input.content.slice(0, 500);
+        if (input.content.length > 500) {
+          contentForDb += `\n\n[大文本已分片保存，完整内容通过 largeTextRefId 读取: ${largeTextRefId}]`;
+        }
+      }
+    }
+
+    const inputWithRef = { ...input, content: contentForDb, largeTextRefId };
+
     const draft = await dbCall<unknown>(
       'create_chapter_draft',
-      { input },
+      { input: inputWithRef },
       () => {
         const drafts = getLocalDrafts(input.chapterId);
         const maxVersion = drafts.reduce((max, d) => Math.max(max, d.versionNo), 0);
@@ -126,13 +207,14 @@ export const draftVersionService = {
           novelId: input.novelId,
           chapterId: input.chapterId,
           title: input.title,
-          content: input.content,
+          content: input.content, // localStorage 保存完整内容
           source: input.source,
           versionNo: maxVersion + 1,
           wordCount: countWords(input.content),
           isAdopted: false,
           aiTaskId: input.aiTaskId,
           note: input.note,
+          largeTextRefId,
           createdAt: now,
           updatedAt: now,
         };
@@ -144,13 +226,54 @@ export const draftVersionService = {
     );
     const normalized = normalizeDraft(draft);
     if (!normalized?.id) throw new Error('草稿创建返回无效数据');
+
+    // 如果是大文本且有 largeTextRefId，加载完整内容
+    if (normalized.largeTextRefId) {
+      try {
+        const fullContent = await readFullContent(normalized.largeTextRefId);
+        if (fullContent) {
+          normalized.content = fullContent;
+        }
+      } catch {
+        // 读取失败时保留截断预览
+        console.warn('无法读取大文本完整内容，使用截断预览');
+      }
+    }
+
     return normalized;
   },
 
-  async update(id: string, chapterId: string, content: string, source?: DraftSource): Promise<ChapterDraft | null> {
+  async update(id: string, chapterId: string, content: string, source?: DraftSource, onProgress?: (p: LargeTextSaveProgress) => void): Promise<ChapterDraft | null> {
+    // 如果内容较大，先通过大文本管道保存
+    let largeTextRefId: string | undefined;
+    let contentForDb = content;
+
+    if (shouldUseLargeTextSave(content)) {
+      onProgress?.({ stage: 'creating', percent: 0, message: '正在准备保存大文本...' });
+      const saveResult = await saveLargeTextWithChunks({
+        targetType: 'draft',
+        targetId: chapterId,
+        fieldName: 'content',
+        content,
+        onProgress,
+      });
+
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || '大文本保存失败');
+      }
+
+      if (saveResult.documentId) {
+        largeTextRefId = saveResult.documentId;
+        contentForDb = content.slice(0, 500);
+        if (content.length > 500) {
+          contentForDb += `\n\n[大文本已分片保存: ${largeTextRefId}]`;
+        }
+      }
+    }
+
     const draft = await dbCall<unknown | null>(
       'update_chapter_draft',
-      { id, chapterId, content, source },
+      { id, chapterId, content: contentForDb, source, largeTextRefId: largeTextRefId ?? null },
       () => {
         const drafts = getLocalDrafts(chapterId);
         const idx = drafts.findIndex((d) => d.id === id);
@@ -158,16 +281,32 @@ export const draftVersionService = {
 
         drafts[idx] = {
           ...drafts[idx],
-          content,
+          content, // localStorage 保存完整内容
           source: source || 'user_edited',
           wordCount: countWords(content),
+          largeTextRefId: largeTextRefId || drafts[idx].largeTextRefId,
           updatedAt: nowISO(),
         };
         saveLocalDrafts(chapterId, drafts);
         return drafts[idx];
       },
     );
-    return normalizeDraft(draft);
+
+    const normalized = normalizeDraft(draft);
+
+    // 如果是大文本且有 largeTextRefId，加载完整内容
+    if (normalized?.largeTextRefId) {
+      try {
+        const fullContent = await readFullContent(normalized.largeTextRefId);
+        if (fullContent) {
+          normalized.content = fullContent;
+        }
+      } catch {
+        console.warn('无法读取大文本完整内容，使用截断预览');
+      }
+    }
+
+    return normalized;
   },
 
   async adopt(draftId: string, chapterId: string): Promise<ChapterDraft | null> {

@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
-fn get_data_dir() -> PathBuf {
+pub fn get_data_dir() -> PathBuf {
     let mut dir = dirs_next().unwrap_or_else(|| {
         let mut fallback = PathBuf::from(".");
         fallback.push("data");
@@ -470,6 +470,8 @@ fn create_tables(conn: &Connection) -> SqliteResult<()> {
     )?;
     ensure_novel_columns(conn)?;
     ensure_ai_task_record_columns(conn)?;
+    ensure_large_text_ref_columns(conn)?;
+    crate::large_text_save::create_large_text_tables(conn)?;
     Ok(())
 }
 
@@ -561,5 +563,51 @@ fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn ensure_large_text_ref_columns(conn: &Connection) -> SqliteResult<()> {
+    add_column_if_missing(
+        conn,
+        "chapter_drafts",
+        "large_text_ref_id",
+        "ALTER TABLE chapter_drafts ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "chapter_summaries",
+        "large_text_ref_id",
+        "ALTER TABLE chapter_summaries ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "context_records",
+        "large_text_ref_id",
+        "ALTER TABLE context_records ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "style_profiles",
+        "large_text_ref_id",
+        "ALTER TABLE style_profiles ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "output_profiles",
+        "large_text_ref_id",
+        "ALTER TABLE output_profiles ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "world_settings",
+        "large_text_ref_id",
+        "ALTER TABLE world_settings ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "rule_systems",
+        "large_text_ref_id",
+        "ALTER TABLE rule_systems ADD COLUMN large_text_ref_id TEXT",
+    )?;
     Ok(())
 }

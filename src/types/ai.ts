@@ -148,6 +148,7 @@ export interface ChapterDraft {
   isAdopted: boolean;
   aiTaskId?: string;
   note?: string;
+  largeTextRefId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -160,6 +161,7 @@ export interface CreateChapterDraftInput {
   title?: string;
   aiTaskId?: string;
   note?: string;
+  largeTextRefId?: string;
 }
 
 // ==================== 生成上下文 ====================

@@ -6,6 +6,7 @@
 mod commands;
 mod ai;
 mod db;
+mod large_text_save;
 
 fn main() {
     db::init_database();
@@ -49,6 +50,13 @@ fn main() {
             commands::get_ai_task_records_by_chapter_id,
             commands::get_ai_task_records_by_novel_id,
             ai::ai_chat_completion,
+            large_text_save::create_large_text_save_session,
+            large_text_save::append_large_text_chunk,
+            large_text_save::finalize_large_text_save,
+            large_text_save::abort_large_text_save,
+            large_text_save::cleanup_expired_large_text_save_sessions,
+            large_text_save::read_large_text_content,
+            large_text_save::update_large_text_ref,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

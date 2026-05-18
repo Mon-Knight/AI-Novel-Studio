@@ -1009,6 +1009,7 @@ pub struct ChapterDraftDto {
     pub is_adopted: bool,
     pub ai_task_id: Option<String>,
     pub note: Option<String>,
+    pub large_text_ref_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1023,6 +1024,7 @@ pub struct CreateChapterDraftInput {
     pub source: String,
     pub ai_task_id: Option<String>,
     pub note: Option<String>,
+    pub large_text_ref_id: Option<String>,
 }
 
 fn count_words(content: &str) -> i64 {
@@ -1043,8 +1045,9 @@ fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterDraftDto> {
         is_adopted: is_adopted != 0,
         ai_task_id: row.get(9)?,
         note: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        large_text_ref_id: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -1052,7 +1055,7 @@ fn get_draft_by_id_internal(
     conn: &rusqlite::Connection,
     id: &str,
 ) -> Result<ChapterDraftDto, String> {
-    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE id = ?1").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE id = ?1").map_err(|e| e.to_string())?;
     stmt.query_row(params![id], map_draft_row)
         .map_err(|e| e.to_string())
 }
@@ -1061,7 +1064,7 @@ fn get_draft_by_id_internal(
 pub fn get_drafts_by_chapter_id(chapter_id: String) -> Result<Vec<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC")
+        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC")
         .map_err(|e| e.to_string())?;
     let items = stmt
         .query_map(params![chapter_id], map_draft_row)
@@ -1077,7 +1080,7 @@ pub fn get_latest_draft_by_chapter_id(
 ) -> Result<Option<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no DESC LIMIT 1")
+        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no DESC LIMIT 1")
         .map_err(|e| e.to_string())?;
     match stmt.query_row(params![chapter_id], map_draft_row) {
         Ok(draft) => Ok(Some(draft)),
@@ -1118,7 +1121,7 @@ pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDra
     };
 
     conn.execute(
-        "INSERT INTO chapter_drafts (id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?10,?11,?11)",
+        "INSERT INTO chapter_drafts (id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?10,?11,?12,?12)",
         params![
             &id,
             &input.novel_id,
@@ -1130,6 +1133,7 @@ pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDra
             word_count,
             &ai_task_id,
             &input.note,
+            &input.large_text_ref_id,
             now
         ],
     ).map_err(|e| e.to_string())?;
@@ -1143,14 +1147,15 @@ pub fn update_chapter_draft(
     chapter_id: String,
     content: String,
     source: Option<String>,
+    large_text_ref_id: Option<String>,
 ) -> Result<Option<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let source = source.unwrap_or_else(|| "user_edited".to_string());
     let word_count = count_words(&content);
     conn.execute(
-        "UPDATE chapter_drafts SET content = ?1, source = ?2, word_count = ?3, updated_at = ?4 WHERE id = ?5 AND chapter_id = ?6",
-        params![content, source, word_count, now, &id, chapter_id],
+        "UPDATE chapter_drafts SET content = ?1, source = ?2, word_count = ?3, large_text_ref_id = ?4, updated_at = ?5 WHERE id = ?6 AND chapter_id = ?7",
+        params![content, source, word_count, large_text_ref_id, now, &id, chapter_id],
     ).map_err(|e| e.to_string())?;
 
     match get_draft_by_id_internal(&conn, &id) {
