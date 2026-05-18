@@ -8,6 +8,7 @@ import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient
 import { buildChapterContext } from '../../../services/prompt/contextBuilder';
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { chapterRepository } from '../../../services/database/chapterRepository';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
 import { styleProfileService } from '../../../services/styles/styleProfileService';
@@ -20,14 +21,56 @@ interface AiGeneratePanelProps {
   chapter?: Chapter;
   onGenerated?: (draft: ChapterDraft) => void;
   onAdopted?: () => void;
+  contextVersion?: number;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0 }: AiGeneratePanelProps) {
   const [userInstruction, setUserInstruction] = useState('');
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
+
+  // v1.0.26 风格方案与输出控制选择
+  const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
+  const [availableOutputs, setAvailableOutputs] = useState<OutputProfile[]>([]);
+  const [selectedStyleId, setSelectedStyleId] = useState('');
+  const [selectedOutputId, setSelectedOutputId] = useState('');
+
+  // v1.0.42 目标字数可编辑（必须在 availableOutputs/selectedOutputId 声明之后）
+  const [wordCountDraft, setWordCountDraft] = useState<number>(0);
+  const [wordCountSaving, setWordCountSaving] = useState(false);
+  const [wordCountSaved, setWordCountSaved] = useState(false);
+
+  // 初始化/更新目标字数草稿
+  useEffect(() => {
+    const resolved = (() => {
+      if (chapter?.targetWordCount && chapter.targetWordCount > 0) return chapter.targetWordCount;
+      if (selectedOutputId) {
+        const output = availableOutputs.find((o) => o.id === selectedOutputId);
+        const ot = output?.targetWordCount || output?.chapterWordRange?.default;
+        if (ot && ot > 0) return ot;
+      }
+      return 4000;
+    })();
+    setWordCountDraft(resolved);
+    setWordCountSaved(false);
+  }, [chapter?.id, chapter?.targetWordCount, selectedOutputId, availableOutputs]);
+
+  // 保存目标字数
+  const handleSaveWordCount = async () => {
+    if (!novelId || !chapter?.id || wordCountDraft <= 0) return;
+    setWordCountSaving(true);
+    try {
+      await chapterRepository.update(chapter.id, { targetWordCount: wordCountDraft });
+      setWordCountSaved(true);
+      setTimeout(() => setWordCountSaved(false), 2000);
+    } catch (e: any) {
+      setErrorMsg(`保存目标字数失败：${e.message || '未知错误'}`);
+    } finally {
+      setWordCountSaving(false);
+    }
+  };
 
   // v1.0.25 上下文摘要状态
   const [contextSummary, setContextSummary] = useState<ChapterGenerationContext | null>(null);
@@ -35,12 +78,6 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
 
   // v0.8.0 上下文加载状态
   const [contextCount, setContextCount] = useState(0);
-
-  // v1.0.26 风格方案与输出控制选择
-  const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
-  const [availableOutputs, setAvailableOutputs] = useState<OutputProfile[]>([]);
-  const [selectedStyleId, setSelectedStyleId] = useState('');
-  const [selectedOutputId, setSelectedOutputId] = useState('');
 
   useEffect(() => {
     if (novelId) {
@@ -65,7 +102,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
     }
   }, [novelId, selectedStyleId, selectedOutputId]);
 
-  // v1.0.25 预加载上下文摘要
+  // v1.0.25 预加载上下文摘要（监听 contextVersion 刷新）
   const handlePreviewContext = useCallback(async () => {
     if (!novelId || !chapter) return;
     try {
@@ -73,26 +110,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
       setContextSummary(ctx);
       setShowContext(true);
     } catch { /* ignore */ }
-  }, [novelId, chapter, selectedStyleId, selectedOutputId]);
+  }, [novelId, chapter?.id, chapter?.goal, chapter?.targetWordCount, selectedStyleId, selectedOutputId, contextVersion]);
 
   const settings = aiSettingsService.getSettings();
-
-  // v1.0.37: 解析实际目标字数（章节单独设置 > 输出控制 > 系统默认4000）
-  const resolvedTargetWordCount = (() => {
-    // 章节有明确设置的目标字数时优先使用
-    if (chapter?.targetWordCount && chapter.targetWordCount > 0) {
-      return chapter.targetWordCount;
-    }
-    // 否则使用输出控制方案的目标字数
-    if (selectedOutputId) {
-      const output = availableOutputs.find((o) => o.id === selectedOutputId);
-      if (output) {
-        const ot = output.targetWordCount || output.chapterWordRange?.default;
-        if (ot && ot > 0) return ot;
-      }
-    }
-    return 4000; // 最终降级默认值
-  })();
 
   const handleGenerate = async () => {
     if (!novelId || !chapter) return;
@@ -144,7 +164,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             `前文：${hasPrevContext}`,
             `风格：${styleName}`,
             `输出：${outputName}`,
-            `字数：${resolvedTargetWordCount}`,
+            `字数：${wordCountDraft}`,
           ].join('，');
 
           // 创建 AI 任务记录
@@ -193,15 +213,34 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
           setPercent(90);
           setStage('正在校验生成结果……');
 
-          // v1.0.36: 生成后主角名校验
+          // v1.0.42: 生成后角色名校验（检查主角 + 本章必须出场角色）
           let validationWarning: string | undefined;
+          const requiredNames: string[] = [];
+          // 收集主角名
           if (ctx?.protagonistNames && ctx.protagonistMustAppear) {
-            const names = ctx.protagonistNames.split('、');
-            const missingNames = names.filter((name) => !response.text.includes(name));
-            if (missingNames.length === names.length && names.length > 0) {
-              validationWarning = `⚠️ 生成正文中未出现主角名：${ctx.protagonistNames}。建议检查风格方案、角色设定或重新生成。`;
+            requiredNames.push(...ctx.protagonistNames.split('、'));
+          }
+          // 收集本章出场角色中 mustAppear 的角色名
+          if (ctx?.chapterCharacters) {
+            const charLines = ctx.chapterCharacters.split('\n');
+            for (const line of charLines) {
+              const mustAppearMatch = line.match(/^- (.+?)：.+?【必须直接出场】/);
+              if (mustAppearMatch) {
+                const name = mustAppearMatch[1].trim();
+                if (name && !requiredNames.includes(name)) {
+                  requiredNames.push(name);
+                }
+              }
+            }
+          }
+          // 去重
+          const uniqueRequiredNames = [...new Set(requiredNames.filter(Boolean))];
+          if (uniqueRequiredNames.length > 0) {
+            const missingNames = uniqueRequiredNames.filter((name) => !response.text.includes(name));
+            if (missingNames.length === uniqueRequiredNames.length) {
+              validationWarning = `⚠️ 生成正文中未出现本章必须出场角色：${uniqueRequiredNames.join('、')}。建议重新生成或检查角色设定。`;
             } else if (missingNames.length > 0) {
-              validationWarning = `⚠️ 生成正文中未出现部分主角名：${missingNames.join('、')}。`;
+              validationWarning = `⚠️ 生成正文中未出现部分必须出场角色：${missingNames.join('、')}。`;
             }
           }
 
@@ -324,7 +363,43 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
           <div className="panel-field-label">目标字数</div>
-          <div className="panel-field-value">{formatNumber(resolvedTargetWordCount)} 字</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="number"
+              value={wordCountDraft || ''}
+              onChange={(e) => { setWordCountDraft(Number(e.target.value)); setWordCountSaved(false); }}
+              onBlur={() => { if (wordCountDraft <= 0) setWordCountDraft(4000); }}
+              min={500}
+              max={50000}
+              step={100}
+              disabled={wordCountSaving}
+              style={{
+                width: 80,
+                padding: '4px 8px',
+                border: '1px solid var(--color-border)',
+                borderRadius: 4,
+                fontSize: 13,
+                textAlign: 'center',
+              }}
+            />
+            <span style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>字</span>
+            <button
+              className="btn btn-sm"
+              onClick={handleSaveWordCount}
+              disabled={wordCountSaving || wordCountDraft <= 0}
+              style={{
+                padding: '3px 10px',
+                fontSize: 12,
+                background: wordCountSaved ? 'var(--color-success)' : 'var(--color-primary)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {wordCountSaving ? '⏳' : wordCountSaved ? '✓ 已保存' : '保存'}
+            </button>
+          </div>
         </div>
         <div className="panel-field" style={{ marginTop: 8 }}>
           <div className="panel-field-label">状态</div>
@@ -447,7 +522,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
             <div>📦 前文总结：{contextSummary.previousContext ? '✅ 有' : '❌ 无'}</div>
             <div>🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'} {availableStyles.find((s) => s.id === selectedStyleId)?.name ? `→ ${availableStyles.find((s) => s.id === selectedStyleId)!.name}` : ''}</div>
             <div>⚙️ 输出控制：{availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认'}</div>
-            <div>📊 目标字数：{contextSummary.targetWordCount || resolvedTargetWordCount} 字</div>
+            <div>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</div>
           </div>
         )}
         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>

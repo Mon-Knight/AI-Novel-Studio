@@ -13,9 +13,10 @@ interface CharactersPanelProps {
   chapter?: Chapter;
   onGenerated?: (draft: any) => void;
   onAdopted?: () => void;
+  onChapterCharactersChanged?: () => void;
 }
 
-function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
+function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: CharactersPanelProps) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [chapterChars, setChapterChars] = useState<ChapterCharacter[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
@@ -160,6 +161,7 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
       upsertChapterCharacterState(cc);
       setNotice(isProtagonist ? '主角已加入本章出场角色' : '角色已加入本章');
       setError('');
+      onChapterCharactersChanged?.();
     } catch (e: any) {
       setError(e?.message || '添加本章出场角色失败');
     } finally {
@@ -184,6 +186,7 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
       setChapterChars((prev) => prev.filter((c) => c.id !== cc.id));
       setNotice(isProtagonist ? '已设置主角本章不出场' : '已移除本章出场角色');
       setError('');
+      onChapterCharactersChanged?.();
     } catch (e: any) {
       setError(e?.message || '移除本章出场角色失败');
     } finally {

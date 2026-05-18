@@ -115,12 +115,13 @@ export async function buildChapterContext(
           protagonistsInChapterNames.push(ch?.name || cc.characterName || '未知');
         }
         const roleLabel = isProtagonist ? '主角' : cc.roleInChapter;
-        const appearance = cc.mustAppear ? '必须出场' : '本章出场';
+        const appearance = cc.mustAppear ? '【必须直接出场】' : '本章出场';
         const parts = [`- ${ch?.name || cc.characterName || '未知'}：${roleLabel}，${appearance}`];
         if (cc.note) parts.push(`  备注：${cc.note}`);
         if (ch?.personality) parts.push(`  性格：${ch.personality}`);
         if (ch?.goal) parts.push(`  目标：${ch.goal}`);
         if (ch?.forbiddenBehaviors) parts.push(`  禁止行为：${ch.forbiddenBehaviors}`);
+        if (isProtagonist && (ch as any).specialAbility) parts.push(`  特殊能力：${(ch as any).specialAbility}`);
         return parts.join('\n');
       }).join('\n');
       // 找出本章不在出场角色中的主角

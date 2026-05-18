@@ -188,7 +188,18 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     '',
     ctx.chapterSettings ? `## 本章可用设定\n${ctx.chapterSettings}\n` : '',
     '',
-    ctx.chapterCharacters ? `## 本章出场角色\n${ctx.chapterCharacters}` : '',
+    ctx.chapterCharacters
+      ? [
+          '## 本章出场角色（强制约束）',
+          ctx.chapterCharacters,
+          '',
+          '【角色出场硬性要求】',
+          '- 以上列出的所有角色必须在正文中直接出现，不能只在摘要或叙述中提到',
+          '- 标记为"必须出场"的角色必须有实际行动、对话、心理或剧情参与',
+          '- 标记为"主角"的角色必须有足够的篇幅来体现其目标和性格',
+          '- 不得将主角写成旁观者或路人',
+        ].join('\n')
+      : '',
     ctx.chapterEvents ? `## 本章关键事件\n${ctx.chapterEvents}` : '',
     '',
     ctx.previousContext ? `## 前文上下文摘要\n${ctx.previousContext}` : '',

@@ -44,6 +44,10 @@ function WritingWorkspacePage() {
   const [isDirty, setIsDirty] = useState(false);
   const [chapterGoalDirty, setChapterGoalDirty] = useState(false);
 
+  // v1.0.42 上下文版本号（角色变更/字数变更时递增，触发 AiGeneratePanel 刷新摘要）
+  const [contextVersion, setContextVersion] = useState(0);
+  const bumpContextVersion = useCallback(() => setContextVersion((v) => v + 1), []);
+
   // v0.8.0 上下文总结相关状态
   const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
   const [summaryResult, setSummaryResult] = useState<ChapterSummarizeResult | null>(null);
@@ -501,6 +505,8 @@ function WritingWorkspacePage() {
           onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
           onChapterOutlineApplied={handleChapterOutlineApplied}
           onChapterGoalDirtyChange={setChapterGoalDirty}
+          onChapterCharactersChanged={bumpContextVersion}
+          contextVersion={contextVersion}
         />
       )}
 
