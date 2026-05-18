@@ -20,6 +20,9 @@ export interface Character {
   behaviorLimits?: string; forbiddenBehaviors?: string;
   firstAppearanceChapterId?: string; currentState?: string;
   isProtagonist?: boolean;
+  protagonistKey?: string;
+  protagonistLabel?: string;
+  protagonistOrder?: number;
   source: CharacterSource; isActive: boolean;
   createdAt: string; updatedAt: string;
 }

@@ -28,6 +28,9 @@ function mapToCharacter(dto: any): Character {
     firstAppearanceChapterId: dto.firstAppearanceChapterId ?? dto.first_appearance_chapter_id,
     currentState: dto.currentState ?? dto.current_state,
     isProtagonist: dto.isProtagonist ?? dto.is_protagonist ?? ((dto.roleType ?? dto.role_type) === 'protagonist'),
+    protagonistKey: dto.protagonistKey ?? dto.protagonist_key,
+    protagonistLabel: dto.protagonistLabel ?? dto.protagonist_label,
+    protagonistOrder: dto.protagonistOrder ?? dto.protagonist_order ?? 0,
     source: dto.source ?? 'manual',
     isActive: dto.isActive ?? dto.is_active ?? true,
     createdAt: dto.createdAt ?? dto.created_at,
@@ -97,13 +100,33 @@ export const characterService = {
     return ch;
   },
 
-  /** 获取主角角色 */
+  /** 获取主角角色（单主角，向后兼容） */
   async getProtagonist(novelId: string): Promise<Character | null> {
     if (isTauri()) {
       const result = await dbCall<any>('get_protagonist_character', { novelId });
       return result ? mapToCharacter(result) : null;
     }
     return getAllLocal().find((c) => c.novelId === novelId && c.roleType === 'protagonist') ?? null;
+  },
+
+  /** 同步所有主角到角色库（新接口，返回数组） */
+  async syncProtagonists(novelId: string): Promise<Character[]> {
+    if (isTauri()) {
+      const list = await dbCall<any[]>('sync_protagonists_to_character_library', { novelId });
+      return (list ?? []).map(mapToCharacter);
+    }
+    // localStorage 回退：逐个调用单体同步
+    const single = await this.syncProtagonist(novelId);
+    return single ? [single] : [];
+  },
+
+  /** 获取所有主角角色（新接口，返回数组） */
+  async getProtagonists(novelId: string): Promise<Character[]> {
+    if (isTauri()) {
+      const list = await dbCall<any[]>('get_protagonist_characters', { novelId });
+      return (list ?? []).map(mapToCharacter);
+    }
+    return getAllLocal().filter((c) => c.novelId === novelId && c.roleType === 'protagonist');
   },
 
   async getByNovelId(novelId: string): Promise<Character[]> {

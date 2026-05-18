@@ -93,6 +93,8 @@ export async function buildChapterContext(
   let chapterEventSummary: string | undefined;
   let protagonistInChapter = false;
   let protagonistMustAppear = false;
+  const protagonistsInChapterNames: string[] = [];
+  const protagonistsNotInChapterNames: string[] = [];
   if (chapter.id) {
     const [chapterChars, chapterEvents] = await Promise.all([
       chapterCharacterService.getByChapterId(chapter.id),
@@ -100,12 +102,17 @@ export async function buildChapterContext(
     ]);
     if (chapterChars.length > 0) {
       const chars = await characterService.getByNovelId(novelId);
+      // 收集所有主角 ID（用于判断出场状态）
+      const protagonistIds = new Set(
+        chars.filter((c) => c.isProtagonist || c.roleType === 'protagonist').map((c) => c.id)
+      );
       chapterCharacterSummary = chapterChars.map((cc) => {
         const ch = chars.find((c) => c.id === cc.characterId);
         const isProtagonist = ch?.isProtagonist || ch?.roleType === 'protagonist';
         if (isProtagonist) {
           protagonistInChapter = true;
-          protagonistMustAppear = cc.mustAppear || cc.roleInChapter === 'main';
+          protagonistMustAppear = protagonistMustAppear || cc.mustAppear || cc.roleInChapter === 'main';
+          protagonistsInChapterNames.push(ch?.name || cc.characterName || '未知');
         }
         const roleLabel = isProtagonist ? '主角' : cc.roleInChapter;
         const appearance = cc.mustAppear ? '必须出场' : '本章出场';
@@ -116,6 +123,12 @@ export async function buildChapterContext(
         if (ch?.forbiddenBehaviors) parts.push(`  禁止行为：${ch.forbiddenBehaviors}`);
         return parts.join('\n');
       }).join('\n');
+      // 找出本章不在出场角色中的主角
+      for (const ch of chars) {
+        if ((ch.isProtagonist || ch.roleType === 'protagonist') && !protagonistsInChapterNames.includes(ch.name)) {
+          protagonistsNotInChapterNames.push(ch.name);
+        }
+      }
     }
     if (chapterEvents.length > 0) {
       chapterEventSummary = chapterEvents
@@ -178,9 +191,22 @@ export async function buildChapterContext(
     protagonistsSummary = parts.join('\n');
   }
   const protagonistAppearance = protagonistNames
-    ? protagonistInChapter
-      ? `本章主角已加入出场角色，${protagonistMustAppear ? '必须直接出场并推动本章目标。' : '可以直接出场，但不强制承担全部行动。'}`
-      : '本章主角未加入出场角色，不要强制主角直接出场；剧情仍需服务主线和后续发展。'
+    ? (() => {
+        const parts: string[] = [];
+        if (protagonistsInChapterNames.length > 0) {
+          parts.push(`本章出场主角：${protagonistsInChapterNames.join('、')}。`);
+          if (protagonistMustAppear) {
+            parts.push('至少有一位主角必须直接出场并推动本章目标。');
+          }
+        }
+        if (protagonistsNotInChapterNames.length > 0) {
+          parts.push(`本章不直接出场主角：${protagonistsNotInChapterNames.join('、')}（不直接出场，但其影响/绑定关系/未来伏笔仍可作为隐性推动）。`);
+        }
+        if (parts.length === 0) {
+          parts.push('本章主角未加入出场角色，不要强制主角直接出场；剧情仍需服务主线和后续发展。');
+        }
+        return parts.join(' ');
+      })()
     : undefined;
   if (novel?.dualProtagonistRelation?.description) {
     const rel = novel.dualProtagonistRelation;

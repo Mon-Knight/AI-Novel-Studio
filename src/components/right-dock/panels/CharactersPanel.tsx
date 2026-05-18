@@ -24,14 +24,14 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [protagonist, setProtagonist] = useState<Character | null>(null);
+  const [protagonists, setProtagonists] = useState<Character[]>([]);
 
   // 加载角色库 & 同步主角
   const load = useCallback(async () => {
     if (!novelId) return;
-    let syncedProtagonist: Character | null = null;
+    let syncedProtagonists: Character[] = [];
     try {
-      // 1. 同步主角从 protagonists/novels 表 → characters 表
+      // 1. 同步所有主角从 protagonists/novels 表 → characters 表
       setSyncing(true);
       await runWithLoading({
         title: '正在同步主角信息',
@@ -40,15 +40,14 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
         errorMessage: '主角信息同步失败',
       }, async ({ setStage }) => {
         setStage('正在写入角色库……');
-        syncedProtagonist = await characterService.syncProtagonist(novelId);
+        syncedProtagonists = await characterService.syncProtagonists(novelId);
       });
-      setProtagonist(syncedProtagonist);
+      setProtagonists(syncedProtagonists);
       setSyncing(false);
     } catch (e: any) {
       console.warn('[CharactersPanel] 主角同步失败:', e.message);
       setError(`主角同步失败：${e.message || '未知错误'}`);
       setSyncing(false);
-      // 主角同步失败不阻塞其他角色加载
     }
 
     try {
@@ -60,8 +59,13 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
       setCharacters(all);
       setChapterChars(cc);
 
-      const p = syncedProtagonist || all.find((c) => c.isProtagonist || c.roleType === 'protagonist') || null;
-      setProtagonist(p);
+      // 从已加载的角色中补充主角（确保 protagonistKey 等字段完整）
+      const loadedProtagonists = all.filter((c) => c.isProtagonist || c.roleType === 'protagonist');
+      if (loadedProtagonists.length > 0 && syncedProtagonists.length === 0) {
+        setProtagonists(loadedProtagonists);
+      } else if (syncedProtagonists.length > 0) {
+        setProtagonists(syncedProtagonists);
+      }
     } catch (e: any) {
       console.error('[CharactersPanel] 加载角色失败:', e.message);
     }
@@ -93,9 +97,10 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
 
   const handleConfirmCandidate = async (candidate: CharacterCandidate) => {
     if (!novelId) return;
-    // 防止主角重复入库
-    if (protagonist && candidate.name === protagonist.name) {
-      setError('该角色与主角同名，已跳过入库');
+    // 防止主角重复入库（检查所有主角）
+    const isDuplicateName = protagonists.some((p) => p.name === candidate.name);
+    if (isDuplicateName) {
+      setError('该角色与已有主角同名，已跳过入库');
       setCandidates((prev) => prev.filter((c) => c.name !== candidate.name));
       return;
     }
@@ -186,22 +191,22 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
     }
   };
 
-  const handleSetProtagonistAppearance = async (appear: boolean) => {
-    if (!novelId || !chapter?.id || !protagonist) return;
-    const existing = chapterChars.find((cc) => cc.characterId === protagonist.id);
+  const handleSetProtagonistAppearance = async (protag: Character, appear: boolean) => {
+    if (!novelId || !chapter?.id) return;
+    const existing = chapterChars.find((cc) => cc.characterId === protag.id);
     if (appear && existing) {
-      setNotice('主角已在本章出场角色中');
+      setNotice(`${protag.name} 已在本章出场角色中`);
       setError('');
       return;
     }
     if (!appear && !existing) {
-      setNotice('主角已设置为本章不出场');
+      setNotice(`${protag.name} 已设置为本章不出场`);
       setError('');
       return;
     }
 
     if (appear) {
-      await handleAddToChapter(protagonist.id, protagonist.name, 'main');
+      await handleAddToChapter(protag.id, protag.name, 'main');
     } else if (existing) {
       await handleRemoveFromChapter(existing);
     }
@@ -218,7 +223,10 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
   const availableChars = characters
     .filter((c) => !isInChapter(c.id))
     .sort((a, b) => Number(isProtagonistCharacter(b)) - Number(isProtagonistCharacter(a)));
-  const protagonistChapterChar = protagonist ? chapterChars.find((cc) => cc.characterId === protagonist.id) : undefined;
+
+  // 判断主角是否在本章出场
+  const isProtagonistInChapter = (protag: Character) =>
+    chapterChars.some((cc) => cc.characterId === protag.id);
 
   return (
     <div>
@@ -237,12 +245,12 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
         {syncing && (
           <div style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>⏳ 正在同步主角信息...</div>
         )}
-        {protagonist && !syncing && (
+        {protagonists.length > 0 && !syncing && (
           <div style={{ color: 'var(--color-primary)', marginTop: 4 }}>
-            ⭐ 主角已同步：{protagonist.name}
+            ⭐ 已同步主角：{protagonists.map((p) => p.name).join('、')}
           </div>
         )}
-        {!protagonist && !syncing && (
+        {protagonists.length === 0 && !syncing && (
           <div style={{ color: 'var(--color-warning)', marginTop: 4 }}>
             ⚠️ 未检测到主角信息，请先在作品详情中完善主角设定
           </div>
@@ -253,44 +261,51 @@ function CharactersPanel({ novelId, chapter }: CharactersPanelProps) {
 
       {/* 主角快捷项 */}
       <div className="panel-section">
-        <div className="panel-section-title">⭐ 主角快捷项</div>
-        {protagonist ? (
-          <div className="character-item" style={{ borderColor: 'var(--color-primary)', borderWidth: 1, background: 'rgba(99, 102, 241, 0.04)' }}>
-            <div className="character-avatar" style={{ background: 'var(--color-primary)', color: '#fff', fontWeight: 'bold' }}>
-              ⭐
-            </div>
-            <div className="character-info" style={{ flex: 1 }}>
-              <div className="character-name">
-                {protagonist.name}
-                <span style={{ color: 'var(--color-primary)', fontSize: 11, marginLeft: 4, fontWeight: 'bold' }}>主角</span>
-              </div>
-              <div className="character-role">
-                {protagonist.identity || '作品主角'}
-                {protagonistChapterChar?.mustAppear ? ' · 本章必须出场' : protagonistChapterChar ? ' · 本章出场' : ' · 本章不出场'}
-              </div>
-              {protagonist.goal && (
-                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>目标：{protagonist.goal}</div>
-              )}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 6, color: 'var(--color-text-secondary)' }}>
-                <input
-                  type="checkbox"
-                  checked={!!protagonistChapterChar}
+        <div className="panel-section-title">⭐ 主角快捷项{protagonists.length > 1 ? `（${protagonists.length}）` : ''}</div>
+        {protagonists.length > 0 ? (
+          protagonists.map((protag) => {
+            const protagChapterChar = chapterChars.find((cc) => cc.characterId === protag.id);
+            return (
+              <div key={protag.id} className="character-item" style={{ borderColor: 'var(--color-primary)', borderWidth: 1, background: 'rgba(99, 102, 241, 0.04)' }}>
+                <div className="character-avatar" style={{ background: 'var(--color-primary)', color: '#fff', fontWeight: 'bold' }}>
+                  ⭐
+                </div>
+                <div className="character-info" style={{ flex: 1 }}>
+                  <div className="character-name">
+                    {protag.name}
+                    <span style={{ color: 'var(--color-primary)', fontSize: 11, marginLeft: 4, fontWeight: 'bold' }}>
+                      {protag.protagonistLabel || '主角'}
+                    </span>
+                  </div>
+                  <div className="character-role">
+                    {protag.identity || '作品主角'}
+                    {protagChapterChar?.mustAppear ? ' · 本章必须出场' : protagChapterChar ? ' · 本章出场' : ' · 本章不出场'}
+                  </div>
+                  {protag.goal && (
+                    <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>目标：{protag.goal}</div>
+                  )}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 6, color: 'var(--color-text-secondary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!protagChapterChar}
+                      disabled={!chapter?.id || actionBusy}
+                      onChange={(e) => handleSetProtagonistAppearance(protag, e.target.checked)}
+                    />
+                    {protag.name}本章出场
+                  </label>
+                </div>
+                <button
+                  className="btn btn-sm"
+                  style={{ background: protagChapterChar ? 'var(--color-bg-secondary)' : 'var(--color-primary)', color: protagChapterChar ? 'var(--color-text-secondary)' : '#fff', border: 'none', whiteSpace: 'nowrap' }}
+                  onClick={() => handleSetProtagonistAppearance(protag, !protagChapterChar)}
                   disabled={!chapter?.id || actionBusy}
-                  onChange={(e) => handleSetProtagonistAppearance(e.target.checked)}
-                />
-                主角本章出场
-              </label>
-            </div>
-            <button
-              className="btn btn-sm"
-              style={{ background: protagonistChapterChar ? 'var(--color-bg-secondary)' : 'var(--color-primary)', color: protagonistChapterChar ? 'var(--color-text-secondary)' : '#fff', border: 'none', whiteSpace: 'nowrap' }}
-              onClick={() => handleSetProtagonistAppearance(!protagonistChapterChar)}
-              disabled={!chapter?.id || actionBusy}
-              title={!chapter?.id ? '请先选择章节' : protagonistChapterChar ? '设置主角本章不出场' : '将主角加入本章'}
-            >
-              {protagonistChapterChar ? '本章不出场' : '加入本章'}
-            </button>
-          </div>
+                  title={!chapter?.id ? '请先选择章节' : protagChapterChar ? `设置${protag.name}本章不出场` : `将${protag.name}加入本章`}
+                >
+                  {protagChapterChar ? '本章不出场' : '加入本章'}
+                </button>
+              </div>
+            );
+          })
         ) : (
           <div style={{ fontSize: 12, color: 'var(--color-warning)', padding: '8px 0', lineHeight: 1.6 }}>
             尚未设置主角，请先在作品详情中完善主角信息。

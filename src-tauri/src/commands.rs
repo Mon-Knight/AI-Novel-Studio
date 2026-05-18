@@ -1688,6 +1688,9 @@ pub struct CharacterDto {
     pub current_state: Option<String>,
     pub source: String,
     pub is_protagonist: bool,
+    pub protagonist_key: Option<String>,
+    pub protagonist_label: Option<String>,
+    pub protagonist_order: i64,
     pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -1713,11 +1716,14 @@ fn map_character_row(row: &rusqlite::Row) -> rusqlite::Result<CharacterDto> {
         is_active: row.get::<_, i64>(15)? != 0,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
+        protagonist_key: row.get(18)?,
+        protagonist_label: row.get(19)?,
+        protagonist_order: row.get::<_, i64>(20)?,
     })
 }
 
 fn character_select_sql() -> &'static str {
-    "SELECT id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, is_protagonist, is_active, created_at, updated_at FROM characters"
+    "SELECT id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, is_protagonist, is_active, created_at, updated_at, protagonist_key, protagonist_label, protagonist_order FROM characters"
 }
 
 #[derive(Debug, Deserialize)]
@@ -1756,181 +1762,260 @@ pub struct UpdateCharacterInput {
 }
 
 /// 同步主角：从 protagonists 表 / novels 表读取主角信息，upsert 到 characters 表
+/// 保留向后兼容：内部调用同步逻辑，返回第一个主角
 #[tauri::command]
 pub fn sync_protagonist_to_character_library(
     novel_id: String,
 ) -> Result<Option<CharacterDto>, String> {
+    let all = sync_protagonists_to_character_library_inner(&novel_id)?;
+    Ok(all.into_iter().next())
+}
+
+/// 同步所有主角到角色库（新接口，返回数组）
+#[tauri::command]
+pub fn sync_protagonists_to_character_library(
+    novel_id: String,
+) -> Result<Vec<CharacterDto>, String> {
+    sync_protagonists_to_character_library_inner(&novel_id)
+}
+
+fn sync_protagonists_to_character_library_inner(
+    novel_id: &str,
+) -> Result<Vec<CharacterDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    // 尝试从 protagonists 表读取主角
-    let protagonist = conn
+    // 收集所有需要同步的主角信息
+    struct ProtagonistInfo {
+        key: String,
+        label: String,
+        order: i64,
+        name: String,
+        identity: Option<String>,
+        personality: Option<String>,
+        goal: Option<String>,
+        special_ability: Option<String>,
+        ability_limits: Option<String>,
+        forbidden_behaviors: Option<String>,
+        current_state: Option<String>,
+    }
+
+    let mut protagonists: Vec<ProtagonistInfo> = Vec::new();
+
+    // 1. 优先从 novels 表的 protagonists_json 读取（支持双主角/多主角）
+    let novel_row: Option<(String, String, String)> = conn
         .query_row(
-            "SELECT id, novel_id, name, identity, personality, goal, special_ability, ability_limits, forbidden_behaviors, current_state, created_at, updated_at FROM protagonists WHERE novel_id = ?1 LIMIT 1",
-            params![&novel_id],
+            "SELECT main_character, protagonist_ability, protagonists_json FROM novels WHERE id = ?1 AND deleted_at IS NULL",
+            params![novel_id],
             |row| {
                 Ok((
-                    row.get::<_, String>(2)?,  // name
-                    row.get::<_, Option<String>>(3)?,  // identity
-                    row.get::<_, Option<String>>(4)?,  // personality
-                    row.get::<_, Option<String>>(5)?,  // goal
-                    row.get::<_, Option<String>>(6)?,  // special_ability
-                    row.get::<_, Option<String>>(7)?,  // ability_limits
-                    row.get::<_, Option<String>>(8)?,  // forbidden_behaviors
-                    row.get::<_, Option<String>>(9)?,  // current_state
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let (protag_name, identity, personality, goal, ability, ability_limits, forbidden_behaviors, current_state) =
-        match protagonist {
-            Some(p) => p,
-            None => {
-                // 尝试从 novels 表读取主角信息（main_character 或 protagonists_json）
-                let novel_info: Option<(String, String, String)> = conn
-                    .query_row(
-                        "SELECT main_character, protagonist_ability, protagonists_json FROM novels WHERE id = ?1 AND deleted_at IS NULL",
-                        params![&novel_id],
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, String>(1)?,
-                                row.get::<_, String>(2)?,
-                            ))
+    if let Some((main_char, _ability_str, protagonists_json)) = novel_row {
+        if !protagonists_json.is_empty() && protagonists_json != "[]" {
+            if let Ok(profiles) = serde_json::from_str::<Vec<ProtagonistProfileDto>>(&protagonists_json) {
+                for (i, profile) in profiles.iter().enumerate() {
+                    if profile.name.trim().is_empty() { continue; }
+                    protagonists.push(ProtagonistInfo {
+                        key: profile.label.clone(),
+                        label: match profile.label.as_str() {
+                            "primary" => "主角A".to_string(),
+                            "secondary" => "主角B".to_string(),
+                            _ => format!("主角{}", i + 1),
                         },
-                    )
-                    .optional()
-                    .map_err(|e| e.to_string())?;
-
-                match novel_info {
-                    Some((main_char, ability_str, protagonists_json)) => {
-                        // 优先从 protagonists_json 解析
-                        if !protagonists_json.is_empty() && protagonists_json != "[]" {
-                            if let Ok(profiles) = serde_json::from_str::<Vec<ProtagonistProfileDto>>(&protagonists_json) {
-                                if let Some(first) = profiles.first() {
-                                    (
-                                        first.name.clone(),
-                                        Some(first.identity.clone()),
-                                        Some(first.personality.clone()),
-                                        Some(first.goal.clone()),
-                                        Some(first.ability.clone()),
-                                        first.ability_limits.clone(),
-                                        first.forbidden_behaviors.clone(),
-                                        None,
-                                    )
-                                } else {
-                                    return Ok(None);
-                                }
-                            } else {
-                                return Ok(None);
-                            }
-                        } else if !main_char.is_empty() {
-                            (
-                                main_char,
-                                None,
-                                None,
-                                None,
-                                if ability_str.is_empty() { None } else { Some(ability_str) },
-                                None,
-                                None,
-                                None,
-                            )
-                        } else {
-                            return Ok(None); // 无主角信息
-                        }
-                    }
-                    None => return Ok(None),
+                        order: i as i64,
+                        name: profile.name.clone(),
+                        identity: if profile.identity.is_empty() { None } else { Some(profile.identity.clone()) },
+                        personality: if profile.personality.is_empty() { None } else { Some(profile.personality.clone()) },
+                        goal: if profile.goal.is_empty() { None } else { Some(profile.goal.clone()) },
+                        special_ability: profile.special_ability.clone(),
+                        ability_limits: profile.ability_limits.clone(),
+                        forbidden_behaviors: profile.forbidden_behaviors.clone(),
+                        current_state: None,
+                    });
                 }
             }
-        };
-
-    if protag_name.trim().is_empty() {
-        return Ok(None);
-    }
-
-    // 查找是否已存在 is_protagonist=1 的角色记录
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT id FROM characters
-             WHERE novel_id = ?1
-               AND (is_protagonist = 1 OR role_type = 'protagonist' OR name = ?2)
-             ORDER BY is_protagonist DESC, updated_at DESC
-             LIMIT 1",
-            params![&novel_id, &protag_name],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-
-    if let Some(existing_id) = existing {
-        // 更新已有主角
-        conn.execute(
-            "UPDATE characters SET name = ?1, role_type = 'protagonist', identity = ?2, personality = ?3, goal = ?4, behavior_limits = ?5, forbidden_behaviors = ?6, current_state = ?7, source = 'protagonist_profile', source_type = 'protagonist_profile', is_protagonist = 1, is_active = 1, updated_at = ?8 WHERE id = ?9",
-            params![&protag_name, identity, personality, goal, ability_limits, forbidden_behaviors, current_state, now, &existing_id],
-        )
-        .map_err(|e| e.to_string())?;
-
-        let sql = format!("{} WHERE id = ?1", character_select_sql());
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        stmt.query_row(params![&existing_id], map_character_row)
-            .optional()
-            .map_err(|e| e.to_string())
-    } else {
-        // 插入新主角
-        let new_id = uuid::Uuid::new_v4().to_string();
-        let special_ability_text = ability.unwrap_or_default();
-        let behavior_limits_text = ability_limits.unwrap_or_default();
-        let personality_notes = personality.unwrap_or_default();
-        let goal_text = goal.unwrap_or_default();
-        let current_state_text = current_state.unwrap_or_default();
-
-        conn.execute(
-            "INSERT INTO characters (id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, source_type, is_protagonist, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 'protagonist', ?4, NULL, NULL, ?5, ?6, ?7, ?8, NULL, ?9, 'protagonist_profile', 'protagonist_profile', 1, 1, ?10, ?10)",
-            params![
-                &new_id,
-                &novel_id,
-                &protag_name,
-                identity,
-                goal_text,
-                personality_notes,
-                behavior_limits_text,
-                forbidden_behaviors,
-                current_state_text,
-                now,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-
-        // 将 special_ability 也写入角色的 goal/behaviorLimits 作为补充
-        if !special_ability_text.is_empty() {
-            let _ = conn.execute(
-                "UPDATE characters SET goal = goal || ?1 WHERE id = ?2",
-                params![format!("\n特殊能力：{}", special_ability_text), &new_id],
-            );
         }
-
-        let sql = format!("{} WHERE id = ?1", character_select_sql());
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        stmt.query_row(params![&new_id], map_character_row)
-            .optional()
-            .map_err(|e| e.to_string())
+        // 回退：如果 protagonists_json 为空，用 main_character
+        if protagonists.is_empty() && !main_char.is_empty() {
+            protagonists.push(ProtagonistInfo {
+                key: "primary".to_string(),
+                label: "主角".to_string(),
+                order: 0,
+                name: main_char,
+                identity: None,
+                personality: None,
+                goal: None,
+                special_ability: None,
+                ability_limits: None,
+                forbidden_behaviors: None,
+                current_state: None,
+            });
+        }
     }
+
+    // 2. 如果 novels 表也没有，尝试从 protagonists 表读取
+    if protagonists.is_empty() {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, identity, personality, goal, special_ability, ability_limits, forbidden_behaviors, current_state FROM protagonists WHERE novel_id = ?1 ORDER BY created_at ASC"
+            )
+            .map_err(|e| e.to_string())?;
+        let protag_rows: Vec<(String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)> = stmt
+            .query_map(params![novel_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for (i, (name, identity, personality, goal, ability, ability_limits, forbidden_behaviors, current_state)) in protag_rows.iter().enumerate() {
+            if name.trim().is_empty() { continue; }
+            protagonists.push(ProtagonistInfo {
+                key: if i == 0 { "primary".to_string() } else { format!("lead_{}", i + 1) },
+                label: if i == 0 { "主角".to_string() } else { format!("主角{}", i + 1) },
+                order: i as i64,
+                name: name.clone(),
+                identity: identity.clone(),
+                personality: personality.clone(),
+                goal: goal.clone(),
+                special_ability: ability.clone(),
+                ability_limits: ability_limits.clone(),
+                forbidden_behaviors: forbidden_behaviors.clone(),
+                current_state: current_state.clone(),
+            });
+        }
+    }
+
+    // 3. 对每个主角执行 upsert（按 novel_id + protagonist_key 去重）
+    let mut results: Vec<CharacterDto> = Vec::new();
+
+    for info in &protagonists {
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM characters
+                 WHERE novel_id = ?1 AND protagonist_key = ?2
+                 LIMIT 1",
+                params![novel_id, &info.key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        if let Some(existing_id) = existing {
+            conn.execute(
+                "UPDATE characters SET name = ?1, role_type = 'protagonist', identity = ?2, personality = ?3, goal = ?4, behavior_limits = ?5, forbidden_behaviors = ?6, current_state = ?7, source = 'protagonist_profile', source_type = 'protagonist_profile', is_protagonist = 1, is_active = 1, protagonist_label = ?8, protagonist_order = ?9, updated_at = ?10 WHERE id = ?11",
+                params![
+                    &info.name,
+                    &info.identity,
+                    &info.personality,
+                    &info.goal,
+                    &info.ability_limits,
+                    &info.forbidden_behaviors,
+                    &info.current_state,
+                    &info.label,
+                    &info.order,
+                    now,
+                    &existing_id,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            let sql = format!("{} WHERE id = ?1", character_select_sql());
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            if let Some(ch) = stmt.query_row(params![&existing_id], map_character_row).optional().map_err(|e| e.to_string())? {
+                results.push(ch);
+            }
+        } else {
+            let new_id = uuid::Uuid::new_v4().to_string();
+            let special_ability_text = info.special_ability.clone().unwrap_or_default();
+            let ability_limits_text = info.ability_limits.clone().unwrap_or_default();
+            let personality_notes = info.personality.clone().unwrap_or_default();
+            let goal_text = info.goal.clone().unwrap_or_default();
+            let current_state_text = info.current_state.clone().unwrap_or_default();
+
+            conn.execute(
+                "INSERT INTO characters (id, novel_id, name, role_type, identity, faction, relation_to_protagonist, goal, personality, behavior_limits, forbidden_behaviors, first_appearance_chapter_id, current_state, source, source_type, is_protagonist, protagonist_key, protagonist_label, protagonist_order, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 'protagonist', ?4, NULL, NULL, ?5, ?6, ?7, ?8, NULL, ?9, 'protagonist_profile', 'protagonist_profile', 1, ?10, ?11, ?12, 1, ?13, ?13)",
+                params![
+                    &new_id,
+                    novel_id,
+                    &info.name,
+                    &info.identity,
+                    &goal_text,
+                    &personality_notes,
+                    &ability_limits_text,
+                    &info.forbidden_behaviors,
+                    &current_state_text,
+                    &info.key,
+                    &info.label,
+                    &info.order,
+                    now,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            if !special_ability_text.is_empty() {
+                let _ = conn.execute(
+                    "UPDATE characters SET goal = goal || ?1 WHERE id = ?2",
+                    params![format!("\n特殊能力：{}", special_ability_text), &new_id],
+                );
+            }
+
+            let sql = format!("{} WHERE id = ?1", character_select_sql());
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            if let Some(ch) = stmt.query_row(params![&new_id], map_character_row).optional().map_err(|e| e.to_string())? {
+                results.push(ch);
+            }
+        }
+    }
+
+    Ok(results)
 }
 
-/// 获取主角角色（从 characters 表）
+/// 获取主角角色（从 characters 表，单主角-保留向后兼容）
 #[tauri::command]
 pub fn get_protagonist_character(novel_id: String) -> Result<Option<CharacterDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let sql = format!(
-        "{} WHERE novel_id = ?1 AND is_protagonist = 1 LIMIT 1",
+        "{} WHERE novel_id = ?1 AND is_protagonist = 1 ORDER BY protagonist_order ASC LIMIT 1",
         character_select_sql()
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     stmt.query_row(params![&novel_id], map_character_row)
         .optional()
         .map_err(|e| e.to_string())
+}
+
+/// 获取所有主角角色（新接口，返回数组）
+#[tauri::command]
+pub fn get_protagonist_characters(novel_id: String) -> Result<Vec<CharacterDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let sql = format!(
+        "{} WHERE novel_id = ?1 AND is_protagonist = 1 AND is_active = 1 ORDER BY protagonist_order ASC, updated_at DESC",
+        character_select_sql()
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![&novel_id], map_character_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
 }
 
 /// 列出作品的所有角色

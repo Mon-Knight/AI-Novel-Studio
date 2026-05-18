@@ -316,6 +316,9 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
             source TEXT NOT NULL DEFAULT 'manual',
             source_type TEXT NOT NULL DEFAULT 'manual',
             is_protagonist INTEGER NOT NULL DEFAULT 0,
+            protagonist_key TEXT,
+            protagonist_label TEXT,
+            protagonist_order INTEGER NOT NULL DEFAULT 0,
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -504,6 +507,9 @@ fn create_indexes(conn: &Connection) -> SqliteResult<()> {
         "
         CREATE INDEX IF NOT EXISTS idx_characters_protagonist
         ON characters(novel_id, is_protagonist);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_characters_protagonist_key
+        ON characters(novel_id, protagonist_key)
+        WHERE protagonist_key IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chapter_characters_unique
         ON chapter_characters(chapter_id, character_id);
         ",
@@ -702,6 +708,14 @@ fn migrate_characters_table(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "characters", "goals", "TEXT")?;
     ensure_column(conn, "characters", "constraints", "TEXT")?;
     ensure_column(conn, "characters", "relationship_notes", "TEXT")?;
+    ensure_column(conn, "characters", "protagonist_key", "TEXT")?;
+    ensure_column(conn, "characters", "protagonist_label", "TEXT")?;
+    ensure_column(
+        conn,
+        "characters",
+        "protagonist_order",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(
         conn,
         "characters",
