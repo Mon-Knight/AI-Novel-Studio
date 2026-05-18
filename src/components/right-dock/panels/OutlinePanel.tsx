@@ -7,6 +7,8 @@ import type { Chapter } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { formatNumber } from '../../../utils/format';
+import { runWithLoading } from '../../../lib/runWithLoading';
+import { chapterOutlineService } from '../../../services/outlines/outlineService';
 
 interface OutlinePanelProps {
   novelId?: string;
@@ -43,8 +45,17 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
     if (!novelId) return;
     setLoading(true); setGenMode('novel'); setError('');
     try {
-      const result = await outlineGenerateService.generateNovelOutline(novelId);
-      setNovelOutline(result);
+      await runWithLoading({
+        title: 'AI 正在生成作品总大纲',
+        initialMessage: '正在读取作品设定和世界观……',
+        successMessage: '作品总大纲生成完成',
+        errorMessage: '作品总大纲生成失败',
+      }, async ({ setMessage, setStage }) => {
+        setStage('正在分析主角和世界背景……');
+        const result = await outlineGenerateService.generateNovelOutline(novelId);
+        setNovelOutline(result);
+        setStage('生成完成');
+      });
     } catch (e: any) {
       setError(e.message || '作品总大纲生成失败');
     } finally {
@@ -60,11 +71,19 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
     }
     setLoading(true); setGenMode('volume'); setError('');
     try {
-      const result = await outlineGenerateService.generateVolumeOutline({
-        novelId,
-        volumeTitle: volume.title,
+      await runWithLoading({
+        title: 'AI 正在生成分卷大纲',
+        initialMessage: '正在读取分卷和作品设定……',
+        successMessage: '分卷大纲生成完成',
+        errorMessage: '分卷大纲生成失败',
+      }, async ({ setStage }) => {
+        setStage('正在分析分卷结构……');
+        const result = await outlineGenerateService.generateVolumeOutline({
+          novelId, volumeTitle: volume.title,
+        });
+        setVolumeOutline(result);
+        setStage('生成完成');
       });
-      setVolumeOutline(result);
     } catch (e: any) {
       setError(e.message || '分卷大纲生成失败');
     } finally {
@@ -80,12 +99,20 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
     }
     setLoading(true); setGenMode('chapter'); setError('');
     try {
-      const result = await outlineGenerateService.generateChapterOutlines({
-        novelId,
-        volumeId: chapter.volumeId,
-        chapterCount: 3,
+      await runWithLoading({
+        title: 'AI 正在生成章节大纲',
+        initialMessage: '正在读取当前分卷、总纲和风格方案……',
+        successMessage: '章节大纲生成完成',
+        errorMessage: '章节大纲生成失败',
+      }, async ({ setMessage, setStage }) => {
+        setStage('正在推演本章剧情结构……');
+        const result = await outlineGenerateService.generateChapterOutlines({
+          novelId, volumeId: chapter.volumeId, chapterCount: 3,
+        });
+        setChapterOutlines(result);
+        setMessage(`已生成 ${result.length} 个章节大纲候选`);
+        setStage('生成完成');
       });
-      setChapterOutlines(result);
     } catch (e: any) {
       setError(e.message || '章节大纲生成失败');
     } finally {
@@ -194,13 +221,18 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
       {/* 作品总大纲结果 */}
       {novelOutline && (
         <div className="panel-section" style={{ border: '1px solid var(--color-primary-light)', borderRadius: 6, padding: 10 }}>
-          <div className="panel-section-title">📖 作品总大纲</div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.8, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto' }}>
-            {novelOutline}
+          <div className="panel-section-title">📖 作品总大纲（可编辑）</div>
+          <textarea
+            className="input"
+            value={novelOutline}
+            onChange={(e) => setNovelOutline(e.target.value)}
+            style={{ width: '100%', height: 160, resize: 'vertical', fontSize: 12, lineHeight: 1.7, fontFamily: 'var(--font-family-editor)' }}
+          />
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleAdoptNovelOutline}>
+              📋 复制大纲
+            </button>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={handleAdoptNovelOutline} style={{ marginTop: 8, width: '100%' }}>
-            📋 复制大纲
-          </button>
         </div>
       )}
 
@@ -243,15 +275,28 @@ function OutlinePanel({ novelId, chapter }: OutlinePanelProps) {
           {chapterOutlines.map((cand, i) => (
             <div key={i} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
               <div className="panel-field-label">{cand.title}</div>
-              <div className="panel-field-value" style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {cand.rawText || cand.outline}
-              </div>
+              <textarea
+                className="input"
+                value={cand.rawText || cand.outline}
+                onChange={(e) => {
+                  const updated = [...chapterOutlines];
+                  if (cand.rawText) {
+                    updated[i] = { ...cand, rawText: e.target.value };
+                  } else {
+                    updated[i] = { ...cand, outline: e.target.value };
+                  }
+                  setChapterOutlines(updated);
+                }}
+                style={{ width: '100%', height: 100, resize: 'vertical', fontSize: 12, lineHeight: 1.6, fontFamily: 'var(--font-family-editor)' }}
+              />
               {cand.goal && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>目标：{cand.goal}</div>}
               {cand.targetWordCount && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>建议字数：{formatNumber(cand.targetWordCount)} 字</div>}
-              {!cand.rawText && chapter && (
-                <button className="btn btn-primary btn-sm" onClick={() => handleAdoptChapterOutline(cand)} style={{ marginTop: 6 }}>
-                  ✅ 采用此大纲
-                </button>
+              {chapter && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button className="btn btn-primary btn-sm" onClick={() => handleAdoptChapterOutline(cand)}>
+                    ✅ 应用到当前章节
+                  </button>
+                </div>
               )}
             </div>
           ))}

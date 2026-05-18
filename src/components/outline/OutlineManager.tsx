@@ -10,6 +10,8 @@ import ChapterFormModal from './ChapterFormModal';
 import type { Volume, CreateVolumeInput, UpdateVolumeInput } from '../../types/volume';
 import type { Chapter, CreateChapterInput, UpdateChapterInput } from '../../types/chapter';
 import { runWithLoading } from '../../lib/runWithLoading';
+import { masterOutlineService, volumeOutlineService, chapterOutlineService } from '../../services/outlines/outlineService';
+import type { MasterOutline, VolumeOutline, ChapterOutline } from '../../types/outline';
 
 interface OutlineManagerProps {
   novelId: string;
@@ -29,6 +31,9 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   const [novelOutline, setNovelOutline] = useState('');
   const [volumeCandidate, setVolumeCandidate] = useState<VolumeOutlineCandidate | null>(null);
   const [chapterCandidates, setChapterCandidates] = useState<ChapterOutlineCandidate[]>([]);
+  // v1.0.35: 大纲库选择
+  const [masterOutlines, setMasterOutlines] = useState<MasterOutline[]>([]);
+  const [selectedMasterOutlineId, setSelectedMasterOutlineId] = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -46,6 +51,11 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   }, [novelId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // v1.0.35: 加载已保存的总纲列表
+  useEffect(() => {
+    masterOutlineService.getVersions(novelId).then(setMasterOutlines).catch(() => {});
+  }, [novelId]);
 
   const flash = (msg: string) => { setMessage(msg); setTimeout(() => setMessage(''), 3000); };
 
@@ -164,14 +174,35 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
 
   const handleSaveNovelOutline = async () => {
     if (!novelOutline.trim()) return;
-    await settingRepository.saveWorldSetting(null, {
-      novelId,
-      title: 'AI 作品总大纲',
-      content: novelOutline,
-      isActive: false,
-    });
-    setNovelOutline('');
-    flash('作品总大纲已保存到设定库');
+    try {
+      await runWithLoading({
+        title: '正在保存总纲',
+        initialMessage: '正在写入数据库……',
+        successMessage: '总纲已保存',
+        errorMessage: '保存失败',
+        successAutoCloseMs: 800,
+      }, async () => {
+        await masterOutlineService.save({
+          projectId: novelId, title: '作品总纲', content: novelOutline,
+          sourceType: 'ai_generated', saveAsNewVersion: false,
+        });
+        // Reload existing outlines after save
+        const versions = await masterOutlineService.getVersions(novelId);
+        setMasterOutlines(versions);
+        if (versions.length > 0) setSelectedMasterOutlineId(versions[0].id);
+        flash('总纲已保存到大纲库');
+      });
+    } catch (e: any) {
+      flash('保存失败：' + (e?.message || '未知错误'));
+    }
+  };
+
+  const handleSetActiveMasterOutline = async () => {
+    if (!selectedMasterOutlineId) return;
+    await masterOutlineService.setActive(selectedMasterOutlineId, novelId);
+    const versions = await masterOutlineService.getVersions(novelId);
+    setMasterOutlines(versions);
+    flash('已设为当前采用总纲');
   };
 
   const handleGenerateVolumeOutline = async () => {
@@ -320,8 +351,48 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
 
         {novelOutline && (
           <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--color-border-light)', borderRadius: 6 }}>
-            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 220, overflowY: 'auto' }}>{novelOutline}</div>
-            <button className="btn btn-primary btn-sm" onClick={handleSaveNovelOutline} style={{ marginTop: 8 }}>确认保存到设定库</button>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>📋 生成的总纲（可编辑后保存）</div>
+            <textarea
+              className="input"
+              value={novelOutline}
+              onChange={(e) => setNovelOutline(e.target.value)}
+              style={{ width: '100%', height: 180, resize: 'vertical', fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-family-editor)' }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="btn btn-primary btn-sm" onClick={handleSaveNovelOutline}>💾 保存到大纲库</button>
+            </div>
+          </div>
+        )}
+
+        {/* v1.0.35: 大纲库选择 */}
+        {masterOutlines.length > 0 && (
+          <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--color-border-light)', borderRadius: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>📚 已保存的总纲（{masterOutlines.length} 个版本）</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                className="panel-select"
+                value={selectedMasterOutlineId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedMasterOutlineId(id);
+                  const outline = masterOutlines.find((o) => o.id === id);
+                  if (outline) setNovelOutline(outline.content);
+                }}
+                style={{ flex: 1, minWidth: 200 }}
+              >
+                <option value="">选择已保存的总纲</option>
+                {masterOutlines.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    v{o.version} {o.isActive ? '★ 采用中' : ''} - {o.title}
+                  </option>
+                ))}
+              </select>
+              {selectedMasterOutlineId && (
+                <button className="btn btn-sm btn-secondary" onClick={handleSetActiveMasterOutline}>
+                  ✅ 设为采用
+                </button>
+              )}
+            </div>
           </div>
         )}
 
