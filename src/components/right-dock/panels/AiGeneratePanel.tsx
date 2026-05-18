@@ -13,6 +13,7 @@ import { contextRecordService } from '../../../services/context/contextRecordSer
 import { styleProfileService } from '../../../services/styles/styleProfileService';
 import { outputProfileService } from '../../../services/styles/outputProfileService';
 import { formatNumber } from '../../../utils/format';
+import { runWithLoading } from '../../../lib/runWithLoading';
 
 interface AiGeneratePanelProps {
   novelId?: string;
@@ -91,88 +92,114 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted }: AiGenerat
     }
 
     setGenerating(true);
-    setStatusMsg('正在构建上下文...');
     setErrorMsg('');
 
-    // v1.0.25 构建详细的 inputSummary
-    let ctx: ChapterGenerationContext | undefined;
     try {
-      ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
-    } catch { /* 上下文构建失败不阻止生成 */ }
+      await runWithLoading(
+        {
+          title: genMode === 'rewrite' ? 'AI 正在重新生成正文' : 'AI 正在生成正文',
+          initialMessage: '正在构建上下文……',
+          successMessage: `✅ 生成成功！已保存为草稿`,
+          errorMessage: 'AI 生成失败',
+          cancelable: false,
+        },
+        async ({ setMessage, setStage, setPercent }) => {
+          // v1.0.25 构建详细的 inputSummary
+          let ctx: ChapterGenerationContext | undefined;
+          try {
+            ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
+          } catch { /* 上下文构建失败不阻止生成 */ }
 
-    const hasOutline = ctx?.chapterOutline ? '有' : '无';
-    const charCount = ctx?.chapterCharacters ? (ctx.chapterCharacters.match(/\n- /g)?.length || 1) : 0;
-    const eventCount = ctx?.chapterEvents ? (ctx.chapterEvents.match(/\n- /g)?.length || 1) : 0;
-    const hasPrevContext = ctx?.previousContext ? '有' : '无';
-    const styleName = availableStyles.find((s) => s.id === selectedStyleId)?.name || '默认';
-    const outputName = availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认';
+          const hasOutline = ctx?.chapterOutline ? '有' : '无';
+          const charCount = ctx?.chapterCharacters ? (ctx.chapterCharacters.match(/\n- /g)?.length || 1) : 0;
+          const eventCount = ctx?.chapterEvents ? (ctx.chapterEvents.match(/\n- /g)?.length || 1) : 0;
+          const hasPrevContext = ctx?.previousContext ? '有' : '无';
+          const styleName = availableStyles.find((s) => s.id === selectedStyleId)?.name || '默认';
+          const outputName = availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认';
 
-    const inputSummary = [
-      `生成：${novelId.slice(0,8)}/${chapter.title}`,
-      `大纲：${hasOutline}`,
-      `角色：${charCount}个`,
-      `事件：${eventCount}个`,
-      `前文：${hasPrevContext}`,
-      `风格：${styleName}`,
-      `输出：${outputName}`,
-      `字数：${chapter.targetWordCount || 4000}`,
-    ].join('，');
+          const inputSummary = [
+            `生成：${novelId.slice(0,8)}/${chapter.title}`,
+            `大纲：${hasOutline}`,
+            `角色：${charCount}个`,
+            `事件：${eventCount}个`,
+            `前文：${hasPrevContext}`,
+            `风格：${styleName}`,
+            `输出：${outputName}`,
+            `字数：${chapter.targetWordCount || 4000}`,
+          ].join('，');
 
-    // 创建 AI 任务记录
-    const task = await aiTaskService.create('chapter_generate', {
-      novelId,
-      chapterId: chapter.id,
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary,
-    }).catch(() => null);
+          // 创建 AI 任务记录
+          const task = await aiTaskService.create('chapter_generate', {
+            novelId,
+            chapterId: chapter.id,
+            runtimeMode: settings.runtimeMode,
+            provider: settings.provider,
+            modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+            inputSummary,
+          }).catch(() => null);
 
-    try {
-      setStatusMsg('正在组装提示词...');
-      // 1. 构建上下文（如果前面没构建过）
-      if (!ctx) {
-        ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
-      }
+          setStage('正在组装提示词……');
+          setPercent(15);
 
-      // 2. 组装提示词
-      const request = await buildGenerateRequest(ctx);
+          // 1. 构建上下文（如果前面没构建过）
+          if (!ctx) {
+            ctx = await buildChapterContext(novelId, chapter, userInstruction.trim() || undefined, selectedStyleId || undefined, selectedOutputId || undefined);
+          }
 
-      // 3. 调用 AI
-      setStatusMsg('正在调用 AI 生成正文...');
-      const client = createAiClient(settings);
-      const response = await client.generate(request);
+          // 2. 组装提示词
+          setStage('正在分析角色、事件和风格方案……');
+          setPercent(25);
+          const request = await buildGenerateRequest(ctx);
 
-      // 4. 保存为草稿
-      const draft = await draftVersionService.create({
-        novelId,
-        chapterId: chapter.id,
-        content: response.text,
-        source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
-        aiTaskId: task?.id,
-      });
+          // 3. 调用 AI
+          setStage('正在请求 AI 生成正文……');
+          setMessage('AI 正在输出章节内容，请稍候……');
+          setPercent(40);
+          const client = createAiClient(settings);
+          const response = await client.generate(request);
 
-      // 5. 更新 AI 任务记录
-      if (task) {
-        await aiTaskService.markSucceeded(task.id, {
-          resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}`,
-          tokenInput: response.tokenInput,
-          tokenOutput: response.tokenOutput,
-          tokenTotal: response.tokenTotal,
-        });
-      }
+          setPercent(80);
+          setStage('正在整理生成结果……');
+          setMessage('正在保存生成结果……');
 
-      setStatusMsg(`✅ 生成成功！已保存为草稿 v${draft.versionNo}（${formatNumber(draft.wordCount)} 字）`);
+          // 4. 保存为草稿
+          const draft = await draftVersionService.create({
+            novelId,
+            chapterId: chapter.id,
+            content: response.text,
+            source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
+            aiTaskId: task?.id,
+          });
+
+          setPercent(95);
+
+          // 5. 更新 AI 任务记录
+          if (task) {
+            await aiTaskService.markSucceeded(task.id, {
+              resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}`,
+              tokenInput: response.tokenInput,
+              tokenOutput: response.tokenOutput,
+              tokenTotal: response.tokenTotal,
+            });
+          }
+
+          setPercent(100);
+          setStage('生成完成');
+
+          onGenerated?.(draft);
+        },
+      );
+
+      setStatusMsg('');
       setGenerating(false);
-      onGenerated?.(draft);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '生成失败';
       setErrorMsg(msg);
       setStatusMsg('');
       setGenerating(false);
 
-      if (task) {
-        await aiTaskService.markFailed(task.id, msg);
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        // 错误已由 runWithLoading 显示弹窗，这里只做本地状态清理
       }
     }
   };

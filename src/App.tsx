@@ -1,6 +1,8 @@
 import { Routes, Route } from 'react-router-dom';
 import AppShell from './components/layout/AppShell';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import LoadingModal from './components/common/LoadingModal';
+import { useGlobalLoadingModal } from './lib/runWithLoading';
 import HomePage from './pages/Home/HomePage';
 import NovelDetailPage from './pages/NovelDetail/NovelDetailPage';
 import WritingWorkspacePage from './pages/WritingWorkspace/WritingWorkspacePage';
@@ -14,6 +16,8 @@ import AiTasksPage from './pages/AiTasks/AiTasksPage';
 import ImportExportPage from './pages/ImportExport/ImportExportPage';
 
 function App() {
+  const globalLoading = useGlobalLoadingModal(1200);
+
   return (
     <ErrorBoundary>
       <AppShell>
@@ -31,6 +35,22 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </AppShell>
+
+      {/* 全局加载弹窗 */}
+      <LoadingModal
+        open={globalLoading.open}
+        state={globalLoading.state}
+        title={globalLoading.title}
+        message={globalLoading.message}
+        stage={globalLoading.stage}
+        percent={globalLoading.percent}
+        cancelable={globalLoading.cancelable}
+        errorMessage={globalLoading.errorMessage}
+        autoCloseMs={1200}
+        onCancel={globalLoading.onCancel}
+        onClose={globalLoading.closeModal}
+        onRetry={globalLoading.onRetry}
+      />
     </ErrorBoundary>
   );
 }

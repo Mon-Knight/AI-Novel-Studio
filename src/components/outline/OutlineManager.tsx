@@ -9,6 +9,7 @@ import VolumeFormModal from './VolumeFormModal';
 import ChapterFormModal from './ChapterFormModal';
 import type { Volume, CreateVolumeInput, UpdateVolumeInput } from '../../types/volume';
 import type { Chapter, CreateChapterInput, UpdateChapterInput } from '../../types/chapter';
+import { runWithLoading } from '../../lib/runWithLoading';
 
 interface OutlineManagerProps {
   novelId: string;
@@ -141,8 +142,19 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setVolumeCandidate(null);
     setChapterCandidates([]);
     try {
-      setNovelOutline(await outlineGenerateService.generateNovelOutline(novelId));
-      flash('AI 作品总大纲已生成，请确认后保存');
+      await runWithLoading(
+        {
+          title: 'AI 正在生成作品总大纲',
+          initialMessage: '正在读取作品设定……',
+          successMessage: '作品总大纲已生成，请确认后保存',
+          errorMessage: '作品总大纲生成失败',
+        },
+        async ({ setMessage, setStage }) => {
+          setStage('正在分析世界观和角色……');
+          const outline = await outlineGenerateService.generateNovelOutline(novelId);
+          setNovelOutline(outline);
+        },
+      );
     } catch (e: any) {
       flash('AI 作品总大纲生成失败：' + (e?.message || '未知错误'));
     } finally {
@@ -168,11 +180,22 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setVolumeCandidate(null);
     setChapterCandidates([]);
     try {
-      setVolumeCandidate(await outlineGenerateService.generateVolumeOutline({
-        novelId,
-        volumeTitle: target?.title,
-      }));
-      flash('AI 分卷大纲已生成，请确认后保存');
+      await runWithLoading(
+        {
+          title: 'AI 正在生成分卷大纲',
+          initialMessage: '正在读取分卷和作品设定……',
+          successMessage: '分卷大纲已生成，请确认后保存',
+          errorMessage: '分卷大纲生成失败',
+        },
+        async ({ setStage }) => {
+          setStage('正在分析分卷结构……');
+          const candidate = await outlineGenerateService.generateVolumeOutline({
+            novelId,
+            volumeTitle: target?.title,
+          });
+          setVolumeCandidate(candidate);
+        },
+      );
     } catch (e: any) {
       flash('AI 分卷大纲生成失败：' + (e?.message || '未知错误'));
     } finally {
@@ -206,12 +229,23 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setAiLoading('chapters');
     setChapterCandidates([]);
     try {
-      setChapterCandidates(await outlineGenerateService.generateChapterOutlines({
-        novelId,
-        volumeId,
-        chapterCount: 6,
-      }));
-      flash('AI 章节大纲已生成，请逐条确认保存');
+      await runWithLoading(
+        {
+          title: 'AI 正在生成章节大纲',
+          initialMessage: '正在读取分卷大纲和设定……',
+          successMessage: '章节大纲已生成，请逐条确认保存',
+          errorMessage: '章节大纲生成失败',
+        },
+        async ({ setStage }) => {
+          setStage('AI 正在规划章节结构……');
+          const candidates = await outlineGenerateService.generateChapterOutlines({
+            novelId,
+            volumeId,
+            chapterCount: 6,
+          });
+          setChapterCandidates(candidates);
+        },
+      );
     } catch (e: any) {
       flash('AI 章节大纲生成失败：' + (e?.message || '未知错误'));
     } finally {

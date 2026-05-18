@@ -9,6 +9,7 @@ import { outputProfileService } from '../../services/styles/outputProfileService
 import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
 import { normalizeNovel } from '../../features/novels/novelNormalizer';
 import type { JsonDetectResult } from '../../services/import/jsonImportService';
+import { runWithLoading } from '../../lib/runWithLoading';
 
 interface ImportJsonDialogProps {
   onClose: () => void;
@@ -43,9 +44,19 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
     if (!detectResult || !rawData) return;
     setImporting(true); setError('');
     try {
-      const obj = rawData as Record<string, unknown>;
-      if (detectResult.type === 'style_profile') {
-        await styleProfileService.create({
+      await runWithLoading(
+        {
+          title: '正在导入 JSON 文件',
+          initialMessage: `正在导入${detectResult.type === 'style_profile' ? '风格方案' : detectResult.type === 'output_profile' ? '输出控制方案' : '作品'}……`,
+          successMessage: '导入成功',
+          errorMessage: '导入失败',
+          successAutoCloseMs: 1200,
+        },
+        async ({ setMessage }) => {
+          const obj = rawData as Record<string, unknown>;
+          if (detectResult.type === 'style_profile') {
+            setMessage('正在导入风格方案……');
+            await styleProfileService.create({
           name: (obj.name as string) || '导入风格',
           sourceType: 'json_import',
           narrativePerspective: obj.narrativePerspective as any,
@@ -99,6 +110,8 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         if (detectResult.type === 'style_profile' || detectResult.type === 'output_profile') navigate('/styles');
         else navigate('/');
       }, 1500);
+        },
+      );
     } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }
   };
 

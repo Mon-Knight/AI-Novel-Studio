@@ -1,0 +1,193 @@
+/**
+ * AI Novel Studio - 统一加载弹窗样式
+ */
+
+.loading-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: var(--z-modal, 400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: loadingModalFadeIn 0.2s ease;
+}
+
+.loading-modal-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: calc(var(--z-modal, 400) + 1);
+  background: var(--color-bg-card, #ffffff);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.12));
+  padding: 32px 36px;
+  min-width: 320px;
+  max-width: 460px;
+  width: 90%;
+  text-align: center;
+  animation: loadingModalSlideIn 0.25s ease;
+}
+
+@keyframes loadingModalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes loadingModalSlideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* 图标区 */
+.loading-modal-icon {
+  margin-bottom: 16px;
+}
+
+/* 旋转动画 */
+.loading-modal-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto;
+  border: 3px solid var(--color-border-light, #f0f0f5);
+  border-top-color: var(--color-primary, #4a7cf7);
+  border-radius: 50%;
+  animation: loadingModalSpin 0.8s linear infinite;
+}
+
+@keyframes loadingModalSpin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-modal-check,
+.loading-modal-cross {
+  font-size: 36px;
+  line-height: 1;
+}
+
+/* 标题 */
+.loading-modal-title {
+  font-size: var(--font-size-lg, 16px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-text-primary, #1a1a2e);
+  margin-bottom: 8px;
+}
+
+/* 阶段 */
+.loading-modal-stage {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--color-primary, #4a7cf7);
+  font-weight: var(--font-weight-medium, 500);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+  text-transform: none;
+}
+
+/* 消息 */
+.loading-modal-message {
+  font-size: var(--font-size-sm, 12px);
+  color: var(--color-text-secondary, #5a5a7a);
+  line-height: var(--line-height-relaxed, 1.7);
+  margin-bottom: 16px;
+}
+
+/* 进度条 */
+.loading-modal-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--color-border-light, #f0f0f5);
+  border-radius: var(--radius-full, 9999px);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.loading-modal-progress-bar {
+  height: 100%;
+  background: var(--color-primary, #4a7cf7);
+  border-radius: var(--radius-full, 9999px);
+  transition: width 0.3s ease;
+}
+
+/* 不确定进度条动画 */
+.loading-modal-progress-indeterminate {
+  width: 30%;
+  height: 100%;
+  background: var(--color-primary, #4a7cf7);
+  border-radius: var(--radius-full, 9999px);
+  animation: loadingModalIndeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes loadingModalIndeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* 错误详情 */
+.loading-modal-error {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--color-error, #f44336);
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  border-radius: var(--radius-sm, 4px);
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  text-align: left;
+  line-height: 1.5;
+  max-height: 100px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+/* 操作按钮 */
+.loading-modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.loading-modal-btn {
+  height: 36px;
+  padding: 0 20px;
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--font-size-sm, 12px);
+  font-weight: var(--font-weight-medium, 500);
+  cursor: pointer;
+  transition: background var(--transition-fast, 0.15s ease);
+  border: 1px solid transparent;
+}
+
+.loading-modal-btn-cancel {
+  background: var(--color-bg-hover, #f0f2f5);
+  color: var(--color-text-secondary, #5a5a7a);
+  border-color: var(--color-border, #e8e8f0);
+}
+
+.loading-modal-btn-cancel:hover {
+  background: var(--color-border-light, #f0f0f5);
+}
+
+.loading-modal-btn-retry {
+  background: var(--color-primary, #4a7cf7);
+  color: #ffffff;
+}
+
+.loading-modal-btn-retry:hover {
+  background: var(--color-primary-hover, #3b6be0);
+}
+
+.loading-modal-btn-close {
+  background: var(--color-bg-hover, #f0f2f5);
+  color: var(--color-text-secondary, #5a5a7a);
+  border-color: var(--color-border, #e8e8f0);
+}
+
+.loading-modal-btn-close:hover {
+  background: var(--color-border-light, #f0f0f5);
+}

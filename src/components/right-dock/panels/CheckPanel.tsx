@@ -7,6 +7,7 @@ import { qualityCheckService } from '../../../services/quality/qualityCheckServi
 import { qualityCheckAiService } from '../../../services/ai/qualityCheckAiService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
+import { runWithLoading } from '../../../lib/runWithLoading';
 
 interface CheckPanelProps {
   novelId?: string; chapter?: Chapter;
@@ -37,14 +38,34 @@ function CheckPanel({ novelId, chapter }: CheckPanelProps) {
     if (!currentDraft || currentDraft.content.length < 10) { setError('正文过短，请先生成或编辑正文'); return; }
     setLoading(true); setError('');
     try {
-      const rpt = await qualityCheckService.createReport({ novelId, chapterId: chapter.id, draftId: currentDraft.id });
-      const result = await qualityCheckAiService.runCheck({
-        novelId, chapterId: chapter.id, draftId: currentDraft.id,
-        draftContent: currentDraft.content, chapterTitle: chapter.title,
-        chapterOutline: chapter.outline, chapterGoal: chapter.goal,
-      });
-      const saved = await qualityCheckService.saveResult({ reportId: rpt.id, novelId, chapterId: chapter.id, draftId: currentDraft.id, result });
-      setReport(saved.report); setItems(saved.items);
+      await runWithLoading(
+        {
+          title: 'AI 正在质量检查',
+          initialMessage: '正在准备检查参数……',
+          successMessage: '质量检查完成',
+          errorMessage: '质量检查失败',
+        },
+        async ({ setMessage, setStage, setPercent }) => {
+          setStage('创建检查报告……');
+          setPercent(5);
+          const rpt = await qualityCheckService.createReport({ novelId, chapterId: chapter.id, draftId: currentDraft.id });
+
+          setMessage('正在分析正文……');
+          setStage('AI 正在检查逻辑、设定和文笔……');
+          setPercent(30);
+          const result = await qualityCheckAiService.runCheck({
+            novelId, chapterId: chapter.id, draftId: currentDraft.id,
+            draftContent: currentDraft.content, chapterTitle: chapter.title,
+            chapterOutline: chapter.outline, chapterGoal: chapter.goal,
+          });
+
+          setMessage('正在保存检查结果……');
+          setPercent(80);
+          const saved = await qualityCheckService.saveResult({ reportId: rpt.id, novelId, chapterId: chapter.id, draftId: currentDraft.id, result });
+          setReport(saved.report); setItems(saved.items);
+          setPercent(100);
+        },
+      );
     } catch (e: any) { setError(e.message || '检查失败'); }
     finally { setLoading(false); }
   };

@@ -10,6 +10,7 @@ import { draftVersionService } from '../../services/database/draftVersionService
 import { readTextFile, analyzeTxtForChapters } from '../../services/import/txtImportService';
 import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
 import { formatNumber } from '../../utils/format';
+import { runWithLoading } from '../../lib/runWithLoading';
 
 interface ImportTxtDialogProps {
   onClose: () => void;
@@ -49,24 +50,41 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
     if (!analyzeResult || !novelTitle.trim()) return;
     setImporting(true); setError('');
     try {
-      const novel = await novelService.createNovel({ title: novelTitle.trim(), genre: genre.trim() || undefined, description: desc.trim() || '由 TXT 导入' });
-      const volume = await volumeRepository.create({ novelId: novel.id, title: '第一卷', orderIndex: 1 });
-      let count = 0;
-      for (const ch of analyzeResult.chapters) {
-        const chapter = await chapterRepository.create({
-          novelId: novel.id, volumeId: volume.id, title: ch.title,
-          orderIndex: ch.orderIndex, targetWordCount: undefined, outline: '',
-        });
-        await draftVersionService.create({
-          novelId: novel.id, chapterId: chapter.id,
-          content: ch.content, source: 'imported',
-        });
-        count++;
-      }
-      setImporting(false);
-      setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${count} 章。`);
-      setStep('done');
-      setTimeout(() => { onClose(); navigate(`/novels/${novel.id}`); }, 1500);
+      await runWithLoading(
+        {
+          title: '正在导入 TXT 文件',
+          initialMessage: '正在创建作品和章节……',
+          successMessage: `导入成功！共导入章节`,
+          errorMessage: '导入失败',
+          successAutoCloseMs: 1500,
+        },
+        async ({ setMessage, setStage, setPercent }) => {
+          setStage('创建作品……');
+          const novel = await novelService.createNovel({ title: novelTitle.trim(), genre: genre.trim() || undefined, description: desc.trim() || '由 TXT 导入' });
+          const volume = await volumeRepository.create({ novelId: novel.id, title: '第一卷', orderIndex: 1 });
+          let count = 0;
+          const totalCh = analyzeResult.chapters.length;
+          for (const ch of analyzeResult.chapters) {
+            setStage(`正在写入：${ch.title}`);
+            setMessage(`正在导入章节 ${count + 1} / ${totalCh}……`);
+            setPercent(Math.round(((count + 1) / totalCh) * 90));
+            const chapter = await chapterRepository.create({
+              novelId: novel.id, volumeId: volume.id, title: ch.title,
+              orderIndex: ch.orderIndex, targetWordCount: undefined, outline: '',
+            });
+            await draftVersionService.create({
+              novelId: novel.id, chapterId: chapter.id,
+              content: ch.content, source: 'imported',
+            });
+            count++;
+          }
+          setPercent(100);
+          setImporting(false);
+          setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${count} 章。`);
+          setStep('done');
+          setTimeout(() => { onClose(); navigate(`/novels/${novel.id}`); }, 1500);
+        },
+      );
     } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }
   };
 

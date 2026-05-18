@@ -5,6 +5,7 @@ import { draftVersionService } from '../../services/database/draftVersionService
 import { ChapterStatusLabels } from '../../types/chapter';
 import { formatDateTime } from '../../utils/date';
 import { formatNumber } from '../../utils/format';
+import { runWithLoading } from '../../lib/runWithLoading';
 
 interface EditorAreaProps {
   chapter?: Chapter;
@@ -55,13 +56,26 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
   const handleSave = useCallback(async () => {
     if (!chapter || !novelId) return;
     try {
-      if (currentDraft && !currentDraft.isAdopted) {
-        await draftVersionService.update(currentDraft.id, chapter.id, content, 'user_edited');
-      } else {
-        await draftVersionService.create({
-          novelId, chapterId: chapter.id, content, source: 'user_edited',
-        });
-      }
+      await runWithLoading(
+        {
+          title: '正在保存草稿',
+          initialMessage: '正在保存正文……',
+          successMessage: '草稿已保存',
+          errorMessage: '保存失败',
+          successAutoCloseMs: 800,
+        },
+        async ({ setMessage }) => {
+          if (currentDraft && !currentDraft.isAdopted) {
+            setMessage('正在更新草稿……');
+            await draftVersionService.update(currentDraft.id, chapter.id, content, 'user_edited');
+          } else {
+            setMessage('正在创建草稿……');
+            await draftVersionService.create({
+              novelId, chapterId: chapter.id, content, source: 'user_edited',
+            });
+          }
+        },
+      );
       setIsDirty(false);
       setSaveMsg('已保存');
       setLastSaved(formatDateTime(new Date()));

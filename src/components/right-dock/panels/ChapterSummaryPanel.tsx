@@ -13,6 +13,7 @@ import { draftVersionService } from '../../../services/database/draftVersionServ
 import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { formatDateTime } from '../../../utils/date';
+import { runWithLoading } from '../../../lib/runWithLoading';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
@@ -56,15 +57,26 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
     
     setGenLoading(true); setGenError(''); setGenResult(null); setSaveSuccess(false);
     try {
-      const result = await chapterSummarizeService.summarize({
-        novelId,
-        chapterId: chapter.id,
-        adoptedDraftId: adoptedDraft.id,
-        chapterTitle: chapter.title,
-        chapterOutline: chapter.outline,
-        adoptedContent: adoptedDraft.content.slice(0, 5000),
-      });
-      setGenResult(result);
+      await runWithLoading(
+        {
+          title: 'AI 正在生成章节总结',
+          initialMessage: '正在准备上下文数据……',
+          successMessage: '章节总结生成完成',
+          errorMessage: '总结生成失败',
+        },
+        async ({ setMessage, setStage }) => {
+          setStage('正在分析章节内容……');
+          const result = await chapterSummarizeService.summarize({
+            novelId,
+            chapterId: chapter.id,
+            adoptedDraftId: adoptedDraft.id,
+            chapterTitle: chapter.title,
+            chapterOutline: chapter.outline,
+            adoptedContent: adoptedDraft.content.slice(0, 5000),
+          });
+          setGenResult(result);
+        },
+      );
     } catch (e: any) {
       setGenError(e.message || '总结生成失败');
     } finally {
@@ -77,40 +89,53 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
     if (!novelId || !chapter || !genResult) return;
     setGenLoading(true); setGenError('');
     try {
-      // 保存章节总结
-      const newSummary = await chapterSummaryService.create({
-        novelId, chapterId: chapter.id,
-        adoptedDraftId: '',
-        summary: genResult.summary,
-        keyEvents: genResult.keyEvents,
-        characterChanges: genResult.characterChanges as any,
-        relationshipChanges: genResult.relationshipChanges as any,
-        newForeshadows: genResult.newForeshadows,
-        resolvedForeshadows: genResult.resolvedForeshadows,
-        nextChapterHints: genResult.nextChapterHints,
-      });
-      // 保存上下文记录
-      for (const cr of genResult.contextRecords) {
-        await contextRecordService.create({ ...cr, novelId, chapterId: chapter.id }).catch(() => {});
-      }
-      // 保存角色状态
-      for (const cc of genResult.characterChanges) {
-        if (cc.characterId) {
-          await characterStateService.create({
-            novelId, characterId: cc.characterId, chapterId: chapter.id,
-            stateSummary: cc.stateSummary, relationshipChanges: cc.relationshipChanges,
-            goalChanges: cc.goalChanges, location: cc.location,
-            healthState: cc.healthState, knowledgeState: cc.knowledgeState,
-          }).catch(() => {});
-        }
-      }
-      // 更新章节状态
-      await chapterRepository.update(chapter.id, { status: 'summarized' }).catch(() => {});
-      
-      setSummary(newSummary);
-      setSaveSuccess(true);
-      setGenResult(null);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      await runWithLoading(
+        {
+          title: '正在保存章节总结',
+          initialMessage: '正在保存总结和上下文……',
+          successMessage: '总结保存完成',
+          errorMessage: '保存总结失败',
+          successAutoCloseMs: 800,
+        },
+        async ({ setMessage, setStage }) => {
+          setStage('保存章节总结……');
+          const newSummary = await chapterSummaryService.create({
+            novelId, chapterId: chapter.id,
+            adoptedDraftId: '',
+            summary: genResult.summary,
+            keyEvents: genResult.keyEvents,
+            characterChanges: genResult.characterChanges as any,
+            relationshipChanges: genResult.relationshipChanges as any,
+            newForeshadows: genResult.newForeshadows,
+            resolvedForeshadows: genResult.resolvedForeshadows,
+            nextChapterHints: genResult.nextChapterHints,
+          });
+          // 保存上下文记录
+          setMessage('正在保存上下文记录……');
+          for (const cr of genResult.contextRecords) {
+            await contextRecordService.create({ ...cr, novelId, chapterId: chapter.id }).catch(() => {});
+          }
+          // 保存角色状态
+          setStage('保存角色状态……');
+          for (const cc of genResult.characterChanges) {
+            if (cc.characterId) {
+              await characterStateService.create({
+                novelId, characterId: cc.characterId, chapterId: chapter.id,
+                stateSummary: cc.stateSummary, relationshipChanges: cc.relationshipChanges,
+                goalChanges: cc.goalChanges, location: cc.location,
+                healthState: cc.healthState, knowledgeState: cc.knowledgeState,
+              }).catch(() => {});
+            }
+          }
+          // 更新章节状态
+          await chapterRepository.update(chapter.id, { status: 'summarized' }).catch(() => {});
+
+          setSummary(newSummary);
+          setSaveSuccess(true);
+          setGenResult(null);
+          setTimeout(() => setSaveSuccess(false), 3000);
+        },
+      );
     } catch (e: any) {
       setGenError(e.message || '保存总结失败');
     } finally {
