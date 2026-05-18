@@ -26,6 +26,11 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
   const [applyMsg, setApplyMsg] = useState('');
   const [applyError, setApplyError] = useState('');
 
+  // v1.0.35 当前章节大纲行内编辑
+  const [isEditingChapterOutline, setIsEditingChapterOutline] = useState(false);
+  const [chapterOutlineDraft, setChapterOutlineDraft] = useState('');
+  const [chapterOutlineSaveMsg, setChapterOutlineSaveMsg] = useState('');
+
   // 作品总大纲结果
   const [novelOutline, setNovelOutline] = useState('');
   // 分卷大纲结果
@@ -153,6 +158,36 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
       setApplyMsg('');
     }
   }, [chapter, onChapterOutlineApplied]);
+
+  // v1.0.35 当前章节大纲行内编辑
+  const handleStartEditChapterOutline = useCallback(() => {
+    setChapterOutlineDraft(chapter?.outline || '');
+    setIsEditingChapterOutline(true);
+    setChapterOutlineSaveMsg('');
+  }, [chapter?.outline]);
+
+  const handleCancelEditChapterOutline = useCallback(() => {
+    setIsEditingChapterOutline(false);
+    setChapterOutlineDraft('');
+    setChapterOutlineSaveMsg('');
+  }, []);
+
+  const handleSaveChapterOutline = useCallback(async () => {
+    if (!chapter) return;
+    setChapterOutlineSaveMsg('正在保存...');
+    try {
+      await chapterRepository.update(chapter.id, {
+        outline: chapterOutlineDraft,
+      });
+      onChapterOutlineApplied?.(chapter.id);
+      setIsEditingChapterOutline(false);
+      setChapterOutlineSaveMsg('✅ 已保存');
+      setTimeout(() => setChapterOutlineSaveMsg(''), 3000);
+    } catch (e: any) {
+      setChapterOutlineSaveMsg('❌ 保存失败');
+      setTimeout(() => setChapterOutlineSaveMsg(''), 3000);
+    }
+  }, [chapter, chapterOutlineDraft, onChapterOutlineApplied]);
 
   // 采用作品总大纲（显示确认）
   const handleAdoptNovelOutline = useCallback(() => {
@@ -368,13 +403,48 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied }: OutlinePane
           </div>
 
           <div className="panel-section">
-            <div className="panel-section-title">章节大纲</div>
-            {chapter.outline ? (
+            <div className="panel-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>章节大纲</span>
+              {!isEditingChapterOutline ? (
+                <button className="btn btn-secondary btn-sm" onClick={handleStartEditChapterOutline} style={{ fontSize: 11 }}>
+                  ✏️ 编辑
+                </button>
+              ) : (
+                <span style={{ display: 'flex', gap: 4 }}>
+                  <button className="btn btn-primary btn-sm" onClick={handleSaveChapterOutline} style={{ fontSize: 11 }}>
+                    💾 保存
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={handleCancelEditChapterOutline} style={{ fontSize: 11 }}>
+                    取消
+                  </button>
+                </span>
+              )}
+            </div>
+            {isEditingChapterOutline ? (
+              <textarea
+                className="form-textarea"
+                value={chapterOutlineDraft}
+                onChange={(e) => setChapterOutlineDraft(e.target.value)}
+                style={{ width: '100%', height: 140, resize: 'vertical', fontSize: 13, lineHeight: 1.8, fontFamily: 'var(--font-family-editor)', marginTop: 6 }}
+                placeholder="编辑章节大纲..."
+                autoFocus
+              />
+            ) : chapter.outline ? (
               <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
                 {chapter.outline}
               </div>
             ) : (
-              <div className="text-sm text-muted">本章尚未编写大纲</div>
+              <div className="text-sm text-muted">
+                本章尚未编写大纲
+                <button className="btn btn-secondary btn-sm" onClick={handleStartEditChapterOutline} style={{ fontSize: 11, marginLeft: 8 }}>
+                  ✏️ 手动编写
+                </button>
+              </div>
+            )}
+            {chapterOutlineSaveMsg && (
+              <div style={{ fontSize: 11, marginTop: 4, color: chapterOutlineSaveMsg.startsWith('✅') ? 'var(--color-success)' : chapterOutlineSaveMsg.startsWith('❌') ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                {chapterOutlineSaveMsg}
+              </div>
             )}
           </div>
 

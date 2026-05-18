@@ -449,6 +449,7 @@ function WritingWorkspacePage() {
           currentDraft={currentDraft}
           onOpenPanel={handleOpenPanel}
           onDraftChange={handleDraftChange}
+          onChapterUpdated={handleChapterOutlineApplied}
         />
         <StatusBar
           chapter={activeChapter}

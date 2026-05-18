@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import { draftVersionService } from '../../services/database/draftVersionService';
+import { chapterRepository } from '../../services/database/chapterRepository';
 import { ChapterStatusLabels } from '../../types/chapter';
 import { formatDateTime } from '../../utils/date';
 import { formatNumber } from '../../utils/format';
@@ -14,6 +15,7 @@ interface EditorAreaProps {
   currentDraft?: ChapterDraft | null;
   onOpenPanel?: (panel: string) => void;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
+  onChapterUpdated?: (chapterId: string) => void;
 }
 
 function countWords(text: string): number {
@@ -24,12 +26,17 @@ function countWords(text: string): number {
   return cjk + words;
 }
 
-function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, onDraftChange }: EditorAreaProps) {
+function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, onDraftChange, onChapterUpdated }: EditorAreaProps) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [lastSaved, setLastSaved] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // v1.0.35 章节大纲行内编辑状态
+  const [isEditingOutline, setIsEditingOutline] = useState(false);
+  const [outlineDraft, setOutlineDraft] = useState('');
+  const [outlineSaveMsg, setOutlineSaveMsg] = useState('');
 
   // 加载当前草稿
   useEffect(() => {
@@ -44,7 +51,64 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
       setLastSaved('');
       onDraftChange?.(0, false);
     }
+    // 切换章节时重置大纲编辑状态
+    setIsEditingOutline(false);
+    setOutlineDraft('');
+    setOutlineSaveMsg('');
   }, [currentDraft?.id, chapter?.id]);
+
+  // v1.0.35 大纲保存处理
+  const handleStartEditOutline = () => {
+    setOutlineDraft(chapter?.outline || '');
+    setIsEditingOutline(true);
+    setOutlineSaveMsg('');
+  };
+
+  const handleCancelEditOutline = () => {
+    setIsEditingOutline(false);
+    setOutlineDraft('');
+    setOutlineSaveMsg('');
+  };
+
+  const handleSaveOutline = useCallback(async () => {
+    if (!chapter || !novelId) return;
+    try {
+      await runWithLoading(
+        {
+          title: '正在保存章节大纲',
+          initialMessage: '正在写入数据库……',
+          successMessage: '章节大纲已保存',
+          errorMessage: '保存失败',
+          successAutoCloseMs: 800,
+        },
+        async () => {
+          await chapterRepository.update(chapter.id, {
+            outline: outlineDraft,
+          });
+          onChapterUpdated?.(chapter.id);
+        },
+      );
+      setIsEditingOutline(false);
+      setOutlineSaveMsg('✅ 已保存');
+      setTimeout(() => setOutlineSaveMsg(''), 3000);
+    } catch {
+      setOutlineSaveMsg('❌ 保存失败');
+      setTimeout(() => setOutlineSaveMsg(''), 3000);
+    }
+  }, [chapter, novelId, outlineDraft, onChapterUpdated]);
+
+  // Ctrl+S 保存大纲（编辑模式时）
+  useEffect(() => {
+    if (!isEditingOutline) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSaveOutline();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isEditingOutline, handleSaveOutline]);
 
   const handleContentChange = (value: string) => {
     setContent(value);
@@ -149,7 +213,44 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
       {/* 章节信息卡片 */}
       {(chapter.outline || chapter.goal) && (
         <div className="editor-info-card">
-          {chapter.outline && <div className="editor-info-section"><div className="editor-info-label">📋 章节大纲</div><div className="editor-info-text">{chapter.outline}</div></div>}
+          {chapter.outline && (
+            <div className="editor-info-section">
+              <div className="editor-info-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>📋 章节大纲</span>
+                {!isEditingOutline ? (
+                  <button className="btn btn-secondary btn-sm" onClick={handleStartEditOutline} style={{ fontSize: 11 }}>
+                    ✏️ 编辑
+                  </button>
+                ) : (
+                  <span style={{ display: 'flex', gap: 4 }}>
+                    <button className="btn btn-primary btn-sm" onClick={handleSaveOutline} style={{ fontSize: 11 }}>
+                      💾 保存
+                    </button>
+                    <button className="btn btn-secondary btn-sm" onClick={handleCancelEditOutline} style={{ fontSize: 11 }}>
+                      取消
+                    </button>
+                  </span>
+                )}
+              </div>
+              {isEditingOutline ? (
+                <textarea
+                  className="form-textarea"
+                  value={outlineDraft}
+                  onChange={(e) => setOutlineDraft(e.target.value)}
+                  style={{ width: '100%', height: 120, resize: 'vertical', fontSize: 14, lineHeight: 1.8, fontFamily: 'var(--font-family-editor)', marginTop: 8 }}
+                  placeholder="编辑章节大纲..."
+                  autoFocus
+                />
+              ) : (
+                <div className="editor-info-text">{chapter.outline}</div>
+              )}
+              {outlineSaveMsg && (
+                <div style={{ fontSize: 11, marginTop: 4, color: outlineSaveMsg.startsWith('✅') ? 'var(--color-success)' : 'var(--color-error)' }}>
+                  {outlineSaveMsg}
+                </div>
+              )}
+            </div>
+          )}
           {chapter.goal && <div className="editor-info-section"><div className="editor-info-label">🎯 本章目标</div><div className="editor-info-text">{chapter.goal}</div></div>}
           <div className="editor-info-meta">
             <span>状态：{ChapterStatusLabels[chapter.status]}</span>
@@ -159,8 +260,45 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
         </div>
       )}
 
-      {!chapter.outline && (
-        <div className="editor-hint-banner">💡 当前章节还没有大纲，建议先在作品详情页补充章节大纲，后续 AI 将根据大纲生成正文。</div>
+      {!chapter.outline && !isEditingOutline && (
+        <div className="editor-hint-banner">
+          💡 当前章节还没有大纲，建议补充章节大纲，AI 将根据大纲生成正文。
+          <button className="btn btn-secondary btn-sm" onClick={handleStartEditOutline} style={{ marginLeft: 8, fontSize: 11 }}>
+            ✏️ 手动编写
+          </button>
+        </div>
+      )}
+
+      {/* 大纲编辑模式（无现有大纲时） */}
+      {isEditingOutline && !chapter.outline && (
+        <div className="editor-info-card" style={{ marginTop: 8 }}>
+          <div className="editor-info-section">
+            <div className="editor-info-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>📋 编写章节大纲</span>
+              <span style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-primary btn-sm" onClick={handleSaveOutline} style={{ fontSize: 11 }}>
+                  💾 保存
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={handleCancelEditOutline} style={{ fontSize: 11 }}>
+                  取消
+                </button>
+              </span>
+            </div>
+            <textarea
+              className="form-textarea"
+              value={outlineDraft}
+              onChange={(e) => setOutlineDraft(e.target.value)}
+              style={{ width: '100%', height: 120, resize: 'vertical', fontSize: 14, lineHeight: 1.8, fontFamily: 'var(--font-family-editor)', marginTop: 8 }}
+              placeholder="编写章节大纲..."
+              autoFocus
+            />
+            {outlineSaveMsg && (
+              <div style={{ fontSize: 11, marginTop: 4, color: outlineSaveMsg.startsWith('✅') ? 'var(--color-success)' : 'var(--color-error)' }}>
+                {outlineSaveMsg}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       <div className="editor-paper">
