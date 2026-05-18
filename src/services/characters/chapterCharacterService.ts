@@ -43,13 +43,15 @@ export const chapterCharacterService = {
   }): Promise<ChapterCharacter> {
     if (isTauri()) {
       const dto = await dbCall<any>('add_chapter_character', {
-        novelId: input.novelId,
-        chapterId: input.chapterId,
-        characterId: input.characterId,
-        characterName: input.characterName,
-        roleInChapter: input.roleInChapter || 'supporting',
-        mustAppear: input.mustAppear ?? true,
-        note: input.note,
+        input: {
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          characterId: input.characterId,
+          characterName: input.characterName,
+          roleInChapter: input.roleInChapter || 'supporting',
+          mustAppear: input.mustAppear ?? true,
+          note: input.note,
+        },
       });
       return mapToChapterCharacter(dto);
     }
@@ -82,13 +84,15 @@ export const chapterCharacterService = {
       if (!old) return null;
       await dbCall<void>('remove_chapter_character', { chapterId: old.chapterId, characterId: old.characterId });
       const dto = await dbCall<any>('add_chapter_character', {
-        novelId: input.novelId ?? old.novelId,
-        chapterId: input.chapterId ?? old.chapterId,
-        characterId: input.characterId ?? old.characterId,
-        characterName: input.characterName ?? old.characterName,
-        roleInChapter: input.roleInChapter ?? old.roleInChapter,
-        mustAppear: input.mustAppear ?? old.mustAppear,
-        note: input.note ?? old.note,
+        input: {
+          novelId: input.novelId ?? old.novelId,
+          chapterId: input.chapterId ?? old.chapterId,
+          characterId: input.characterId ?? old.characterId,
+          characterName: input.characterName ?? old.characterName,
+          roleInChapter: input.roleInChapter ?? old.roleInChapter,
+          mustAppear: input.mustAppear ?? old.mustAppear,
+          note: input.note ?? old.note,
+        },
       });
       return mapToChapterCharacter(dto);
     }

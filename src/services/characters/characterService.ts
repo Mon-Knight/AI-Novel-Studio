@@ -128,18 +128,20 @@ export const characterService = {
   async create(input: CreateCharacterInput & { isProtagonist?: boolean }): Promise<Character> {
     if (isTauri()) {
       const dto = await dbCall<any>('create_character', {
-        novelId: input.novelId,
-        name: input.name,
-        roleType: input.roleType,
-        identity: input.identity,
-        faction: input.faction,
-        relationToProtagonist: input.relationToProtagonist,
-        goal: input.goal,
-        personality: input.personality,
-        behaviorLimits: input.behaviorLimits,
-        forbiddenBehaviors: input.forbiddenBehaviors,
-        currentState: input.currentState,
-        isProtagonist: (input as any).isProtagonist ?? false,
+        input: {
+          novelId: input.novelId,
+          name: input.name,
+          roleType: input.roleType,
+          identity: input.identity,
+          faction: input.faction,
+          relationToProtagonist: input.relationToProtagonist,
+          goal: input.goal,
+          personality: input.personality,
+          behaviorLimits: input.behaviorLimits,
+          forbiddenBehaviors: input.forbiddenBehaviors,
+          currentState: input.currentState,
+          isProtagonist: (input as any).isProtagonist ?? false,
+        },
       });
       return mapToCharacter(dto);
     }
@@ -152,18 +154,20 @@ export const characterService = {
     if (isTauri()) {
       const dto = await dbCall<any>('update_character', {
         id,
-        name: input.name,
-        roleType: input.roleType,
-        identity: input.identity,
-        faction: input.faction,
-        relationToProtagonist: input.relationToProtagonist,
-        goal: input.goal,
-        personality: input.personality,
-        behaviorLimits: input.behaviorLimits,
-        forbiddenBehaviors: input.forbiddenBehaviors,
-        currentState: input.currentState,
-        isProtagonist: (input as any).isProtagonist,
-        isActive: input.isActive,
+        input: {
+          name: input.name,
+          roleType: input.roleType,
+          identity: input.identity,
+          faction: input.faction,
+          relationToProtagonist: input.relationToProtagonist,
+          goal: input.goal,
+          personality: input.personality,
+          behaviorLimits: input.behaviorLimits,
+          forbiddenBehaviors: input.forbiddenBehaviors,
+          currentState: input.currentState,
+          isProtagonist: (input as any).isProtagonist,
+          isActive: input.isActive,
+        },
       });
       return mapToCharacter(dto);
     }
