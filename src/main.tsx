@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api';
 import App from './App';
+import ToastProvider from './components/ToastProvider';
 import './styles/variables.css';
 import './styles/global.css';
 
@@ -41,7 +42,9 @@ applySystemAccentColor().then(() => {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <HashRouter>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </HashRouter>
     </React.StrictMode>,
   );

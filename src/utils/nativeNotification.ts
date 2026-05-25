@@ -1,9 +1,10 @@
 /**
- * Native Feel P2.2 — 原生通知工具封装
+ * Native Feel P2.3.2 — 原生通知工具封装（Toast 回退版）
  *
- * 优先使用 Tauri 原生通知，失败时静默回退。
- * 通知是辅助提示，不替代页面内状态 UI。
+ * 优先 Tauri 原生通知 → DOM Toast → console 回退。
  */
+
+import { showToast } from './toast';
 
 let tauriNotificationApi: typeof import('@tauri-apps/api/notification') | null = null;
 let permissionChecked = false;
@@ -49,12 +50,8 @@ export async function notifyNative(options: {
   const { title = 'AI Novel Studio', body, kind = 'info' } = options;
 
   if (!(await ensurePermission())) {
-    // 静默回退：通知仅供辅助，不打断流程
-    if (kind === 'error') {
-      console.error(`[${title}] ${body}`);
-    } else {
-      console.info(`[${title}] ${body}`);
-    }
+    // 回退：Toast → console
+    showToast({ kind, title, message: body });
     return;
   }
 
@@ -64,6 +61,7 @@ export async function notifyNative(options: {
       notif.sendNotification({ title, body });
     }
   } catch {
-    // 通知失败不影响主流程
+    // 原生通知失败 → Toast 回退
+    showToast({ kind, title, message: body });
   }
 }
