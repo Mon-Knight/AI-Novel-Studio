@@ -1,6 +1,35 @@
 # AI Novel Studio — CHANGELOG
 
-## v1.0.45 (2026-05-26) — 项目开发辅助 Skills 增强版
+## v1.0.46 (2026-05-26) — Tool Layer 接入真实项目读取
+
+### 新增
+- `src/agent-tools/style-tools.ts` — 风格方案只读 Tool（readStyleProfile / readOutputControl）
+- `src/agent-tools/context-tools.ts` — Agent 可读上下文聚合 Tool（buildAgentReadableContext）
+- `src/agent/context-summary.ts` — 上下文摘要格式化器（formatAgentContextSummary）
+- `createChapterReadinessWorkflow()` — 章节准备度检查 Workflow（6 步：读取→聚合→检查→建议）
+- `validateWorkflow()` — Workflow 结构校验器（id/task 重复/依赖/循环依赖检查）
+- `successResult()` / `errorResult()` / `resolveNovelId()` — 工具辅助函数
+
+### 修改
+- `tool-types.ts` — 扩展 AgentToolResult（新增 source/warnings）、AgentToolContext（新增 novelId/styleProfileId/workId）、新增 AgentReadableSummary
+- `project-tools.ts` — 从占位升级为只读真实数据接口（readProjectContext/readProjectList/readProjectSettings）
+- `chapter-tools.ts` — 从占位升级为只读真实章节接口（readChapterOutline/readChapterContext），saveCandidateDraft 保持安全策略
+- `verification-tools.ts` — 增加基础非 AI 检查（字数/主角出场/禁用写法）
+- `planner-lite.ts` — 新增 Chapter Readiness Workflow
+- `workflow-runner.ts` — 新增 Workflow 结构校验
+- `verify_project.ps1` / `check_docs_sync.ps1` — 版本号更新至 1.0.46
+- `README.md` — 新增 Agent Tool Layer 说明、更新版本号
+- `docs/version-roadmap.md` — Tool Layer 标记 ✅
+- `docs/agent-runtime.md` — 新增 v1.0.46 说明
+- 版本号统一更新至 1.0.46
+
+### 开发者备注
+- 本版本 Tool Layer 开始读取真实项目数据（novelService / chapterRepository / styleProfileService 等）
+- 全部只读：不写数据库、不自动写正文、不替换生成链路、不调用外部 AI
+- 不修改数据库 schema
+- Agent Tool Layer（src/agent-tools/）与项目开发辅助 Skills（.github/skills/）明确区分
+
+---
 
 ### 新增
 

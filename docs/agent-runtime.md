@@ -140,17 +140,30 @@ Agent 或开发者在对应用场景下：
 
 ---
 
-## 9. 后续 v1.0.46 / v1.0.47 / v1.0.48 怎么扩展
+## 9. 版本演进
 
-> **注意**：v1.0.45 不开发软件内部 Runtime 新能力，而是增强项目开发辅助 Skills。
-> Tool Layer 真实读取后移到 v1.0.46。
+| 版本 | 内容 | 状态 |
+|------|------|------|
+| v1.0.46 | Tool Layer 接入真实项目读取（readProjectContext 连接数据库） | ✅ 完成 |
+| v1.0.47 | Verification Engine 基础版（实际大纲/风格验证） | 计划中 |
+| v1.0.48 | Prompt Pipeline 接入现有正文生成链路 | 计划中 |
+| v1.1.0 | Agent Workflow 稳定版（完整闭环测试通过） | 计划中 |
 
-| 版本 | 内容 |
-|------|------|
-| v1.0.46 | Tool Layer 接入真实项目读取（readProjectContext 连接数据库） |
-| v1.0.47 | Verification Engine 基础版（实际大纲/风格验证） |
-| v1.0.48 | Prompt Pipeline 接入现有正文生成链路 |
-| v1.1.0 | Agent Workflow 稳定版（完整闭环测试通过） |
+---
+
+## 10. v1.0.46 Tool Layer Read-only Integration
+
+### 定位
+v1.0.46 将 Agent Tool Layer 从占位接口升级为只读真实数据接口。
+- 只读，不写入数据库
+- 不自动生成正文
+- 不替换现有生成链路
+- 不调用外部 AI
+- 不修改数据库 schema
+
+### 与 Skills 的区别
+- `src/agent-tools/` → 软件内部 Agent Tool Layer，读真实数据
+- `.github/skills/` → 项目开发辅助 Skills，纯流程指导
 
 ---
 

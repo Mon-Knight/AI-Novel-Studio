@@ -1,6 +1,6 @@
 # verify_project.ps1
 # AI Novel Studio - Unified Project Verification
-# Version: v1.0.45
+# Version: v1.0.46
 # Purpose: Run all build and verification steps, output unified summary
 
 $ErrorActionPreference = "Continue"
@@ -9,7 +9,7 @@ $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Project Verification" -ForegroundColor Cyan
-Write-Host "  Version: v1.0.45" -ForegroundColor Cyan
+Write-Host "  Version: v1.0.46" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

@@ -1,8 +1,8 @@
 // src/agent/planner-lite.ts
 // AI Novel Studio — Planner Lite（最小规划器）
-// 版本：v1.0.44
-// 用途：返回固定的章节生成 Workflow，为未来 Planner 打基础
-// 注意：不连接真实生成逻辑，当前只返回固定任务图
+// 版本：v1.0.46
+// 用途：返回固定的章节生成 Workflow + 章节准备度检查 Workflow
+// 注意：不连接真实生成逻辑，当前只返回固定任务图，不写数据库
 
 import type { AgentWorkflow, PlannerInput } from "./types";
 
@@ -77,6 +77,77 @@ export function createChapterGenerationWorkflow(
         title: "保存候选草稿",
         description: "将验证通过的草稿保存为候选版本",
         dependsOn: ["verify_outline_compliance", "verify_style_compliance"],
+        status: "pending",
+      },
+    ],
+  };
+}
+
+/**
+ * 创建章节准备度检查工作流
+ *
+ * 固定任务：
+ *   1. read_project_context — 读取作品上下文
+ *   2. read_chapter_context — 读取章节上下文
+ *   3. read_style_profile — 读取风格方案
+ *   4. build_agent_readable_context — 构建 Agent 可读上下文
+ *   5. check_missing_requirements — 检查缺失项
+ *   6. output_next_step_suggestion — 输出下一步建议
+ *
+ * @param input - 规划输入
+ * @returns 固定的 AgentWorkflow
+ */
+export function createChapterReadinessWorkflow(input: {
+  projectId?: string;
+  chapterId?: string;
+  goal: string;
+}): AgentWorkflow {
+  const workflowId = `chapter-readiness-${input.chapterId ?? "unknown"}-${Date.now()}`;
+
+  return {
+    id: workflowId,
+    name: `章节准备度检查: ${input.goal}`,
+    description: `检查作品 ${input.projectId ?? "(未指定)"} 第 ${input.chapterId ?? "(未指定)"} 章的生成准备度`,
+    tasks: [
+      {
+        id: "read_project_context",
+        title: "读取项目上下文",
+        description: "读取作品信息、世界设定、主角数据",
+        status: "pending",
+      },
+      {
+        id: "read_chapter_context",
+        title: "读取章节上下文",
+        description: "读取章节信息、大纲、出场角色、事件",
+        dependsOn: ["read_project_context"],
+        status: "pending",
+      },
+      {
+        id: "read_style_profile",
+        title: "读取风格方案",
+        description: "读取风格方案和输出控制配置",
+        dependsOn: ["read_project_context"],
+        status: "pending",
+      },
+      {
+        id: "build_agent_readable_context",
+        title: "构建可读上下文",
+        description: "将项目、章节、风格信息组合为 Agent 可读摘要",
+        dependsOn: ["read_chapter_context", "read_style_profile"],
+        status: "pending",
+      },
+      {
+        id: "check_missing_requirements",
+        title: "检查缺失项",
+        description: "检查上下文完整度，列出缺失的必需要素",
+        dependsOn: ["build_agent_readable_context"],
+        status: "pending",
+      },
+      {
+        id: "output_next_step_suggestion",
+        title: "输出下一步建议",
+        description: "根据准备度给出下一步操作建议",
+        dependsOn: ["check_missing_requirements"],
         status: "pending",
       },
     ],

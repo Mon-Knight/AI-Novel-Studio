@@ -1,6 +1,6 @@
 # run_feature_workflow.ps1
 # AI Novel Studio - Agent Feature Development Workflow Guide
-# Version: v1.0.44
+# Version: v1.0.46
 # Purpose: Guide Agent before/after feature development
 # Note: Does NOT auto-modify code, auto-commit, or auto-tag
 
@@ -10,7 +10,7 @@ $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Feature Dev Workflow" -ForegroundColor Cyan
-Write-Host "  Version: v1.0.44" -ForegroundColor Cyan
+Write-Host "  Version: v1.0.46" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

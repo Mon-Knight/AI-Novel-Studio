@@ -140,6 +140,7 @@ v1.0.0  可正式用于长篇小说创作的基础版
 v1.0.43 Agent 基础设施建设
 v1.0.44 Agent Workflow Runtime 最小闭环
 v1.0.45 项目开发辅助 Skills 增强版
+v1.0.46 Tool Layer 接入真实项目读取
 
 ---
 
@@ -152,10 +153,13 @@ v1.0.45：项目开发辅助 Skills 增强版 ✅
   ├─ 8 个 Checklists
   └─ 8 个 Cursor Rules
 
-v1.0.46：Tool Layer 接入真实项目读取
-  ├─ readProjectContext → 连接真实数据库
-  ├─ readChapterOutline → 连接真实章节数据
-  └─ saveCandidateDraft → 连接真实草稿存储
+v1.0.46：Tool Layer 接入真实项目读取 ✅
+  ├─ readProjectContext → 连接真实 Novel 数据
+  ├─ readChapterOutline → 连接真实 Chapter 数据
+  ├─ readStyleProfile → 连接真实 StyleProfile 数据
+  ├─ buildAgentReadableContext → 上下文聚合
+  ├─ verifyOutlineCompliance → 基础非 AI 检查
+  └─ verifyStyleCompliance → 基础禁用写法检查
 
 v1.0.47：Verification Engine 基础版
   ├─ verifyOutlineCompliance → 实际大纲验证
@@ -167,6 +171,15 @@ v1.0.48：Prompt Pipeline 接入现有正文生成链路
   └─ 风格约束 Prompt → 接入风格方案
 
 v1.1.0：Agent Workflow 稳定版
+  ├─ 完整闭环测试通过
+  ├─ 所有 Tool 接入真实数据
+  └─ Prompt Pipeline 与旧系统平滑切换
+
+v1.2.0：Planner 接入真实任务执行
+  └─ Planner 从固定 Workflow 升级为动态任务编排
+
+v1.3.0：Long-term Memory 基础版
+  └─ Agent Memory Engine 基础实现
   ├─ 完整闭环测试通过
   ├─ 所有 Tool 接入真实数据
   └─ Prompt Pipeline 与旧系统平滑切换

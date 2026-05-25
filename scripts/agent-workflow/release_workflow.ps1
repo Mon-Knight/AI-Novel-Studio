@@ -1,6 +1,6 @@
 # release_workflow.ps1
 # AI Novel Studio - Pre-release Check
-# Version: v1.0.44
+# Version: v1.0.46
 # Purpose: Pre-release checks, does NOT force release
 # Warning: Does NOT auto-create tag, auto-push, auto-delete, or auto-modify version
 
@@ -10,11 +10,11 @@ $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Pre-release Check" -ForegroundColor Cyan
-Write-Host "  Version: v1.0.44" -ForegroundColor Cyan
+Write-Host "  Version: v1.0.46" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-$CURRENT_VERSION = "1.0.44"
+$CURRENT_VERSION = "1.0.46"
 $allOk = $true
 
 # Step 1: Check CHANGELOG.md contains current version

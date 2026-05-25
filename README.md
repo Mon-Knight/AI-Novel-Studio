@@ -12,7 +12,7 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 
 ## 当前阶段
 
-**v1.0.45** — 项目开发辅助 Skills 增强版
+**v1.0.46** — Tool Layer 接入真实项目读取
 
 当前项目已建立完整的 Agent 开发辅助系统，包含 10 个 Skills、8 个 Checklists 和 8 个 Cursor Rules。
 
@@ -61,7 +61,7 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 
 ## 当前版本
 
-**v1.0.45** — 项目开发辅助 Skills 增强版
+**v1.0.46** — Tool Layer 接入真实项目读取
 
 ## 功能概览
 
@@ -156,6 +156,7 @@ ai-novel-studio/
 | v1.0.43 | Agent 基础设施建设 |
 | v1.0.44 | Agent Workflow Runtime 最小闭环 |
 | v1.0.45 | 项目开发辅助 Skills 增强版 |
+| v1.0.46 | Tool Layer 接入真实项目读取 |
 
 ### Agent 化路线
 
