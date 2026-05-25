@@ -218,6 +218,30 @@
   word-break: break-word;
 }
 
+/* Native Feel P1.1: 暗色模式编辑区背景覆盖 */
+@media (prefers-color-scheme: dark) {
+  .editor-paper {
+    background: var(--color-bg-editor, #1e1e1e);
+    border-color: var(--color-border, #3c3c3c);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  .editor-content {
+    background: var(--color-bg-app, #1f1f1f);
+  }
+
+  .editor-hint-banner {
+    background: #3a2a1a;
+    border-color: #5a4a2a;
+    color: #ffb74d;
+  }
+
+  .editor-info-card {
+    background: #1e2a45;
+    border-color: var(--color-border);
+  }
+}
+
 .editor-body:focus {
   /* 使用全局 :focus-visible 统一焦点样式 */
 }
@@ -311,8 +335,8 @@
 .editor-paper {
   max-width: 880px;
   margin: 0 auto 24px;
-  background: #ffffff;
-  border: 1px solid #e5eaf0;
+  background: var(--color-bg-card, #ffffff);
+  border: 1px solid var(--color-border, #e5eaf0);
   border-radius: 10px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
   overflow: hidden;
@@ -384,11 +408,11 @@
   max-width: 880px;
   margin: 0 auto 16px;
   padding: 10px 16px;
-  background: #fff8e1;
-  border: 1px solid #ffe082;
+  background: var(--color-warning-light, #fff8e1);
+  border: 1px solid var(--color-warning-border, #ffe082);
   border-radius: 6px;
   font-size: 13px;
-  color: #e65100;
+  color: var(--color-warning-text, #e65100);
   text-align: center;
 }
 

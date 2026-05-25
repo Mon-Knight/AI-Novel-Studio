@@ -128,5 +128,11 @@
     --color-shadow-hover: rgba(0, 0, 0, 0.5);
 
     --color-focus-ring: #7aa2ff;
+
+    /* 色调微调 */
+    --color-success: #66bb6a;
+    --color-warning: #ffb74d;
+    --color-error: #ef5350;
+    --color-info: #42a5f5;
   }
 }

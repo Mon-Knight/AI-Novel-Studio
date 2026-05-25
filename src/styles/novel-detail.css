@@ -92,6 +92,17 @@
   flex-wrap: wrap;
 }
 
+/* Native Feel P1.1: 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .detail-cover {
+    background: linear-gradient(135deg, #1e2a45, #252540);
+  }
+
+  .modal-overlay {
+    background: rgba(0, 0, 0, 0.6);
+  }
+}
+
 /* === 按钮样式 === */
 .btn {
   display: inline-flex;

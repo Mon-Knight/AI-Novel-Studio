@@ -33,21 +33,78 @@ fn lock_file_path(app_data_dir: &PathBuf) -> PathBuf {
     app_data_dir.join("instance.lock")
 }
 
-/// 加载保存的窗口状态
+/// 加载保存的窗口状态（含异常防护）
 pub fn load_window_state(app_data_dir: &PathBuf) -> WindowState {
     let path = state_file_path(app_data_dir);
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(state) = serde_json::from_str::<WindowState>(&content) {
+                // 校验合理性
+                let state = validate_window_state(state);
                 return state;
             }
         }
+        // JSON 损坏，删除无效文件
+        let _ = fs::remove_file(&path);
     }
     WindowState::default()
 }
 
-/// 保存窗口状态
+/// 校验窗口状态合理性（屏幕外防护 / 最小尺寸 / JSON 损坏回退）
+fn validate_window_state(mut state: WindowState) -> WindowState {
+    const MIN_WIDTH: f64 = 1024.0;
+    const MIN_HEIGHT: f64 = 680.0;
+
+    // 最小尺寸强制
+    if state.width < MIN_WIDTH {
+        state.width = MIN_WIDTH;
+    }
+    if state.height < MIN_HEIGHT {
+        state.height = MIN_HEIGHT;
+    }
+
+    // 最大化状态无需校验位置
+    if state.maximized {
+        return state;
+    }
+
+    // 屏幕外防护：检查位置是否在有效显示器范围内
+    if let Some((max_x, max_y)) = get_virtual_screen_bounds() {
+        // 坐标合法性：x/y 为负或超出虚拟屏幕范围时回退
+        if state.x < -200 || state.y < -200 || state.x > max_x || state.y > max_y {
+            state.x = -1;
+            state.y = -1;
+        }
+    } else if state.x < 0 || state.y < 0 {
+        // 无法获取屏幕边界时的简单回退
+        state.x = -1;
+        state.y = -1;
+    }
+
+    state
+}
+
+/// 获取虚拟屏幕边界（所有显示器组合范围）
+#[cfg(target_os = "windows")]
+fn get_virtual_screen_bounds() -> Option<(i32, i32)> {
+    // Windows: 使用 PowerShell 获取虚拟屏幕尺寸
+    // GetSystemMetrics(SM_CXVIRTUALSCREEN) = 78, GetSystemMetrics(SM_CYVIRTUALSCREEN) = 79
+    // 简化方案：直接返回足够大的范围，或使用 win32 API
+    None // 暂时返回 None，后续可接入 windows crate
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_virtual_screen_bounds() -> Option<(i32, i32)> {
+    None
+}
+
+/// 保存窗口状态（跳过最小化状态）
 pub fn save_window_state(window: &Window, app_data_dir: &PathBuf) {
+    // 最小化时不保存位置（Windows 会返回 -32000）
+    if window.is_minimized().unwrap_or(false) {
+        return;
+    }
+
     if let Ok(scale_factor) = window.scale_factor() {
         if let Ok(position) = window.outer_position() {
             if let Ok(size) = window.outer_size() {
@@ -127,6 +184,20 @@ pub fn try_acquire_instance_lock(app_data_dir: &PathBuf) -> bool {
 pub fn release_instance_lock(app_data_dir: &PathBuf) {
     let lock_path = lock_file_path(app_data_dir);
     let _ = fs::remove_file(&lock_path);
+    // 同时清理可能残留的聚焦请求
+    let focus_path = focus_request_path(app_data_dir);
+    let _ = fs::remove_file(&focus_path);
+}
+
+/// 写入聚焦请求（供第二次启动调用）
+pub fn write_focus_request(app_data_dir: &PathBuf) {
+    let _ = fs::create_dir_all(app_data_dir);
+    let path = focus_request_path(app_data_dir);
+    let _ = fs::write(&path, "focus");
+}
+
+fn focus_request_path(app_data_dir: &PathBuf) -> PathBuf {
+    app_data_dir.join("focus.request")
 }
 
 #[cfg(target_os = "windows")]

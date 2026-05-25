@@ -15,7 +15,11 @@
 }
 
 .loading-modal-card {
-  position: relative;
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: calc(var(--z-modal, 400) + 1);
   background: var(--color-bg-card, #ffffff);
   border: 1px solid var(--color-border, #e8e8f0);
   border-radius: var(--radius-lg, 12px);
@@ -36,11 +40,11 @@
 @keyframes loadingModalSlideIn {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateX(-50%) translateY(-8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 

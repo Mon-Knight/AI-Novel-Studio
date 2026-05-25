@@ -39,17 +39,20 @@ fn get_app_data_dir() -> std::path::PathBuf {
 fn main() {
     db::init_database();
 
-    // Native Feel P1: 确定应用数据目录
+    // Native Feel P1.1: 确定应用数据目录
     let app_data_dir = get_app_data_dir();
 
     // 单实例检测
     if !window_state::try_acquire_instance_lock(&app_data_dir) {
+        // 已有实例在运行，写入聚焦请求后退出
+        window_state::write_focus_request(&app_data_dir);
         std::process::exit(0);
     }
 
     // 提前加载窗口状态
     let saved_state = window_state::load_window_state(&app_data_dir);
     let state_for_close = app_data_dir.clone();
+    let focus_watch_dir = app_data_dir.clone();
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -128,10 +131,29 @@ fn main() {
             commands::remove_chapter_character,
         ])
         .setup(move |app| {
-            // Native Feel P1: 恢复窗口状态
+            // Native Feel P1.1: 恢复窗口状态
             if let Some(window) = app.get_window("main") {
                 window_state::apply_window_state(&window, &saved_state);
             }
+
+            // Native Feel P1.1: 后台监听聚焦请求（单实例第二启动时聚焦已有窗口）
+            let handle = app.handle();
+            let watch_dir = focus_watch_dir.clone();
+            std::thread::spawn(move || {
+                let focus_req_path = watch_dir.join("focus.request");
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if focus_req_path.exists() {
+                        // 聚焦已有窗口
+                        if let Some(window) = handle.get_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                        let _ = std::fs::remove_file(&focus_req_path);
+                    }
+                }
+            });
+
             Ok(())
         })
         .on_window_event(move |event| {

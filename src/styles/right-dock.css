@@ -314,6 +314,23 @@
 }
 
 /* === 润色选项 === */
+/* Native Feel P1.1: 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .panel-btn-warning {
+    background: #3a2a1a;
+    color: #ffb74d;
+    border-color: #5a4a2a;
+  }
+
+  .panel-btn-warning:hover {
+    background: #4a3a2a;
+  }
+
+  .loading-modal-error {
+    background: #2a1a1a;
+    border-color: #5a2a2a;
+  }
+}
 .polish-option {
   display: flex;
   align-items: center;

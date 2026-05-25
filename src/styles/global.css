@@ -60,13 +60,13 @@ select {
   height: 32px;
   padding: 0 12px;
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  color: #374151;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-bg-card, #ffffff);
+  color: var(--color-text-secondary, #374151);
   font-size: 13px;
   white-space: nowrap;
 }
-.back-button:hover { background: #f3f4f6; }
+.back-button:hover { background: var(--color-bg-hover, #f3f4f6); }
 
 /* 通用工具类 */
 .text-muted {
