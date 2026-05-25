@@ -1,6 +1,61 @@
 # AI Novel Studio — CHANGELOG
 
-## v1.0.43 (2026-05-26)
+## v1.0.44 (2026-05-26) — Agent Workflow Runtime 最小闭环
+
+### 新增
+
+#### Agent Workflow Scripts（4 个 PowerShell 脚本）
+- `scripts/agent-workflow/verify_project.ps1` — 统一项目验证入口（cargo check / npm build / tauri build / pytest / git status）
+- `scripts/agent-workflow/check_docs_sync.ps1` — 关键文档同步检查（存在性 + 版本号）
+- `scripts/agent-workflow/run_feature_workflow.ps1` — 功能开发工作流引导（不自动修改代码）
+- `scripts/agent-workflow/release_workflow.ps1` — 发布前检查（不自动创建 tag）
+
+#### Agent Checklists（4 个 Markdown 清单）
+- `.github/checklists/feature-development.checklist.md` — 功能开发自检清单
+- `.github/checklists/release.checklist.md` — 发布检查清单
+- `.github/checklists/ui-review.checklist.md` — UI 审查清单
+- `.github/checklists/verification.checklist.md` — 综合验证清单
+
+#### Workflow Docs（2 个文档）
+- `.github/workflows-docs/agent-runtime-overview.md` — Agent Runtime 架构概览
+- `.github/workflows-docs/workflow-script-usage.md` — 脚本使用说明
+
+#### Agent Core（3 个 TypeScript 文件）
+- `src/agent/types.ts` — AgentTask / AgentWorkflow / PlannerInput / WorkflowSummary 类型
+- `src/agent/planner-lite.ts` — 固定章节生成 Workflow（7 个任务 + 依赖关系）
+- `src/agent/workflow-runner.ts` — Workflow 统计摘要 + 格式化输出
+
+#### Agent Tools（4 个 TypeScript 文件）
+- `src/agent-tools/tool-types.ts` — AgentToolResult / AgentToolContext / notImplemented
+- `src/agent-tools/project-tools.ts` — readProjectContext（占位）
+- `src/agent-tools/chapter-tools.ts` — readChapterOutline / saveCandidateDraft（占位）
+- `src/agent-tools/verification-tools.ts` — verifyOutlineCompliance / verifyStyleCompliance（占位）
+
+#### Prompt Pipeline（5 个 TypeScript 文件）
+- `src/prompts/README.md` — Prompt Pipeline 结构说明
+- `src/prompts/system/base-system-prompt.ts` — AI 行为边界和项目核心约束
+- `src/prompts/chapter/chapter-generation-prompt.ts` — 章节生成 Prompt 构建器
+- `src/prompts/style/style-constraint-prompt.ts` — 风格约束 Prompt 构建器
+- `src/prompts/verification/chapter-verification-prompt.ts` — 验证 Prompt 构建器
+
+#### 新文档
+- `docs/agent-runtime.md` — Agent Runtime 完整使用指南
+
+### 修改
+- `README.md` — 更新当前阶段为 Agent Workflow Runtime、新增 Agent Runtime 说明
+- `docs/version-roadmap.md` — 新增 v1.0.44～v1.1.0 路线
+- `package.json` / `Cargo.toml` / `tauri.conf.json` — 版本号 1.0.43 → 1.0.44
+
+### 开发者备注
+- 本次不新增小说业务功能
+- 不修改数据库 schema
+- 不替换现有正文生成链路
+- Prompt Pipeline 与现有 Markdown 模板并存，互不干扰
+- Tool Layer 当前全部返回 `not implemented` 占位
+- Planner Lite 返回固定 Workflow，不执行真实 AI 调用
+- 目标：Agent 规则系统 → 可执行工作流的最小闭环
+
+---
 
 ### 新增 — Agent 基础设施建设
 

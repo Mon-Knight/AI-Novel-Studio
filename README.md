@@ -12,9 +12,17 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 
 ## 当前阶段
 
-**v1.0.43** — Agent 基础设施建设阶段
+**v1.0.44** — Agent Workflow Runtime 最小闭环
 
-当前项目正处于从 AI 辅助工具向 AI Agent 创作平台的升级过程中。本阶段建立了完整的 Agent 工程化开发基础设施。
+当前项目正处于从 AI 辅助工具向 AI Agent 创作平台的升级过程中。本阶段建立了最小的 Agent 工作流执行系统。
+
+### Agent Workflow Runtime
+
+- 🔄 **工作流脚本** — `scripts/agent-workflow/` 提供 4 个验证和引导脚本（verify_project / check_docs_sync / run_feature_workflow / release_workflow）
+- ✅ **执行清单** — `.github/checklists/` 提供 4 个 Agent 执行清单（功能开发 / 发布 / UI审查 / 验证）
+- 📐 **核心类型** — `src/agent/` 提供最小 workflow 类型系统、Planner Lite 和 Workflow Runner
+- 🔧 **Tool Layer** — `src/agent-tools/` 提供未来 Tool Calling 接口（当前占位）
+- 📝 **Prompt Pipeline** — `src/prompts/` 提供未来 Prompt 管线结构（system / chapter / style / verification）
 
 ## 技术栈
 
@@ -43,7 +51,7 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 
 ## 当前版本
 
-**v1.0.43** — Agent 基础设施建设
+**v1.0.44** — Agent Workflow Runtime 最小闭环
 
 ## 功能概览
 
@@ -136,6 +144,7 @@ ai-novel-studio/
 | v0.9.0 | 质量检查与润色建议 |
 | v1.0.0 | 基础可用版整合 |
 | v1.0.43 | Agent 基础设施建设 |
+| v1.0.44 | Agent Workflow Runtime 最小闭环 |
 
 ### Agent 化路线
 

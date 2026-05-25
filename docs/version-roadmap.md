@@ -138,10 +138,43 @@ v0.11.0 质量检查与润色建议
 v0.12.0 导入导出与备份恢复
 v1.0.0  可正式用于长篇小说创作的基础版
 v1.0.43 Agent 基础设施建设
+v1.0.44 Agent Workflow Runtime 最小闭环
 
 ---
 
-## 4. Agent 化路线（Phase 2-3）
+## 4. Agent Runtime 阶段（v1.0.44+）
+
+```text
+v1.0.44：Agent Workflow Runtime 最小闭环 ✅
+  ├─ Workflow Scripts（4 个 PowerShell 脚本）
+  ├─ Checklists（4 个执行清单）
+  ├─ Agent Core（types / planner-lite / workflow-runner）
+  ├─ Tool Layer（占位接口）
+  └─ Prompt Pipeline（初始结构）
+
+v1.0.45：Tool Layer 接入真实项目读取
+  ├─ readProjectContext → 连接真实数据库
+  ├─ readChapterOutline → 连接真实章节数据
+  └─ saveCandidateDraft → 连接真实草稿存储
+
+v1.0.46：Verification Engine 基础版
+  ├─ verifyOutlineCompliance → 实际大纲验证
+  └─ verifyStyleCompliance → 实际风格验证
+
+v1.0.47：Prompt Pipeline 接入现有正文生成链路
+  ├─ 系统规则 Prompt → 接入生成上下文
+  ├─ 章节生成 Prompt → 替换现有 Prompt 拼接
+  └─ 风格约束 Prompt → 接入风格方案
+
+v1.1.0：Agent Workflow 稳定版
+  ├─ 完整闭环测试通过
+  ├─ 所有 Tool 接入真实数据
+  └─ Prompt Pipeline 与旧系统平滑切换
+```
+
+---
+
+## 5. Agent 化路线（Phase 2-3）
 
 ```text
 Phase 1: Agent 基础设施（v1.0.43+ 已完成）
