@@ -8,9 +8,48 @@ mod ai;
 mod db;
 mod large_text_save;
 mod outline_commands;
+mod window_state;
+
+use tauri::Manager;
+
+/// Native Feel P1: 获取应用数据目录
+fn get_app_data_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let dir = std::path::PathBuf::from(appdata).join("com.ainovelstudio.app");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir;
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let dir = std::path::PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("com.ainovelstudio.app");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir;
+        }
+    }
+    std::path::PathBuf::from(".")
+}
 
 fn main() {
     db::init_database();
+
+    // Native Feel P1: 确定应用数据目录
+    let app_data_dir = get_app_data_dir();
+
+    // 单实例检测
+    if !window_state::try_acquire_instance_lock(&app_data_dir) {
+        std::process::exit(0);
+    }
+
+    // 提前加载窗口状态
+    let saved_state = window_state::load_window_state(&app_data_dir);
+    let state_for_close = app_data_dir.clone();
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +127,20 @@ fn main() {
             commands::list_chapter_characters,
             commands::remove_chapter_character,
         ])
+        .setup(move |app| {
+            // Native Feel P1: 恢复窗口状态
+            if let Some(window) = app.get_window("main") {
+                window_state::apply_window_state(&window, &saved_state);
+            }
+            Ok(())
+        })
+        .on_window_event(move |event| {
+            // Native Feel P1: 关闭时保存窗口状态并释放单实例锁
+            if let tauri::WindowEvent::Destroyed = event.event() {
+                window_state::save_window_state(event.window(), &state_for_close);
+                window_state::release_instance_lock(&state_for_close);
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

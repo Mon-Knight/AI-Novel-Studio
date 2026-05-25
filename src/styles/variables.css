@@ -98,3 +98,35 @@
   --z-overlay: 300;
   --z-modal: 400;
 }
+
+/* === 暗色模式基础覆盖（Native Feel P1） === */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-primary: #7aa2ff;
+    --color-primary-hover: #5b8af0;
+    --color-primary-light: #1e2a45;
+    --color-primary-dark: #3b5fc0;
+
+    --color-bg-app: #1f1f1f;
+    --color-bg-sidebar: #252526;
+    --color-bg-panel: #252526;
+    --color-bg-card: #2d2d30;
+    --color-bg-editor: #1e1e1e;
+    --color-bg-hover: #3c3c3c;
+    --color-bg-active: #1e2a45;
+
+    --color-text-primary: #f3f3f3;
+    --color-text-secondary: #c8c8c8;
+    --color-text-muted: #8f8f8f;
+    --color-text-placeholder: #5a5a5a;
+
+    --color-border: #3c3c3c;
+    --color-border-light: #333333;
+    --color-border-focus: #7aa2ff;
+
+    --color-shadow: rgba(0, 0, 0, 0.3);
+    --color-shadow-hover: rgba(0, 0, 0, 0.5);
+
+    --color-focus-ring: #7aa2ff;
+  }
+}

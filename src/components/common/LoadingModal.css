@@ -1,33 +1,31 @@
 /**
- * AI Novel Studio - 统一加载弹窗样式
+ * AI Novel Studio - 统一加载弹窗样式（Native Feel P1 优化版）
  */
 
 .loading-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.12);
   z-index: var(--z-modal, 400);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  animation: loadingModalFadeIn 0.2s ease;
+  padding-top: 80px;
+  animation: loadingModalFadeIn 0.15s ease;
 }
 
 .loading-modal-card {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: calc(var(--z-modal, 400) + 1);
+  position: relative;
   background: var(--color-bg-card, #ffffff);
+  border: 1px solid var(--color-border, #e8e8f0);
   border-radius: var(--radius-lg, 12px);
-  box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.12));
-  padding: 32px 36px;
-  min-width: 320px;
-  max-width: 460px;
-  width: 90%;
+  box-shadow: var(--shadow-md, 0 2px 8px rgba(0, 0, 0, 0.06));
+  padding: 28px 32px;
+  min-width: 300px;
+  max-width: 420px;
+  width: auto;
   text-align: center;
-  animation: loadingModalSlideIn 0.25s ease;
+  animation: loadingModalSlideIn 0.15s ease;
 }
 
 @keyframes loadingModalFadeIn {
@@ -38,11 +36,11 @@
 @keyframes loadingModalSlideIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -48%);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%);
+    transform: translateY(0);
   }
 }
 
@@ -158,7 +156,6 @@
   border-radius: var(--radius-md, 8px);
   font-size: var(--font-size-sm, 12px);
   font-weight: var(--font-weight-medium, 500);
-  cursor: pointer;
   transition: background var(--transition-fast, 0.15s ease);
   border: 1px solid transparent;
 }
