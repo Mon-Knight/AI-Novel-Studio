@@ -70,15 +70,17 @@ fn validate_window_state(mut state: WindowState) -> WindowState {
 
     // 屏幕外防护：检查位置是否在有效显示器范围内
     if let Some((max_x, max_y)) = get_virtual_screen_bounds() {
-        // 坐标合法性：x/y 为负或超出虚拟屏幕范围时回退
+        // 坐标合法性：超出虚拟屏幕范围时回退
         if state.x < -200 || state.y < -200 || state.x > max_x || state.y > max_y {
             state.x = -1;
             state.y = -1;
         }
-    } else if state.x < 0 || state.y < 0 {
-        // 无法获取屏幕边界时的简单回退
-        state.x = -1;
-        state.y = -1;
+    } else {
+        // 无法获取屏幕边界时的宽松检测：只拒绝极度异常值
+        if state.x < -20000 || state.y < -20000 || state.x > 20000 || state.y > 20000 {
+            state.x = -1;
+            state.y = -1;
+        }
     }
 
     state
