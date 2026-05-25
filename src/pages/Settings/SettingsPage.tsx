@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { confirmInfo } from '../../utils/nativeDialog';
 import { aiSettingsService } from '../../services/ai/aiClient';
 import { novelRepository } from '../../services/database/novelRepository';
 import type { AiSettings } from '../../types/ai';
@@ -14,7 +15,7 @@ function SettingsPage() {
   const [repairMsg, setRepairMsg] = useState('');
 
   const handleRepairData = async () => {
-    if (!confirm('将尝试修复异常作品数据，修复前会自动备份。是否继续？')) return;
+    if (!(await confirmInfo({ title: '数据修复', message: '将尝试修复异常作品数据，修复前会自动备份。是否继续？' }))) return;
     try {
       const result = await novelRepository.repairData();
       setRepairMsg(`✅ 修复完成：${result.before} 条 → ${result.after} 条（已备份原数据）`);

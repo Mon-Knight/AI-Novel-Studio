@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { confirmDanger } from '../../utils/nativeDialog';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { settingRepository } from '../../services/database/settingRepository';
@@ -90,8 +91,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       flash('该分卷下仍有章节，请先移动或删除章节');
       return;
     }
-    if (!confirm('确定删除此分卷？')) return;
-    await volumeRepository.remove(id);
+    if (!(await confirmDanger({ title: '删除分卷', message: '确定删除此分卷？' }))) return;
     await loadData();
     flash('分卷已删除');
   };
@@ -140,8 +140,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   };
 
   const handleDeleteChapter = async (id: string) => {
-    if (!confirm('确定删除此章节？')) return;
-    await chapterRepository.remove(id);
+    if (!(await confirmDanger({ title: '删除章节', message: '确定删除此章节？' }))) return;
     await loadData();
     flash('章节已删除');
   };

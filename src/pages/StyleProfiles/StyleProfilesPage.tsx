@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { confirmDanger } from '../../utils/nativeDialog';
 import BackButton from '../../components/common/BackButton';
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
@@ -56,8 +57,7 @@ function StyleProfilesPage() {
   };
 
   const deleteStyle = async (id: string, name: string) => {
-    if (!confirm(`确定删除「${name}」？`)) return;
-    await styleProfileService.remove(id); flash('已删除');
+    if (!(await confirmDanger({ title: '删除风格', message: `确定删除「${name}」？` }))) return;
     styleProfileService.getAll().then(setStyles);
   };
 
@@ -70,8 +70,7 @@ function StyleProfilesPage() {
   };
 
   const deleteOutput = async (id: string, name: string) => {
-    if (!confirm(`确定删除「${name}」？`)) return;
-    await outputProfileService.remove(id); flash('已删除');
+    if (!(await confirmDanger({ title: '删除方案', message: `确定删除「${name}」？` }))) return;
     outputProfileService.getAll().then(setOutputs);
   };
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { confirmDanger } from '../../utils/nativeDialog';
 import type { Novel, ProtagonistProfile, DualProtagonistRelation, ProtagonistMode } from '../../types/novel';
 import type { WorldSetting } from '../../types/setting';
 import type { RuleSystem } from '../../types/setting';
@@ -417,7 +418,7 @@ function RuleSystemCard({ novelId, ruleSystems, onSave, onDelete }: RuleSystemCa
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定删除此规则体系？')) return;
+    if (!(await confirmDanger({ title: '删除规则', message: '确定删除此规则体系？' }))) return;
     try {
       await onDelete(id);
     } catch {

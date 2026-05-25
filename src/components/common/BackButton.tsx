@@ -7,14 +7,14 @@ interface BackButtonProps {
   label?: string;
   to?: string;
   fallbackTo?: string;
-  onBeforeBack?: () => boolean; // 返回 true 则继续，false 则取消
+  onBeforeBack?: () => boolean | Promise<boolean>;
 }
 
 function BackButton({ label = '返回', to, fallbackTo = '/', onBeforeBack }: BackButtonProps) {
   const navigate = useNavigate();
 
-  const handleClick = () => {
-    if (onBeforeBack && !onBeforeBack()) return;
+  const handleClick = async () => {
+    if (onBeforeBack && !(await onBeforeBack())) return;
     if (to) { navigate(to); return; }
     if (window.history.length > 2) { navigate(-1); }
     else { navigate(fallbackTo); }

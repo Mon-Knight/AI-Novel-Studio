@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import BackButton from '../../components/common/BackButton';
+import { confirmInfo } from '../../utils/nativeDialog';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import BackButton from '../../components/common/BackButton';
 import VolumeTree from '../../components/workspace/VolumeTree';
 import EditorArea from '../../components/workspace/EditorArea';
 import StatusBar from '../../components/workspace/StatusBar';
@@ -139,33 +140,33 @@ function WritingWorkspacePage() {
     return () => { cancelled = true; };
   }, [novelId, searchParams, loadChapterDraft]);
 
-  const confirmDiscardChapterGoal = useCallback(() => {
+  const confirmDiscardChapterGoal = useCallback(async () => {
     if (!chapterGoalDirty) return true;
-    return confirm('本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？');
+    return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？' });
   }, [chapterGoalDirty]);
 
-  const handleSelectChapter = useCallback((chapterId: string) => {
-    if (!confirmDiscardChapterGoal()) return;
+  const handleSelectChapter = useCallback(async (chapterId: string) => {
+    if (!(await confirmDiscardChapterGoal())) return;
     setChapterGoalDirty(false);
     setActiveChapterId(chapterId);
     setActivePanel(null); // 切换章节关闭面板
     loadChapterDraft(chapterId);
   }, [confirmDiscardChapterGoal, loadChapterDraft]);
 
-  const handleTogglePanel = useCallback((panel: PanelType) => {
-    if (activePanel === 'outline' && !confirmDiscardChapterGoal()) return;
+  const handleTogglePanel = useCallback(async (panel: PanelType) => {
+    if (activePanel === 'outline' && !(await confirmDiscardChapterGoal())) return;
     if (activePanel === 'outline') setChapterGoalDirty(false);
     setActivePanel((prev) => (prev === panel ? null : panel));
   }, [activePanel, confirmDiscardChapterGoal]);
 
-  const handleOpenPanel = useCallback((panel: string) => {
-    if (activePanel === 'outline' && panel !== 'outline' && !confirmDiscardChapterGoal()) return;
+  const handleOpenPanel = useCallback(async (panel: string) => {
+    if (activePanel === 'outline' && panel !== 'outline' && !(await confirmDiscardChapterGoal())) return;
     if (activePanel === 'outline' && panel !== 'outline') setChapterGoalDirty(false);
     setActivePanel(panel as PanelType);
   }, [activePanel, confirmDiscardChapterGoal]);
 
-  const handleClosePanel = useCallback(() => {
-    if (!confirmDiscardChapterGoal()) return;
+  const handleClosePanel = useCallback(async () => {
+    if (!(await confirmDiscardChapterGoal())) return;
     setChapterGoalDirty(false);
     setActivePanel(null);
   }, [confirmDiscardChapterGoal]);
@@ -394,9 +395,9 @@ function WritingWorkspacePage() {
           <BackButton
             label="返回作品详情"
             to={`/novels/${novelId}`}
-            onBeforeBack={() => {
-              if (chapterGoalDirty) return confirm('本章目标有未保存修改，直接返回会丢失这些修改。是否继续？');
-              if (isDirty) return confirm('当前正文有未保存修改，直接返回可能丢失修改。是否继续？');
+            onBeforeBack={async () => {
+              if (chapterGoalDirty) return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，直接返回会丢失这些修改。是否继续？' });
+              if (isDirty) return await confirmInfo({ title: '未保存修改', message: '当前正文有未保存修改，直接返回可能丢失修改。是否继续？' });
               return true;
             }}
           />
@@ -428,9 +429,9 @@ function WritingWorkspacePage() {
             <BackButton
               label="返回作品"
               to={`/novels/${novelId}`}
-              onBeforeBack={() => {
-                if (chapterGoalDirty) return confirm('本章目标有未保存修改，直接返回会丢失这些修改。是否继续？');
-                if (isDirty) return confirm('当前正文有未保存修改，直接返回可能丢失修改。是否继续？');
+              onBeforeBack={async () => {
+                if (chapterGoalDirty) return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，直接返回会丢失这些修改。是否继续？' });
+                if (isDirty) return await confirmInfo({ title: '未保存修改', message: '当前正文有未保存修改，直接返回可能丢失修改。是否继续？' });
                 return true;
               }}
             />

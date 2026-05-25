@@ -9,6 +9,7 @@ import { buildFreshChapterGenerationContext } from '../../../services/prompt/con
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { notifyNative } from '../../../utils/nativeNotification';
+import { confirmInfo, confirmDanger } from '../../../utils/nativeDialog';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
@@ -285,12 +286,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       preflightWarnings.push('未能从章节大纲中提取关键剧情点，建议补充大纲。');
     }
     if (preflightWarnings.length > 0) {
-      const ok = confirm(
-        `⚠️ ${preflightWarnings.join('\n')}\n\n` +
-        '本次生成将尽量使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n' +
-        '建议先在大纲面板中补充或保存章节大纲。\n\n' +
-        '是否仍然继续生成？'
-      );
+      const ok = await confirmInfo({
+        title: '生成前提示',
+        message: `⚠️ ${preflightWarnings.join('\n')}\n\n本次生成将尽量使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n建议先在大纲面板中补充或保存章节大纲。\n\n是否仍然继续生成？`,
+      });
       if (!ok) return;
     }
 
@@ -577,8 +576,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       const riskText = validationState?.draftId === latest.id
         ? validationState.note
         : latest.note || '该正文可能偏离章节大纲。';
-      if (!confirm(`该正文可能偏离章节大纲，仍要采用吗？\n\n${riskText}`)) return;
-    } else if (!confirm(`确认采用草稿 v${latest.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。`)) {
+      if (!(await confirmDanger({ title: '采用确认', message: `该正文可能偏离章节大纲，仍要采用吗？\n\n${riskText}` }))) return;
+    } else if (!(await confirmInfo({ title: '采用草稿', message: `确认采用草稿 v${latest.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。` }))) {
       return;
     }
 

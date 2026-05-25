@@ -3,6 +3,7 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import BackButton from '../../components/common/BackButton';
+import { confirmDanger } from '../../utils/nativeDialog';
 import { templateService, type UserTemplate, type TemplateType, TemplateTypeLabels } from '../../services/templates/templateService';
 
 interface BuiltInTemplate {
@@ -144,8 +145,8 @@ function TemplatesPage() {
   };
 
   // 删除模板
-  const handleDeleteTemplate = (tpl: UserTemplate) => {
-    if (!confirm(`确定删除模板「${tpl.name}」吗？\n删除后无法恢复。`)) return;
+  const handleDeleteTemplate = async (tpl: UserTemplate) => {
+    if (!(await confirmDanger({ title: '删除模板', message: `确定删除模板「${tpl.name}」吗？\n删除后无法恢复。` }))) return;
     templateService.remove(tpl.id);
     loadUserTemplates();
     setMsg(`已删除模板「${tpl.name}」`);

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
+import { confirmInfo } from '../../../utils/nativeDialog';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { formatDateTime } from '../../../utils/date';
 import { formatNumber } from '../../../utils/format';
@@ -37,7 +38,7 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
   useEffect(() => { load(); }, [chapterId]);
 
   const handleAdopt = async (draft: ChapterDraft) => {
-    if (!confirm(`确认采用 v${draft.versionNo} 作为正式正文？`)) return;
+    if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
     await draftVersionService.adopt(draft.id, chapterId);
     setMsg(`v${draft.versionNo} 已采用`);
     setTimeout(() => setMsg(''), 2000);
