@@ -66,7 +66,6 @@
   border-radius: var(--radius-md);
   padding: var(--spacing-lg);
   text-align: center;
-  cursor: pointer;
   transition: all var(--transition-fast);
   text-decoration: none;
   color: var(--color-text-primary);
@@ -129,7 +128,6 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  cursor: pointer;
   transition: all var(--transition-fast);
   display: flex;
   flex-direction: column;
@@ -152,7 +150,6 @@
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid var(--color-border-light);
-  cursor: pointer;
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -276,7 +273,6 @@
   font-size: var(--font-size-sm);
   color: var(--color-primary);
   font-weight: var(--font-weight-medium);
-  cursor: pointer;
   padding: var(--spacing-xs) var(--spacing-md);
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);

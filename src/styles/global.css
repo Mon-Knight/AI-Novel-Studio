@@ -40,10 +40,8 @@ a:hover {
 }
 
 button {
-  cursor: pointer;
   font-family: var(--font-family);
   border: none;
-  outline: none;
   background: none;
 }
 
@@ -51,31 +49,8 @@ input,
 textarea,
 select {
   font-family: var(--font-family);
-  outline: none;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-text-muted);
-  border-radius: var(--radius-full);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
-}
-
-::selection {
-  background-color: var(--color-primary-light);
-  color: var(--color-text-primary);
-}
 
 /* 返回按钮 */
 .back-button {
@@ -89,7 +64,6 @@ select {
   background: #ffffff;
   color: #374151;
   font-size: 13px;
-  cursor: pointer;
   white-space: nowrap;
 }
 .back-button:hover { background: #f3f4f6; }
@@ -97,6 +71,24 @@ select {
 /* 通用工具类 */
 .text-muted {
   color: var(--color-text-muted);
+}
+
+/* === 焦点可见样式（替代 outline:none） === */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring, #4a7cf7);
+  outline-offset: 2px;
+}
+
+/* === 无障碍：减少动画 === */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .text-secondary {

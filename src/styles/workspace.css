@@ -59,7 +59,6 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  cursor: pointer;
   transition: background var(--transition-fast);
 }
 
@@ -80,7 +79,6 @@
   padding: 6px var(--spacing-lg) 6px 44px;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  cursor: pointer;
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
@@ -131,7 +129,6 @@
   margin: var(--spacing-xs) var(--spacing-sm);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  cursor: pointer;
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
   text-align: left;
@@ -167,7 +164,6 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   border-radius: var(--radius-sm);
-  cursor: pointer;
   transition: all var(--transition-fast);
   border: 1px solid transparent;
 }
@@ -223,7 +219,7 @@
 }
 
 .editor-body:focus {
-  outline: none;
+  /* 使用全局 :focus-visible 统一焦点样式 */
 }
 
 .editor-body[contenteditable='true'] {
@@ -327,7 +323,6 @@
   min-height: 420px;
   padding: 36px 44px;
   border: none;
-  outline: none;
   resize: vertical;
   font-family: var(--font-family-editor);
   font-size: 18px;
