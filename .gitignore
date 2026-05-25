@@ -4,6 +4,10 @@ node_modules/
 # Build outputs
 dist/
 target/
+dist-release/
+*.msi
+*.exe
+*.nsis.zip
 
 # Environment
 .env
