@@ -9,6 +9,23 @@
 
 ---
 
+## 0. Agent 基础设施（v1.0.43 新增）
+
+AI Novel Studio 已建立完整的 Agent 工程化开发基础设施。所有开发者在开始工作前，除本文档外，还应阅读：
+
+- **`AGENTS.md`** — AI Agent 总入口规则（必读）
+- **`.github/instructions/`** — 6 个分领域开发指令
+- **`.github/skills/`** — 5 个多步骤 Agent 工作流
+- **`.cursor/rules/`** — 5 个 IDE 规则
+- **`docs/agent-workflow.md`** — Agent 标准工作流
+
+AI Agent 在操作本仓库时，必须：
+1. 先读 `AGENTS.md`
+2. 遵循 `docs/agent-workflow.md` 定义的工作流
+3. 遵守 `.cursor/rules/agent-safety.mdc` 中的安全约束
+
+---
+
 ## 1. 项目基本定位
 
 AI Novel Studio 是一个原生运行在 Windows 上的 AI 小说创作软件。

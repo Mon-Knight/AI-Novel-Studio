@@ -1,0 +1,74 @@
+---
+description: AI Novel Studio 项目架构规则 - 模块边界、技术栈、目录结构
+globs: **/*
+alwaysApply: true
+---
+
+# Project Architecture Rules
+
+## 项目身份
+
+AI Novel Studio 是：
+- AI 长篇小说创作工程系统
+- AI Autonomous Creative Platform
+- Windows 桌面端 AI 写作工作台
+
+## 技术栈（不可变）
+
+| 层级 | 技术 |
+|------|------|
+| 桌面壳 | Tauri (Rust) |
+| 前端 | React 18 + TypeScript 5 |
+| 构建 | Vite 5 |
+| 路由 | React Router 6 (HashRouter) |
+| 数据 | SQLite / LocalStorage |
+
+## 模块边界
+
+### 世界系统
+- 世界背景设定
+- 规则体系（魔法/科技/规则）
+- 主角特殊能力
+- 不包含"世界推演"和"分支历史"
+
+### 小说工程
+- Novel → Volume → Chapter → ChapterDraft
+- 分卷大纲、章节大纲
+- 字数目标、状态管理
+
+### 上下文资产
+- Character（角色库）
+- ChapterEvent（剧情事件）
+- ChapterSummary（章节总结）
+- ContextRecord（上下文记录）
+
+### AI 系统
+- Prompt 模板管理
+- AI 服务层封装
+- AI 任务记录
+- 风格方案 / 输出控制方案
+
+### Agent 系统（预留）
+- Agent Tasks
+- Tool Calling
+- Planner
+- Long-term Memory
+- Multi-Agent Workflow
+
+## 目录结构约束
+
+- `src/pages/` - 页面级组件，只组织布局
+- `src/components/` - UI 组件，按功能分目录
+- `src/features/` - 业务逻辑模块
+- `src/services/` - AI/数据库/提示词服务层
+- `src/store/` - 状态管理
+- `src/types/` - TypeScript 类型定义
+- `src-tauri/` - Rust 桌面壳
+- `prompts/` - AI 提示词模板
+
+## 关键约束
+
+- 禁止把所有逻辑写进 App.tsx
+- 禁止在组件中直接写 SQL
+- 禁止在组件中直接写大量 Prompt
+- 禁止模块间循环依赖

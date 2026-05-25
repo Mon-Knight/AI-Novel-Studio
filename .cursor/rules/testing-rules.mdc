@@ -1,0 +1,50 @@
+---
+description: AI Novel Studio 测试规则 - 必须运行的验证命令、验证清单
+globs: **/*
+alwaysApply: true
+---
+
+# Testing Rules
+
+## 强制验证命令（每次修改后必须运行）
+
+```powershell
+# 1. Rust 编译检查
+cargo check
+
+# 2. 前端构建
+npm run build
+
+# 3. Tauri 完整构建
+npm run tauri build
+
+# 4. Git 状态
+git status
+```
+
+以上命令 **全部通过** 才能提交代码。
+
+## 验证检查清单
+
+- [ ] `cargo check` 通过，无编译错误
+- [ ] `npm run build` 通过，无 TS 类型错误
+- [ ] `npm run tauri build` 通过
+- [ ] `git status` 显示 working tree clean
+- [ ] 所有页面路由可访问
+- [ ] 写作工作台正常渲染
+- [ ] 右侧工具栏正常交互
+- [ ] 无控制台报错
+
+## 构建失败处理
+
+1. 完整记录错误输出
+2. 定位失败文件和行号
+3. 分析原因
+4. 修复后重新运行全部验证
+5. 全部通过后才可提交
+
+## 禁止
+
+- ❌ 跳过验证步骤
+- ❌ 忽略构建警告/错误
+- ❌ 提交未通过验证的代码

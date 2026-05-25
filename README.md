@@ -6,7 +6,15 @@
 
 AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理系统。它是一个面向长篇小说创作的 **桌面端 AI 工作台**。
 
+**长期愿景**：AI Autonomous Creative Platform（AI 自主创作平台）
+
 核心理念：**用户控制方向，AI 分工生成，章节逐步采用，上下文持续沉淀**。
+
+## 当前阶段
+
+**v1.0.43** — Agent 基础设施建设阶段
+
+当前项目正处于从 AI 辅助工具向 AI Agent 创作平台的升级过程中。本阶段建立了完整的 Agent 工程化开发基础设施。
 
 ## 技术栈
 
@@ -16,9 +24,26 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 - **路由**：React Router 6（HashRouter）
 - **数据存储**：SQLite（Tauri 模式）/ LocalStorage（浏览器开发模式）
 
+## Agent 化路线
+
+| 阶段 | 版本 | 内容 |
+|------|------|------|
+| Phase 1 | v1.0.43+ | Agent 基础设施（Rules / Skills / Instructions / Workflow） |
+| Phase 2 | v2.x | Agent 化（Planner / Tool Calling / Memory / Verification） |
+| Phase 3 | v3.x | Autonomous（Multi-Agent / 自主创作） |
+
+### Agent 基础设施
+
+- 📋 **AGENTS.md** — AI Agent 总入口规则
+- 📐 **Instructions** — 6 个分领域开发指令（前端/Tauri/数据库/测试/文档/Agent行为）
+- 📝 **Prompts** — 4 个标准 Prompt 模板（版本规划/Bug修复/发布报告/构建验证）
+- 🔧 **Skills** — 5 个多步骤 Agent 工作流（规划/实现/验证/UI审查/发布）
+- 📏 **Cursor Rules** — 5 个 IDE 规则（架构/UI/数据库/安全/测试）
+- 📚 **Docs** — 4 个新文档（模块边界/项目架构/Agent工作流/AI Agent路线图）
+
 ## 当前版本
 
-**v1.0.0** — 基础可用版
+**v1.0.43** — Agent 基础设施建设
 
 ## 功能概览
 
@@ -110,6 +135,14 @@ ai-novel-studio/
 | v0.8.0 | 上下文总结系统 |
 | v0.9.0 | 质量检查与润色建议 |
 | v1.0.0 | 基础可用版整合 |
+| v1.0.43 | Agent 基础设施建设 |
+
+### Agent 化路线
+
+| 版本 | 阶段 |
+|------|------|
+| v2.x | Agent 化（Planner / Tool Calling / Memory / Verification） |
+| v3.x | Autonomous（Multi-Agent / 自主创作） |
 
 ## GitHub
 

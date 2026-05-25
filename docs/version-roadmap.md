@@ -137,11 +137,47 @@ v0.10.0 上下文总结与连续生成
 v0.11.0 质量检查与润色建议
 v0.12.0 导入导出与备份恢复
 v1.0.0  可正式用于长篇小说创作的基础版
-```
+v1.0.43 Agent 基础设施建设
 
 ---
 
-## 4. v0.1.0：桌面壳与作品管理首页
+## 4. Agent 化路线（Phase 2-3）
+
+```text
+Phase 1: Agent 基础设施（v1.0.43+ 已完成）
+  ├─ AGENTS.md（Agent 总入口规则）
+  ├─ Instructions（6 个分领域开发指令）
+  ├─ Prompts（4 个标准 Prompt 模板）
+  ├─ Skills（5 个多步骤 Agent 工作流）
+  ├─ Cursor Rules（5 个 IDE 规则）
+  └─ Docs（4 个新文档）
+
+Phase 2: Agent 化（v2.x 系列）
+  ├─ Rules Engine（规则自动检查）
+  ├─ Planner（Agent 自主规划）
+  ├─ Tool Calling（工具调用能力）
+  ├─ Memory Engine（长期记忆）
+  └─ Verification Engine（自我验证）
+
+Phase 3: Autonomous（v3.x 系列）
+  ├─ Multi-Agent Workflow（多 Agent 协作）
+  ├─ Autonomous Creation（自主创作流程）
+  └─ Creative Collaboration（人机协作模式）
+```
+
+### Agent 化关键能力演进
+
+| 能力 | v1.x（当前） | v2.x（Agent 化） | v3.x（Autonomous） |
+|------|------------|-----------------|-------------------|
+| Rules | 静态文档 | 动态检查 | 自动执行 |
+| Planning | 人工拆解 | Agent 辅助 | Agent 自主 |
+| Memory | 章节上下文 | 长期记忆 | 语义记忆 |
+| Tool Calling | 无 | 工具注册 | 自主选择 |
+| Multi-Agent | 无 | 无 | 协作网络 |
+
+---
+
+## 5. v0.1.0：桌面壳与作品管理首页
 
 ### 目标
 
