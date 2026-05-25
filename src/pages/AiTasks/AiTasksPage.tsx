@@ -8,6 +8,7 @@ import { formatTokenCount } from '../../utils/format';
 import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { AiTaskRecord, AiTaskType, AiTaskStatus } from '../../types/ai';
 import { AiTaskTypeLabels } from '../../types/ai';
+import { confirmDanger } from '../../utils/nativeDialog';
 
 const TYPE_FILTERS: (AiTaskType | 'all')[] = ['all', 'connection_test', 'chapter_generate', 'character_generate', 'event_suggest', 'setting_expand', 'outline_generate', 'volume_outline_generate', 'chapter_outline_generate', 'context_summarize', 'style_analyze', 'quality_check', 'chapter_polish'];
 const STATUS_FILTERS: (AiTaskStatus | 'all')[] = ['all', 'succeeded', 'failed', 'pending', 'running'];
@@ -55,7 +56,7 @@ function AiTasksPage() {
 
   // 单条删除
   const handleDeleteOne = async (task: AiTaskRecord) => {
-    if (!confirm(`确定删除这条「${AiTaskTypeLabels[task.taskType]}」记录吗？`)) return;
+    if (!(await confirmDanger({ title: '删除任务记录', message: `确定删除这条「${AiTaskTypeLabels[task.taskType]}」记录吗？` }))) return;
     try {
       await aiTaskService.deleteOne(task.id);
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
@@ -70,7 +71,7 @@ function AiTasksPage() {
   // 批量删除
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`确定删除选中的 ${selectedIds.size} 条 AI 任务记录吗？`)) return;
+    if (!(await confirmDanger({ title: '批量删除', message: `确定删除选中的 ${selectedIds.size} 条 AI 任务记录吗？` }))) return;
     setDeleting(true);
     try {
       await aiTaskService.deleteMany([...selectedIds]);
@@ -88,11 +89,10 @@ function AiTasksPage() {
 
   // 清空全部
   const handleClearAll = async () => {
-    if (!confirm(
-      '确定清空所有 AI 任务记录吗？\n\n' +
-      '这只会删除 AI 调用历史，不会删除作品、章节、草稿、大纲、角色或设定。\n\n' +
-      '此操作无法恢复。'
-    )) return;
+    if (!(await confirmDanger({
+      title: '清空全部记录',
+      message: '确定清空所有 AI 任务记录吗？\n\n这只会删除 AI 调用历史，不会删除作品、章节、草稿、大纲、角色或设定。\n\n此操作无法恢复。',
+    }))) return;
     setDeleting(true);
     try {
       await aiTaskService.clearAll();

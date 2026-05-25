@@ -8,6 +8,7 @@ import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient
 import { buildFreshChapterGenerationContext } from '../../../services/prompt/contextBuilder';
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { notifyNative } from '../../../utils/nativeNotification';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
@@ -427,6 +428,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             setErrorMsg('');
             setStatusMsg('生成完成，大纲遵循检查和角色出场检查通过。');
           }
+
+          // Native Feel P2.2: 生成完成通知
+          notifyNative({ kind: 'success', body: `正文生成完成（${draft.wordCount} 字）` });
         },
       );
 
@@ -436,6 +440,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setErrorMsg(msg);
       setStatusMsg('');
       setGenerating(false);
+
+      // Native Feel P2.2: 生成失败通知
+      notifyNative({ kind: 'error', body: `正文生成失败：${msg}` });
 
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
         // 错误已由 runWithLoading 显示弹窗，这里只做本地状态清理

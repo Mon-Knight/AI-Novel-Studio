@@ -7,6 +7,7 @@ import FirstTimeGuide from '../../components/common/FirstTimeGuide';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
 import ImportJsonDialog from '../../components/import/ImportJsonDialog';
 import type { Novel } from '../../types/novel';
+import { confirmDanger } from '../../utils/nativeDialog';
 import '../../styles/home.css';
 
 const quickActions = [
@@ -74,11 +75,10 @@ function HomePage() {
     if (deletingId) return;
     const novel = novels.find((n) => n.id === novelId);
     if (!novel) return;
-    if (!confirm(
-      `确定要删除作品《${novel.title}》吗？\n\n` +
-      `此操作会删除该作品下的分卷、章节、草稿、大纲、角色、事件、设定、上下文总结和相关 AI 任务记录。\n\n` +
-      `删除后无法恢复。`
-    )) return;
+    if (!(await confirmDanger({
+      title: '删除作品',
+      message: `确定要删除作品《${novel.title}》吗？\n\n此操作会删除该作品下的分卷、章节、草稿、大纲、角色、事件、设定、上下文总结和相关 AI 任务记录。\n\n删除后无法恢复。`,
+    }))) return;
 
     setDeletingId(novelId);
     try {
