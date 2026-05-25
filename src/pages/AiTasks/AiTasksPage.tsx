@@ -158,7 +158,7 @@ function AiTasksPage() {
       {(typeFilter !== 'all' || statusFilter !== 'all') && filtered.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <button className="btn btn-xs btn-danger" onClick={async () => {
-            if (!confirm(`确定删除当前筛选的 ${filtered.length} 条记录吗？`)) return;
+            if (!(await confirmDanger({ title: '删除筛选记录', message: `确定删除当前筛选的 ${filtered.length} 条记录吗？` }))) return;
             setDeleting(true);
             try {
               await aiTaskService.deleteMany(filtered.map((t) => t.id));

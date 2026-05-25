@@ -67,10 +67,12 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
       {/* v1.0.26 删除按钮 */}
       {onDelete && (
         <button
+          type="button"
           className="novel-card-delete-btn"
           title="删除作品"
           onClick={(e) => {
             e.stopPropagation();
+            e.preventDefault();
             onDelete(novel.id);
           }}
         >

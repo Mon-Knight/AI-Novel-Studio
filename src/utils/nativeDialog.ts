@@ -29,13 +29,19 @@ export async function confirmDanger(options: {
   try {
     const dialog = await getTauriDialog();
     if (dialog) {
-      return await dialog.ask(message, { title, okLabel, cancelLabel, type: 'warning' });
+      return await dialog.ask(message, { title, type: 'warning' });
     }
-  } catch {
-    // 静默回退
+  } catch (err) {
+    console.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
   }
 
-  return window.confirm(`${title}\n\n${message}`);
+  try {
+    return window.confirm(`${title}\n\n${message}`);
+  } catch {
+    // 极端情况：window.confirm 也不可用，危险操作绝不默认执行
+    console.error('[nativeDialog] window.confirm unavailable, denying dangerous action');
+    return false;
+  }
 }
 
 /** 普通确认 */
@@ -45,18 +51,22 @@ export async function confirmInfo(options: {
   okLabel?: string;
   cancelLabel?: string;
 }): Promise<boolean> {
-  const { title = '提示', message, okLabel = '确定', cancelLabel = '取消' } = options;
+  const { title = '提示', message } = options;
 
   try {
     const dialog = await getTauriDialog();
     if (dialog) {
-      return await dialog.ask(message, { title, okLabel, cancelLabel, type: 'info' });
+      return await dialog.ask(message, { title, type: 'info' });
     }
-  } catch {
-    // 静默回退
+  } catch (err) {
+    console.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
   }
 
-  return window.confirm(`${title}\n\n${message}`);
+  try {
+    return window.confirm(`${title}\n\n${message}`);
+  } catch {
+    return false;
+  }
 }
 
 /** 信息提示（无确认/取消） */
