@@ -31,6 +31,9 @@
   --color-error: #f44336;
   --color-info: #2196f3;
 
+  --color-accent: #4a7cf7;
+  --color-focus-ring: #4a7cf7;
+
   --color-shadow: rgba(0, 0, 0, 0.06);
   --color-shadow-hover: rgba(0, 0, 0, 0.12);
 
@@ -128,6 +131,8 @@
     --color-shadow-hover: rgba(0, 0, 0, 0.5);
 
     --color-focus-ring: #7aa2ff;
+
+    --color-accent: #7aa2ff;
 
     /* 色调微调 */
     --color-success: #66bb6a;

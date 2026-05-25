@@ -9,6 +9,7 @@ mod db;
 mod large_text_save;
 mod outline_commands;
 mod window_state;
+mod system_accent;
 
 use tauri::Manager;
 
@@ -129,6 +130,7 @@ fn main() {
             commands::add_chapter_character,
             commands::list_chapter_characters,
             commands::remove_chapter_character,
+            system_accent::get_system_accent_color,
         ])
         .setup(move |app| {
             // Native Feel P1.1: 恢复窗口状态
