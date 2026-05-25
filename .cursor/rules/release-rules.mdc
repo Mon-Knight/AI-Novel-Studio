@@ -1,0 +1,34 @@
+---
+description: AI Novel Studio 发布规则 — 发布前必须验证，push/tag 需人工确认
+globs: scripts/agent-workflow/release_workflow.ps1,.github/skills/release-package/**
+alwaysApply: true
+---
+
+# Release Rules
+
+## 发布前强制要求
+
+- ✅ `npm run build` 通过
+- ✅ `cargo check` 通过
+- ✅ `npm run tauri build` 通过
+- ✅ `CHANGELOG.md` 已更新
+- ✅ `README.md` 已同步
+- ✅ `docs/version-roadmap.md` 已标记
+- ✅ 安装包路径已记录
+
+## 人工确认事项
+
+以下操作 **默认不自动执行**，需人工确认：
+
+- ⚠️ `git tag vX.X.X` — 默认不自动 tag
+- ⚠️ `git push origin main` — 默认不自动 push
+- ⚠️ `git push origin vX.X.X` — 默认不自动 push tag
+- ⚠️ 删除文件 — 绝对不自动删除
+- ⚠️ 覆盖安装包 — 需确认
+
+## 禁止
+
+- ❌ 禁止构建失败时强行发布
+- ❌ 禁止未更新 CHANGELOG 就发布
+- ❌ 禁止未记录安装包路径就发布
+- ❌ 禁止提交敏感信息（API Key / .env.local / *.db）

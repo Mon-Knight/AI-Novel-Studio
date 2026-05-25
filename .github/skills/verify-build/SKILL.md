@@ -124,6 +124,31 @@ git status
 
 ---
 
+## 输入信息
+
+- 无（自动检测项目状态）
+
+## 禁止事项
+
+- ❌ 不跳过任何步骤（即使某步之前通过过）
+- ❌ 不隐藏错误输出
+- ❌ 不在失败时继续下一步
+
+## 验证方式
+
+- 所有步骤状态为 PASS 或 SKIPPED（无 FAIL）
+
+## 失败处理
+
+- 失败步骤必须输出完整命令和错误摘要
+- 定位失败文件和行号
+- 给出修复建议
+
+## 关联资源
+
+- 关联脚本：`scripts/agent-workflow/verify_project.ps1`（必须调用）
+- 关联 Checklist：`.github/checklists/verification.checklist.md`
+
 ## 约束
 
 - 必须按顺序执行，前一步失败不继续

@@ -229,5 +229,62 @@ git status               # 确认 working tree clean
 
 ---
 
+## 11. 用户与 Agent 的真实协作流程
+
+### 11.1 当前协作模式（v1.x）
+
+AI Novel Studio 当前采用 **用户主导、Agent 执行** 的协作模式：
+
+```text
+第 1 步：用户向 ChatGPT / Planner 询问下一步
+        ↓
+第 2 步：ChatGPT 分析项目状态，生成完整任务书
+        ↓
+第 3 步：用户复制任务书给 VS Code Agent
+        ↓
+第 4 步：Agent 根据任务书执行开发
+        ↓
+第 5 步：Agent 输出完成汇报
+        ↓
+第 6 步：用户把完成汇报发回 ChatGPT
+        ↓
+第 7 步：ChatGPT 分析结果，生成下一步任务书
+```
+
+### 11.2 Agent 的角色定位
+
+Agent **不是** 自主决策者。Agent 是 **任务执行者**。
+
+- ✅ Agent 必须按任务书执行
+- ✅ Agent 可以读取项目中的 Skills 来指导执行方式
+- ❌ Agent 不能因为项目里有 Skills 就自行扩展任务
+- ❌ Agent 不能自行决定下一步版本内容
+- ❌ Agent 不能跳过任务书中的禁止事项
+
+### 11.3 任务书要求
+
+任务书（由 ChatGPT 生成）必须：
+
+- 自包含（不依赖对话历史）
+- 包含版本号、目标、禁止事项
+- 包含详细实现要求
+- 包含测试要求
+- 包含完成汇报格式
+
+详见 `.github/skills/agent-task-writer/SKILL.md`。
+
+### 11.4 开发辅助 Skills 的作用
+
+`.github/skills/` 中的 Skills 是 **开发辅助系统**，不是用户端产品功能。
+
+它们的作用是：
+- 指导 Agent 如何正确执行任务
+- 提供标准化的执行流程
+- 防止 Agent 越界操作
+
+它们不代表软件内部功能已经实现。
+
+---
+
 > **本文件是 AI Novel Studio Agent 化开发的核心约束文件。**
 > **所有 AI Agent 在操作本仓库时，必须无条件遵守本文件中的规则。**

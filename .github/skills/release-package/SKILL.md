@@ -158,9 +158,41 @@ git push origin vX.X.X
 
 ---
 
+## 输入信息
+
+- 当前版本号
+- 发布类型（正式版 / 预览版）
+- 是否需要创建 tag
+
+## 禁止事项
+
+- ❌ 禁止未经构建验证就发布
+- ❌ 禁止自动 push（必须人工确认）
+- ❌ 禁止自动创建 tag（默认不自动 tag，除非任务书明确要求）
+- ❌ 禁止未经确认覆盖安装包
+- ❌ 禁止自动删除文件
+- ❌ 禁止自动修改版本号
+
+## 验证方式
+
+- `verify_project.ps1` 全部通过
+- 版本号在所有位置一致
+- CHANGELOG 已更新
+
+## 失败处理
+
+- 如果构建验证失败，必须修复后才能继续
+- 如果文档未同步，先运行 docs-sync Skill
+
+## 关联资源
+
+- 关联脚本：`scripts/agent-workflow/release_workflow.ps1`
+- 关联 Checklist：`.github/checklists/release.checklist.md`
+- 关联 Skill：`docs-sync`（发布前先同步文档）
+
 ## 约束
 
 - 必须先验证构建，再发布
 - 版本号必须在所有位置一致
-- 必须创建 tag
+- push 和 tag 必须人工确认（默认不自动执行）
 - 必须推送到 GitHub

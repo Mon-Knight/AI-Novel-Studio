@@ -1,6 +1,6 @@
 # check_docs_sync.ps1
 # AI Novel Studio - Document Sync Check
-# Version: v1.0.44
+# Version: v1.0.45
 # Purpose: Check key documents exist and version is synced
 
 $ErrorActionPreference = "Continue"
@@ -14,7 +14,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $Results = @()
-$CURRENT_VERSION = "1.0.44"
+$CURRENT_VERSION = "1.0.45"
 
 # Check file existence
 $requiredFiles = @(
@@ -76,9 +76,42 @@ $checklistFiles = @(
     ".github/checklists/feature-development.checklist.md",
     ".github/checklists/release.checklist.md",
     ".github/checklists/ui-review.checklist.md",
-    ".github/checklists/verification.checklist.md"
+    ".github/checklists/verification.checklist.md",
+    ".github/checklists/docs-sync.checklist.md",
+    ".github/checklists/database-change.checklist.md",
+    ".github/checklists/tauri-build.checklist.md",
+    ".github/checklists/bugfix.checklist.md"
 )
 foreach ($file in $checklistFiles) {
+    $fullPath = Join-Path $ProjectRoot $file
+    if (Test-Path $fullPath) {
+        Write-Host "  [OK] $file" -ForegroundColor Green
+    } else {
+        Write-Host "  [MISSING] $file" -ForegroundColor Red
+    }
+}
+Write-Host ""
+
+# Check development skills doc
+Write-Host "[check_docs] Checking docs/development-skills.md..." -ForegroundColor Yellow
+$devSkillsPath = Join-Path $ProjectRoot "docs/development-skills.md"
+if (Test-Path $devSkillsPath) {
+    Write-Host "  [OK] docs/development-skills.md exists" -ForegroundColor Green
+} else {
+    Write-Host "  [MISSING] docs/development-skills.md not found!" -ForegroundColor Red
+}
+Write-Host ""
+
+# Check new Skills existence
+Write-Host "[check_docs] Checking new Skills..." -ForegroundColor Yellow
+$newSkillFiles = @(
+    ".github/skills/agent-task-writer/SKILL.md",
+    ".github/skills/bugfix-safe-patch/SKILL.md",
+    ".github/skills/docs-sync/SKILL.md",
+    ".github/skills/db-migration-guard/SKILL.md",
+    ".github/skills/tauri-desktop-build/SKILL.md"
+)
+foreach ($file in $newSkillFiles) {
     $fullPath = Join-Path $ProjectRoot $file
     if (Test-Path $fullPath) {
         Write-Host "  [OK] $file" -ForegroundColor Green

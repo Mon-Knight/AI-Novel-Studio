@@ -1,6 +1,6 @@
 # verify_project.ps1
 # AI Novel Studio - Unified Project Verification
-# Version: v1.0.44
+# Version: v1.0.45
 # Purpose: Run all build and verification steps, output unified summary
 
 $ErrorActionPreference = "Continue"
@@ -9,7 +9,7 @@ $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Project Verification" -ForegroundColor Cyan
-Write-Host "  Version: v1.0.44" -ForegroundColor Cyan
+Write-Host "  Version: v1.0.45" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -126,6 +126,35 @@ try {
     $Results += @{ Step = "git status"; Status = "FAIL" }
 } finally {
     Pop-Location
+}
+Write-Host ""
+
+# Step 6: Check all checklists exist
+Write-Host "[verify_project] Checking checklists..." -ForegroundColor Yellow
+$checklistFiles = @(
+    ".github/checklists/feature-development.checklist.md",
+    ".github/checklists/release.checklist.md",
+    ".github/checklists/ui-review.checklist.md",
+    ".github/checklists/verification.checklist.md",
+    ".github/checklists/docs-sync.checklist.md",
+    ".github/checklists/database-change.checklist.md",
+    ".github/checklists/tauri-build.checklist.md",
+    ".github/checklists/bugfix.checklist.md"
+)
+$missingChecklists = @()
+foreach ($file in $checklistFiles) {
+    $fullPath = Join-Path $ProjectRoot $file
+    if (-not (Test-Path $fullPath)) {
+        $missingChecklists += $file
+        Write-Host "  [MISSING] $file" -ForegroundColor Red
+    }
+}
+if ($missingChecklists.Count -eq 0) {
+    Write-Host "[verify_project] checklists: ALL PRESENT" -ForegroundColor Green
+    $Results += @{ Step = "checklists"; Status = "PASS" }
+} else {
+    Write-Host "[verify_project] checklists: $($missingChecklists.Count) MISSING" -ForegroundColor Red
+    $Results += @{ Step = "checklists"; Status = "FAIL" }
 }
 Write-Host ""
 

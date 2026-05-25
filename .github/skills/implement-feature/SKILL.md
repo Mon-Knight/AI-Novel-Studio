@@ -103,6 +103,37 @@
 
 ---
 
+## 输入信息
+
+- 用户提供的任务书（自包含的 Markdown 文档）
+- 或：版本号 + 功能描述 + 修改范围
+
+## 禁止事项
+
+- ❌ 禁止顺手重构与任务无关的代码
+- ❌ 禁止扩展任务书中没有的未来功能
+- ❌ 禁止删除任务书中未要求删除的旧功能
+- ❌ 禁止修改数据库 schema（除非任务书明确要求）
+- ❌ 禁止不读 AGENTS.md 就直接修改
+- ❌ 禁止跳过验证步骤
+
+## 验证方式
+
+- 修改后的文件是否在任务书范围内？
+- `cargo check` / `npm run build` 是否通过？
+- 已有功能是否正常？
+
+## 失败处理
+
+- 如果 `npm run build` 失败，先修复再继续
+- 如果修改引起了其他模块报错，评估是否在自己的修改范围内
+- 如果是预存错误（修改前就存在），在汇报中说明
+
+## 关联资源
+
+- 关联 Checklist：`.github/checklists/feature-development.checklist.md`
+- 关联脚本：`scripts/agent-workflow/run_feature_workflow.ps1`
+
 ## 约束
 
 - 必须先读 AGENTS.md，不允许跳过

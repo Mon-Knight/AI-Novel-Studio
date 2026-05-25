@@ -12,17 +12,27 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 
 ## 当前阶段
 
-**v1.0.44** — Agent Workflow Runtime 最小闭环
+**v1.0.45** — 项目开发辅助 Skills 增强版
 
-当前项目正处于从 AI 辅助工具向 AI Agent 创作平台的升级过程中。本阶段建立了最小的 Agent 工作流执行系统。
+当前项目已建立完整的 Agent 开发辅助系统，包含 10 个 Skills、8 个 Checklists 和 8 个 Cursor Rules。
 
-### Agent Workflow Runtime
+### 项目开发辅助 Skills
 
-- 🔄 **工作流脚本** — `scripts/agent-workflow/` 提供 4 个验证和引导脚本（verify_project / check_docs_sync / run_feature_workflow / release_workflow）
-- ✅ **执行清单** — `.github/checklists/` 提供 4 个 Agent 执行清单（功能开发 / 发布 / UI审查 / 验证）
-- 📐 **核心类型** — `src/agent/` 提供最小 workflow 类型系统、Planner Lite 和 Workflow Runner
-- 🔧 **Tool Layer** — `src/agent-tools/` 提供未来 Tool Calling 接口（当前占位）
-- 📝 **Prompt Pipeline** — `src/prompts/` 提供未来 Prompt 管线结构（system / chapter / style / verification）
+`.github/skills/` 用于辅助 Copilot / Codex / DeepSeek Agent 执行用户复制进来的任务书。
+
+**重要**：Skills 是开发辅助系统，不是用户端产品功能。这些 Skills 不代表软件内部功能已经实现。
+
+10 个 Skills：
+- `plan-version` — 版本规划
+- `agent-task-writer` — 任务书生成
+- `implement-feature` — 功能实现
+- `bugfix-safe-patch` — 安全 Bug 修复
+- `verify-build` — 构建验证
+- `review-ui` — UI 审查
+- `docs-sync` — 文档同步
+- `release-package` — 发布收尾
+- `db-migration-guard` — 数据库变更保护
+- `tauri-desktop-build` — Tauri 桌面构建
 
 ## 技术栈
 
@@ -51,7 +61,7 @@ AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理�
 
 ## 当前版本
 
-**v1.0.44** — Agent Workflow Runtime 最小闭环
+**v1.0.45** — 项目开发辅助 Skills 增强版
 
 ## 功能概览
 
@@ -145,6 +155,7 @@ ai-novel-studio/
 | v1.0.0 | 基础可用版整合 |
 | v1.0.43 | Agent 基础设施建设 |
 | v1.0.44 | Agent Workflow Runtime 最小闭环 |
+| v1.0.45 | 项目开发辅助 Skills 增强版 |
 
 ### Agent 化路线
 

@@ -1,6 +1,52 @@
 # AI Novel Studio — CHANGELOG
 
-## v1.0.44 (2026-05-26) — Agent Workflow Runtime 最小闭环
+## v1.0.45 (2026-05-26) — 项目开发辅助 Skills 增强版
+
+### 新增
+
+#### 新 Skills（5 个）
+- `.github/skills/agent-task-writer/SKILL.md` — 任务书生成（自包含、结构化输出）
+- `.github/skills/bugfix-safe-patch/SKILL.md` — 安全 Bug 修复（最小修改、禁止重构）
+- `.github/skills/docs-sync/SKILL.md` — 文档同步（版本完成后的文档对齐）
+- `.github/skills/db-migration-guard/SKILL.md` — 数据库变更保护（强制安全流程）
+- `.github/skills/tauri-desktop-build/SKILL.md` — Tauri 桌面构建（全流程）
+
+#### 新 Checklists（4 个）
+- `.github/checklists/docs-sync.checklist.md` — 文档同步检查
+- `.github/checklists/database-change.checklist.md` — 数据库变更安全检查
+- `.github/checklists/tauri-build.checklist.md` — Tauri 构建检查
+- `.github/checklists/bugfix.checklist.md` — Bug 修复检查
+
+#### 新 Cursor Rules（3 个）
+- `.cursor/rules/task-writing-rules.mdc` — 任务书编写规则（自包含原则）
+- `.cursor/rules/bugfix-rules.mdc` — Bug 修复规则（先定位再修复）
+- `.cursor/rules/release-rules.mdc` — 发布规则（push/tag 需人工确认）
+
+#### 新文档
+- `docs/development-skills.md` — 10 个开发辅助 Skills 总览
+
+### 修改
+- 完善 `plan-version` Skill（输入信息/禁止事项/失败处理）
+- 完善 `implement-feature` Skill（任务书执行模式/关联资源）
+- 完善 `verify-build` Skill（关联脚本/checklist）
+- 完善 `review-ui` Skill（关联 checklist）
+- 完善 `release-package` Skill（默认不自动 tag/push）
+- 更新 `AGENTS.md` — 新增第 11 章「用户与 Agent 的真实协作流程」
+- 更新 `README.md` — 新增项目开发辅助 Skills 说明，强调 Skills 是开发辅助系统
+- 更新 `docs/version-roadmap.md` — Tool Layer 真实读取后移到 v1.0.46
+- 更新 `docs/agent-runtime.md` — 标注 v1.0.45 不开发 Runtime 新能力
+- 更新 `check_docs_sync.ps1` — 新增 5 个 Skills + docs/development-skills.md 检查
+- 更新 `verify_project.ps1` — 新增 4 个 checklists 检查
+- 版本号统一更新至 1.0.45
+
+### 开发者备注
+- 本版本不新增小说业务功能
+- 本版本不修改数据库 schema
+- 本版本不修改正文生成链路
+- 本版本用于增强 Agent 执行用户任务书时的稳定性
+- 明确区分「开发辅助 Skills」和「软件内部 Agent 功能」
+
+---
 
 ### 新增
 
