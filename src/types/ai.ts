@@ -62,6 +62,7 @@ export interface AiClient {
 export type AiTaskType =
   | 'connection_test'
   | 'setting_expand'
+  | 'setting_suggestion_generate'
   | 'outline_generate'
   | 'volume_outline_generate'
   | 'context_summarize'
@@ -109,6 +110,7 @@ export interface AiTaskRecord {
 export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   connection_test: '连接测试',
   setting_expand: '设定补充',
+  setting_suggestion_generate: '设定库 AI 推演',
   outline_generate: '作品大纲生成',
   volume_outline_generate: '分卷大纲生成',
   context_summarize: '上下文总结',

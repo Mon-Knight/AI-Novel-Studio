@@ -4,7 +4,7 @@
 
 .home-page {
   padding: var(--spacing-2xl);
-  max-width: 1200px;
+  max-width: 1440px;
   margin: 0 auto;
   height: 100%;
   overflow-y: auto;
@@ -55,7 +55,7 @@
 /* === 快捷入口卡片 === */
 .home-quick-actions {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-2xl);
 }
@@ -162,6 +162,31 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--spacing-lg);
+}
+
+@media (min-width: 1920px) {
+  .home-page {
+    max-width: 1600px;
+  }
+
+  .novel-card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .home-page {
+    padding: var(--spacing-lg);
+  }
+
+  .home-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .novel-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* === 作品卡片 === */

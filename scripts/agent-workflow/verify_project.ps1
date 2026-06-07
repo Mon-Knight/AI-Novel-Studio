@@ -1,6 +1,6 @@
 # verify_project.ps1
 # AI Novel Studio - Unified Project Verification
-# Version: v1.0.46
+# Version: v1.7.10
 # Purpose: Run all build and verification steps, output unified summary
 
 $ErrorActionPreference = "Continue"
@@ -9,7 +9,7 @@ $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Project Verification" -ForegroundColor Cyan
-Write-Host "  Version: v1.0.46" -ForegroundColor Cyan
+Write-Host "  Version: v1.7.10" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -59,7 +59,29 @@ try {
 }
 Write-Host ""
 
-# Step 3: npm run tauri build
+# Step 3: setting suggestions static regression
+Write-Host "[verify_project] Running npm run test:setting-suggestions..." -ForegroundColor Yellow
+Push-Location $ProjectRoot
+try {
+    $settingSuggestionOutput = npm run test:setting-suggestions 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[verify_project] npm run test:setting-suggestions: PASS" -ForegroundColor Green
+        $Results += @{ Step = "npm run test:setting-suggestions"; Status = "PASS" }
+    } else {
+        Write-Host "[verify_project] npm run test:setting-suggestions: FAIL" -ForegroundColor Red
+        Write-Host "  Exit code: $LASTEXITCODE" -ForegroundColor Red
+        $Results += @{ Step = "npm run test:setting-suggestions"; Status = "FAIL" }
+    }
+} catch {
+    Write-Host "[verify_project] npm run test:setting-suggestions: FAIL (exception)" -ForegroundColor Red
+    Write-Host "  $_" -ForegroundColor Red
+    $Results += @{ Step = "npm run test:setting-suggestions"; Status = "FAIL" }
+} finally {
+    Pop-Location
+}
+Write-Host ""
+
+# Step 4: npm run tauri build
 Write-Host "[verify_project] Running npm run tauri build..." -ForegroundColor Yellow
 Push-Location $ProjectRoot
 try {
@@ -81,7 +103,7 @@ try {
 }
 Write-Host ""
 
-# Step 4: pytest (if available)
+# Step 5: pytest (if available)
 Write-Host "[verify_project] Checking pytest..." -ForegroundColor Yellow
 $pytestAvailable = Get-Command pytest -ErrorAction SilentlyContinue
 if ($pytestAvailable) {
@@ -107,7 +129,7 @@ if ($pytestAvailable) {
 }
 Write-Host ""
 
-# Step 5: git status
+# Step 6: git status
 Write-Host "[verify_project] Checking git status..." -ForegroundColor Yellow
 Push-Location $ProjectRoot
 try {
@@ -129,7 +151,7 @@ try {
 }
 Write-Host ""
 
-# Step 6: Check all checklists exist
+# Step 7: Check all checklists exist
 Write-Host "[verify_project] Checking checklists..." -ForegroundColor Yellow
 $checklistFiles = @(
     ".github/checklists/feature-development.checklist.md",

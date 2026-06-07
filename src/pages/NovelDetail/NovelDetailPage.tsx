@@ -180,11 +180,14 @@ function NovelDetailPage() {
             <button className="btn btn-primary" onClick={() => navigate(`/novels/${novel.id}/workspace`)}>
               ✏️ 进入写作工作台
             </button>
+            <button className="btn btn-secondary" onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}>
+              设定库 AI 推演
+            </button>
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="detail-cards-grid">
         <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
         <WorldSettingCard novelId={novel.id} settings={worldSettings} onSave={handleSaveWorldSetting} />
         <div style={{ gridColumn: '1 / -1' }}>

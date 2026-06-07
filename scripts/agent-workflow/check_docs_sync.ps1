@@ -1,6 +1,6 @@
 # check_docs_sync.ps1
 # AI Novel Studio - Document Sync Check
-# Version: v1.0.46
+# Version: v1.7.10
 # Purpose: Check key documents exist and version is synced
 
 $ErrorActionPreference = "Continue"
@@ -9,12 +9,12 @@ $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Document Sync Check" -ForegroundColor Cyan
-Write-Host "  Version: v1.0.46" -ForegroundColor Cyan
+Write-Host "  Version: v1.7.10" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $Results = @()
-$CURRENT_VERSION = "1.0.46"
+$CURRENT_VERSION = "1.7.10"
 
 # Check file existence
 $requiredFiles = @(

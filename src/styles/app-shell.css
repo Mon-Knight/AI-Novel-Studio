@@ -172,3 +172,159 @@
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* ================================================================
+   v1.7.7 响应式布局 — 窗口大小控制与 2K 适配
+   ================================================================ */
+
+/* --- 响应式断点 ---
+   < 1024px：小窗口
+   1024px ～ 1439px：普通窗口
+   1440px ～ 1919px：大窗口
+   >= 1920px：2K / 大屏窗口
+*/
+
+/* --- 页面内容区最大宽度约束 --- */
+.page-container {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--spacing-xl);
+}
+
+@media (min-width: 1920px) {
+  .page-container {
+    max-width: 1600px;
+  }
+}
+
+/* --- 自适应卡片网格 --- */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+@media (min-width: 1440px) {
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--spacing-xl);
+  }
+}
+
+@media (min-width: 1920px) {
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+}
+
+/* --- 统计卡片网格（更紧凑） --- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-md);
+}
+
+/* --- 表单页面约束 --- */
+.form-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--spacing-xl);
+}
+
+@media (min-width: 1024px) {
+  .form-page {
+    max-width: 840px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .form-page {
+    max-width: 960px;
+  }
+}
+
+/* --- 阅读/长文本页面约束 --- */
+.reading-page {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: var(--spacing-xl);
+  line-height: var(--line-height-relaxed);
+}
+
+@media (min-width: 1440px) {
+  .reading-page {
+    max-width: 960px;
+  }
+}
+
+/* --- 表格容器 --- */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  min-width: 900px;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+@media (min-width: 1920px) {
+  .data-table {
+    min-width: 1200px;
+  }
+}
+
+/* --- 双栏布局（大屏并排，小窗纵向） --- */
+.two-column {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-xl);
+}
+
+@media (min-width: 1024px) {
+  .two-column {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* --- 三栏布局 --- */
+.three-column {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-lg);
+}
+
+@media (min-width: 1024px) {
+  .three-column {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1440px) {
+  .three-column {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* --- 小窗口侧栏压缩 --- */
+@media (max-width: 1023px) {
+  .app-sidebar {
+    width: 60px;
+    min-width: 60px;
+  }
+
+  .sidebar-brand-text,
+  .sidebar-nav-section,
+  .sidebar-nav-item .nav-label,
+  .sidebar-footer .version {
+    display: none;
+  }
+
+  .sidebar-nav-item {
+    justify-content: center;
+    padding: var(--spacing-sm);
+  }
+}

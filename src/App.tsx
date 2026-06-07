@@ -15,6 +15,7 @@ import TemplatesPage from './pages/Templates/TemplatesPage';
 import AiTasksPage from './pages/AiTasks/AiTasksPage';
 import ImportExportPage from './pages/ImportExport/ImportExportPage';
 import OutlineEditorPage from './pages/OutlineEditor/OutlineEditorPage';
+import SettingSuggestionsPage from './pages/SettingSuggestions/SettingSuggestionsPage';
 
 function App() {
   const globalLoading = useGlobalLoadingModal(1200);
@@ -33,6 +34,8 @@ function App() {
           <Route path="/ai-tasks" element={<AiTasksPage />} />
           <Route path="/import-export" element={<ImportExportPage />} />
           <Route path="/novels/:novelId/outline" element={<OutlineEditorPage />} />
+          <Route path="/novels/:novelId/setting-suggestions" element={<SettingSuggestionsPage />} />
+          <Route path="/worlds/:worldId/lore/suggestions" element={<SettingSuggestionsPage />} />
           <Route path="/coming-soon" element={<ComingSoonPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

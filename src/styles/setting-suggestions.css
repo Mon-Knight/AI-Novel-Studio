@@ -1,0 +1,242 @@
+/**
+ * AI Novel Studio - 设定库 AI 推演样式
+ */
+
+.setting-suggestions-page {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.setting-suggestions-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.setting-suggestions-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.setting-suggestions-subtitle,
+.setting-suggestions-muted {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-relaxed);
+}
+
+.setting-suggestions-message,
+.setting-suggestions-error {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-sm);
+}
+
+.setting-suggestions-message {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+}
+
+.setting-suggestions-error {
+  color: var(--color-error);
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+}
+
+.setting-suggestions-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: var(--spacing-lg);
+  align-items: start;
+}
+
+.setting-suggestions-panel,
+.setting-suggestions-results,
+.setting-suggestion-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.setting-suggestions-panel {
+  display: grid;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-lg);
+  position: sticky;
+  top: var(--spacing-lg);
+}
+
+.setting-suggestions-panel-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.setting-suggestions-check {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.setting-suggestions-textarea {
+  min-height: 96px;
+  resize: vertical;
+  line-height: var(--line-height-relaxed);
+}
+
+.setting-suggestions-context-note {
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--color-border-light);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-relaxed);
+}
+
+.setting-suggestions-results {
+  padding: var(--spacing-lg);
+  min-width: 0;
+}
+
+.setting-suggestions-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.setting-suggestions-filter {
+  max-width: 160px;
+}
+
+.setting-suggestions-list {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+.setting-suggestion-card {
+  padding: var(--spacing-lg);
+}
+
+.setting-suggestion-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.setting-suggestion-name {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.setting-suggestion-meta,
+.setting-suggestion-target {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+.setting-suggestion-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.setting-suggestion-field {
+  display: grid;
+  gap: 2px;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.setting-suggestion-field span {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.setting-suggestion-field strong {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-normal);
+  word-break: break-word;
+}
+
+.setting-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.setting-suggestion-raw {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.setting-suggestion-raw-title {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  margin: var(--spacing-xs) 0;
+}
+
+.setting-suggestion-raw pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.setting-suggestions-modal {
+  width: 720px;
+}
+
+.setting-suggestions-json-editor {
+  min-height: 320px;
+  margin-top: var(--spacing-md);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.setting-suggestions-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+@media (max-width: 1100px) {
+  .setting-suggestions-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .setting-suggestions-panel {
+    position: static;
+  }
+}
+
+@media (min-width: 1920px) {
+  .setting-suggestions-page {
+    max-width: 1600px;
+  }
+}

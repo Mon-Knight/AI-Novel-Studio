@@ -1,207 +1,210 @@
-# AI Novel Studio — CHANGELOG
+# AI Novel Studio - CHANGELOG
 
-## v1.0.46 (2026-05-26) — Tool Layer 接入真实项目读取
-
-### 新增
-- `src/agent-tools/style-tools.ts` — 风格方案只读 Tool（readStyleProfile / readOutputControl）
-- `src/agent-tools/context-tools.ts` — Agent 可读上下文聚合 Tool（buildAgentReadableContext）
-- `src/agent/context-summary.ts` — 上下文摘要格式化器（formatAgentContextSummary）
-- `createChapterReadinessWorkflow()` — 章节准备度检查 Workflow（6 步：读取→聚合→检查→建议）
-- `validateWorkflow()` — Workflow 结构校验器（id/task 重复/依赖/循环依赖检查）
-- `successResult()` / `errorResult()` / `resolveNovelId()` — 工具辅助函数
-
-### 修改
-- `tool-types.ts` — 扩展 AgentToolResult（新增 source/warnings）、AgentToolContext（新增 novelId/styleProfileId/workId）、新增 AgentReadableSummary
-- `project-tools.ts` — 从占位升级为只读真实数据接口（readProjectContext/readProjectList/readProjectSettings）
-- `chapter-tools.ts` — 从占位升级为只读真实章节接口（readChapterOutline/readChapterContext），saveCandidateDraft 保持安全策略
-- `verification-tools.ts` — 增加基础非 AI 检查（字数/主角出场/禁用写法）
-- `planner-lite.ts` — 新增 Chapter Readiness Workflow
-- `workflow-runner.ts` — 新增 Workflow 结构校验
-- `verify_project.ps1` / `check_docs_sync.ps1` — 版本号更新至 1.0.46
-- `README.md` — 新增 Agent Tool Layer 说明、更新版本号
-- `docs/version-roadmap.md` — Tool Layer 标记 ✅
-- `docs/agent-runtime.md` — 新增 v1.0.46 说明
-- 版本号统一更新至 1.0.46
-
-### 开发者备注
-- 本版本 Tool Layer 开始读取真实项目数据（novelService / chapterRepository / styleProfileService 等）
-- 全部只读：不写数据库、不自动写正文、不替换生成链路、不调用外部 AI
-- 不修改数据库 schema
-- Agent Tool Layer（src/agent-tools/）与项目开发辅助 Skills（.github/skills/）明确区分
-
----
+## v1.7.11 (2026-06-08) - 发布收尾、本地构建产物清理与安装包验证
 
 ### 新增
 
-#### 新 Skills（5 个）
-- `.github/skills/agent-task-writer/SKILL.md` — 任务书生成（自包含、结构化输出）
-- `.github/skills/bugfix-safe-patch/SKILL.md` — 安全 Bug 修复（最小修改、禁止重构）
-- `.github/skills/docs-sync/SKILL.md` — 文档同步（版本完成后的文档对齐）
-- `.github/skills/db-migration-guard/SKILL.md` — 数据库变更保护（强制安全流程）
-- `.github/skills/tauri-desktop-build/SKILL.md` — Tauri 桌面构建（全流程）
-
-#### 新 Checklists（4 个）
-- `.github/checklists/docs-sync.checklist.md` — 文档同步检查
-- `.github/checklists/database-change.checklist.md` — 数据库变更安全检查
-- `.github/checklists/tauri-build.checklist.md` — Tauri 构建检查
-- `.github/checklists/bugfix.checklist.md` — Bug 修复检查
-
-#### 新 Cursor Rules（3 个）
-- `.cursor/rules/task-writing-rules.mdc` — 任务书编写规则（自包含原则）
-- `.cursor/rules/bugfix-rules.mdc` — Bug 修复规则（先定位再修复）
-- `.cursor/rules/release-rules.mdc` — 发布规则（push/tag 需人工确认）
-
-#### 新文档
-- `docs/development-skills.md` — 10 个开发辅助 Skills 总览
+- 新增本地大文件扫描脚本 `scripts/maintenance/report_large_files.ps1`。
+- 新增旧构建产物归档脚本 `scripts/maintenance/archive_old_builds.ps1`，默认 dry-run。
+- 新增旧构建产物清理脚本 `scripts/maintenance/clean_old_builds.ps1`，默认 dry-run。
+- 新增安装包验证清单文档 `docs/technical/installer-verification.md`。
+- 新增发布产物保留策略文档 `docs/technical/release-artifact-policy.md`。
+- 新增本地构建清理说明文档 `docs/technical/local-build-cleanup.md`。
 
 ### 修改
-- 完善 `plan-version` Skill（输入信息/禁止事项/失败处理）
-- 完善 `implement-feature` Skill（任务书执行模式/关联资源）
-- 完善 `verify-build` Skill（关联脚本/checklist）
-- 完善 `review-ui` Skill（关联 checklist）
-- 完善 `release-package` Skill（默认不自动 tag/push）
-- 更新 `AGENTS.md` — 新增第 11 章「用户与 Agent 的真实协作流程」
-- 更新 `README.md` — 新增项目开发辅助 Skills 说明，强调 Skills 是开发辅助系统
-- 更新 `docs/version-roadmap.md` — Tool Layer 真实读取后移到 v1.0.46
-- 更新 `docs/agent-runtime.md` — 标注 v1.0.45 不开发 Runtime 新能力
-- 更新 `check_docs_sync.ps1` — 新增 5 个 Skills + docs/development-skills.md 检查
-- 更新 `verify_project.ps1` — 新增 4 个 checklists 检查
-- 版本号统一更新至 1.0.45
 
-### 开发者备注
-- 本版本不新增小说业务功能
-- 本版本不修改数据库 schema
-- 本版本不修改正文生成链路
-- 本版本用于增强 Agent 执行用户任务书时的稳定性
-- 明确区分「开发辅助 Skills」和「软件内部 Agent 功能」
+- 版本号统一更新至 `1.7.11` / `v1.7.11`。
+- 同步 README 当前版本与阶段说明。
+- 同步版本路线图，新增 v1.7.11 节点。
+- v1.7.10 NSIS/MSI 安装包标记为稳定基线保留。
+
+### 备注
+
+- 本版本不新增业务功能。
+- 本版本不修改数据库 schema。
+- 本版本不开发分卷、章节、正文生成。
+- 本版本不自动删除任何文件。
+- 本版本不自动 commit / tag / push。
 
 ---
+
+## v1.7.10 (2026-06-08) - 候选设定采纳与测试补齐
 
 ### 新增
 
-#### Agent Workflow Scripts（4 个 PowerShell 脚本）
-- `scripts/agent-workflow/verify_project.ps1` — 统一项目验证入口（cargo check / npm build / tauri build / pytest / git status）
-- `scripts/agent-workflow/check_docs_sync.ps1` — 关键文档同步检查（存在性 + 版本号）
-- `scripts/agent-workflow/run_feature_workflow.ps1` — 功能开发工作流引导（不自动修改代码）
-- `scripts/agent-workflow/release_workflow.ps1` — 发布前检查（不自动创建 tag）
-
-#### Agent Checklists（4 个 Markdown 清单）
-- `.github/checklists/feature-development.checklist.md` — 功能开发自检清单
-- `.github/checklists/release.checklist.md` — 发布检查清单
-- `.github/checklists/ui-review.checklist.md` — UI 审查清单
-- `.github/checklists/verification.checklist.md` — 综合验证清单
-
-#### Workflow Docs（2 个文档）
-- `.github/workflows-docs/agent-runtime-overview.md` — Agent Runtime 架构概览
-- `.github/workflows-docs/workflow-script-usage.md` — 脚本使用说明
-
-#### Agent Core（3 个 TypeScript 文件）
-- `src/agent/types.ts` — AgentTask / AgentWorkflow / PlannerInput / WorkflowSummary 类型
-- `src/agent/planner-lite.ts` — 固定章节生成 Workflow（7 个任务 + 依赖关系）
-- `src/agent/workflow-runner.ts` — Workflow 统计摘要 + 格式化输出
-
-#### Agent Tools（4 个 TypeScript 文件）
-- `src/agent-tools/tool-types.ts` — AgentToolResult / AgentToolContext / notImplemented
-- `src/agent-tools/project-tools.ts` — readProjectContext（占位）
-- `src/agent-tools/chapter-tools.ts` — readChapterOutline / saveCandidateDraft（占位）
-- `src/agent-tools/verification-tools.ts` — verifyOutlineCompliance / verifyStyleCompliance（占位）
-
-#### Prompt Pipeline（5 个 TypeScript 文件）
-- `src/prompts/README.md` — Prompt Pipeline 结构说明
-- `src/prompts/system/base-system-prompt.ts` — AI 行为边界和项目核心约束
-- `src/prompts/chapter/chapter-generation-prompt.ts` — 章节生成 Prompt 构建器
-- `src/prompts/style/style-constraint-prompt.ts` — 风格约束 Prompt 构建器
-- `src/prompts/verification/chapter-verification-prompt.ts` — 验证 Prompt 构建器
-
-#### 新文档
-- `docs/agent-runtime.md` — Agent Runtime 完整使用指南
+- 新增设定候选采纳流程，支持角色、势力、地点、规则候选的采纳、编辑后采纳与废弃。
+- 新增候选状态流转：`pending`、`adopted`、`edited_adopted`、`discarded`。
+- 新增重复采纳保护，已处理候选不能再次写入正式资产。
+- 新增 `npm run test:setting-suggestions` 静态回归脚本，检查路由、状态、Mock 支持、采纳入口与重复采纳保护。
 
 ### 修改
-- `README.md` — 更新当前阶段为 Agent Workflow Runtime、新增 Agent Runtime 说明
-- `docs/version-roadmap.md` — 新增 v1.0.44～v1.1.0 路线
-- `package.json` / `Cargo.toml` / `tauri.conf.json` — 版本号 1.0.43 → 1.0.44
+
+- 版本号统一更新至 `1.7.10` / `v1.7.10`。
+- 同步 README、路线图、设定推演设计、导入导出说明与测试文档。
+
+### 验证
+
+- 覆盖设定候选生成、列表展示、状态过滤、采纳、编辑后采纳与废弃的静态回归检查。
 
 ### 开发者备注
-- 本次不新增小说业务功能
-- 不修改数据库 schema
-- 不替换现有正文生成链路
-- Prompt Pipeline 与现有 Markdown 模板并存，互不干扰
-- Tool Layer 当前全部返回 `not implemented` 占位
-- Planner Lite 返回固定 Workflow，不执行真实 AI 调用
-- 目标：Agent 规则系统 → 可执行工作流的最小闭环
+
+- 本版本不修改数据库结构。
+- 角色候选采纳进入角色库。
+- 规则候选采纳进入规则体系。
+- 势力、地点候选在当前正式资产模块尚未独立拆分前，采纳为世界设定条目。
+- 本版本不实现 v1.8.0+ 的分卷大纲生成、章节大纲生成或正文生成新链路。
 
 ---
 
-### 新增 — Agent 基础设施建设
+## v1.7.9 (2026-06-08) - 设定库 AI 推演基础版
 
-#### 核心文件
-- `AGENTS.md` — AI Agent 总入口规则文件
+### 新增
 
-#### Instructions（6 个文件）
-- `.github/instructions/frontend.instructions.md` — 前端开发指令
-- `.github/instructions/tauri.instructions.md` — Tauri 桌面壳开发指令
-- `.github/instructions/database.instructions.md` — 数据库开发指令
-- `.github/instructions/testing.instructions.md` — 测试验证指令
-- `.github/instructions/documentation.instructions.md` — 文档维护指令
-- `.github/instructions/agent-behavior.instructions.md` — Agent 行为约束指令
-
-#### Prompts（4 个文件）
-- `.github/prompts/next-version.prompt.md` — 版本规划 Prompt
-- `.github/prompts/fix-bug.prompt.md` — Bug 修复 Prompt
-- `.github/prompts/release-report.prompt.md` — 发布报告 Prompt
-- `.github/prompts/verify-build.prompt.md` — 构建验证 Prompt
-
-#### Skills（5 个多步骤工作流）
-- `.github/skills/plan-version/SKILL.md` — 版本规划技能
-- `.github/skills/implement-feature/SKILL.md` — 功能实现技能
-- `.github/skills/verify-build/SKILL.md` — 构建验证技能
-- `.github/skills/review-ui/SKILL.md` — UI 审查技能
-- `.github/skills/release-package/SKILL.md` — 版本发布收尾技能
-
-#### Cursor Rules（5 个 IDE 规则）
-- `.cursor/rules/project-architecture.mdc` — 项目架构规则
-- `.cursor/rules/ui-rules.mdc` — UI 规则
-- `.cursor/rules/database-rules.mdc` — 数据库规则
-- `.cursor/rules/agent-safety.mdc` — Agent 安全规则
-- `.cursor/rules/testing-rules.mdc` — 测试规则
-
-#### Docs（4 个新文档）
-- `docs/module-boundaries.md` — 模块边界文档
-- `docs/project-architecture.md` — 项目架构文档
-- `docs/agent-workflow.md` — Agent 工作流文档
-- `docs/ai-agent-roadmap.md` — AI Agent 路线图
+- 新增 `/novels/:id/setting-suggestions` 页面，用于生成设定库候选。
+- 新增 `/worlds/:worldId/lore/suggestions` 兼容入口。
+- 新增 `settingSuggestionService`，统一封装候选生成、解析、保存、采纳和废弃。
+- 新增设定候选类型定义：角色、势力、地点、规则。
+- 新增 Mock AI 输出，支持无 API Key 测试设定推演流程。
+- 新增 AI 任务类型 `setting_suggestion_generate`，候选生成会进入 AI 任务记录。
 
 ### 修改
-- `README.md` — 更新项目定位、Agent 化路线、当前版本
-- `CHANGELOG.md` — 新建变更日志文件
+
+- 作品详情页和创作资产页增加“设定库 AI 推演”入口。
+- 顶部栏识别设定推演页面标题。
 
 ### 开发者备注
-- 本次不新增小说业务功能
-- 不修改数据库结构
-- 不修改正文生成逻辑
-- 不修改现有 UI 页面
-- 目标：建立 Agent 工程化开发基础设施
-- 为 v2.x Agent 化阶段和 v3.x Autonomous 阶段打基础
+
+- AI 只生成候选，不自动写入正式数据。
+- 候选池保存在本地 LocalStorage，不新增 SQLite 表。
+
+---
+
+## v1.7.8 (2026-06-08) - 导出文件位置选择与导出体验优化
+
+### 新增
+
+- 桌面模式下通过 Tauri 保存对话框选择导出位置。
+- 导出成功后在 UI 中展示保存路径。
+- JSON 备份使用统一保存服务，不再依赖未定义的浏览器下载函数。
+
+### 修改
+
+- 章节 TXT / Markdown、整本 TXT / Markdown、JSON 备份导出接口统一返回保存路径。
+- 扩展 Tauri 文件系统写入权限到用户主目录、文档、下载和桌面目录。
+
+### 修复
+
+- 修复 `exportNovelToMarkdown` 返回类型与调用方不一致的问题。
+- 修复 `exportNovelBackupJson` 调用未定义 `downloadBlob` 的问题。
+- 修复 Tauri 配置 JSON 结构错误。
+
+---
+
+## v1.7.7 (2026-06-08) - 桌面端窗口与 2K 适配
+
+### 新增
+
+- 首页、作品详情页、创作资产页、导入导出页增加更适合桌面端和 2K 分辨率的响应式布局约束。
+- 设定推演页面采用桌面工作台式双栏布局，并在窄窗口下自动收敛为单栏。
+
+### 修改
+
+- 卡片网格改为自适应列宽，避免 2K 屏幕上表单和卡片被无限拉伸。
+- 作品详情页基础信息卡片改为响应式网格。
+
+---
+
+## v1.7.6 (2026-06-08) - 阶段性整理、文档体系重整与 EXE 验证
+
+### 新增
+
+- 新增 `docs/README.md` 文档索引。
+- 新增 `docs/user/` 用户指南分组。
+- 新增 `docs/project/` 项目管理文档分组。
+- 新增 `docs/technical/` 技术文档分组。
+- 新增 `docs/design/` 设计文档分组。
+
+### 修改
+
+- 重构 `README.md` 结构，使其更适合使用者和开发者阅读。
+- 将过长说明拆分到 docs 子文档。
+- 统一版本路线说明，README 与 version-roadmap 同步。
+- 更新 Tauri 默认窗口尺寸为 1280 × 820，最小窗口高度为 700。
+
+### 验证
+
+- 前端构建通过。
+- 现有路由不受影响。
+
+### 开发者备注
+
+- 本版本不新增核心业务功能。
+- 本版本不修改数据库结构。
+- 本版本用于完成 v1.7.x 应用化阶段的文档与结构收口。
+
+---
+
+## v1.0.46 (2026-05-26) - Tool Layer 接入真实项目读取
+
+### 新增
+
+- `src/agent-tools/style-tools.ts`：风格方案只读 Tool。
+- `src/agent-tools/context-tools.ts`：Agent 可读上下文聚合 Tool。
+- `src/agent/context-summary.ts`：上下文摘要格式化器。
+- `createChapterReadinessWorkflow()`：章节准备度检查 Workflow。
+- `validateWorkflow()`：Workflow 结构校验器。
+
+### 修改
+
+- `project-tools.ts`、`chapter-tools.ts`、`verification-tools.ts` 从占位升级为读取真实项目数据的基础接口。
+- `planner-lite.ts` 新增 Chapter Readiness Workflow。
+- `workflow-runner.ts` 新增 Workflow 结构校验。
+
+### 开发者备注
+
+- Tool Layer 只读，不写数据库、不自动写正文、不调用外部 AI。
+- 不修改数据库 schema。
+
+---
+
+## v1.0.45 (2026-05-26) - 项目开发辅助 Skills 增强版
+
+### 新增
+
+- 新增开发辅助 Skills、Checklists、Cursor Rules 与 `docs/development-skills.md`。
+
+### 修改
+
+- 完善 Agent 任务书、Bug 修复、文档同步、发布与验证工作流规则。
+
+---
+
+## v1.0.44 (2026-05-26) - Agent Workflow Runtime 最小闭环
+
+### 新增
+
+- 新增 Agent Workflow Scripts、Agent Checklists、Workflow Docs、Agent Core、Agent Tools 与 Prompt Pipeline 基础文件。
+
+### 开发者备注
+
+- 不新增小说业务功能。
+- 不修改数据库 schema。
+- 不替换现有正文生成链路。
+
+---
+
+## v1.0.43 (2026-05-26) - Agent 基础设施建设
+
+### 新增
+
+- 新增 `AGENTS.md`、GitHub instructions、prompts、skills、Cursor Rules 与基础架构文档。
+
+### 开发者备注
+
+- 建立 Agent 工程化开发约束，为 v2.x Agent 化阶段打基础。
 
 ---
 
 ## v1.0.41
 
-### 核心功能
-- 小说作品管理（CRUD）
-- 世界设定：背景、规则体系、主角能力
-- 分卷章节管理：多卷结构、章节大纲
-- 写作工作台：三栏布局 + 右侧工具栏
-- AI 正文生成：基于上下文的逐章生成
-- 多版本草稿系统
-- 角色库与事件辅助
-- 风格方案与输出控制方案
-- 上下文总结系统
-- 质量检查（6 维度）
-- 正文润色（8 种模式）
-- 导入导出（TXT/Markdown）
-- AI 设置（Mock 模式 / API Key 管理）
-
----
-
-> 版本历史详见 Git tags 和 `docs/release-notes-*.md`
+- 早期基础版本。

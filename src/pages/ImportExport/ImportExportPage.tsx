@@ -36,9 +36,13 @@ function ImportExportPage() {
     });
   }, [selectedNovelId]);
 
-  const handleExport = async (fn: () => Promise<void>) => {
+  const handleExport = async (fn: () => Promise<string | void>) => {
     setErr(''); setMsg('导出中...');
-    try { await fn(); setMsg('导出成功！'); setTimeout(() => setMsg(''), 2000); }
+    try {
+      const savedPath = await fn();
+      setMsg(savedPath ? `导出成功：${savedPath}` : '导出成功！');
+      setTimeout(() => setMsg(''), 4000);
+    }
     catch (e: any) { setErr(e.message || '导出失败'); setMsg(''); }
   };
 
@@ -46,7 +50,7 @@ function ImportExportPage() {
   const selectedNovel = novels.find((n) => n.id === selectedNovelId);
 
   return (
-    <div style={{ padding: 32, maxWidth: 800, margin: '0 auto', height: '100%', overflowY: 'auto' }}>
+    <div className="page-container form-page" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>📥 导入导出中心</div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>导出已采用章节正文，导入风格方案和输出控制</div>

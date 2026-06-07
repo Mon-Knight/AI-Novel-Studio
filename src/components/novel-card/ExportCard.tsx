@@ -10,9 +10,13 @@ function ExportCard({ novelId, novelTitle }: ExportCardProps) {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
-  const handleExport = async (fn: () => Promise<void>) => {
+  const handleExport = async (fn: () => Promise<string | void>) => {
     setErr(''); setMsg('正在导出...');
-    try { await fn(); setMsg('导出成功！'); setTimeout(() => setMsg(''), 2000); }
+    try {
+      const savedPath = await fn();
+      setMsg(savedPath ? `导出成功：${savedPath}` : '导出成功！');
+      setTimeout(() => setMsg(''), 4000);
+    }
     catch (e: any) { setErr(e.message || '导出失败'); setMsg(''); }
   };
 

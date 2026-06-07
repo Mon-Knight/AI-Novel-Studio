@@ -9,6 +9,7 @@ import { characterService } from '../../services/characters/characterService';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
 import { contextRecordService } from '../../services/context/contextRecordService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
+import { settingSuggestionService } from '../../services/settingSuggestions/settingSuggestionService';
 import type { Novel } from '../../types/novel';
 
 interface AssetCard { title: string; icon: string; count: string; desc: string; path: string; }
@@ -33,10 +34,12 @@ function AssetsPage() {
       chapterSummaryService.getByNovelId(selectedNovelId),
       contextRecordService.getByNovelId(selectedNovelId),
       styleProfileService.getAll(selectedNovelId),
-    ]).then(([chars, sums, ctx, styles]) => {
+      settingSuggestionService.getByNovelId(selectedNovelId),
+    ]).then(([chars, sums, ctx, styles, suggestions]) => {
       setStats({
         chars: String(chars.length), sums: String(sums.length),
         ctx: String(ctx.length), styles: String(styles.length),
+        suggestions: String(suggestions.filter((item) => item.status === 'pending').length),
       });
     });
   }, [selectedNovelId]);
@@ -49,11 +52,12 @@ function AssetsPage() {
     { title: '风格方案', icon: '🎨', count: stats.styles || '0', desc: '文风与节奏控制', path: '/styles' },
     { title: '章节总结', icon: '📝', count: stats.sums || '0', desc: '已总结章节', path: selectedNovelId ? `/novels/${selectedNovelId}` : '' },
     { title: '上下文记录', icon: '📦', count: stats.ctx || '0', desc: '前文摘要与伏笔', path: selectedNovelId ? `/novels/${selectedNovelId}` : '' },
+    { title: '设定库 AI 推演', icon: '◇', count: stats.suggestions || '0', desc: '待确认候选设定', path: selectedNovelId ? `/novels/${selectedNovelId}/setting-suggestions` : '' },
     { title: '导入资产', icon: '📥', count: '0', desc: '外部导入素材', path: '/import-export' },
   ];
 
   return (
-    <div style={{ padding: 32, maxWidth: 800, margin: '0 auto', height: '100%', overflowY: 'auto' }}>
+    <div className="page-container" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>📦 创作资产中心</div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>聚合当前作品所有创作资产，提供统一管理入口</div>
@@ -78,7 +82,7 @@ function AssetsPage() {
 
       {/* 资产卡片 */}
       {selectedNovel && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div className="asset-card-grid">
           {assetCards.map((card) => (
             <div key={card.title} className="detail-card" style={{ cursor: card.path ? 'pointer' : 'default', textAlign: 'center', opacity: card.path ? 1 : 0.5 }}
               onClick={() => { if (card.path) navigate(card.path); }}>

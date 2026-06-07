@@ -1,178 +1,235 @@
 # AI Novel Studio
 
-> Windows 桌面端 AI 小说创作工作台 —— 逐章辅助完成长篇小说创作
+> Windows 桌面端 AI 长篇小说创作工作台。用户控制方向，AI 分工生成，章节逐步采用，上下文持续沉淀。
 
-## 项目定位
+---
 
-AI Novel Studio 不是一个普通的码字软件，也不是网页后台管理系统。它是一个面向长篇小说创作的 **桌面端 AI 工作台**。
+## 1. 项目简介
 
-**长期愿景**：AI Autonomous Creative Platform（AI 自主创作平台）
+AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工作台**。
 
-核心理念：**用户控制方向，AI 分工生成，章节逐步采用，上下文持续沉淀**。
+它不是普通聊天机器人，不是网页后台管理系统，也不是一次性生成整本小说的工具。它的核心形态是：
 
-## 当前阶段
+```text
+作品管理
+→ 世界观 / 角色 / 规则 / 风格 / 事件资产准备
+→ 章节写作工作台
+→ AI 生成候选
+→ 用户编辑、采纳、沉淀上下文
+→ 继续下一章
+```
 
-**v1.0.46** — Tool Layer 接入真实项目读取
+长期愿景：**AI Autonomous Creative Platform（AI 自主创作平台）**。
 
-当前项目已建立完整的 Agent 开发辅助系统，包含 10 个 Skills、8 个 Checklists 和 8 个 Cursor Rules。
+---
 
-### 项目开发辅助 Skills
+## 2. 当前版本与定位
 
-`.github/skills/` 用于辅助 Copilot / Codex / DeepSeek Agent 执行用户复制进来的任务书。
+**当前版本：v1.7.11**  
+**阶段：发布收尾、本地构建产物清理与安装包验证**
 
-**重要**：Skills 是开发辅助系统，不是用户端产品功能。这些 Skills 不代表软件内部功能已经实现。
+本轮 v1.7.11 不新增业务功能，聚焦发布收尾：工作区状态整理、安装包验证文档、本地构建产物扫描与清理脚本（默认 dry-run）、版本路线同步。
 
-10 个 Skills：
-- `plan-version` — 版本规划
-- `agent-task-writer` — 任务书生成
-- `implement-feature` — 功能实现
-- `bugfix-safe-patch` — 安全 Bug 修复
-- `verify-build` — 构建验证
-- `review-ui` — UI 审查
-- `docs-sync` — 文档同步
-- `release-package` — 发布收尾
-- `db-migration-guard` — 数据库变更保护
-- `tauri-desktop-build` — Tauri 桌面构建
+v1.7.10 为稳定基线版本，下一阶段 v1.8.0 将在安装包验证通过后启动分卷大纲生成。
 
-## 技术栈
+---
 
-- **桌面壳**：Tauri（Rust）
-- **前端**：React 18 + TypeScript 5
-- **构建**：Vite 5
-- **路由**：React Router 6（HashRouter）
-- **数据存储**：SQLite（Tauri 模式）/ LocalStorage（浏览器开发模式）
+## 3. 当前核心能力
 
-## Agent 化路线
+- **作品管理**：创建、编辑、删除小说作品，维护封面与基础元数据。
+- **世界设定**：维护世界背景、规则体系、主角特殊能力。
+- **分卷章节**：管理多卷结构、章节大纲与目标字数。
+- **写作工作台**：左侧卷章节树、中间正文编辑区、右侧 AI 控制面板。
+- **AI 正文生成**：基于世界设定、角色、事件、风格和上下文逐章生成候选正文。
+- **多版本草稿**：AI 初稿、重生成稿、用户编辑稿、润色稿互不覆盖。
+- **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
+- **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
+- **风格控制**：风格方案与输出控制方案管理。
+- **上下文总结**：章节采用后沉淀上下文记录，支持后续连续生成。
+- **质量检查**：逻辑、设定、角色、连续性、语言、节奏多维度检查。
+- **正文润色**：多种润色模式，结果保存为新草稿。
+- **导出功能**：章节 / 整本作品导出为 TXT、Markdown；项目 JSON 备份。
+- **设定库 AI 推演**：生成角色、势力、地点、规则候选，用户确认后才写入正式资产。
+- **AI 设置**：Mock 模式、API Key 本地管理、模型参数配置。
 
-| 阶段 | 版本 | 内容 |
-|------|------|------|
-| Phase 1 | v1.0.43+ | Agent 基础设施（Rules / Skills / Instructions / Workflow） |
-| Phase 2 | v2.x | Agent 化（Planner / Tool Calling / Memory / Verification） |
-| Phase 3 | v3.x | Autonomous（Multi-Agent / 自主创作） |
+---
 
-### Agent 基础设施
-
-- 📋 **AGENTS.md** — AI Agent 总入口规则
-- 📐 **Instructions** — 6 个分领域开发指令（前端/Tauri/数据库/测试/文档/Agent行为）
-- 📝 **Prompts** — 4 个标准 Prompt 模板（版本规划/Bug修复/发布报告/构建验证）
-- 🔧 **Skills** — 5 个多步骤 Agent 工作流（规划/实现/验证/UI审查/发布）
-- 📏 **Cursor Rules** — 5 个 IDE 规则（架构/UI/数据库/安全/测试）
-- 📚 **Docs** — 4 个新文档（模块边界/项目架构/Agent工作流/AI Agent路线图）
-
-## 当前版本
-
-**v1.0.46** — Tool Layer 接入真实项目读取
-
-## 功能概览
-
-- 📖 **作品管理**：创建、编辑、删除小说作品，封面与元数据管理
-- 🌍 **世界设定**：世界背景、规则体系、主角特殊能力设定
-- 📚 **分卷章节**：多卷结构，章节大纲与目标字数管理
-- ✏️ **写作工作台**：专业三栏布局，左侧卷章树 + 中间正文编辑 + 右侧 AI 控制台
-- 🤖 **AI 正文生成**：基于世界设定、角色、事件、风格和上下文的逐章生成
-- 📝 **多版本草稿**：AI 初稿、重生成、用户编辑、润色稿，互不覆盖
-- 👥 **角色库**：角色创建、AI 候选推荐、本章出场角色管理
-- ⚡ **事件辅助**：章节事件规划、AI 推荐事件、必须/禁止事件标记
-- 🎨 **风格控制**：风格方案（节奏/对话比例/禁用写法）与输出控制方案
-- 📦 **上下文总结**：章节采用后自动总结，沉淀上下文记录供后续章节使用
-- 🔍 **质量检查**：逻辑/设定/角色/连续性/语言/节奏多维度检查
-- ✨ **正文润色**：8 种润色模式，结果保存为新草稿不覆盖原文
-- 📥 **导出功能**：章节/整本作品导出为 TXT、Markdown
-- ⚙️ **AI 设置**：Mock 模式、API Key 管理（脱敏显示）、模型参数配置
-
-## 本地运行
+## 4. 快速开始
 
 ### 环境要求
 
 - Node.js >= 18
-- Rust（仅 Tauri 模式需要）
+- Rust（仅 Tauri 桌面模式需要）
 - Windows 10/11
 
 ### 安装与启动
 
 ```powershell
-# 安装依赖
 npm install
 
-# 启动前端开发服务器（浏览器模式）
+# 浏览器开发模式
 npm run dev
 
-# 启动 Tauri 桌面应用
+# Tauri 桌面开发模式
 npm run tauri dev
 
-# 构建生产版本
+# 前端生产构建
 npm run build
 ```
 
-## 项目目录
+### 构建 EXE
 
-```
-ai-novel-studio/
-├── src/
-│   ├── app/              # 应用入口
-│   ├── pages/            # 页面组件
-│   ├── components/       # 通用组件
-│   ├── features/         # 功能模块
-│   ├── services/         # 服务层（AI/数据库/提示词/导出）
-│   ├── store/            # 状态管理
-│   ├── styles/           # 样式文件
-│   └── types/            # TypeScript 类型定义
-├── src-tauri/            # Tauri Rust 后端
-├── prompts/              # AI 提示词模板
-├── docs/                 # 项目文档
-└── .github/              # GitHub 配置
+```powershell
+npm run tauri build
 ```
 
-## AI 设置
+构建产物位于 `src-tauri/target/release/`。
 
-1. 打开设置中心（`/#/settings`）
-2. 使用 **Mock 模式** 可无需 API Key 测试完整工作流
+---
+
+## 5. Windows 桌面规格
+
+| 项目 | 规格 |
+|------|------|
+| 默认窗口 | 1280 × 820 |
+| 最小窗口 | 1024 × 700 |
+| 最大化 | 支持，UI 自适应 |
+| 2K 适配 | 内容宽度受控，阅读 / 表单 / 卡片布局不会无限拉伸 |
+| 数据存储 | 桌面模式 SQLite；浏览器开发模式 LocalStorage |
+
+API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端。
+
+---
+
+## 6. 页面与功能入口
+
+| 路径 | 页面 | 说明 |
+|------|------|------|
+| `/` | 作品管理首页 | 作品卡片列表与快捷入口 |
+| `/novels/:id` | 作品详情 | 基础设定、大纲、角色、风格、设定推演入口 |
+| `/novels/:id/workspace` | 写作工作台 | AI 逐章创作核心工作区 |
+| `/novels/:id/outline` | 大纲编辑器 | 分卷与章节大纲编辑 |
+| `/novels/:id/setting-suggestions` | 设定库 AI 推演 | 生成并采纳角色、势力、地点、规则候选 |
+| `/worlds/:worldId/lore/suggestions` | 设定库 AI 推演兼容入口 | 面向世界设定 ID 的候选推演入口 |
+| `/styles` | 风格方案 | 风格方案与输出控制方案管理 |
+| `/assets` | 创作资产 | 角色库、设定库与设定推演入口 |
+| `/templates` | 模板中心 | 提示词模板管理 |
+| `/ai-tasks` | AI 任务记录 | AI 任务历史与状态追踪 |
+| `/import-export` | 导入导出 | TXT / Markdown 导入导出与 JSON 备份 |
+| `/settings` | 设置中心 | AI 模式、API Key、模型参数 |
+| `/coming-soon` | 即将开放 | 未完成能力的统一占位入口 |
+
+---
+
+## 7. AI 模式与模型配置
+
+1. 打开设置中心（`/#/settings`）。
+2. 使用 **Mock 模式** 可以在无 API Key 的情况下测试完整工作流。
 3. 关闭 Mock 模式后，配置 OpenAI 兼容 API：
-   - API Base URL（如 `https://api.openai.com/v1`）
-   - API Key（仅保存在本地浏览器存储）
-   - 模型名称（如 `gpt-4`、`deepseek-chat`）
+   - API Base URL，例如 `https://api.openai.com/v1`
+   - API Key，仅保存到本地
+   - 模型名称，例如 `gpt-4`、`deepseek-chat`
 
-## 数据与隐私
+详细说明见 [docs/user/ai-settings.md](docs/user/ai-settings.md)。
 
-- 所有数据保存在本地（LocalStorage / SQLite）
-- API Key 仅本地存储，不会上传到任何服务器
-- API Key 脱敏显示，AI 任务日志不保存完整 Key
-- 导出文件由用户选择保存位置
+---
 
-## 版本路线
+## 8. 核心安全规则
+
+- AI 只生成候选、建议或草稿，不自动写入正式数据。
+- 用户确认后内容才成为正式数据。
+- 候选状态必须清晰：待处理、已采纳、编辑后采纳、已废弃。
+- AI 不得自动覆盖正文、正稿或用户已确认资产。
+- API Key 不得写死进代码或提交到 Git。
+- 已有路由和功能必须保留。
+- 不在 UI 组件中直接写 SQL 或大量提示词。
+
+---
+
+## 9. 当前版本路线
 
 | 版本 | 内容 |
 |------|------|
-| v0.1.0 | 项目基础框架与首页 UI |
-| v0.2.0 | 作品详情与基础设定 |
-| v0.3.0 | 分卷与章节管理 |
-| v0.4.0 | 写作工作台 UI |
-| v0.5.0 | AI 正文生成闭环 |
-| v0.6.0 | 风格方案与输出控制 |
-| v0.7.0 | 角色库与事件辅助 |
-| v0.8.0 | 上下文总结系统 |
-| v0.9.0 | 质量检查与润色建议 |
-| v1.0.0 | 基础可用版整合 |
-| v1.0.43 | Agent 基础设施建设 |
-| v1.0.44 | Agent Workflow Runtime 最小闭环 |
-| v1.0.45 | 项目开发辅助 Skills 增强版 |
-| v1.0.46 | Tool Layer 接入真实项目读取 |
+| v1.7.6 | 已完成：阶段性整理、文档体系重整与 EXE 验证 |
+| v1.7.7 | 已完成：桌面端窗口大小控制、响应式 UI 与 2K 适配 |
+| v1.7.8 | 已完成：导出文件位置选择与导出体验优化 |
+| v1.7.9 | 已完成：设定库 AI 推演基础版 |
+| v1.7.10 | 已完成：候选设定采纳与测试补齐 |
+| v1.8.0 | 计划：分卷大纲生成 |
+| v1.9.0 | 计划：章节大纲生成 |
+| v2.0.0 | 计划：正文初稿生成基础闭环 |
+| v2.x | Agent 化：Planner / Tool Calling / Memory / Verification |
+| v3.x | Autonomous：Multi-Agent / 自主创作 |
 
-### Agent 化路线
+完整历史见 [docs/project/version-roadmap.md](docs/project/version-roadmap.md)。
 
-| 版本 | 阶段 |
+---
+
+## 10. 项目结构
+
+```text
+ai-novel-studio/
+├─ src/
+│  ├─ pages/            # 页面级组件
+│  ├─ components/       # 通用 UI 组件
+│  ├─ features/         # 业务功能模块
+│  ├─ services/         # AI / 数据 / 提示词 / 导出服务
+│  ├─ store/            # 状态管理
+│  ├─ styles/           # 样式文件
+│  ├─ types/            # TypeScript 类型定义
+│  ├─ agent/            # Agent Runtime
+│  └─ agent-tools/      # Agent Tool Layer
+├─ src-tauri/           # Tauri Rust 桌面壳
+├─ prompts/             # AI 提示词模板
+├─ docs/                # 项目文档
+├─ .github/             # GitHub 配置与开发辅助系统
+└─ scripts/             # 构建与验证脚本
+```
+
+---
+
+## 11. 测试与构建
+
+```powershell
+# TypeScript 类型检查 + 前端构建
+npm run build
+
+# 设定库 AI 推演静态回归检查
+npm run test:setting-suggestions
+
+# ESLint 检查
+npm run lint
+
+# Rust 编译检查
+cd src-tauri
+cargo check
+cd ..
+
+# 桌面 EXE 完整构建
+npm run tauri build
+
+# 项目验证脚本
+powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
+```
+
+---
+
+## 12. 当前限制
+
+- 分卷大纲生成、章节大纲生成暂未开放，计划 v1.8.0+。
+- 参考小说导入暂未实现。
+- 自动风格画像分析暂未实现。
+- Multi-Agent 自主创作暂未开放，计划 v3.x。
+- 势力库、地点库目前通过世界设定条目承载，后续版本可拆分为独立正式资产模块。
+
+---
+
+## 13. 文档索引
+
+| 分类 | 入口 |
 |------|------|
-| v2.x | Agent 化（Planner / Tool Calling / Memory / Verification） |
-| v3.x | Autonomous（Multi-Agent / 自主创作） |
-
-## GitHub
-
-https://github.com/Mon-Knight/AI-Novel-Studio
-
-## 使用说明
-
-详见 [docs/user-guide.md](docs/user-guide.md)
-
-## License
-
-MIT
+| 用户指南 | [docs/user/](docs/user/) |
+| 项目管理 | [docs/project/](docs/project/) |
+| 技术文档 | [docs/technical/](docs/technical/) |
+| 设计文档 | [docs/design/](docs/design/) |
+| 总索引 | [docs/README.md](docs/README.md) |

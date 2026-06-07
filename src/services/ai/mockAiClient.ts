@@ -22,6 +22,7 @@ type MockTaskType =
   | 'character_generate'
   | 'event_suggest'
   | 'setting_expand'
+  | 'setting_suggestion_generate'
   | 'quality_check'
   | 'chapter_polish'
   | 'connection_test'
@@ -40,6 +41,7 @@ function detectTaskType(messages: { role: string; content: string }[]): MockTask
   }
   if (systemMsg.includes('小说创作顾问') && systemMsg.includes('角色')) return 'character_generate';
   if (systemMsg.includes('剧情策划') || systemMsg.includes('关键事件')) return 'event_suggest';
+  if (systemMsg.includes('设定库 AI 推演') || systemMsg.includes('生成类型：')) return 'setting_suggestion_generate';
   if (systemMsg.includes('世界观构建') || systemMsg.includes('设定补充')) return 'setting_expand';
   if (systemMsg.includes('编辑和质量审查') || systemMsg.includes('质量检查')) return 'quality_check';
   if (systemMsg.includes('文字编辑') || systemMsg.includes('润色')) return 'chapter_polish';
@@ -177,6 +179,45 @@ function mockChapterSummary(info: ReturnType<typeof extractInfo>): string {
   });
 }
 
+function extractSuggestionType(messages: { role: string; content: string }[]): string {
+  const allText = messages.map((m) => m.content).join('\n');
+  return allText.match(/生成类型：(\w+)/)?.[1] || 'character';
+}
+
+function mockSettingSuggestion(messages: { role: string; content: string }[]): string {
+  const type = extractSuggestionType(messages);
+  if (type === 'faction') {
+    return JSON.stringify({
+      items: [
+        { name: '白塔议会', type: '学术权力组织', leader: '首席星象师伊莱恩', goal: '垄断星辉矿脉的解释权', resources: '古代观测台、学徒网络、禁书库', allies: '北境城邦', enemies: '灰烬商会', territory: '王都白塔区', internal_conflict: '保守派与改革派争夺议席', plot_role: '能为主角提供知识，也可能隐瞒关键真相' },
+        { name: '灰烬商会', type: '跨境贸易势力', leader: '无面账房', goal: '打开被封锁的地下航线', resources: '佣兵、黑市账册、走私港', allies: '边境矿主', enemies: '白塔议会', territory: '旧码头与南部驿路', internal_conflict: '利润派与复仇派互相制衡', plot_role: '制造经济压力与情报交换场景' },
+      ],
+    });
+  }
+  if (type === 'location') {
+    return JSON.stringify({
+      items: [
+        { name: '镜湖旧站', type: '废弃中转站', region: '北境湖区', controlled_by: '名义上归王国巡防队', description: '半沉入湖面的旧车站，夜间会映出不存在的列车灯光', danger_level: '中高', resource: '失落航线图', history: '二十年前一次整车失踪事故后废弃', plot_trigger: '发现被抹除的乘客名单' },
+        { name: '第七码头', type: '隐秘港口', region: '王都南岸', controlled_by: '灰烬商会', description: '只在退潮后开放的石拱码头，货物从水下仓库进出', danger_level: '高', resource: '禁运晶核', history: '曾是王室秘密补给点', plot_trigger: '主角可在此交换情报或遭遇伏击' },
+      ],
+    });
+  }
+  if (type === 'rule') {
+    return JSON.stringify({
+      items: [
+        { name: '星辉誓约反噬', type: 'magic', content: '使用星辉术式时，若违背亲口许下的誓约，术式会反向抽取记忆作为代价', limits: '只对主动宣誓者生效', scope: '高阶星辉术士', possible_conflict: '需要避免普通角色也被误伤', plot_usage: '可用于制造信任与背叛的两难局面' },
+        { name: '旧铁轨不可回望', type: 'social', content: '进入废弃铁路区域后，回头看见的若是已故之人，必须继续前行，否则会迷失在原地', limits: '仅在镜湖旧站周边生效', scope: '民间禁忌与超自然规则', possible_conflict: '不能替代正式传送体系', plot_usage: '适合作为悬疑章节的行动约束' },
+      ],
+    });
+  }
+  return JSON.stringify({
+    items: [
+      { name: '林照夜', identity: '流亡的星象书记官', faction: '白塔议会边缘派', personality: '谨慎、记忆力极强，但不轻易相信权威', goal: '找回被删改的星图原本', ability: '能读出旧纸张上残留的观测痕迹', weakness: '害怕公开审判，容易在权力面前退让', current_status: '被白塔除名后潜伏在镜湖旧站', plot_role: '提供世界规则线索并牵出白塔内部矛盾', mainline_relation: '可能成为主角理解星辉体系的关键协作者' },
+      { name: '沈洛川', identity: '灰烬商会护送人', faction: '灰烬商会', personality: '寡言、务实，习惯先算风险再谈道义', goal: '完成一次会改写商会格局的护送', ability: '熟悉地下航线与黑市暗号', weakness: '家族债务被商会掌握', current_status: '正在寻找可靠的临时盟友', plot_role: '把主角带入势力冲突现场', mainline_relation: '既能协助主角，也可能因债务被迫背叛' },
+    ],
+  });
+}
+
 function mockOutlineGenerate(info: ReturnType<typeof extractInfo>): string {
   return `# ${info.novelTitle} 总大纲\n\n主线围绕${info.protagonist}的成长与关键冲突展开，分为开端、升级、反转和终局四个阶段。\n\n## 分卷规划\n1. 第一卷：建立世界规则与主角目标。\n2. 第二卷：扩大冲突，揭示敌对势力。\n3. 第三卷：回收伏笔，完成核心决战。`;
 }
@@ -247,6 +288,9 @@ export class MockAiClient implements AiClient {
         break;
       case 'setting_expand':
         text = mockSettingExpand(info);
+        break;
+      case 'setting_suggestion_generate':
+        text = mockSettingSuggestion(request.messages);
         break;
       case 'quality_check':
         text = mockQualityCheck(info);
