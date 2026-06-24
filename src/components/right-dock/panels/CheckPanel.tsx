@@ -12,7 +12,7 @@ import {
 import { qualityCheckService, computeStatistics } from '../../../services/quality/qualityCheckService';
 import { qualityCheckAiService } from '../../../services/ai/qualityCheckAiService';
 import { qualityFixService } from '../../../services/ai/qualityFixService';
-import type { FixComparison } from '../../../services/ai/qualityFixService';
+import type { FixComparison, FixScopeValidation } from '../../../services/ai/qualityFixService';
 import { fixRunStore } from '../../../services/ai/fixRunStore';
 import { getContextForChapterTask, buildContextPromptSection } from '../../../services/prompt/contextReaderService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
@@ -60,6 +60,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
   const [fixStage, setFixStage] = useState('');
   const [fixProgress, setFixProgress] = useState(0);
   const [fixComparison, setFixComparison] = useState<FixComparison | null>(null);
+  const [fixScopeValidation, setFixScopeValidation] = useState<FixScopeValidation | null>(null);
   const [fixError, setFixError] = useState('');
   const [lastFixRunId, setLastFixRunId] = useState<string>('');
   const [sourceDraftId, setSourceDraftId] = useState<string>('');
@@ -182,7 +183,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       } catch { /* non-critical */ }
 
       updateAiModal?.('正在生成修订版正文...', 30);
-      const { fixResult, fixRun } = await qualityFixService.runFix({
+      const { fixResult, fixRun, scopeValidation } = await qualityFixService.runFix({
         novelId, chapterId: chapter.id, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, currentDraft,
         pendingIssues: pending, ignoredIssues: ignored,
@@ -192,6 +193,16 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         beforeSeriousCount: statistics.critical,
         chapterContext,
       });
+      setFixScopeValidation(scopeValidation);
+
+      // v1.7.19 修稿范围门控：范围越界 → 拒绝，不创建候选草稿
+      if (!scopeValidation.passed) {
+        fixRun.status = 'failed';
+        fixRun.failureReason = scopeValidation.rejectReason || '修稿范围校验未通过';
+        (fixRun as any).warnings = JSON.stringify(scopeValidation.warnings);
+        await fixRunStore.save(fixRun);
+        throw new Error(scopeValidation.rejectReason || '修稿范围越界，修订版未采用');
+      }
 
       // 保存上下文信息到 fixRun
       (fixRun as any).usedContextIds = usedCtxIds;
@@ -395,7 +406,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         </div>
       )}
 
-      {/* v1.7.16 AI 修复对比结果 */}
+      {/* v1.7.19 AI 修复对比结果（增强版） */}
       {fixComparison && (
         <div className="panel-section" style={{
           border: `1px solid ${fixComparison.isBetter ? '#22c55e40' : fixComparison.isWorse ? '#ef444440' : '#f59e0b40'}`,
@@ -403,7 +414,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
           borderRadius: 6, padding: 10,
         }}>
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: fixComparison.isBetter ? '#16a34a' : fixComparison.isWorse ? '#dc2626' : '#d97706' }}>
-            {fixComparison.isBetter ? '✅ 修复成功' : fixComparison.isWorse ? '⚠️ 修复效果不佳' : '📊 修复效果一般'}
+            {fixComparison.isBetter ? '✅ 修复成功（已自动采用）' : fixComparison.isWorse ? '⚠️ 修复效果不佳（保留原版）' : '📊 修复效果一般（保留原版）'}
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.8 }}>
             <div>修复前：{fixComparison.beforeScore} 分，待处理 {fixComparison.beforePendingCount}，严重 {fixComparison.beforeSeriousCount}</div>
@@ -413,12 +424,23 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
               {fixComparison.newIssueCount > 0 && <span style={{ color: '#d97706' }}>，新增 {fixComparison.newIssueCount} 个问题</span>}
             </div>
           </div>
-          {fixComparison.isBetter && (
-            <div style={{ fontSize: 11, color: '#16a34a', marginTop: 4, fontWeight: 500 }}>
-              已自动采用修复后版本，原版本保留可回退。
+          {fixScopeValidation && (
+            <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+              范围校验：{fixScopeValidation.passed ? `通过 (${fixScopeValidation.riskLevel})` : `未通过`}
+              {fixScopeValidation.warnings.length > 0 && <span> | {fixScopeValidation.warnings.join('; ')}</span>}
             </div>
           )}
-          {/* 回退按钮 */}
+          {fixComparison.isBetter && (
+            <div style={{ fontSize: 11, color: '#16a34a', marginTop: 4, fontWeight: 500 }}>
+              已自动采用修复后版本。
+            </div>
+          )}
+          {!fixComparison.isBetter && (
+            <div style={{ fontSize: 11, color: '#d97706', marginTop: 4 }}>
+              修稿未能显著改善质量，当前正文保持不变。可查看候选版本后手动采用。
+            </div>
+          )}
+          {/* 回退/采用按钮 */}
           <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
             <button
               className="btn btn-sm btn-secondary"

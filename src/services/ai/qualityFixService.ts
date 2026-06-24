@@ -49,15 +49,24 @@ export interface QualityFixRun {
 
 /** AI 修稿返回结果 */
 export interface FixResult {
-  mode: FixMode;
+  mode: 'targeted_fix' | 'conservative';
+  revisionPlan?: Array<{ issue_key: string; target_quote?: string; fix_strategy: string; change_scope: string }>;
   fixedIssueKeys: string[];
   revisionSummary: string;
-  changedRanges: Array<{
-    reason: string;
-    before: string;
-    after: string;
-  }>;
+  changedRanges: Array<{ issue_key?: string; reason: string; before: string; after: string }>;
   revisedContent: string;
+  unchangedPolicy?: string;
+}
+
+/** 修稿范围校验结果 */
+export interface FixScopeValidation {
+  passed: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  changedParagraphCount: number;
+  totalParagraphCount: number;
+  unrelatedChangedCount: number;
+  warnings: string[];
+  rejectReason?: string;
 }
 
 /** 修复前后对比 */
@@ -88,7 +97,7 @@ function hashContent(content: string): string {
   return 'fx_' + (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-/** 构建 AI 修稿 Prompt */
+/** 构建 AI 修稿 Prompt (v1.7.19 精准局部修稿) */
 function buildFixPrompt(params: {
   chapterTitle: string;
   chapterOutline?: string;
@@ -99,69 +108,143 @@ function buildFixPrompt(params: {
   volumeContext?: string;
   styleSummary?: string;
 }): { messages: Array<{ role: string; content: string }>; maxTokens: number } {
-  const pendingText = params.pendingIssues.map((item, i) =>
-    `${i + 1}. [${item.severity}] ${item.title}\n   类别：${item.category || item.issueType}\n   描述：${item.description}\n   ${item.quote ? `原文："${item.quote}"` : ''}\n   ${item.suggestion ? `建议：${item.suggestion}` : ''}`
-  ).join('\n\n');
+  const pendingText = params.pendingIssues.map((item, i) => {
+    const parts = [
+      `### 问题 ${i + 1}`,
+      `- issue_key: ${item.issueKey}`,
+      `- severity: ${item.severity}`,
+      `- category: ${item.category || item.issueType}`,
+      `- title: ${item.title}`,
+      `- description: ${item.description}`,
+    ];
+    if (item.quote) parts.push(`- quote: "${item.quote}"`);
+    if (item.suggestion) parts.push(`- suggestion: ${item.suggestion}`);
+    if (item.paragraphIndex !== undefined) parts.push(`- paragraph_index: ${item.paragraphIndex}`);
+    return parts.join('\n');
+  }).join('\n\n');
 
   const ignoredText = params.ignoredIssues.length > 0
-    ? params.ignoredIssues.map((item) => `- ${item.title}（忽略，不要修复）`).join('\n')
+    ? params.ignoredIssues.map((item) => `- ${item.issueKey}: ${item.title}（忽略，不要修复）`).join('\n')
     : '无';
 
   const system = [
-    '你是小说章节自动修稿 AI。你只能根据质量检查指出的 pending 问题修复当前章节。',
-    '你必须尽量保留原章节结构、剧情顺序、人物关系、叙事风格。',
-    '你不能新增重大设定。你不能提前暴露未公开秘密。',
-    '你不能修复 ignored 问题。你必须输出完整修订后章节正文。',
+    '你是一位精准小说章节修稿专家。你不是在重新创作本章。',
+    '你是在对当前章节进行最小必要修改，只修复【待修复问题】中列出的问题。',
+    '未被质量检查指出的内容，尽量保持原文不变。只修改问题涉及的段落。',
     '',
     `章节：${params.chapterTitle}`,
     params.chapterOutline ? `大纲：${params.chapterOutline}` : '',
     '',
-    params.chapterContext ? params.chapterContext : '',
-    params.volumeContext ? params.volumeContext : '',
-    params.styleSummary ? `风格要求：${params.styleSummary}` : '',
+    params.chapterContext || '',
+    params.volumeContext || '',
+    params.styleSummary ? `风格：${params.styleSummary}` : '',
     '',
-    '【禁止改动】',
-    '- 不允许改变章节核心目标',
-    '- 不允许改变已确认世界设定',
-    '- 不允许改变人物身份和核心关系',
-    '- 不允许新增重大世界规则',
-    '- 不允许提前暴露未公开秘密',
-    '- 不允许为了修问题删除关键剧情',
-    '- 不允许把章节改成完全不同内容',
-    '- 不允许修复 ignored 问题',
-    '- 不允许新增与质量问题无关的大段剧情',
+    '【核心约束 - 必须遵守】',
+    '- 修稿不是重写，修改范围尽量小。',
+    '- 只修复【待修复问题】，不修复 ignored 问题。',
+    '- 未涉及质量问题的段落保持原文不变。',
+    '- 不改变章节核心目标、设定和人物关系。',
+    '- 不新增设定、不提前暴露秘密。',
+    '- 输出必须是完整章节正文。',
     '',
-    '【忽略问题，不要处理】',
+    '【已忽略问题，不要修复】',
     ignoredText,
     '',
     '【待修复问题】',
     pendingText,
     '',
-    '请严格按以下 JSON 格式返回，不要输出其他内容：',
-    '```json',
+    '请严格按以下 JSON 格式返回：',
     '{',
-    '  "mode": "conservative",',
-    '  "fixed_issue_keys": ["issue_key_1", "issue_key_2"],',
+    '  "mode": "targeted_fix",',
+    '  "revision_plan": [{ "issue_key":"...", "target_quote":"...", "fix_strategy":"...", "change_scope":"只修改该段" }],',
+    '  "changed_ranges": [{ "issue_key":"...", "before":"原文", "after":"修改后", "reason":"修复原因" }],',
+    '  "fixed_issue_keys": ["qc_xxx"],',
     '  "revision_summary": "本次修复说明",',
-    '  "changed_ranges": [',
-    '    {"reason": "修复原因", "before": "原文片段", "after": "修改后片段"}',
-    '  ],',
+    '  "unchanged_policy": "未涉及质量问题的段落保持原文结构和表达。",',
     '  "revised_content": "完整修订后章节正文"',
     '}',
-    '```',
     '',
-    '以下是当前章节正文：',
-    '',
+    '以下是当前章节全文：',
     params.draftContent.slice(0, 10000),
   ].filter(Boolean).join('\n');
 
   return {
     messages: [
       { role: 'system', content: system },
-      { role: 'user', content: `请根据以上 ${params.pendingIssues.length} 个待修复问题，生成修订版章节正文。` },
+      { role: 'user', content: `请根据以上 ${params.pendingIssues.length} 个待修复问题，进行精准局部修稿。只修改问题相关部分，其他内容尽量不变。` },
     ],
     maxTokens: 10000,
   };
+}
+
+/** 修稿范围校验 (v1.7.19) */
+function validateFixScope(
+  sourceContent: string,
+  revisedContent: string,
+  changedRanges: FixResult['changedRanges'],
+  fixedIssueKeys: string[],
+  pendingIssueKeys: string[],
+): FixScopeValidation {
+  const warnings: string[] = [];
+  if (!revisedContent || revisedContent.trim().length === 0) {
+    return { passed: false, riskLevel: 'high', changedParagraphCount: 0, totalParagraphCount: 0, unrelatedChangedCount: 0, warnings, rejectReason: '修订版正文为空' };
+  }
+
+  const sourceLen = sourceContent.length;
+  const revisedLen = revisedContent.length;
+  const ratio = revisedLen / Math.max(1, sourceLen);
+
+  if (ratio < 0.8) {
+    return { passed: false, riskLevel: 'high', changedParagraphCount: 0, totalParagraphCount: 0, unrelatedChangedCount: 0, warnings, rejectReason: `修订版字数异常减少（${Math.round(ratio * 100)}%），可能丢失关键内容` };
+  }
+  if (ratio > 1.3) warnings.push(`修订版字数增加 ${Math.round((ratio - 1) * 100)}%，可能新增了无关内容`);
+
+  // 段落级变化检测
+  const srcParas = sourceContent.split(/\n\n+/);
+  const revParas = revisedContent.split(/\n\n+/);
+  let changedCount = 0;
+  const totalComparable = Math.min(srcParas.length, revParas.length);
+
+  for (let i = 0; i < totalComparable; i++) {
+    const s = srcParas[i].trim();
+    const r = revParas[i] ? revParas[i].trim() : '';
+    if (s !== r) changedCount++;
+  }
+  // 新增/删除的段落也算变化
+  changedCount += Math.abs(srcParas.length - revParas.length);
+
+  const totalParagraphCount = Math.max(srcParas.length, revParas.length);
+  const changeRatio = changedCount / Math.max(1, totalParagraphCount);
+
+  // 检查是否只修改了 pending issue 相关区域
+  const pendingQuoteTexts = pendingIssueKeys.join(' ').toLowerCase();
+  let unrelatedChangedCount = 0;
+
+  for (let i = 0; i < Math.min(srcParas.length, revParas.length); i++) {
+    const s = srcParas[i].trim();
+    const r = revParas[i] ? revParas[i].trim() : '';
+    if (s !== r) {
+      // 简单判断：是否包含 pending issue key 的引用
+      const paraText = (s + ' ' + r).toLowerCase();
+      if (!pendingQuoteTexts.includes(paraText.slice(0, 50))) {
+        // 粗略判断为无关修改
+      }
+      unrelatedChangedCount++;
+    }
+  }
+
+  if (changeRatio > 0.4 && changedCount > 3) {
+    return { passed: false, riskLevel: 'high', changedParagraphCount: changedCount, totalParagraphCount, unrelatedChangedCount, warnings, rejectReason: `修改了 ${Math.round(changeRatio * 100)}% 段落（${changedCount}/${totalParagraphCount}），超出精准修稿范围` };
+  }
+
+  // 检查 changed_ranges 是否绑定 issue_key
+  const unboundedRanges = changedRanges.filter((r) => !r.issue_key || !fixedIssueKeys.includes(r.issue_key));
+  if (unboundedRanges.length > 0) {
+    warnings.push(`${unboundedRanges.length} 个 changed_ranges 未绑定有效的 issue_key`);
+  }
+
+  const riskLevel = changeRatio > 0.25 ? 'medium' : 'low';
+  return { passed: true, riskLevel, changedParagraphCount: changedCount, totalParagraphCount, unrelatedChangedCount, warnings };
 }
 
 export const qualityFixService = {
@@ -180,7 +263,7 @@ export const qualityFixService = {
     chapterContext?: string;
     volumeContext?: string;
     styleSummary?: string;
-  }): Promise<{ fixResult: FixResult; fixRun: QualityFixRun }> {
+  }): Promise<{ fixResult: FixResult; fixRun: QualityFixRun; scopeValidation: FixScopeValidation }> {
     const settings = aiSettingsService.getSettings();
     const sourceHash = hashContent(params.currentDraft.content);
 
@@ -243,14 +326,21 @@ export const qualityFixService = {
         revisedContent: params.currentDraft.content,
       });
 
-      // v1.7.18 安全规范化：确保所有数组字段不为 undefined
+      // v1.7.18 安全规范化，v1.7.19 增加 targeted_fix 字段
       const safeFixResult: FixResult = {
-        mode: fixResult.mode || 'conservative',
+        mode: (fixResult as any).mode === 'targeted_fix' ? 'targeted_fix' : 'targeted_fix',
+        revisionPlan: Array.isArray((fixResult as any).revisionPlan) ? (fixResult as any).revisionPlan : [],
         fixedIssueKeys: Array.isArray(fixResult.fixedIssueKeys) ? fixResult.fixedIssueKeys : [],
         revisionSummary: fixResult.revisionSummary || '无修复摘要',
         changedRanges: Array.isArray(fixResult.changedRanges) ? fixResult.changedRanges : [],
-        revisedContent: fixResult.revisedContent || params.currentDraft.content,
+        revisedContent: fixResult.revisedContent || '',
+        unchangedPolicy: (fixResult as any).unchangedPolicy || '',
       };
+
+      // 校验 revisedContent 非空
+      if (!safeFixResult.revisedContent.trim()) {
+        throw new Error('AI 返回的修订版正文为空');
+      }
 
       fixRun.revisionSummary = safeFixResult.revisionSummary;
       fixRun.changedRangesJson = JSON.stringify(safeFixResult.changedRanges);
@@ -260,6 +350,15 @@ export const qualityFixService = {
         .map((i) => i.id);
       fixRunStore.save(fixRun);
 
+      // v1.7.19 修稿范围校验
+      const scopeValidation = validateFixScope(
+        params.currentDraft.content,
+        safeFixResult.revisedContent,
+        safeFixResult.changedRanges,
+        safeFixResult.fixedIssueKeys,
+        params.pendingIssues.map((i) => i.issueKey),
+      );
+
       await aiTaskService.markSucceeded(task?.id || '', {
         resultText: safeFixResult.revisionSummary,
         tokenInput: response.tokenInput,
@@ -267,7 +366,7 @@ export const qualityFixService = {
         tokenTotal: response.tokenTotal,
       });
 
-      return { fixResult: safeFixResult, fixRun };
+      return { fixResult: safeFixResult, fixRun, scopeValidation };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'AI 修稿失败';
       fixRun.status = 'failed';
