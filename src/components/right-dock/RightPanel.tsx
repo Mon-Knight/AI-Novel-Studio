@@ -26,6 +26,13 @@ interface RightPanelProps {
   contextVersion?: number;
   /** 定位正文回调 (v1.7.16 4参数) */
   onLocateText?: (startOffset: number, endOffset: number, quote?: string, paragraphIndex?: number) => void;
+  /** v1.7.19 质量检查状态持久化 */
+  qcReport?: any;
+  qcItems?: any[];
+  onQcChange?: (report: any, items: any[]) => void;
+  showAiModal?: (title: string, subtitle?: string) => void;
+  updateAiModal?: (stage: string, progress: number) => void;
+  hideAiModal?: () => void;
 }
 
 const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
@@ -41,7 +48,7 @@ const panelConfig: Record<string, { title: string; component: React.FC<any> }> =
   'context-view': { title: '上下文记录', component: ContextViewPanel },
 };
 
-function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted, onChapterOutlineApplied, onChapterGoalDirtyChange, onChapterCharactersChanged, contextVersion, onLocateText }: RightPanelProps) {
+function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted, onChapterOutlineApplied, onChapterGoalDirtyChange, onChapterCharactersChanged, contextVersion, onLocateText, qcReport, qcItems, onQcChange, showAiModal, updateAiModal, hideAiModal }: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
@@ -98,6 +105,12 @@ function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopt
             onChapterCharactersChanged={onChapterCharactersChanged}
             contextVersion={contextVersion}
             onLocateText={onLocateText}
+            qcReport={qcReport}
+            qcItems={qcItems}
+            onQcChange={onQcChange}
+            showAiModal={showAiModal}
+            updateAiModal={updateAiModal}
+            hideAiModal={hideAiModal}
           />
         </div>
       </div>

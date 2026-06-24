@@ -9,6 +9,8 @@ import RightToolbar from '../../components/right-dock/RightToolbar';
 import RightPanel from '../../components/right-dock/RightPanel';
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
+import GlobalAiTaskModal from '../../components/workspace/GlobalAiTaskModal';
+import type { AiTaskModalState } from '../../components/workspace/GlobalAiTaskModal';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { volumeRepository } from '../../services/database/volumeRepository';
@@ -55,6 +57,24 @@ function WritingWorkspacePage() {
     setLocateTarget({ startOffset, endOffset, quote, paragraphIndex });
   }, []);
   const handleLocateDone = useCallback(() => setLocateTarget(null), []);
+
+  // v1.7.19 全局 AI 任务弹窗状态
+  const [aiModal, setAiModal] = useState<AiTaskModalState>({
+    running: false, title: '', stage: '', progress: 0,
+  });
+  const showAiModal = useCallback((title: string, subtitle?: string) => {
+    setAiModal({ running: true, title, subtitle, stage: '', progress: 0 });
+  }, []);
+  const updateAiModal = useCallback((stage: string, progress: number) => {
+    setAiModal((prev) => ({ ...prev, stage, progress }));
+  }, []);
+  const hideAiModal = useCallback(() => {
+    setAiModal((prev) => ({ ...prev, running: false, stage: '完成', progress: 100 }));
+  }, []);
+
+  // v1.7.19 质量检查状态上移（不随面板卸载丢失）
+  const [qcReport, setQcReport] = useState<any>(null);
+  const [qcItems, setQcItems] = useState<any[]>([]);
 
   // v0.8.0 上下文总结相关状态
   const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
@@ -430,6 +450,9 @@ function WritingWorkspacePage() {
 
       {/* 中间正文编辑区 */}
       <div className="workspace-editor" onClick={handleEditorClick}>
+
+        {/* v1.7.19 全局 AI 任务弹窗 */}
+        <GlobalAiTaskModal state={aiModal} />
         {/* 顶部信息栏 */}
         <div className="workspace-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -518,6 +541,14 @@ function WritingWorkspacePage() {
           onChapterCharactersChanged={bumpContextVersion}
           contextVersion={contextVersion}
           onLocateText={handleLocateText}
+          // v1.7.19 质量检查状态
+          qcReport={qcReport}
+          qcItems={qcItems}
+          onQcChange={(report: any, items: any[]) => { setQcReport(report); setQcItems(items); }}
+          // v1.7.19 全局 AI 弹窗
+          showAiModal={showAiModal}
+          updateAiModal={updateAiModal}
+          hideAiModal={hideAiModal}
         />
       )}
 
