@@ -38,6 +38,10 @@ export interface QualityFixRun {
   model?: string;
   revisionSummary?: string;
   changedRangesJson?: string;
+  /** v1.7.17 上下文追踪 */
+  usedContextIds?: string;
+  skippedContextIds?: string;
+  warnings?: string;
   failureReason?: string;
   createdAt: string;
   updatedAt: string;
@@ -303,17 +307,17 @@ export const qualityFixService = {
   },
 
   /** 标记修稿已被采用 */
-  adoptFixRun(id: string): void {
-    fixRunStore.updateStatus(id, 'adopted');
+  async adoptFixRun(id: string): Promise<void> {
+    await fixRunStore.updateStatus(id, 'adopted');
   },
 
   /** 回退修稿 */
-  revertFixRun(id: string): void {
-    fixRunStore.updateStatus(id, 'reverted');
+  async revertFixRun(id: string): Promise<void> {
+    await fixRunStore.updateStatus(id, 'reverted');
   },
 
   /** 获取最近的修稿记录 */
-  getFixRuns(chapterId: string): QualityFixRun[] {
+  async getFixRuns(chapterId: string): Promise<QualityFixRun[]> {
     return fixRunStore.getByChapterId(chapterId);
   },
 };

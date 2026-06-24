@@ -3529,6 +3529,180 @@ pub fn delete_context_record(id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ==================== Quality Fix Runs ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityFixRunDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub source_draft_id: String,
+    pub source_draft_version: i64,
+    pub target_draft_id: Option<String>,
+    pub target_draft_version: Option<i64>,
+    pub source_content_hash: Option<String>,
+    pub target_content_hash: Option<String>,
+    pub before_report_id: Option<String>,
+    pub after_report_id: Option<String>,
+    pub before_score: Option<i64>,
+    pub after_score: Option<i64>,
+    pub before_pending_count: i64,
+    pub after_pending_count: Option<i64>,
+    pub before_serious_count: i64,
+    pub after_serious_count: Option<i64>,
+    pub fixed_issue_ids: Option<String>,
+    pub new_issue_ids: Option<String>,
+    pub mode: String,
+    pub status: String,
+    pub model: Option<String>,
+    pub revision_summary: Option<String>,
+    pub changed_ranges_json: Option<String>,
+    pub used_context_ids: Option<String>,
+    pub skipped_context_ids: Option<String>,
+    pub warnings: Option<String>,
+    pub failure_reason: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveQualityFixRunInput {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub source_draft_id: String,
+    pub source_draft_version: i64,
+    pub target_draft_id: Option<String>,
+    pub target_draft_version: Option<i64>,
+    pub source_content_hash: Option<String>,
+    pub target_content_hash: Option<String>,
+    pub before_report_id: Option<String>,
+    pub after_report_id: Option<String>,
+    pub before_score: Option<i64>,
+    pub after_score: Option<i64>,
+    pub before_pending_count: i64,
+    pub after_pending_count: Option<i64>,
+    pub before_serious_count: i64,
+    pub after_serious_count: Option<i64>,
+    pub fixed_issue_ids: Option<String>,
+    pub new_issue_ids: Option<String>,
+    pub mode: Option<String>,
+    pub status: String,
+    pub model: Option<String>,
+    pub revision_summary: Option<String>,
+    pub changed_ranges_json: Option<String>,
+    pub used_context_ids: Option<String>,
+    pub skipped_context_ids: Option<String>,
+    pub warnings: Option<String>,
+    pub failure_reason: Option<String>,
+}
+
+fn map_fix_run_row(row: &rusqlite::Row) -> rusqlite::Result<QualityFixRunDto> {
+    Ok(QualityFixRunDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        source_draft_id: row.get(3)?,
+        source_draft_version: row.get(4)?,
+        target_draft_id: row.get(5)?,
+        target_draft_version: row.get(6)?,
+        source_content_hash: row.get(7)?,
+        target_content_hash: row.get(8)?,
+        before_report_id: row.get(9)?,
+        after_report_id: row.get(10)?,
+        before_score: row.get(11)?,
+        after_score: row.get(12)?,
+        before_pending_count: row.get(13)?,
+        after_pending_count: row.get(14)?,
+        before_serious_count: row.get(15)?,
+        after_serious_count: row.get(16)?,
+        fixed_issue_ids: row.get(17)?,
+        new_issue_ids: row.get(18)?,
+        mode: row.get(19)?,
+        status: row.get(20)?,
+        model: row.get(21)?,
+        revision_summary: row.get(22)?,
+        changed_ranges_json: row.get(23)?,
+        used_context_ids: row.get(24)?,
+        skipped_context_ids: row.get(25)?,
+        warnings: row.get(26)?,
+        failure_reason: row.get(27)?,
+        created_at: row.get(28)?,
+        updated_at: row.get(29)?,
+    })
+}
+
+/// 保存修稿记录（创建或更新）
+#[tauri::command]
+pub fn save_quality_fix_run(input: SaveQualityFixRunInput) -> Result<QualityFixRunDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mode = input.mode.unwrap_or_else(|| "conservative".to_string());
+
+    // upsert: try update, then insert
+    let updated = conn.execute(
+        "UPDATE quality_fix_runs SET target_draft_id=?1, target_draft_version=?2, target_content_hash=?3, after_report_id=?4, after_score=?5, after_pending_count=?6, after_serious_count=?7, fixed_issue_ids=?8, new_issue_ids=?9, status=?10, revision_summary=?11, changed_ranges_json=?12, used_context_ids=?13, skipped_context_ids=?14, warnings=?15, failure_reason=?16, updated_at=?17 WHERE id=?18",
+        params![
+            &input.target_draft_id, &input.target_draft_version, &input.target_content_hash,
+            &input.after_report_id, &input.after_score, &input.after_pending_count,
+            &input.after_serious_count, &input.fixed_issue_ids, &input.new_issue_ids,
+            &input.status, &input.revision_summary, &input.changed_ranges_json,
+            &input.used_context_ids, &input.skipped_context_ids, &input.warnings,
+            &input.failure_reason, &now, &input.id,
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    if updated == 0 {
+        conn.execute(
+            "INSERT INTO quality_fix_runs (id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?29)",
+            params![
+                &input.id, &input.novel_id, &input.chapter_id, &input.source_draft_id,
+                &input.source_draft_version, &input.target_draft_id, &input.target_draft_version,
+                &input.source_content_hash, &input.target_content_hash, &input.before_report_id,
+                &input.after_report_id, &input.before_score, &input.after_score,
+                &input.before_pending_count, &input.after_pending_count,
+                &input.before_serious_count, &input.after_serious_count,
+                &input.fixed_issue_ids, &input.new_issue_ids, &mode, &input.status,
+                &input.model, &input.revision_summary, &input.changed_ranges_json,
+                &input.used_context_ids, &input.skipped_context_ids, &input.warnings,
+                &input.failure_reason, &now,
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at FROM quality_fix_runs WHERE id=?1"
+    ).map_err(|e| e.to_string())?;
+    stmt.query_row(params![&input.id], map_fix_run_row).map_err(|e| e.to_string())
+}
+
+/// 获取章节的修稿记录
+#[tauri::command]
+pub fn get_quality_fix_runs(chapter_id: String) -> Result<Vec<QualityFixRunDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at FROM quality_fix_runs WHERE chapter_id=?1 ORDER BY created_at DESC"
+    ).map_err(|e| e.to_string())?;
+    let items = stmt.query_map(params![&chapter_id], map_fix_run_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+/// 更新修稿记录状态
+#[tauri::command]
+pub fn update_quality_fix_run_status(id: String, status: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE quality_fix_runs SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![&status, chrono::Utc::now().to_rfc3339(), &id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

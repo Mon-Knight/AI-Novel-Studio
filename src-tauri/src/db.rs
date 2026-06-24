@@ -491,6 +491,42 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_polish_records_chapter_id ON polish_records(chapter_id);
         CREATE INDEX IF NOT EXISTS idx_polish_records_source_draft_id ON polish_records(source_draft_id);
+
+        CREATE TABLE IF NOT EXISTS quality_fix_runs (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            chapter_id TEXT NOT NULL,
+            source_draft_id TEXT NOT NULL,
+            source_draft_version INTEGER NOT NULL DEFAULT 0,
+            target_draft_id TEXT,
+            target_draft_version INTEGER,
+            source_content_hash TEXT,
+            target_content_hash TEXT,
+            before_report_id TEXT,
+            after_report_id TEXT,
+            before_score INTEGER,
+            after_score INTEGER,
+            before_pending_count INTEGER NOT NULL DEFAULT 0,
+            after_pending_count INTEGER,
+            before_serious_count INTEGER NOT NULL DEFAULT 0,
+            after_serious_count INTEGER,
+            fixed_issue_ids TEXT,
+            new_issue_ids TEXT,
+            mode TEXT NOT NULL DEFAULT 'conservative',
+            status TEXT NOT NULL DEFAULT 'pending',
+            model TEXT,
+            revision_summary TEXT,
+            changed_ranges_json TEXT,
+            used_context_ids TEXT,
+            skipped_context_ids TEXT,
+            warnings TEXT,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quality_fix_runs_chapter_id ON quality_fix_runs(chapter_id);
         ",
     )?;
     Ok(())

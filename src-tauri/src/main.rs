@@ -146,6 +146,9 @@ fn main() {
             commands::get_context_records,
             commands::update_context_record_active,
             commands::delete_context_record,
+            commands::save_quality_fix_run,
+            commands::get_quality_fix_runs,
+            commands::update_quality_fix_run_status,
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {

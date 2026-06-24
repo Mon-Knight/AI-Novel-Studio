@@ -155,7 +155,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
 
       // 读取章节上下文
       let chapterContext: string | undefined;
-      let volumeContext: string | undefined;
+      let usedCtxIds = '';
+      let skippedCtxIds = '';
+      let ctxWarnings = '';
       try {
         const ctxResult = await getContextForChapterTask({
           novelId, chapterId: chapter.id, volumeId: chapter.volumeId,
@@ -164,6 +166,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         if (ctxResult.chapterSummaries.length > 0 || ctxResult.volumeContexts.length > 0) {
           chapterContext = buildContextPromptSection(ctxResult);
         }
+        usedCtxIds = JSON.stringify(ctxResult.chapterContexts.map((c) => c.id).concat(ctxResult.volumeContexts.map((v) => v.id)));
+        skippedCtxIds = JSON.stringify([]);
+        ctxWarnings = JSON.stringify(ctxResult.warnings);
       } catch { /* non-critical */ }
 
       setFixStage('正在 AI 修稿...');
@@ -175,10 +180,14 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         beforeScore: report.overallScore || 0,
         beforePendingCount: statistics.pending,
         beforeSeriousCount: statistics.critical,
-        chapterContext, volumeContext,
+        chapterContext,
       });
 
-      fixRunStore.save(fixRun);
+      // 保存上下文信息到 fixRun
+      (fixRun as any).usedContextIds = usedCtxIds;
+      (fixRun as any).skippedContextIds = skippedCtxIds;
+      (fixRun as any).warnings = ctxWarnings;
+      await fixRunStore.save(fixRun);
       setLastFixRunId(fixRun.id);
 
       if (fixRun.status === 'failed') {
@@ -391,12 +400,11 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
               className="btn btn-sm btn-secondary"
               onClick={async () => {
                 if (!sourceDraftId || !chapter || !currentDraft) return;
-                // 加载源草稿
                 const drafts = await draftVersionService.getByChapterId(chapter.id);
                 const source = drafts.find((d: any) => d.id === sourceDraftId);
                 if (source) {
                   setCurrentDraft(source);
-                  qualityFixService.revertFixRun(lastFixRunId);
+                  await qualityFixService.revertFixRun(lastFixRunId);
                   setFixComparison(null);
                   setFixStage('已回退到修稿前版本');
                   setTimeout(() => setFixStage(''), 3000);
@@ -408,8 +416,8 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
             </button>
             <button
               className="btn btn-sm btn-primary"
-              onClick={() => {
-                qualityFixService.adoptFixRun(lastFixRunId);
+              onClick={async () => {
+                await qualityFixService.adoptFixRun(lastFixRunId);
                 setFixStage('已确认采用修复后版本');
                 setTimeout(() => setFixStage(''), 3000);
               }}
