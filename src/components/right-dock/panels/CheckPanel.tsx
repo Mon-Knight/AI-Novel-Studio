@@ -101,8 +101,8 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
     if (!currentDraft || currentDraft.content.length < 10) {
       setError('正文过短，请先生成或编辑正文'); return;
     }
+    if (loading) return; // v1.7.20 防重复点击
     setLoading(true); setError(''); setLocateMessage('');
-    // v1.7.19 使用全局弹窗
     showAiModal?.('AI 正在质量检查', 'AI 正在检查逻辑、设定和文笔……');
     try {
       updateAiModal?.('正在准备检查参数……', 10);
@@ -110,7 +110,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         novelId, chapterId: chapter.id, draftId: currentDraft.id,
       });
 
-      updateAiModal?.('AI 正在分析逻辑和设定……', 30);
+      updateAiModal?.('正在请求 AI 质量检查……', 35);
       const result = await qualityCheckAiService.runCheck({
         novelId, chapterId: chapter.id, draftId: currentDraft.id,
         volumeId: chapter.volumeId,
@@ -118,18 +118,35 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         chapterOutline: chapter.outline, chapterGoal: chapter.goal,
       });
 
-      updateAiModal?.('正在保存检查结果……', 90);
+      if (!result || (!result.items && !result.summary)) {
+        throw new Error('AI 返回内容为空，质量检查未完成。');
+      }
+
+      updateAiModal?.('正在保存检查结果……', 80);
       const saved = await qualityCheckService.saveResult({
         reportId: rpt.id, novelId, chapterId: chapter.id,
         draftId: currentDraft.id, result,
         draftVersion: currentDraft.versionNo,
       });
+
+      updateAiModal?.('正在加载最新结果……', 95);
       syncUp(saved.report, saved.items);
       setFilter('all');
-    } catch (e: any) { setError(e.message || '检查失败'); }
-    finally {
-      setLoading(false);
+
+      updateAiModal?.('质量检查完成', 100);
+      // v1.7.20 成功后延迟关闭弹窗
+      await new Promise((r) => setTimeout(r, 500));
       hideAiModal?.();
+    } catch (e: any) {
+      const msg = e.message || '质量检查失败';
+      setError(msg);
+      // v1.7.20 失败时弹窗显示错误，不立即关闭
+      updateAiModal?.(`失败: ${msg}`, 0);
+      // 停留 2.5 秒后关闭
+      await new Promise((r) => setTimeout(r, 2500));
+      hideAiModal?.();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -155,6 +172,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
     const pending = items.filter((i) => i.status === 'pending');
     if (pending.length === 0) return;
 
+    if (fixLoading || loading) return; // v1.7.20 防重复
     setFixLoading(true); setFixError(''); setFixComparison(null); setFixProgress(0);
     setSourceDraftId(currentDraft.id);
     showAiModal?.('AI 正在修复并复检', 'AI 正在根据质量问题自动优化正文……');
@@ -287,7 +305,10 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       setFixLoading(false);
       setTimeout(() => setFixStage(''), 3000);
     } catch (e: any) {
-      setFixError(e.message || 'AI 修稿失败');
+      const msg = e.message || 'AI 修稿失败';
+      setFixError(msg);
+      updateAiModal?.(`失败: ${msg}`, 0);
+      await new Promise((r) => setTimeout(r, 2500));
       hideAiModal?.();
       setFixLoading(false);
     }
