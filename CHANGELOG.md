@@ -1,5 +1,60 @@
 # AI Novel Studio - CHANGELOG
 
+## v1.7.13 (2026-06-24) - 章节总结升级为章节上下文，打通上下文入库
+
+### 新增
+
+- **章节总结 → 章节上下文升级**：
+  - 章节总结不再是临时文本，而是绑定章节、绑定正文版本的**章节上下文**。
+  - 生成后自动进行一致性校验（本地算法），检测编造、遗漏、角色错误、设定错误、推测等问题。
+  - 校验通过后自动启用并写入上下文记录，供后续 AI 生成调用。
+
+- **一致性校验** (`summaryValidator.ts`)：
+  - 本地关键词匹配算法，快速检测总结与正文的明显矛盾。
+  - 校验结果分 `passed`/`failed`，score 低于 70 不自动启用。
+  - 导出 `hashContent()` 用于正文版本绑定。
+
+- **卷自动归类**：
+  - 章节上下文根据 `chapter.volume_id` 自动归类到所属卷。
+  - 章节未归属卷时阻止生成，提示用户先归类。
+
+- **过期机制**：
+  - 章节上下文绑定 `content_hash` 和 `draft_version`。
+  - 正文版本变化后自动标记上下文为已过期。
+  - 过期上下文默认不参与 AI 生成。
+
+- **上下文记录面板升级** (ContextViewPanel)：
+  - 新增分类标签：全部 / 章节上下文 / 手动上下文。
+  - 过期记录计数和标记。
+
+- **Tauri 后端命令** (新增 9 个)：
+  - `save_chapter_summary` — 创建/更新章节总结。
+  - `get_chapter_summary` — 按章节 ID 获取。
+  - `mark_chapter_summaries_expired` — 标记过期（含关联 context_records）。
+  - `update_chapter_summary_enabled` — 启用/停用。
+  - `save_context_records` — 批量保存上下文记录。
+  - `get_context_records` — 获取作品全部上下文。
+  - `update_context_record_active` — 切换启用。
+  - `delete_context_record` — 删除。
+
+### 数据库迁移
+
+- `chapter_summaries`：新增 `volume_id`、`enabled`、`content_hash`、`draft_version`、`is_expired`、`validation_status`、`validation_result`、`core_events`、`protagonist_state_change`、`important_character_changes`、`setting_changes`、`new_locations`、`new_items_or_abilities`、`foreshadowing`、`unresolved_questions`、`facts_must_remember`、`next_chapter_hook`。
+- `context_records`：新增 `volume_id`、`is_expired`、`content_hash`、`draft_version`。
+
+### 修改
+
+- `src/types/chapterSummary.ts`：新增 `ChapterSummaryValidation`、`ValidateSummaryInput`；`ChapterSummary` 扩展结构化字段 + 校验/过期/启用字段。
+- `src/types/context.ts`：`ContextRecord` 新增 `volumeId`/`isExpired`/`contentHash`/`draftVersion`；新增 `ContextCategory` 分类类型。
+- `src/services/ai/summaryValidator.ts`：新增一致性校验 + 正文哈希工具。
+- `src/services/context/chapterSummaryService.ts`：升级为 Tauri + localStorage 双模。
+- `src/services/context/contextRecordService.ts`：升级为 Tauri + localStorage 双模，新增 `createBatch`。
+- `src/components/right-dock/panels/ChapterSummaryPanel.tsx`：增加校验流程、过期提示、卷归属检查、启用/停用按钮。
+- `src/components/right-dock/panels/ContextViewPanel.tsx`：增加分类标签、过期计数。
+- `src-tauri/src/commands.rs`：新增 ChapterSummary + ContextRecord 相关 DTOs 和 9 个命令。
+- `src-tauri/src/db.rs`：新增 `migrate_chapter_summaries_table` 和 `migrate_context_records_table`。
+- `src-tauri/src/main.rs`：注册 9 个新命令。
+
 ## v1.7.12 (2026-06-24) - 修复 AI 任务记录删除 FOREIGN KEY 约束失败 + 质量检查问题处理闭环
 
 ### 修复
