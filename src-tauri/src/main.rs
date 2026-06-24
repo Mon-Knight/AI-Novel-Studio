@@ -149,6 +149,7 @@ fn main() {
             commands::save_quality_fix_run,
             commands::get_quality_fix_runs,
             commands::update_quality_fix_run_status,
+            commands::save_context_read_log,
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {

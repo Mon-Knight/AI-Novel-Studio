@@ -3703,6 +3703,33 @@ pub fn update_quality_fix_run_status(id: String, status: String) -> Result<(), S
     Ok(())
 }
 
+// ==================== Context Read Logs ====================
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveContextReadLogInput {
+    pub id: String,
+    pub novel_id: String,
+    pub task_type: String,
+    pub chapter_id: Option<String>,
+    pub volume_id: Option<String>,
+    pub used_context_ids: Option<String>,
+    pub skipped_context_ids: Option<String>,
+    pub warnings: Option<String>,
+}
+
+/// 保存上下文读取日志
+#[tauri::command]
+pub fn save_context_read_log(input: SaveContextReadLogInput) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO context_read_logs (id, novel_id, task_type, chapter_id, volume_id, used_context_ids, skipped_context_ids, warnings, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        params![&input.id, &input.novel_id, &input.task_type, &input.chapter_id, &input.volume_id, &input.used_context_ids, &input.skipped_context_ids, &input.warnings, &now],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

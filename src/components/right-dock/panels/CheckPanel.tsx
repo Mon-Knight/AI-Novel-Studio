@@ -17,6 +17,7 @@ import { fixRunStore } from '../../../services/ai/fixRunStore';
 import { getContextForChapterTask, buildContextPromptSection } from '../../../services/prompt/contextReaderService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
+import { contextRecordService } from '../../../services/context/contextRecordService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { runWithLoading } from '../../../lib/runWithLoading';
 
@@ -256,9 +257,16 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
       setReport(saved2.report);
       setItems(saved2.items);
 
-      // 标记旧章节上下文过期
+      // 标记旧章节上下文和卷上下文过期
       if (comparison.isBetter) {
-        chapterSummaryService.markExpired(chapter.id).catch(() => {});
+        await chapterSummaryService.markExpired(chapter.id).catch(() => {});
+        // v1.7.17: 同时过期卷上下文
+        const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
+        for (const r of allRecords) {
+          if (r.contextType === 'volume_summary' && r.volumeId === chapter.volumeId && !r.isExpired) {
+            await contextRecordService.update(r.id, { isExpired: true }).catch(() => {});
+          }
+        }
       }
 
       setFixStage('AI 修复完成');

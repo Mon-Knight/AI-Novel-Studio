@@ -6,6 +6,7 @@ import { contextRecordService, buildContextSummary } from '../context/contextRec
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
+import { dbCall } from '../database/db';
 import type { ContextRecord } from '../../types/context';
 import type { ChapterSummary } from '../../types/chapterSummary';
 
@@ -45,6 +46,14 @@ function logId(): string {
 function addLog(log: ContextReadLog): void {
   readLogs.unshift(log);
   if (readLogs.length > 50) readLogs.length = 50;
+  // v1.7.17 持久化到 SQLite
+  dbCall('save_context_read_log', {
+    id: log.id, novelId: log.novelId, taskType: log.taskType,
+    chapterId: log.chapterId || null, volumeId: log.volumeId || null,
+    usedContextIds: JSON.stringify(log.usedContextIds),
+    skippedContextIds: JSON.stringify(log.skippedContextIds),
+    warnings: JSON.stringify(log.warnings),
+  }).catch(() => {});
 }
 
 /** 获取最近的上下文读取日志 */

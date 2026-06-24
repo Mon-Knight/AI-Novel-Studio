@@ -527,6 +527,20 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
             FOREIGN KEY (chapter_id) REFERENCES chapters(id)
         );
         CREATE INDEX IF NOT EXISTS idx_quality_fix_runs_chapter_id ON quality_fix_runs(chapter_id);
+
+        CREATE TABLE IF NOT EXISTS context_read_logs (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            task_type TEXT NOT NULL,
+            chapter_id TEXT,
+            volume_id TEXT,
+            used_context_ids TEXT,
+            skipped_context_ids TEXT,
+            warnings TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_context_read_logs_novel_id ON context_read_logs(novel_id);
+        CREATE INDEX IF NOT EXISTS idx_context_read_logs_task_type ON context_read_logs(task_type);
         ",
     )?;
     Ok(())
