@@ -90,6 +90,7 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
           setPercent(30);
           const result = await qualityCheckAiService.runCheck({
             novelId, chapterId: chapter.id, draftId: currentDraft.id,
+            volumeId: chapter.volumeId,
             draftContent: currentDraft.content, chapterTitle: chapter.title,
             chapterOutline: chapter.outline, chapterGoal: chapter.goal,
           });

@@ -10,7 +10,7 @@ import { outputProfileService } from '../styles/outputProfileService';
 import { characterService } from '../characters/characterService';
 import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
-import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
+import { getContextForChapterTask, buildContextPromptSection } from './contextReaderService';
 import { masterOutlineService, volumeOutlineService, chapterOutlineService } from '../outlines/outlineService';
 import { chapterRepository } from '../database/chapterRepository';
 import { getCachedChapterOutlineDraft } from './chapterOutlineDraftCache';
@@ -298,14 +298,17 @@ export async function buildChapterContext(
     }
   }
 
-  // v0.8.0 加载前文上下文记录
+  // v1.7.15 使用统一上下文读取服务，分区注入 Prompt
   let previousContext: string | undefined;
   try {
-    const records = await contextRecordService.getForGeneration({
-      novelId, chapterId: chapter.id, maxCount: 15,
+    const contextResult = await getContextForChapterTask({
+      novelId,
+      chapterId: chapter.id,
+      volumeId: chapter.volumeId,
+      taskType: 'chapter_generate',
     });
-    if (records.length > 0) {
-      previousContext = buildContextSummary(records);
+    if (contextResult.chapterSummaries.length > 0 || contextResult.volumeContexts.length > 0) {
+      previousContext = buildContextPromptSection(contextResult);
     }
   } catch { /* 上下文加载失败不影响生成 */ }
 

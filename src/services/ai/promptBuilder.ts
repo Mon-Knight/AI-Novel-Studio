@@ -80,6 +80,8 @@ export interface QualityCheckPromptContext {
   draftContent: string;
   specialAbility?: string;
   forbiddenBehaviors?: string;
+  /** v1.7.15 上下文注入 */
+  contextSummary?: string;
 }
 
 export interface PolishPromptContext {
@@ -393,6 +395,7 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
     ctx.chapterGoal ? `本章目标：${ctx.chapterGoal}` : '',
     ctx.specialAbility ? `主角能力：${ctx.specialAbility}` : '',
     ctx.forbiddenBehaviors ? `禁止行为：${ctx.forbiddenBehaviors}` : '',
+    ctx.contextSummary ? ctx.contextSummary : '',
     '',
     '请从以下维度检查：逻辑一致性、设定违背、角色行为一致性、前后文割裂、节奏问题、文风问题、语言问题。',
     '',

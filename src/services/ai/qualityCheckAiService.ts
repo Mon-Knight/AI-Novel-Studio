@@ -1,11 +1,12 @@
 /**
- * AI Novel Studio - AI 质量检查 (v1.0.21 统一 aiClient)
+ * AI Novel Studio - AI 质量检查 (v1.7.15 接入上下文)
  */
 import { createAiClient, aiSettingsService } from './aiClient';
 import { buildQualityCheckPrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
+import { getContextForChapterTask, buildContextPromptSection } from '../prompt/contextReaderService';
 import type { QualityCheckResult, RunQualityCheckInput } from '../../types/qualityCheck';
 import { safeJsonParse } from './jsonUtils';
 
@@ -24,6 +25,19 @@ export const qualityCheckAiService = {
       }
     } catch { /* non-critical */ }
 
+    // v1.7.15 读取章节上下文用于质量检查
+    let contextSummary: string | undefined;
+    try {
+      const ctxResult = await getContextForChapterTask({
+        novelId: input.novelId, chapterId: input.chapterId,
+        volumeId: input.volumeId as string | undefined,
+        taskType: 'quality_check',
+      });
+      if (ctxResult.chapterSummaries.length > 0 || ctxResult.volumeContexts.length > 0) {
+        contextSummary = buildContextPromptSection(ctxResult);
+      }
+    } catch { /* 上下文加载失败不影响检查 */ }
+
     const request = buildQualityCheckPrompt({
       novelTitle: novel?.title || '未命名作品',
       chapterTitle: input.chapterTitle,
@@ -32,6 +46,7 @@ export const qualityCheckAiService = {
       draftContent: input.draftContent,
       specialAbility,
       forbiddenBehaviors,
+      contextSummary,
     });
 
     const task = await aiTaskService.create('quality_check', {

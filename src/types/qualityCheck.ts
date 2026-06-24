@@ -98,6 +98,8 @@ export interface QualityCheckResult {
 
 export interface RunQualityCheckInput {
   novelId: string; chapterId: string; draftId: string;
+  /** v1.7.15 卷ID，用于上下文读取 */
+  volumeId?: string;
   draftContent: string; chapterTitle: string; chapterOutline?: string;
   chapterGoal?: string; worldBackground?: string; ruleSystems?: string;
   protagonist?: string; specialAbility?: string; abilityLimits?: string;
