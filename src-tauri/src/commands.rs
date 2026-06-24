@@ -1,5 +1,5 @@
-use crate::db::get_connection;
-use rusqlite::{params, Row};
+use crate::db::{get_connection, get_database_path};
+use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
 // ==================== Novel ====================
@@ -1257,6 +1257,37 @@ pub struct MarkAiTaskSucceededInput {
     pub finished_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteAiTaskRecordsInput {
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteAiTaskRecordsResult {
+    pub deleted_count: i64,
+    pub requested_count: i64,
+    pub before_count: i64,
+    pub after_count: i64,
+    pub before_match_count: i64,
+    pub after_match_count: i64,
+    pub affected_rows: i64,
+    pub db_path: String,
+    /// 子表被清理的引用行数 { table_name: rows_updated }
+    pub deleted_child_rows: std::collections::HashMap<String, i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTaskRecordsDebugState {
+    pub db_path: String,
+    pub table_exists: bool,
+    pub total_count: i64,
+    pub matched_count: Option<i64>,
+    pub sample_ids: Vec<String>,
+}
+
 fn map_ai_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTaskRecordDto> {
     Ok(AiTaskRecordDto {
         id: row.get(0)?,
@@ -1285,6 +1316,322 @@ fn map_ai_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTaskRecordDto>
 
 fn ai_task_select_sql() -> &'static str {
     "SELECT id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, prompt_template_id, input_summary, prompt_snapshot, result_text, result_json, error_message, token_input, token_output, token_total, duration_ms, started_at, finished_at, created_at FROM ai_task_records"
+}
+
+fn ai_task_db_path_for_log() -> String {
+    get_database_path().display().to_string()
+}
+
+fn normalize_ai_task_ids(ids: Vec<String>) -> Vec<String> {
+    let mut ids = ids
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+fn ai_task_records_table_exists(conn: &Connection) -> Result<bool, String> {
+    let count = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ai_task_records'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| format!("Failed to check ai_task_records table: {}", e))?;
+    Ok(count > 0)
+}
+
+fn ensure_ai_task_records_table(conn: &Connection, db_path: &str) -> Result<(), String> {
+    let table_exists = ai_task_records_table_exists(conn)?;
+    if !table_exists {
+        return Err(format!(
+            "ai_task_records table does not exist. db_path={}",
+            db_path
+        ));
+    }
+    Ok(())
+}
+
+fn count_ai_task_records_in_conn(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("SELECT COUNT(*) FROM ai_task_records", [], |row| row.get(0))
+        .map_err(|e| e.to_string())
+}
+
+fn count_ai_task_records_by_ids(conn: &Connection, ids: &[String]) -> Result<i64, String> {
+    let mut count = 0_i64;
+    for id in ids {
+        count += conn
+            .query_row(
+                "SELECT COUNT(*) FROM ai_task_records WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(count)
+}
+
+fn sample_ai_task_ids(conn: &Connection, limit: i64) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM ai_task_records ORDER BY created_at DESC LIMIT ?1")
+        .map_err(|e| e.to_string())?;
+    let ids = stmt
+        .query_map(params![limit], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(ids)
+}
+
+fn delete_ai_task_records_by_ids_internal(
+    conn: &Connection,
+    ids: Vec<String>,
+    db_path: String,
+) -> Result<DeleteAiTaskRecordsResult, String> {
+    let ids = normalize_ai_task_ids(ids);
+    let requested_count = ids.len() as i64;
+    let table_exists = ai_task_records_table_exists(conn)?;
+    println!(
+        "[AI_TASK_DELETE_RUST] delete_many command_entered db_path={} table_exists={} requested_count={} ids={:?}",
+        db_path, table_exists, requested_count, ids
+    );
+    ensure_ai_task_records_table(conn, &db_path)?;
+    let before_count = count_ai_task_records_in_conn(conn)?;
+
+    if ids.is_empty() {
+        println!(
+            "[AI_TASK_DELETE_RUST] delete_many skipped empty ids db_path={} before_count={}",
+            db_path, before_count
+        );
+        return Ok(DeleteAiTaskRecordsResult {
+            deleted_count: 0,
+            requested_count,
+            before_count,
+            after_count: before_count,
+            before_match_count: 0,
+            after_match_count: 0,
+            affected_rows: 0,
+            db_path,
+            deleted_child_rows: std::collections::HashMap::new(),
+        });
+    }
+
+    let before_match_count = count_ai_task_records_by_ids(conn, &ids)?;
+    println!(
+        "[AI_TASK_DELETE_RUST] delete_many called ids={:?} db_path={} before_count={} before_match_count={}",
+        ids, db_path, before_count, before_match_count
+    );
+
+    if before_match_count == 0 {
+        let sample_ids = sample_ai_task_ids(conn, 5)?;
+        println!(
+            "[AI_TASK_DELETE_RUST] delete_many no matching ids requested={:?} sample_existing_ids={:?}",
+            ids, sample_ids
+        );
+        return Err(format!(
+            "No AI task records matched selected ids. requested_ids={:?}, sample_existing_ids={:?}, db_path={}",
+            ids, sample_ids, db_path
+        ));
+    }
+
+    // 构建 IN 子句占位符
+    let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+    let placeholders_str = placeholders.join(",");
+
+    // 开启事务
+    conn.execute_batch("BEGIN TRANSACTION")
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+    let mut deleted_child_rows: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+
+    // 按顺序清理子表引用（FOREIGN KEY 子表必须在父表删除前处理）
+    let child_tables: &[&str] = &[
+        "chapter_drafts",
+        "quality_check_reports",
+        "polish_records",
+        // 以下表无 FK 约束，但清理 ai_task_id 引用以保持数据整洁
+        "chapter_events",
+        "chapter_summaries",
+    ];
+
+    for table in child_tables {
+        let sql = format!(
+            "UPDATE {} SET ai_task_id = NULL WHERE ai_task_id IN ({})",
+            table, placeholders_str
+        );
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        match conn.execute(&sql, rusqlite::params_from_iter(params_refs.iter())) {
+            Ok(rows) => {
+                if rows > 0 {
+                    println!(
+                        "[AI_TASK_DELETE_RUST] delete_many cleaned child table {} rows={}",
+                        table, rows
+                    );
+                    deleted_child_rows.insert(table.to_string(), rows as i64);
+                }
+            }
+            Err(e) => {
+                let msg = format!("Failed to clean child table {}: {}", table, e);
+                println!("[AI_TASK_DELETE_RUST] delete_many rollback: {}", msg);
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(msg);
+            }
+        }
+    }
+
+    // 删除父表记录
+    let mut affected_rows = 0_i64;
+    for id in &ids {
+        match conn.execute("DELETE FROM ai_task_records WHERE id = ?1", params![id]) {
+            Ok(rows) => affected_rows += rows as i64,
+            Err(e) => {
+                let msg = format!("Failed to delete ai_task_record {}: {}", id, e);
+                println!("[AI_TASK_DELETE_RUST] delete_many rollback: {}", msg);
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(msg);
+            }
+        }
+    }
+
+    let after_match_count = count_ai_task_records_by_ids(conn, &ids)?;
+    let after_count = count_ai_task_records_in_conn(conn)?;
+    let deleted_count = before_match_count - after_match_count;
+
+    println!(
+        "[AI_TASK_DELETE_RUST] delete_many result db_path={} before_count={} before_match_count={} affected_rows={} after_match_count={} after_count={} deleted_count={} deleted_child_rows={:?}",
+        db_path,
+        before_count,
+        before_match_count,
+        affected_rows,
+        after_match_count,
+        after_count,
+        deleted_count,
+        deleted_child_rows
+    );
+
+    if before_match_count > 0 && after_match_count > 0 {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(format!(
+            "AI task records still exist after delete. requested_ids={:?}, after_match_count={}, db_path={}",
+            ids, after_match_count, db_path
+        ));
+    }
+
+    conn.execute_batch("COMMIT")
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+    Ok(DeleteAiTaskRecordsResult {
+        deleted_count,
+        requested_count,
+        before_count,
+        after_count,
+        before_match_count,
+        after_match_count,
+        affected_rows,
+        db_path,
+        deleted_child_rows,
+    })
+}
+
+fn clear_ai_task_records_internal(
+    conn: &Connection,
+    db_path: String,
+) -> Result<DeleteAiTaskRecordsResult, String> {
+    let table_exists = ai_task_records_table_exists(conn)?;
+    println!(
+        "[AI_TASK_DELETE_RUST] clear_all command_entered db_path={} table_exists={}",
+        db_path, table_exists
+    );
+    ensure_ai_task_records_table(conn, &db_path)?;
+    let before_count = count_ai_task_records_in_conn(conn)?;
+    println!(
+        "[AI_TASK_DELETE_RUST] clear_all called db_path={} before_count={}",
+        db_path, before_count
+    );
+
+    // 开启事务
+    conn.execute_batch("BEGIN TRANSACTION")
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+    let mut deleted_child_rows: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+
+    // 按顺序清理子表引用（FOREIGN KEY 子表必须在父表删除前处理）
+    // 使用子查询匹配所有 ai_task_records 的 id
+    let child_tables: &[&str] = &[
+        "chapter_drafts",
+        "quality_check_reports",
+        "polish_records",
+        // 以下表无 FK 约束，但清理 ai_task_id 引用以保持数据整洁
+        "chapter_events",
+        "chapter_summaries",
+    ];
+
+    for table in child_tables {
+        let sql = format!(
+            "UPDATE {} SET ai_task_id = NULL WHERE ai_task_id IN (SELECT id FROM ai_task_records)",
+            table
+        );
+        match conn.execute(&sql, []) {
+            Ok(rows) => {
+                if rows > 0 {
+                    println!(
+                        "[AI_TASK_DELETE_RUST] clear_all cleaned child table {} rows={}",
+                        table, rows
+                    );
+                    deleted_child_rows.insert(table.to_string(), rows as i64);
+                }
+            }
+            Err(e) => {
+                let msg = format!("Failed to clean child table {}: {}", table, e);
+                println!("[AI_TASK_DELETE_RUST] clear_all rollback: {}", msg);
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(msg);
+            }
+        }
+    }
+
+    // 删除父表所有记录
+    let affected_rows = conn
+        .execute("DELETE FROM ai_task_records", [])
+        .map_err(|e| {
+            let msg = format!("Failed to delete ai_task_records: {}", e);
+            println!("[AI_TASK_DELETE_RUST] clear_all rollback: {}", msg);
+            let _ = conn.execute_batch("ROLLBACK");
+            msg
+        })? as i64;
+
+    let after_count = count_ai_task_records_in_conn(conn)?;
+    let deleted_count = before_count - after_count;
+    println!(
+        "[AI_TASK_DELETE_RUST] clear_all result db_path={} before_count={} affected_rows={} after_count={} deleted_count={} deleted_child_rows={:?}",
+        db_path, before_count, affected_rows, after_count, deleted_count, deleted_child_rows
+    );
+
+    if after_count != 0 {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(format!(
+            "AI task records still exist after clear. after_count={}, db_path={}",
+            after_count, db_path
+        ));
+    }
+
+    conn.execute_batch("COMMIT")
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+    Ok(DeleteAiTaskRecordsResult {
+        deleted_count,
+        requested_count: before_count,
+        before_count,
+        after_count,
+        before_match_count: before_count,
+        after_match_count: after_count,
+        affected_rows,
+        db_path,
+        deleted_child_rows,
+    })
 }
 
 #[tauri::command]
@@ -1352,6 +1699,7 @@ pub fn get_ai_task_records(
     size: Option<i64>,
 ) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let db_path = ai_task_db_path_for_log();
     let page = page.unwrap_or(1).max(1);
     let size = size.unwrap_or(20).clamp(1, 500);
     let offset = (page - 1) * size;
@@ -1365,14 +1713,95 @@ pub fn get_ai_task_records(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
+    if let Ok(items) = &result {
+        println!(
+            "[AI_TASK_READ_RUST] get_ai_task_records db_path={} page={} size={} returned={}",
+            db_path,
+            page,
+            size,
+            items.len()
+        );
+    }
     result
 }
 
 #[tauri::command]
 pub fn count_ai_task_records() -> Result<i64, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.query_row("SELECT COUNT(*) FROM ai_task_records", [], |row| row.get(0))
-        .map_err(|e| e.to_string())
+    let db_path = ai_task_db_path_for_log();
+    let count = count_ai_task_records_in_conn(&conn)?;
+    println!(
+        "[AI_TASK_READ_RUST] count_ai_task_records db_path={} count={}",
+        db_path, count
+    );
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn delete_ai_task_record(id: String) -> Result<DeleteAiTaskRecordsResult, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let db_path = ai_task_db_path_for_log();
+    println!(
+        "[AI_TASK_DELETE_RUST] delete_one called id={} db_path={}",
+        id, db_path
+    );
+    delete_ai_task_records_by_ids_internal(&conn, vec![id], db_path)
+}
+
+#[tauri::command]
+pub fn delete_ai_task_records_by_ids(
+    input: DeleteAiTaskRecordsInput,
+) -> Result<DeleteAiTaskRecordsResult, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let db_path = ai_task_db_path_for_log();
+    delete_ai_task_records_by_ids_internal(&conn, input.ids, db_path)
+}
+
+#[tauri::command]
+pub fn clear_ai_task_records() -> Result<DeleteAiTaskRecordsResult, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let db_path = ai_task_db_path_for_log();
+    clear_ai_task_records_internal(&conn, db_path)
+}
+
+#[tauri::command]
+pub fn get_ai_task_records_debug_state(
+    ids: Option<Vec<String>>,
+) -> Result<AiTaskRecordsDebugState, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let db_path = ai_task_db_path_for_log();
+    let normalized_ids = ids.map(normalize_ai_task_ids);
+    let table_exists = ai_task_records_table_exists(&conn)?;
+    let matched_count = if table_exists {
+        match &normalized_ids {
+            Some(ids) if !ids.is_empty() => Some(count_ai_task_records_by_ids(&conn, ids)?),
+            Some(_) => Some(0),
+            None => None,
+        }
+    } else {
+        normalized_ids.as_ref().map(|_| 0)
+    };
+    let total_count = if table_exists {
+        count_ai_task_records_in_conn(&conn)?
+    } else {
+        0
+    };
+    let sample_ids = if table_exists {
+        sample_ai_task_ids(&conn, 10)?
+    } else {
+        Vec::new()
+    };
+    println!(
+        "[AI_TASK_DEBUG_RUST] state db_path={} table_exists={} total_count={} matched_count={:?} ids={:?} sample_ids={:?}",
+        db_path, table_exists, total_count, matched_count, normalized_ids, sample_ids
+    );
+    Ok(AiTaskRecordsDebugState {
+        db_path,
+        table_exists,
+        total_count,
+        matched_count,
+        sample_ids,
+    })
 }
 
 #[tauri::command]
@@ -1537,7 +1966,10 @@ fn style_select_sql() -> &'static str {
 #[tauri::command]
 pub fn list_style_profiles(project_id: String) -> Result<Vec<StyleProfileDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let sql = format!("{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC", style_select_sql());
+    let sql = format!(
+        "{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC",
+        style_select_sql()
+    );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let items = stmt
         .query_map(params![&project_id], map_style_profile_row)
@@ -1551,7 +1983,10 @@ pub fn list_style_profiles(project_id: String) -> Result<Vec<StyleProfileDto>, S
 pub fn get_active_style_profile(project_id: String) -> Result<Option<StyleProfileDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     // Prefer active, fallback to latest
-    let sql = format!("{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC LIMIT 1", style_select_sql());
+    let sql = format!(
+        "{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC LIMIT 1",
+        style_select_sql()
+    );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     match stmt.query_row(params![&project_id], map_style_profile_row) {
         Ok(dto) => Ok(Some(dto)),
@@ -1604,26 +2039,27 @@ pub fn save_style_profile(
 }
 
 #[tauri::command]
-pub fn set_active_style_profile(
-    input: SetActiveStyleProfileInput,
-) -> Result<(), String> {
+pub fn set_active_style_profile(input: SetActiveStyleProfileInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE style_profiles SET is_active = 0 WHERE novel_id = ?1",
         params![&input.project_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE style_profiles SET is_active = 1, updated_at = ?1 WHERE id = ?2 AND novel_id = ?3",
-        params![&chrono::Utc::now().to_rfc3339(), &input.style_profile_id, &input.project_id],
-    ).map_err(|e| e.to_string())?;
+        params![
+            &chrono::Utc::now().to_rfc3339(),
+            &input.style_profile_id,
+            &input.project_id
+        ],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn delete_style_profile(
-    project_id: String,
-    style_profile_id: String,
-) -> Result<(), String> {
+pub fn delete_style_profile(project_id: String, style_profile_id: String) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     // Check if active
     let is_active: i64 = conn
@@ -1637,7 +2073,8 @@ pub fn delete_style_profile(
     conn.execute(
         "DELETE FROM style_profiles WHERE id = ?1 AND novel_id = ?2",
         params![&style_profile_id, &project_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     // If deleted was active, activate the latest remaining
     if is_active != 0 {
@@ -1652,7 +2089,8 @@ pub fn delete_style_profile(
             conn.execute(
                 "UPDATE style_profiles SET is_active = 1 WHERE id = ?1",
                 params![&new_active_id],
-            ).ok();
+            )
+            .ok();
         }
     }
     Ok(())
@@ -1820,9 +2258,13 @@ fn sync_protagonists_to_character_library_inner(
 
     if let Some((main_char, _ability_str, protagonists_json)) = novel_row {
         if !protagonists_json.is_empty() && protagonists_json != "[]" {
-            if let Ok(profiles) = serde_json::from_str::<Vec<ProtagonistProfileDto>>(&protagonists_json) {
+            if let Ok(profiles) =
+                serde_json::from_str::<Vec<ProtagonistProfileDto>>(&protagonists_json)
+            {
                 for (i, profile) in profiles.iter().enumerate() {
-                    if profile.name.trim().is_empty() { continue; }
+                    if profile.name.trim().is_empty() {
+                        continue;
+                    }
                     protagonists.push(ProtagonistInfo {
                         key: profile.label.clone(),
                         label: match profile.label.as_str() {
@@ -1832,9 +2274,21 @@ fn sync_protagonists_to_character_library_inner(
                         },
                         order: i as i64,
                         name: profile.name.clone(),
-                        identity: if profile.identity.is_empty() { None } else { Some(profile.identity.clone()) },
-                        personality: if profile.personality.is_empty() { None } else { Some(profile.personality.clone()) },
-                        goal: if profile.goal.is_empty() { None } else { Some(profile.goal.clone()) },
+                        identity: if profile.identity.is_empty() {
+                            None
+                        } else {
+                            Some(profile.identity.clone())
+                        },
+                        personality: if profile.personality.is_empty() {
+                            None
+                        } else {
+                            Some(profile.personality.clone())
+                        },
+                        goal: if profile.goal.is_empty() {
+                            None
+                        } else {
+                            Some(profile.goal.clone())
+                        },
                         special_ability: profile.special_ability.clone(),
                         ability_limits: profile.ability_limits.clone(),
                         forbidden_behaviors: profile.forbidden_behaviors.clone(),
@@ -1868,7 +2322,16 @@ fn sync_protagonists_to_character_library_inner(
                 "SELECT name, identity, personality, goal, special_ability, ability_limits, forbidden_behaviors, current_state FROM protagonists WHERE novel_id = ?1 ORDER BY created_at ASC"
             )
             .map_err(|e| e.to_string())?;
-        let protag_rows: Vec<(String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)> = stmt
+        let protag_rows: Vec<(
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_map(params![novel_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -1884,11 +2347,34 @@ fn sync_protagonists_to_character_library_inner(
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
-        for (i, (name, identity, personality, goal, ability, ability_limits, forbidden_behaviors, current_state)) in protag_rows.iter().enumerate() {
-            if name.trim().is_empty() { continue; }
+        for (
+            i,
+            (
+                name,
+                identity,
+                personality,
+                goal,
+                ability,
+                ability_limits,
+                forbidden_behaviors,
+                current_state,
+            ),
+        ) in protag_rows.iter().enumerate()
+        {
+            if name.trim().is_empty() {
+                continue;
+            }
             protagonists.push(ProtagonistInfo {
-                key: if i == 0 { "primary".to_string() } else { format!("lead_{}", i + 1) },
-                label: if i == 0 { "主角".to_string() } else { format!("主角{}", i + 1) },
+                key: if i == 0 {
+                    "primary".to_string()
+                } else {
+                    format!("lead_{}", i + 1)
+                },
+                label: if i == 0 {
+                    "主角".to_string()
+                } else {
+                    format!("主角{}", i + 1)
+                },
                 order: i as i64,
                 name: name.clone(),
                 identity: identity.clone(),
@@ -1938,7 +2424,11 @@ fn sync_protagonists_to_character_library_inner(
 
             let sql = format!("{} WHERE id = ?1", character_select_sql());
             let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-            if let Some(ch) = stmt.query_row(params![&existing_id], map_character_row).optional().map_err(|e| e.to_string())? {
+            if let Some(ch) = stmt
+                .query_row(params![&existing_id], map_character_row)
+                .optional()
+                .map_err(|e| e.to_string())?
+            {
                 results.push(ch);
             }
         } else {
@@ -1978,7 +2468,11 @@ fn sync_protagonists_to_character_library_inner(
 
             let sql = format!("{} WHERE id = ?1", character_select_sql());
             let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-            if let Some(ch) = stmt.query_row(params![&new_id], map_character_row).optional().map_err(|e| e.to_string())? {
+            if let Some(ch) = stmt
+                .query_row(params![&new_id], map_character_row)
+                .optional()
+                .map_err(|e| e.to_string())?
+            {
                 results.push(ch);
             }
         }
@@ -2182,7 +2676,9 @@ fn default_role_in_chapter() -> String {
 
 /// 添加章节出场角色
 #[tauri::command]
-pub fn add_chapter_character(input: AddChapterCharacterInput) -> Result<ChapterCharacterDto, String> {
+pub fn add_chapter_character(
+    input: AddChapterCharacterInput,
+) -> Result<ChapterCharacterDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
 
     // 检查是否已存在
@@ -2261,10 +2757,7 @@ pub fn list_chapter_characters(chapter_id: String) -> Result<Vec<ChapterCharacte
 
 /// 移除章节出场角色
 #[tauri::command]
-pub fn remove_chapter_character(
-    chapter_id: String,
-    character_id: String,
-) -> Result<(), String> {
+pub fn remove_chapter_character(chapter_id: String, character_id: String) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM chapter_characters WHERE chapter_id = ?1 AND character_id = ?2",
@@ -2286,5 +2779,92 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn create_runtime_ai_task_table(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL
+            );
+            ",
+        )
+    }
+
+    fn insert_runtime_ai_task(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO ai_task_records (id, task_type, status, created_at) VALUES (?1, 'connection_test', 'succeeded', ?2)",
+            params![id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_delete_runtime_insert_list_delete_clear() -> Result<(), Box<dyn std::error::Error>> {
+        let db_path = std::env::temp_dir().join(format!(
+            "ai-novel-studio-ai-task-delete-runtime-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db_path_text = db_path.display().to_string();
+        let conn = Connection::open(&db_path)?;
+        create_runtime_ai_task_table(&conn)?;
+        assert!(ai_task_records_table_exists(&conn).expect("table exists check should work"));
+
+        let first_id = format!("runtime-delete-{}", uuid::Uuid::new_v4());
+        let second_id = format!("runtime-clear-{}", uuid::Uuid::new_v4());
+        insert_runtime_ai_task(&conn, &first_id)?;
+        insert_runtime_ai_task(&conn, &second_id)?;
+
+        let before_count = count_ai_task_records_in_conn(&conn)?;
+        println!(
+            "[AI_TASK_DELETE_RUNTIME_TEST] inserted db_path={} ids=[{}, {}] before_count={}",
+            db_path_text, first_id, second_id, before_count
+        );
+        assert_eq!(before_count, 2);
+
+        let delete_result = delete_ai_task_records_by_ids_internal(
+            &conn,
+            vec![first_id.clone()],
+            db_path_text.clone(),
+        )?;
+        println!(
+            "[AI_TASK_DELETE_RUNTIME_TEST] delete_result={:?}",
+            delete_result
+        );
+        assert_eq!(delete_result.requested_count, 1);
+        assert_eq!(delete_result.before_count, 2);
+        assert_eq!(delete_result.before_match_count, 1);
+        assert_eq!(delete_result.deleted_count, 1);
+        assert_eq!(delete_result.after_match_count, 0);
+        assert_eq!(delete_result.after_count, 1);
+
+        assert_eq!(count_ai_task_records_by_ids(&conn, &[first_id.clone()])?, 0);
+        assert_eq!(
+            count_ai_task_records_by_ids(&conn, &[second_id.clone()])?,
+            1
+        );
+
+        let clear_result = clear_ai_task_records_internal(&conn, db_path_text.clone())?;
+        println!(
+            "[AI_TASK_DELETE_RUNTIME_TEST] clear_result={:?}",
+            clear_result
+        );
+        assert_eq!(clear_result.before_count, 1);
+        assert_eq!(clear_result.deleted_count, 1);
+        assert_eq!(clear_result.after_count, 0);
+        assert_eq!(count_ai_task_records_in_conn(&conn)?, 0);
+
+        drop(conn);
+        let _ = fs::remove_file(db_path);
+        Ok(())
     }
 }

@@ -1,10 +1,31 @@
 /**
  * AI Novel Studio - AI task record service.
  */
-import { dbCall, lsGet, lsSet, generateId, nowISO } from '../database/db';
+import { dbCall, isTauri, lsGet, lsRemove, lsSet, generateId, nowISO } from '../database/db';
 import type { AiTaskRecord, AiTaskType } from '../../types/ai';
 
 const AI_TASKS_KEY = 'ai_novel_studio_ai_tasks';
+const LEGACY_AI_TASKS_KEY = 'ai_novel_studio_ai_task_records';
+
+interface DeleteAiTaskRecordsResult {
+  deletedCount: number;
+  requestedCount?: number;
+  beforeCount?: number;
+  afterCount?: number;
+  beforeMatchCount?: number;
+  afterMatchCount?: number;
+  affectedRows?: number;
+  dbPath?: string;
+  deletedChildRows?: Record<string, number>;
+}
+
+interface AiTaskRecordsDebugState {
+  dbPath: string;
+  tableExists: boolean;
+  totalCount: number;
+  matchedCount?: number | null;
+  sampleIds: string[];
+}
 
 type AiTaskRecordRow = Partial<AiTaskRecord> & {
   novel_id?: string | null;
@@ -28,11 +49,29 @@ type AiTaskRecordRow = Partial<AiTaskRecord> & {
 };
 
 function getLocalTasks(): AiTaskRecord[] {
-  return normalizeTasks(lsGet<unknown>(AI_TASKS_KEY));
+  const byId = new Map<string, AiTaskRecord>();
+  for (const task of normalizeTasks(lsGet<unknown>(LEGACY_AI_TASKS_KEY))) {
+    byId.set(task.id, task);
+  }
+  for (const task of normalizeTasks(lsGet<unknown>(AI_TASKS_KEY))) {
+    byId.set(task.id, task);
+  }
+  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function saveLocalTasks(tasks: AiTaskRecord[]): void {
   lsSet(AI_TASKS_KEY, tasks);
+  lsRemove(LEGACY_AI_TASKS_KEY);
+}
+
+function clearLocalTaskCache(): void {
+  lsRemove(AI_TASKS_KEY);
+  lsRemove(LEGACY_AI_TASKS_KEY);
+}
+
+function removeLocalTasksByIds(ids: string[]): void {
+  const idSet = new Set(ids);
+  saveLocalTasks(getLocalTasks().filter((task) => !idSet.has(task.id)));
 }
 
 function upsertLocalTask(record: AiTaskRecord): void {
@@ -147,15 +186,12 @@ export const aiTaskService = {
         saveLocalTasks(tasks);
         return record;
       },
-    ).catch(() => {
-      const tasks = getLocalTasks();
-      tasks.unshift(record);
-      saveLocalTasks(tasks);
-      return record;
-    });
+    );
 
     const normalized = normalizeTask(created) ?? record;
-    upsertLocalTask(normalized);
+    if (!isTauri()) {
+      upsertLocalTask(normalized);
+    }
     return normalized;
   },
 
@@ -212,24 +248,9 @@ export const aiTaskService = {
         };
         saveLocalTasks(tasks);
       },
-    ).catch(() => {
-      const idx = tasks.findIndex((t) => t.id === id);
-      if (idx === -1) return;
-      tasks[idx] = {
-        ...tasks[idx],
-        status: 'succeeded',
-        resultText: summarizeText(result.resultText),
-        promptSnapshot: summarizeText(result.promptSnapshot),
-        resultJson: summarizeText(result.resultJson),
-        tokenInput: result.tokenInput,
-        tokenOutput: result.tokenOutput,
-        tokenTotal: result.tokenTotal,
-        durationMs: computedDuration,
-        finishedAt,
-      };
-      saveLocalTasks(tasks);
-    });
+    );
 
+    if (isTauri()) return;
     const latest = getLocalTasks();
     const idx = latest.findIndex((t) => t.id === id);
     if (idx !== -1) {
@@ -271,19 +292,9 @@ export const aiTaskService = {
         };
         saveLocalTasks(tasks);
       },
-    ).catch(() => {
-      const idx = tasks.findIndex((t) => t.id === id);
-      if (idx === -1) return;
-      tasks[idx] = {
-        ...tasks[idx],
-        status: 'failed',
-        errorMessage: summarizeText(errorMessage, 500),
-        durationMs: computedDuration,
-        finishedAt,
-      };
-      saveLocalTasks(tasks);
-    });
+    );
 
+    if (isTauri()) return;
     const latest = getLocalTasks();
     const idx = latest.findIndex((t) => t.id === id);
     if (idx !== -1) {
@@ -303,7 +314,7 @@ export const aiTaskService = {
       'get_ai_task_records_by_chapter_id',
       { chapterId },
       () => getLocalTasks().filter((t) => t.chapterId === chapterId),
-    ).catch(() => getLocalTasks().filter((t) => t.chapterId === chapterId));
+    );
     return normalizeTasks(tasks);
   },
 
@@ -312,26 +323,40 @@ export const aiTaskService = {
       'get_ai_task_records_by_novel_id',
       { novelId },
       () => getLocalTasks().filter((t) => t.novelId === novelId),
-    ).catch(() => getLocalTasks().filter((t) => t.novelId === novelId));
+    );
     return normalizeTasks(tasks);
   },
 
   async getAll(page = 1, size = 20): Promise<{ items: AiTaskRecord[]; total: number }> {
-    const [items, total] = await Promise.all([
+    const tauri = isTauri();
+    if (tauri) {
+      clearLocalTaskCache();
+    }
+    console.log('[AI_TASK_SERVICE] getAll invoke', {
+      command: 'get_ai_task_records',
+      page,
+      size,
+      isTauri: tauri,
+    });
+
+    const [rawItems, total] = await Promise.all([
       dbCall<unknown[]>('get_ai_task_records', { page, size }, () => {
-        const tasks = getLocalTasks();
-        const start = (page - 1) * size;
-        return tasks.slice(start, start + size);
-      }).catch(() => {
+        console.log('[AI_TASK_SERVICE] getAll fallback', { page, size, isTauri: false });
         const tasks = getLocalTasks();
         const start = (page - 1) * size;
         return tasks.slice(start, start + size);
       }),
-      dbCall<number>('count_ai_task_records', {}, () => getLocalTasks().length).catch(() => getLocalTasks().length),
+      dbCall<number>('count_ai_task_records', {}, () => getLocalTasks().length),
     ]);
+    const items = normalizeTasks(rawItems);
+    console.log('[AI_TASK_SERVICE] getAll result', {
+      isTauri: tauri,
+      itemCount: items.length,
+      total,
+    });
 
     return {
-      items: normalizeTasks(items),
+      items,
       total,
     };
   },
@@ -339,25 +364,110 @@ export const aiTaskService = {
   // v1.0.27 删除/清空方法
 
   /** 删除单条任务记录 */
-  async deleteOne(id: string): Promise<void> {
-    const tasks = getLocalTasks().filter((t) => t.id !== id);
-    saveLocalTasks(tasks);
-    // 反查
+  async deleteOne(id: string): Promise<DeleteAiTaskRecordsResult> {
+    if (!id) return { deletedCount: 0 };
+
+    const tauri = isTauri();
+    console.log('[AI_TASK_SERVICE] deleteOne invoke', {
+      command: 'delete_ai_task_record',
+      id,
+      isTauri: tauri,
+    });
+    const result = await dbCall<DeleteAiTaskRecordsResult>(
+      'delete_ai_task_record',
+      { id },
+      () => {
+        console.log('[AI_TASK_SERVICE] deleteOne fallback', { id, isTauri: false });
+        const before = getLocalTasks();
+        const tasks = before.filter((t) => t.id !== id);
+        saveLocalTasks(tasks);
+        return { deletedCount: before.length - tasks.length };
+      },
+    );
+    console.log('[AI_TASK_SERVICE] deleteOne result', result);
+
+    removeLocalTasksByIds([id]);
+
     const check = getLocalTasks().find((t) => t.id === id);
     if (check) throw new Error('AI 任务记录删除后仍可读取');
+    if (result.deletedCount === 0) {
+      throw new Error('未删除任何记录，请检查记录ID或数据库连接');
+    }
+
+    return result;
   },
 
   /** 批量删除 */
-  async deleteMany(ids: string[]): Promise<void> {
-    const idSet = new Set(ids);
-    const tasks = getLocalTasks().filter((t) => !idSet.has(t.id));
-    saveLocalTasks(tasks);
+  async deleteMany(ids: string[]): Promise<DeleteAiTaskRecordsResult> {
+    const uniqueIds = Array.from(new Set(ids.filter((id) => id.trim().length > 0)));
+    if (uniqueIds.length === 0) return { deletedCount: 0 };
+
+    const tauri = isTauri();
+    console.log('[AI_TASK_SERVICE] deleteMany invoke', {
+      command: 'delete_ai_task_records_by_ids',
+      ids: uniqueIds,
+      isTauri: tauri,
+    });
+    const result = await dbCall<DeleteAiTaskRecordsResult>(
+      'delete_ai_task_records_by_ids',
+      { input: { ids: uniqueIds } },
+      () => {
+        console.log('[AI_TASK_SERVICE] deleteMany fallback', { ids: uniqueIds, isTauri: false });
+        const idSet = new Set(uniqueIds);
+        const before = getLocalTasks();
+        const tasks = before.filter((t) => !idSet.has(t.id));
+        saveLocalTasks(tasks);
+        return { deletedCount: before.length - tasks.length };
+      },
+    );
+    console.log('[AI_TASK_SERVICE] deleteMany result', result);
+
+    const idSet = new Set(uniqueIds);
+    removeLocalTasksByIds(uniqueIds);
+
+    const remainingIds = getLocalTasks()
+      .filter((t) => idSet.has(t.id))
+      .map((t) => t.id);
+    if (remainingIds.length > 0) {
+      throw new Error(`AI 任务记录删除后仍可读取：${remainingIds.join(', ')}`);
+    }
+    if (result.deletedCount === 0) {
+      throw new Error('未删除任何记录，请检查记录ID或数据库连接');
+    }
+
+    return result;
   },
 
   /** 清空全部记录 */
-  async clearAll(): Promise<void> {
-    saveLocalTasks([]);
+  async clearAll(): Promise<DeleteAiTaskRecordsResult> {
+    const tauri = isTauri();
+    console.log('[AI_TASK_SERVICE] clearAll invoke', {
+      command: 'clear_ai_task_records',
+      isTauri: tauri,
+    });
+    const result = await dbCall<DeleteAiTaskRecordsResult>(
+      'clear_ai_task_records',
+      {},
+      () => {
+        console.log('[AI_TASK_SERVICE] clearAll fallback', { isTauri: false });
+        const deletedCount = getLocalTasks().length;
+        saveLocalTasks([]);
+        return { deletedCount };
+      },
+    );
+    console.log('[AI_TASK_SERVICE] clearAll result', result);
+
+    clearLocalTaskCache();
     const check = getLocalTasks();
     if (check.length > 0) throw new Error('AI 任务记录清空后仍有残留');
+    return result;
+  },
+
+  async debugState(ids?: string[]): Promise<AiTaskRecordsDebugState | null> {
+    if (!isTauri()) return null;
+    return dbCall<AiTaskRecordsDebugState>(
+      'get_ai_task_records_debug_state',
+      ids ? { ids } : {},
+    );
   },
 };

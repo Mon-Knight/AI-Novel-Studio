@@ -3,13 +3,13 @@
     windows_subsystem = "windows"
 )]
 
-mod commands;
 mod ai;
+mod commands;
 mod db;
 mod large_text_save;
 mod outline_commands;
-mod window_state;
 mod system_accent;
+mod window_state;
 
 use tauri::Manager;
 
@@ -91,6 +91,10 @@ fn main() {
             commands::mark_ai_task_failed,
             commands::get_ai_task_records,
             commands::count_ai_task_records,
+            commands::delete_ai_task_record,
+            commands::delete_ai_task_records_by_ids,
+            commands::clear_ai_task_records,
+            commands::get_ai_task_records_debug_state,
             commands::get_ai_task_records_by_chapter_id,
             commands::get_ai_task_records_by_novel_id,
             ai::ai_chat_completion,

@@ -1,7 +1,7 @@
 /**
  * AI Novel Studio - AI 任务记录页面 (v1.0.27 增强版)
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import BackButton from '../../components/common/BackButton';
 import { formatDateTime } from '../../utils/date';
 import { formatTokenCount } from '../../utils/format';
@@ -9,6 +9,7 @@ import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { AiTaskRecord, AiTaskType, AiTaskStatus } from '../../types/ai';
 import { AiTaskTypeLabels } from '../../types/ai';
 import { confirmDanger } from '../../utils/nativeDialog';
+import { describeUnknownError } from '../../utils/errorMessage';
 
 const TYPE_FILTERS: (AiTaskType | 'all')[] = ['all', 'connection_test', 'chapter_generate', 'character_generate', 'event_suggest', 'setting_expand', 'outline_generate', 'volume_outline_generate', 'chapter_outline_generate', 'context_summarize', 'style_analyze', 'quality_check', 'chapter_polish'];
 const STATUS_FILTERS: (AiTaskStatus | 'all')[] = ['all', 'succeeded', 'failed', 'pending', 'running'];
@@ -25,12 +26,23 @@ function AiTasksPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const loadTasks = async () => {
+  const showMessage = useCallback((text: string, durationMs = 3000) => {
+    setMsg(text);
+    setTimeout(() => setMsg(''), durationMs);
+  }, []);
+
+  const loadTasks = useCallback(async () => {
+    console.log('[AI_TASK_DELETE_UI] reload tasks start');
     const result = await aiTaskService.getAll(1, 500);
     setTasks(result.items);
-  };
+    console.log('[AI_TASK_DELETE_UI] reload tasks done', {
+      itemCount: result.items.length,
+      total: result.total,
+    });
+    return result.items;
+  }, []);
 
-  useEffect(() => { loadTasks(); }, []);
+  useEffect(() => { void loadTasks(); }, [loadTasks]);
 
   const filtered = tasks
     .filter((t) => typeFilter === 'all' || t.taskType === typeFilter)
@@ -58,30 +70,71 @@ function AiTasksPage() {
   const handleDeleteOne = async (task: AiTaskRecord) => {
     if (!(await confirmDanger({ title: '删除任务记录', message: `确定删除这条「${AiTaskTypeLabels[task.taskType]}」记录吗？` }))) return;
     try {
-      await aiTaskService.deleteOne(task.id);
-      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+      console.log('[AI_TASK_DELETE_UI] delete one clicked', { id: task.id });
+      console.log('[AI_TASK_DELETE_UI] call deleteOne start', { id: task.id });
+      const result = await aiTaskService.deleteOne(task.id);
+      console.log('[AI_TASK_DELETE_UI] deleteOne result', result);
+      if (result.deletedCount === 0) {
+        showMessage('未删除任何记录，请检查记录ID或数据库连接');
+        return;
+      }
+      const reloaded = await loadTasks();
+      if (reloaded.some((item) => item.id === task.id)) {
+        console.error('[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible', [task.id]);
+        showMessage('删除后仍检测到记录，请检查数据源');
+        return;
+      }
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
-      setMsg('已删除');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (e: any) {
-      setMsg('删除失败：' + (e?.message || '未知错误'));
+      setExpandedId((prev) => prev === task.id ? null : prev);
+      showMessage(`已删除 ${result.deletedCount} 条记录`, 2000);
+    } catch (e: unknown) {
+      const errorMessage = describeUnknownError(e);
+      console.error('[AI_TASK_DELETE_UI] delete one failed full error', {
+        errorMessage,
+        error: e,
+      });
+      showMessage('删除失败：' + errorMessage, 8000);
     }
   };
 
   // 批量删除
   const handleDeleteSelected = async () => {
-    if (selectedIds.size === 0) return;
-    if (!(await confirmDanger({ title: '批量删除', message: `确定删除选中的 ${selectedIds.size} 条 AI 任务记录吗？` }))) return;
+    const ids = [...selectedIds];
+    console.log('[AI_TASK_DELETE_UI] delete selected clicked', {
+      selectedIds: ids,
+      selectedCount: ids.length,
+    });
+    if (ids.length === 0) {
+      showMessage('请先选择要删除的记录', 2000);
+      return;
+    }
+    if (!(await confirmDanger({ title: '批量删除', message: `确定删除选中的 ${ids.length} 条 AI 任务记录吗？` }))) return;
     setDeleting(true);
     try {
-      await aiTaskService.deleteMany([...selectedIds]);
-      await loadTasks();
+      console.log('[AI_TASK_DELETE_UI] call deleteMany start', { ids, selectedCount: ids.length });
+      const result = await aiTaskService.deleteMany(ids);
+      console.log('[AI_TASK_DELETE_UI] deleteMany result', result);
+      if (result.deletedCount === 0) {
+        showMessage('未删除任何记录，请检查记录ID或数据库连接');
+        return;
+      }
+      const reloaded = await loadTasks();
+      const stillVisibleIds = reloaded.filter((item) => ids.includes(item.id)).map((item) => item.id);
+      if (stillVisibleIds.length > 0) {
+        console.error('[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible', stillVisibleIds);
+        showMessage('删除后仍检测到记录，请检查数据源');
+        return;
+      }
       setSelectedIds(new Set());
       setSelectMode(false);
-      setMsg(`已删除 ${selectedIds.size} 条记录`);
-      setTimeout(() => setMsg(''), 3000);
-    } catch (e: any) {
-      setMsg('删除失败：' + (e?.message || '未知错误'));
+      showMessage(`已删除 ${result.deletedCount} 条记录`);
+    } catch (e: unknown) {
+      const errorMessage = describeUnknownError(e);
+      console.error('[AI_TASK_DELETE_UI] delete selected failed full error', {
+        errorMessage,
+        error: e,
+      });
+      showMessage('删除失败：' + errorMessage, 8000);
     } finally {
       setDeleting(false);
     }
@@ -93,16 +146,36 @@ function AiTasksPage() {
       title: '清空全部记录',
       message: '确定清空所有 AI 任务记录吗？\n\n这只会删除 AI 调用历史，不会删除作品、章节、草稿、大纲、角色或设定。\n\n此操作无法恢复。',
     }))) return;
+    const beforeCount = tasks.length;
+    console.log('[AI_TASK_DELETE_UI] clear all clicked', { beforeCount });
     setDeleting(true);
     try {
-      await aiTaskService.clearAll();
-      await loadTasks();
+      console.log('[AI_TASK_DELETE_UI] call clearAll start', { beforeCount });
+      const result = await aiTaskService.clearAll();
+      console.log('[AI_TASK_DELETE_UI] clearAll result', result);
+      if (beforeCount > 0 && result.deletedCount === 0) {
+        showMessage('清空失败：数据库未删除任何记录');
+        return;
+      }
+      const reloaded = await loadTasks();
+      if (reloaded.length > 0) {
+        console.error('[AI_TASK_DELETE_VERIFY_FAILED] clear all still visible', {
+          itemCount: reloaded.length,
+          ids: reloaded.map((item) => item.id).slice(0, 20),
+        });
+        showMessage('清空后仍检测到记录，请检查数据源');
+        return;
+      }
       setSelectedIds(new Set());
       setSelectMode(false);
-      setMsg('已清空全部 AI 任务记录');
-      setTimeout(() => setMsg(''), 3000);
-    } catch (e: any) {
-      setMsg('清空失败：' + (e?.message || '未知错误'));
+      showMessage(`清理完成，已删除 ${result.deletedCount} 条记录`);
+    } catch (e: unknown) {
+      const errorMessage = describeUnknownError(e);
+      console.error('[AI_TASK_DELETE_UI] clear all failed full error', {
+        errorMessage,
+        error: e,
+      });
+      showMessage('清空失败：' + errorMessage, 8000);
     } finally {
       setDeleting(false);
     }
@@ -114,7 +187,7 @@ function AiTasksPage() {
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>🤖 AI 任务记录</div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>查看所有 AI 生成、分析、检查和润色任务的执行记录</div>
 
-      {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: msg.includes('失败') ? '#ffebee' : 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: msg.includes('失败') ? '#c62828' : 'var(--color-primary)' }}>{msg}</div>}
+      {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: (msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测')) ? '#ffebee' : 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: (msg.includes('失败') || msg.includes('未删除') || msg.includes('仍检测')) ? '#c62828' : 'var(--color-primary)' }}>{msg}</div>}
 
       {/* 操作按钮区 */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -159,14 +232,36 @@ function AiTasksPage() {
         <div style={{ marginBottom: 12 }}>
           <button className="btn btn-xs btn-danger" onClick={async () => {
             if (!(await confirmDanger({ title: '删除筛选记录', message: `确定删除当前筛选的 ${filtered.length} 条记录吗？` }))) return;
+            const ids = filtered.map((t) => t.id);
+            console.log('[AI_TASK_DELETE_UI] delete filtered clicked', {
+              selectedIds: ids,
+              selectedCount: ids.length,
+            });
             setDeleting(true);
             try {
-              await aiTaskService.deleteMany(filtered.map((t) => t.id));
-              await loadTasks();
-              setMsg(`已删除 ${filtered.length} 条筛选记录`);
-              setTimeout(() => setMsg(''), 3000);
-            } catch (e: any) {
-              setMsg('删除失败：' + (e?.message || '未知错误'));
+              console.log('[AI_TASK_DELETE_UI] call deleteMany start', { ids, selectedCount: ids.length });
+              const result = await aiTaskService.deleteMany(ids);
+              console.log('[AI_TASK_DELETE_UI] deleteMany result', result);
+              if (result.deletedCount === 0) {
+                showMessage('未删除任何记录，请检查记录ID或数据库连接');
+                return;
+              }
+              const reloaded = await loadTasks();
+              const stillVisibleIds = reloaded.filter((item) => ids.includes(item.id)).map((item) => item.id);
+              if (stillVisibleIds.length > 0) {
+                console.error('[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible', stillVisibleIds);
+                showMessage('删除后仍检测到记录，请检查数据源');
+                return;
+              }
+              setSelectedIds(new Set());
+              showMessage(`已删除 ${result.deletedCount} 条筛选记录`);
+            } catch (e: unknown) {
+              const errorMessage = describeUnknownError(e);
+              console.error('[AI_TASK_DELETE_UI] delete filtered failed full error', {
+                errorMessage,
+                error: e,
+              });
+              showMessage('删除失败：' + errorMessage, 8000);
             } finally { setDeleting(false); }
           }} disabled={deleting}>
             🗑️ 删除当前筛选的 {filtered.length} 条记录

@@ -1,5 +1,31 @@
 # AI Novel Studio - CHANGELOG
 
+## v1.7.12 (2026-06-24) - 修复 AI 任务记录删除 FOREIGN KEY 约束失败
+
+### 修复
+
+- **修复 AI 任务记录删除 FOREIGN KEY constraint failed 问题**（根因修复）：
+  - `ai_task_records` 被 3 个子表通过外键引用：`chapter_drafts.ai_task_id`、`quality_check_reports.ai_task_id`、`polish_records.ai_task_id`。
+  - 原删除逻辑直接 `DELETE FROM ai_task_records`，未先清理子表引用，导致 SQLite 外键约束阻止删除。
+  - 修复后：单条删除、多选删除、清空全部均**先清理子表 `ai_task_id` 引用，再删除父表记录**。
+  - 所有删除操作均包裹在显式事务中（`BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK`）。
+  - 额外清理 `chapter_events` 和 `chapter_summaries` 中的 `ai_task_id` 引用以保持数据整洁。
+- Rust `DeleteAiTaskRecordsResult` 新增 `deleted_child_rows` 字段，记录各子表清理行数。
+- 前端 `DeleteAiTaskRecordsResult` 类型同步新增 `deletedChildRows` 字段。
+
+### 修改
+
+- `src-tauri/src/commands.rs`：
+  - `delete_ai_task_records_by_ids_internal`：新增事务 + 子表清理逻辑。
+  - `clear_ai_task_records_internal`：新增事务 + 子表清理逻辑。
+  - `DeleteAiTaskRecordsResult` 结构体新增 `deleted_child_rows` 字段。
+- `src/services/ai/aiTaskService.ts`：`DeleteAiTaskRecordsResult` 接口新增 `deletedChildRows`。
+
+### 备注
+
+- 未使用 `PRAGMA foreign_keys = OFF` 或 `ON DELETE CASCADE`，保持外键约束完整性。
+- 不影响作品、章节、草稿、大纲、角色、设定库等无关业务数据。
+
 ## v1.7.11 (2026-06-08) - 发布收尾、本地构建产物清理与安装包验证
 
 ### 新增
@@ -17,6 +43,14 @@
 - 同步 README 当前版本与阶段说明。
 - 同步版本路线图，新增 v1.7.11 节点。
 - v1.7.10 NSIS/MSI 安装包标记为稳定基线保留。
+
+### 修复
+
+- 修复 AI 任务记录多选删除、筛选删除和清空全部只删除浏览器本地缓存、不删除 SQLite `ai_task_records` 数据的问题。
+- 新增 AI 任务记录删除静态回归检查脚本，覆盖后端命令、Tauri 注册、服务层调用和页面刷新反馈。
+- 二次加固 AI 任务记录删除链路：Tauri 环境下移除 `getAll` 等读取接口的错误 localStorage fallback，删除命令返回 SQLite 路径、删除前后计数和命中计数。
+- 新增 AI 任务记录运行时删除验证脚本，使用临时 SQLite 文件执行插入、按 ID 删除、重新计数、清空和最终计数校验。
+- 三次修复 AI 任务记录清空失败显示“未知错误”的问题：Tauri 字符串错误会被规范化为真实错误摘要，页面和 `dbCall` 均打印完整错误对象，Rust 清空命令补充表存在性、数据库路径和删除前后计数日志。
 
 ### 备注
 

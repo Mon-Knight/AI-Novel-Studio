@@ -16,6 +16,10 @@ pub fn get_data_dir() -> PathBuf {
     dir
 }
 
+pub fn get_database_path() -> PathBuf {
+    get_data_dir().join("ai-novel-studio.db")
+}
+
 fn dirs_next() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -38,7 +42,7 @@ pub fn init_database() {
     let data_dir = get_data_dir();
     fs::create_dir_all(&data_dir).expect("Failed to create data directory");
 
-    let db_path = data_dir.join("ai-novel-studio.db");
+    let db_path = get_database_path();
     let connection = Connection::open(&db_path).expect("Failed to open database");
 
     connection
@@ -620,12 +624,7 @@ fn migrate_chapters_table(conn: &Connection) -> SqliteResult<()> {
         "TEXT NOT NULL DEFAULT 'not_started'",
     )?;
     ensure_column(conn, "chapters", "adopted_draft_id", "TEXT")?;
-    ensure_column(
-        conn,
-        "chapters",
-        "word_count",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
+    ensure_column(conn, "chapters", "word_count", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(conn, "chapters", "target_word_count", "INTEGER")?;
     ensure_column(conn, "chapters", "created_at", "TEXT")?;
     ensure_column(conn, "chapters", "updated_at", "TEXT")?;

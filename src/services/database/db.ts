@@ -4,6 +4,7 @@
  */
 
 import { safeJsonParse } from '../../utils/dataGuard';
+import { describeUnknownError } from '../../utils/errorMessage';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 
 // ==================== localStorage 回退实现 ====================
@@ -51,6 +52,29 @@ export function isTauri(): boolean {
   return isTauriRuntime();
 }
 
+function shouldLogDbCommand(command: string): boolean {
+  return command.includes('ai_task');
+}
+
+function sanitizeForDbLog(value: unknown, depth = 0): unknown {
+  if (depth > 3) return '[MaxDepth]';
+  if (typeof value === 'string') {
+    return value.length > 300 ? `${value.slice(0, 300)}...[truncated]` : value;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => sanitizeForDbLog(item, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        sanitizeForDbLog(item, depth + 1),
+      ]),
+    );
+  }
+  return value;
+}
+
 /**
  * 统一调用入口：桌面端使用 Tauri/SQLite，浏览器开发态使用 localStorage。
  * Tauri 模式下不静默降级，避免同一业务链路写入和读取落到不同存储。
@@ -61,6 +85,13 @@ export async function dbCall<T>(
   fallback?: () => T,
 ): Promise<T> {
   if (isTauriRuntime()) {
+    if (shouldLogDbCommand(command)) {
+      console.log('[DB_CALL] invoke start', {
+        command,
+        args: sanitizeForDbLog(args),
+        isTauri: true,
+      });
+    }
     try {
       const result = await Promise.race([
         tauriInvoke<T>(command, args),
@@ -68,13 +99,41 @@ export async function dbCall<T>(
           setTimeout(() => reject(new Error('tauri_timeout')), 3000)
         ),
       ]);
+      if (shouldLogDbCommand(command)) {
+        console.log('[DB_CALL] invoke success', {
+          command,
+          result: sanitizeForDbLog(result),
+        });
+      }
       return result;
     } catch (e: unknown) {
-      console.error(`[db] Tauri command failed: ${command}`, e);
-      throw e;
+      const errorMessage = describeUnknownError(e, `Tauri command failed: ${command}`);
+      console.error('[DB_CALL_FAILED]', {
+        command,
+        args: sanitizeForDbLog(args),
+        errorMessage,
+        rawError: e,
+      });
+      if (e instanceof Error) {
+        throw e;
+      }
+      const normalizedError = new Error(errorMessage);
+      Object.assign(normalizedError, {
+        command,
+        args: sanitizeForDbLog(args),
+        rawError: e,
+      });
+      throw normalizedError;
     }
   }
   if (fallback) {
+    if (shouldLogDbCommand(command)) {
+      console.log('[DB_CALL] localStorage fallback', {
+        command,
+        args: sanitizeForDbLog(args),
+        isTauri: false,
+      });
+    }
     return fallback();
   }
   throw new Error(`No fallback for command: ${command}`);
