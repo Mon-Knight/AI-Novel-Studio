@@ -24,8 +24,8 @@ interface RightPanelProps {
   onChapterGoalDirtyChange?: (dirty: boolean) => void;
   onChapterCharactersChanged?: () => void;
   contextVersion?: number;
-  /** 定位正文回调 */
-  onLocateText?: (startOffset: number, endOffset: number, quote?: string) => void;
+  /** 定位正文回调 (v1.7.16 4参数) */
+  onLocateText?: (startOffset: number, endOffset: number, quote?: string, paragraphIndex?: number) => void;
 }
 
 const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {

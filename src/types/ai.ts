@@ -78,6 +78,7 @@ export type AiTaskType =
   | 'chapter_rewrite'
   | 'chapter_polish'
   | 'quality_check'
+  | 'quality_fix'
   | 'chapter_summarize'
   | 'context_update';
 
@@ -126,6 +127,7 @@ export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   chapter_rewrite: '章节重写',
   chapter_polish: '章节润色',
   quality_check: '质量检查',
+  quality_fix: 'AI修稿',
   chapter_summarize: '章节总结',
   context_update: '上下文更新',
 };

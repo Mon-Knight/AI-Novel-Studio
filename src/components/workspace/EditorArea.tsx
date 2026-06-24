@@ -17,8 +17,8 @@ interface EditorAreaProps {
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
   onChapterUpdated?: (chapterId: string) => void;
   /** 定位目标：设置后自动在正文中搜索并高亮指定文本 */
-  locateTarget?: { startOffset: number; endOffset: number; quote?: string } | null;
-  onLocateDone?: () => void;
+  locateTarget?: { startOffset: number; endOffset: number; quote?: string; paragraphIndex?: number } | null;
+  onLocateDone?: (result?: { found: boolean; message?: string }) => void;
 }
 
 function countWords(text: string): number {
@@ -60,36 +60,72 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
     setOutlineSaveMsg('');
   }, [currentDraft, chapter, onDraftChange]);
 
-  // 定位正文功能
+  // 定位正文功能 (v1.7.16: 多级策略 + 明显高亮)
+  const [_highlightRange, setHighlightRange] = useState<{ start: number; end: number } | null>(null);
+
   useEffect(() => {
     if (!locateTarget || !textareaRef.current) return;
     const ta = textareaRef.current;
-    const { startOffset, endOffset, quote } = locateTarget;
+    const { startOffset, endOffset, quote, paragraphIndex } = locateTarget;
+    let found = false;
+    let selStart = 0;
+    let selEnd = 0;
 
-    // 优先使用 offset 定位
+    // 策略1: offset 精确定位
     if (startOffset >= 0 && endOffset >= 0 && startOffset < ta.value.length) {
-      ta.focus();
-      ta.setSelectionRange(startOffset, Math.min(endOffset, ta.value.length));
-      // 滚动到选中位置
-      const lineHeight = 24;
-      const linesBefore = ta.value.substring(0, startOffset).split('\n').length;
-      ta.scrollTop = Math.max(0, (linesBefore - 5) * lineHeight);
-    } else if (quote) {
-      // 通过引用文本搜索定位
+      selStart = startOffset;
+      selEnd = Math.min(endOffset, ta.value.length);
+      found = true;
+    }
+    // 策略2: paragraph_index 段落定位
+    else if (paragraphIndex !== undefined && paragraphIndex >= 0) {
+      const paragraphs = ta.value.split(/\n\n+/);
+      let pos = 0;
+      for (let i = 0; i < Math.min(paragraphIndex, paragraphs.length); i++) {
+        if (i > 0) pos += 2; // paragraph separator
+        pos += paragraphs[i].length;
+      }
+      const paraText = paragraphs[Math.min(paragraphIndex, paragraphs.length - 1)] || '';
+      selStart = Math.max(0, pos - paraText.length);
+      selEnd = Math.min(pos, ta.value.length);
+      found = true;
+    }
+    // 策略3: quote 精确搜索
+    else if (quote && quote.length >= 3) {
       const idx = ta.value.indexOf(quote);
       if (idx >= 0) {
-        ta.focus();
-        ta.setSelectionRange(idx, idx + quote.length);
-        const lineHeight = 24;
-        const linesBefore = ta.value.substring(0, idx).split('\n').length;
-        ta.scrollTop = Math.max(0, (linesBefore - 5) * lineHeight);
+        selStart = idx;
+        selEnd = idx + quote.length;
+        found = true;
+      } else {
+        // 策略4: 模糊搜索（取 quote 的前 20 个字符）
+        const shortQuote = quote.slice(0, Math.min(20, quote.length));
+        if (shortQuote.length >= 3) {
+          const fuzzyIdx = ta.value.indexOf(shortQuote);
+          if (fuzzyIdx >= 0) {
+            selStart = fuzzyIdx;
+            selEnd = fuzzyIdx + shortQuote.length;
+            found = true;
+          }
+        }
       }
     }
 
-    // 短暂高亮后重置
+    if (found) {
+      ta.focus();
+      ta.setSelectionRange(selStart, selEnd);
+      setHighlightRange({ start: selStart, end: selEnd });
+      // 滚动到选中位置
+      const lineHeight = 24;
+      const linesBefore = ta.value.substring(0, selStart).split('\n').length;
+      ta.scrollTop = Math.max(0, (linesBefore - 5) * lineHeight);
+    }
+
+    // 2.5秒后清除高亮
     const timer = setTimeout(() => {
-      onLocateDone?.();
-    }, 2000);
+      setHighlightRange(null);
+      onLocateDone?.({ found, message: found ? undefined : '原文片段可能已被修改，无法精确定位' });
+    }, 2500);
     return () => clearTimeout(timer);
   }, [locateTarget, onLocateDone]);
 

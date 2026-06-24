@@ -49,10 +49,10 @@ function WritingWorkspacePage() {
   const [contextVersion, setContextVersion] = useState(0);
   const bumpContextVersion = useCallback(() => setContextVersion((v) => v + 1), []);
 
-  // v1.7.12 质量检查正文定位
-  const [locateTarget, setLocateTarget] = useState<{ startOffset: number; endOffset: number; quote?: string } | null>(null);
-  const handleLocateText = useCallback((startOffset: number, endOffset: number, quote?: string) => {
-    setLocateTarget({ startOffset, endOffset, quote });
+  // v1.7.12/v1.7.16 质量检查正文定位
+  const [locateTarget, setLocateTarget] = useState<{ startOffset: number; endOffset: number; quote?: string; paragraphIndex?: number } | null>(null);
+  const handleLocateText = useCallback((startOffset: number, endOffset: number, quote?: string, paragraphIndex?: number) => {
+    setLocateTarget({ startOffset, endOffset, quote, paragraphIndex });
   }, []);
   const handleLocateDone = useCallback(() => setLocateTarget(null), []);
 

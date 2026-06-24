@@ -11,15 +11,18 @@ import {
 } from '../../../types/qualityCheck';
 import { qualityCheckService, computeStatistics } from '../../../services/quality/qualityCheckService';
 import { qualityCheckAiService } from '../../../services/ai/qualityCheckAiService';
+import { qualityFixService } from '../../../services/ai/qualityFixService';
+import type { FixComparison } from '../../../services/ai/qualityFixService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { runWithLoading } from '../../../lib/runWithLoading';
 
 interface CheckPanelProps {
   novelId?: string; chapter?: Chapter;
   onGenerated?: (draft: ChapterDraft) => void; onAdopted?: () => void;
-  /** 定位到正文指定位置的回调 */
-  onLocateText?: (startOffset: number, endOffset: number, quote?: string) => void;
+  /** 定位到正文指定位置的回调 (v1.7.16 支持 paragraphIndex) */
+  onLocateText?: (startOffset: number, endOffset: number, quote?: string, paragraphIndex?: number) => void;
 }
 
 const FILTER_OPTIONS: QualityIssueFilter[] = ['all', 'pending', 'resolved', 'ignored'];
@@ -32,6 +35,12 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
   const [filter, setFilter] = useState<QualityIssueFilter>('all');
   const [locateMessage, setLocateMessage] = useState('');
+
+  // v1.7.16 AI 修稿状态
+  const [fixLoading, setFixLoading] = useState(false);
+  const [fixStage, setFixStage] = useState('');
+  const [fixComparison, setFixComparison] = useState<FixComparison | null>(null);
+  const [fixError, setFixError] = useState('');
 
   const statistics = computeStatistics(items);
   const filteredItems = filter === 'all' ? items : items.filter((i) => i.status === filter);
@@ -128,22 +137,121 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
     }
   };
 
-  /** 定位到正文位置 */
+  /** AI 修稿并复检 (v1.7.16) */
+  const handleAIFix = async () => {
+    if (!novelId || !chapter || !currentDraft || !report) return;
+    const pending = items.filter((i) => i.status === 'pending');
+    if (pending.length === 0) return;
+
+    setFixLoading(true); setFixError(''); setFixComparison(null);
+    try {
+      // 阶段1: 分析
+      setFixStage('正在分析待处理问题...');
+      const ignored = items.filter((i) => i.status === 'ignored');
+
+      // 阶段2: AI 修稿
+      setFixStage('正在 AI 修稿...');
+      const { fixResult, fixRun } = await qualityFixService.runFix({
+        novelId, chapterId: chapter.id, chapterTitle: chapter.title,
+        chapterOutline: chapter.outline, currentDraft,
+        pendingIssues: pending, ignoredIssues: ignored,
+        beforeReportId: report.id,
+        beforeScore: report.overallScore || 0,
+        beforePendingCount: statistics.pending,
+        beforeSeriousCount: statistics.critical,
+      });
+
+      if (fixRun.status === 'failed') {
+        setFixError(fixRun.failureReason || 'AI 修稿失败');
+        setFixLoading(false);
+        return;
+      }
+
+      // 阶段3: 保存新草稿
+      setFixStage('正在保存新草稿版本...');
+      const newDraft = await draftVersionService.create({
+        novelId, chapterId: chapter.id,
+        title: chapter.title,
+        content: fixResult.revisedContent,
+        source: 'ai_fix' as any,
+      });
+
+      fixRun.targetDraftId = newDraft.id;
+      fixRun.targetDraftVersion = newDraft.versionNo;
+
+      // 更新当前草稿为新版本
+      setCurrentDraft(newDraft);
+
+      // 阶段4: 重新质量检查
+      setFixStage('正在重新质量检查...');
+      const rpt2 = await qualityCheckService.createReport({
+        novelId, chapterId: chapter.id, draftId: newDraft.id,
+      });
+      const checkResult = await qualityCheckAiService.runCheck({
+        novelId, chapterId: chapter.id, draftId: newDraft.id,
+        volumeId: chapter.volumeId,
+        draftContent: fixResult.revisedContent,
+        chapterTitle: chapter.title,
+        chapterOutline: chapter.outline, chapterGoal: chapter.goal,
+      });
+      const saved2 = await qualityCheckService.saveResult({
+        reportId: rpt2.id, novelId, chapterId: chapter.id,
+        draftId: newDraft.id, result: checkResult,
+        draftVersion: newDraft.versionNo,
+      });
+
+      // 阶段5: 对比
+      setFixStage('正在对比修复效果...');
+      const afterItems = saved2.items;
+      const afterStats = computeStatistics(afterItems);
+      const comparison = qualityFixService.compareResults(
+        fixRun.beforeScore, checkResult.overallScore,
+        fixRun.beforePendingCount, afterStats.pending,
+        fixRun.beforeSeriousCount, afterStats.critical,
+        items.length, afterItems.length,
+        statistics.high, afterStats.high,
+        fixResult.fixedIssueKeys.length,
+      );
+      setFixComparison(comparison);
+
+      // 阶段6: 更新问题状态
+      setFixStage('正在更新问题状态...');
+      if (comparison.isBetter) {
+        for (const key of fixResult.fixedIssueKeys) {
+          const item = items.find((i) => i.issueKey === key);
+          if (item) await qualityCheckService.updateIssueStatus(item.id, 'resolved').catch(() => {});
+        }
+      }
+
+      // 更新报告和问题列表
+      setReport(saved2.report);
+      setItems(saved2.items);
+
+      // 标记旧章节上下文过期
+      if (comparison.isBetter) {
+        chapterSummaryService.markExpired(chapter.id).catch(() => {});
+      }
+
+      setFixStage('AI 修复完成');
+    } catch (e: any) {
+      setFixError(e.message || 'AI 修稿失败');
+    } finally {
+      setFixLoading(false);
+      setTimeout(() => setFixStage(''), 3000);
+    }
+  };
   const handleLocate = (item: QualityCheckItem) => {
     if (!onLocateText) {
       setLocateMessage('定位功能需要正文编辑器支持');
       return;
     }
-    if (item.startOffset !== undefined && item.endOffset !== undefined) {
-      onLocateText(item.startOffset, item.endOffset, item.quote || item.evidence);
-      setLocateMessage('');
-    } else if (item.quote || item.evidence) {
-      // 通过引用文本定位
-      onLocateText(-1, -1, item.quote || item.evidence);
-      setLocateMessage('');
-    } else {
-      setLocateMessage('该问题没有位置信息，无法定位');
-    }
+    onLocateText(
+      item.startOffset ?? -1,
+      item.endOffset ?? -1,
+      item.quote || item.evidence,
+      item.paragraphIndex,
+    );
+    setLocateMessage('');
   };
 
   if (!chapter) return <div style={{ padding: 16, color: 'var(--color-text-muted)' }}>请先选择章节</div>;
@@ -189,6 +297,26 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         <button className="btn btn-primary btn-sm" onClick={handleRunCheck} disabled={loading} style={{ width: '100%' }}>
           {loading ? '⏳ 检查中...' : '🔍 开始质量检查'}
         </button>
+
+        {/* v1.7.16 AI 修复并复检 */}
+        {report && statistics.pending > 0 && (
+          <button
+            className="btn btn-sm"
+            onClick={handleAIFix}
+            disabled={fixLoading}
+            style={{
+              width: '100%', marginTop: 6,
+              background: fixLoading ? 'var(--color-bg-hover)' : '#7c3aed',
+              color: '#fff', border: 'none',
+            }}
+          >
+            {fixLoading ? `⏳ ${fixStage || '修复中...'}` : '🤖 AI 修复并复检'}
+          </button>
+        )}
+        {fixStage && !fixLoading && (
+          <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4 }}>✅ {fixStage}</div>
+        )}
+        {fixError && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{fixError}</div>}
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>}
       </div>
 
@@ -209,6 +337,32 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
           {report.summary && (
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
               {report.summary}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* v1.7.16 AI 修复对比结果 */}
+      {fixComparison && (
+        <div className="panel-section" style={{
+          border: `1px solid ${fixComparison.isBetter ? '#22c55e40' : fixComparison.isWorse ? '#ef444440' : '#f59e0b40'}`,
+          background: fixComparison.isBetter ? '#22c55e08' : fixComparison.isWorse ? '#ef444408' : '#f59e0b08',
+          borderRadius: 6, padding: 10,
+        }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: fixComparison.isBetter ? '#16a34a' : fixComparison.isWorse ? '#dc2626' : '#d97706' }}>
+            {fixComparison.isBetter ? '✅ 修复成功' : fixComparison.isWorse ? '⚠️ 修复效果不佳' : '📊 修复效果一般'}
+          </div>
+          <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+            <div>修复前：{fixComparison.beforeScore} 分，待处理 {fixComparison.beforePendingCount}，严重 {fixComparison.beforeSeriousCount}</div>
+            <div>修复后：{fixComparison.afterScore} 分，待处理 {fixComparison.afterPendingCount}，严重 {fixComparison.afterSeriousCount}</div>
+            <div style={{ marginTop: 4 }}>
+              已修复 {fixComparison.fixedIssueCount} 个问题
+              {fixComparison.newIssueCount > 0 && <span style={{ color: '#d97706' }}>，新增 {fixComparison.newIssueCount} 个问题</span>}
+            </div>
+          </div>
+          {fixComparison.isBetter && (
+            <div style={{ fontSize: 11, color: '#16a34a', marginTop: 4, fontWeight: 500 }}>
+              已自动采用修复后版本，原版本保留可回退。
             </div>
           )}
         </div>
