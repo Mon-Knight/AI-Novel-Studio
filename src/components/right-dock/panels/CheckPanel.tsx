@@ -39,9 +39,10 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
   const [filter, setFilter] = useState<QualityIssueFilter>('all');
   const [locateMessage, setLocateMessage] = useState('');
 
-  // v1.7.16 AI 修稿状态
+  // v1.7.16/v1.7.18 AI 修稿状态
   const [fixLoading, setFixLoading] = useState(false);
   const [fixStage, setFixStage] = useState('');
+  const [fixProgress, setFixProgress] = useState(0);
   const [fixComparison, setFixComparison] = useState<FixComparison | null>(null);
   const [fixError, setFixError] = useState('');
   const [lastFixRunId, setLastFixRunId] = useState<string>('');
@@ -148,11 +149,17 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
     const pending = items.filter((i) => i.status === 'pending');
     if (pending.length === 0) return;
 
-    setFixLoading(true); setFixError(''); setFixComparison(null);
+    setFixLoading(true); setFixError(''); setFixComparison(null); setFixProgress(0);
     setSourceDraftId(currentDraft.id);
     try {
+      // 阶段1: 分析问题
       setFixStage('正在分析待处理问题...');
+      setFixProgress(5);
       const ignored = items.filter((i) => i.status === 'ignored');
+
+      // 阶段2: 读取上下文
+      setFixStage('正在读取上下文...');
+      setFixProgress(15);
 
       // 读取章节上下文
       let chapterContext: string | undefined;
@@ -172,7 +179,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         ctxWarnings = JSON.stringify(ctxResult.warnings);
       } catch { /* non-critical */ }
 
-      setFixStage('正在 AI 修稿...');
+      // 阶段3: AI 修稿
+      setFixStage('正在生成修订版正文...');
+      setFixProgress(30);
       const { fixResult, fixRun } = await qualityFixService.runFix({
         novelId, chapterId: chapter.id, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, currentDraft,
@@ -197,8 +206,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         return;
       }
 
-      // 阶段3: 保存新草稿
+      // 阶段4: 保存新草稿
       setFixStage('正在保存新草稿版本...');
+      setFixProgress(60);
       const newDraft = await draftVersionService.create({
         novelId, chapterId: chapter.id,
         title: chapter.title,
@@ -212,8 +222,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
       // 更新当前草稿为新版本
       setCurrentDraft(newDraft);
 
-      // 阶段4: 重新质量检查
+      // 阶段5: 重新质量检查
       setFixStage('正在重新质量检查...');
+      setFixProgress(75);
       const rpt2 = await qualityCheckService.createReport({
         novelId, chapterId: chapter.id, draftId: newDraft.id,
       });
@@ -230,8 +241,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         draftVersion: newDraft.versionNo,
       });
 
-      // 阶段5: 对比
+      // 阶段6: 对比
       setFixStage('正在对比修复效果...');
+      setFixProgress(90);
       const afterItems = saved2.items;
       const afterStats = computeStatistics(afterItems);
       const comparison = qualityFixService.compareResults(
@@ -244,8 +256,9 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
       );
       setFixComparison(comparison);
 
-      // 阶段6: 更新问题状态
+      // 阶段7: 更新状态
       setFixStage('正在更新问题状态...');
+      setFixProgress(95);
       if (comparison.isBetter) {
         for (const key of fixResult.fixedIssueKeys) {
           const item = items.find((i) => i.issueKey === key);
@@ -335,20 +348,32 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
           {loading ? '⏳ 检查中...' : '🔍 开始质量检查'}
         </button>
 
-        {/* v1.7.16 AI 修复并复检 */}
+        {/* v1.7.16/v1.7.18 AI 修复并复检 */}
         {report && statistics.pending > 0 && (
-          <button
-            className="btn btn-sm"
-            onClick={handleAIFix}
-            disabled={fixLoading}
-            style={{
-              width: '100%', marginTop: 6,
-              background: fixLoading ? 'var(--color-bg-hover)' : '#7c3aed',
-              color: '#fff', border: 'none',
-            }}
-          >
-            {fixLoading ? `⏳ ${fixStage || '修复中...'}` : '🤖 AI 修复并复检'}
-          </button>
+          <div style={{ marginTop: 6 }}>
+            <button
+              className="btn btn-sm"
+              onClick={handleAIFix}
+              disabled={fixLoading || loading}
+              style={{
+                width: '100%',
+                background: fixLoading ? 'var(--color-bg-hover)' : '#7c3aed',
+                color: fixLoading ? 'var(--color-text-muted)' : '#fff',
+                border: 'none', cursor: fixLoading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {fixLoading ? (
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  ⏳ {fixStage || '修复中...'}
+                </span>
+              ) : '🤖 AI 修复并复检'}
+            </button>
+            {fixLoading && (
+              <div style={{ marginTop: 6, background: 'var(--color-bg-primary)', borderRadius: 4, height: 4, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${fixProgress}%`, background: '#7c3aed', transition: 'width 0.3s ease' }} />
+              </div>
+            )}
+          </div>
         )}
         {fixStage && !fixLoading && (
           <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4 }}>✅ {fixStage}</div>

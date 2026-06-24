@@ -243,22 +243,31 @@ export const qualityFixService = {
         revisedContent: params.currentDraft.content,
       });
 
-      fixRun.revisionSummary = fixResult.revisionSummary;
-      fixRun.changedRangesJson = JSON.stringify(fixResult.changedRanges);
+      // v1.7.18 安全规范化：确保所有数组字段不为 undefined
+      const safeFixResult: FixResult = {
+        mode: fixResult.mode || 'conservative',
+        fixedIssueKeys: Array.isArray(fixResult.fixedIssueKeys) ? fixResult.fixedIssueKeys : [],
+        revisionSummary: fixResult.revisionSummary || '无修复摘要',
+        changedRanges: Array.isArray(fixResult.changedRanges) ? fixResult.changedRanges : [],
+        revisedContent: fixResult.revisedContent || params.currentDraft.content,
+      };
+
+      fixRun.revisionSummary = safeFixResult.revisionSummary;
+      fixRun.changedRangesJson = JSON.stringify(safeFixResult.changedRanges);
       fixRun.status = 'success';
       fixRun.fixedIssueIds = params.pendingIssues
-        .filter((i) => fixResult.fixedIssueKeys.includes(i.issueKey))
+        .filter((i) => safeFixResult.fixedIssueKeys.includes(i.issueKey))
         .map((i) => i.id);
       fixRunStore.save(fixRun);
 
       await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: fixResult.revisionSummary,
+        resultText: safeFixResult.revisionSummary,
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
         tokenTotal: response.tokenTotal,
       });
 
-      return { fixResult, fixRun };
+      return { fixResult: safeFixResult, fixRun };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'AI 修稿失败';
       fixRun.status = 'failed';
