@@ -138,6 +138,14 @@ fn main() {
             commands::update_quality_issue_status,
             commands::batch_update_quality_issue_status,
             commands::save_quality_check_result,
+            commands::save_chapter_summary,
+            commands::get_chapter_summary,
+            commands::mark_chapter_summaries_expired,
+            commands::update_chapter_summary_enabled,
+            commands::save_context_records,
+            commands::get_context_records,
+            commands::update_context_record_active,
+            commands::delete_context_record,
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {

@@ -3226,6 +3226,309 @@ pub fn save_quality_check_result(
     })
 }
 
+// ==================== Chapter Summary ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSummaryDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub volume_id: Option<String>,
+    pub adopted_draft_id: String,
+    pub summary: String,
+    pub key_events: Option<String>,
+    pub character_changes: Option<String>,
+    pub relationship_changes: Option<String>,
+    pub new_foreshadows: Option<String>,
+    pub resolved_foreshadows: Option<String>,
+    pub next_chapter_hints: Option<String>,
+    pub core_events: Option<String>,
+    pub protagonist_state_change: Option<String>,
+    pub important_character_changes: Option<String>,
+    pub setting_changes: Option<String>,
+    pub new_locations: Option<String>,
+    pub new_items_or_abilities: Option<String>,
+    pub foreshadowing: Option<String>,
+    pub unresolved_questions: Option<String>,
+    pub facts_must_remember: Option<String>,
+    pub next_chapter_hook: Option<String>,
+    pub validation_status: Option<String>,
+    pub validation_result: Option<String>,
+    pub enabled: bool,
+    pub content_hash: Option<String>,
+    pub draft_version: Option<i64>,
+    pub is_expired: bool,
+    pub ai_task_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveChapterSummaryInput {
+    pub id: Option<String>,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub volume_id: Option<String>,
+    pub adopted_draft_id: String,
+    pub summary: String,
+    pub key_events: Option<String>,
+    pub character_changes: Option<String>,
+    pub relationship_changes: Option<String>,
+    pub new_foreshadows: Option<String>,
+    pub resolved_foreshadows: Option<String>,
+    pub next_chapter_hints: Option<String>,
+    pub core_events: Option<String>,
+    pub protagonist_state_change: Option<String>,
+    pub important_character_changes: Option<String>,
+    pub setting_changes: Option<String>,
+    pub new_locations: Option<String>,
+    pub new_items_or_abilities: Option<String>,
+    pub foreshadowing: Option<String>,
+    pub unresolved_questions: Option<String>,
+    pub facts_must_remember: Option<String>,
+    pub next_chapter_hook: Option<String>,
+    pub validation_status: Option<String>,
+    pub validation_result: Option<String>,
+    pub enabled: Option<bool>,
+    pub content_hash: Option<String>,
+    pub draft_version: Option<i64>,
+    pub ai_task_id: Option<String>,
+}
+
+fn map_chapter_summary_row(row: &rusqlite::Row) -> rusqlite::Result<ChapterSummaryDto> {
+    Ok(ChapterSummaryDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        volume_id: row.get(3)?,
+        adopted_draft_id: row.get(4)?,
+        summary: row.get(5)?,
+        key_events: row.get(6)?,
+        character_changes: row.get(7)?,
+        relationship_changes: row.get(8)?,
+        new_foreshadows: row.get(9)?,
+        resolved_foreshadows: row.get(10)?,
+        next_chapter_hints: row.get(11)?,
+        core_events: row.get(12)?,
+        protagonist_state_change: row.get(13)?,
+        important_character_changes: row.get(14)?,
+        setting_changes: row.get(15)?,
+        new_locations: row.get(16)?,
+        new_items_or_abilities: row.get(17)?,
+        foreshadowing: row.get(18)?,
+        unresolved_questions: row.get(19)?,
+        facts_must_remember: row.get(20)?,
+        next_chapter_hook: row.get(21)?,
+        validation_status: row.get(22)?,
+        validation_result: row.get(23)?,
+        enabled: row.get::<_, i64>(24)? != 0,
+        content_hash: row.get(25)?,
+        draft_version: row.get(26)?,
+        is_expired: row.get::<_, i64>(27)? != 0,
+        ai_task_id: row.get(28)?,
+        created_at: row.get(29)?,
+        updated_at: row.get(30)?,
+    })
+}
+
+/// 保存章节总结（创建或更新）
+#[tauri::command]
+pub fn save_chapter_summary(input: SaveChapterSummaryInput) -> Result<ChapterSummaryDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let enabled = input.enabled.unwrap_or(true) as i64;
+
+    if let Some(ref existing_id) = input.id {
+        conn.execute(
+            "UPDATE chapter_summaries SET volume_id=?1, summary=?2, key_events=?3, character_changes=?4, relationship_changes=?5, new_foreshadows=?6, resolved_foreshadows=?7, next_chapter_hints=?8, core_events=?9, protagonist_state_change=?10, important_character_changes=?11, setting_changes=?12, new_locations=?13, new_items_or_abilities=?14, foreshadowing=?15, unresolved_questions=?16, facts_must_remember=?17, next_chapter_hook=?18, validation_status=?19, validation_result=?20, enabled=?21, content_hash=?22, draft_version=?23, is_expired=0, updated_at=?24 WHERE id=?25",
+            params![
+                &input.volume_id, &input.summary, &input.key_events, &input.character_changes,
+                &input.relationship_changes, &input.new_foreshadows, &input.resolved_foreshadows,
+                &input.next_chapter_hints, &input.core_events, &input.protagonist_state_change,
+                &input.important_character_changes, &input.setting_changes, &input.new_locations,
+                &input.new_items_or_abilities, &input.foreshadowing, &input.unresolved_questions,
+                &input.facts_must_remember, &input.next_chapter_hook, &input.validation_status,
+                &input.validation_result, &enabled, &input.content_hash, &input.draft_version,
+                &now, existing_id,
+            ],
+        ).map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE id=?1").map_err(|e| e.to_string())?;
+        stmt.query_row(params![existing_id], map_chapter_summary_row).map_err(|e| e.to_string())
+    } else {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO chapter_summaries (id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,0,?28,?29,?29)",
+            params![
+                &new_id, &input.novel_id, &input.chapter_id, &input.volume_id,
+                &input.adopted_draft_id, &input.summary, &input.key_events, &input.character_changes,
+                &input.relationship_changes, &input.new_foreshadows, &input.resolved_foreshadows,
+                &input.next_chapter_hints, &input.core_events, &input.protagonist_state_change,
+                &input.important_character_changes, &input.setting_changes, &input.new_locations,
+                &input.new_items_or_abilities, &input.foreshadowing, &input.unresolved_questions,
+                &input.facts_must_remember, &input.next_chapter_hook, &input.validation_status,
+                &input.validation_result, &enabled, &input.content_hash, &input.draft_version,
+                &input.ai_task_id, &now,
+            ],
+        ).map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE id=?1").map_err(|e| e.to_string())?;
+        stmt.query_row(params![&new_id], map_chapter_summary_row).map_err(|e| e.to_string())
+    }
+}
+
+/// 按章节获取总结
+#[tauri::command]
+pub fn get_chapter_summary(chapter_id: String) -> Result<Option<ChapterSummaryDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE chapter_id=?1 LIMIT 1").map_err(|e| e.to_string())?;
+    stmt.query_row(params![&chapter_id], map_chapter_summary_row)
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
+/// 标记章节总结过期
+#[tauri::command]
+pub fn mark_chapter_summaries_expired(chapter_id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE chapter_summaries SET is_expired = 1, updated_at = ?1 WHERE chapter_id = ?2",
+        params![chrono::Utc::now().to_rfc3339(), &chapter_id],
+    ).map_err(|e| e.to_string())?;
+    // 同时标记关联的 context_records 过期
+    conn.execute(
+        "UPDATE context_records SET is_expired = 1, updated_at = ?1 WHERE chapter_id = ?2",
+        params![chrono::Utc::now().to_rfc3339(), &chapter_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 更新章节总结启用状态
+#[tauri::command]
+pub fn update_chapter_summary_enabled(id: String, enabled: bool) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE chapter_summaries SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
+        params![enabled as i64, chrono::Utc::now().to_rfc3339(), &id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ==================== Context Records ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextRecordDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: Option<String>,
+    pub volume_id: Option<String>,
+    pub context_type: String,
+    pub title: String,
+    pub content: String,
+    pub importance: i64,
+    pub is_active: bool,
+    pub is_expired: bool,
+    pub content_hash: Option<String>,
+    pub draft_version: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveContextRecordInput {
+    pub id: Option<String>,
+    pub novel_id: String,
+    pub chapter_id: Option<String>,
+    pub volume_id: Option<String>,
+    pub context_type: String,
+    pub title: String,
+    pub content: String,
+    pub importance: Option<i64>,
+    pub is_active: Option<bool>,
+    pub content_hash: Option<String>,
+    pub draft_version: Option<i64>,
+}
+
+fn map_context_record_row(row: &rusqlite::Row) -> rusqlite::Result<ContextRecordDto> {
+    Ok(ContextRecordDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        volume_id: row.get(3)?,
+        context_type: row.get(4)?,
+        title: row.get(5)?,
+        content: row.get(6)?,
+        importance: row.get(7)?,
+        is_active: row.get::<_, i64>(8)? != 0,
+        is_expired: row.get::<_, i64>(9)? != 0,
+        content_hash: row.get(10)?,
+        draft_version: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+    })
+}
+
+/// 批量保存上下文记录
+#[tauri::command]
+pub fn save_context_records(inputs: Vec<SaveContextRecordInput>) -> Result<Vec<ContextRecordDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut results = Vec::new();
+
+    for input in inputs {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let importance = input.importance.unwrap_or(3);
+        let is_active = input.is_active.unwrap_or(true);
+
+        conn.execute(
+            "INSERT INTO context_records (id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11,?12,?12)",
+            params![
+                &new_id, &input.novel_id, &input.chapter_id, &input.volume_id,
+                &input.context_type, &input.title, &input.content, &importance,
+                &(is_active as i64), &input.content_hash, &input.draft_version, &now,
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records WHERE id=?1").map_err(|e| e.to_string())?;
+        results.push(stmt.query_row(params![&new_id], map_context_record_row).map_err(|e| e.to_string())?);
+    }
+    Ok(results)
+}
+
+/// 获取作品的所有上下文记录
+#[tauri::command]
+pub fn get_context_records(novel_id: String) -> Result<Vec<ContextRecordDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records WHERE novel_id=?1 ORDER BY created_at DESC").map_err(|e| e.to_string())?;
+    let items = stmt.query_map(params![&novel_id], map_context_record_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+/// 更新上下文记录启用状态
+#[tauri::command]
+pub fn update_context_record_active(id: String, is_active: bool) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE context_records SET is_active = ?1, updated_at = ?2 WHERE id = ?3",
+        params![is_active as i64, chrono::Utc::now().to_rfc3339(), &id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 删除上下文记录
+#[tauri::command]
+pub fn delete_context_record(id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM context_records WHERE id = ?1", params![&id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

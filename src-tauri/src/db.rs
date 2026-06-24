@@ -504,6 +504,8 @@ fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     migrate_characters_table(conn)?;
     migrate_chapter_characters_table(conn)?;
     migrate_quality_check_tables(conn)?;
+    migrate_chapter_summaries_table(conn)?;
+    migrate_context_records_table(conn)?;
     Ok(())
 }
 
@@ -871,6 +873,48 @@ fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
          CREATE INDEX IF NOT EXISTS idx_quality_check_items_chapter_id_status ON quality_check_items(chapter_id, status);",
     )?;
 
+    Ok(())
+}
+
+fn migrate_chapter_summaries_table(conn: &Connection) -> SqliteResult<()> {
+    ensure_column(conn, "chapter_summaries", "volume_id", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "enabled", "INTEGER NOT NULL DEFAULT 1")?;
+    ensure_column(conn, "chapter_summaries", "content_hash", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "draft_version", "INTEGER")?;
+    ensure_column(conn, "chapter_summaries", "is_expired", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "chapter_summaries", "validation_status", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "validation_result", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "core_events", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "protagonist_state_change", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "important_character_changes", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "setting_changes", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "new_locations", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "new_items_or_abilities", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "foreshadowing", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "unresolved_questions", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "facts_must_remember", "TEXT")?;
+    ensure_column(conn, "chapter_summaries", "next_chapter_hook", "TEXT")?;
+    // 初始化 enabled 默认值
+    conn.execute(
+        "UPDATE chapter_summaries SET enabled = 1 WHERE enabled IS NULL",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE chapter_summaries SET is_expired = 0 WHERE is_expired IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+fn migrate_context_records_table(conn: &Connection) -> SqliteResult<()> {
+    ensure_column(conn, "context_records", "volume_id", "TEXT")?;
+    ensure_column(conn, "context_records", "is_expired", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "context_records", "content_hash", "TEXT")?;
+    ensure_column(conn, "context_records", "draft_version", "INTEGER")?;
+    conn.execute(
+        "UPDATE context_records SET is_expired = 0 WHERE is_expired IS NULL",
+        [],
+    )?;
     Ok(())
 }
 
