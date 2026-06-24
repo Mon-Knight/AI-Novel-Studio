@@ -124,3 +124,52 @@ export interface ValidateSummaryInput {
   chapterTitle: string;
 }
 
+// ==================== v1.7.14 卷上下文类型 ====================
+
+/** 卷完成检查结果 */
+export interface VolumeCompletionCheck {
+  completed: boolean;
+  reasons: string[];
+  totalChapters: number;
+  chaptersWithContext: number;
+  expiredContexts: number;
+  disabledContexts: number;
+}
+
+/** 卷总结 AI 返回结果 */
+export interface VolumeSummarizeResult {
+  summaryTitle: string;
+  volumeMainArc: string;
+  majorEvents: string[];
+  protagonistGrowth: string;
+  characterChanges: Array<{ name: string; change: string }>;
+  relationshipChanges: Array<{ from: string; to: string; change: string }>;
+  factionChanges: string[];
+  settingChanges: string[];
+  foreshadowingCollected: string[];
+  unresolvedQuestions: string[];
+  factsMustRemember: string[];
+  nextVolumeHook: string;
+}
+
+/** 卷总结生成输入 */
+export interface SummarizeVolumeInput {
+  novelId: string;
+  volumeId: string;
+  volumeTitle: string;
+  chapterContexts: Array<{
+    chapterId: string;
+    chapterTitle: string;
+    summary: string;
+    keyEvents: string[];
+    coreEvents?: string[];
+    protagonistStateChange?: string;
+    importantCharacterChanges?: Array<{ name: string; change: string }>;
+    settingChanges?: string[];
+    newForeshadows?: string[];
+    resolvedForeshadows?: string[];
+    unresolvedQuestions?: string[];
+    factsMustRemember?: string[];
+  }>;
+}
+
