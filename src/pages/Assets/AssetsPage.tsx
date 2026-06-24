@@ -1,7 +1,7 @@
 /**
  * AI Novel Studio - 创作资产中心页面
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import { novelRepository } from '../../services/database/novelRepository';

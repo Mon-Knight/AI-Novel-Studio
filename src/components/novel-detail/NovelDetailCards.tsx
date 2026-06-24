@@ -241,7 +241,7 @@ interface WorldSettingCardProps {
   onSave: (id: string | null, data: { title: string; content: string }) => Promise<void>;
 }
 
-function WorldSettingCard({ novelId, settings, onSave }: WorldSettingCardProps) {
+function WorldSettingCard({ settings, onSave }: WorldSettingCardProps) {
   const activeSetting = settings.find((s) => s.isActive) || settings[0];
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(activeSetting?.title || '默认世界设定');
@@ -361,7 +361,7 @@ interface RuleSystemCardProps {
   onDelete: (id: string) => Promise<void>;
 }
 
-function RuleSystemCard({ novelId, ruleSystems, onSave, onDelete }: RuleSystemCardProps) {
+function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [title, setTitle] = useState('');
@@ -586,7 +586,7 @@ interface ProtagonistCardProps {
   }) => Promise<void>;
 }
 
-function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCardProps) {
+function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
@@ -791,7 +791,7 @@ function ProtagonistCard({ novelId, novel, protagonist, onSave }: ProtagonistCar
         <div style={{ fontSize: 12, color: 'var(--color-primary)', fontWeight: 500 }}>
           主角模式：{novel?.protagonistMode === 'dual' ? '双主角' : '单主角'}
         </div>
-        {prots!.map((p, i) => (
+        {prots!.map((p) => (
           <div key={p.id} style={{ border: '1px solid var(--color-border-light)', borderRadius: 6, padding: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
               {p.label === 'primary' ? '⭐ 主角A' : '🌟 主角B'}：{p.name}

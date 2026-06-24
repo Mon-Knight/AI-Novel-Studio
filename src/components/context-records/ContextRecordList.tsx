@@ -2,7 +2,7 @@
  * AI Novel Studio - 上下文记录列表组件
  */
 import { useState } from 'react';
-import type { ContextRecord, ContextRecordType } from '../../types/context';
+import type { ContextRecord } from '../../types/context';
 import { ContextRecordTypeLabels, ContextRecordTypeColors } from '../../types/context';
 
 interface ContextRecordListProps {

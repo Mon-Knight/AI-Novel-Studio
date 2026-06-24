@@ -1,4 +1,4 @@
-# AI Novel Studio Windows 打包脚本
+﻿# AI Novel Studio Windows 打包脚本
 # 使用方式：
 #   npm run package:windows
 #   或直接：powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1

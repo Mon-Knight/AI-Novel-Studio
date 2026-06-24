@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
-import type { ChapterDraft } from '../../../types/ai';
 import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
 import type { StyleAnalyzeResult } from '../../../types/style';

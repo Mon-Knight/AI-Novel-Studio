@@ -116,7 +116,7 @@ function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
   return result;
 }
 
-function mockCharacterGenerate(info: ReturnType<typeof extractInfo>): string {
+function mockCharacterGenerate(_info: ReturnType<typeof extractInfo>): string {
   return JSON.stringify({
     characters: [
       { name: '路明非', roleType: 'protagonist', identity: '卡塞尔学院学生', faction: '卡塞尔学院', relationToProtagonist: '本人', goal: '存活并保护同伴', personality: '内向自卑，关键时刻勇敢', behaviorLimits: '不会主动伤害无辜者', forbiddenBehaviors: '不会背叛同伴', currentState: '刚接受S级身份', chapterFunction: '本章视角人物' },
@@ -127,7 +127,7 @@ function mockCharacterGenerate(info: ReturnType<typeof extractInfo>): string {
   });
 }
 
-function mockEventSuggest(info: ReturnType<typeof extractInfo>): string {
+function mockEventSuggest(_info: ReturnType<typeof extractInfo>): string {
   return JSON.stringify({
     events: [
       { title: '初次交锋', type: 'conflict', description: '主角首次遭遇本章对手，双方试探实力差距', impact: '建立本章冲突基调，引出后续对抗', risk: '若实力对比失衡，可能影响读者期待', mustHappen: false },
@@ -138,7 +138,7 @@ function mockEventSuggest(info: ReturnType<typeof extractInfo>): string {
   });
 }
 
-function mockSettingExpand(info: ReturnType<typeof extractInfo>): string {
+function mockSettingExpand(_info: ReturnType<typeof extractInfo>): string {
   return JSON.stringify({
     settings: [
       { name: '场景：关键地点', category: 'location', description: '本章核心事件发生地的详细设定，包括环境氛围、建筑特征、历史背景', usageInChapter: '作为本章主要场景，承载关键对话和冲突', risk: '与已设定世界背景的衔接需注意一致性' },
@@ -254,9 +254,8 @@ function mockStyleAnalyze(): string {
   });
 }
 
-function mockChapterPolish(info: ReturnType<typeof extractInfo>, messages: { role: string; content: string }[]): string {
+function mockChapterPolish(_info: ReturnType<typeof extractInfo>, messages: { role: string; content: string }[]): string {
   // 从用户消息中提取原文
-  const userMsg = messages.find((m) => m.role === 'user')?.content || '';
   const original = messages.find((m) => m.role === 'system')?.content?.match(/以下是原文：\n\n([\s\S]*?)$/)?.[1] || '（空正文）';
 
   const modeText = messages.find((m) => m.role === 'system')?.content?.match(/润色模式：(.+)/)?.[1] || '保持剧情不变，优化表达';

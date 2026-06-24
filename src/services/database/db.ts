@@ -4,17 +4,7 @@
  */
 
 import { safeJsonParse } from '../../utils/dataGuard';
-
-// 检测是否在 Tauri 环境中
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
-}
-
-// Tauri invoke 包装
-async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const { invoke } = await import('@tauri-apps/api/tauri');
-  return invoke<T>(cmd, args);
-}
+import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 
 // ==================== localStorage 回退实现 ====================
 
@@ -54,7 +44,11 @@ function nowISO(): string {
 export type DbMode = 'tauri' | 'localstorage';
 
 export function getDbMode(): DbMode {
-  return isTauri() ? 'tauri' : 'localstorage';
+  return isTauriRuntime() ? 'tauri' : 'localstorage';
+}
+
+export function isTauri(): boolean {
+  return isTauriRuntime();
 }
 
 /**
@@ -66,7 +60,7 @@ export async function dbCall<T>(
   args?: Record<string, unknown>,
   fallback?: () => T,
 ): Promise<T> {
-  if (isTauri()) {
+  if (isTauriRuntime()) {
     try {
       const result = await Promise.race([
         tauriInvoke<T>(command, args),
@@ -86,4 +80,4 @@ export async function dbCall<T>(
   throw new Error(`No fallback for command: ${command}`);
 }
 
-export { lsGet, lsSet, lsRemove, generateId, nowISO, isTauri };
+export { lsGet, lsSet, lsRemove, generateId, nowISO };

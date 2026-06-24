@@ -12,7 +12,7 @@ interface ChapterFormModalProps {
   onClose: () => void;
 }
 
-function ChapterFormModal({ initial, novelId, volumeId: defaultVolumeId, volumes, onSave, onClose }: ChapterFormModalProps) {
+function ChapterFormModal({ initial, volumeId: defaultVolumeId, volumes, onSave, onClose }: ChapterFormModalProps) {
   const [title, setTitle] = useState(initial?.title || '');
   const [volumeId, setVolumeId] = useState(initial?.volumeId || defaultVolumeId || '');
   const [outline, setOutline] = useState(initial?.outline || '');

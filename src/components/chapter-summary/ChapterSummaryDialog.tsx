@@ -2,7 +2,7 @@
  * AI Novel Studio - 章节总结确认弹窗组件
  */
 import { useState } from 'react';
-import type { ChapterSummary, ChapterSummarizeResult } from '../../types/chapterSummary';
+import type { ChapterSummarizeResult } from '../../types/chapterSummary';
 
 interface ChapterSummaryDialogProps {
   result: ChapterSummarizeResult;

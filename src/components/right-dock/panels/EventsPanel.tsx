@@ -17,7 +17,7 @@ interface EventsPanelProps {
   onAdopted?: () => void;
 }
 
-function EventsPanel({ novelId, chapter, onGenerated, onAdopted }: EventsPanelProps) {
+function EventsPanel({ novelId, chapter }: EventsPanelProps) {
   const [events, setEvents] = useState<ChapterEvent[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [chapterChars, setChapterChars] = useState<ChapterCharacter[]>([]);

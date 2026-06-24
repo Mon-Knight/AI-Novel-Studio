@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { confirmDanger } from '../../utils/nativeDialog';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
-import { settingRepository } from '../../services/database/settingRepository';
 import { createVolumeForNovel, createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
 import { outlineGenerateService, type ChapterOutlineCandidate, type VolumeOutlineCandidate } from '../../services/ai/outlineGenerateService';
 import VolumeCard from './VolumeCard';
@@ -11,8 +10,8 @@ import ChapterFormModal from './ChapterFormModal';
 import type { Volume, CreateVolumeInput, UpdateVolumeInput } from '../../types/volume';
 import type { Chapter, CreateChapterInput, UpdateChapterInput } from '../../types/chapter';
 import { runWithLoading } from '../../lib/runWithLoading';
-import { masterOutlineService, volumeOutlineService, chapterOutlineService } from '../../services/outlines/outlineService';
-import type { MasterOutline, VolumeOutline, ChapterOutline } from '../../types/outline';
+import { masterOutlineService } from '../../services/outlines/outlineService';
+import type { MasterOutline } from '../../types/outline';
 
 interface OutlineManagerProps {
   novelId: string;
@@ -92,6 +91,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       return;
     }
     if (!(await confirmDanger({ title: '删除分卷', message: '确定删除此分卷？' }))) return;
+    await volumeRepository.remove(id);
     await loadData();
     flash('分卷已删除');
   };
@@ -141,6 +141,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
 
   const handleDeleteChapter = async (id: string) => {
     if (!(await confirmDanger({ title: '删除章节', message: '确定删除此章节？' }))) return;
+    await chapterRepository.remove(id);
     await loadData();
     flash('章节已删除');
   };
@@ -158,7 +159,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
           successMessage: '作品总大纲已生成，请确认后保存',
           errorMessage: '作品总大纲生成失败',
         },
-        async ({ setMessage, setStage }) => {
+        async ({ setStage }) => {
           setStage('正在分析世界观和角色……');
           const outline = await outlineGenerateService.generateNovelOutline(novelId);
           setNovelOutline(outline);

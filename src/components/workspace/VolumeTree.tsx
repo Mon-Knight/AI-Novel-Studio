@@ -136,11 +136,11 @@ function VolumeTree({
         <div className="workspace-sidebar-header">
           <span>📖 卷章目录</span>
           <div style={{ display: 'flex', gap: 4 }}>
-            <button style={{ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: '1px solid var(--color-primary)', background: 'var(--color-primary)', color: '#fff', cursor: 'pointer' }}
+            <button style={xsBtnPrimary}
               onClick={() => handleOpenNewChapter()} disabled={creating} title="新建章节（自动创建第一卷）">
               + 章节
             </button>
-            <button style={{ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', cursor: 'pointer' }}
+            <button style={xsBtnSecondary}
               onClick={() => { setNewVolumeTitle(''); setShowNewVolume(true); }} disabled={creating} title="新建分卷">
               + 分卷
             </button>
@@ -224,11 +224,11 @@ function VolumeTree({
       <div className="workspace-sidebar-header">
         <span>📖 卷章目录</span>
         <div style={{ display: 'flex', gap: 4 }}>
-          <button style={{ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: '1px solid var(--color-primary)', background: 'var(--color-primary)', color: '#fff', cursor: 'pointer' }}
+          <button style={xsBtnPrimary}
             onClick={() => handleOpenNewChapter()} disabled={creating} title="新建章节（自动创建第一卷）">
             + 章节
           </button>
-          <button style={{ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', cursor: 'pointer' }}
+          <button style={xsBtnSecondary}
             onClick={() => { setNewVolumeTitle(''); setShowNewVolume(true); }} disabled={creating} title="新建分卷">
             + 分卷
           </button>

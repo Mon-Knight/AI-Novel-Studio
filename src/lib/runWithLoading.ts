@@ -28,6 +28,7 @@ export interface LoadingModalUpdate {
   percent?: number;
   cancelable?: boolean;
   errorMessage?: string;
+  autoCloseMs?: number;
 }
 
 // ==================== 全局事件名称 ====================
@@ -101,7 +102,7 @@ export function useGlobalLoadingModal(
             cancelable: detail.cancelable ?? prev.cancelable,
           }));
           break;
-        case 'success':
+        case 'success': {
           setState((prev) => ({
             ...prev,
             state: 'success',
@@ -111,12 +112,14 @@ export function useGlobalLoadingModal(
             cancelable: false,
             errorMessage: '',
           }));
-          if (autoCloseMs > 0) {
+          const successAutoCloseMs = detail.autoCloseMs ?? autoCloseMs;
+          if (successAutoCloseMs > 0) {
             setTimeout(() => {
               setState((prev) => ({ ...prev, open: false }));
-            }, autoCloseMs);
+            }, successAutoCloseMs);
           }
           break;
+        }
         case 'error':
           setState((prev) => ({
             ...prev,
@@ -208,12 +211,12 @@ export async function runWithLoading<T>(
         }
       });
       const result = await Promise.race([task(helpers), abortPromise]);
-      emit({ type: 'success', message: successMessage });
+      emit({ type: 'success', message: successMessage, autoCloseMs: successAutoCloseMs });
       return result;
     }
 
     const result = await task(helpers);
-    emit({ type: 'success', message: successMessage });
+    emit({ type: 'success', message: successMessage, autoCloseMs: successAutoCloseMs });
     return result;
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);

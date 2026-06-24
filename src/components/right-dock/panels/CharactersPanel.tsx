@@ -227,10 +227,6 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
     .filter((c) => !isInChapter(c.id))
     .sort((a, b) => Number(isProtagonistCharacter(b)) - Number(isProtagonistCharacter(a)));
 
-  // 判断主角是否在本章出场
-  const isProtagonistInChapter = (protag: Character) =>
-    chapterChars.some((cc) => cc.characterId === protag.id);
-
   return (
     <div>
       {/* AI 模式状态 */}

@@ -9,8 +9,6 @@ import { draftVersionService } from '../database/draftVersionService';
 import { settingRepository } from '../database/settingRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { characterService } from '../characters/characterService';
-import { chapterCharacterService } from '../characters/chapterCharacterService';
-import { chapterEventService } from '../characters/chapterEventService';
 import { styleProfileService } from '../styles/styleProfileService';
 import { outputProfileService } from '../styles/outputProfileService';
 import { chapterSummaryService } from '../context/chapterSummaryService';

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import BackButton from '../../components/common/BackButton';
 import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
 import { protagonistRepository } from '../../services/database/protagonistRepository';
@@ -117,19 +116,6 @@ function NovelDetailPage() {
   const handleDeleteRuleSystem = async (id: string) => {
     await settingRepository.deleteRuleSystem(id);
     setRuleSystems((prev) => prev.filter((r) => r.id !== id));
-  };
-
-  const handleSaveProtagonist = async (
-    id: string | null,
-    data: {
-      name: string; identity?: string; personality?: string;
-      goal?: string; specialAbility?: string; abilityLimits?: string;
-      forbiddenBehaviors?: string; currentState?: string;
-    },
-  ) => {
-    if (!novelId) return;
-    const result = await protagonistRepository.save(id, { novelId, ...data });
-    setProtagonist(result);
   };
 
   if (loading) {

@@ -2,7 +2,7 @@
  * AI Novel Studio - 质量检查服务（localStorage）
  */
 import { lsGet, lsSet, generateId, nowISO } from '../database/db';
-import type { QualityCheckReport, QualityCheckItem, CreateQualityReportInput, SaveQualityCheckResultInput, QualityCheckStatus } from '../../types/qualityCheck';
+import type { QualityCheckReport, QualityCheckItem, CreateQualityReportInput, SaveQualityCheckResultInput } from '../../types/qualityCheck';
 
 const REPORTS_KEY = 'ai_novel_studio_quality_reports';
 const ITEMS_KEY = 'ai_novel_studio_quality_items';

@@ -2,7 +2,7 @@
  * AI Novel Studio - 上下文记录服务（localStorage）
  */
 import { lsGet, lsSet, generateId, nowISO } from '../database/db';
-import type { ContextRecord, CreateContextRecordInput, ContextRecordType } from '../../types/context';
+import type { ContextRecord, CreateContextRecordInput } from '../../types/context';
 
 const KEY = 'ai_novel_studio_context_records';
 function getAll(): ContextRecord[] { return lsGet<ContextRecord[]>(KEY) ?? []; }

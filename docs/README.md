@@ -18,7 +18,7 @@
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
-| [version-roadmap.md](project/version-roadmap.md) | 版本路线图 | ✅ v1.7.10 已同步 |
+| [version-roadmap.md](project/version-roadmap.md) | 版本路线图 | ✅ v1.7.11 已同步 |
 | [module-boundaries.md](project/module-boundaries.md) | 模块边界定义 | ✅ 已有 |
 | [development-rules.md](project/development-rules.md) | 开发规则总览 | ✅ 已有 |
 | [agent-task-rules.md](project/agent-task-rules.md) | Agent 任务执行规则 | 🚧 占位，待后续细化 |
@@ -31,7 +31,7 @@
 | [architecture.md](technical/architecture.md) | 项目架构总览 | 🚧 占位，待后续细化 |
 | [database.md](technical/database.md) | 数据库设计与迁移 | 🚧 占位，待后续细化 |
 | [desktop-build.md](technical/desktop-build.md) | 桌面端构建指南 | 🚧 占位，待后续细化 |
-| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v1.7.10 已补充 |
+| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v1.7.11 已补充 |
 | [api-routes.md](technical/api-routes.md) | API 路由说明 | 🚧 占位，待后续细化 |
 | [deployment.md](technical/deployment.md) | 部署说明 | 🚧 占位，待后续细化 |
 

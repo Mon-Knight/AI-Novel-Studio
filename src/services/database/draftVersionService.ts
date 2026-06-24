@@ -5,6 +5,7 @@
  */
 import { dbCall, lsGet, lsSet, generateId, nowISO } from '../database/db';
 import { saveLargeTextWithChunks } from '../largeTextSave';
+import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 import { shouldUseLargeTextSave } from '../../types/largeTextSave';
 import type { ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
 import type { LargeTextSaveProgress } from '../../types/largeTextSave';
@@ -96,10 +97,9 @@ function saveLocalDrafts(chapterId: string, drafts: ChapterDraft[]): void {
  */
 async function readFullContent(largeTextRefId: string): Promise<string | null> {
   // 检测是否在 Tauri 环境
-  if (typeof window !== 'undefined' && '__TAURI__' in window) {
+  if (isTauriRuntime()) {
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
-      const result = await invoke<{ content: string }>('read_large_text_content', {
+      const result = await tauriInvoke<{ content: string }>('read_large_text_content', {
         input: { documentId: largeTextRefId },
       });
       return result?.content ?? null;

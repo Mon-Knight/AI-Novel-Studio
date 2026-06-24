@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { draftVersionService } from '../../../services/database/draftVersionService';
@@ -26,23 +26,23 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!chapterId) { setLoading(false); return; }
     try {
       const list = await draftVersionService.getByChapterId(chapterId);
       setDrafts(list.sort((a, b) => b.versionNo - a.versionNo));
     } catch { /* ignore */ }
     setLoading(false);
-  };
+  }, [chapterId]);
 
-  useEffect(() => { load(); }, [chapterId]);
+  useEffect(() => { load(); }, [load]);
 
   const handleAdopt = async (draft: ChapterDraft) => {
     if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
     await draftVersionService.adopt(draft.id, chapterId);
     setMsg(`v${draft.versionNo} 已采用`);
     setTimeout(() => setMsg(''), 2000);
-    load();
+    await load();
   };
 
   return (

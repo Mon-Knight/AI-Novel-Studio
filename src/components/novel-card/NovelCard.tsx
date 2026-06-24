@@ -86,6 +86,7 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
       <div className="novel-card-body">
         <div className="novel-card-title">{novel.title}</div>
         <div className="novel-card-desc">{novel.description || ''}</div>
+        {progressLabel && <div className="novel-card-progress">{progressLabel}</div>}
         <div className="novel-card-meta">
           <span className="novel-card-meta-item">
             {formatNumber(wordCount)} 字

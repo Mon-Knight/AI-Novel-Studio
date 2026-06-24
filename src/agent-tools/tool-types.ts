@@ -4,12 +4,6 @@
 // 用途：定义 Agent Tool 的统一返回类型和上下文类型
 // 注意：增强版，支持 warnings / source / AgentReadableSummary
 
-import type { Novel } from "../types/novel";
-import type { Chapter } from "../types/chapter";
-import type { Volume } from "../types/volume";
-import type { StyleProfile } from "../types/style";
-import type { OutputProfile } from "../types/output";
-
 /**
  * Agent Tool 统一返回类型
  * @template T - 工具返回的数据类型

@@ -26,7 +26,7 @@ function countWords(text: string): number {
   return cjk + words;
 }
 
-function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, onDraftChange, onChapterUpdated }: EditorAreaProps) {
+function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange, onChapterUpdated }: EditorAreaProps) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -55,7 +55,7 @@ function EditorArea({ chapter, novelTitle, novelId, currentDraft, onOpenPanel, o
     setIsEditingOutline(false);
     setOutlineDraft('');
     setOutlineSaveMsg('');
-  }, [currentDraft?.id, chapter?.id]);
+  }, [currentDraft, chapter, onDraftChange]);
 
   // v1.0.35 大纲保存处理
   const handleStartEditOutline = () => {

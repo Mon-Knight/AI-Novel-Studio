@@ -194,7 +194,7 @@ function OutlineEditor({
   };
 
   // 保存大纲
-  const handleSave = async (saveAsNew: boolean) => {
+  const handleSave = useCallback(async (saveAsNew: boolean) => {
     if (!content.trim()) return;
     try {
       await runWithLoading(
@@ -242,7 +242,20 @@ function OutlineEditor({
     } catch {
       // 错误已在弹窗显示
     }
-  };
+  }, [
+    content,
+    context,
+    load,
+    onSaved,
+    outlineType,
+    parentOutlineId,
+    projectId,
+    targetId,
+    targetIndex,
+    targetTitle,
+    title,
+    typeLabel,
+  ]);
 
   // 设为采用版本
   const handleSetActive = async () => {
@@ -271,7 +284,7 @@ function OutlineEditor({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isDirty, content]);
+  }, [isDirty, handleSave]);
 
   if (loading) {
     return <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)' }}>⏳ 加载中……</div>;

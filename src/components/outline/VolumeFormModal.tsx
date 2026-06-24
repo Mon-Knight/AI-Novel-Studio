@@ -8,7 +8,7 @@ interface VolumeFormModalProps {
   onClose: () => void;
 }
 
-function VolumeFormModal({ initial, novelId, onSave, onClose }: VolumeFormModalProps) {
+function VolumeFormModal({ initial, onSave, onClose }: VolumeFormModalProps) {
   const [title, setTitle] = useState(initial?.title || '');
   const [summary, setSummary] = useState(initial?.summary || '');
   const [goal, setGoal] = useState(initial?.goal || '');

@@ -24,7 +24,7 @@ export async function confirmDanger(options: {
   okLabel?: string;
   cancelLabel?: string;
 }): Promise<boolean> {
-  const { title = '确认操作', message, okLabel = '确认删除', cancelLabel = '取消' } = options;
+  const { title = '确认操作', message } = options;
 
   try {
     const dialog = await getTauriDialog();

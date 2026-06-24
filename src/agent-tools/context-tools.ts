@@ -13,7 +13,6 @@ import { errorResult, resolveNovelId, successResult } from "./tool-types";
 import { readProjectContext } from "./project-tools";
 import { readChapterContext } from "./chapter-tools";
 import { readStyleProfile } from "./style-tools";
-import { readOutputControl } from "./style-tools";
 
 /**
  * 构建 Agent 可读上下文摘要

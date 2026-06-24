@@ -218,7 +218,7 @@ function WritingWorkspacePage() {
     if (!novelId || !activeChapter || !currentDraft) return;
     try {
       // 保存章节总结
-      const summary = await chapterSummaryService.create({
+      await chapterSummaryService.create({
         novelId, chapterId: activeChapter.id, adoptedDraftId: currentDraft.id,
         summary: edited.summary, keyEvents: edited.keyEvents,
         characterChanges: edited.characterChanges as any,

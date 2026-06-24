@@ -1,9 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
+import { tauriInvoke } from './services/tauri/runtime';
 import './styles/variables.css';
 import './styles/global.css';
 
@@ -25,7 +25,7 @@ window.addEventListener('contextmenu', (event) => {
 // Native Feel P2: 读取系统强调色并写入 CSS 变量
 async function applySystemAccentColor() {
   try {
-    const accent = await invoke<string | null>('get_system_accent_color');
+    const accent = await tauriInvoke<string | null>('get_system_accent_color');
     if (accent && /^#[0-9a-fA-F]{6}$/.test(accent)) {
       document.documentElement.style.setProperty('--color-accent', accent);
       document.documentElement.style.setProperty('--color-focus-ring', accent);

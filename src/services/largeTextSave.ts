@@ -10,9 +10,9 @@ import {
   LARGE_TEXT_THRESHOLD,
   shouldUseLargeTextSave,
   type CreateLargeTextSessionOptions,
-  type LargeTextSaveProgress,
   type LargeTextSaveResult,
 } from '../types/largeTextSave';
+import { isTauriRuntime, tauriInvoke } from './tauri/runtime';
 
 // ==================== 类型定义 ====================
 
@@ -59,22 +59,7 @@ interface TauriFinalizeOutput {
   chunkCount: number;
 }
 
-interface TauriAbortInput {
-  sessionId: string;
-}
-
 // ==================== 工具函数 ====================
-
-/** 检测是否在 Tauri 环境中 */
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
-}
-
-/** Tauri invoke 包装（无超时限制，用于大文本操作） */
-async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const { invoke } = await import('@tauri-apps/api/tauri');
-  return invoke<T>(cmd, args);
-}
 
 /** 计算文本字节长度 */
 function byteLength(content: string): number {
@@ -164,7 +149,7 @@ export async function saveLargeTextWithChunks(
   }
 
   // 浏览器模式：直接返回（由调用方通过 localStorage 保存）
-  if (!isTauri()) {
+  if (!isTauriRuntime()) {
     onProgress?.({ stage: 'done', percent: 100, message: '浏览器模式：内容由 localStorage 保存' });
     return { success: true, totalChars: charLength(content), totalBytes: byteLength(content), chunkCount: 0 };
   }
@@ -334,7 +319,7 @@ export async function saveLargeTextWithChunks(
  * 取消正在进行的保存
  */
 export async function abortLargeTextSave(sessionId: string): Promise<void> {
-  if (!isTauri()) return;
+  if (!isTauriRuntime()) return;
   await tauriInvoke<void>('abort_large_text_save', { sessionId });
 }
 
@@ -344,7 +329,7 @@ export async function abortLargeTextSave(sessionId: string): Promise<void> {
  * 清理超过 24 小时的过期保存会话缓存
  */
 export async function cleanupExpiredSessions(): Promise<number> {
-  if (!isTauri()) return 0;
+  if (!isTauriRuntime()) return 0;
   return tauriInvoke<number>('cleanup_expired_large_text_save_sessions');
 }
 

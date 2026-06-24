@@ -6,7 +6,7 @@ import { exportService } from '../../services/export/exportService';
 
 interface ExportCardProps { novelId: string; novelTitle: string; }
 
-function ExportCard({ novelId, novelTitle }: ExportCardProps) {
+function ExportCard({ novelId }: ExportCardProps) {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 

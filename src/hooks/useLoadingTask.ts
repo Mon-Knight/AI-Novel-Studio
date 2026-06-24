@@ -4,7 +4,7 @@
  * 封装 loading / error / success 状态管理，
  * 与 LoadingModal 配合使用时自动处理弹窗生命周期。
  */
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import type { LoadingModalState } from '../components/common/LoadingModal';
 
 export interface LoadingTaskState {
@@ -68,20 +68,22 @@ export function useLoadingTask(): UseLoadingTaskReturn {
   const isProcessingRef = useRef(false);
   const currentTaskRef = useRef<AbortController | null>(null);
 
-  const helpers: LoadingTaskHelpers = {
-    setMessage: useCallback((message: string) => {
-      setState((prev) => ({ ...prev, message }));
-    }, []),
-    setStage: useCallback((stage: string) => {
-      setState((prev) => ({ ...prev, stage }));
-    }, []),
-    setPercent: useCallback((percent: number) => {
-      setState((prev) => ({ ...prev, percent }));
-    }, []),
-    setCancelable: useCallback((cancelable: boolean) => {
-      setState((prev) => ({ ...prev, cancelable }));
-    }, []),
-  };
+  const setMessage = useCallback((message: string) => {
+    setState((prev) => ({ ...prev, message }));
+  }, []);
+  const setStage = useCallback((stage: string) => {
+    setState((prev) => ({ ...prev, stage }));
+  }, []);
+  const setPercent = useCallback((percent: number) => {
+    setState((prev) => ({ ...prev, percent }));
+  }, []);
+  const setCancelable = useCallback((cancelable: boolean) => {
+    setState((prev) => ({ ...prev, cancelable }));
+  }, []);
+  const helpers: LoadingTaskHelpers = useMemo(
+    () => ({ setMessage, setStage, setPercent, setCancelable }),
+    [setMessage, setStage, setPercent, setCancelable],
+  );
 
   const closeModal = useCallback(() => {
     setState((prev) => ({ ...prev, modalOpen: false }));

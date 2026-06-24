@@ -21,7 +21,6 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<'select' | 'analyze' | 'importing' | 'done'>('select');
   const [fileName, setFileName] = useState('');
-  const [content, setContent] = useState('');
   const [analyzeResult, setAnalyzeResult] = useState<TxtAnalyzeResult | null>(null);
   const [novelTitle, setNovelTitle] = useState('');
   const [genre, setGenre] = useState('');
@@ -38,7 +37,6 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
     try {
       const text = await readTextFile(file);
       if (!text.trim()) { setError('文件内容为空'); return; }
-      setContent(text);
       const result = analyzeTxtForChapters(text);
       setAnalyzeResult(result);
       setNovelTitle(file.name.replace(/\.(txt|TXT)$/, '').slice(0, 40));

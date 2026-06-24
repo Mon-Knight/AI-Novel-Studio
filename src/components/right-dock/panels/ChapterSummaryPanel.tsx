@@ -64,7 +64,7 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           successMessage: '章节总结生成完成',
           errorMessage: '总结生成失败',
         },
-        async ({ setMessage, setStage }) => {
+        async ({ setStage }) => {
           setStage('正在分析章节内容……');
           const result = await chapterSummarizeService.summarize({
             novelId,

@@ -108,6 +108,7 @@ function VolumeCard({ volume, chapters, onEdit, onDelete, onAddChapter, onEditCh
                 </span>
               )}
               <button className="btn btn-secondary btn-sm" onClick={() => onEditChapter(ch)} style={{ marginRight: 4 }}>✏️</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => onDeleteChapter(ch.id)} style={{ marginRight: 4, color: 'var(--color-error)' }}>🗑️</button>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => navigate(`/novels/${ch.novelId}/workspace?chapterId=${ch.id}`)}

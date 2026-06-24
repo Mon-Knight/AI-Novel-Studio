@@ -47,8 +47,6 @@ function ImportExportPage() {
   };
 
   const adoptedChapters = chapters.filter((c) => c.status === 'adopted' || c.status === 'summarized');
-  const selectedNovel = novels.find((n) => n.id === selectedNovelId);
-
   return (
     <div className="page-container form-page" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />

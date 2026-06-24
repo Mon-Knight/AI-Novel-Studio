@@ -4,7 +4,7 @@
 import { dbCall } from '../database/db';
 import type {
   MasterOutline, VolumeOutline, ChapterOutline,
-  OutlineGenerationContext, OutlineType,
+  OutlineGenerationContext,
 } from '../../types/outline';
 
 // ==================== Master Outline ====================
@@ -115,7 +115,6 @@ export async function loadOutlineContext(projectId: string): Promise<OutlineGene
 
     // v1.0.35: 加载上层大纲
     let activeMasterOutline: string | undefined;
-    let activeVolumeOutline: string | undefined;
     try {
       const masterOutline = await masterOutlineService.getActive(projectId);
       if (masterOutline) activeMasterOutline = masterOutline.content;

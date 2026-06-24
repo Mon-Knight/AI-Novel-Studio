@@ -16,7 +16,7 @@ interface PolishPanelProps {
 
 const POLISH_MODES: PolishMode[] = ['keep_plot', 'enhance_description', 'reduce_redundancy', 'strengthen_conflict', 'adjust_pacing', 'unify_style', 'fix_language', 'custom'];
 
-function PolishPanel({ novelId, chapter, onGenerated, onAdopted }: PolishPanelProps) {
+function PolishPanel({ novelId, chapter, onGenerated }: PolishPanelProps) {
   const [mode, setMode] = useState<PolishMode>('keep_plot');
   const [customInstruction, setCustomInstruction] = useState('');
   const [loading, setLoading] = useState(false);

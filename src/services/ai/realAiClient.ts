@@ -23,6 +23,7 @@ interface TauriAiResponse {
   tokenInput?: number;
   tokenOutput?: number;
   tokenTotal?: number;
+  totalTokens?: number;
 }
 
 export function buildChatCompletionsUrl(baseUrl: string): string {
@@ -151,7 +152,7 @@ export class RealAiClient implements AiClient {
       raw: response.raw,
       tokenInput: response.tokenInput,
       tokenOutput: response.tokenOutput,
-      tokenTotal: response.tokenTotal,
+      tokenTotal: response.tokenTotal ?? response.totalTokens,
     };
   }
 

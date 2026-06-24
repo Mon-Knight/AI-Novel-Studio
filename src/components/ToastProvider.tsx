@@ -43,11 +43,12 @@ function ToastProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unregister = registerToastListener(addToast);
+    const timers = timersRef.current;
     return () => {
       unregister();
       // 清理所有 timer
-      timersRef.current.forEach((timer) => clearTimeout(timer));
-      timersRef.current.clear();
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
     };
   }, [addToast]);
 
