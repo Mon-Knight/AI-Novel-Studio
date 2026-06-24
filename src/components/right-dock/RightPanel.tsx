@@ -24,9 +24,11 @@ interface RightPanelProps {
   onChapterGoalDirtyChange?: (dirty: boolean) => void;
   onChapterCharactersChanged?: () => void;
   contextVersion?: number;
+  /** 定位正文回调 */
+  onLocateText?: (startOffset: number, endOffset: number, quote?: string) => void;
 }
 
-const panelConfig: Record<string, { title: string; component: React.FC<{ novelId?: string; chapter?: Chapter; onGenerated?: (draft: ChapterDraft) => void; onAdopted?: () => void; onChapterOutlineApplied?: (chapterId: string) => void; onChapterGoalDirtyChange?: (dirty: boolean) => void; onChapterCharactersChanged?: () => void; contextVersion?: number }> }> = {
+const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
   'ai-generate': { title: 'AI 章节生成', component: AiGeneratePanel },
   'outline': { title: '大纲查看', component: OutlinePanel },
   'characters': { title: '角色管理', component: CharactersPanel },
@@ -39,7 +41,7 @@ const panelConfig: Record<string, { title: string; component: React.FC<{ novelId
   'context-view': { title: '上下文记录', component: ContextViewPanel },
 };
 
-function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted, onChapterOutlineApplied, onChapterGoalDirtyChange, onChapterCharactersChanged, contextVersion }: RightPanelProps) {
+function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted, onChapterOutlineApplied, onChapterGoalDirtyChange, onChapterCharactersChanged, contextVersion, onLocateText }: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
@@ -95,6 +97,7 @@ function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopt
             onChapterGoalDirtyChange={onChapterGoalDirtyChange}
             onChapterCharactersChanged={onChapterCharactersChanged}
             contextVersion={contextVersion}
+            onLocateText={onLocateText}
           />
         </div>
       </div>

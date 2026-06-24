@@ -49,6 +49,13 @@ function WritingWorkspacePage() {
   const [contextVersion, setContextVersion] = useState(0);
   const bumpContextVersion = useCallback(() => setContextVersion((v) => v + 1), []);
 
+  // v1.7.12 质量检查正文定位
+  const [locateTarget, setLocateTarget] = useState<{ startOffset: number; endOffset: number; quote?: string } | null>(null);
+  const handleLocateText = useCallback((startOffset: number, endOffset: number, quote?: string) => {
+    setLocateTarget({ startOffset, endOffset, quote });
+  }, []);
+  const handleLocateDone = useCallback(() => setLocateTarget(null), []);
+
   // v0.8.0 上下文总结相关状态
   const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
   const [summaryResult, setSummaryResult] = useState<ChapterSummarizeResult | null>(null);
@@ -473,6 +480,8 @@ function WritingWorkspacePage() {
           onOpenPanel={handleOpenPanel}
           onDraftChange={handleDraftChange}
           onChapterUpdated={handleChapterOutlineApplied}
+          locateTarget={locateTarget}
+          onLocateDone={handleLocateDone}
         />
         <StatusBar
           chapter={activeChapter}
@@ -508,6 +517,7 @@ function WritingWorkspacePage() {
           onChapterGoalDirtyChange={setChapterGoalDirty}
           onChapterCharactersChanged={bumpContextVersion}
           contextVersion={contextVersion}
+          onLocateText={handleLocateText}
         />
       )}
 

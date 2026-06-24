@@ -16,6 +16,9 @@ interface EditorAreaProps {
   onOpenPanel?: (panel: string) => void;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
   onChapterUpdated?: (chapterId: string) => void;
+  /** 定位目标：设置后自动在正文中搜索并高亮指定文本 */
+  locateTarget?: { startOffset: number; endOffset: number; quote?: string } | null;
+  onLocateDone?: () => void;
 }
 
 function countWords(text: string): number {
@@ -26,7 +29,7 @@ function countWords(text: string): number {
   return cjk + words;
 }
 
-function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange, onChapterUpdated }: EditorAreaProps) {
+function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange, onChapterUpdated, locateTarget, onLocateDone }: EditorAreaProps) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -56,6 +59,39 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
     setOutlineDraft('');
     setOutlineSaveMsg('');
   }, [currentDraft, chapter, onDraftChange]);
+
+  // 定位正文功能
+  useEffect(() => {
+    if (!locateTarget || !textareaRef.current) return;
+    const ta = textareaRef.current;
+    const { startOffset, endOffset, quote } = locateTarget;
+
+    // 优先使用 offset 定位
+    if (startOffset >= 0 && endOffset >= 0 && startOffset < ta.value.length) {
+      ta.focus();
+      ta.setSelectionRange(startOffset, Math.min(endOffset, ta.value.length));
+      // 滚动到选中位置
+      const lineHeight = 24;
+      const linesBefore = ta.value.substring(0, startOffset).split('\n').length;
+      ta.scrollTop = Math.max(0, (linesBefore - 5) * lineHeight);
+    } else if (quote) {
+      // 通过引用文本搜索定位
+      const idx = ta.value.indexOf(quote);
+      if (idx >= 0) {
+        ta.focus();
+        ta.setSelectionRange(idx, idx + quote.length);
+        const lineHeight = 24;
+        const linesBefore = ta.value.substring(0, idx).split('\n').length;
+        ta.scrollTop = Math.max(0, (linesBefore - 5) * lineHeight);
+      }
+    }
+
+    // 短暂高亮后重置
+    const timer = setTimeout(() => {
+      onLocateDone?.();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [locateTarget, onLocateDone]);
 
   // v1.0.35 大纲保存处理
   const handleStartEditOutline = () => {

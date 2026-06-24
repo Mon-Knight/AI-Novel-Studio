@@ -503,6 +503,7 @@ fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     ensure_large_text_ref_columns(conn)?;
     migrate_characters_table(conn)?;
     migrate_chapter_characters_table(conn)?;
+    migrate_quality_check_tables(conn)?;
     Ok(())
 }
 
@@ -825,6 +826,49 @@ fn migrate_chapter_characters_table(conn: &Connection) -> SqliteResult<()> {
              GROUP BY chapter_id, character_id
            )",
         [],
+    )?;
+
+    Ok(())
+}
+
+fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // quality_check_reports: add draft_version, model columns
+    ensure_column(conn, "quality_check_reports", "draft_version", "INTEGER")?;
+    ensure_column(conn, "quality_check_reports", "model", "TEXT")?;
+
+    // quality_check_items: migrate from is_resolved boolean to status enum
+    // Step 1: add new columns
+    ensure_column(conn, "quality_check_items", "status", "TEXT NOT NULL DEFAULT 'pending'")?;
+    ensure_column(conn, "quality_check_items", "issue_key", "TEXT")?;
+    ensure_column(conn, "quality_check_items", "resolution_note", "TEXT")?;
+    ensure_column(conn, "quality_check_items", "resolved_at", "TEXT")?;
+    ensure_column(conn, "quality_check_items", "paragraph_index", "INTEGER")?;
+    ensure_column(conn, "quality_check_items", "category", "TEXT")?;
+    ensure_column(conn, "quality_check_items", "quote", "TEXT")?;
+
+    // Step 2: migrate existing is_resolved data to status
+    conn.execute(
+        "UPDATE quality_check_items SET status = 'resolved', resolved_at = ?1 WHERE is_resolved = 1 AND (status IS NULL OR status = 'pending')",
+        rusqlite::params![&now],
+    )?;
+    conn.execute(
+        "UPDATE quality_check_items SET status = 'pending' WHERE status IS NULL OR TRIM(status) = ''",
+        [],
+    )?;
+
+    // Step 3: populate issue_key for existing items if empty
+    conn.execute(
+        "UPDATE quality_check_items SET issue_key = id WHERE issue_key IS NULL OR TRIM(issue_key) = ''",
+        [],
+    )?;
+
+    // Step 4: create index for issue_key
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_quality_check_items_issue_key ON quality_check_items(issue_key);
+         CREATE INDEX IF NOT EXISTS idx_quality_check_items_status ON quality_check_items(status);
+         CREATE INDEX IF NOT EXISTS idx_quality_check_items_chapter_id_status ON quality_check_items(chapter_id, status);",
     )?;
 
     Ok(())

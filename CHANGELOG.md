@@ -1,6 +1,6 @@
 # AI Novel Studio - CHANGELOG
 
-## v1.7.12 (2026-06-24) - 修复 AI 任务记录删除 FOREIGN KEY 约束失败
+## v1.7.12 (2026-06-24) - 修复 AI 任务记录删除 FOREIGN KEY 约束失败 + 质量检查问题处理闭环
 
 ### 修复
 
@@ -13,7 +13,49 @@
 - Rust `DeleteAiTaskRecordsResult` 新增 `deleted_child_rows` 字段，记录各子表清理行数。
 - 前端 `DeleteAiTaskRecordsResult` 类型同步新增 `deletedChildRows` 字段。
 
+### 新增：质量检查「问题处理闭环」正式可用化
+
+- **数据库迁移**：
+  - `quality_check_reports` 新增 `draft_version`、`model` 字段。
+  - `quality_check_items` 新增 `status`（pending/resolved/ignored）、`issue_key`、`resolution_note`、`resolved_at`、`paragraph_index`、`category`、`quote` 字段；弃用旧 `is_resolved` 布尔值。
+  - 新增索引：`idx_quality_check_items_issue_key`、`idx_quality_check_items_status`、`idx_quality_check_items_chapter_id_status`。
+
+- **Tauri 后端命令**（新增 4 个）：
+  - `get_quality_check_issues(chapter_id)` — 获取最新报告 + 问题列表 + 统计。
+  - `update_quality_issue_status(issue_id, status, resolution_note?)` — 更新单条问题状态。
+  - `batch_update_quality_issue_status(issue_ids, status)` — 批量更新。
+  - `save_quality_check_result(input)` — 保存 AI 检查结果，自动根据 `issue_key` 合并历史问题，保留用户 ignored 状态。
+
+- **前端服务层重构**：
+  - `qualityCheckService` 从纯 localStorage 升级为 Tauri SQLite + localStorage 回退双模式。
+  - 新增 `generateIssueKey()` — 基于章节 ID + 类别 + 标题 + 引用 + 描述生成稳定 hash，用于重新检测时去重。
+  - 新增 `computeStatistics()` — 统一计算 pending/resolved/ignored/critical/high/medium/low 统计。
+
+- **质量检查面板 UI 重构** (CheckPanel.tsx)：
+  - 问题状态从布尔 `isResolved` 改为三态：待处理 / 已处理 / 已忽略。
+  - 新增筛选按钮：全部 / 待处理 / 已处理 / 已忽略，带数量显示。
+  - 统计区显示：总问题、待处理、已处理、已忽略、严重程度分布。
+  - 问题卡片增加状态标签和操作按钮：定位、标记已处理、忽略、重新打开。
+  - 乐观更新 + 失败回滚，确保 UI 状态与数据库一致。
+
+- **正文定位功能**：
+  - EditorArea 新增 `locateTarget` prop：支持按 offset 或文本搜索定位。
+  - CheckPanel 新增「📍 定位」按钮，点击后滚动到正文对应位置并短暂高亮。
+  - WritingWorkspacePage 中转 `onLocateText` 回调贯穿 RightPanel → CheckPanel → EditorArea。
+
 ### 修改
+
+- `src-tauri/src/commands.rs`：新增 quality check 命令 + DTOs + `OptionalExt` trait。
+- `src-tauri/src/db.rs`：新增 `migrate_quality_check_tables` 迁移函数。
+- `src-tauri/src/main.rs`：注册 4 个新质量检查命令。
+- `src/types/qualityCheck.ts`：新增 `QualityIssueStatus`、`QualityIssueFilter`、`QualityCheckStatistics`、`GetQualityCheckIssuesResult` 等类型。
+- `src/services/quality/qualityCheckService.ts`：完全重写。
+- `src/components/right-dock/panels/CheckPanel.tsx`：完全重写。
+- `src/components/right-dock/RightPanel.tsx`：新增 `onLocateText` prop。
+- `src/components/workspace/EditorArea.tsx`：新增 `locateTarget` 定位功能。
+- `src/pages/WritingWorkspace/WritingWorkspacePage.tsx`：新增定位状态管理和回调。
+
+### 修改（续）
 
 - `src-tauri/src/commands.rs`：
   - `delete_ai_task_records_by_ids_internal`：新增事务 + 子表清理逻辑。

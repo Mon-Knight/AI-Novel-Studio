@@ -134,6 +134,10 @@ fn main() {
             commands::add_chapter_character,
             commands::list_chapter_characters,
             commands::remove_chapter_character,
+            commands::get_quality_check_issues,
+            commands::update_quality_issue_status,
+            commands::batch_update_quality_issue_status,
+            commands::save_quality_check_result,
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {

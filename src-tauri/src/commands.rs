@@ -2782,6 +2782,450 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
     }
 }
 
+// ==================== Quality Check ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityCheckReportDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub draft_id: String,
+    pub scope: String,
+    pub status: String,
+    pub overall_score: Option<i64>,
+    pub summary: Option<String>,
+    pub ai_task_id: Option<String>,
+    pub draft_version: Option<i64>,
+    pub model: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityCheckItemDto {
+    pub id: String,
+    pub report_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub draft_id: String,
+    pub issue_type: String,
+    pub severity: String,
+    pub title: String,
+    pub description: String,
+    pub category: Option<String>,
+    pub evidence: Option<String>,
+    pub suggestion: Option<String>,
+    pub quote: Option<String>,
+    pub start_offset: Option<i64>,
+    pub end_offset: Option<i64>,
+    pub paragraph_index: Option<i64>,
+    pub issue_key: String,
+    pub status: String,
+    pub resolution_note: Option<String>,
+    pub resolved_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityCheckStatisticsDto {
+    pub total: i64,
+    pub pending: i64,
+    pub resolved: i64,
+    pub ignored: i64,
+    pub critical: i64,
+    pub high: i64,
+    pub medium: i64,
+    pub low: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetQualityCheckIssuesResult {
+    pub report: Option<QualityCheckReportDto>,
+    pub items: Vec<QualityCheckItemDto>,
+    pub statistics: QualityCheckStatisticsDto,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveQualityCheckResultInput {
+    pub report_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub draft_id: String,
+    pub result: QualityCheckResultDto,
+    pub draft_version: Option<i64>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityCheckResultDto {
+    pub overall_score: Option<i64>,
+    pub summary: Option<String>,
+    pub items: Vec<QualityCheckResultItemDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityCheckResultItemDto {
+    pub issue_type: Option<String>,
+    pub severity: Option<String>,
+    pub category: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub evidence: Option<String>,
+    pub suggestion: Option<String>,
+    pub quote: Option<String>,
+    pub start_offset: Option<i64>,
+    pub end_offset: Option<i64>,
+    pub paragraph_index: Option<i64>,
+    pub issue_key: Option<String>,
+}
+
+fn map_quality_report_row(row: &rusqlite::Row) -> rusqlite::Result<QualityCheckReportDto> {
+    Ok(QualityCheckReportDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        draft_id: row.get(3)?,
+        scope: row.get(4)?,
+        status: row.get(5)?,
+        overall_score: row.get(6)?,
+        summary: row.get(7)?,
+        ai_task_id: row.get(8)?,
+        draft_version: row.get(9)?,
+        model: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
+}
+
+fn map_quality_item_row(row: &rusqlite::Row) -> rusqlite::Result<QualityCheckItemDto> {
+    Ok(QualityCheckItemDto {
+        id: row.get(0)?,
+        report_id: row.get(1)?,
+        novel_id: row.get(2)?,
+        chapter_id: row.get(3)?,
+        draft_id: row.get(4)?,
+        issue_type: row.get(5)?,
+        severity: row.get(6)?,
+        title: row.get(7)?,
+        description: row.get(8)?,
+        category: row.get(9)?,
+        evidence: row.get(10)?,
+        suggestion: row.get(11)?,
+        quote: row.get(12)?,
+        start_offset: row.get(13)?,
+        end_offset: row.get(14)?,
+        paragraph_index: row.get(15)?,
+        issue_key: row.get(16)?,
+        status: row.get(17)?,
+        resolution_note: row.get(18)?,
+        resolved_at: row.get(19)?,
+        created_at: row.get(20)?,
+        updated_at: row.get(21)?,
+    })
+}
+
+fn quality_item_select_sql() -> &'static str {
+    "SELECT id, report_id, novel_id, chapter_id, draft_id, issue_type, severity, title, description, category, evidence, suggestion, quote, start_offset, end_offset, paragraph_index, issue_key, status, resolution_note, resolved_at, created_at, updated_at FROM quality_check_items"
+}
+
+fn quality_report_select_sql() -> &'static str {
+    "SELECT id, novel_id, chapter_id, draft_id, scope, status, overall_score, summary, ai_task_id, draft_version, model, created_at, updated_at FROM quality_check_reports"
+}
+
+/// 获取章节的质量检查结果（最新报告 + 问题列表 + 统计）
+#[tauri::command]
+pub fn get_quality_check_issues(chapter_id: String) -> Result<GetQualityCheckIssuesResult, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+
+    // 获取最新报告
+    let report = conn
+        .query_row(
+            &format!(
+                "{} WHERE chapter_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                quality_report_select_sql()
+            ),
+            params![&chapter_id],
+            map_quality_report_row,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    // 获取问题列表
+    let items: Vec<QualityCheckItemDto> = if let Some(ref rpt) = report {
+        let sql = format!(
+            "{} WHERE report_id = ?1 ORDER BY severity DESC, created_at ASC",
+            quality_item_select_sql()
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![&rpt.id], map_quality_item_row)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+
+    // 计算统计
+    let statistics = compute_statistics(&items);
+
+    Ok(GetQualityCheckIssuesResult {
+        report,
+        items,
+        statistics,
+    })
+}
+
+fn compute_statistics(items: &[QualityCheckItemDto]) -> QualityCheckStatisticsDto {
+    let total = items.len() as i64;
+    let pending = items.iter().filter(|i| i.status == "pending").count() as i64;
+    let resolved = items.iter().filter(|i| i.status == "resolved").count() as i64;
+    let ignored = items.iter().filter(|i| i.status == "ignored").count() as i64;
+    let critical = items.iter().filter(|i| i.severity == "critical").count() as i64;
+    let high = items.iter().filter(|i| i.severity == "high").count() as i64;
+    let medium = items.iter().filter(|i| i.severity == "medium").count() as i64;
+    let low = items.iter().filter(|i| i.severity == "low").count() as i64;
+
+    QualityCheckStatisticsDto {
+        total,
+        pending,
+        resolved,
+        ignored,
+        critical,
+        high,
+        medium,
+        low,
+    }
+}
+
+/// 更新单条问题状态
+#[tauri::command]
+pub fn update_quality_issue_status(
+    issue_id: String,
+    status: String,
+    resolution_note: Option<String>,
+) -> Result<QualityCheckItemDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let resolved_at = if status == "resolved" {
+        Some(now.clone())
+    } else {
+        None
+    };
+
+    conn.execute(
+        "UPDATE quality_check_items SET status = ?1, resolution_note = ?2, resolved_at = ?3, updated_at = ?4 WHERE id = ?5",
+        params![&status, &resolution_note, &resolved_at, &now, &issue_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![&issue_id], map_quality_item_row)
+        .map_err(|e| e.to_string())
+}
+
+/// 批量更新问题状态
+#[tauri::command]
+pub fn batch_update_quality_issue_status(
+    issue_ids: Vec<String>,
+    status: String,
+) -> Result<Vec<QualityCheckItemDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let resolved_at = if status == "resolved" {
+        Some(now.clone())
+    } else {
+        None
+    };
+
+    for issue_id in &issue_ids {
+        conn.execute(
+            "UPDATE quality_check_items SET status = ?1, resolved_at = ?2, updated_at = ?3 WHERE id = ?4",
+            params![&status, &resolved_at, &now, issue_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 返回更新后的所有问题
+    let mut result = Vec::new();
+    for issue_id in &issue_ids {
+        let mut stmt = conn
+            .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
+            .map_err(|e| e.to_string())?;
+        if let Ok(item) = stmt.query_row(params![issue_id], map_quality_item_row) {
+            result.push(item);
+        }
+    }
+    Ok(result)
+}
+
+/// 保存质量检查结果（创建 run + 合并 issues）
+#[tauri::command]
+pub fn save_quality_check_result(
+    input: SaveQualityCheckResultInput,
+) -> Result<GetQualityCheckIssuesResult, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 1. 更新报告状态
+    let affected = conn
+        .execute(
+            "UPDATE quality_check_reports SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3, model = ?4, updated_at = ?5 WHERE id = ?6",
+            params![
+                &input.result.overall_score,
+                &input.result.summary,
+                &input.draft_version,
+                &input.model,
+                &now,
+                &input.report_id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if affected == 0 {
+        return Err("报告不存在".to_string());
+    }
+
+    // 2. 查询历史问题（用于合并）
+    let mut old_stmt = conn
+        .prepare(&format!(
+            "{} WHERE chapter_id = ?1",
+            quality_item_select_sql()
+        ))
+        .map_err(|e| e.to_string())?;
+    let old_items: Vec<QualityCheckItemDto> = old_stmt
+        .query_map(params![&input.chapter_id], map_quality_item_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // 3. 处理新问题列表
+    let new_items = &input.result.items;
+    let mut saved_items: Vec<QualityCheckItemDto> = Vec::new();
+
+    for new_item in new_items {
+        let issue_key = new_item.issue_key.clone().unwrap_or_else(|| {
+            uuid::Uuid::new_v4().to_string()
+        });
+        let title = new_item.title.clone().unwrap_or_default();
+        let description = new_item.description.clone().unwrap_or_default();
+        let severity = new_item.severity.clone().unwrap_or_else(|| "medium".to_string());
+        let issue_type = new_item.issue_type.clone().unwrap_or_else(|| "other".to_string());
+        let category = new_item.category.clone();
+        let evidence = new_item.evidence.clone();
+        let suggestion = new_item.suggestion.clone();
+        let quote = new_item.quote.clone();
+        let start_offset = new_item.start_offset;
+        let end_offset = new_item.end_offset;
+        let paragraph_index = new_item.paragraph_index;
+
+        // 查找历史匹配项
+        let old_match = old_items.iter().find(|old| old.issue_key == issue_key);
+
+        if let Some(old) = old_match {
+            // 合并：保留用户处理状态
+            let keep_status = if old.status == "ignored" {
+                "ignored".to_string()
+            } else if old.status == "resolved" {
+                // 已处理的问题如果仍被检测到，恢复为 pending
+                "pending".to_string()
+            } else {
+                "pending".to_string()
+            };
+
+            conn.execute(
+                "UPDATE quality_check_items SET report_id = ?1, severity = ?2, title = ?3, description = ?4, category = ?5, evidence = ?6, suggestion = ?7, quote = ?8, start_offset = ?9, end_offset = ?10, paragraph_index = ?11, status = ?12, updated_at = ?13 WHERE id = ?14",
+                params![
+                    &input.report_id,
+                    &severity,
+                    &title,
+                    &description,
+                    &category,
+                    &evidence,
+                    &suggestion,
+                    &quote,
+                    &start_offset,
+                    &end_offset,
+                    &paragraph_index,
+                    &keep_status,
+                    &now,
+                    &old.id,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            let mut stmt = conn
+                .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
+                .map_err(|e| e.to_string())?;
+            if let Ok(item) = stmt.query_row(params![&old.id], map_quality_item_row) {
+                saved_items.push(item);
+            }
+        } else {
+            // 新增问题
+            let new_id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO quality_check_items (id, report_id, novel_id, chapter_id, draft_id, issue_type, severity, title, description, category, evidence, suggestion, quote, start_offset, end_offset, paragraph_index, issue_key, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,'pending',?18,?18)",
+                params![
+                    &new_id,
+                    &input.report_id,
+                    &input.novel_id,
+                    &input.chapter_id,
+                    &input.draft_id,
+                    &issue_type,
+                    &severity,
+                    &title,
+                    &description,
+                    &category,
+                    &evidence,
+                    &suggestion,
+                    &quote,
+                    &start_offset,
+                    &end_offset,
+                    &paragraph_index,
+                    &issue_key,
+                    &now,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            let mut stmt = conn
+                .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
+                .map_err(|e| e.to_string())?;
+            if let Ok(item) = stmt.query_row(params![&new_id], map_quality_item_row) {
+                saved_items.push(item);
+            }
+        }
+    }
+
+    // 4. 获取最终报告
+    let report = conn
+        .query_row(
+            &format!("{} WHERE id = ?1", quality_report_select_sql()),
+            params![&input.report_id],
+            map_quality_report_row,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let statistics = compute_statistics(&saved_items);
+
+    Ok(GetQualityCheckIssuesResult {
+        report,
+        items: saved_items,
+        statistics,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
