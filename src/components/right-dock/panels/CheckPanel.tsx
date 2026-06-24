@@ -13,6 +13,8 @@ import { qualityCheckService, computeStatistics } from '../../../services/qualit
 import { qualityCheckAiService } from '../../../services/ai/qualityCheckAiService';
 import { qualityFixService } from '../../../services/ai/qualityFixService';
 import type { FixComparison } from '../../../services/ai/qualityFixService';
+import { fixRunStore } from '../../../services/ai/fixRunStore';
+import { getContextForChapterTask, buildContextPromptSection } from '../../../services/prompt/contextReaderService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
@@ -41,6 +43,8 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
   const [fixStage, setFixStage] = useState('');
   const [fixComparison, setFixComparison] = useState<FixComparison | null>(null);
   const [fixError, setFixError] = useState('');
+  const [lastFixRunId, setLastFixRunId] = useState<string>('');
+  const [sourceDraftId, setSourceDraftId] = useState<string>('');
 
   const statistics = computeStatistics(items);
   const filteredItems = filter === 'all' ? items : items.filter((i) => i.status === filter);
@@ -144,12 +148,24 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
     if (pending.length === 0) return;
 
     setFixLoading(true); setFixError(''); setFixComparison(null);
+    setSourceDraftId(currentDraft.id);
     try {
-      // 阶段1: 分析
       setFixStage('正在分析待处理问题...');
       const ignored = items.filter((i) => i.status === 'ignored');
 
-      // 阶段2: AI 修稿
+      // 读取章节上下文
+      let chapterContext: string | undefined;
+      let volumeContext: string | undefined;
+      try {
+        const ctxResult = await getContextForChapterTask({
+          novelId, chapterId: chapter.id, volumeId: chapter.volumeId,
+          taskType: 'quality_fix',
+        });
+        if (ctxResult.chapterSummaries.length > 0 || ctxResult.volumeContexts.length > 0) {
+          chapterContext = buildContextPromptSection(ctxResult);
+        }
+      } catch { /* non-critical */ }
+
       setFixStage('正在 AI 修稿...');
       const { fixResult, fixRun } = await qualityFixService.runFix({
         novelId, chapterId: chapter.id, chapterTitle: chapter.title,
@@ -159,7 +175,11 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
         beforeScore: report.overallScore || 0,
         beforePendingCount: statistics.pending,
         beforeSeriousCount: statistics.critical,
+        chapterContext, volumeContext,
       });
+
+      fixRunStore.save(fixRun);
+      setLastFixRunId(fixRun.id);
 
       if (fixRun.status === 'failed') {
         setFixError(fixRun.failureReason || 'AI 修稿失败');
@@ -365,6 +385,39 @@ function CheckPanel({ novelId, chapter, onLocateText }: CheckPanelProps) {
               已自动采用修复后版本，原版本保留可回退。
             </div>
           )}
+          {/* 回退按钮 */}
+          <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={async () => {
+                if (!sourceDraftId || !chapter || !currentDraft) return;
+                // 加载源草稿
+                const drafts = await draftVersionService.getByChapterId(chapter.id);
+                const source = drafts.find((d: any) => d.id === sourceDraftId);
+                if (source) {
+                  setCurrentDraft(source);
+                  qualityFixService.revertFixRun(lastFixRunId);
+                  setFixComparison(null);
+                  setFixStage('已回退到修稿前版本');
+                  setTimeout(() => setFixStage(''), 3000);
+                }
+              }}
+              style={{ flex: 1, fontSize: 11 }}
+            >
+              ↩️ 回退原版本
+            </button>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => {
+                qualityFixService.adoptFixRun(lastFixRunId);
+                setFixStage('已确认采用修复后版本');
+                setTimeout(() => setFixStage(''), 3000);
+              }}
+              style={{ flex: 1, fontSize: 11 }}
+            >
+              ✅ 确认采用
+            </button>
+          </div>
         </div>
       )}
 

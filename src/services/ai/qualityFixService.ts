@@ -5,6 +5,7 @@
 import { createAiClient, aiSettingsService } from './aiClient';
 import { aiTaskService } from './aiTaskService';
 import { safeJsonParse } from './jsonUtils';
+import { fixRunStore } from './fixRunStore';
 import type { QualityCheckItem } from '../../types/qualityCheck';
 import type { ChapterDraft } from '../../types/ai';
 
@@ -179,7 +180,7 @@ export const qualityFixService = {
     const settings = aiSettingsService.getSettings();
     const sourceHash = hashContent(params.currentDraft.content);
 
-    // 创建 fix run 记录
+    // 创建 fix run 记录并持久化
     const fixRun: QualityFixRun = {
       id: 'fxr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
       novelId: params.novelId,
@@ -199,6 +200,7 @@ export const qualityFixService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    fixRunStore.save(fixRun);
 
     // 创建 AI 任务
     const task = await aiTaskService.create('quality_fix', {
@@ -243,6 +245,7 @@ export const qualityFixService = {
       fixRun.fixedIssueIds = params.pendingIssues
         .filter((i) => fixResult.fixedIssueKeys.includes(i.issueKey))
         .map((i) => i.id);
+      fixRunStore.save(fixRun);
 
       await aiTaskService.markSucceeded(task?.id || '', {
         resultText: fixResult.revisionSummary,
@@ -256,6 +259,7 @@ export const qualityFixService = {
       const message = e instanceof Error ? e.message : 'AI 修稿失败';
       fixRun.status = 'failed';
       fixRun.failureReason = message;
+      fixRunStore.save(fixRun);
       if (task) await aiTaskService.markFailed(task.id, message);
       throw e;
     }
@@ -296,5 +300,20 @@ export const qualityFixService = {
           ? `修复效果不佳：分数从 ${beforeScore} 降至 ${afterScore}。`
           : `修复效果一般：分数 ${beforeScore} → ${afterScore}。`,
     };
+  },
+
+  /** 标记修稿已被采用 */
+  adoptFixRun(id: string): void {
+    fixRunStore.updateStatus(id, 'adopted');
+  },
+
+  /** 回退修稿 */
+  revertFixRun(id: string): void {
+    fixRunStore.updateStatus(id, 'reverted');
+  },
+
+  /** 获取最近的修稿记录 */
+  getFixRuns(chapterId: string): QualityFixRun[] {
+    return fixRunStore.getByChapterId(chapterId);
   },
 };
