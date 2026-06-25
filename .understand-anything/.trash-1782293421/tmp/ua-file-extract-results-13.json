@@ -1,0 +1,613 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 6,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": ".github/instructions/agent-behavior.instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 141,
+      "nonEmptyLines": 98,
+      "sections": [
+        {
+          "heading": "Agent Behavior Instructions",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 核心行为准则",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "1.1 分析 → 规划 → 执行 → 验证",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "1.2 禁止\"边想边改\"",
+          "level": 3,
+          "line": 41
+        },
+        {
+          "heading": "2. 禁止行为清单",
+          "level": 2,
+          "line": 47
+        },
+        {
+          "heading": "2.1 绝对红线",
+          "level": 3,
+          "line": 49
+        },
+        {
+          "heading": "2.2 需要克制",
+          "level": 3,
+          "line": 64
+        },
+        {
+          "heading": "3. 修改范围控制",
+          "level": 2,
+          "line": 75
+        },
+        {
+          "heading": "3.1 单次修改原则",
+          "level": 3,
+          "line": 77
+        },
+        {
+          "heading": "3.2 影响范围评估",
+          "level": 3,
+          "line": 86
+        },
+        {
+          "heading": "4. 完成标准",
+          "level": 2,
+          "line": 97
+        },
+        {
+          "heading": "5. 与用户沟通",
+          "level": 2,
+          "line": 108
+        },
+        {
+          "heading": "5.1 何时必须询问",
+          "level": 3,
+          "line": 110
+        },
+        {
+          "heading": "5.2 何时可以直接执行",
+          "level": 3,
+          "line": 118
+        },
+        {
+          "heading": "6. 错误恢复",
+          "level": 2,
+          "line": 128
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 15
+      }
+    },
+    {
+      "path": ".github/instructions/database.instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 138,
+      "nonEmptyLines": 91,
+      "sections": [
+        {
+          "heading": "Database Development Instructions",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 总体原则",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "1.1 数据安全第一",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "1.2 技术栈",
+          "level": 3,
+          "line": 20
+        },
+        {
+          "heading": "2. Schema 修改规则（核心）",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "2.1 绝对禁止",
+          "level": 3,
+          "line": 30
+        },
+        {
+          "heading": "2.2 允许的修改",
+          "level": 3,
+          "line": 39
+        },
+        {
+          "heading": "2.3 迁移原则",
+          "level": 3,
+          "line": 46
+        },
+        {
+          "heading": "3. 为 Agent 系统预留空间",
+          "level": 2,
+          "line": 57
+        },
+        {
+          "heading": "3.1 预留字段",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "3.2 预留表",
+          "level": 3,
+          "line": 68
+        },
+        {
+          "heading": "4. 查询规范",
+          "level": 2,
+          "line": 79
+        },
+        {
+          "heading": "4.1 参数化查询",
+          "level": 3,
+          "line": 81
+        },
+        {
+          "heading": "4.2 事务使用",
+          "level": 3,
+          "line": 93
+        },
+        {
+          "heading": "4.3 查询性能",
+          "level": 3,
+          "line": 104
+        },
+        {
+          "heading": "5. 数据库文件",
+          "level": 2,
+          "line": 112
+        },
+        {
+          "heading": "5.1 存储位置",
+          "level": 3,
+          "line": 114
+        },
+        {
+          "heading": "5.2 文件命名",
+          "level": 3,
+          "line": 119
+        },
+        {
+          "heading": "6. 禁止事项",
+          "level": 2,
+          "line": 126
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 19
+      }
+    },
+    {
+      "path": ".github/instructions/documentation.instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 109,
+      "nonEmptyLines": 75,
+      "sections": [
+        {
+          "heading": "Documentation Instructions",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 文档更新规则",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "1.1 必须更新的文档",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "1.2 文档原则",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "2. README.md 维护",
+          "level": 2,
+          "line": 32
+        },
+        {
+          "heading": "3. CHANGELOG.md 维护",
+          "level": 2,
+          "line": 48
+        },
+        {
+          "heading": "3.1 格式",
+          "level": 3,
+          "line": 50
+        },
+        {
+          "heading": "3.2 规则",
+          "level": 3,
+          "line": 71
+        },
+        {
+          "heading": "4. Release Notes",
+          "level": 2,
+          "line": 81
+        },
+        {
+          "heading": "4.1 存储",
+          "level": 3,
+          "line": 83
+        },
+        {
+          "heading": "4.2 内容",
+          "level": 3,
+          "line": 88
+        },
+        {
+          "heading": "5. 禁止事项",
+          "level": 2,
+          "line": 99
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 12
+      }
+    },
+    {
+      "path": ".github/instructions/frontend.instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 189,
+      "nonEmptyLines": 134,
+      "sections": [
+        {
+          "heading": "Frontend Development Instructions",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 总体原则",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "1.1 桌面应用优先",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "1.2 统一应用壳",
+          "level": 3,
+          "line": 21
+        },
+        {
+          "heading": "2. 布局规范",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "2.1 写作工作台布局",
+          "level": 3,
+          "line": 38
+        },
+        {
+          "heading": "2.2 首页布局",
+          "level": 3,
+          "line": 49
+        },
+        {
+          "heading": "2.3 表单页面",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "3. 视觉风格",
+          "level": 2,
+          "line": 67
+        },
+        {
+          "heading": "3.1 色彩",
+          "level": 3,
+          "line": 69
+        },
+        {
+          "heading": "3.2 字体",
+          "level": 3,
+          "line": 77
+        },
+        {
+          "heading": "3.3 阴影与边框",
+          "level": 3,
+          "line": 86
+        },
+        {
+          "heading": "4. 组件规范",
+          "level": 2,
+          "line": 95
+        },
+        {
+          "heading": "4.1 组件目录",
+          "level": 3,
+          "line": 97
+        },
+        {
+          "heading": "4.2 组件规则",
+          "level": 3,
+          "line": 115
+        },
+        {
+          "heading": "5. 禁止事项",
+          "level": 2,
+          "line": 125
+        },
+        {
+          "heading": "5.1 绝对禁止",
+          "level": 3,
+          "line": 127
+        },
+        {
+          "heading": "5.2 需要克制",
+          "level": 3,
+          "line": 137
+        },
+        {
+          "heading": "6. 2K 屏幕适配",
+          "level": 2,
+          "line": 145
+        },
+        {
+          "heading": "7. 右侧工具栏与弹出面板",
+          "level": 2,
+          "line": 154
+        },
+        {
+          "heading": "7.1 工具栏",
+          "level": 3,
+          "line": 156
+        },
+        {
+          "heading": "7.2 弹出面板",
+          "level": 3,
+          "line": 163
+        },
+        {
+          "heading": "8. 路由规范",
+          "level": 2,
+          "line": 174
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 23
+      }
+    },
+    {
+      "path": ".github/instructions/tauri.instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 152,
+      "nonEmptyLines": 100,
+      "sections": [
+        {
+          "heading": "Tauri Development Instructions",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 总体原则",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "1.1 桌面端稳定优先",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "1.2 不引入不必要的 Rust 依赖",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "2. 窗口管理",
+          "level": 2,
+          "line": 29
+        },
+        {
+          "heading": "2.1 窗口配置",
+          "level": 3,
+          "line": 31
+        },
+        {
+          "heading": "2.2 窗口行为",
+          "level": 3,
+          "line": 39
+        },
+        {
+          "heading": "3. 构建要求",
+          "level": 2,
+          "line": 47
+        },
+        {
+          "heading": "3.1 构建命令",
+          "level": 3,
+          "line": 49
+        },
+        {
+          "heading": "3.2 构建失败处理",
+          "level": 3,
+          "line": 62
+        },
+        {
+          "heading": "4. 文件结构",
+          "level": 2,
+          "line": 75
+        },
+        {
+          "heading": "5. Tauri 命令规范",
+          "level": 2,
+          "line": 90
+        },
+        {
+          "heading": "5.1 命令命名",
+          "level": 3,
+          "line": 92
+        },
+        {
+          "heading": "5.2 错误处理",
+          "level": 3,
+          "line": 103
+        },
+        {
+          "heading": "6. 安全要求",
+          "level": 2,
+          "line": 111
+        },
+        {
+          "heading": "6.1 CSP（内容安全策略）",
+          "level": 3,
+          "line": 113
+        },
+        {
+          "heading": "6.2 文件系统访问",
+          "level": 3,
+          "line": 118
+        },
+        {
+          "heading": "6.3 API Key 安全",
+          "level": 3,
+          "line": 124
+        },
+        {
+          "heading": "7. 日志规范",
+          "level": 2,
+          "line": 132
+        },
+        {
+          "heading": "8. 禁止事项",
+          "level": 2,
+          "line": 141
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 20
+      }
+    },
+    {
+      "path": ".github/instructions/testing.instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 128,
+      "nonEmptyLines": 86,
+      "sections": [
+        {
+          "heading": "Testing Instructions",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 强制验证命令",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "1.1 Rust 编译检查",
+          "level": 3,
+          "line": 13
+        },
+        {
+          "heading": "1.2 前端构建",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "1.3 Tauri 完整构建",
+          "level": 3,
+          "line": 33
+        },
+        {
+          "heading": "1.4 Git 状态检查",
+          "level": 3,
+          "line": 43
+        },
+        {
+          "heading": "2. 可选验证",
+          "level": 2,
+          "line": 55
+        },
+        {
+          "heading": "2.1 ESLint",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "2.2 Tauri 开发模式",
+          "level": 3,
+          "line": 66
+        },
+        {
+          "heading": "3. 验证检查清单",
+          "level": 2,
+          "line": 78
+        },
+        {
+          "heading": "4. 构建失败处理",
+          "level": 2,
+          "line": 95
+        },
+        {
+          "heading": "5. 测试数据",
+          "level": 2,
+          "line": 109
+        },
+        {
+          "heading": "6. 自动化验证（未来）",
+          "level": 2,
+          "line": 117
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 13
+      }
+    }
+  ]
+}

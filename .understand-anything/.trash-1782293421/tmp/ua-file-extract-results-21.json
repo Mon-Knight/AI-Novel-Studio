@@ -1,0 +1,125 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 3,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/project/agent-task-rules.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 24,
+      "nonEmptyLines": 15,
+      "sections": [
+        {
+          "heading": "Agent 任务执行规则",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "核心规则",
+          "level": 2,
+          "line": 7
+        },
+        {
+          "heading": "相关资源",
+          "level": 2,
+          "line": 11
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 17
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/project/release-history.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 27,
+      "nonEmptyLines": 18,
+      "sections": [
+        {
+          "heading": "发布历史汇总",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "最新版本",
+          "level": 2,
+          "line": 7
+        },
+        {
+          "heading": "历史版本",
+          "level": 2,
+          "line": 16
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 20
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/project/version-roadmap.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 66,
+      "nonEmptyLines": 48,
+      "sections": [
+        {
+          "heading": "版本路线图",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "当前阶段：v1.7.x 应用化优化",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "下一阶段：v1.8.0+ 大纲生成",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "中期路线：v2.x Agent 化",
+          "level": 2,
+          "line": 34
+        },
+        {
+          "heading": "远期路线：v3.x Autonomous",
+          "level": 2,
+          "line": 43
+        },
+        {
+          "heading": "历史版本",
+          "level": 2,
+          "line": 51
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    }
+  ]
+}

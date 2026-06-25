@@ -1,0 +1,238 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 3,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "src/agent/planner-lite.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 155,
+      "nonEmptyLines": 150,
+      "functions": [
+        {
+          "name": "createChapterGenerationWorkflow",
+          "startLine": 24,
+          "endLine": 84,
+          "params": [
+            "input"
+          ]
+        },
+        {
+          "name": "createChapterReadinessWorkflow",
+          "startLine": 100,
+          "endLine": 155,
+          "params": [
+            "input"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "createChapterGenerationWorkflow",
+          "line": 24,
+          "isDefault": false
+        },
+        {
+          "name": "createChapterReadinessWorkflow",
+          "line": 100,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "createChapterGenerationWorkflow",
+          "callee": "Date.now",
+          "lineNumber": 27
+        },
+        {
+          "caller": "createChapterReadinessWorkflow",
+          "callee": "Date.now",
+          "lineNumber": 105
+        }
+      ],
+      "metrics": {
+        "importCount": 1,
+        "exportCount": 2,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent/types.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 74,
+      "nonEmptyLines": 69,
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent/workflow-runner.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 183,
+      "nonEmptyLines": 166,
+      "functions": [
+        {
+          "name": "summarizeWorkflow",
+          "startLine": 21,
+          "endLine": 70,
+          "params": [
+            "workflow"
+          ]
+        },
+        {
+          "name": "formatSummary",
+          "startLine": 75,
+          "endLine": 92,
+          "params": [
+            "summary"
+          ]
+        },
+        {
+          "name": "validateWorkflow",
+          "startLine": 107,
+          "endLine": 183,
+          "params": [
+            "workflow"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "summarizeWorkflow",
+          "line": 21,
+          "isDefault": false
+        },
+        {
+          "name": "formatSummary",
+          "line": 75,
+          "isDefault": false
+        },
+        {
+          "name": "validateWorkflow",
+          "line": 107,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "summarizeWorkflow",
+          "callee": "dependencyLines.push",
+          "lineNumber": 54
+        },
+        {
+          "caller": "summarizeWorkflow",
+          "callee": "task.dependsOn.join",
+          "lineNumber": 55
+        },
+        {
+          "caller": "formatSummary",
+          "callee": "lines.push",
+          "lineNumber": 87
+        },
+        {
+          "caller": "formatSummary",
+          "callee": "lines.push",
+          "lineNumber": 88
+        },
+        {
+          "caller": "formatSummary",
+          "callee": "lines.join",
+          "lineNumber": 91
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "workflow.id.trim",
+          "lineNumber": 117
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 118
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 123
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "taskIds.has",
+          "lineNumber": 130
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 131
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "taskIds.add",
+          "lineNumber": 133
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "taskIds.has",
+          "lineNumber": 141
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 142
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 148
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "tasks.find",
+          "lineNumber": 158
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "depTask?.dependsOn?.includes",
+          "lineNumber": 159
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 160
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "task.id.trim",
+          "lineNumber": 170
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "errors.push",
+          "lineNumber": 171
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "task.title.trim",
+          "lineNumber": 173
+        },
+        {
+          "caller": "validateWorkflow",
+          "callee": "warnings.push",
+          "lineNumber": 174
+        }
+      ],
+      "metrics": {
+        "importCount": 1,
+        "exportCount": 3,
+        "functionCount": 3,
+        "classCount": 0
+      }
+    }
+  ]
+}

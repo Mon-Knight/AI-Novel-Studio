@@ -1,0 +1,1541 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 25,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": ".cursor/rules/agent-safety.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 49,
+      "nonEmptyLines": 37,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/bugfix-rules.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 35,
+      "nonEmptyLines": 26,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/database-rules.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 52,
+      "nonEmptyLines": 39,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/project-architecture.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 74,
+      "nonEmptyLines": 59,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/release-rules.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 34,
+      "nonEmptyLines": 26,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/task-writing-rules.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 43,
+      "nonEmptyLines": 34,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/testing-rules.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 50,
+      "nonEmptyLines": 37,
+      "metrics": {}
+    },
+    {
+      "path": ".cursor/rules/ui-rules.mdc",
+      "language": "mdc",
+      "fileCategory": "code",
+      "totalLines": 56,
+      "nonEmptyLines": 44,
+      "metrics": {}
+    },
+    {
+      "path": ".github/copilot-instructions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 1151,
+      "nonEmptyLines": 859,
+      "sections": [
+        {
+          "heading": "GitHub Copilot / Agent 项目开发指令",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目定位",
+          "level": 1,
+          "line": 12
+        },
+        {
+          "heading": "2. 开发时必须优先阅读的文档",
+          "level": 1,
+          "line": 36
+        },
+        {
+          "heading": "3. 项目最高优先级",
+          "level": 1,
+          "line": 64
+        },
+        {
+          "heading": "4. 本项目不应被开发成什么",
+          "level": 1,
+          "line": 79
+        },
+        {
+          "heading": "4.1 不要做成普通网页后台",
+          "level": 2,
+          "line": 83
+        },
+        {
+          "heading": "4.2 不要做成普通码字软件",
+          "level": 2,
+          "line": 99
+        },
+        {
+          "heading": "4.3 不要做成一次性生成整本小说的网站",
+          "level": 2,
+          "line": 123
+        },
+        {
+          "heading": "4.4 不要沿用旧 AI World Engine 的产品结构",
+          "level": 2,
+          "line": 138
+        },
+        {
+          "heading": "5. 技术路线约束",
+          "level": 1,
+          "line": 162
+        },
+        {
+          "heading": "6. 推荐项目目录结构",
+          "level": 1,
+          "line": 183
+        },
+        {
+          "heading": "7. UI 开发总要求",
+          "level": 1,
+          "line": 246
+        },
+        {
+          "heading": "8. 首页 UI 规则",
+          "level": 1,
+          "line": 267
+        },
+        {
+          "heading": "9. 作品卡片规则",
+          "level": 1,
+          "line": 305
+        },
+        {
+          "heading": "10. 作品详情页规则",
+          "level": 1,
+          "line": 331
+        },
+        {
+          "heading": "11. 写作工作台 UI 规则",
+          "level": 1,
+          "line": 358
+        },
+        {
+          "heading": "12. 右侧工具栏规则",
+          "level": 1,
+          "line": 409
+        },
+        {
+          "heading": "13. 右侧面板职责边界",
+          "level": 1,
+          "line": 447
+        },
+        {
+          "heading": "13.1 AI 生成面板",
+          "level": 2,
+          "line": 449
+        },
+        {
+          "heading": "13.2 大纲面板",
+          "level": 2,
+          "line": 476
+        },
+        {
+          "heading": "13.3 角色面板",
+          "level": 2,
+          "line": 490
+        },
+        {
+          "heading": "13.4 事件面板",
+          "level": 2,
+          "line": 510
+        },
+        {
+          "heading": "13.5 设定面板",
+          "level": 2,
+          "line": 535
+        },
+        {
+          "heading": "13.6 风格面板",
+          "level": 2,
+          "line": 550
+        },
+        {
+          "heading": "13.7 检查面板",
+          "level": 2,
+          "line": 569
+        },
+        {
+          "heading": "13.8 润色面板",
+          "level": 2,
+          "line": 586
+        },
+        {
+          "heading": "14. 数据模型开发规则",
+          "level": 1,
+          "line": 603
+        },
+        {
+          "heading": "15. 章节与草稿规则",
+          "level": 1,
+          "line": 653
+        },
+        {
+          "heading": "16. AI 分工规则",
+          "level": 1,
+          "line": 682
+        },
+        {
+          "heading": "17. 提示词模板规则",
+          "level": 1,
+          "line": 723
+        },
+        {
+          "heading": "18. AI 服务层规则",
+          "level": 1,
+          "line": 756
+        },
+        {
+          "heading": "19. 数据库服务层规则",
+          "level": 1,
+          "line": 778
+        },
+        {
+          "heading": "20. v0.1.0 开发范围",
+          "level": 1,
+          "line": 804
+        },
+        {
+          "heading": "21. 版本路线",
+          "level": 1,
+          "line": 844
+        },
+        {
+          "heading": "22. Git 与 GitHub 规则",
+          "level": 1,
+          "line": 865
+        },
+        {
+          "heading": "23. API Key 安全规则",
+          "level": 1,
+          "line": 910
+        },
+        {
+          "heading": "24. 代码风格规则",
+          "level": 1,
+          "line": 932
+        },
+        {
+          "heading": "25. 样式规则",
+          "level": 1,
+          "line": 960
+        },
+        {
+          "heading": "26. 路由规则",
+          "level": 1,
+          "line": 998
+        },
+        {
+          "heading": "27. 未完成功能处理规则",
+          "level": 1,
+          "line": 1026
+        },
+        {
+          "heading": "28. 测试与验证规则",
+          "level": 1,
+          "line": 1053
+        },
+        {
+          "heading": "29. Agent 执行任务时的行为要求",
+          "level": 1,
+          "line": 1083
+        },
+        {
+          "heading": "30. 完成汇报格式",
+          "level": 1,
+          "line": 1102
+        },
+        {
+          "heading": "31. 最重要的开发提醒",
+          "level": 1,
+          "line": 1140
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 44
+      }
+    },
+    {
+      "path": ".github/skills/agent-task-writer/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 159,
+      "nonEmptyLines": 103,
+      "sections": [
+        {
+          "heading": "Skill: agent-task-writer",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "使用场景",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "必须读取的文件",
+          "level": 2,
+          "line": 33
+        },
+        {
+          "heading": "执行步骤",
+          "level": 2,
+          "line": 42
+        },
+        {
+          "heading": "步骤 1：确认版本信息",
+          "level": 3,
+          "line": 44
+        },
+        {
+          "heading": "步骤 2：列出禁止事项",
+          "level": 3,
+          "line": 50
+        },
+        {
+          "heading": "步骤 3：列出必须阅读的文件",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "步骤 4：列出修改范围",
+          "level": 3,
+          "line": 67
+        },
+        {
+          "heading": "步骤 5：定义测试要求",
+          "level": 3,
+          "line": 73
+        },
+        {
+          "heading": "步骤 6：定义完成标准",
+          "level": 3,
+          "line": 81
+        },
+        {
+          "heading": "步骤 7：定义完成汇报格式",
+          "level": 3,
+          "line": 87
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 93
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 141
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 151
+        },
+        {
+          "heading": "核心原则",
+          "level": 2,
+          "line": 157
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 17
+      }
+    },
+    {
+      "path": ".github/skills/bugfix-safe-patch/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 135,
+      "nonEmptyLines": 91,
+      "sections": [
+        {
+          "heading": "Skill: bugfix-safe-patch",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "使用场景",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 26
+        },
+        {
+          "heading": "必须读取的文件",
+          "level": 2,
+          "line": 35
+        },
+        {
+          "heading": "执行步骤",
+          "level": 2,
+          "line": 43
+        },
+        {
+          "heading": "步骤 1：复现或定位错误",
+          "level": 3,
+          "line": 45
+        },
+        {
+          "heading": "步骤 2：分析根因",
+          "level": 3,
+          "line": 51
+        },
+        {
+          "heading": "步骤 3：提出最小修复方案",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "步骤 4：执行修复",
+          "level": 3,
+          "line": 65
+        },
+        {
+          "heading": "步骤 5：验证",
+          "level": 3,
+          "line": 72
+        },
+        {
+          "heading": "步骤 6：输出修复说明",
+          "level": 3,
+          "line": 79
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 83
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 114
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 125
+        },
+        {
+          "heading": "核心原则",
+          "level": 2,
+          "line": 133
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": ".github/skills/db-migration-guard/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 149,
+      "nonEmptyLines": 101,
+      "sections": [
+        {
+          "heading": "Skill: db-migration-guard",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "使用场景",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "必须读取的文件",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "必须关联的 Checklist",
+          "level": 2,
+          "line": 44
+        },
+        {
+          "heading": "执行步骤",
+          "level": 2,
+          "line": 52
+        },
+        {
+          "heading": "步骤 1：评估必要性",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "步骤 2：备份评估",
+          "level": 3,
+          "line": 62
+        },
+        {
+          "heading": "步骤 3：检查 Schema 变更安全性",
+          "level": 3,
+          "line": 68
+        },
+        {
+          "heading": "步骤 4：定义迁移方案",
+          "level": 3,
+          "line": 79
+        },
+        {
+          "heading": "步骤 5：执行与验证",
+          "level": 3,
+          "line": 86
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 94
+        },
+        {
+          "heading": "禁止事项（绝对红线）",
+          "level": 2,
+          "line": 126
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 138
+        },
+        {
+          "heading": "核心原则",
+          "level": 2,
+          "line": 147
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": ".github/skills/docs-sync/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 128,
+      "nonEmptyLines": 85,
+      "sections": [
+        {
+          "heading": "Skill: docs-sync",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "使用场景",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "必须读取/检查的文件",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "必须关联的脚本",
+          "level": 2,
+          "line": 42
+        },
+        {
+          "heading": "必须关联的 Checklist",
+          "level": 2,
+          "line": 50
+        },
+        {
+          "heading": "执行步骤",
+          "level": 2,
+          "line": 58
+        },
+        {
+          "heading": "步骤 1：运行文档检查脚本",
+          "level": 3,
+          "line": 60
+        },
+        {
+          "heading": "步骤 2：逐项检查",
+          "level": 3,
+          "line": 66
+        },
+        {
+          "heading": "步骤 3：检查文档真实性",
+          "level": 3,
+          "line": 78
+        },
+        {
+          "heading": "步骤 4：输出同步报告",
+          "level": 3,
+          "line": 84
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 88
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 116
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 125
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 15
+      }
+    },
+    {
+      "path": ".github/skills/implement-feature/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 143,
+      "nonEmptyLines": 96,
+      "sections": [
+        {
+          "heading": "Skill: implement-feature",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "工作流",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "步骤 1：阅读约束",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "步骤 2：阅读设计文档",
+          "level": 3,
+          "line": 26
+        },
+        {
+          "heading": "步骤 3：分析影响范围",
+          "level": 3,
+          "line": 35
+        },
+        {
+          "heading": "步骤 4：执行修改",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "步骤 5：验证",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "步骤 6：文档同步",
+          "level": 3,
+          "line": 66
+        },
+        {
+          "heading": "步骤 7：完成汇报",
+          "level": 3,
+          "line": 74
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 106
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 111
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 120
+        },
+        {
+          "heading": "失败处理",
+          "level": 2,
+          "line": 126
+        },
+        {
+          "heading": "关联资源",
+          "level": 2,
+          "line": 132
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 137
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": ".github/skills/plan-version/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 125,
+      "nonEmptyLines": 83,
+      "sections": [
+        {
+          "heading": "Skill: plan-version",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "工作流",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "步骤 1：收集项目状态",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "步骤 2：分析差距",
+          "level": 3,
+          "line": 28
+        },
+        {
+          "heading": "步骤 3：定义版本范围",
+          "level": 3,
+          "line": 37
+        },
+        {
+          "heading": "步骤 4：制定修改计划",
+          "level": 3,
+          "line": 46
+        },
+        {
+          "heading": "步骤 5：定义完成标准",
+          "level": 3,
+          "line": 55
+        },
+        {
+          "heading": "步骤 6：输出计划文档",
+          "level": 3,
+          "line": 64
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 92
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 98
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 106
+        },
+        {
+          "heading": "失败处理",
+          "level": 2,
+          "line": 112
+        },
+        {
+          "heading": "关联资源",
+          "level": 2,
+          "line": 116
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 120
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 15
+      }
+    },
+    {
+      "path": ".github/skills/release-package/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 198,
+      "nonEmptyLines": 132,
+      "sections": [
+        {
+          "heading": "Skill: release-package",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "工作流",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "步骤 1：验证构建",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "步骤 2：更新版本号",
+          "level": 3,
+          "line": 32
+        },
+        {
+          "heading": "步骤 3：更新 CHANGELOG.md",
+          "level": 3,
+          "line": 43
+        },
+        {
+          "heading": "步骤 4：生成 Release Notes",
+          "level": 3,
+          "line": 63
+        },
+        {
+          "heading": "步骤 5：更新 README",
+          "level": 3,
+          "line": 96
+        },
+        {
+          "heading": "步骤 6：更新版本路线图",
+          "level": 3,
+          "line": 104
+        },
+        {
+          "heading": "步骤 7：Git 操作",
+          "level": 3,
+          "line": 111
+        },
+        {
+          "heading": "步骤 8：最终确认",
+          "level": 3,
+          "line": 133
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 161
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 167
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 176
+        },
+        {
+          "heading": "失败处理",
+          "level": 2,
+          "line": 182
+        },
+        {
+          "heading": "关联资源",
+          "level": 2,
+          "line": 187
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 193
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 17
+      }
+    },
+    {
+      "path": ".github/skills/review-ui/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 125,
+      "nonEmptyLines": 82,
+      "sections": [
+        {
+          "heading": "Skill: review-ui",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "工作流",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "步骤 1：加载 UI 标准",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "步骤 2：逐项检查",
+          "level": 3,
+          "line": 25
+        },
+        {
+          "heading": "2.1 整体风格",
+          "level": 4,
+          "line": 29
+        },
+        {
+          "heading": "2.2 布局结构",
+          "level": 4,
+          "line": 36
+        },
+        {
+          "heading": "2.3 右侧工具栏",
+          "level": 4,
+          "line": 43
+        },
+        {
+          "heading": "2.4 2K 适配",
+          "level": 4,
+          "line": 50
+        },
+        {
+          "heading": "2.5 组件规范",
+          "level": 4,
+          "line": 56
+        },
+        {
+          "heading": "2.6 禁止模式",
+          "level": 4,
+          "line": 62
+        },
+        {
+          "heading": "步骤 3：输出审查报告",
+          "level": 3,
+          "line": 69
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 96
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 101
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 106
+        },
+        {
+          "heading": "失败处理",
+          "level": 2,
+          "line": 111
+        },
+        {
+          "heading": "关联资源",
+          "level": 2,
+          "line": 116
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 121
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 18
+      }
+    },
+    {
+      "path": ".github/skills/tauri-desktop-build/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 158,
+      "nonEmptyLines": 110,
+      "sections": [
+        {
+          "heading": "Skill: tauri-desktop-build",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "使用场景",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 26
+        },
+        {
+          "heading": "必须读取的文件",
+          "level": 2,
+          "line": 34
+        },
+        {
+          "heading": "必须关联的 Checklist",
+          "level": 2,
+          "line": 43
+        },
+        {
+          "heading": "执行步骤",
+          "level": 2,
+          "line": 51
+        },
+        {
+          "heading": "步骤 1：环境检查",
+          "level": 3,
+          "line": 53
+        },
+        {
+          "heading": "步骤 2：开发模式验证",
+          "level": 3,
+          "line": 62
+        },
+        {
+          "heading": "步骤 3：构建前检查",
+          "level": 3,
+          "line": 76
+        },
+        {
+          "heading": "步骤 4：完整构建",
+          "level": 3,
+          "line": 84
+        },
+        {
+          "heading": "步骤 5：构建失败处理",
+          "level": 3,
+          "line": 96
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 107
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 135
+        },
+        {
+          "heading": "关键路径",
+          "level": 2,
+          "line": 144
+        },
+        {
+          "heading": "核心原则",
+          "level": 2,
+          "line": 156
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": ".github/skills/verify-build/SKILL.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 157,
+      "nonEmptyLines": 108,
+      "sections": [
+        {
+          "heading": "Skill: verify-build",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "工作流",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "步骤 1：环境检查",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "步骤 2：依赖检查",
+          "level": 3,
+          "line": 30
+        },
+        {
+          "heading": "步骤 3：Rust 编译检查",
+          "level": 3,
+          "line": 42
+        },
+        {
+          "heading": "步骤 4：前端 TypeScript 编译 + 构建",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "步骤 5：Tauri 完整构建",
+          "level": 3,
+          "line": 71
+        },
+        {
+          "heading": "步骤 6：Git 状态检查",
+          "level": 3,
+          "line": 83
+        },
+        {
+          "heading": "步骤 7：生成验证报告",
+          "level": 3,
+          "line": 94
+        },
+        {
+          "heading": "输入信息",
+          "level": 2,
+          "line": 127
+        },
+        {
+          "heading": "禁止事项",
+          "level": 2,
+          "line": 131
+        },
+        {
+          "heading": "验证方式",
+          "level": 2,
+          "line": 137
+        },
+        {
+          "heading": "失败处理",
+          "level": 2,
+          "line": 141
+        },
+        {
+          "heading": "关联资源",
+          "level": 2,
+          "line": 147
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 152
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": ".github/workflows-docs/agent-runtime-overview.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 76,
+      "nonEmptyLines": 60,
+      "sections": [
+        {
+          "heading": "Agent Runtime Overview",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 什么是 Agent Workflow Runtime？",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. 架构概览",
+          "level": 2,
+          "line": 21
+        },
+        {
+          "heading": "3. 当前阶段（v1.0.44）",
+          "level": 2,
+          "line": 55
+        },
+        {
+          "heading": "4. 后续扩展方向",
+          "level": 2,
+          "line": 71
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 5
+      }
+    },
+    {
+      "path": ".github/workflows-docs/workflow-script-usage.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 116,
+      "nonEmptyLines": 89,
+      "sections": [
+        {
+          "heading": "Workflow Script Usage",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 脚本列表",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. verify_project.ps1",
+          "level": 2,
+          "line": 21
+        },
+        {
+          "heading": "用途",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "运行",
+          "level": 3,
+          "line": 26
+        },
+        {
+          "heading": "输出格式",
+          "level": 3,
+          "line": 31
+        },
+        {
+          "heading": "说明",
+          "level": 3,
+          "line": 40
+        },
+        {
+          "heading": "3. check_docs_sync.ps1",
+          "level": 2,
+          "line": 47
+        },
+        {
+          "heading": "用途",
+          "level": 3,
+          "line": 49
+        },
+        {
+          "heading": "运行",
+          "level": 3,
+          "line": 52
+        },
+        {
+          "heading": "检查项",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "4. run_feature_workflow.ps1",
+          "level": 2,
+          "line": 68
+        },
+        {
+          "heading": "用途",
+          "level": 3,
+          "line": 70
+        },
+        {
+          "heading": "运行",
+          "level": 3,
+          "line": 73
+        },
+        {
+          "heading": "流程",
+          "level": 3,
+          "line": 78
+        },
+        {
+          "heading": "禁止",
+          "level": 3,
+          "line": 87
+        },
+        {
+          "heading": "5. release_workflow.ps1",
+          "level": 2,
+          "line": 95
+        },
+        {
+          "heading": "用途",
+          "level": 3,
+          "line": 97
+        },
+        {
+          "heading": "运行",
+          "level": 3,
+          "line": 100
+        },
+        {
+          "heading": "流程",
+          "level": 3,
+          "line": 105
+        },
+        {
+          "heading": "禁止",
+          "level": 3,
+          "line": 112
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 21
+      }
+    },
+    {
+      "path": ".understand-anything/.understandignore",
+      "language": "unknown",
+      "fileCategory": "code",
+      "totalLines": 50,
+      "nonEmptyLines": 44,
+      "metrics": {}
+    },
+    {
+      "path": ".understand-anything/config.json",
+      "language": "json",
+      "fileCategory": "config",
+      "totalLines": 1,
+      "nonEmptyLines": 1,
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 0
+      }
+    },
+    {
+      "path": ".understand-anything/tmp/all-files.json",
+      "language": "json",
+      "fileCategory": "config",
+      "totalLines": 1807,
+      "nonEmptyLines": 1807,
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 0
+      }
+    },
+    {
+      "path": "reports/local-storage-report.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 81,
+      "nonEmptyLines": 58,
+      "sections": [
+        {
+          "heading": "1. Total Project Size",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. Top-Level Directory Sizes",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "3. Files Over 100MB",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "4. Common Build Directories",
+          "level": 2,
+          "line": 35
+        },
+        {
+          "heading": "5. Installer Files",
+          "level": 2,
+          "line": 42
+        },
+        {
+          "heading": "6. src-tauri/target Subdirectories",
+          "level": 2,
+          "line": 46
+        },
+        {
+          "heading": "7. Summary",
+          "level": 2,
+          "line": 52
+        },
+        {
+          "heading": "Cleanup Candidates",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "Must Keep",
+          "level": 3,
+          "line": 61
+        },
+        {
+          "heading": "Recommended Operation Order",
+          "level": 3,
+          "line": 71
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    }
+  ]
+}

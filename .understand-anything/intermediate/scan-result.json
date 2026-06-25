@@ -1,0 +1,3013 @@
+{
+  "name": "AI Novel Studio",
+  "description": "Windows 桌面端 AI 长篇小说创作工作台。用户控制方向，AI 分工生成，章节逐步采用，上下文持续沉淀。这是一款结合了世界观构建、角色管理、分卷章节规划和 AI 辅助写作的桌面应用。该项目包含超过 100 个源文件；建议将分析范围限定到子目录以获得更快的分析速度。",
+  "languages": [
+    "css",
+    "html",
+    "icns",
+    "json",
+    "markdown",
+    "mdc",
+    "powershell",
+    "rust",
+    "text",
+    "toml",
+    "typescript",
+    "unknown"
+  ],
+  "frameworks": [
+    "React",
+    "React Router",
+    "Vite",
+    "Tauri",
+    "TypeScript"
+  ],
+  "files": [
+    {
+      "path": ".cursor/rules/agent-safety.mdc",
+      "language": "mdc",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/bugfix-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/database-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/project-architecture.mdc",
+      "language": "mdc",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/release-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 34,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/task-writing-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/testing-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/ui-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".github/checklists/bugfix.checklist.md",
+      "language": "markdown",
+      "sizeLines": 50,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/database-change.checklist.md",
+      "language": "markdown",
+      "sizeLines": 58,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/docs-sync.checklist.md",
+      "language": "markdown",
+      "sizeLines": 71,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/feature-development.checklist.md",
+      "language": "markdown",
+      "sizeLines": 57,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/release.checklist.md",
+      "language": "markdown",
+      "sizeLines": 71,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/tauri-build.checklist.md",
+      "language": "markdown",
+      "sizeLines": 54,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/ui-review.checklist.md",
+      "language": "markdown",
+      "sizeLines": 68,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/verification.checklist.md",
+      "language": "markdown",
+      "sizeLines": 70,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/copilot-instructions.md",
+      "language": "markdown",
+      "sizeLines": 1151,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/agent-behavior.instructions.md",
+      "language": "markdown",
+      "sizeLines": 141,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/database.instructions.md",
+      "language": "markdown",
+      "sizeLines": 138,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/documentation.instructions.md",
+      "language": "markdown",
+      "sizeLines": 109,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/frontend.instructions.md",
+      "language": "markdown",
+      "sizeLines": 189,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/tauri.instructions.md",
+      "language": "markdown",
+      "sizeLines": 152,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/testing.instructions.md",
+      "language": "markdown",
+      "sizeLines": 128,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/fix-bug.prompt.md",
+      "language": "markdown",
+      "sizeLines": 64,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/next-version.prompt.md",
+      "language": "markdown",
+      "sizeLines": 64,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/release-report.prompt.md",
+      "language": "markdown",
+      "sizeLines": 72,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/verify-build.prompt.md",
+      "language": "markdown",
+      "sizeLines": 108,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/agent-task-writer/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 159,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/bugfix-safe-patch/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 135,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/db-migration-guard/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 149,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/docs-sync/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 128,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/implement-feature/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 143,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/plan-version/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 125,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/release-package/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 198,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/review-ui/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 125,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/tauri-desktop-build/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 158,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/verify-build/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 157,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/workflows-docs/agent-runtime-overview.md",
+      "language": "markdown",
+      "sizeLines": 76,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/workflows-docs/workflow-script-usage.md",
+      "language": "markdown",
+      "sizeLines": 116,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".understand-anything/.understandignore",
+      "language": "unknown",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".understand-anything/config.json",
+      "language": "json",
+      "sizeLines": 1,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/tmp/all-files.json",
+      "language": "json",
+      "sizeLines": 1807,
+      "fileCategory": "config"
+    },
+    {
+      "path": "AGENTS.md",
+      "language": "markdown",
+      "sizeLines": 290,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "language": "markdown",
+      "sizeLines": 341,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/agent-runtime.md",
+      "language": "markdown",
+      "sizeLines": 170,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/agent-workflow.md",
+      "language": "markdown",
+      "sizeLines": 182,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/ai-agent-roadmap.md",
+      "language": "markdown",
+      "sizeLines": 175,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/data-model.md",
+      "language": "markdown",
+      "sizeLines": 2074,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/context-assets.md",
+      "language": "markdown",
+      "sizeLines": 20,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/future-interactive-story.md",
+      "language": "markdown",
+      "sizeLines": 25,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/novel-engineering.md",
+      "language": "markdown",
+      "sizeLines": 26,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/setting-suggestions.md",
+      "language": "markdown",
+      "sizeLines": 130,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/development-rules.md",
+      "language": "markdown",
+      "sizeLines": 1454,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/development-skills.md",
+      "language": "markdown",
+      "sizeLines": 107,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/import-samples/sample-novel.txt",
+      "language": "txt",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/import-samples/sample-output-profile.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/import-samples/sample-style-profile.json",
+      "language": "json",
+      "sizeLines": 9,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/module-boundaries.md",
+      "language": "markdown",
+      "sizeLines": 228,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/native-dialog-notification-plan.md",
+      "language": "markdown",
+      "sizeLines": 106,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/native-feel-p2-4-installation-report.md",
+      "language": "markdown",
+      "sizeLines": 96,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/native-feel-p2-assessment.md",
+      "language": "markdown",
+      "sizeLines": 202,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/product-design.md",
+      "language": "markdown",
+      "sizeLines": 1294,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project-architecture.md",
+      "language": "markdown",
+      "sizeLines": 216,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project/agent-task-rules.md",
+      "language": "markdown",
+      "sizeLines": 24,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project/release-history.md",
+      "language": "markdown",
+      "sizeLines": 27,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project/version-roadmap.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/prompt-system.md",
+      "language": "markdown",
+      "sizeLines": 967,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/README.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.0.md",
+      "language": "markdown",
+      "sizeLines": 59,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.15.md",
+      "language": "markdown",
+      "sizeLines": 77,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.16.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.17.md",
+      "language": "markdown",
+      "sizeLines": 43,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.18.md",
+      "language": "markdown",
+      "sizeLines": 38,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.19.md",
+      "language": "markdown",
+      "sizeLines": 41,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.20.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.21.md",
+      "language": "markdown",
+      "sizeLines": 95,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.22.md",
+      "language": "markdown",
+      "sizeLines": 96,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.23.md",
+      "language": "markdown",
+      "sizeLines": 20,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.24.md",
+      "language": "markdown",
+      "sizeLines": 78,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.25.md",
+      "language": "markdown",
+      "sizeLines": 64,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.26.md",
+      "language": "markdown",
+      "sizeLines": 52,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.27.md",
+      "language": "markdown",
+      "sizeLines": 44,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.28.md",
+      "language": "markdown",
+      "sizeLines": 58,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.29.md",
+      "language": "markdown",
+      "sizeLines": 42,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.31.md",
+      "language": "markdown",
+      "sizeLines": 70,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.32.md",
+      "language": "markdown",
+      "sizeLines": 79,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.33.md",
+      "language": "markdown",
+      "sizeLines": 92,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.34.md",
+      "language": "markdown",
+      "sizeLines": 61,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.36.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.37.md",
+      "language": "markdown",
+      "sizeLines": 67,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.38.md",
+      "language": "markdown",
+      "sizeLines": 27,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.39.md",
+      "language": "markdown",
+      "sizeLines": 36,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.41.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.43.md",
+      "language": "markdown",
+      "sizeLines": 121,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/tauri2-mica-assessment.md",
+      "language": "markdown",
+      "sizeLines": 315,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/api-routes.md",
+      "language": "markdown",
+      "sizeLines": 29,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/architecture.md",
+      "language": "markdown",
+      "sizeLines": 29,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/database.md",
+      "language": "markdown",
+      "sizeLines": 22,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/deployment.md",
+      "language": "markdown",
+      "sizeLines": 25,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/desktop-build.md",
+      "language": "markdown",
+      "sizeLines": 34,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/installer-verification.md",
+      "language": "markdown",
+      "sizeLines": 95,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/local-build-cleanup.md",
+      "language": "markdown",
+      "sizeLines": 150,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/release-artifact-policy.md",
+      "language": "markdown",
+      "sizeLines": 89,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/testing.md",
+      "language": "markdown",
+      "sizeLines": 98,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/ui-reference.md",
+      "language": "markdown",
+      "sizeLines": 1346,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user-guide.md",
+      "language": "markdown",
+      "sizeLines": 107,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/ai-settings.md",
+      "language": "markdown",
+      "sizeLines": 49,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/data-import-export.md",
+      "language": "markdown",
+      "sizeLines": 84,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/desktop-usage.md",
+      "language": "markdown",
+      "sizeLines": 50,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/quick-start.md",
+      "language": "markdown",
+      "sizeLines": 61,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/workflow-guide.md",
+      "language": "markdown",
+      "sizeLines": 23,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/version-roadmap.md",
+      "language": "markdown",
+      "sizeLines": 225,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "index.html",
+      "language": "html",
+      "sizeLines": 13,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "sizeLines": 39,
+      "fileCategory": "config"
+    },
+    {
+      "path": "prompts/chapter_generate.md",
+      "language": "markdown",
+      "sizeLines": 182,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/chapter_polish.md",
+      "language": "markdown",
+      "sizeLines": 67,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/chapter_summarize.md",
+      "language": "markdown",
+      "sizeLines": 76,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/character_generate.md",
+      "language": "markdown",
+      "sizeLines": 33,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/event_suggest.md",
+      "language": "markdown",
+      "sizeLines": 33,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/quality_check.md",
+      "language": "markdown",
+      "sizeLines": 88,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/style_analyze.md",
+      "language": "markdown",
+      "sizeLines": 37,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 238,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "reports/local-storage-report.md",
+      "language": "markdown",
+      "sizeLines": 81,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "scripts/agent-workflow/check_ai_task_delete.ps1",
+      "language": "powershell",
+      "sizeLines": 107,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/check_docs_sync.ps1",
+      "language": "powershell",
+      "sizeLines": 161,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/check_setting_suggestions.ps1",
+      "language": "powershell",
+      "sizeLines": 57,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/release_workflow.ps1",
+      "language": "powershell",
+      "sizeLines": 111,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/run_feature_workflow.ps1",
+      "language": "powershell",
+      "sizeLines": 115,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/runtime_check_ai_task_delete.ps1",
+      "language": "powershell",
+      "sizeLines": 17,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/verify_project.ps1",
+      "language": "powershell",
+      "sizeLines": 203,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/maintenance/archive_old_builds.ps1",
+      "language": "powershell",
+      "sizeLines": 221,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/maintenance/clean_old_builds.ps1",
+      "language": "powershell",
+      "sizeLines": 249,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/maintenance/report_large_files.ps1",
+      "language": "powershell",
+      "sizeLines": 267,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/package-windows.ps1",
+      "language": "powershell",
+      "sizeLines": 125,
+      "fileCategory": "script"
+    },
+    {
+      "path": "src-tauri/build.rs",
+      "language": "rust",
+      "sizeLines": 3,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "language": "toml",
+      "sizeLines": 27,
+      "fileCategory": "config"
+    },
+    {
+      "path": "src-tauri/icons/icon.icns",
+      "language": "icns",
+      "sizeLines": 11179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/ai.rs",
+      "language": "rust",
+      "sizeLines": 203,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/commands.rs",
+      "language": "rust",
+      "sizeLines": 3818,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/db.rs",
+      "language": "rust",
+      "sizeLines": 1085,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/large_text_save.rs",
+      "language": "rust",
+      "sizeLines": 640,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/main.rs",
+      "language": "rust",
+      "sizeLines": 190,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/outline_commands.rs",
+      "language": "rust",
+      "sizeLines": 785,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/system_accent.rs",
+      "language": "rust",
+      "sizeLines": 73,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/window_state.rs",
+      "language": "rust",
+      "sizeLines": 225,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "language": "json",
+      "sizeLines": 59,
+      "fileCategory": "config"
+    },
+    {
+      "path": "src/agent-tools/chapter-tools.ts",
+      "language": "typescript",
+      "sizeLines": 179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/context-tools.ts",
+      "language": "typescript",
+      "sizeLines": 180,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/project-tools.ts",
+      "language": "typescript",
+      "sizeLines": 185,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/style-tools.ts",
+      "language": "typescript",
+      "sizeLines": 167,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/tool-types.ts",
+      "language": "typescript",
+      "sizeLines": 106,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/verification-tools.ts",
+      "language": "typescript",
+      "sizeLines": 300,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/context-summary.ts",
+      "language": "typescript",
+      "sizeLines": 159,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/planner-lite.ts",
+      "language": "typescript",
+      "sizeLines": 155,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/types.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/workflow-runner.ts",
+      "language": "typescript",
+      "sizeLines": 183,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/App.tsx",
+      "language": "typescript",
+      "sizeLines": 63,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/app/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/components/chapter-summary/ChapterSummaryDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 121,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/BackButton.tsx",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/EmptyState.tsx",
+      "language": "typescript",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/ErrorBoundary.tsx",
+      "language": "typescript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/ErrorState.tsx",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/FirstTimeGuide.tsx",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/LoadingModal.css",
+      "language": "css",
+      "sizeLines": 194,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/components/common/LoadingModal.tsx",
+      "language": "typescript",
+      "sizeLines": 163,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/LoadingState.tsx",
+      "language": "typescript",
+      "sizeLines": 13,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/components/context-records/ContextRecordForm.tsx",
+      "language": "typescript",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/context-records/ContextRecordList.tsx",
+      "language": "typescript",
+      "sizeLines": 97,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/import/ImportJsonDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 169,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/import/ImportTxtDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 166,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/layout/AppShell.tsx",
+      "language": "typescript",
+      "sizeLines": 24,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/CharacterLibraryCard.tsx",
+      "language": "typescript",
+      "sizeLines": 150,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/ContextOverviewCard.tsx",
+      "language": "typescript",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/ExportCard.tsx",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/NovelCard.tsx",
+      "language": "typescript",
+      "sizeLines": 120,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-detail/NovelDetailCards.tsx",
+      "language": "typescript",
+      "sizeLines": 870,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/ChapterFormModal.tsx",
+      "language": "typescript",
+      "sizeLines": 105,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/OutlineEditor.tsx",
+      "language": "typescript",
+      "sizeLines": 408,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/OutlineManager.tsx",
+      "language": "typescript",
+      "sizeLines": 564,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/VolumeCard.tsx",
+      "language": "typescript",
+      "sizeLines": 134,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/VolumeFormModal.tsx",
+      "language": "typescript",
+      "sizeLines": 81,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/AiGeneratePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 966,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/ChapterSummaryPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 404,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/CharactersPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 449,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/CheckPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 668,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/ContextViewPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 344,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/DraftHistoryPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 108,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/EventsPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 182,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/OutlinePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 570,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/PolishPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 142,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/SettingPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 152,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/StylePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 244,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/RightPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 121,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/RightToolbar.tsx",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/sidebar/Sidebar.tsx",
+      "language": "typescript",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/Toast.css",
+      "language": "css",
+      "sizeLines": 102,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/components/ToastProvider.tsx",
+      "language": "typescript",
+      "sizeLines": 85,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/topbar/TopBar.tsx",
+      "language": "typescript",
+      "sizeLines": 41,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/EditorArea.tsx",
+      "language": "typescript",
+      "sizeLines": 400,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/GlobalAiTaskModal.tsx",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/StatusBar.tsx",
+      "language": "typescript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/VolumeTree.tsx",
+      "language": "typescript",
+      "sizeLines": 345,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/constants/version.ts",
+      "language": "typescript",
+      "sizeLines": 6,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/chapters/mockChapters.ts",
+      "language": "typescript",
+      "sizeLines": 216,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/novels/mockNovels.ts",
+      "language": "typescript",
+      "sizeLines": 71,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/novels/novelNormalizer.ts",
+      "language": "typescript",
+      "sizeLines": 332,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/styles/mockStyles.ts",
+      "language": "typescript",
+      "sizeLines": 71,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/hooks/useLoadingTask.ts",
+      "language": "typescript",
+      "sizeLines": 184,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/lib/runWithLoading.ts",
+      "language": "typescript",
+      "sizeLines": 236,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/main.tsx",
+      "language": "typescript",
+      "sizeLines": 51,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/AiTasks/AiTasksPage.tsx",
+      "language": "typescript",
+      "sizeLines": 339,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Assets/AssetsPage.tsx",
+      "language": "typescript",
+      "sizeLines": 101,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/ComingSoon/ComingSoonPage.tsx",
+      "language": "typescript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Home/HomePage.tsx",
+      "language": "typescript",
+      "sizeLines": 202,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/ImportExport/ImportExportPage.tsx",
+      "language": "typescript",
+      "sizeLines": 152,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/NotFound/NotFoundPage.tsx",
+      "language": "typescript",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/NovelDetail/NovelDetailPage.tsx",
+      "language": "typescript",
+      "sizeLines": 215,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/OutlineEditor/OutlineEditorPage.tsx",
+      "language": "typescript",
+      "sizeLines": 162,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Settings/SettingsPage.tsx",
+      "language": "typescript",
+      "sizeLines": 267,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+      "language": "typescript",
+      "sizeLines": 392,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+      "language": "typescript",
+      "sizeLines": 212,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Templates/TemplatesPage.tsx",
+      "language": "typescript",
+      "sizeLines": 294,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+      "language": "typescript",
+      "sizeLines": 607,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/chapter/chapter-generation-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/README.md",
+      "language": "markdown",
+      "sizeLines": 69,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/prompts/style/style-constraint-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/system/base-system-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/verification/chapter-verification-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/aiClient.ts",
+      "language": "typescript",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/aiSettingsService.ts",
+      "language": "typescript",
+      "sizeLines": 122,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/aiTaskService.ts",
+      "language": "typescript",
+      "sizeLines": 473,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/chapterRevisionService.ts",
+      "language": "typescript",
+      "sizeLines": 91,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/chapterSummarizeService.ts",
+      "language": "typescript",
+      "sizeLines": 95,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/characterGenerateService.ts",
+      "language": "typescript",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/eventSuggestService.ts",
+      "language": "typescript",
+      "sizeLines": 114,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/fixRunStore.ts",
+      "language": "typescript",
+      "sizeLines": 130,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/jsonUtils.ts",
+      "language": "typescript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/mockAiClient.ts",
+      "language": "typescript",
+      "sizeLines": 327,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/outlineComplianceChecker.ts",
+      "language": "typescript",
+      "sizeLines": 135,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/outlineGenerateService.ts",
+      "language": "typescript",
+      "sizeLines": 295,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/polishAiService.ts",
+      "language": "typescript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/promptBuilder.ts",
+      "language": "typescript",
+      "sizeLines": 651,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/qualityCheckAiService.ts",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/qualityFixService.ts",
+      "language": "typescript",
+      "sizeLines": 431,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/realAiClient.ts",
+      "language": "typescript",
+      "sizeLines": 207,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/settingExpandService.ts",
+      "language": "typescript",
+      "sizeLines": 80,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/summaryValidator.ts",
+      "language": "typescript",
+      "sizeLines": 78,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/volumeSummaryService.ts",
+      "language": "typescript",
+      "sizeLines": 188,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/chapters/chapterCreationService.ts",
+      "language": "typescript",
+      "sizeLines": 115,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/characters/chapterCharacterService.ts",
+      "language": "typescript",
+      "sizeLines": 130,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/characters/chapterEventService.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/characters/characterService.ts",
+      "language": "typescript",
+      "sizeLines": 267,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/context/chapterSummaryService.ts",
+      "language": "typescript",
+      "sizeLines": 140,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/context/characterStateService.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/context/contextRecordService.ts",
+      "language": "typescript",
+      "sizeLines": 122,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/chapterRepository.ts",
+      "language": "typescript",
+      "sizeLines": 187,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/db.ts",
+      "language": "typescript",
+      "sizeLines": 142,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/draftService.ts",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/draftVersionService.ts",
+      "language": "typescript",
+      "sizeLines": 345,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/index.ts",
+      "language": "typescript",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/novelRepository.ts",
+      "language": "typescript",
+      "sizeLines": 288,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/protagonistRepository.ts",
+      "language": "typescript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/settingRepository.ts",
+      "language": "typescript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/volumeRepository.ts",
+      "language": "typescript",
+      "sizeLines": 151,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/export/exportService.ts",
+      "language": "typescript",
+      "sizeLines": 191,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/import/jsonImportService.ts",
+      "language": "typescript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/import/txtImportService.ts",
+      "language": "typescript",
+      "sizeLines": 89,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/largeTextSave.ts",
+      "language": "typescript",
+      "sizeLines": 375,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/novels/novelService.ts",
+      "language": "typescript",
+      "sizeLines": 44,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/outlines/outlineService.ts",
+      "language": "typescript",
+      "sizeLines": 150,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/chapterOutlineDraftCache.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/contextBuilder.ts",
+      "language": "typescript",
+      "sizeLines": 482,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/contextReaderService.ts",
+      "language": "typescript",
+      "sizeLines": 309,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/outlineKeyPointExtractor.ts",
+      "language": "typescript",
+      "sizeLines": 116,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/promptOrchestrator.ts",
+      "language": "typescript",
+      "sizeLines": 262,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/quality/polishService.ts",
+      "language": "typescript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/quality/qualityCheckService.ts",
+      "language": "typescript",
+      "sizeLines": 264,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/services/settingSuggestions/settingSuggestionService.ts",
+      "language": "typescript",
+      "sizeLines": 332,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/importedAssetService.ts",
+      "language": "typescript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/outputProfileService.ts",
+      "language": "typescript",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/styleAnalyzeService.ts",
+      "language": "typescript",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/styleProfileService.ts",
+      "language": "typescript",
+      "sizeLines": 144,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/tauri/runtime.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/templates/templateService.ts",
+      "language": "typescript",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/store/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/styles/app-shell.css",
+      "language": "css",
+      "sizeLines": 330,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/coming-soon.css",
+      "language": "css",
+      "sizeLines": 46,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/global.css",
+      "language": "css",
+      "sizeLines": 299,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/home.css",
+      "language": "css",
+      "sizeLines": 351,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/novel-detail.css",
+      "language": "css",
+      "sizeLines": 290,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/right-dock.css",
+      "language": "css",
+      "sizeLines": 356,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/setting-suggestions.css",
+      "language": "css",
+      "sizeLines": 242,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/variables.css",
+      "language": "css",
+      "sizeLines": 143,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/workspace.css",
+      "language": "css",
+      "sizeLines": 424,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/types/ai.ts",
+      "language": "typescript",
+      "sizeLines": 278,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/chapter.ts",
+      "language": "typescript",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/chapterEvent.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/chapterSummary.ts",
+      "language": "typescript",
+      "sizeLines": 175,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/character.ts",
+      "language": "typescript",
+      "sizeLines": 61,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/context.ts",
+      "language": "typescript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/importedAsset.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/index.ts",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/largeTextSave.ts",
+      "language": "typescript",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/novel.ts",
+      "language": "typescript",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/outline.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/output.ts",
+      "language": "typescript",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/polish.ts",
+      "language": "typescript",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/protagonist.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/qualityCheck.ts",
+      "language": "typescript",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/setting.ts",
+      "language": "typescript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/settingSuggestion.ts",
+      "language": "typescript",
+      "sizeLines": 54,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/style.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/volume.ts",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/dataGuard.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/date.ts",
+      "language": "typescript",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/debugSeed.ts",
+      "language": "typescript",
+      "sizeLines": 24,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/errorMessage.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/format.ts",
+      "language": "typescript",
+      "sizeLines": 37,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/nativeDialog.ts",
+      "language": "typescript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/nativeNotification.ts",
+      "language": "typescript",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/toast.ts",
+      "language": "typescript",
+      "sizeLines": 58,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "language": "typescript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tsconfig.json",
+      "language": "json",
+      "sizeLines": 25,
+      "fileCategory": "config"
+    },
+    {
+      "path": "tsconfig.node.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "vite.config.ts",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 328,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "large",
+  "importMap": {
+    ".cursor/rules/agent-safety.mdc": [],
+    ".cursor/rules/bugfix-rules.mdc": [],
+    ".cursor/rules/database-rules.mdc": [],
+    ".cursor/rules/project-architecture.mdc": [],
+    ".cursor/rules/release-rules.mdc": [],
+    ".cursor/rules/task-writing-rules.mdc": [],
+    ".cursor/rules/testing-rules.mdc": [],
+    ".cursor/rules/ui-rules.mdc": [],
+    ".github/checklists/bugfix.checklist.md": [],
+    ".github/checklists/database-change.checklist.md": [],
+    ".github/checklists/docs-sync.checklist.md": [],
+    ".github/checklists/feature-development.checklist.md": [],
+    ".github/checklists/release.checklist.md": [],
+    ".github/checklists/tauri-build.checklist.md": [],
+    ".github/checklists/ui-review.checklist.md": [],
+    ".github/checklists/verification.checklist.md": [],
+    ".github/copilot-instructions.md": [],
+    ".github/instructions/agent-behavior.instructions.md": [],
+    ".github/instructions/database.instructions.md": [],
+    ".github/instructions/documentation.instructions.md": [],
+    ".github/instructions/frontend.instructions.md": [],
+    ".github/instructions/tauri.instructions.md": [],
+    ".github/instructions/testing.instructions.md": [],
+    ".github/prompts/fix-bug.prompt.md": [],
+    ".github/prompts/next-version.prompt.md": [],
+    ".github/prompts/release-report.prompt.md": [],
+    ".github/prompts/verify-build.prompt.md": [],
+    ".github/skills/agent-task-writer/SKILL.md": [],
+    ".github/skills/bugfix-safe-patch/SKILL.md": [],
+    ".github/skills/db-migration-guard/SKILL.md": [],
+    ".github/skills/docs-sync/SKILL.md": [],
+    ".github/skills/implement-feature/SKILL.md": [],
+    ".github/skills/plan-version/SKILL.md": [],
+    ".github/skills/release-package/SKILL.md": [],
+    ".github/skills/review-ui/SKILL.md": [],
+    ".github/skills/tauri-desktop-build/SKILL.md": [],
+    ".github/skills/verify-build/SKILL.md": [],
+    ".github/workflows-docs/agent-runtime-overview.md": [],
+    ".github/workflows-docs/workflow-script-usage.md": [],
+    ".understand-anything/.understandignore": [],
+    ".understand-anything/config.json": [],
+    ".understand-anything/tmp/all-files.json": [],
+    "AGENTS.md": [],
+    "CHANGELOG.md": [],
+    "docs/agent-runtime.md": [],
+    "docs/agent-workflow.md": [],
+    "docs/ai-agent-roadmap.md": [],
+    "docs/data-model.md": [],
+    "docs/design/context-assets.md": [],
+    "docs/design/future-interactive-story.md": [],
+    "docs/design/novel-engineering.md": [],
+    "docs/design/setting-suggestions.md": [],
+    "docs/development-rules.md": [],
+    "docs/development-skills.md": [],
+    "docs/import-samples/sample-novel.txt": [],
+    "docs/import-samples/sample-output-profile.json": [],
+    "docs/import-samples/sample-style-profile.json": [],
+    "docs/module-boundaries.md": [],
+    "docs/native-dialog-notification-plan.md": [],
+    "docs/native-feel-p2-4-installation-report.md": [],
+    "docs/native-feel-p2-assessment.md": [],
+    "docs/product-design.md": [],
+    "docs/project-architecture.md": [],
+    "docs/project/agent-task-rules.md": [],
+    "docs/project/release-history.md": [],
+    "docs/project/version-roadmap.md": [],
+    "docs/prompt-system.md": [],
+    "docs/README.md": [],
+    "docs/release-notes-v1.0.0.md": [],
+    "docs/release-notes-v1.0.15.md": [],
+    "docs/release-notes-v1.0.16.md": [],
+    "docs/release-notes-v1.0.17.md": [],
+    "docs/release-notes-v1.0.18.md": [],
+    "docs/release-notes-v1.0.19.md": [],
+    "docs/release-notes-v1.0.20.md": [],
+    "docs/release-notes-v1.0.21.md": [],
+    "docs/release-notes-v1.0.22.md": [],
+    "docs/release-notes-v1.0.23.md": [],
+    "docs/release-notes-v1.0.24.md": [],
+    "docs/release-notes-v1.0.25.md": [],
+    "docs/release-notes-v1.0.26.md": [],
+    "docs/release-notes-v1.0.27.md": [],
+    "docs/release-notes-v1.0.28.md": [],
+    "docs/release-notes-v1.0.29.md": [],
+    "docs/release-notes-v1.0.31.md": [],
+    "docs/release-notes-v1.0.32.md": [],
+    "docs/release-notes-v1.0.33.md": [],
+    "docs/release-notes-v1.0.34.md": [],
+    "docs/release-notes-v1.0.36.md": [],
+    "docs/release-notes-v1.0.37.md": [],
+    "docs/release-notes-v1.0.38.md": [],
+    "docs/release-notes-v1.0.39.md": [],
+    "docs/release-notes-v1.0.41.md": [],
+    "docs/release-notes-v1.0.43.md": [],
+    "docs/tauri2-mica-assessment.md": [],
+    "docs/technical/api-routes.md": [],
+    "docs/technical/architecture.md": [],
+    "docs/technical/database.md": [],
+    "docs/technical/deployment.md": [],
+    "docs/technical/desktop-build.md": [],
+    "docs/technical/installer-verification.md": [],
+    "docs/technical/local-build-cleanup.md": [],
+    "docs/technical/release-artifact-policy.md": [],
+    "docs/technical/testing.md": [],
+    "docs/ui-reference.md": [],
+    "docs/user-guide.md": [],
+    "docs/user/ai-settings.md": [],
+    "docs/user/data-import-export.md": [],
+    "docs/user/desktop-usage.md": [],
+    "docs/user/quick-start.md": [],
+    "docs/user/workflow-guide.md": [],
+    "docs/version-roadmap.md": [],
+    "index.html": [],
+    "package.json": [],
+    "prompts/chapter_generate.md": [],
+    "prompts/chapter_polish.md": [],
+    "prompts/chapter_summarize.md": [],
+    "prompts/character_generate.md": [],
+    "prompts/event_suggest.md": [],
+    "prompts/quality_check.md": [],
+    "prompts/style_analyze.md": [],
+    "README.md": [],
+    "reports/local-storage-report.md": [],
+    "scripts/agent-workflow/check_ai_task_delete.ps1": [],
+    "scripts/agent-workflow/check_docs_sync.ps1": [],
+    "scripts/agent-workflow/check_setting_suggestions.ps1": [],
+    "scripts/agent-workflow/release_workflow.ps1": [],
+    "scripts/agent-workflow/run_feature_workflow.ps1": [],
+    "scripts/agent-workflow/runtime_check_ai_task_delete.ps1": [],
+    "scripts/agent-workflow/verify_project.ps1": [],
+    "scripts/maintenance/archive_old_builds.ps1": [],
+    "scripts/maintenance/clean_old_builds.ps1": [],
+    "scripts/maintenance/report_large_files.ps1": [],
+    "scripts/package-windows.ps1": [],
+    "src-tauri/build.rs": [],
+    "src-tauri/Cargo.toml": [],
+    "src-tauri/icons/icon.icns": [],
+    "src-tauri/src/ai.rs": [],
+    "src-tauri/src/commands.rs": [
+      "src-tauri/src/db.rs"
+    ],
+    "src-tauri/src/db.rs": [],
+    "src-tauri/src/large_text_save.rs": [
+      "src-tauri/src/db.rs"
+    ],
+    "src-tauri/src/main.rs": [
+      "src-tauri/src/ai.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/db.rs",
+      "src-tauri/src/large_text_save.rs",
+      "src-tauri/src/outline_commands.rs",
+      "src-tauri/src/system_accent.rs",
+      "src-tauri/src/window_state.rs"
+    ],
+    "src-tauri/src/outline_commands.rs": [
+      "src-tauri/src/db.rs"
+    ],
+    "src-tauri/src/system_accent.rs": [],
+    "src-tauri/src/window_state.rs": [],
+    "src-tauri/tauri.conf.json": [],
+    "src/agent-tools/chapter-tools.ts": [
+      "src/agent-tools/tool-types.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftService.ts",
+      "src/services/database/volumeRepository.ts"
+    ],
+    "src/agent-tools/context-tools.ts": [
+      "src/agent-tools/chapter-tools.ts",
+      "src/agent-tools/project-tools.ts",
+      "src/agent-tools/style-tools.ts",
+      "src/agent-tools/tool-types.ts"
+    ],
+    "src/agent-tools/project-tools.ts": [
+      "src/agent-tools/tool-types.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/novels/novelService.ts"
+    ],
+    "src/agent-tools/style-tools.ts": [
+      "src/agent-tools/tool-types.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts"
+    ],
+    "src/agent-tools/tool-types.ts": [],
+    "src/agent-tools/verification-tools.ts": [
+      "src/agent-tools/tool-types.ts"
+    ],
+    "src/agent/context-summary.ts": [],
+    "src/agent/planner-lite.ts": [
+      "src/agent/types.ts"
+    ],
+    "src/agent/types.ts": [],
+    "src/agent/workflow-runner.ts": [
+      "src/agent/types.ts"
+    ],
+    "src/App.tsx": [
+      "src/components/common/ErrorBoundary.tsx",
+      "src/components/common/LoadingModal.tsx",
+      "src/components/layout/AppShell.tsx",
+      "src/lib/runWithLoading.ts",
+      "src/pages/AiTasks/AiTasksPage.tsx",
+      "src/pages/Assets/AssetsPage.tsx",
+      "src/pages/ComingSoon/ComingSoonPage.tsx",
+      "src/pages/Home/HomePage.tsx",
+      "src/pages/ImportExport/ImportExportPage.tsx",
+      "src/pages/NotFound/NotFoundPage.tsx",
+      "src/pages/NovelDetail/NovelDetailPage.tsx",
+      "src/pages/OutlineEditor/OutlineEditorPage.tsx",
+      "src/pages/Settings/SettingsPage.tsx",
+      "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+      "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+      "src/pages/Templates/TemplatesPage.tsx",
+      "src/pages/WritingWorkspace/WritingWorkspacePage.tsx"
+    ],
+    "src/app/README.md": [],
+    "src/components/chapter-summary/ChapterSummaryDialog.tsx": [
+      "src/types/chapterSummary.ts"
+    ],
+    "src/components/common/BackButton.tsx": [],
+    "src/components/common/EmptyState.tsx": [],
+    "src/components/common/ErrorBoundary.tsx": [
+      "src/services/database/novelRepository.ts"
+    ],
+    "src/components/common/ErrorState.tsx": [],
+    "src/components/common/FirstTimeGuide.tsx": [],
+    "src/components/common/LoadingModal.css": [],
+    "src/components/common/LoadingModal.tsx": [
+      "src/components/common/LoadingModal.css"
+    ],
+    "src/components/common/LoadingState.tsx": [],
+    "src/components/common/README.md": [],
+    "src/components/context-records/ContextRecordForm.tsx": [
+      "src/types/context.ts"
+    ],
+    "src/components/context-records/ContextRecordList.tsx": [
+      "src/types/context.ts"
+    ],
+    "src/components/import/ImportJsonDialog.tsx": [
+      "src/features/novels/novelNormalizer.ts",
+      "src/lib/runWithLoading.ts",
+      "src/services/import/jsonImportService.ts",
+      "src/services/novels/novelService.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts"
+    ],
+    "src/components/import/ImportTxtDialog.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/import/txtImportService.ts",
+      "src/services/novels/novelService.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/layout/AppShell.tsx": [
+      "src/components/sidebar/Sidebar.tsx",
+      "src/components/topbar/TopBar.tsx",
+      "src/styles/app-shell.css"
+    ],
+    "src/components/novel-card/CharacterLibraryCard.tsx": [
+      "src/services/characters/characterService.ts",
+      "src/types/character.ts"
+    ],
+    "src/components/novel-card/ContextOverviewCard.tsx": [
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts"
+    ],
+    "src/components/novel-card/ExportCard.tsx": [
+      "src/services/export/exportService.ts"
+    ],
+    "src/components/novel-card/NovelCard.tsx": [
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/novel.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/novel-detail/NovelDetailCards.tsx": [
+      "src/features/novels/novelNormalizer.ts",
+      "src/types/novel.ts",
+      "src/types/protagonist.ts",
+      "src/types/setting.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/components/outline/ChapterFormModal.tsx": [
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/components/outline/OutlineEditor.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/types/outline.ts"
+    ],
+    "src/components/outline/OutlineManager.tsx": [
+      "src/components/outline/ChapterFormModal.tsx",
+      "src/components/outline/VolumeCard.tsx",
+      "src/components/outline/VolumeFormModal.tsx",
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/outlineGenerateService.ts",
+      "src/services/chapters/chapterCreationService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/types/chapter.ts",
+      "src/types/outline.ts",
+      "src/types/volume.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/components/outline/VolumeCard.tsx": [
+      "src/types/chapter.ts",
+      "src/types/volume.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/outline/VolumeFormModal.tsx": [
+      "src/types/volume.ts"
+    ],
+    "src/components/right-dock/panels/AiGeneratePanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/chapterRevisionService.ts",
+      "src/services/ai/outlineComplianceChecker.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/prompt/contextBuilder.ts",
+      "src/services/prompt/promptOrchestrator.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/output.ts",
+      "src/types/style.ts",
+      "src/utils/nativeDialog.ts",
+      "src/utils/nativeNotification.ts"
+    ],
+    "src/components/right-dock/panels/ChapterSummaryPanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/chapterSummarizeService.ts",
+      "src/services/ai/summaryValidator.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/characterStateService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/utils/date.ts"
+    ],
+    "src/components/right-dock/panels/CharactersPanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/characterGenerateService.ts",
+      "src/services/characters/chapterCharacterService.ts",
+      "src/services/characters/characterService.ts",
+      "src/types/chapter.ts",
+      "src/types/character.ts"
+    ],
+    "src/components/right-dock/panels/CheckPanel.tsx": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/fixRunStore.ts",
+      "src/services/ai/qualityCheckAiService.ts",
+      "src/services/ai/qualityFixService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/prompt/contextReaderService.ts",
+      "src/services/quality/qualityCheckService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/components/right-dock/panels/ContextViewPanel.tsx": [
+      "src/components/context-records/ContextRecordForm.tsx",
+      "src/components/context-records/ContextRecordList.tsx",
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/volumeSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/context.ts",
+      "src/types/volume.ts"
+    ],
+    "src/components/right-dock/panels/DraftHistoryPanel.tsx": [
+      "src/services/database/draftVersionService.ts",
+      "src/types/ai.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/components/right-dock/panels/EventsPanel.tsx": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/eventSuggestService.ts",
+      "src/services/characters/chapterCharacterService.ts",
+      "src/services/characters/chapterEventService.ts",
+      "src/services/characters/characterService.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterEvent.ts",
+      "src/types/character.ts"
+    ],
+    "src/components/right-dock/panels/OutlinePanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/outlineGenerateService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/prompt/chapterOutlineDraftCache.ts",
+      "src/types/chapter.ts",
+      "src/types/volume.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/right-dock/panels/PolishPanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/polishAiService.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/quality/polishService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/polish.ts"
+    ],
+    "src/components/right-dock/panels/SettingPanel.tsx": [
+      "src/services/ai/settingExpandService.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/types/chapter.ts",
+      "src/types/protagonist.ts",
+      "src/types/setting.ts"
+    ],
+    "src/components/right-dock/panels/StylePanel.tsx": [
+      "src/services/ai/aiClient.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleAnalyzeService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/chapter.ts",
+      "src/types/output.ts",
+      "src/types/style.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/right-dock/RightPanel.tsx": [
+      "src/components/right-dock/panels/AiGeneratePanel.tsx",
+      "src/components/right-dock/panels/ChapterSummaryPanel.tsx",
+      "src/components/right-dock/panels/CharactersPanel.tsx",
+      "src/components/right-dock/panels/CheckPanel.tsx",
+      "src/components/right-dock/panels/ContextViewPanel.tsx",
+      "src/components/right-dock/panels/EventsPanel.tsx",
+      "src/components/right-dock/panels/OutlinePanel.tsx",
+      "src/components/right-dock/panels/PolishPanel.tsx",
+      "src/components/right-dock/panels/SettingPanel.tsx",
+      "src/components/right-dock/panels/StylePanel.tsx",
+      "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+      "src/types/ai.ts",
+      "src/types/chapter.ts"
+    ],
+    "src/components/right-dock/RightToolbar.tsx": [
+      "src/pages/WritingWorkspace/WritingWorkspacePage.tsx"
+    ],
+    "src/components/sidebar/Sidebar.tsx": [
+      "src/constants/version.ts"
+    ],
+    "src/components/Toast.css": [],
+    "src/components/ToastProvider.tsx": [
+      "src/components/Toast.css",
+      "src/utils/toast.ts"
+    ],
+    "src/components/topbar/TopBar.tsx": [
+      "src/constants/version.ts"
+    ],
+    "src/components/workspace/EditorArea.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/workspace/GlobalAiTaskModal.tsx": [],
+    "src/components/workspace/StatusBar.tsx": [
+      "src/types/chapter.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/workspace/VolumeTree.tsx": [
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/constants/version.ts": [],
+    "src/features/chapters/mockChapters.ts": [
+      "src/types/chapter.ts"
+    ],
+    "src/features/novels/mockNovels.ts": [
+      "src/types/novel.ts"
+    ],
+    "src/features/novels/novelNormalizer.ts": [
+      "src/services/database/db.ts",
+      "src/types/novel.ts",
+      "src/utils/dataGuard.ts",
+      "src/utils/date.ts"
+    ],
+    "src/features/styles/mockStyles.ts": [
+      "src/types/character.ts",
+      "src/types/output.ts",
+      "src/types/style.ts"
+    ],
+    "src/hooks/useLoadingTask.ts": [
+      "src/components/common/LoadingModal.tsx"
+    ],
+    "src/lib/runWithLoading.ts": [
+      "src/hooks/useLoadingTask.ts"
+    ],
+    "src/main.tsx": [
+      "src/App.tsx",
+      "src/components/ToastProvider.tsx",
+      "src/services/tauri/runtime.ts",
+      "src/styles/global.css",
+      "src/styles/variables.css"
+    ],
+    "src/pages/AiTasks/AiTasksPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/ai/aiTaskService.ts",
+      "src/types/ai.ts",
+      "src/utils/date.ts",
+      "src/utils/errorMessage.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/Assets/AssetsPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/characters/characterService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/settingSuggestions/settingSuggestionService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/novel.ts"
+    ],
+    "src/pages/ComingSoon/ComingSoonPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/styles/coming-soon.css"
+    ],
+    "src/pages/Home/HomePage.tsx": [
+      "src/components/common/FirstTimeGuide.tsx",
+      "src/components/import/ImportJsonDialog.tsx",
+      "src/components/import/ImportTxtDialog.tsx",
+      "src/components/novel-card/NovelCard.tsx",
+      "src/services/database/novelRepository.ts",
+      "src/services/novels/novelService.ts",
+      "src/styles/home.css",
+      "src/types/novel.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/ImportExport/ImportExportPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/components/import/ImportJsonDialog.tsx",
+      "src/components/import/ImportTxtDialog.tsx",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/export/exportService.ts",
+      "src/types/chapter.ts",
+      "src/types/novel.ts"
+    ],
+    "src/pages/NotFound/NotFoundPage.tsx": [],
+    "src/pages/NovelDetail/NovelDetailPage.tsx": [
+      "src/components/novel-card/CharacterLibraryCard.tsx",
+      "src/components/novel-card/ContextOverviewCard.tsx",
+      "src/components/novel-card/ExportCard.tsx",
+      "src/components/novel-detail/NovelDetailCards.tsx",
+      "src/components/outline/OutlineManager.tsx",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/novels/novelService.ts",
+      "src/styles/novel-detail.css",
+      "src/types/novel.ts",
+      "src/types/protagonist.ts",
+      "src/types/setting.ts",
+      "src/utils/format.ts"
+    ],
+    "src/pages/OutlineEditor/OutlineEditorPage.tsx": [
+      "src/components/outline/OutlineEditor.tsx",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/pages/Settings/SettingsPage.tsx": [
+      "src/constants/version.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/database/novelRepository.ts",
+      "src/styles/novel-detail.css",
+      "src/types/ai.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/database/novelRepository.ts",
+      "src/services/settingSuggestions/settingSuggestionService.ts",
+      "src/styles/setting-suggestions.css",
+      "src/types/novel.ts",
+      "src/types/settingSuggestion.ts"
+    ],
+    "src/pages/StyleProfiles/StyleProfilesPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/styles/importedAssetService.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleAnalyzeService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/importedAsset.ts",
+      "src/types/output.ts",
+      "src/types/style.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/Templates/TemplatesPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/templates/templateService.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/WritingWorkspace/WritingWorkspacePage.tsx": [
+      "src/components/chapter-summary/ChapterSummaryDialog.tsx",
+      "src/components/common/BackButton.tsx",
+      "src/components/right-dock/panels/DraftHistoryPanel.tsx",
+      "src/components/right-dock/RightPanel.tsx",
+      "src/components/right-dock/RightToolbar.tsx",
+      "src/components/workspace/EditorArea.tsx",
+      "src/components/workspace/GlobalAiTaskModal.tsx",
+      "src/components/workspace/StatusBar.tsx",
+      "src/components/workspace/VolumeTree.tsx",
+      "src/services/ai/chapterSummarizeService.ts",
+      "src/services/chapters/chapterCreationService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/characterStateService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/styles/right-dock.css",
+      "src/styles/workspace.css",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/novel.ts",
+      "src/types/volume.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/prompts/chapter/chapter-generation-prompt.ts": [],
+    "src/prompts/README.md": [],
+    "src/prompts/style/style-constraint-prompt.ts": [],
+    "src/prompts/system/base-system-prompt.ts": [],
+    "src/prompts/verification/chapter-verification-prompt.ts": [],
+    "src/services/ai/aiClient.ts": [
+      "src/services/ai/aiSettingsService.ts",
+      "src/services/ai/mockAiClient.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/aiSettingsService.ts": [
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/services/database/db.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/aiTaskService.ts": [
+      "src/services/database/db.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/chapterRevisionService.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/chapterSummarizeService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/context.ts"
+    ],
+    "src/services/ai/characterGenerateService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/ai/eventSuggestService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/ai/fixRunStore.ts": [
+      "src/services/ai/qualityFixService.ts",
+      "src/services/database/db.ts"
+    ],
+    "src/services/ai/jsonUtils.ts": [],
+    "src/services/ai/mockAiClient.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/outlineComplianceChecker.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/outlineGenerateService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/services/styles/styleProfileService.ts"
+    ],
+    "src/services/ai/polishAiService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/types/polish.ts"
+    ],
+    "src/services/ai/promptBuilder.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/qualityCheckAiService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/prompt/contextReaderService.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/services/ai/qualityFixService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/fixRunStore.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/types/ai.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/services/ai/realAiClient.ts": [
+      "src/services/database/db.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/settingExpandService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/settingRepository.ts"
+    ],
+    "src/services/ai/summaryValidator.ts": [
+      "src/types/chapterSummary.ts"
+    ],
+    "src/services/ai/volumeSummaryService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/volume.ts"
+    ],
+    "src/services/chapters/chapterCreationService.ts": [
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/services/characters/chapterCharacterService.ts": [
+      "src/services/database/db.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/characters/chapterEventService.ts": [
+      "src/services/database/db.ts",
+      "src/types/chapterEvent.ts"
+    ],
+    "src/services/characters/characterService.ts": [
+      "src/services/database/db.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/context/chapterSummaryService.ts": [
+      "src/services/database/db.ts",
+      "src/types/chapterSummary.ts"
+    ],
+    "src/services/context/characterStateService.ts": [
+      "src/services/characters/characterService.ts",
+      "src/services/database/db.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/context/contextRecordService.ts": [
+      "src/services/database/db.ts",
+      "src/types/context.ts"
+    ],
+    "src/services/database/chapterRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/chapter.ts"
+    ],
+    "src/services/database/db.ts": [
+      "src/services/tauri/runtime.ts",
+      "src/utils/dataGuard.ts",
+      "src/utils/errorMessage.ts"
+    ],
+    "src/services/database/draftService.ts": [
+      "src/services/database/db.ts"
+    ],
+    "src/services/database/draftVersionService.ts": [
+      "src/services/database/db.ts",
+      "src/services/largeTextSave.ts",
+      "src/services/tauri/runtime.ts",
+      "src/types/ai.ts",
+      "src/types/largeTextSave.ts"
+    ],
+    "src/services/database/index.ts": [],
+    "src/services/database/novelRepository.ts": [
+      "src/features/novels/mockNovels.ts",
+      "src/features/novels/novelNormalizer.ts",
+      "src/services/database/db.ts",
+      "src/types/novel.ts",
+      "src/utils/date.ts"
+    ],
+    "src/services/database/protagonistRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/protagonist.ts"
+    ],
+    "src/services/database/settingRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/setting.ts"
+    ],
+    "src/services/database/volumeRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/volume.ts"
+    ],
+    "src/services/export/exportService.ts": [
+      "src/services/characters/characterService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts"
+    ],
+    "src/services/import/jsonImportService.ts": [],
+    "src/services/import/txtImportService.ts": [],
+    "src/services/largeTextSave.ts": [
+      "src/services/tauri/runtime.ts",
+      "src/types/largeTextSave.ts"
+    ],
+    "src/services/novels/novelService.ts": [
+      "src/services/database/novelRepository.ts",
+      "src/types/novel.ts"
+    ],
+    "src/services/outlines/outlineService.ts": [
+      "src/services/database/db.ts",
+      "src/types/outline.ts"
+    ],
+    "src/services/prompt/chapterOutlineDraftCache.ts": [],
+    "src/services/prompt/contextBuilder.ts": [
+      "src/services/characters/chapterCharacterService.ts",
+      "src/services/characters/chapterEventService.ts",
+      "src/services/characters/characterService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/services/prompt/chapterOutlineDraftCache.ts",
+      "src/services/prompt/contextReaderService.ts",
+      "src/services/prompt/outlineKeyPointExtractor.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/output.ts",
+      "src/types/style.ts"
+    ],
+    "src/services/prompt/contextReaderService.ts": [
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/db.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/context.ts"
+    ],
+    "src/services/prompt/outlineKeyPointExtractor.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/prompt/promptOrchestrator.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/quality/polishService.ts": [
+      "src/services/database/db.ts",
+      "src/types/polish.ts"
+    ],
+    "src/services/quality/qualityCheckService.ts": [
+      "src/services/database/db.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/services/README.md": [],
+    "src/services/settingSuggestions/settingSuggestionService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/characters/characterService.ts",
+      "src/services/database/db.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/types/character.ts",
+      "src/types/setting.ts",
+      "src/types/settingSuggestion.ts",
+      "src/utils/dataGuard.ts"
+    ],
+    "src/services/styles/importedAssetService.ts": [
+      "src/services/database/db.ts",
+      "src/types/importedAsset.ts"
+    ],
+    "src/services/styles/outputProfileService.ts": [
+      "src/services/database/db.ts",
+      "src/types/output.ts"
+    ],
+    "src/services/styles/styleAnalyzeService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/types/style.ts"
+    ],
+    "src/services/styles/styleProfileService.ts": [
+      "src/services/database/db.ts",
+      "src/types/style.ts"
+    ],
+    "src/services/tauri/runtime.ts": [],
+    "src/services/templates/templateService.ts": [
+      "src/services/database/db.ts"
+    ],
+    "src/store/README.md": [],
+    "src/styles/app-shell.css": [],
+    "src/styles/coming-soon.css": [],
+    "src/styles/global.css": [],
+    "src/styles/home.css": [],
+    "src/styles/novel-detail.css": [],
+    "src/styles/right-dock.css": [],
+    "src/styles/setting-suggestions.css": [],
+    "src/styles/variables.css": [],
+    "src/styles/workspace.css": [],
+    "src/types/ai.ts": [],
+    "src/types/chapter.ts": [],
+    "src/types/chapterEvent.ts": [],
+    "src/types/chapterSummary.ts": [
+      "src/types/context.ts"
+    ],
+    "src/types/character.ts": [],
+    "src/types/context.ts": [],
+    "src/types/importedAsset.ts": [],
+    "src/types/index.ts": [],
+    "src/types/largeTextSave.ts": [],
+    "src/types/novel.ts": [
+      "src/types/volume.ts"
+    ],
+    "src/types/outline.ts": [],
+    "src/types/output.ts": [],
+    "src/types/polish.ts": [],
+    "src/types/protagonist.ts": [],
+    "src/types/qualityCheck.ts": [],
+    "src/types/setting.ts": [],
+    "src/types/settingSuggestion.ts": [],
+    "src/types/style.ts": [],
+    "src/types/volume.ts": [],
+    "src/utils/dataGuard.ts": [],
+    "src/utils/date.ts": [],
+    "src/utils/debugSeed.ts": [
+      "src/services/database/db.ts"
+    ],
+    "src/utils/errorMessage.ts": [],
+    "src/utils/format.ts": [],
+    "src/utils/nativeDialog.ts": [],
+    "src/utils/nativeNotification.ts": [
+      "src/utils/toast.ts"
+    ],
+    "src/utils/toast.ts": [],
+    "src/vite-env.d.ts": [],
+    "tsconfig.json": [],
+    "tsconfig.node.json": [],
+    "vite.config.ts": []
+  }
+}

@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react';
 import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePage';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
+import type { AiTextApplyMode, AiTextApplyRequest } from '../workspace/EditorArea';
 import AiGeneratePanel from './panels/AiGeneratePanel';
 import OutlinePanel from './panels/OutlinePanel';
 import CharactersPanel from './panels/CharactersPanel';
@@ -30,6 +31,17 @@ interface RightPanelProps {
   qcReport?: any;
   qcItems?: any[];
   onQcChange?: (report: any, items: any[]) => void;
+  currentEditorContent?: string;
+  currentEditorWordCount?: number;
+  currentEditorDirty?: boolean;
+  currentContentHash?: string;
+  currentDraftId?: string;
+  currentDraftVersion?: number;
+  onApplyAiText?: (payload: {
+    mode: AiTextApplyMode;
+    text: string;
+    source: AiTextApplyRequest['source'];
+  }) => Promise<boolean>;
   showAiModal?: (title: string, subtitle?: string) => void;
   updateAiModal?: (stage: string, progress: number) => void;
   hideAiModal?: () => void;
@@ -48,7 +60,32 @@ const panelConfig: Record<string, { title: string; component: React.FC<any> }> =
   'context-view': { title: '上下文记录', component: ContextViewPanel },
 };
 
-function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopted, onChapterOutlineApplied, onChapterGoalDirtyChange, onChapterCharactersChanged, contextVersion, onLocateText, qcReport, qcItems, onQcChange, showAiModal, updateAiModal, hideAiModal }: RightPanelProps) {
+function RightPanel({
+  panelType,
+  onClose,
+  novelId,
+  chapter,
+  onGenerated,
+  onAdopted,
+  onChapterOutlineApplied,
+  onChapterGoalDirtyChange,
+  onChapterCharactersChanged,
+  contextVersion,
+  onLocateText,
+  qcReport,
+  qcItems,
+  onQcChange,
+  currentEditorContent,
+  currentEditorWordCount,
+  currentEditorDirty,
+  currentContentHash,
+  currentDraftId,
+  currentDraftVersion,
+  onApplyAiText,
+  showAiModal,
+  updateAiModal,
+  hideAiModal,
+}: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
@@ -108,6 +145,13 @@ function RightPanel({ panelType, onClose, novelId, chapter, onGenerated, onAdopt
             qcReport={qcReport}
             qcItems={qcItems}
             onQcChange={onQcChange}
+            currentEditorContent={currentEditorContent}
+            currentEditorWordCount={currentEditorWordCount}
+            currentEditorDirty={currentEditorDirty}
+            currentContentHash={currentContentHash}
+            currentDraftId={currentDraftId}
+            currentDraftVersion={currentDraftVersion}
+            onApplyAiText={onApplyAiText}
             showAiModal={showAiModal}
             updateAiModal={updateAiModal}
             hideAiModal={hideAiModal}

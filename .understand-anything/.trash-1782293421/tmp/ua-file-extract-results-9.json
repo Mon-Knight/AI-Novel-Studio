@@ -1,0 +1,1304 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 8,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "src/components/ToastProvider.tsx",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 85,
+      "nonEmptyLines": 76,
+      "functions": [
+        {
+          "name": "ToastProvider",
+          "startLine": 14,
+          "endLine": 83,
+          "params": [
+            "{ children }"
+          ]
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "ToastProvider",
+          "callee": "useState",
+          "lineNumber": 15
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "useRef",
+          "lineNumber": 16
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "useCallback",
+          "lineNumber": 18
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "setToasts",
+          "lineNumber": 19
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "next.shift",
+          "lineNumber": 23
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timersRef.current.get",
+          "lineNumber": 24
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "clearTimeout",
+          "lineNumber": 25
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timersRef.current.delete",
+          "lineNumber": 25
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "setTimeout",
+          "lineNumber": 31
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "setToasts",
+          "lineNumber": 32
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "prev.filter",
+          "lineNumber": 32
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timersRef.current.delete",
+          "lineNumber": 33
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timersRef.current.set",
+          "lineNumber": 35
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "useCallback",
+          "lineNumber": 38
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timersRef.current.get",
+          "lineNumber": 39
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "clearTimeout",
+          "lineNumber": 40
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timersRef.current.delete",
+          "lineNumber": 40
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "setToasts",
+          "lineNumber": 41
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "prev.filter",
+          "lineNumber": 41
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "useEffect",
+          "lineNumber": 44
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "registerToastListener",
+          "lineNumber": 45
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "unregister",
+          "lineNumber": 48
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timers.forEach",
+          "lineNumber": 50
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "clearTimeout",
+          "lineNumber": 50
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "timers.clear",
+          "lineNumber": 51
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "toasts.map",
+          "lineNumber": 60
+        },
+        {
+          "caller": "ToastProvider",
+          "callee": "dismissToast",
+          "lineNumber": 72
+        }
+      ],
+      "metrics": {
+        "importCount": 2,
+        "exportCount": 0,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/main.tsx",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 51,
+      "nonEmptyLines": 46,
+      "functions": [
+        {
+          "name": "applySystemAccentColor",
+          "startLine": 26,
+          "endLine": 39,
+          "params": []
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "applySystemAccentColor",
+          "callee": "await tauriInvoke",
+          "lineNumber": 28
+        },
+        {
+          "caller": "applySystemAccentColor",
+          "callee": "/^#[0-9a-fA-F]{6}$/.test",
+          "lineNumber": 29
+        },
+        {
+          "caller": "applySystemAccentColor",
+          "callee": "document.documentElement.style.setProperty",
+          "lineNumber": 30
+        },
+        {
+          "caller": "applySystemAccentColor",
+          "callee": "document.documentElement.style.setProperty",
+          "lineNumber": 31
+        },
+        {
+          "caller": "applySystemAccentColor",
+          "callee": "document.documentElement.style.setProperty",
+          "lineNumber": 33
+        },
+        {
+          "caller": "applySystemAccentColor",
+          "callee": "document.documentElement.style.setProperty",
+          "lineNumber": 34
+        }
+      ],
+      "metrics": {
+        "importCount": 5,
+        "exportCount": 0,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/database/draftVersionService.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 345,
+      "nonEmptyLines": 304,
+      "functions": [
+        {
+          "name": "draftsKey",
+          "startLine": 27,
+          "endLine": 29,
+          "params": [
+            "chapterId"
+          ]
+        },
+        {
+          "name": "countWords",
+          "startLine": 31,
+          "endLine": 37,
+          "params": [
+            "text"
+          ]
+        },
+        {
+          "name": "toNumber",
+          "startLine": 39,
+          "endLine": 41,
+          "params": [
+            "value",
+            "fallback"
+          ]
+        },
+        {
+          "name": "toBoolean",
+          "startLine": 43,
+          "endLine": 47,
+          "params": [
+            "value"
+          ]
+        },
+        {
+          "name": "normalizeDraft",
+          "startLine": 49,
+          "endLine": 75,
+          "params": [
+            "raw"
+          ]
+        },
+        {
+          "name": "normalizeDrafts",
+          "startLine": 77,
+          "endLine": 83,
+          "params": [
+            "items"
+          ]
+        },
+        {
+          "name": "getLocalDrafts",
+          "startLine": 85,
+          "endLine": 89,
+          "params": [
+            "chapterId"
+          ]
+        },
+        {
+          "name": "saveLocalDrafts",
+          "startLine": 91,
+          "endLine": 93,
+          "params": [
+            "chapterId",
+            "drafts"
+          ]
+        },
+        {
+          "name": "readFullContent",
+          "startLine": 98,
+          "endLine": 112,
+          "params": [
+            "largeTextRefId"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "draftVersionService",
+          "line": 114,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "countWords",
+          "callee": "text.replace(/[#*\\-`>\\s]+/g, ' ').trim",
+          "lineNumber": 32
+        },
+        {
+          "caller": "countWords",
+          "callee": "text.replace",
+          "lineNumber": 32
+        },
+        {
+          "caller": "countWords",
+          "callee": "cleaned.match",
+          "lineNumber": 34
+        },
+        {
+          "caller": "countWords",
+          "callee": "cleaned.match",
+          "lineNumber": 35
+        },
+        {
+          "caller": "toNumber",
+          "callee": "Number.isFinite",
+          "lineNumber": 40
+        },
+        {
+          "caller": "normalizeDraft",
+          "callee": "nowISO",
+          "lineNumber": 58
+        },
+        {
+          "caller": "normalizeDraft",
+          "callee": "toNumber",
+          "lineNumber": 66
+        },
+        {
+          "caller": "normalizeDraft",
+          "callee": "toNumber",
+          "lineNumber": 67
+        },
+        {
+          "caller": "normalizeDraft",
+          "callee": "countWords",
+          "lineNumber": 67
+        },
+        {
+          "caller": "normalizeDraft",
+          "callee": "toBoolean",
+          "lineNumber": 68
+        },
+        {
+          "caller": "normalizeDrafts",
+          "callee": "Array.isArray",
+          "lineNumber": 78
+        },
+        {
+          "caller": "normalizeDrafts",
+          "callee": "items\n    .map(normalizeDraft)\n    .filter((item): item is ChapterDraft => item !== null)\n    .sort",
+          "lineNumber": 79
+        },
+        {
+          "caller": "normalizeDrafts",
+          "callee": "items\n    .map(normalizeDraft)\n    .filter",
+          "lineNumber": 79
+        },
+        {
+          "caller": "normalizeDrafts",
+          "callee": "items\n    .map",
+          "lineNumber": 79
+        },
+        {
+          "caller": "getLocalDrafts",
+          "callee": "normalizeDrafts",
+          "lineNumber": 86
+        },
+        {
+          "caller": "getLocalDrafts",
+          "callee": "lsGet",
+          "lineNumber": 86
+        },
+        {
+          "caller": "getLocalDrafts",
+          "callee": "draftsKey",
+          "lineNumber": 86
+        },
+        {
+          "caller": "getLocalDrafts",
+          "callee": "lsSet",
+          "lineNumber": 87
+        },
+        {
+          "caller": "getLocalDrafts",
+          "callee": "draftsKey",
+          "lineNumber": 87
+        },
+        {
+          "caller": "saveLocalDrafts",
+          "callee": "lsSet",
+          "lineNumber": 92
+        },
+        {
+          "caller": "saveLocalDrafts",
+          "callee": "draftsKey",
+          "lineNumber": 92
+        },
+        {
+          "caller": "readFullContent",
+          "callee": "isTauriRuntime",
+          "lineNumber": 100
+        },
+        {
+          "caller": "readFullContent",
+          "callee": "await tauriInvoke",
+          "lineNumber": 102
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "await dbCall",
+          "lineNumber": 116
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "getLocalDrafts",
+          "lineNumber": 119
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "normalizeDrafts",
+          "lineNumber": 121
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "readFullContent",
+          "lineNumber": 126
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "countWords",
+          "lineNumber": 129
+        },
+        {
+          "caller": "getLatestByChapterId",
+          "callee": "await dbCall",
+          "lineNumber": 138
+        },
+        {
+          "caller": "getLatestByChapterId",
+          "callee": "getLocalDrafts",
+          "lineNumber": 142
+        },
+        {
+          "caller": "getLatestByChapterId",
+          "callee": "drafts.sort",
+          "lineNumber": 144
+        },
+        {
+          "caller": "getLatestByChapterId",
+          "callee": "normalizeDraft",
+          "lineNumber": 147
+        },
+        {
+          "caller": "getLatestByChapterId",
+          "callee": "readFullContent",
+          "lineNumber": 151
+        },
+        {
+          "caller": "getLatestByChapterId",
+          "callee": "countWords",
+          "lineNumber": 154
+        },
+        {
+          "caller": "getAdoptedByChapterId",
+          "callee": "this.getByChapterId",
+          "lineNumber": 162
+        },
+        {
+          "caller": "getAdoptedByChapterId",
+          "callee": "drafts.find",
+          "lineNumber": 163
+        },
+        {
+          "caller": "create",
+          "callee": "shouldUseLargeTextSave",
+          "lineNumber": 171
+        },
+        {
+          "caller": "create",
+          "callee": "onProgress",
+          "lineNumber": 172
+        },
+        {
+          "caller": "create",
+          "callee": "saveLargeTextWithChunks",
+          "lineNumber": 173
+        },
+        {
+          "caller": "create",
+          "callee": "input.content.slice",
+          "lineNumber": 189
+        },
+        {
+          "caller": "create",
+          "callee": "await dbCall",
+          "lineNumber": 198
+        },
+        {
+          "caller": "create",
+          "callee": "getLocalDrafts",
+          "lineNumber": 202
+        },
+        {
+          "caller": "create",
+          "callee": "drafts.reduce",
+          "lineNumber": 203
+        },
+        {
+          "caller": "create",
+          "callee": "Math.max",
+          "lineNumber": 203
+        },
+        {
+          "caller": "create",
+          "callee": "nowISO",
+          "lineNumber": 204
+        },
+        {
+          "caller": "create",
+          "callee": "generateId",
+          "lineNumber": 206
+        },
+        {
+          "caller": "create",
+          "callee": "countWords",
+          "lineNumber": 213
+        },
+        {
+          "caller": "create",
+          "callee": "drafts.push",
+          "lineNumber": 222
+        },
+        {
+          "caller": "create",
+          "callee": "saveLocalDrafts",
+          "lineNumber": 223
+        },
+        {
+          "caller": "create",
+          "callee": "normalizeDraft",
+          "lineNumber": 227
+        },
+        {
+          "caller": "create",
+          "callee": "readFullContent",
+          "lineNumber": 233
+        },
+        {
+          "caller": "create",
+          "callee": "console.warn",
+          "lineNumber": 239
+        },
+        {
+          "caller": "update",
+          "callee": "shouldUseLargeTextSave",
+          "lineNumber": 251
+        },
+        {
+          "caller": "update",
+          "callee": "onProgress",
+          "lineNumber": 252
+        },
+        {
+          "caller": "update",
+          "callee": "saveLargeTextWithChunks",
+          "lineNumber": 253
+        },
+        {
+          "caller": "update",
+          "callee": "content.slice",
+          "lineNumber": 267
+        },
+        {
+          "caller": "update",
+          "callee": "await dbCall",
+          "lineNumber": 274
+        },
+        {
+          "caller": "update",
+          "callee": "getLocalDrafts",
+          "lineNumber": 278
+        },
+        {
+          "caller": "update",
+          "callee": "drafts.findIndex",
+          "lineNumber": 279
+        },
+        {
+          "caller": "update",
+          "callee": "countWords",
+          "lineNumber": 286
+        },
+        {
+          "caller": "update",
+          "callee": "nowISO",
+          "lineNumber": 288
+        },
+        {
+          "caller": "update",
+          "callee": "saveLocalDrafts",
+          "lineNumber": 290
+        },
+        {
+          "caller": "update",
+          "callee": "normalizeDraft",
+          "lineNumber": 295
+        },
+        {
+          "caller": "update",
+          "callee": "readFullContent",
+          "lineNumber": 300
+        },
+        {
+          "caller": "update",
+          "callee": "console.warn",
+          "lineNumber": 305
+        },
+        {
+          "caller": "adopt",
+          "callee": "await dbCall",
+          "lineNumber": 313
+        },
+        {
+          "caller": "adopt",
+          "callee": "getLocalDrafts",
+          "lineNumber": 317
+        },
+        {
+          "caller": "adopt",
+          "callee": "drafts.map",
+          "lineNumber": 320
+        },
+        {
+          "caller": "adopt",
+          "callee": "nowISO",
+          "lineNumber": 322
+        },
+        {
+          "caller": "adopt",
+          "callee": "saveLocalDrafts",
+          "lineNumber": 328
+        },
+        {
+          "caller": "adopt",
+          "callee": "normalizeDraft",
+          "lineNumber": 332
+        },
+        {
+          "caller": "delete",
+          "callee": "await dbCall",
+          "lineNumber": 336
+        },
+        {
+          "caller": "delete",
+          "callee": "getLocalDrafts(chapterId).filter",
+          "lineNumber": 340
+        },
+        {
+          "caller": "delete",
+          "callee": "getLocalDrafts",
+          "lineNumber": 340
+        },
+        {
+          "caller": "delete",
+          "callee": "saveLocalDrafts",
+          "lineNumber": 341
+        }
+      ],
+      "metrics": {
+        "importCount": 5,
+        "exportCount": 1,
+        "functionCount": 9,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/largeTextSave.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 375,
+      "nonEmptyLines": 323,
+      "functions": [
+        {
+          "name": "byteLength",
+          "startLine": 65,
+          "endLine": 67,
+          "params": [
+            "content"
+          ]
+        },
+        {
+          "name": "charLength",
+          "startLine": 70,
+          "endLine": 72,
+          "params": [
+            "content"
+          ]
+        },
+        {
+          "name": "splitContent",
+          "startLine": 75,
+          "endLine": 93,
+          "params": [
+            "content",
+            "chunkSize"
+          ]
+        },
+        {
+          "name": "computeSha256",
+          "startLine": 96,
+          "endLine": 109,
+          "params": [
+            "content"
+          ]
+        },
+        {
+          "name": "saveLargeTextWithChunks",
+          "startLine": 127,
+          "endLine": 314,
+          "params": [
+            "options"
+          ]
+        },
+        {
+          "name": "abortLargeTextSave",
+          "startLine": 321,
+          "endLine": 324,
+          "params": [
+            "sessionId"
+          ]
+        },
+        {
+          "name": "cleanupExpiredSessions",
+          "startLine": 331,
+          "endLine": 334,
+          "params": []
+        },
+        {
+          "name": "smartSaveText",
+          "startLine": 343,
+          "endLine": 375,
+          "params": [
+            "options",
+            "normalSaveFn"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "saveLargeTextWithChunks",
+          "line": 127,
+          "isDefault": false
+        },
+        {
+          "name": "abortLargeTextSave",
+          "line": 321,
+          "isDefault": false
+        },
+        {
+          "name": "cleanupExpiredSessions",
+          "line": 331,
+          "isDefault": false
+        },
+        {
+          "name": "smartSaveText",
+          "line": 343,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "splitContent",
+          "callee": "Math.min",
+          "lineNumber": 79
+        },
+        {
+          "caller": "splitContent",
+          "callee": "content.charCodeAt",
+          "lineNumber": 84
+        },
+        {
+          "caller": "splitContent",
+          "callee": "chunks.push",
+          "lineNumber": 89
+        },
+        {
+          "caller": "splitContent",
+          "callee": "content.slice",
+          "lineNumber": 89
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "encoder.encode",
+          "lineNumber": 100
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "crypto.subtle.digest",
+          "lineNumber": 101
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "Array.from",
+          "lineNumber": 102
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "hashArray.map((b) => b.toString(16).padStart(2, '0')).join",
+          "lineNumber": 103
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "hashArray.map",
+          "lineNumber": 103
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "b.toString(16).padStart",
+          "lineNumber": 103
+        },
+        {
+          "caller": "computeSha256",
+          "callee": "b.toString",
+          "lineNumber": 103
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "isTauriRuntime",
+          "lineNumber": 152
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 153
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "charLength",
+          "lineNumber": 154
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "byteLength",
+          "lineNumber": 154
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "charLength",
+          "lineNumber": 157
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "byteLength",
+          "lineNumber": 158
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "shouldUseLargeTextSave",
+          "lineNumber": 161
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 162
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 170
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "splitContent",
+          "lineNumber": 176
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "computeSha256",
+          "lineNumber": 179
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 192
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 199
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 206
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 216
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "computeSha256",
+          "lineNumber": 223
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "charLength",
+          "lineNumber": 229
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "byteLength",
+          "lineNumber": 230
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 234
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "Math.round",
+          "lineNumber": 239
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 241
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 251
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 258
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 265
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 271
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "await tauriInvoke",
+          "lineNumber": 290
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "String",
+          "lineNumber": 299
+        },
+        {
+          "caller": "saveLargeTextWithChunks",
+          "callee": "onProgress",
+          "lineNumber": 301
+        },
+        {
+          "caller": "abortLargeTextSave",
+          "callee": "isTauriRuntime",
+          "lineNumber": 322
+        },
+        {
+          "caller": "abortLargeTextSave",
+          "callee": "await tauriInvoke",
+          "lineNumber": 323
+        },
+        {
+          "caller": "cleanupExpiredSessions",
+          "callee": "isTauriRuntime",
+          "lineNumber": 332
+        },
+        {
+          "caller": "cleanupExpiredSessions",
+          "callee": "tauriInvoke",
+          "lineNumber": 333
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "shouldUseLargeTextSave",
+          "lineNumber": 347
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "saveLargeTextWithChunks",
+          "lineNumber": 348
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "normalSaveFn",
+          "lineNumber": 355
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "charLength",
+          "lineNumber": 358
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "byteLength",
+          "lineNumber": 358
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "String",
+          "lineNumber": 365
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "charLength",
+          "lineNumber": 373
+        },
+        {
+          "caller": "smartSaveText",
+          "callee": "byteLength",
+          "lineNumber": 373
+        }
+      ],
+      "metrics": {
+        "importCount": 2,
+        "exportCount": 4,
+        "functionCount": 8,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/tauri/runtime.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 31,
+      "nonEmptyLines": 27,
+      "functions": [
+        {
+          "name": "isTauriRuntime",
+          "startLine": 9,
+          "endLine": 17,
+          "params": []
+        },
+        {
+          "name": "tauriInvoke",
+          "startLine": 19,
+          "endLine": 31,
+          "params": [
+            "command",
+            "args"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "isTauriRuntime",
+          "line": 9,
+          "isDefault": false
+        },
+        {
+          "name": "tauriInvoke",
+          "line": 19,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "tauriInvoke",
+          "callee": "isTauriRuntime",
+          "lineNumber": 23
+        },
+        {
+          "caller": "tauriInvoke",
+          "callee": "command.includes",
+          "lineNumber": 27
+        },
+        {
+          "caller": "tauriInvoke",
+          "callee": "console.log",
+          "lineNumber": 28
+        },
+        {
+          "caller": "tauriInvoke",
+          "callee": "invoke",
+          "lineNumber": 30
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 2,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/types/largeTextSave.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 72,
+      "nonEmptyLines": 64,
+      "functions": [
+        {
+          "name": "shouldUseLargeTextSave",
+          "startLine": 70,
+          "endLine": 72,
+          "params": [
+            "content"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "DEFAULT_CHUNK_SIZE",
+          "line": 64,
+          "isDefault": false
+        },
+        {
+          "name": "LARGE_TEXT_THRESHOLD",
+          "line": 67,
+          "isDefault": false
+        },
+        {
+          "name": "shouldUseLargeTextSave",
+          "line": 70,
+          "isDefault": false
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 3,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/utils/nativeNotification.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 67,
+      "nonEmptyLines": 56,
+      "functions": [
+        {
+          "name": "getTauriNotification",
+          "startLine": 13,
+          "endLine": 21,
+          "params": []
+        },
+        {
+          "name": "ensurePermission",
+          "startLine": 23,
+          "endLine": 41,
+          "params": []
+        },
+        {
+          "name": "notifyNative",
+          "startLine": 45,
+          "endLine": 67,
+          "params": [
+            "options"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "notifyNative",
+          "line": 45,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "getTauriNotification",
+          "callee": "import",
+          "lineNumber": 16
+        },
+        {
+          "caller": "ensurePermission",
+          "callee": "getTauriNotification",
+          "lineNumber": 27
+        },
+        {
+          "caller": "ensurePermission",
+          "callee": "notif.requestPermission",
+          "lineNumber": 33
+        },
+        {
+          "caller": "notifyNative",
+          "callee": "ensurePermission",
+          "lineNumber": 52
+        },
+        {
+          "caller": "notifyNative",
+          "callee": "showToast",
+          "lineNumber": 54
+        },
+        {
+          "caller": "notifyNative",
+          "callee": "getTauriNotification",
+          "lineNumber": 59
+        },
+        {
+          "caller": "notifyNative",
+          "callee": "notif.sendNotification",
+          "lineNumber": 61
+        },
+        {
+          "caller": "notifyNative",
+          "callee": "showToast",
+          "lineNumber": 65
+        }
+      ],
+      "metrics": {
+        "importCount": 1,
+        "exportCount": 1,
+        "functionCount": 3,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/utils/toast.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 58,
+      "nonEmptyLines": 48,
+      "functions": [
+        {
+          "name": "registerToastListener",
+          "startLine": 28,
+          "endLine": 33,
+          "params": [
+            "fn"
+          ]
+        },
+        {
+          "name": "showToast",
+          "startLine": 35,
+          "endLine": 58,
+          "params": [
+            "options"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "registerToastListener",
+          "line": 28,
+          "isDefault": false
+        },
+        {
+          "name": "showToast",
+          "line": 35,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "showToast",
+          "callee": "Date.now",
+          "lineNumber": 45
+        },
+        {
+          "caller": "showToast",
+          "callee": "_listener",
+          "lineNumber": 49
+        },
+        {
+          "caller": "showToast",
+          "callee": "console.error",
+          "lineNumber": 56
+        },
+        {
+          "caller": "showToast",
+          "callee": "console.info",
+          "lineNumber": 57
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 2,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    }
+  ]
+}

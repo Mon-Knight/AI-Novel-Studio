@@ -1,0 +1,22 @@
+{
+  "issues": [],
+  "warnings": [],
+  "stats": {
+    "totalNodes": 743,
+    "totalEdges": 685,
+    "totalLayers": 14,
+    "tourSteps": 10,
+    "nodeTypes": {
+      "class": 78,
+      "config": 9,
+      "document": 113,
+      "file": 206,
+      "function": 337
+    },
+    "edgeTypes": {
+      "contains": 415,
+      "imports": 189,
+      "calls": 81
+    }
+  }
+}

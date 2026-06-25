@@ -56,6 +56,9 @@ export interface QualityCheckReport {
   scope: QualityCheckScope; status: QualityCheckStatus;
   overallScore?: number; summary?: string; aiTaskId?: string;
   draftVersion?: number; model?: string;
+  contentHash?: string;
+  contentLength?: number;
+  checkedAt?: string;
   createdAt: string; updatedAt: string;
 }
 
@@ -101,6 +104,7 @@ export interface RunQualityCheckInput {
   /** v1.7.15 卷ID，用于上下文读取 */
   volumeId?: string;
   draftContent: string; chapterTitle: string; chapterOutline?: string;
+  contentHash?: string; wordCount?: number;
   chapterGoal?: string; worldBackground?: string; ruleSystems?: string;
   protagonist?: string; specialAbility?: string; abilityLimits?: string;
   chapterCharacters?: string; chapterEvents?: string; previousContext?: string;
@@ -109,6 +113,9 @@ export interface RunQualityCheckInput {
 export interface CreateQualityReportInput {
   novelId: string; chapterId: string; draftId: string;
   scope?: QualityCheckScope;
+  contentHash?: string;
+  contentLength?: number;
+  checkedAt?: string;
 }
 
 export interface SaveQualityCheckResultInput {
@@ -116,6 +123,9 @@ export interface SaveQualityCheckResultInput {
   result: QualityCheckResult;
   draftVersion?: number;
   model?: string;
+  contentHash?: string;
+  contentLength?: number;
+  checkedAt?: string;
 }
 
 /** 获取质量检查结果返回 */

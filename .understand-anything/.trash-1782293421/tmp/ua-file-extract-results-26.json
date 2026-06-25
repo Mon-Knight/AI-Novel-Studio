@@ -1,0 +1,31 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 3,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "scripts/maintenance/archive_old_builds.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 221,
+      "nonEmptyLines": 190,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/maintenance/clean_old_builds.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 249,
+      "nonEmptyLines": 221,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/maintenance/report_large_files.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 267,
+      "nonEmptyLines": 233,
+      "metrics": {}
+    }
+  ]
+}

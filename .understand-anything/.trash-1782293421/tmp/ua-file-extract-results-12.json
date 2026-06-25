@@ -1,0 +1,430 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 8,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": ".github/checklists/bugfix.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 50,
+      "nonEmptyLines": 34,
+      "sections": [
+        {
+          "heading": "Bugfix Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "定位阶段",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "分析阶段",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "修复阶段",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "验证阶段",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "汇报阶段",
+          "level": 2,
+          "line": 46
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": ".github/checklists/database-change.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 58,
+      "nonEmptyLines": 39,
+      "sections": [
+        {
+          "heading": "Database Change Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "必要性评估",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "Schema 变更安全检查",
+          "level": 2,
+          "line": 16
+        },
+        {
+          "heading": "迁移准备",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "备份与回滚",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "兼容性",
+          "level": 2,
+          "line": 45
+        },
+        {
+          "heading": "验证",
+          "level": 2,
+          "line": 53
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 7
+      }
+    },
+    {
+      "path": ".github/checklists/docs-sync.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 71,
+      "nonEmptyLines": 46,
+      "sections": [
+        {
+          "heading": "Docs Sync Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "README.md",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "CHANGELOG.md",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "docs/version-roadmap.md",
+          "level": 2,
+          "line": 26
+        },
+        {
+          "heading": "docs/agent-runtime.md",
+          "level": 2,
+          "line": 34
+        },
+        {
+          "heading": "docs/development-skills.md",
+          "level": 2,
+          "line": 41
+        },
+        {
+          "heading": "AGENTS.md",
+          "level": 2,
+          "line": 48
+        },
+        {
+          "heading": "版本号一致性",
+          "level": 2,
+          "line": 56
+        },
+        {
+          "heading": "真实性检查",
+          "level": 2,
+          "line": 66
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    },
+    {
+      "path": ".github/checklists/feature-development.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 57,
+      "nonEmptyLines": 41,
+      "sections": [
+        {
+          "heading": "Feature Development Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "开发前检查",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "开发中检查",
+          "level": 2,
+          "line": 20
+        },
+        {
+          "heading": "开发后验证",
+          "level": 2,
+          "line": 33
+        },
+        {
+          "heading": "文档同步",
+          "level": 2,
+          "line": 44
+        },
+        {
+          "heading": "收尾",
+          "level": 2,
+          "line": 53
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": ".github/checklists/release.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 71,
+      "nonEmptyLines": 46,
+      "sections": [
+        {
+          "heading": "Release Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本确认",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "变更记录",
+          "level": 2,
+          "line": 16
+        },
+        {
+          "heading": "README 同步",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "路线图同步",
+          "level": 2,
+          "line": 34
+        },
+        {
+          "heading": "构建验证",
+          "level": 2,
+          "line": 41
+        },
+        {
+          "heading": "Git 检查",
+          "level": 2,
+          "line": 51
+        },
+        {
+          "heading": "Tag 创建前人工确认",
+          "level": 2,
+          "line": 59
+        },
+        {
+          "heading": "Tag 与推送",
+          "level": 2,
+          "line": 67
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    },
+    {
+      "path": ".github/checklists/tauri-build.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 54,
+      "nonEmptyLines": 38,
+      "sections": [
+        {
+          "heading": "Tauri Desktop Build Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "构建前",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "构建中",
+          "level": 2,
+          "line": 22
+        },
+        {
+          "heading": "构建后",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "日志检查",
+          "level": 2,
+          "line": 42
+        },
+        {
+          "heading": "产物记录",
+          "level": 2,
+          "line": 49
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": ".github/checklists/ui-review.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 68,
+      "nonEmptyLines": 46,
+      "sections": [
+        {
+          "heading": "UI Review Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "整体风格",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "布局结构",
+          "level": 2,
+          "line": 18
+        },
+        {
+          "heading": "2K 大屏适配",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "右侧工具栏与弹出面板",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "页面入口",
+          "level": 2,
+          "line": 45
+        },
+        {
+          "heading": "正文编辑区",
+          "level": 2,
+          "line": 54
+        },
+        {
+          "heading": "禁止模式",
+          "level": 2,
+          "line": 63
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": ".github/checklists/verification.checklist.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 70,
+      "nonEmptyLines": 48,
+      "sections": [
+        {
+          "heading": "Verification Checklist",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "Prompt 检查",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "Agent Tool Layer 检查",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "验证脚本检查",
+          "level": 2,
+          "line": 26
+        },
+        {
+          "heading": "构建检查",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "安全检查",
+          "level": 2,
+          "line": 46
+        },
+        {
+          "heading": "文档检查",
+          "level": 2,
+          "line": 56
+        },
+        {
+          "heading": "危险操作检查",
+          "level": 2,
+          "line": 64
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    }
+  ]
+}

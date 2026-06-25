@@ -1,0 +1,1807 @@
+﻿[
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/checklists/decision-tree.md",
+        "Ext":  ".md",
+        "Size":  7145
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/checklists/ship-readiness.md",
+        "Ext":  ".md",
+        "Size":  7086
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/01-philosophy.md",
+        "Ext":  ".md",
+        "Size":  9732
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/02-architecture.md",
+        "Ext":  ".md",
+        "Size":  11032
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/03-webview-survival.md",
+        "Ext":  ".md",
+        "Size":  21644
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/04-ipc-contract.md",
+        "Ext":  ".md",
+        "Size":  8461
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/05-memory-truths.md",
+        "Ext":  ".md",
+        "Size":  8098
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/06-native-conventions.md",
+        "Ext":  ".md",
+        "Size":  9425
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/references/07-evidence-raycast.md",
+        "Ext":  ".md",
+        "Size":  11067
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/.gitignore",
+        "Ext":  ".gitignore",
+        "Size":  69
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/LICENSE",
+        "Ext":  "",
+        "Size":  1084
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/README.md",
+        "Ext":  ".md",
+        "Size":  11478
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.agents/skills/native-feel-cross-platform-desktop/SKILL.md",
+        "Ext":  ".md",
+        "Size":  6207
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/agent-safety.mdc",
+        "Ext":  ".mdc",
+        "Size":  1408
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/bugfix-rules.mdc",
+        "Ext":  ".mdc",
+        "Size":  877
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/database-rules.mdc",
+        "Ext":  ".mdc",
+        "Size":  1461
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/project-architecture.mdc",
+        "Ext":  ".mdc",
+        "Size":  1792
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/release-rules.mdc",
+        "Ext":  ".mdc",
+        "Size":  1053
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/task-writing-rules.mdc",
+        "Ext":  ".mdc",
+        "Size":  1194
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/testing-rules.mdc",
+        "Ext":  ".mdc",
+        "Size":  1061
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.cursor/rules/ui-rules.mdc",
+        "Ext":  ".mdc",
+        "Size":  1398
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/bugfix.checklist.md",
+        "Ext":  ".md",
+        "Size":  1157
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/database-change.checklist.md",
+        "Ext":  ".md",
+        "Size":  1629
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/docs-sync.checklist.md",
+        "Ext":  ".md",
+        "Size":  1583
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/feature-development.checklist.md",
+        "Ext":  ".md",
+        "Size":  1645
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/release.checklist.md",
+        "Ext":  ".md",
+        "Size":  1713
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/tauri-build.checklist.md",
+        "Ext":  ".md",
+        "Size":  1279
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/ui-review.checklist.md",
+        "Ext":  ".md",
+        "Size":  1871
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/checklists/verification.checklist.md",
+        "Ext":  ".md",
+        "Size":  1900
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/instructions/agent-behavior.instructions.md",
+        "Ext":  ".md",
+        "Size":  3476
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/instructions/database.instructions.md",
+        "Ext":  ".md",
+        "Size":  3395
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/instructions/documentation.instructions.md",
+        "Ext":  ".md",
+        "Size":  2215
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/instructions/frontend.instructions.md",
+        "Ext":  ".md",
+        "Size":  4978
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/instructions/tauri.instructions.md",
+        "Ext":  ".md",
+        "Size":  3298
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/instructions/testing.instructions.md",
+        "Ext":  ".md",
+        "Size":  2429
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/prompts/fix-bug.prompt.md",
+        "Ext":  ".md",
+        "Size":  1180
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/prompts/next-version.prompt.md",
+        "Ext":  ".md",
+        "Size":  1513
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/prompts/release-report.prompt.md",
+        "Ext":  ".md",
+        "Size":  1558
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/prompts/verify-build.prompt.md",
+        "Ext":  ".md",
+        "Size":  1889
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/agent-task-writer/SKILL.md",
+        "Ext":  ".md",
+        "Size":  2848
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/bugfix-safe-patch/SKILL.md",
+        "Ext":  ".md",
+        "Size":  2669
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/db-migration-guard/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3379
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/docs-sync/SKILL.md",
+        "Ext":  ".md",
+        "Size":  2465
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/implement-feature/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3526
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/plan-version/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3034
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/release-package/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3690
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/review-ui/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3149
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/tauri-desktop-build/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3089
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/skills/verify-build/SKILL.md",
+        "Ext":  ".md",
+        "Size":  3154
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/workflows-docs/agent-runtime-overview.md",
+        "Ext":  ".md",
+        "Size":  3732
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/workflows-docs/workflow-script-usage.md",
+        "Ext":  ".md",
+        "Size":  2828
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.github/copilot-instructions.md",
+        "Ext":  ".md",
+        "Size":  19185
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.understand-anything/tmp/all-files.json",
+        "Ext":  ".json",
+        "Size":  0
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.understand-anything/.understandignore",
+        "Ext":  ".understandignore",
+        "Size":  991
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.understand-anything/config.json",
+        "Ext":  ".json",
+        "Size":  28
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/design/context-assets.md",
+        "Ext":  ".md",
+        "Size":  390
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/design/future-interactive-story.md",
+        "Ext":  ".md",
+        "Size":  617
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/design/novel-engineering.md",
+        "Ext":  ".md",
+        "Size":  726
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/design/setting-suggestions.md",
+        "Ext":  ".md",
+        "Size":  3674
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/import-samples/sample-novel.txt",
+        "Ext":  ".txt",
+        "Size":  2517
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/import-samples/sample-output-profile.json",
+        "Ext":  ".json",
+        "Size":  238
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/import-samples/sample-style-profile.json",
+        "Ext":  ".json",
+        "Size":  293
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/project/agent-task-rules.md",
+        "Ext":  ".md",
+        "Size":  697
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/project/release-history.md",
+        "Ext":  ".md",
+        "Size":  850
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/project/version-roadmap.md",
+        "Ext":  ".md",
+        "Size":  1902
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/api-routes.md",
+        "Ext":  ".md",
+        "Size":  998
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/architecture.md",
+        "Ext":  ".md",
+        "Size":  697
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/database.md",
+        "Ext":  ".md",
+        "Size":  469
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/deployment.md",
+        "Ext":  ".md",
+        "Size":  449
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/desktop-build.md",
+        "Ext":  ".md",
+        "Size":  599
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/installer-verification.md",
+        "Ext":  ".md",
+        "Size":  2627
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/local-build-cleanup.md",
+        "Ext":  ".md",
+        "Size":  4276
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/release-artifact-policy.md",
+        "Ext":  ".md",
+        "Size":  2881
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/technical/testing.md",
+        "Ext":  ".md",
+        "Size":  2565
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/user/ai-settings.md",
+        "Ext":  ".md",
+        "Size":  1293
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/user/data-import-export.md",
+        "Ext":  ".md",
+        "Size":  2087
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/user/desktop-usage.md",
+        "Ext":  ".md",
+        "Size":  1555
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/user/quick-start.md",
+        "Ext":  ".md",
+        "Size":  1139
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/user/workflow-guide.md",
+        "Ext":  ".md",
+        "Size":  583
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/agent-runtime.md",
+        "Ext":  ".md",
+        "Size":  5458
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/agent-workflow.md",
+        "Ext":  ".md",
+        "Size":  4360
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/ai-agent-roadmap.md",
+        "Ext":  ".md",
+        "Size":  4576
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/data-model.md",
+        "Ext":  ".md",
+        "Size":  45949
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/development-rules.md",
+        "Ext":  ".md",
+        "Size":  24944
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/development-skills.md",
+        "Ext":  ".md",
+        "Size":  3577
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/module-boundaries.md",
+        "Ext":  ".md",
+        "Size":  4770
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/native-dialog-notification-plan.md",
+        "Ext":  ".md",
+        "Size":  4492
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/native-feel-p2-4-installation-report.md",
+        "Ext":  ".md",
+        "Size":  3352
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/native-feel-p2-assessment.md",
+        "Ext":  ".md",
+        "Size":  6850
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/product-design.md",
+        "Ext":  ".md",
+        "Size":  23182
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/project-architecture.md",
+        "Ext":  ".md",
+        "Size":  7490
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/prompt-system.md",
+        "Ext":  ".md",
+        "Size":  23931
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/README.md",
+        "Ext":  ".md",
+        "Size":  3460
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.0.md",
+        "Ext":  ".md",
+        "Size":  2006
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.15.md",
+        "Ext":  ".md",
+        "Size":  2918
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.16.md",
+        "Ext":  ".md",
+        "Size":  2013
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.17.md",
+        "Ext":  ".md",
+        "Size":  1805
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.18.md",
+        "Ext":  ".md",
+        "Size":  1883
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.19.md",
+        "Ext":  ".md",
+        "Size":  1793
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.20.md",
+        "Ext":  ".md",
+        "Size":  2184
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.21.md",
+        "Ext":  ".md",
+        "Size":  3848
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.22.md",
+        "Ext":  ".md",
+        "Size":  3758
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.23.md",
+        "Ext":  ".md",
+        "Size":  1156
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.24.md",
+        "Ext":  ".md",
+        "Size":  3676
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.25.md",
+        "Ext":  ".md",
+        "Size":  4052
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.26.md",
+        "Ext":  ".md",
+        "Size":  2728
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.27.md",
+        "Ext":  ".md",
+        "Size":  2243
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.28.md",
+        "Ext":  ".md",
+        "Size":  3364
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.29.md",
+        "Ext":  ".md",
+        "Size":  2033
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.31.md",
+        "Ext":  ".md",
+        "Size":  2772
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.32.md",
+        "Ext":  ".md",
+        "Size":  3588
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.33.md",
+        "Ext":  ".md",
+        "Size":  3792
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.34.md",
+        "Ext":  ".md",
+        "Size":  2532
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.36.md",
+        "Ext":  ".md",
+        "Size":  2897
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.37.md",
+        "Ext":  ".md",
+        "Size":  3125
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.38.md",
+        "Ext":  ".md",
+        "Size":  1377
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.39.md",
+        "Ext":  ".md",
+        "Size":  1523
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.41.md",
+        "Ext":  ".md",
+        "Size":  2203
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/release-notes-v1.0.43.md",
+        "Ext":  ".md",
+        "Size":  4566
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/tauri2-mica-assessment.md",
+        "Ext":  ".md",
+        "Size":  10706
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/ui-reference.md",
+        "Ext":  ".md",
+        "Size":  26150
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/user-guide.md",
+        "Ext":  ".md",
+        "Size":  3429
+    },
+    {
+        "Path":  "F:/ai-novel-studio/docs/version-roadmap.md",
+        "Ext":  ".md",
+        "Size":  6321
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/chapter_generate.md",
+        "Ext":  ".md",
+        "Size":  6410
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/chapter_polish.md",
+        "Ext":  ".md",
+        "Size":  1436
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/chapter_summarize.md",
+        "Ext":  ".md",
+        "Size":  2002
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/character_generate.md",
+        "Ext":  ".md",
+        "Size":  909
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/event_suggest.md",
+        "Ext":  ".md",
+        "Size":  825
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/quality_check.md",
+        "Ext":  ".md",
+        "Size":  2317
+    },
+    {
+        "Path":  "F:/ai-novel-studio/prompts/style_analyze.md",
+        "Ext":  ".md",
+        "Size":  1283
+    },
+    {
+        "Path":  "F:/ai-novel-studio/public/vite.svg",
+        "Ext":  ".svg",
+        "Size":  263
+    },
+    {
+        "Path":  "F:/ai-novel-studio/reports/local-storage-report.md",
+        "Ext":  ".md",
+        "Size":  2762
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/check_ai_task_delete.ps1",
+        "Ext":  ".ps1",
+        "Size":  5246
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/check_docs_sync.ps1",
+        "Ext":  ".ps1",
+        "Size":  6229
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/check_setting_suggestions.ps1",
+        "Ext":  ".ps1",
+        "Size":  2132
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/release_workflow.ps1",
+        "Ext":  ".ps1",
+        "Size":  4880
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/runtime_check_ai_task_delete.ps1",
+        "Ext":  ".ps1",
+        "Size":  383
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/run_feature_workflow.ps1",
+        "Ext":  ".ps1",
+        "Size":  4864
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/agent-workflow/verify_project.ps1",
+        "Ext":  ".ps1",
+        "Size":  8246
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/maintenance/archive_old_builds.ps1",
+        "Ext":  ".ps1",
+        "Size":  7312
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/maintenance/clean_old_builds.ps1",
+        "Ext":  ".ps1",
+        "Size":  8492
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/maintenance/report_large_files.ps1",
+        "Ext":  ".ps1",
+        "Size":  11636
+    },
+    {
+        "Path":  "F:/ai-novel-studio/scripts/package-windows.ps1",
+        "Ext":  ".ps1",
+        "Size":  4139
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent/context-summary.ts",
+        "Ext":  ".ts",
+        "Size":  5631
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent/planner-lite.ts",
+        "Ext":  ".ts",
+        "Size":  5368
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent/types.ts",
+        "Ext":  ".ts",
+        "Size":  1531
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent/workflow-runner.ts",
+        "Ext":  ".ts",
+        "Size":  4586
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent-tools/chapter-tools.ts",
+        "Ext":  ".ts",
+        "Size":  5625
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent-tools/context-tools.ts",
+        "Ext":  ".ts",
+        "Size":  6683
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent-tools/project-tools.ts",
+        "Ext":  ".ts",
+        "Size":  5600
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent-tools/style-tools.ts",
+        "Ext":  ".ts",
+        "Size":  5815
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent-tools/tool-types.ts",
+        "Ext":  ".ts",
+        "Size":  2586
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/agent-tools/verification-tools.ts",
+        "Ext":  ".ts",
+        "Size":  10057
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/app/README.md",
+        "Ext":  ".md",
+        "Size":  43
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/chapter-summary/ChapterSummaryDialog.tsx",
+        "Ext":  ".tsx",
+        "Size":  6446
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/BackButton.tsx",
+        "Ext":  ".tsx",
+        "Size":  818
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/EmptyState.tsx",
+        "Ext":  ".tsx",
+        "Size":  815
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/ErrorBoundary.tsx",
+        "Ext":  ".tsx",
+        "Size":  2768
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/ErrorState.tsx",
+        "Ext":  ".tsx",
+        "Size":  1026
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/FirstTimeGuide.tsx",
+        "Ext":  ".tsx",
+        "Size":  2145
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/LoadingModal.css",
+        "Ext":  ".css",
+        "Size":  4626
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/LoadingModal.tsx",
+        "Ext":  ".tsx",
+        "Size":  4708
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/LoadingState.tsx",
+        "Ext":  ".tsx",
+        "Size":  370
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/common/README.md",
+        "Ext":  ".md",
+        "Size":  49
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/context-records/ContextRecordForm.tsx",
+        "Ext":  ".tsx",
+        "Size":  3391
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/context-records/ContextRecordList.tsx",
+        "Ext":  ".tsx",
+        "Size":  4170
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/import/ImportJsonDialog.tsx",
+        "Ext":  ".tsx",
+        "Size":  8559
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/import/ImportTxtDialog.tsx",
+        "Ext":  ".tsx",
+        "Size":  8607
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/layout/AppShell.tsx",
+        "Ext":  ".tsx",
+        "Size":  523
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/novel-card/CharacterLibraryCard.tsx",
+        "Ext":  ".tsx",
+        "Size":  8837
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/novel-card/ContextOverviewCard.tsx",
+        "Ext":  ".tsx",
+        "Size":  2688
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/novel-card/ExportCard.tsx",
+        "Ext":  ".tsx",
+        "Size":  2111
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/novel-card/NovelCard.tsx",
+        "Ext":  ".tsx",
+        "Size":  4092
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/novel-detail/NovelDetailCards.tsx",
+        "Ext":  ".tsx",
+        "Size":  37981
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/outline/ChapterFormModal.tsx",
+        "Ext":  ".tsx",
+        "Size":  5128
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/outline/OutlineEditor.tsx",
+        "Ext":  ".tsx",
+        "Size":  17031
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/outline/OutlineManager.tsx",
+        "Ext":  ".tsx",
+        "Size":  24206
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/outline/VolumeCard.tsx",
+        "Ext":  ".tsx",
+        "Size":  5928
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/outline/VolumeFormModal.tsx",
+        "Ext":  ".tsx",
+        "Size":  4009
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/AiGeneratePanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  44276
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/ChapterSummaryPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  18476
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/CharactersPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  21854
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/CheckPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  29148
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/ContextViewPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  14337
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/DraftHistoryPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  4866
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/EventsPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  8582
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/OutlinePanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  25020
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/PolishPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  6772
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/SettingPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  6735
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/panels/StylePanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  10956
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/RightPanel.tsx",
+        "Ext":  ".tsx",
+        "Size":  5036
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/right-dock/RightToolbar.tsx",
+        "Ext":  ".tsx",
+        "Size":  1444
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/sidebar/Sidebar.tsx",
+        "Ext":  ".tsx",
+        "Size":  2333
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/topbar/TopBar.tsx",
+        "Ext":  ".tsx",
+        "Size":  1216
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/workspace/EditorArea.tsx",
+        "Ext":  ".tsx",
+        "Size":  17273
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/workspace/GlobalAiTaskModal.tsx",
+        "Ext":  ".tsx",
+        "Size":  2641
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/workspace/StatusBar.tsx",
+        "Ext":  ".tsx",
+        "Size":  2096
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/workspace/VolumeTree.tsx",
+        "Ext":  ".tsx",
+        "Size":  15879
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/Toast.css",
+        "Ext":  ".css",
+        "Size":  2216
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/components/ToastProvider.tsx",
+        "Ext":  ".tsx",
+        "Size":  2675
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/constants/version.ts",
+        "Ext":  ".ts",
+        "Size":  202
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/features/chapters/mockChapters.ts",
+        "Ext":  ".ts",
+        "Size":  8200
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/features/novels/mockNovels.ts",
+        "Ext":  ".ts",
+        "Size":  2522
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/features/novels/novelNormalizer.ts",
+        "Ext":  ".ts",
+        "Size":  11054
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/features/styles/mockStyles.ts",
+        "Ext":  ".ts",
+        "Size":  3951
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/hooks/useLoadingTask.ts",
+        "Ext":  ".ts",
+        "Size":  4995
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/lib/runWithLoading.ts",
+        "Ext":  ".ts",
+        "Size":  6928
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/AiTasks/AiTasksPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  17784
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/Assets/AssetsPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  5520
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/ComingSoon/ComingSoonPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  2787
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/Home/HomePage.tsx",
+        "Ext":  ".tsx",
+        "Size":  8563
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/ImportExport/ImportExportPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  8071
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/NotFound/NotFoundPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  931
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/NovelDetail/NovelDetailPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  8690
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/OutlineEditor/OutlineEditorPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  6395
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/Settings/SettingsPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  15301
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  17155
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/StyleProfiles/StyleProfilesPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  18570
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/Templates/TemplatesPage.tsx",
+        "Ext":  ".tsx",
+        "Size":  17727
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+        "Ext":  ".tsx",
+        "Size":  28490
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/prompts/chapter/chapter-generation-prompt.ts",
+        "Ext":  ".ts",
+        "Size":  1172
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/prompts/style/style-constraint-prompt.ts",
+        "Ext":  ".ts",
+        "Size":  1021
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/prompts/system/base-system-prompt.ts",
+        "Ext":  ".ts",
+        "Size":  1808
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/prompts/verification/chapter-verification-prompt.ts",
+        "Ext":  ".ts",
+        "Size":  1280
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/prompts/README.md",
+        "Ext":  ".md",
+        "Size":  2117
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/aiClient.ts",
+        "Ext":  ".ts",
+        "Size":  943
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/aiSettingsService.ts",
+        "Ext":  ".ts",
+        "Size":  4191
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/aiTaskService.ts",
+        "Ext":  ".ts",
+        "Size":  15005
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/chapterRevisionService.ts",
+        "Ext":  ".ts",
+        "Size":  3487
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/chapterSummarizeService.ts",
+        "Ext":  ".ts",
+        "Size":  4924
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/characterGenerateService.ts",
+        "Ext":  ".ts",
+        "Size":  3367
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/eventSuggestService.ts",
+        "Ext":  ".ts",
+        "Size":  4310
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/fixRunStore.ts",
+        "Ext":  ".ts",
+        "Size":  5783
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/jsonUtils.ts",
+        "Ext":  ".ts",
+        "Size":  838
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/mockAiClient.ts",
+        "Ext":  ".ts",
+        "Size":  21662
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/outlineComplianceChecker.ts",
+        "Ext":  ".ts",
+        "Size":  4977
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/outlineGenerateService.ts",
+        "Ext":  ".ts",
+        "Size":  12833
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/polishAiService.ts",
+        "Ext":  ".ts",
+        "Size":  2229
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/promptBuilder.ts",
+        "Ext":  ".ts",
+        "Size":  27506
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/qualityCheckAiService.ts",
+        "Ext":  ".ts",
+        "Size":  3469
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/qualityFixService.ts",
+        "Ext":  ".ts",
+        "Size":  16552
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/realAiClient.ts",
+        "Ext":  ".ts",
+        "Size":  7964
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/settingExpandService.ts",
+        "Ext":  ".ts",
+        "Size":  3217
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/summaryValidator.ts",
+        "Ext":  ".ts",
+        "Size":  3495
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/ai/volumeSummaryService.ts",
+        "Ext":  ".ts",
+        "Size":  7486
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/chapters/chapterCreationService.ts",
+        "Ext":  ".ts",
+        "Size":  4009
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/characters/chapterCharacterService.ts",
+        "Ext":  ".ts",
+        "Size":  5308
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/characters/chapterEventService.ts",
+        "Ext":  ".ts",
+        "Size":  1622
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/characters/characterService.ts",
+        "Ext":  ".ts",
+        "Size":  10024
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/context/chapterSummaryService.ts",
+        "Ext":  ".ts",
+        "Size":  7558
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/context/characterStateService.ts",
+        "Ext":  ".ts",
+        "Size":  1538
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/context/contextRecordService.ts",
+        "Ext":  ".ts",
+        "Size":  5098
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/chapterRepository.ts",
+        "Ext":  ".ts",
+        "Size":  7263
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/db.ts",
+        "Ext":  ".ts",
+        "Size":  3970
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/draftService.ts",
+        "Ext":  ".ts",
+        "Size":  2370
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/draftVersionService.ts",
+        "Ext":  ".ts",
+        "Size":  11514
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/index.ts",
+        "Ext":  ".ts",
+        "Size":  378
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/novelRepository.ts",
+        "Ext":  ".ts",
+        "Size":  9241
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/protagonistRepository.ts",
+        "Ext":  ".ts",
+        "Size":  1893
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/settingRepository.ts",
+        "Ext":  ".ts",
+        "Size":  3531
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/database/volumeRepository.ts",
+        "Ext":  ".ts",
+        "Size":  5399
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/export/exportService.ts",
+        "Ext":  ".ts",
+        "Size":  9360
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/import/jsonImportService.ts",
+        "Ext":  ".ts",
+        "Size":  1657
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/import/txtImportService.ts",
+        "Ext":  ".ts",
+        "Size":  3324
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/novels/novelService.ts",
+        "Ext":  ".ts",
+        "Size":  1373
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/outlines/outlineService.ts",
+        "Ext":  ".ts",
+        "Size":  6560
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/prompt/chapterOutlineDraftCache.ts",
+        "Ext":  ".ts",
+        "Size":  945
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/prompt/contextBuilder.ts",
+        "Ext":  ".ts",
+        "Size":  22419
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/prompt/contextReaderService.ts",
+        "Ext":  ".ts",
+        "Size":  11970
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/prompt/outlineKeyPointExtractor.ts",
+        "Ext":  ".ts",
+        "Size":  4119
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/prompt/promptOrchestrator.ts",
+        "Ext":  ".ts",
+        "Size":  10233
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/quality/polishService.ts",
+        "Ext":  ".ts",
+        "Size":  1393
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/quality/qualityCheckService.ts",
+        "Ext":  ".ts",
+        "Size":  9324
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/settingSuggestions/settingSuggestionService.ts",
+        "Ext":  ".ts",
+        "Size":  14664
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/styles/importedAssetService.ts",
+        "Ext":  ".ts",
+        "Size":  1040
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/styles/outputProfileService.ts",
+        "Ext":  ".ts",
+        "Size":  3621
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/styles/styleAnalyzeService.ts",
+        "Ext":  ".ts",
+        "Size":  2623
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/styles/styleProfileService.ts",
+        "Ext":  ".ts",
+        "Size":  9148
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/tauri/runtime.ts",
+        "Ext":  ".ts",
+        "Size":  848
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/templates/templateService.ts",
+        "Ext":  ".ts",
+        "Size":  3328
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/largeTextSave.ts",
+        "Ext":  ".ts",
+        "Size":  10843
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/services/README.md",
+        "Ext":  ".md",
+        "Size":  109
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/store/README.md",
+        "Ext":  ".md",
+        "Size":  51
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/app-shell.css",
+        "Ext":  ".css",
+        "Size":  6887
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/coming-soon.css",
+        "Ext":  ".css",
+        "Size":  1001
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/global.css",
+        "Ext":  ".css",
+        "Size":  5918
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/home.css",
+        "Ext":  ".css",
+        "Size":  7778
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/novel-detail.css",
+        "Ext":  ".css",
+        "Size":  6426
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/right-dock.css",
+        "Ext":  ".css",
+        "Size":  8017
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/setting-suggestions.css",
+        "Ext":  ".css",
+        "Size":  5185
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/variables.css",
+        "Ext":  ".css",
+        "Size":  3607
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/styles/workspace.css",
+        "Ext":  ".css",
+        "Size":  9411
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/ai.ts",
+        "Ext":  ".ts",
+        "Size":  7341
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/chapter.ts",
+        "Ext":  ".ts",
+        "Size":  1733
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/chapterEvent.ts",
+        "Ext":  ".ts",
+        "Size":  1035
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/chapterSummary.ts",
+        "Ext":  ".ts",
+        "Size":  5673
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/character.ts",
+        "Ext":  ".ts",
+        "Size":  2620
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/context.ts",
+        "Ext":  ".ts",
+        "Size":  2035
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/importedAsset.ts",
+        "Ext":  ".ts",
+        "Size":  643
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/index.ts",
+        "Ext":  ".ts",
+        "Size":  791
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/largeTextSave.ts",
+        "Ext":  ".ts",
+        "Size":  1661
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/novel.ts",
+        "Ext":  ".ts",
+        "Size":  2421
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/outline.ts",
+        "Ext":  ".ts",
+        "Size":  1840
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/output.ts",
+        "Ext":  ".ts",
+        "Size":  1406
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/polish.ts",
+        "Ext":  ".ts",
+        "Size":  1681
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/protagonist.ts",
+        "Ext":  ".ts",
+        "Size":  629
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/qualityCheck.ts",
+        "Ext":  ".ts",
+        "Size":  4530
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/setting.ts",
+        "Ext":  ".ts",
+        "Size":  1174
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/settingSuggestion.ts",
+        "Ext":  ".ts",
+        "Size":  1359
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/style.ts",
+        "Ext":  ".ts",
+        "Size":  1924
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/types/volume.ts",
+        "Ext":  ".ts",
+        "Size":  927
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/dataGuard.ts",
+        "Ext":  ".ts",
+        "Size":  937
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/date.ts",
+        "Ext":  ".ts",
+        "Size":  955
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/debugSeed.ts",
+        "Ext":  ".ts",
+        "Size":  722
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/errorMessage.ts",
+        "Ext":  ".ts",
+        "Size":  815
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/format.ts",
+        "Ext":  ".ts",
+        "Size":  1212
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/nativeDialog.ts",
+        "Ext":  ".ts",
+        "Size":  2821
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/nativeNotification.ts",
+        "Ext":  ".ts",
+        "Size":  1758
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/utils/toast.ts",
+        "Ext":  ".ts",
+        "Size":  1418
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/App.tsx",
+        "Ext":  ".tsx",
+        "Size":  2962
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/main.tsx",
+        "Ext":  ".tsx",
+        "Size":  1873
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src/vite-env.d.ts",
+        "Ext":  ".ts",
+        "Size":  39
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/128x128.png",
+        "Ext":  ".png",
+        "Size":  34402
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/128x128@2x.png",
+        "Ext":  ".png",
+        "Size":  121172
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/32x32.png",
+        "Ext":  ".png",
+        "Size":  2894
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/icon.icns",
+        "Ext":  ".icns",
+        "Size":  2801629
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/icon.ico",
+        "Ext":  ".ico",
+        "Size":  143259
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/icon.png",
+        "Ext":  ".png",
+        "Size":  442174
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square107x107Logo.png",
+        "Ext":  ".png",
+        "Size":  25024
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square142x142Logo.png",
+        "Ext":  ".png",
+        "Size":  41300
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square150x150Logo.png",
+        "Ext":  ".png",
+        "Size":  45819
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square284x284Logo.png",
+        "Ext":  ".png",
+        "Size":  146473
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square30x30Logo.png",
+        "Ext":  ".png",
+        "Size":  2592
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square310x310Logo.png",
+        "Ext":  ".png",
+        "Size":  172035
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square44x44Logo.png",
+        "Ext":  ".png",
+        "Size":  5065
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square71x71Logo.png",
+        "Ext":  ".png",
+        "Size":  11959
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/Square89x89Logo.png",
+        "Ext":  ".png",
+        "Size":  17885
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/icons/StoreLogo.png",
+        "Ext":  ".png",
+        "Size":  6325
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/ai.rs",
+        "Ext":  ".rs",
+        "Size":  8257
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/commands.rs",
+        "Ext":  ".rs",
+        "Size":  145231
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/db.rs",
+        "Ext":  ".rs",
+        "Size":  39446
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/large_text_save.rs",
+        "Ext":  ".rs",
+        "Size":  21254
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/main.rs",
+        "Ext":  ".rs",
+        "Size":  7670
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/outline_commands.rs",
+        "Ext":  ".rs",
+        "Size":  33526
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/system_accent.rs",
+        "Ext":  ".rs",
+        "Size":  2242
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/src/window_state.rs",
+        "Ext":  ".rs",
+        "Size":  7158
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/build.rs",
+        "Ext":  ".rs",
+        "Size":  42
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/Cargo.lock",
+        "Ext":  ".lock",
+        "Size":  135287
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/Cargo.toml",
+        "Ext":  ".toml",
+        "Size":  908
+    },
+    {
+        "Path":  "F:/ai-novel-studio/src-tauri/tauri.conf.json",
+        "Ext":  ".json",
+        "Size":  1269
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.eslintrc.cjs",
+        "Ext":  ".cjs",
+        "Size":  774
+    },
+    {
+        "Path":  "F:/ai-novel-studio/.gitignore",
+        "Ext":  ".gitignore",
+        "Size":  357
+    },
+    {
+        "Path":  "F:/ai-novel-studio/AGENTS.md",
+        "Ext":  ".md",
+        "Size":  7863
+    },
+    {
+        "Path":  "F:/ai-novel-studio/CHANGELOG.md",
+        "Ext":  ".md",
+        "Size":  15776
+    },
+    {
+        "Path":  "F:/ai-novel-studio/index.html",
+        "Ext":  ".html",
+        "Size":  380
+    },
+    {
+        "Path":  "F:/ai-novel-studio/package-lock.json",
+        "Ext":  ".json",
+        "Size":  132025
+    },
+    {
+        "Path":  "F:/ai-novel-studio/package.json",
+        "Ext":  ".json",
+        "Size":  1555
+    },
+    {
+        "Path":  "F:/ai-novel-studio/README.md",
+        "Ext":  ".md",
+        "Size":  8053
+    },
+    {
+        "Path":  "F:/ai-novel-studio/tsconfig.json",
+        "Ext":  ".json",
+        "Size":  654
+    },
+    {
+        "Path":  "F:/ai-novel-studio/tsconfig.node.json",
+        "Ext":  ".json",
+        "Size":  223
+    },
+    {
+        "Path":  "F:/ai-novel-studio/vite.config.ts",
+        "Ext":  ".ts",
+        "Size":  411
+    }
+]

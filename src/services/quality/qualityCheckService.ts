@@ -2,7 +2,7 @@
  * AI Novel Studio - 质量检查服务（Tauri SQLite + localStorage 回退）
  * v1.7.12: 引入问题处理闭环，使用 Tauri 后端持久化
  */
-import { lsGet, lsSet, generateId, nowISO, dbCall } from '../database/db';
+import { lsGet, lsSet, generateId, nowISO, dbCall, getDbMode } from '../database/db';
 import type {
   QualityCheckReport, QualityCheckItem, QualityIssueStatus,
   CreateQualityReportInput, SaveQualityCheckResultInput,
@@ -49,6 +49,21 @@ function simpleHash(str: string): string {
   return 'qc_' + (hash >>> 0).toString(16).padStart(8, '0');
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function isMissingReportError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+  return message.includes('报告不存在') || message.includes('quality_check_report_missing');
+}
+
 // ==================== 统一服务接口 ====================
 
 export const qualityCheckService = {
@@ -56,7 +71,8 @@ export const qualityCheckService = {
   async getChapterIssues(chapterId: string): Promise<GetQualityCheckIssuesResult> {
     try {
       return await dbCall<GetQualityCheckIssuesResult>('get_quality_check_issues', { chapterId });
-    } catch {
+    } catch (error) {
+      if (getDbMode() === 'tauri') throw error;
       // localStorage 回退
       const report = (getReports()
         .filter((r) => r.chapterId === chapterId)
@@ -70,7 +86,8 @@ export const qualityCheckService = {
     try {
       const result = await this.getChapterIssues('');
       return result.report?.id === id ? result.report : getReports().find((r) => r.id === id) ?? null;
-    } catch {
+    } catch (error) {
+      if (getDbMode() === 'tauri') throw error;
       return getReports().find((r) => r.id === id) ?? null;
     }
   },
@@ -87,14 +104,20 @@ export const qualityCheckService = {
 
   async createReport(input: CreateQualityReportInput): Promise<QualityCheckReport> {
     const now = nowISO();
-    const r: QualityCheckReport = {
-      ...input, id: generateId(), scope: 'current_draft', status: 'pending',
+    const localReport: QualityCheckReport = {
+      ...input, id: generateId(), scope: input.scope || 'current_draft', status: 'pending',
       createdAt: now, updatedAt: now,
     };
-    const list = getReports();
-    list.push(r);
-    saveReports(list);
-    return r;
+    return await dbCall<QualityCheckReport>(
+      'create_quality_check_report',
+      { input },
+      () => {
+        const list = getReports();
+        list.push(localReport);
+        saveReports(list);
+        return localReport;
+      },
+    );
   },
 
   /** 保存 AI 检查结果（合并问题） */
@@ -119,11 +142,38 @@ export const qualityCheckService = {
       result: { ...input.result, items: itemsWithKeys },
       draftVersion: input.draftVersion,
       model: input.model,
+      contentHash: input.contentHash,
+      contentLength: input.contentLength,
+      checkedAt: input.checkedAt,
     };
 
+    const saveToDatabase = (nextPayload: typeof payload) =>
+      dbCall<GetQualityCheckIssuesResult>('save_quality_check_result', { input: nextPayload });
+
     try {
-      return await dbCall<GetQualityCheckIssuesResult>('save_quality_check_result', payload);
-    } catch {
+      return await saveToDatabase(payload);
+    } catch (error) {
+      if (getDbMode() === 'tauri') {
+        if (isMissingReportError(error)) {
+          console.warn('[QualityCheck] report placeholder missing, recreating before retry', {
+            reportId: input.reportId,
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            draftId: input.draftId,
+            error,
+          });
+          const recreated = await qualityCheckService.createReport({
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            draftId: input.draftId,
+            contentHash: input.contentHash,
+            contentLength: input.contentLength,
+            checkedAt: input.checkedAt,
+          });
+          return await saveToDatabase({ ...payload, reportId: recreated.id });
+        }
+        throw error;
+      }
       // localStorage 回退
       const reports = getReports();
       const rIdx = reports.findIndex((r) => r.id === input.reportId);
@@ -134,6 +184,9 @@ export const qualityCheckService = {
         summary: input.result.summary,
         draftVersion: input.draftVersion,
         model: input.model,
+        contentHash: input.contentHash ?? reports[rIdx].contentHash,
+        contentLength: input.contentLength ?? reports[rIdx].contentLength,
+        checkedAt: input.checkedAt ?? nowISO(),
         updatedAt: nowISO(),
       };
       saveReports(reports);
@@ -201,7 +254,8 @@ export const qualityCheckService = {
       return await dbCall<QualityCheckItem>('update_quality_issue_status', {
         issueId, status, resolutionNote: resolutionNote || null,
       });
-    } catch {
+    } catch (error) {
+      if (getDbMode() === 'tauri') throw error;
       const items = getItems();
       const idx = items.findIndex((i) => i.id === issueId);
       if (idx === -1) return null;
@@ -223,7 +277,8 @@ export const qualityCheckService = {
       return await dbCall<QualityCheckItem[]>('batch_update_quality_issue_status', {
         issueIds, status,
       });
-    } catch {
+    } catch (error) {
+      if (getDbMode() === 'tauri') throw error;
       const items = getItems();
       const now = nowISO();
       const updated: QualityCheckItem[] = [];

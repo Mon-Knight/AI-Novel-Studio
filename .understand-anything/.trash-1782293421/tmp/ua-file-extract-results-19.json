@@ -1,0 +1,176 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 4,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/design/context-assets.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 20,
+      "nonEmptyLines": 14,
+      "sections": [
+        {
+          "heading": "上下文资产管理设计",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "上下文类型",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 13
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 3
+      }
+    },
+    {
+      "path": "docs/design/future-interactive-story.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 25,
+      "nonEmptyLines": 16,
+      "sections": [
+        {
+          "heading": "未来交互式叙事设计",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "远期愿景",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "当前阶段",
+          "level": 2,
+          "line": 14
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 18
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/design/novel-engineering.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 26,
+      "nonEmptyLines": 17,
+      "sections": [
+        {
+          "heading": "小说工程化设计",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "设计理念",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "核心原则",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 19
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/design/setting-suggestions.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 130,
+      "nonEmptyLines": 88,
+      "sections": [
+        {
+          "heading": "设定库 AI 推演设计",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 功能定位",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. 支持的候选类型",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "3. 状态流转",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "4. 页面结构",
+          "level": 2,
+          "line": 53
+        },
+        {
+          "heading": "5. 服务层设计",
+          "level": 2,
+          "line": 74
+        },
+        {
+          "heading": "6. Prompt 安全规则",
+          "level": 2,
+          "line": 91
+        },
+        {
+          "heading": "7. Mock 模式",
+          "level": 2,
+          "line": 103
+        },
+        {
+          "heading": "8. 当前限制",
+          "level": 2,
+          "line": 116
+        },
+        {
+          "heading": "9. 验证命令",
+          "level": 2,
+          "line": 125
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    }
+  ]
+}

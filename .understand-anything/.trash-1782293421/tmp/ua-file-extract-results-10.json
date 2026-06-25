@@ -1,0 +1,1384 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 7,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "src/agent-tools/chapter-tools.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 179,
+      "nonEmptyLines": 164,
+      "functions": [
+        {
+          "name": "readChapterOutline",
+          "startLine": 19,
+          "endLine": 83,
+          "params": [
+            "context"
+          ]
+        },
+        {
+          "name": "readChapterContext",
+          "startLine": 92,
+          "endLine": 157,
+          "params": [
+            "context"
+          ]
+        },
+        {
+          "name": "saveCandidateDraft",
+          "startLine": 169,
+          "endLine": 178,
+          "params": [
+            "context",
+            "draft"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "readChapterOutline",
+          "line": 19,
+          "isDefault": false
+        },
+        {
+          "name": "readChapterContext",
+          "line": 92,
+          "isDefault": false
+        },
+        {
+          "name": "saveCandidateDraft",
+          "line": 169,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "readChapterOutline",
+          "callee": "errorResult",
+          "lineNumber": 24
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "chapterRepository.getById",
+          "lineNumber": 28
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "errorResult",
+          "lineNumber": 30
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "volumeRepository.getById",
+          "lineNumber": 38
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "warnings.push",
+          "lineNumber": 40
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "draftService.getByChapterId",
+          "lineNumber": 46
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "warnings.push",
+          "lineNumber": 48
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "successResult",
+          "lineNumber": 51
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "errorResult",
+          "lineNumber": 78
+        },
+        {
+          "caller": "readChapterOutline",
+          "callee": "String",
+          "lineNumber": 79
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "errorResult",
+          "lineNumber": 97
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "chapterRepository.getById",
+          "lineNumber": 101
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "errorResult",
+          "lineNumber": 103
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "resolveNovelId",
+          "lineNumber": 106
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "import",
+          "lineNumber": 112
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "chapterCharacterService.getByChapterId",
+          "lineNumber": 115
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "warnings.push",
+          "lineNumber": 117
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "import",
+          "lineNumber": 123
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "chapterEventService.getByChapterId",
+          "lineNumber": 126
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "warnings.push",
+          "lineNumber": 128
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "successResult",
+          "lineNumber": 131
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "errorResult",
+          "lineNumber": 152
+        },
+        {
+          "caller": "readChapterContext",
+          "callee": "String",
+          "lineNumber": 153
+        },
+        {
+          "caller": "saveCandidateDraft",
+          "callee": "notImplemented",
+          "lineNumber": 177
+        }
+      ],
+      "metrics": {
+        "importCount": 4,
+        "exportCount": 3,
+        "functionCount": 3,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent-tools/context-tools.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 180,
+      "nonEmptyLines": 165,
+      "functions": [
+        {
+          "name": "buildAgentReadableContext",
+          "startLine": 24,
+          "endLine": 180,
+          "params": [
+            "context"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "buildAgentReadableContext",
+          "line": 24,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "resolveNovelId",
+          "lineNumber": 27
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "errorResult",
+          "lineNumber": 31
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Promise.all",
+          "lineNumber": 39
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "readProjectContext",
+          "lineNumber": 41
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 42
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "readChapterContext",
+          "lineNumber": 44
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 45
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "readStyleProfile",
+          "lineNumber": 47
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 48
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "allWarnings.push",
+          "lineNumber": 52
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "allWarnings.push",
+          "lineNumber": 53
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "allWarnings.push",
+          "lineNumber": 54
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 63
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 66
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 68
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "novel.totalWordCount.toLocaleString",
+          "lineNumber": 68
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 71
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "allWarnings.push",
+          "lineNumber": 72
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 79
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 82
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 84
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "ch.targetWordCount.toLocaleString",
+          "lineNumber": 84
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 87
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "(ch.wordCount as number).toLocaleString",
+          "lineNumber": 87
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Array.isArray",
+          "lineNumber": 91
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 92
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Array.isArray",
+          "lineNumber": 97
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 98
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 102
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "allWarnings.push",
+          "lineNumber": 103
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 110
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 114
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 117
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 120
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 123
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "Array.isArray",
+          "lineNumber": 127
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 128
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "fb.join",
+          "lineNumber": 128
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 132
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "allWarnings.push",
+          "lineNumber": 133
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 138
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "missingItems.push",
+          "lineNumber": 143
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "missingItems.push",
+          "lineNumber": 144
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "missingItems.push",
+          "lineNumber": 145
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 148
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "missingItems.join",
+          "lineNumber": 148
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 152
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 154
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "missingItems.join",
+          "lineNumber": 154
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 159
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 161
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.push",
+          "lineNumber": 165
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "successResult",
+          "lineNumber": 168
+        },
+        {
+          "caller": "buildAgentReadableContext",
+          "callee": "lines.join",
+          "lineNumber": 175
+        }
+      ],
+      "metrics": {
+        "importCount": 4,
+        "exportCount": 1,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent-tools/project-tools.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 185,
+      "nonEmptyLines": 168,
+      "functions": [
+        {
+          "name": "readProjectContext",
+          "startLine": 23,
+          "endLine": 99,
+          "params": [
+            "context"
+          ]
+        },
+        {
+          "name": "readProjectList",
+          "startLine": 107,
+          "endLine": 127,
+          "params": [
+            "context"
+          ]
+        },
+        {
+          "name": "readProjectSettings",
+          "startLine": 135,
+          "endLine": 184,
+          "params": [
+            "context"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "readProjectContext",
+          "line": 23,
+          "isDefault": false
+        },
+        {
+          "name": "readProjectList",
+          "line": 107,
+          "isDefault": false
+        },
+        {
+          "name": "readProjectSettings",
+          "line": 135,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "readProjectContext",
+          "callee": "resolveNovelId",
+          "lineNumber": 26
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "errorResult",
+          "lineNumber": 28
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "novelRepository.getById",
+          "lineNumber": 34
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "errorResult",
+          "lineNumber": 36
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "settingRepository.getWorldSettings",
+          "lineNumber": 44
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "warnings.push",
+          "lineNumber": 46
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "protagonistRepository.getByNovelId",
+          "lineNumber": 52
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "warnings.push",
+          "lineNumber": 54
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "volumeRepository.getByNovelId",
+          "lineNumber": 60
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "warnings.push",
+          "lineNumber": 62
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "chapterRepository.getByNovelId",
+          "lineNumber": 68
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "warnings.push",
+          "lineNumber": 70
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "successResult",
+          "lineNumber": 73
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "errorResult",
+          "lineNumber": 94
+        },
+        {
+          "caller": "readProjectContext",
+          "callee": "String",
+          "lineNumber": 95
+        },
+        {
+          "caller": "readProjectList",
+          "callee": "novelService.listNovels",
+          "lineNumber": 112
+        },
+        {
+          "caller": "readProjectList",
+          "callee": "novels.map",
+          "lineNumber": 113
+        },
+        {
+          "caller": "readProjectList",
+          "callee": "successResult",
+          "lineNumber": 120
+        },
+        {
+          "caller": "readProjectList",
+          "callee": "errorResult",
+          "lineNumber": 122
+        },
+        {
+          "caller": "readProjectList",
+          "callee": "String",
+          "lineNumber": 123
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "resolveNovelId",
+          "lineNumber": 138
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "errorResult",
+          "lineNumber": 140
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "novelRepository.getById",
+          "lineNumber": 144
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "errorResult",
+          "lineNumber": 146
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "settingRepository.getWorldSettings",
+          "lineNumber": 153
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "warnings.push",
+          "lineNumber": 155
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "protagonistRepository.getByNovelId",
+          "lineNumber": 160
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "warnings.push",
+          "lineNumber": 162
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "successResult",
+          "lineNumber": 165
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "errorResult",
+          "lineNumber": 179
+        },
+        {
+          "caller": "readProjectSettings",
+          "callee": "String",
+          "lineNumber": 180
+        }
+      ],
+      "metrics": {
+        "importCount": 7,
+        "exportCount": 3,
+        "functionCount": 3,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent-tools/style-tools.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 167,
+      "nonEmptyLines": 154,
+      "functions": [
+        {
+          "name": "readStyleProfile",
+          "startLine": 19,
+          "endLine": 95,
+          "params": [
+            "context"
+          ]
+        },
+        {
+          "name": "readOutputControl",
+          "startLine": 104,
+          "endLine": 167,
+          "params": [
+            "context"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "readStyleProfile",
+          "line": 19,
+          "isDefault": false
+        },
+        {
+          "name": "readOutputControl",
+          "line": 104,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "readStyleProfile",
+          "callee": "resolveNovelId",
+          "lineNumber": 22
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "errorResult",
+          "lineNumber": 24
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "styleProfileService.getAll",
+          "lineNumber": 36
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "warnings.push",
+          "lineNumber": 38
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "(allStyles as Record<string, unknown>[]).find",
+          "lineNumber": 43
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "warnings.push",
+          "lineNumber": 63
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "warnings.push",
+          "lineNumber": 72
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "successResult",
+          "lineNumber": 78
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "errorResult",
+          "lineNumber": 90
+        },
+        {
+          "caller": "readStyleProfile",
+          "callee": "String",
+          "lineNumber": 91
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "resolveNovelId",
+          "lineNumber": 107
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "errorResult",
+          "lineNumber": 109
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "outputProfileService.getAll",
+          "lineNumber": 117
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "warnings.push",
+          "lineNumber": 119
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "warnings.push",
+          "lineNumber": 123
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "successResult",
+          "lineNumber": 124
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "(profiles as Record<string, unknown>[]).find",
+          "lineNumber": 130
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "successResult",
+          "lineNumber": 135
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "errorResult",
+          "lineNumber": 162
+        },
+        {
+          "caller": "readOutputControl",
+          "callee": "String",
+          "lineNumber": 163
+        }
+      ],
+      "metrics": {
+        "importCount": 3,
+        "exportCount": 2,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent-tools/tool-types.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 106,
+      "nonEmptyLines": 98,
+      "functions": [
+        {
+          "name": "notImplemented",
+          "startLine": 59,
+          "endLine": 67,
+          "params": [
+            "toolName"
+          ]
+        },
+        {
+          "name": "successResult",
+          "startLine": 72,
+          "endLine": 82,
+          "params": [
+            "data",
+            "options"
+          ]
+        },
+        {
+          "name": "errorResult",
+          "startLine": 87,
+          "endLine": 97,
+          "params": [
+            "error",
+            "options"
+          ]
+        },
+        {
+          "name": "resolveNovelId",
+          "startLine": 103,
+          "endLine": 105,
+          "params": [
+            "context"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "notImplemented",
+          "line": 59,
+          "isDefault": false
+        },
+        {
+          "name": "successResult",
+          "line": 72,
+          "isDefault": false
+        },
+        {
+          "name": "errorResult",
+          "line": 87,
+          "isDefault": false
+        },
+        {
+          "name": "resolveNovelId",
+          "line": 103,
+          "isDefault": false
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 4,
+        "functionCount": 4,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/agent-tools/verification-tools.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 300,
+      "nonEmptyLines": 283,
+      "functions": [
+        {
+          "name": "verifyOutlineCompliance",
+          "startLine": 29,
+          "endLine": 182,
+          "params": [
+            "context",
+            "draft"
+          ]
+        },
+        {
+          "name": "verifyStyleCompliance",
+          "startLine": 196,
+          "endLine": 299,
+          "params": [
+            "context",
+            "draft"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "verifyOutlineCompliance",
+          "line": 29,
+          "isDefault": false
+        },
+        {
+          "name": "verifyStyleCompliance",
+          "line": 196,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "resolveNovelId",
+          "lineNumber": 36
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "errorResult",
+          "lineNumber": 39
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "import",
+          "lineNumber": 46
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "chapterRepository.getById",
+          "lineNumber": 49
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 51
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "successResult",
+          "lineNumber": 56
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 60
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "draft.trim",
+          "lineNumber": 67
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 68
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 74
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 87
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 93
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 100
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 106
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "import",
+          "lineNumber": 116
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "protagonistRepository.getByNovelId",
+          "lineNumber": 119
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "Array.isArray",
+          "lineNumber": 120
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "(protagonists as Record<string, unknown>[])\r\n            .map((p) => p.name as string)\r\n            .filter",
+          "lineNumber": 121
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "(protagonists as Record<string, unknown>[])\r\n            .map",
+          "lineNumber": 121
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "names.filter",
+          "lineNumber": 125
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "draft.includes",
+          "lineNumber": 126
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 129
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "names.join",
+          "lineNumber": 132
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "warnings.push",
+          "lineNumber": 134
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 136
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "missingNames.join",
+          "lineNumber": 139
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 142
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "names.join",
+          "lineNumber": 145
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 150
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "warnings.push",
+          "lineNumber": 157
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.push",
+          "lineNumber": 158
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.filter",
+          "lineNumber": 166
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "details.filter",
+          "lineNumber": 167
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "successResult",
+          "lineNumber": 169
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "errorResult",
+          "lineNumber": 177
+        },
+        {
+          "caller": "verifyOutlineCompliance",
+          "callee": "String",
+          "lineNumber": 178
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "resolveNovelId",
+          "lineNumber": 202
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "draft.trim",
+          "lineNumber": 206
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 207
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "successResult",
+          "lineNumber": 212
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 217
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "import",
+          "lineNumber": 226
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "readStyleProfile",
+          "lineNumber": 227
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 231
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "Array.isArray",
+          "lineNumber": 242
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "draft.includes",
+          "lineNumber": 245
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "foundForbidden.push",
+          "lineNumber": 246
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 250
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "foundForbidden.join",
+          "lineNumber": 253
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "warnings.push",
+          "lineNumber": 255
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "foundForbidden.join",
+          "lineNumber": 255
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 257
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "warnings.push",
+          "lineNumber": 265
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 266
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "warnings.push",
+          "lineNumber": 274
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.push",
+          "lineNumber": 275
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.filter",
+          "lineNumber": 283
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "details.filter",
+          "lineNumber": 284
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "successResult",
+          "lineNumber": 286
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "errorResult",
+          "lineNumber": 294
+        },
+        {
+          "caller": "verifyStyleCompliance",
+          "callee": "String",
+          "lineNumber": 295
+        }
+      ],
+      "metrics": {
+        "importCount": 1,
+        "exportCount": 2,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/database/draftService.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 87,
+      "nonEmptyLines": 76,
+      "functions": [
+        {
+          "name": "draftKey",
+          "startLine": 36,
+          "endLine": 38,
+          "params": [
+            "chapterId"
+          ]
+        },
+        {
+          "name": "countWords",
+          "startLine": 40,
+          "endLine": 47,
+          "params": [
+            "text"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "draftService",
+          "line": 49,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "countWords",
+          "callee": "text.replace(/[#*\\-`>\\s]+/g, ' ').trim",
+          "lineNumber": 41
+        },
+        {
+          "caller": "countWords",
+          "callee": "text.replace",
+          "lineNumber": 41
+        },
+        {
+          "caller": "countWords",
+          "callee": "cleaned.match",
+          "lineNumber": 44
+        },
+        {
+          "caller": "countWords",
+          "callee": "cleaned.match",
+          "lineNumber": 45
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "lsGet",
+          "lineNumber": 51
+        },
+        {
+          "caller": "getByChapterId",
+          "callee": "draftKey",
+          "lineNumber": 51
+        },
+        {
+          "caller": "save",
+          "callee": "lsGet",
+          "lineNumber": 56
+        },
+        {
+          "caller": "save",
+          "callee": "draftKey",
+          "lineNumber": 56
+        },
+        {
+          "caller": "save",
+          "callee": "nowISO",
+          "lineNumber": 57
+        },
+        {
+          "caller": "save",
+          "callee": "countWords",
+          "lineNumber": 58
+        },
+        {
+          "caller": "save",
+          "callee": "generateId",
+          "lineNumber": 69
+        },
+        {
+          "caller": "save",
+          "callee": "lsSet",
+          "lineNumber": 80
+        },
+        {
+          "caller": "save",
+          "callee": "draftKey",
+          "lineNumber": 80
+        },
+        {
+          "caller": "clear",
+          "callee": "lsRemove",
+          "lineNumber": 85
+        },
+        {
+          "caller": "clear",
+          "callee": "draftKey",
+          "lineNumber": 85
+        }
+      ],
+      "metrics": {
+        "importCount": 1,
+        "exportCount": 1,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    }
+  ]
+}

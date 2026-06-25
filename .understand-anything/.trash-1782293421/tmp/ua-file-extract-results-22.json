@@ -1,0 +1,456 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 9,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/technical/api-routes.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 29,
+      "nonEmptyLines": 23,
+      "sections": [
+        {
+          "heading": "API 路由说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "当前路由结构",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 22
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 3
+      }
+    },
+    {
+      "path": "docs/technical/architecture.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 29,
+      "nonEmptyLines": 21,
+      "sections": [
+        {
+          "heading": "项目架构总览",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "技术栈",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "架构概览",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 21
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/technical/database.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 22,
+      "nonEmptyLines": 14,
+      "sections": [
+        {
+          "heading": "数据库设计与迁移",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "当前数据存储方案",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "核心数据模型",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 14
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/technical/deployment.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 25,
+      "nonEmptyLines": 17,
+      "sections": [
+        {
+          "heading": "部署说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "当前部署方式",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "构建输出",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 18
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/technical/desktop-build.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 34,
+      "nonEmptyLines": 22,
+      "sections": [
+        {
+          "heading": "桌面端构建指南",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "Tauri 构建",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "环境配置",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "窗口配置",
+          "level": 2,
+          "line": 22
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 26
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 5
+      }
+    },
+    {
+      "path": "docs/technical/installer-verification.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 95,
+      "nonEmptyLines": 66,
+      "sections": [
+        {
+          "heading": "安装包验证清单",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 安装",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. 启动",
+          "level": 2,
+          "line": 18
+        },
+        {
+          "heading": "3. 页面导航",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "4. 设定库 AI 推演功能验证",
+          "level": 2,
+          "line": 41
+        },
+        {
+          "heading": "5. 导出功能验证",
+          "level": 2,
+          "line": 54
+        },
+        {
+          "heading": "6. 稳定性检查",
+          "level": 2,
+          "line": 64
+        },
+        {
+          "heading": "7. 2K 显示适配",
+          "level": 2,
+          "line": 73
+        },
+        {
+          "heading": "8. 验证结论",
+          "level": 2,
+          "line": 81
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    },
+    {
+      "path": "docs/technical/local-build-cleanup.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 150,
+      "nonEmptyLines": 109,
+      "sections": [
+        {
+          "heading": "本地构建产物清理说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 为什么本地版本会越来越大",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. 空间占用分析",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "3. 清理流程",
+          "level": 2,
+          "line": 42
+        },
+        {
+          "heading": "第 1 步：扫描",
+          "level": 3,
+          "line": 44
+        },
+        {
+          "heading": "第 2 步：归档旧安装包（推荐）",
+          "level": 3,
+          "line": 52
+        },
+        {
+          "heading": "第 3 步：预览清理",
+          "level": 3,
+          "line": 64
+        },
+        {
+          "heading": "第 4 步：执行清理",
+          "level": 3,
+          "line": 70
+        },
+        {
+          "heading": "第 5 步：验证可重建",
+          "level": 3,
+          "line": 78
+        },
+        {
+          "heading": "4. 哪些可以安全删除",
+          "level": 2,
+          "line": 89
+        },
+        {
+          "heading": "5. 哪些绝对不要删除",
+          "level": 2,
+          "line": 102
+        },
+        {
+          "heading": "6. 推荐保留策略",
+          "level": 2,
+          "line": 116
+        },
+        {
+          "heading": "7. 相关脚本",
+          "level": 2,
+          "line": 139
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 13
+      }
+    },
+    {
+      "path": "docs/technical/release-artifact-policy.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 89,
+      "nonEmptyLines": 59,
+      "sections": [
+        {
+          "heading": "发布产物保留策略",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 当前版本安装包",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. 保留策略",
+          "level": 2,
+          "line": 19
+        },
+        {
+          "heading": "2.1 始终保留",
+          "level": 3,
+          "line": 21
+        },
+        {
+          "heading": "2.2 保留最近版本",
+          "level": 3,
+          "line": 29
+        },
+        {
+          "heading": "2.3 归档旧版本",
+          "level": 3,
+          "line": 34
+        },
+        {
+          "heading": "3. 可重建的构建缓存",
+          "level": 2,
+          "line": 41
+        },
+        {
+          "heading": "4. 清理工作流程",
+          "level": 2,
+          "line": 55
+        },
+        {
+          "heading": "5. 不应该删除的内容",
+          "level": 2,
+          "line": 68
+        },
+        {
+          "heading": "6. 相关脚本",
+          "level": 2,
+          "line": 79
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "docs/technical/testing.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 98,
+      "nonEmptyLines": 69,
+      "sections": [
+        {
+          "heading": "测试策略与用例",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 基础验证命令",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. 设定库 AI 推演回归检查",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "3. 项目验证脚本",
+          "level": 2,
+          "line": 55
+        },
+        {
+          "heading": "4. 手动验证建议",
+          "level": 2,
+          "line": 66
+        },
+        {
+          "heading": "4.1 设定库 AI 推演",
+          "level": 3,
+          "line": 68
+        },
+        {
+          "heading": "4.2 导出功能",
+          "level": 3,
+          "line": 78
+        },
+        {
+          "heading": "4.3 桌面布局",
+          "level": 3,
+          "line": 85
+        },
+        {
+          "heading": "5. 当前限制",
+          "level": 2,
+          "line": 93
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    }
+  ]
+}

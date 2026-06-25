@@ -1,0 +1,1973 @@
+{
+  "projectRoot": "f:/ai-novel-studio",
+  "files": [
+    {
+      "path": ".cursor/rules/agent-safety.mdc",
+      "language": "mdc",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/bugfix-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/database-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/project-architecture.mdc",
+      "language": "mdc",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/release-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 34,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/task-writing-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/testing-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".cursor/rules/ui-rules.mdc",
+      "language": "mdc",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".github/checklists/bugfix.checklist.md",
+      "language": "markdown",
+      "sizeLines": 50,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/database-change.checklist.md",
+      "language": "markdown",
+      "sizeLines": 58,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/docs-sync.checklist.md",
+      "language": "markdown",
+      "sizeLines": 71,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/feature-development.checklist.md",
+      "language": "markdown",
+      "sizeLines": 57,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/release.checklist.md",
+      "language": "markdown",
+      "sizeLines": 71,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/tauri-build.checklist.md",
+      "language": "markdown",
+      "sizeLines": 54,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/ui-review.checklist.md",
+      "language": "markdown",
+      "sizeLines": 68,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/checklists/verification.checklist.md",
+      "language": "markdown",
+      "sizeLines": 70,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/copilot-instructions.md",
+      "language": "markdown",
+      "sizeLines": 1151,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/agent-behavior.instructions.md",
+      "language": "markdown",
+      "sizeLines": 141,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/database.instructions.md",
+      "language": "markdown",
+      "sizeLines": 138,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/documentation.instructions.md",
+      "language": "markdown",
+      "sizeLines": 109,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/frontend.instructions.md",
+      "language": "markdown",
+      "sizeLines": 189,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/tauri.instructions.md",
+      "language": "markdown",
+      "sizeLines": 152,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/instructions/testing.instructions.md",
+      "language": "markdown",
+      "sizeLines": 128,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/fix-bug.prompt.md",
+      "language": "markdown",
+      "sizeLines": 64,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/next-version.prompt.md",
+      "language": "markdown",
+      "sizeLines": 64,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/release-report.prompt.md",
+      "language": "markdown",
+      "sizeLines": 72,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/prompts/verify-build.prompt.md",
+      "language": "markdown",
+      "sizeLines": 108,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/agent-task-writer/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 159,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/bugfix-safe-patch/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 135,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/db-migration-guard/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 149,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/docs-sync/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 128,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/implement-feature/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 143,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/plan-version/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 125,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/release-package/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 198,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/review-ui/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 125,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/tauri-desktop-build/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 158,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/skills/verify-build/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 157,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/workflows-docs/agent-runtime-overview.md",
+      "language": "markdown",
+      "sizeLines": 76,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/workflows-docs/workflow-script-usage.md",
+      "language": "markdown",
+      "sizeLines": 116,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".understand-anything/.understandignore",
+      "language": "unknown",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".understand-anything/config.json",
+      "language": "json",
+      "sizeLines": 1,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".understand-anything/tmp/all-files.json",
+      "language": "json",
+      "sizeLines": 1807,
+      "fileCategory": "config"
+    },
+    {
+      "path": "AGENTS.md",
+      "language": "markdown",
+      "sizeLines": 290,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "language": "markdown",
+      "sizeLines": 341,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/agent-runtime.md",
+      "language": "markdown",
+      "sizeLines": 170,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/agent-workflow.md",
+      "language": "markdown",
+      "sizeLines": 182,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/ai-agent-roadmap.md",
+      "language": "markdown",
+      "sizeLines": 175,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/data-model.md",
+      "language": "markdown",
+      "sizeLines": 2074,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/context-assets.md",
+      "language": "markdown",
+      "sizeLines": 20,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/future-interactive-story.md",
+      "language": "markdown",
+      "sizeLines": 25,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/novel-engineering.md",
+      "language": "markdown",
+      "sizeLines": 26,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/design/setting-suggestions.md",
+      "language": "markdown",
+      "sizeLines": 130,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/development-rules.md",
+      "language": "markdown",
+      "sizeLines": 1454,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/development-skills.md",
+      "language": "markdown",
+      "sizeLines": 107,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/import-samples/sample-novel.txt",
+      "language": "txt",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/import-samples/sample-output-profile.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/import-samples/sample-style-profile.json",
+      "language": "json",
+      "sizeLines": 9,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/module-boundaries.md",
+      "language": "markdown",
+      "sizeLines": 228,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/native-dialog-notification-plan.md",
+      "language": "markdown",
+      "sizeLines": 106,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/native-feel-p2-4-installation-report.md",
+      "language": "markdown",
+      "sizeLines": 96,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/native-feel-p2-assessment.md",
+      "language": "markdown",
+      "sizeLines": 202,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/product-design.md",
+      "language": "markdown",
+      "sizeLines": 1294,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project-architecture.md",
+      "language": "markdown",
+      "sizeLines": 216,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project/agent-task-rules.md",
+      "language": "markdown",
+      "sizeLines": 24,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project/release-history.md",
+      "language": "markdown",
+      "sizeLines": 27,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/project/version-roadmap.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/prompt-system.md",
+      "language": "markdown",
+      "sizeLines": 967,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/README.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.0.md",
+      "language": "markdown",
+      "sizeLines": 59,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.15.md",
+      "language": "markdown",
+      "sizeLines": 77,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.16.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.17.md",
+      "language": "markdown",
+      "sizeLines": 43,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.18.md",
+      "language": "markdown",
+      "sizeLines": 38,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.19.md",
+      "language": "markdown",
+      "sizeLines": 41,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.20.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.21.md",
+      "language": "markdown",
+      "sizeLines": 95,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.22.md",
+      "language": "markdown",
+      "sizeLines": 96,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.23.md",
+      "language": "markdown",
+      "sizeLines": 20,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.24.md",
+      "language": "markdown",
+      "sizeLines": 78,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.25.md",
+      "language": "markdown",
+      "sizeLines": 64,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.26.md",
+      "language": "markdown",
+      "sizeLines": 52,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.27.md",
+      "language": "markdown",
+      "sizeLines": 44,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.28.md",
+      "language": "markdown",
+      "sizeLines": 58,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.29.md",
+      "language": "markdown",
+      "sizeLines": 42,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.31.md",
+      "language": "markdown",
+      "sizeLines": 70,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.32.md",
+      "language": "markdown",
+      "sizeLines": 79,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.33.md",
+      "language": "markdown",
+      "sizeLines": 92,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.34.md",
+      "language": "markdown",
+      "sizeLines": 61,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.36.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.37.md",
+      "language": "markdown",
+      "sizeLines": 67,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.38.md",
+      "language": "markdown",
+      "sizeLines": 27,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.39.md",
+      "language": "markdown",
+      "sizeLines": 36,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.41.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/release-notes-v1.0.43.md",
+      "language": "markdown",
+      "sizeLines": 121,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/tauri2-mica-assessment.md",
+      "language": "markdown",
+      "sizeLines": 315,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/api-routes.md",
+      "language": "markdown",
+      "sizeLines": 29,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/architecture.md",
+      "language": "markdown",
+      "sizeLines": 29,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/database.md",
+      "language": "markdown",
+      "sizeLines": 22,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/deployment.md",
+      "language": "markdown",
+      "sizeLines": 25,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/desktop-build.md",
+      "language": "markdown",
+      "sizeLines": 34,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/installer-verification.md",
+      "language": "markdown",
+      "sizeLines": 95,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/local-build-cleanup.md",
+      "language": "markdown",
+      "sizeLines": 150,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/release-artifact-policy.md",
+      "language": "markdown",
+      "sizeLines": 89,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/technical/testing.md",
+      "language": "markdown",
+      "sizeLines": 98,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/ui-reference.md",
+      "language": "markdown",
+      "sizeLines": 1346,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user-guide.md",
+      "language": "markdown",
+      "sizeLines": 107,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/ai-settings.md",
+      "language": "markdown",
+      "sizeLines": 49,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/data-import-export.md",
+      "language": "markdown",
+      "sizeLines": 84,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/desktop-usage.md",
+      "language": "markdown",
+      "sizeLines": 50,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/quick-start.md",
+      "language": "markdown",
+      "sizeLines": 61,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/user/workflow-guide.md",
+      "language": "markdown",
+      "sizeLines": 23,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/version-roadmap.md",
+      "language": "markdown",
+      "sizeLines": 225,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "index.html",
+      "language": "html",
+      "sizeLines": 13,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "sizeLines": 39,
+      "fileCategory": "config"
+    },
+    {
+      "path": "prompts/chapter_generate.md",
+      "language": "markdown",
+      "sizeLines": 182,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/chapter_polish.md",
+      "language": "markdown",
+      "sizeLines": 67,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/chapter_summarize.md",
+      "language": "markdown",
+      "sizeLines": 76,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/character_generate.md",
+      "language": "markdown",
+      "sizeLines": 33,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/event_suggest.md",
+      "language": "markdown",
+      "sizeLines": 33,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/quality_check.md",
+      "language": "markdown",
+      "sizeLines": 88,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "prompts/style_analyze.md",
+      "language": "markdown",
+      "sizeLines": 37,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 238,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "reports/local-storage-report.md",
+      "language": "markdown",
+      "sizeLines": 81,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "scripts/agent-workflow/check_ai_task_delete.ps1",
+      "language": "powershell",
+      "sizeLines": 107,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/check_docs_sync.ps1",
+      "language": "powershell",
+      "sizeLines": 161,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/check_setting_suggestions.ps1",
+      "language": "powershell",
+      "sizeLines": 57,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/release_workflow.ps1",
+      "language": "powershell",
+      "sizeLines": 111,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/run_feature_workflow.ps1",
+      "language": "powershell",
+      "sizeLines": 115,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/runtime_check_ai_task_delete.ps1",
+      "language": "powershell",
+      "sizeLines": 17,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/agent-workflow/verify_project.ps1",
+      "language": "powershell",
+      "sizeLines": 203,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/maintenance/archive_old_builds.ps1",
+      "language": "powershell",
+      "sizeLines": 221,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/maintenance/clean_old_builds.ps1",
+      "language": "powershell",
+      "sizeLines": 249,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/maintenance/report_large_files.ps1",
+      "language": "powershell",
+      "sizeLines": 267,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/package-windows.ps1",
+      "language": "powershell",
+      "sizeLines": 125,
+      "fileCategory": "script"
+    },
+    {
+      "path": "src-tauri/build.rs",
+      "language": "rust",
+      "sizeLines": 3,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "language": "toml",
+      "sizeLines": 27,
+      "fileCategory": "config"
+    },
+    {
+      "path": "src-tauri/icons/icon.icns",
+      "language": "icns",
+      "sizeLines": 11179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/ai.rs",
+      "language": "rust",
+      "sizeLines": 203,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/commands.rs",
+      "language": "rust",
+      "sizeLines": 3818,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/db.rs",
+      "language": "rust",
+      "sizeLines": 1085,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/large_text_save.rs",
+      "language": "rust",
+      "sizeLines": 640,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/main.rs",
+      "language": "rust",
+      "sizeLines": 190,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/outline_commands.rs",
+      "language": "rust",
+      "sizeLines": 785,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/system_accent.rs",
+      "language": "rust",
+      "sizeLines": 73,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/src/window_state.rs",
+      "language": "rust",
+      "sizeLines": 225,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "language": "json",
+      "sizeLines": 59,
+      "fileCategory": "config"
+    },
+    {
+      "path": "src/agent-tools/chapter-tools.ts",
+      "language": "typescript",
+      "sizeLines": 179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/context-tools.ts",
+      "language": "typescript",
+      "sizeLines": 180,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/project-tools.ts",
+      "language": "typescript",
+      "sizeLines": 185,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/style-tools.ts",
+      "language": "typescript",
+      "sizeLines": 167,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/tool-types.ts",
+      "language": "typescript",
+      "sizeLines": 106,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent-tools/verification-tools.ts",
+      "language": "typescript",
+      "sizeLines": 300,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/context-summary.ts",
+      "language": "typescript",
+      "sizeLines": 159,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/planner-lite.ts",
+      "language": "typescript",
+      "sizeLines": 155,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/types.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/agent/workflow-runner.ts",
+      "language": "typescript",
+      "sizeLines": 183,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/App.tsx",
+      "language": "typescript",
+      "sizeLines": 63,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/app/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/components/chapter-summary/ChapterSummaryDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 121,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/BackButton.tsx",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/EmptyState.tsx",
+      "language": "typescript",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/ErrorBoundary.tsx",
+      "language": "typescript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/ErrorState.tsx",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/FirstTimeGuide.tsx",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/LoadingModal.css",
+      "language": "css",
+      "sizeLines": 194,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/components/common/LoadingModal.tsx",
+      "language": "typescript",
+      "sizeLines": 163,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/LoadingState.tsx",
+      "language": "typescript",
+      "sizeLines": 13,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/common/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/components/context-records/ContextRecordForm.tsx",
+      "language": "typescript",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/context-records/ContextRecordList.tsx",
+      "language": "typescript",
+      "sizeLines": 97,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/import/ImportJsonDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 169,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/import/ImportTxtDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 166,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/layout/AppShell.tsx",
+      "language": "typescript",
+      "sizeLines": 24,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/CharacterLibraryCard.tsx",
+      "language": "typescript",
+      "sizeLines": 150,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/ContextOverviewCard.tsx",
+      "language": "typescript",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/ExportCard.tsx",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-card/NovelCard.tsx",
+      "language": "typescript",
+      "sizeLines": 120,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/novel-detail/NovelDetailCards.tsx",
+      "language": "typescript",
+      "sizeLines": 870,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/ChapterFormModal.tsx",
+      "language": "typescript",
+      "sizeLines": 105,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/OutlineEditor.tsx",
+      "language": "typescript",
+      "sizeLines": 408,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/OutlineManager.tsx",
+      "language": "typescript",
+      "sizeLines": 564,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/VolumeCard.tsx",
+      "language": "typescript",
+      "sizeLines": 134,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/outline/VolumeFormModal.tsx",
+      "language": "typescript",
+      "sizeLines": 81,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/AiGeneratePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 966,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/ChapterSummaryPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 404,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/CharactersPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 449,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/CheckPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 668,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/ContextViewPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 344,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/DraftHistoryPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 108,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/EventsPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 182,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/OutlinePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 570,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/PolishPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 142,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/SettingPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 152,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/panels/StylePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 244,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/RightPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 121,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/right-dock/RightToolbar.tsx",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/sidebar/Sidebar.tsx",
+      "language": "typescript",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/Toast.css",
+      "language": "css",
+      "sizeLines": 102,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/components/ToastProvider.tsx",
+      "language": "typescript",
+      "sizeLines": 85,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/topbar/TopBar.tsx",
+      "language": "typescript",
+      "sizeLines": 41,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/EditorArea.tsx",
+      "language": "typescript",
+      "sizeLines": 400,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/GlobalAiTaskModal.tsx",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/StatusBar.tsx",
+      "language": "typescript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/components/workspace/VolumeTree.tsx",
+      "language": "typescript",
+      "sizeLines": 345,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/constants/version.ts",
+      "language": "typescript",
+      "sizeLines": 6,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/chapters/mockChapters.ts",
+      "language": "typescript",
+      "sizeLines": 216,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/novels/mockNovels.ts",
+      "language": "typescript",
+      "sizeLines": 71,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/novels/novelNormalizer.ts",
+      "language": "typescript",
+      "sizeLines": 332,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/features/styles/mockStyles.ts",
+      "language": "typescript",
+      "sizeLines": 71,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/hooks/useLoadingTask.ts",
+      "language": "typescript",
+      "sizeLines": 184,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/lib/runWithLoading.ts",
+      "language": "typescript",
+      "sizeLines": 236,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/main.tsx",
+      "language": "typescript",
+      "sizeLines": 51,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/AiTasks/AiTasksPage.tsx",
+      "language": "typescript",
+      "sizeLines": 339,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Assets/AssetsPage.tsx",
+      "language": "typescript",
+      "sizeLines": 101,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/ComingSoon/ComingSoonPage.tsx",
+      "language": "typescript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Home/HomePage.tsx",
+      "language": "typescript",
+      "sizeLines": 202,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/ImportExport/ImportExportPage.tsx",
+      "language": "typescript",
+      "sizeLines": 152,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/NotFound/NotFoundPage.tsx",
+      "language": "typescript",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/NovelDetail/NovelDetailPage.tsx",
+      "language": "typescript",
+      "sizeLines": 215,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/OutlineEditor/OutlineEditorPage.tsx",
+      "language": "typescript",
+      "sizeLines": 162,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Settings/SettingsPage.tsx",
+      "language": "typescript",
+      "sizeLines": 267,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+      "language": "typescript",
+      "sizeLines": 392,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+      "language": "typescript",
+      "sizeLines": 212,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/Templates/TemplatesPage.tsx",
+      "language": "typescript",
+      "sizeLines": 294,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+      "language": "typescript",
+      "sizeLines": 607,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/chapter/chapter-generation-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/README.md",
+      "language": "markdown",
+      "sizeLines": 69,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/prompts/style/style-constraint-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/system/base-system-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/prompts/verification/chapter-verification-prompt.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/aiClient.ts",
+      "language": "typescript",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/aiSettingsService.ts",
+      "language": "typescript",
+      "sizeLines": 122,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/aiTaskService.ts",
+      "language": "typescript",
+      "sizeLines": 473,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/chapterRevisionService.ts",
+      "language": "typescript",
+      "sizeLines": 91,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/chapterSummarizeService.ts",
+      "language": "typescript",
+      "sizeLines": 95,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/characterGenerateService.ts",
+      "language": "typescript",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/eventSuggestService.ts",
+      "language": "typescript",
+      "sizeLines": 114,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/fixRunStore.ts",
+      "language": "typescript",
+      "sizeLines": 130,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/jsonUtils.ts",
+      "language": "typescript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/mockAiClient.ts",
+      "language": "typescript",
+      "sizeLines": 327,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/outlineComplianceChecker.ts",
+      "language": "typescript",
+      "sizeLines": 135,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/outlineGenerateService.ts",
+      "language": "typescript",
+      "sizeLines": 295,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/polishAiService.ts",
+      "language": "typescript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/promptBuilder.ts",
+      "language": "typescript",
+      "sizeLines": 651,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/qualityCheckAiService.ts",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/qualityFixService.ts",
+      "language": "typescript",
+      "sizeLines": 431,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/realAiClient.ts",
+      "language": "typescript",
+      "sizeLines": 207,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/settingExpandService.ts",
+      "language": "typescript",
+      "sizeLines": 80,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/summaryValidator.ts",
+      "language": "typescript",
+      "sizeLines": 78,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/ai/volumeSummaryService.ts",
+      "language": "typescript",
+      "sizeLines": 188,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/chapters/chapterCreationService.ts",
+      "language": "typescript",
+      "sizeLines": 115,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/characters/chapterCharacterService.ts",
+      "language": "typescript",
+      "sizeLines": 130,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/characters/chapterEventService.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/characters/characterService.ts",
+      "language": "typescript",
+      "sizeLines": 267,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/context/chapterSummaryService.ts",
+      "language": "typescript",
+      "sizeLines": 140,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/context/characterStateService.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/context/contextRecordService.ts",
+      "language": "typescript",
+      "sizeLines": 122,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/chapterRepository.ts",
+      "language": "typescript",
+      "sizeLines": 187,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/db.ts",
+      "language": "typescript",
+      "sizeLines": 142,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/draftService.ts",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/draftVersionService.ts",
+      "language": "typescript",
+      "sizeLines": 345,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/index.ts",
+      "language": "typescript",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/novelRepository.ts",
+      "language": "typescript",
+      "sizeLines": 288,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/protagonistRepository.ts",
+      "language": "typescript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/settingRepository.ts",
+      "language": "typescript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/database/volumeRepository.ts",
+      "language": "typescript",
+      "sizeLines": 151,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/export/exportService.ts",
+      "language": "typescript",
+      "sizeLines": 191,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/import/jsonImportService.ts",
+      "language": "typescript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/import/txtImportService.ts",
+      "language": "typescript",
+      "sizeLines": 89,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/largeTextSave.ts",
+      "language": "typescript",
+      "sizeLines": 375,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/novels/novelService.ts",
+      "language": "typescript",
+      "sizeLines": 44,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/outlines/outlineService.ts",
+      "language": "typescript",
+      "sizeLines": 150,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/chapterOutlineDraftCache.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/contextBuilder.ts",
+      "language": "typescript",
+      "sizeLines": 482,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/contextReaderService.ts",
+      "language": "typescript",
+      "sizeLines": 309,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/outlineKeyPointExtractor.ts",
+      "language": "typescript",
+      "sizeLines": 116,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/prompt/promptOrchestrator.ts",
+      "language": "typescript",
+      "sizeLines": 262,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/quality/polishService.ts",
+      "language": "typescript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/quality/qualityCheckService.ts",
+      "language": "typescript",
+      "sizeLines": 264,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/services/settingSuggestions/settingSuggestionService.ts",
+      "language": "typescript",
+      "sizeLines": 332,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/importedAssetService.ts",
+      "language": "typescript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/outputProfileService.ts",
+      "language": "typescript",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/styleAnalyzeService.ts",
+      "language": "typescript",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/styles/styleProfileService.ts",
+      "language": "typescript",
+      "sizeLines": 144,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/tauri/runtime.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/services/templates/templateService.ts",
+      "language": "typescript",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/store/README.md",
+      "language": "markdown",
+      "sizeLines": 2,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/styles/app-shell.css",
+      "language": "css",
+      "sizeLines": 330,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/coming-soon.css",
+      "language": "css",
+      "sizeLines": 46,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/global.css",
+      "language": "css",
+      "sizeLines": 299,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/home.css",
+      "language": "css",
+      "sizeLines": 351,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/novel-detail.css",
+      "language": "css",
+      "sizeLines": 290,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/right-dock.css",
+      "language": "css",
+      "sizeLines": 356,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/setting-suggestions.css",
+      "language": "css",
+      "sizeLines": 242,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/variables.css",
+      "language": "css",
+      "sizeLines": 143,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/styles/workspace.css",
+      "language": "css",
+      "sizeLines": 424,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/types/ai.ts",
+      "language": "typescript",
+      "sizeLines": 278,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/chapter.ts",
+      "language": "typescript",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/chapterEvent.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/chapterSummary.ts",
+      "language": "typescript",
+      "sizeLines": 175,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/character.ts",
+      "language": "typescript",
+      "sizeLines": 61,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/context.ts",
+      "language": "typescript",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/importedAsset.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/index.ts",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/largeTextSave.ts",
+      "language": "typescript",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/novel.ts",
+      "language": "typescript",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/outline.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/output.ts",
+      "language": "typescript",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/polish.ts",
+      "language": "typescript",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/protagonist.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/qualityCheck.ts",
+      "language": "typescript",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/setting.ts",
+      "language": "typescript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/settingSuggestion.ts",
+      "language": "typescript",
+      "sizeLines": 54,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/style.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/types/volume.ts",
+      "language": "typescript",
+      "sizeLines": 45,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/dataGuard.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/date.ts",
+      "language": "typescript",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/debugSeed.ts",
+      "language": "typescript",
+      "sizeLines": 24,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/errorMessage.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/format.ts",
+      "language": "typescript",
+      "sizeLines": 37,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/nativeDialog.ts",
+      "language": "typescript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/nativeNotification.ts",
+      "language": "typescript",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/utils/toast.ts",
+      "language": "typescript",
+      "sizeLines": 58,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "language": "typescript",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tsconfig.json",
+      "language": "json",
+      "sizeLines": 25,
+      "fileCategory": "config"
+    },
+    {
+      "path": "tsconfig.node.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "vite.config.ts",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    }
+  ]
+}

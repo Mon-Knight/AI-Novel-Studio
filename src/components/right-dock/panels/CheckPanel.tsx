@@ -19,6 +19,8 @@ import { draftVersionService } from '../../../services/database/draftVersionServ
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
 import { contextRecordService } from '../../../services/context/contextRecordService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
+import { confirmInfo } from '../../../utils/nativeDialog';
+import { countTextWords, hashTextContent } from '../../../utils/contentHash';
 
 interface CheckPanelProps {
   novelId?: string; chapter?: Chapter;
@@ -29,6 +31,17 @@ interface CheckPanelProps {
   qcReport?: QualityCheckReport | null;
   qcItems?: QualityCheckItem[];
   onQcChange?: (report: QualityCheckReport | null, items: QualityCheckItem[]) => void;
+  currentEditorContent?: string;
+  currentEditorWordCount?: number;
+  currentEditorDirty?: boolean;
+  currentContentHash?: string;
+  currentDraftId?: string;
+  currentDraftVersion?: number;
+  onApplyAiText?: (payload: {
+    mode: 'replace_all' | 'append';
+    text: string;
+    source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
+  }) => Promise<boolean>;
   /** v1.7.19 全局 AI 弹窗 */
   showAiModal?: (title: string, subtitle?: string) => void;
   updateAiModal?: (stage: string, progress: number) => void;
@@ -37,7 +50,24 @@ interface CheckPanelProps {
 
 const FILTER_OPTIONS: QualityIssueFilter[] = ['all', 'pending', 'resolved', 'ignored'];
 
-function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcChange, showAiModal, updateAiModal, hideAiModal }: CheckPanelProps) {
+function CheckPanel({
+  novelId,
+  chapter,
+  onGenerated,
+  onLocateText,
+  qcReport,
+  qcItems,
+  onQcChange,
+  currentEditorContent,
+  currentEditorWordCount,
+  currentEditorDirty,
+  currentContentHash,
+  currentDraftId,
+  onApplyAiText,
+  showAiModal,
+  updateAiModal,
+  hideAiModal,
+}: CheckPanelProps) {
   const [report, setReport] = useState<QualityCheckReport | null>(qcReport ?? null);
   const [items, setItems] = useState<QualityCheckItem[]>(qcItems ?? []);
   const [loading, setLoading] = useState(false);
@@ -65,57 +95,90 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
   const [lastFixRunId, setLastFixRunId] = useState<string>('');
   const [sourceDraftId, setSourceDraftId] = useState<string>('');
 
-  const statistics = computeStatistics(items);
-  const filteredItems = filter === 'all' ? items : items.filter((i) => i.status === filter);
+  const activeReport = report?.chapterId === chapter?.id ? report : null;
+  const activeItems = activeReport ? items.filter((item) => item.chapterId === chapter?.id) : [];
+  const effectiveContent = currentEditorContent ?? currentDraft?.content ?? '';
+  const effectiveContentHash = currentContentHash || hashTextContent(effectiveContent);
+  const reportOutdated = !!activeReport && (
+    activeReport.contentHash
+      ? activeReport.contentHash !== effectiveContentHash
+      : Boolean(currentEditorDirty || (currentDraftId && activeReport.draftId !== currentDraftId))
+  );
+  const statistics = computeStatistics(activeItems);
+  const filteredItems = filter === 'all' ? activeItems : activeItems.filter((i) => i.status === filter);
 
   const loadLatest = useCallback(async () => {
     if (!chapter?.id) return;
     try {
-      const [result, d] = await Promise.all([
-        qualityCheckService.getChapterIssues(chapter.id),
-        draftVersionService.getLatestByChapterId(chapter.id),
-      ]);
-      setReport(result.report);
-      setItems(result.items);
+      const d = await draftVersionService.getLatestByChapterId(chapter.id);
       setCurrentDraft(d);
-    } catch {
-      // 回退到旧方式
-      const [r, d] = await Promise.all([
-        qualityCheckService.getLatestReport(chapter.id),
-        draftVersionService.getLatestByChapterId(chapter.id),
-      ]);
-      setReport(r); setCurrentDraft(d);
-      if (r) {
-        const its = await qualityCheckService.getItemsByReportId(r.id);
-        setItems(its);
-      } else {
-        setItems([]);
-      }
+      if (qcReport?.chapterId === chapter.id) return;
+      const result = await qualityCheckService.getChapterIssues(chapter.id);
+      syncUp(result.report, result.items);
+    } catch (error) {
+      console.error('[QualityCheck] failed to load latest report', error);
+      setError(error instanceof Error ? error.message : '加载质量检查报告失败');
     }
-  }, [chapter?.id]);
+  }, [chapter?.id, qcReport?.chapterId, syncUp]);
 
   useEffect(() => { loadLatest(); }, [loadLatest]);
 
   const handleRunCheck = async () => {
     if (!novelId || !chapter) return;
-    if (!currentDraft || currentDraft.content.length < 10) {
-      setError('正文过短，请先生成或编辑正文'); return;
+    const sourceContent = (currentEditorContent ?? currentDraft?.content ?? '').trim();
+    const sourceWordCount = currentEditorWordCount ?? countTextWords(sourceContent);
+    if (sourceContent.length < 10 || sourceWordCount < 10) {
+      setError('正文过短，请先生成或编辑正文');
+      return;
+    }
+    if (sourceWordCount < 300) {
+      const ok = await confirmInfo({
+        title: '正文较短',
+        message: '当前正文不足 300 字，质量检查结果可能有限。是否继续？',
+      });
+      if (!ok) return;
     }
     if (loading) return; // v1.7.20 防重复点击
     setLoading(true); setError(''); setLocateMessage('');
     showAiModal?.('AI 正在质量检查', 'AI 正在检查逻辑、设定和文笔……');
     try {
       updateAiModal?.('正在准备检查参数……', 10);
+      let sourceDraft = currentDraft;
+      const needsSnapshotDraft = !sourceDraft || sourceDraft.content !== sourceContent || currentEditorDirty;
+      if (needsSnapshotDraft) {
+        updateAiModal?.('正在保存当前正文快照……', 18);
+        sourceDraft = await draftVersionService.create({
+          novelId,
+          chapterId: chapter.id,
+          title: `${chapter.title} - 质量检查快照`,
+          content: sourceContent,
+          source: 'user_edited',
+          note: '质量检查正文快照',
+        });
+        setCurrentDraft(sourceDraft);
+        onGenerated?.(sourceDraft);
+      }
+      if (!sourceDraft) {
+        throw new Error('无法创建质量检查正文快照。');
+      }
+
+      const checkedAt = new Date().toISOString();
+      const contentHash = hashTextContent(sourceContent);
       const rpt = await qualityCheckService.createReport({
-        novelId, chapterId: chapter.id, draftId: currentDraft.id,
+        novelId, chapterId: chapter.id, draftId: sourceDraft.id,
+        contentHash,
+        contentLength: sourceContent.length,
+        checkedAt,
       });
 
       updateAiModal?.('正在请求 AI 质量检查……', 35);
       const result = await qualityCheckAiService.runCheck({
-        novelId, chapterId: chapter.id, draftId: currentDraft.id,
+        novelId, chapterId: chapter.id, draftId: sourceDraft.id,
         volumeId: chapter.volumeId,
-        draftContent: currentDraft.content, chapterTitle: chapter.title,
+        draftContent: sourceContent, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, chapterGoal: chapter.goal,
+        contentHash,
+        wordCount: sourceWordCount,
       });
 
       if (!result || (!result.items && !result.summary)) {
@@ -125,12 +188,20 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       updateAiModal?.('正在保存检查结果……', 80);
       const saved = await qualityCheckService.saveResult({
         reportId: rpt.id, novelId, chapterId: chapter.id,
-        draftId: currentDraft.id, result,
-        draftVersion: currentDraft.versionNo,
+        draftId: sourceDraft.id, result,
+        draftVersion: sourceDraft.versionNo,
+        contentHash,
+        contentLength: sourceContent.length,
+        checkedAt,
       });
 
       updateAiModal?.('正在加载最新结果……', 95);
-      syncUp(saved.report, saved.items);
+      syncUp(saved.report ? {
+        ...saved.report,
+        contentHash,
+        contentLength: sourceContent.length,
+        checkedAt,
+      } : null, saved.items);
       setFilter('all');
 
       updateAiModal?.('质量检查完成', 100);
@@ -138,7 +209,8 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       await new Promise((r) => setTimeout(r, 500));
       hideAiModal?.();
     } catch (e: any) {
-      const msg = e.message || '质量检查失败';
+      console.error('[QualityCheck] run failed', e);
+      const msg = e?.message || (typeof e === 'string' ? e : '质量检查失败');
       setError(msg);
       // v1.7.20 失败时弹窗显示错误，不立即关闭
       updateAiModal?.(`失败: ${msg}`, 0);
@@ -153,23 +225,30 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
   /** 更新问题状态 */
   const handleStatusChange = async (itemId: string, newStatus: QualityIssueStatus) => {
     const prevItems = [...items];
-    // 乐观更新
-    setItems((prev) =>
-      prev.map((i) => i.id === itemId ? { ...i, status: newStatus, resolvedAt: newStatus === 'resolved' ? new Date().toISOString() : i.resolvedAt } : i),
+    const nextItems = items.map((i) =>
+      i.id === itemId ? { ...i, status: newStatus, resolvedAt: newStatus === 'resolved' ? new Date().toISOString() : i.resolvedAt } : i,
     );
+    // 乐观更新
+    setItems(nextItems);
+    onQcChange?.(activeReport, nextItems);
     try {
       await qualityCheckService.updateIssueStatus(itemId, newStatus);
     } catch {
       // 回滚
       setItems(prevItems);
+      onQcChange?.(activeReport, prevItems);
       setError('状态更新失败');
     }
   };
 
   /** AI 修稿并复检 (v1.7.16) */
   const handleAIFix = async () => {
-    if (!novelId || !chapter || !currentDraft || !report) return;
-    const pending = items.filter((i) => i.status === 'pending');
+    if (!novelId || !chapter || !currentDraft || !activeReport) return;
+    if (reportOutdated) {
+      setFixError('当前正文已修改，请先重新进行质量检测后再使用 AI 修复。');
+      return;
+    }
+    const pending = activeItems.filter((i) => i.status === 'pending');
     if (pending.length === 0) return;
 
     if (fixLoading || loading) return; // v1.7.20 防重复
@@ -178,7 +257,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
     showAiModal?.('AI 正在修复并复检', 'AI 正在根据质量问题自动优化正文……');
     try {
       updateAiModal?.('正在分析待处理问题...', 5);
-      const ignored = items.filter((i) => i.status === 'ignored');
+      const ignored = activeItems.filter((i) => i.status === 'ignored');
 
       updateAiModal?.('正在读取上下文...', 15);
 
@@ -205,8 +284,8 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         novelId, chapterId: chapter.id, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, currentDraft,
         pendingIssues: pending, ignoredIssues: ignored,
-        beforeReportId: report.id,
-        beforeScore: report.overallScore || 0,
+        beforeReportId: activeReport.id,
+        beforeScore: activeReport.overallScore || 0,
         beforePendingCount: statistics.pending,
         beforeSeriousCount: statistics.critical,
         chapterContext,
@@ -246,49 +325,107 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       fixRun.targetDraftId = newDraft.id;
       fixRun.targetDraftVersion = newDraft.versionNo;
 
-      // 更新当前草稿为新版本
-      setCurrentDraft(newDraft);
-
       updateAiModal?.('正在重新质量检查...', 75);
-      const rpt2 = await qualityCheckService.createReport({
-        novelId, chapterId: chapter.id, draftId: newDraft.id,
-      });
+      const fixedContentHash = hashTextContent(fixResult.revisedContent);
       const checkResult = await qualityCheckAiService.runCheck({
         novelId, chapterId: chapter.id, draftId: newDraft.id,
         volumeId: chapter.volumeId,
         draftContent: fixResult.revisedContent,
         chapterTitle: chapter.title,
         chapterOutline: chapter.outline, chapterGoal: chapter.goal,
-      });
-      const saved2 = await qualityCheckService.saveResult({
-        reportId: rpt2.id, novelId, chapterId: chapter.id,
-        draftId: newDraft.id, result: checkResult,
-        draftVersion: newDraft.versionNo,
+        contentHash: fixedContentHash,
+        wordCount: newDraft.wordCount,
       });
 
       updateAiModal?.('正在对比修复效果...', 90);
-      const afterItems = saved2.items;
-      const afterStats = computeStatistics(afterItems);
+      const candidateCheckedAt = new Date().toISOString();
+      const afterItemsForStats: QualityCheckItem[] = checkResult.items.map((it, index) => ({
+        id: `candidate-${index}`,
+        reportId: 'candidate',
+        novelId,
+        chapterId: chapter.id,
+        draftId: newDraft.id,
+        issueType: (it.issueType || 'other') as QualityCheckItem['issueType'],
+        severity: (it.severity || 'medium') as QualityCheckItem['severity'],
+        title: it.title || '',
+        description: it.description || '',
+        category: it.category,
+        evidence: it.evidence,
+        suggestion: it.suggestion,
+        quote: it.quote,
+        startOffset: it.startOffset,
+        endOffset: it.endOffset,
+        paragraphIndex: it.paragraphIndex,
+        issueKey: `candidate-${index}`,
+        status: 'pending',
+        createdAt: candidateCheckedAt,
+        updatedAt: candidateCheckedAt,
+      }));
+      const afterStats = computeStatistics(afterItemsForStats);
       const comparison = qualityFixService.compareResults(
         fixRun.beforeScore, checkResult.overallScore,
         fixRun.beforePendingCount, afterStats.pending,
         fixRun.beforeSeriousCount, afterStats.critical,
-        items.length, afterItems.length,
+        activeItems.length, afterItemsForStats.length,
         statistics.high, afterStats.high,
         fixResult.fixedIssueKeys.length,
       );
       setFixComparison(comparison);
+      fixRun.targetContentHash = fixedContentHash;
+      fixRun.afterScore = checkResult.overallScore;
+      fixRun.afterPendingCount = afterStats.pending;
+      fixRun.afterSeriousCount = afterStats.critical;
+      fixRun.fixedIssueIds = activeItems
+        .filter((i) => fixResult.fixedIssueKeys.includes(i.issueKey))
+        .map((i) => i.id);
+      fixRun.newIssueIds = afterItemsForStats.map((i) => i.issueKey);
 
-      updateAiModal?.('正在更新问题状态...', 95);
       if (comparison.isBetter) {
+        updateAiModal?.('正在保存通过复检的质量结果...', 95);
+        const rpt2 = await qualityCheckService.createReport({
+          novelId, chapterId: chapter.id, draftId: newDraft.id,
+          contentHash: fixedContentHash,
+          contentLength: fixResult.revisedContent.length,
+          checkedAt: candidateCheckedAt,
+        });
+        const saved2 = await qualityCheckService.saveResult({
+          reportId: rpt2.id, novelId, chapterId: chapter.id,
+          draftId: newDraft.id, result: checkResult,
+          draftVersion: newDraft.versionNo,
+          contentHash: fixedContentHash,
+          contentLength: fixResult.revisedContent.length,
+          checkedAt: candidateCheckedAt,
+        });
+        fixRun.afterReportId = saved2.report?.id || rpt2.id;
+        fixRun.status = 'adopted';
+
+        updateAiModal?.('正在更新问题状态...', 98);
         for (const key of fixResult.fixedIssueKeys) {
-          const item = items.find((i) => i.issueKey === key);
+          const item = activeItems.find((i) => i.issueKey === key);
           if (item) await qualityCheckService.updateIssueStatus(item.id, 'resolved').catch(() => {});
         }
-      }
 
-      // 更新报告和问题列表
-      syncUp(saved2.report, saved2.items);
+        const refreshed = await qualityCheckService.getChapterIssues(chapter.id).catch(() => saved2);
+
+        // 复检确认更好后，才同步新草稿到当前写作工作台。
+        setCurrentDraft(newDraft);
+        if (onGenerated) {
+          onGenerated(newDraft);
+        } else {
+          await onApplyAiText?.({ mode: 'replace_all', text: fixResult.revisedContent, source: 'quality_check' });
+        }
+
+        syncUp(refreshed.report ? {
+          ...refreshed.report,
+          contentHash: fixedContentHash,
+          contentLength: fixResult.revisedContent.length,
+          checkedAt: candidateCheckedAt,
+        } : null, refreshed.items);
+      } else {
+        fixRun.status = 'success';
+        setFixStage('修复候选已保存为草稿，因复检未明显变好，当前正文保持不变');
+      }
+      await fixRunStore.save(fixRun).catch(() => {});
 
       // 标记旧章节上下文和卷上下文过期
       if (comparison.isBetter) {
@@ -372,7 +509,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         </button>
 
         {/* v1.7.16/v1.7.18 AI 修复并复检 */}
-        {report && statistics.pending > 0 && (
+        {activeReport && statistics.pending > 0 && (
           <div style={{ marginTop: 6 }}>
             <button
               className="btn btn-sm"
@@ -405,23 +542,37 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>}
       </div>
 
+      {reportOutdated && (
+        <div className="panel-section" style={{
+          border: '1px solid #f59e0b55',
+          background: '#f59e0b12',
+          borderRadius: 6,
+          padding: 10,
+          color: '#b45309',
+          fontSize: 12,
+          lineHeight: 1.6,
+        }}>
+          正文已修改，此检测结果可能已过期。建议重新进行质量检测。
+        </div>
+      )}
+
       {/* 检查结果区 */}
-      {report && report.status === 'completed' && (
+      {activeReport && activeReport.status === 'completed' && (
         <div className="panel-section">
           <div className="panel-section-title">📊 检查结果</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <div style={{
               fontSize: 28, fontWeight: 700,
-              color: (report.overallScore ?? 0) >= 80 ? 'var(--color-success)'
-                : (report.overallScore ?? 0) >= 60 ? 'var(--color-warning)' : 'var(--color-error)',
+              color: (activeReport.overallScore ?? 0) >= 80 ? 'var(--color-success)'
+                : (activeReport.overallScore ?? 0) >= 60 ? 'var(--color-warning)' : 'var(--color-error)',
             }}>
-              {report.overallScore ?? '—'}
+              {activeReport.overallScore ?? '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>/ 100</div>
           </div>
-          {report.summary && (
+          {activeReport.summary && (
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-              {report.summary}
+              {activeReport.summary}
             </div>
           )}
         </div>
@@ -497,7 +648,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       )}
 
       {/* 统计区 */}
-      {items.length > 0 && (
+      {activeItems.length > 0 && (
         <div className="panel-section">
           <div className="panel-section-title">📋 问题统计</div>
           {/* 状态统计 */}
@@ -524,7 +675,7 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       )}
 
       {/* 筛选按钮 */}
-      {items.length > 0 && (
+      {activeItems.length > 0 && (
         <div className="panel-section" style={{ paddingTop: 0 }}>
           <div style={{ display: 'flex', gap: 4 }}>
             {FILTER_OPTIONS.map((f) => (
@@ -649,14 +800,14 @@ function CheckPanel({ novelId, chapter, onLocateText, qcReport, qcItems, onQcCha
       ))}
 
       {/* 空状态 */}
-      {!report && !loading && (
+      {!activeReport && !loading && (
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)', textAlign: 'center', padding: 16 }}>
           点击上方按钮对当前草稿进行质量检查
         </div>
       )}
 
       {/* 筛选后无结果 */}
-      {report && filteredItems.length === 0 && items.length > 0 && (
+      {activeReport && filteredItems.length === 0 && activeItems.length > 0 && (
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)', textAlign: 'center', padding: 16 }}>
           当前筛选条件下没有匹配的问题
         </div>

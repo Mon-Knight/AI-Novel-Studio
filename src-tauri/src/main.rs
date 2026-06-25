@@ -38,7 +38,13 @@ fn get_app_data_dir() -> std::path::PathBuf {
 }
 
 fn main() {
+    let startup_at = std::time::Instant::now();
+    println!("[Startup] tauri main start");
     db::init_database();
+    println!(
+        "[Startup] database initialized: {} ms",
+        startup_at.elapsed().as_millis()
+    );
 
     // Native Feel P1.1: 确定应用数据目录
     let app_data_dir = get_app_data_dir();
@@ -135,6 +141,7 @@ fn main() {
             commands::list_chapter_characters,
             commands::remove_chapter_character,
             commands::get_quality_check_issues,
+            commands::create_quality_check_report,
             commands::update_quality_issue_status,
             commands::batch_update_quality_issue_status,
             commands::save_quality_check_result,
@@ -153,6 +160,10 @@ fn main() {
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {
+            println!(
+                "[Startup] tauri setup reached: {} ms",
+                startup_at.elapsed().as_millis()
+            );
             // Native Feel P1.1: 恢复窗口状态
             if let Some(window) = app.get_window("main") {
                 window_state::apply_window_state(&window, &saved_state);

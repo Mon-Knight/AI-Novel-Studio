@@ -7,6 +7,43 @@ import { tauriInvoke } from './services/tauri/runtime';
 import './styles/variables.css';
 import './styles/global.css';
 
+performance.mark('app-script-start');
+
+const startupScriptStartedAt = performance.now();
+const MIN_STARTUP_SPLASH_MS = 700;
+const STARTUP_SPLASH_FADE_MS = 220;
+
+function markStartup(name: string) {
+  performance.mark(name);
+}
+
+function logStartupTimings() {
+  if (!import.meta.env.DEV) return;
+  const get = (name: string) => {
+    const entries = performance.getEntriesByName(name);
+    return entries.length > 0 ? entries[entries.length - 1].startTime : 0;
+  };
+  const scriptStart = get('app-script-start');
+  const reactMounted = get('react-mounted');
+  const firstReady = get('first-page-ready');
+  console.info(`[Startup] script start -> React mounted: ${Math.round(reactMounted - scriptStart)} ms`);
+  console.info(`[Startup] React mounted -> first page ready: ${Math.round(firstReady - reactMounted)} ms`);
+  console.info(`[Startup] total startup: ${Math.round(firstReady - scriptStart)} ms`);
+}
+
+function hideStartupSplash() {
+  const splash = document.getElementById('startup-splash');
+  if (!splash) return;
+  splash.classList.add('is-hidden');
+  window.setTimeout(() => splash.remove(), STARTUP_SPLASH_FADE_MS);
+}
+
+function scheduleHideStartupSplash() {
+  const elapsed = performance.now() - startupScriptStartedAt;
+  const delay = Math.max(0, MIN_STARTUP_SPLASH_MS - elapsed);
+  window.setTimeout(hideStartupSplash, delay);
+}
+
 // Native Feel P1: 禁用 WebView 默认右键菜单（保留输入框和编辑区的原生右键）
 window.addEventListener('contextmenu', (event) => {
   const target = event.target as HTMLElement | null;
@@ -38,14 +75,24 @@ async function applySystemAccentColor() {
   }
 }
 
-applySystemAccentColor().then(() => {
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <HashRouter>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </HashRouter>
-    </React.StrictMode>,
-  );
+markStartup('react-before-render');
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <HashRouter>
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    </HashRouter>
+  </React.StrictMode>,
+);
+
+requestAnimationFrame(() => {
+  markStartup('react-mounted');
+  requestAnimationFrame(() => {
+    markStartup('first-page-ready');
+    scheduleHideStartupSplash();
+    logStartupTimings();
+  });
 });
+
+void applySystemAccentColor();

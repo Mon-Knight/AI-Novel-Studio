@@ -109,9 +109,15 @@ interface AiGeneratePanelProps {
   onGenerated?: (draft: ChapterDraft) => void;
   onAdopted?: () => void;
   contextVersion?: number;
+  currentDraftId?: string;
+  onApplyAiText?: (payload: {
+    mode: 'replace_all' | 'append';
+    text: string;
+    source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
+  }) => Promise<boolean>;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0 }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, onApplyAiText }: AiGeneratePanelProps) {
   const [userInstruction, setUserInstruction] = useState('');
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -119,6 +125,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
   const [validationState, setValidationState] = useState<GenerationValidationState | null>(null);
   const [revising, setRevising] = useState(false);
+  const [latestGeneratedDraft, setLatestGeneratedDraft] = useState<ChapterDraft | null>(null);
 
   // v1.0.26 风格方案与输出控制选择
   const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
@@ -133,6 +140,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   useEffect(() => {
     setValidationState(null);
+    setLatestGeneratedDraft(null);
   }, [chapter?.id]);
 
   // 初始化/更新目标字数草稿
@@ -418,6 +426,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           });
 
           onGenerated?.(draft);
+          setLatestGeneratedDraft(draft);
 
           // 校验警告提示
           if (validationWarning) {
@@ -545,6 +554,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setPercent(100);
           setStage('修正完成');
           onGenerated?.(draft);
+          setLatestGeneratedDraft(draft);
 
           if (validationWarning) {
             setErrorMsg(validationWarning);
@@ -936,6 +946,42 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {latestGeneratedDraft && (
+        <div className="panel-section">
+          <div className="panel-section-title">应用最近生成结果</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => onApplyAiText?.({
+                mode: 'append',
+                text: latestGeneratedDraft.content,
+                source: 'ai_generate',
+              })}
+              disabled={!onApplyAiText || latestGeneratedDraft.id === currentDraftId}
+              style={{ flex: 1 }}
+              title={latestGeneratedDraft.id === currentDraftId ? '当前编辑器已显示该草稿，避免重复追加' : '追加到当前正文末尾'}
+            >
+              追加到正文
+            </button>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => onApplyAiText?.({
+                mode: 'replace_all',
+                text: latestGeneratedDraft.content,
+                source: 'ai_generate',
+              })}
+              disabled={!onApplyAiText}
+              style={{ flex: 1 }}
+            >
+              替换全文
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>
+            当前生成结果已保存为草稿 v{latestGeneratedDraft.versionNo}。
+          </div>
         </div>
       )}
 

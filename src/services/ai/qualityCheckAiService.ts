@@ -44,6 +44,8 @@ export const qualityCheckAiService = {
       chapterOutline: input.chapterOutline,
       chapterGoal: input.chapterGoal,
       draftContent: input.draftContent,
+      contentHash: input.contentHash,
+      wordCount: input.wordCount,
       specialAbility,
       forbiddenBehaviors,
       contextSummary,
@@ -55,7 +57,7 @@ export const qualityCheckAiService = {
       runtimeMode: settings.runtimeMode,
       provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `检查章节「${input.chapterTitle}」质量`,
+      inputSummary: `检查章节「${input.chapterTitle}」质量，hash=${input.contentHash || 'unknown'}，字数=${input.wordCount ?? input.draftContent.length}`,
     }).catch(() => null);
 
     try {

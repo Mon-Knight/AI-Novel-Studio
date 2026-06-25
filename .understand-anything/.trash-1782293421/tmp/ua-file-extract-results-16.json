@@ -1,0 +1,3222 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 20,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/README.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 66,
+      "nonEmptyLines": 52,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 文档索引",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "user/ - 用户使用指南",
+          "level": 2,
+          "line": 7
+        },
+        {
+          "heading": "project/ - 项目管理文档",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "technical/ - 技术文档",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "design/ - 设计文档",
+          "level": 2,
+          "line": 38
+        },
+        {
+          "heading": "根级参考文档",
+          "level": 2,
+          "line": 49
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": "docs/agent-runtime.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 170,
+      "nonEmptyLines": 118,
+      "sections": [
+        {
+          "heading": "AI Novel Studio — Agent Runtime 文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. v1.0.44 的目标",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. Agent Workflow Runtime 是什么？",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "2.1 Workflow Scripts（工作流脚本）",
+          "level": 3,
+          "line": 27
+        },
+        {
+          "heading": "2.2 Checklists（执行清单）",
+          "level": 3,
+          "line": 33
+        },
+        {
+          "heading": "2.3 Agent Core（核心类型系统）",
+          "level": 3,
+          "line": 39
+        },
+        {
+          "heading": "2.4 Agent Tools（工具层占位）",
+          "level": 3,
+          "line": 44
+        },
+        {
+          "heading": "2.5 Prompt Pipeline（提示词管线）",
+          "level": 3,
+          "line": 50
+        },
+        {
+          "heading": "3. 当前只是最小闭环，不是完整 Autonomous Agent",
+          "level": 2,
+          "line": 58
+        },
+        {
+          "heading": "4. Workflow Scripts 怎么用",
+          "level": 2,
+          "line": 72
+        },
+        {
+          "heading": "日常开发",
+          "level": 3,
+          "line": 74
+        },
+        {
+          "heading": "发布前",
+          "level": 3,
+          "line": 86
+        },
+        {
+          "heading": "5. Checklists 怎么用",
+          "level": 2,
+          "line": 93
+        },
+        {
+          "heading": "6. Planner Lite 当前能做什么",
+          "level": 2,
+          "line": 104
+        },
+        {
+          "heading": "7. Tool Layer 当前只是占位",
+          "level": 2,
+          "line": 117
+        },
+        {
+          "heading": "8. Prompt Pipeline 当前只是新结构，不替换旧链路",
+          "level": 2,
+          "line": 132
+        },
+        {
+          "heading": "9. 版本演进",
+          "level": 2,
+          "line": 143
+        },
+        {
+          "heading": "10. v1.0.46 Tool Layer Read-only Integration",
+          "level": 2,
+          "line": 154
+        },
+        {
+          "heading": "定位",
+          "level": 3,
+          "line": 156
+        },
+        {
+          "heading": "与 Skills 的区别",
+          "level": 3,
+          "line": 164
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 20
+      }
+    },
+    {
+      "path": "docs/agent-workflow.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 182,
+      "nonEmptyLines": 129,
+      "sections": [
+        {
+          "heading": "AI Novel Studio — Agent 工作流文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. Agent 角色定位",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. 标准开发工作流",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "3. 各阶段详细说明",
+          "level": 2,
+          "line": 44
+        },
+        {
+          "heading": "阶段 1：信息收集",
+          "level": 3,
+          "line": 46
+        },
+        {
+          "heading": "阶段 2：分析与规划",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "阶段 3：执行",
+          "level": 3,
+          "line": 70
+        },
+        {
+          "heading": "阶段 4：验证",
+          "level": 3,
+          "line": 81
+        },
+        {
+          "heading": "阶段 5：收尾",
+          "level": 3,
+          "line": 91
+        },
+        {
+          "heading": "4. 内置 Skills 工作流",
+          "level": 2,
+          "line": 103
+        },
+        {
+          "heading": "4.1 plan-version",
+          "level": 3,
+          "line": 105
+        },
+        {
+          "heading": "4.2 implement-feature",
+          "level": 3,
+          "line": 111
+        },
+        {
+          "heading": "4.3 verify-build",
+          "level": 3,
+          "line": 117
+        },
+        {
+          "heading": "4.4 review-ui",
+          "level": 3,
+          "line": 123
+        },
+        {
+          "heading": "4.5 release-package",
+          "level": 3,
+          "line": 129
+        },
+        {
+          "heading": "5. Agent 交互模式",
+          "level": 2,
+          "line": 137
+        },
+        {
+          "heading": "5.1 单 Agent 模式（当前）",
+          "level": 3,
+          "line": 139
+        },
+        {
+          "heading": "5.2 Multi-Agent 模式（未来）",
+          "level": 3,
+          "line": 145
+        },
+        {
+          "heading": "6. Agent 使用文档的优先级",
+          "level": 2,
+          "line": 157
+        },
+        {
+          "heading": "7. Agent 错误处理",
+          "level": 2,
+          "line": 171
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 20
+      }
+    },
+    {
+      "path": "docs/ai-agent-roadmap.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 175,
+      "nonEmptyLines": 128,
+      "sections": [
+        {
+          "heading": "AI Novel Studio — AI Agent 路线图",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 总体愿景",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. Phase 1：Agent 基础设施（v1.0.43+，当前阶段）",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "目标",
+          "level": 3,
+          "line": 29
+        },
+        {
+          "heading": "内容",
+          "level": 3,
+          "line": 32
+        },
+        {
+          "heading": "3. Phase 2：Agent 化（v2.x 系列）",
+          "level": 2,
+          "line": 45
+        },
+        {
+          "heading": "3.1 Rules Engine",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "3.2 Planner",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "3.3 Tool Calling",
+          "level": 3,
+          "line": 62
+        },
+        {
+          "heading": "3.4 Memory Engine",
+          "level": 3,
+          "line": 72
+        },
+        {
+          "heading": "3.5 Verification Engine",
+          "level": 3,
+          "line": 80
+        },
+        {
+          "heading": "4. Phase 3：Autonomous（v3.x 系列）",
+          "level": 2,
+          "line": 90
+        },
+        {
+          "heading": "4.1 Multi-Agent Workflow",
+          "level": 3,
+          "line": 92
+        },
+        {
+          "heading": "4.2 Autonomous Creation",
+          "level": 3,
+          "line": 107
+        },
+        {
+          "heading": "4.3 Creative Collaboration",
+          "level": 3,
+          "line": 115
+        },
+        {
+          "heading": "5. 关键技术能力演进",
+          "level": 2,
+          "line": 125
+        },
+        {
+          "heading": "6. 技术选型方向",
+          "level": 2,
+          "line": 138
+        },
+        {
+          "heading": "6.1 Agent 框架",
+          "level": 3,
+          "line": 140
+        },
+        {
+          "heading": "6.2 Memory 系统",
+          "level": 3,
+          "line": 148
+        },
+        {
+          "heading": "6.3 Tool Calling",
+          "level": 3,
+          "line": 155
+        },
+        {
+          "heading": "7. 风险与挑战",
+          "level": 2,
+          "line": 164
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 21
+      }
+    },
+    {
+      "path": "docs/data-model.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 2074,
+      "nonEmptyLines": 1640,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 数据模型设计文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 文档目的",
+          "level": 1,
+          "line": 12
+        },
+        {
+          "heading": "2. 数据设计核心原则",
+          "level": 1,
+          "line": 44
+        },
+        {
+          "heading": "2.1 以小说作品为最高级对象",
+          "level": 2,
+          "line": 46
+        },
+        {
+          "heading": "2.2 以章节为核心生成单位",
+          "level": 2,
+          "line": 60
+        },
+        {
+          "heading": "2.3 AI 结果必须可追踪",
+          "level": 2,
+          "line": 82
+        },
+        {
+          "heading": "2.4 复杂配置放在作品详情页，工作台只调用",
+          "level": 2,
+          "line": 109
+        },
+        {
+          "heading": "2.5 本地优先，SQLite 保存",
+          "level": 2,
+          "line": 126
+        },
+        {
+          "heading": "2.6 允许渐进式实现",
+          "level": 2,
+          "line": 134
+        },
+        {
+          "heading": "3. 总体数据模块",
+          "level": 1,
+          "line": 144
+        },
+        {
+          "heading": "4. 数据关系总览",
+          "level": 1,
+          "line": 174
+        },
+        {
+          "heading": "4.1 核心关系",
+          "level": 2,
+          "line": 176
+        },
+        {
+          "heading": "4.2 推荐 Mermaid 关系图",
+          "level": 2,
+          "line": 204
+        },
+        {
+          "heading": "5. 表设计总览",
+          "level": 1,
+          "line": 237
+        },
+        {
+          "heading": "5.1 v0.1.0 阶段",
+          "level": 2,
+          "line": 239
+        },
+        {
+          "heading": "5.2 v0.2.0 至 v0.5.0 阶段优先落库",
+          "level": 2,
+          "line": 258
+        },
+        {
+          "heading": "5.3 v0.6.0 之后扩展",
+          "level": 2,
+          "line": 278
+        },
+        {
+          "heading": "6. 通用字段规范",
+          "level": 1,
+          "line": 294
+        },
+        {
+          "heading": "7. 枚举值规范",
+          "level": 1,
+          "line": 316
+        },
+        {
+          "heading": "7.1 小说状态 NovelStatus",
+          "level": 2,
+          "line": 318
+        },
+        {
+          "heading": "7.2 章节状态 ChapterStatus",
+          "level": 2,
+          "line": 341
+        },
+        {
+          "heading": "7.3 草稿来源 DraftSource",
+          "level": 2,
+          "line": 368
+        },
+        {
+          "heading": "7.4 AI 任务类型 AiTaskType",
+          "level": 2,
+          "line": 391
+        },
+        {
+          "heading": "7.5 AI 任务状态 AiTaskStatus",
+          "level": 2,
+          "line": 413
+        },
+        {
+          "heading": "7.6 风格来源 StyleSourceType",
+          "level": 2,
+          "line": 426
+        },
+        {
+          "heading": "7.7 事件状态 ChapterEventStatus",
+          "level": 2,
+          "line": 438
+        },
+        {
+          "heading": "8. 核心表详细设计",
+          "level": 1,
+          "line": 452
+        },
+        {
+          "heading": "8.1 novels：小说作品表",
+          "level": 1,
+          "line": 456
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 458
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 462
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 482
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 504
+        },
+        {
+          "heading": "8.2 volumes：分卷表",
+          "level": 1,
+          "line": 528
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 530
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 534
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 550
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 569
+        },
+        {
+          "heading": "8.3 chapters：章节表",
+          "level": 1,
+          "line": 589
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 591
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 597
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 616
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 640
+        },
+        {
+          "heading": "8.4 chapter_drafts：章节正文版本表",
+          "level": 1,
+          "line": 663
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 665
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 678
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 696
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 719
+        },
+        {
+          "heading": "采用正文规则",
+          "level": 2,
+          "line": 739
+        },
+        {
+          "heading": "8.5 world_settings：世界背景表",
+          "level": 1,
+          "line": 755
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 757
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 761
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 774
+        },
+        {
+          "heading": "8.6 rule_systems：规则体系表",
+          "level": 1,
+          "line": 791
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 793
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 797
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 812
+        },
+        {
+          "heading": "8.7 protagonists：主角设定表",
+          "level": 1,
+          "line": 831
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 833
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 839
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 856
+        },
+        {
+          "heading": "8.8 characters：角色库表",
+          "level": 1,
+          "line": 877
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 879
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 887
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 909
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 935
+        },
+        {
+          "heading": "8.9 character_states：角色状态表",
+          "level": 1,
+          "line": 961
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 963
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 977
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 993
+        },
+        {
+          "heading": "8.10 outlines：大纲表",
+          "level": 1,
+          "line": 1013
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1015
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1021
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1036
+        },
+        {
+          "heading": "8.11 chapter_events：章节剧情事件表",
+          "level": 1,
+          "line": 1055
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1057
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1063
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1081
+        },
+        {
+          "heading": "8.12 style_profiles：风格方案表",
+          "level": 1,
+          "line": 1103
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1105
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1118
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 1145
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1176
+        },
+        {
+          "heading": "8.13 output_profiles：输出控制方案表",
+          "level": 1,
+          "line": 1207
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1209
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1221
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1243
+        },
+        {
+          "heading": "8.14 chapter_summaries：章节总结表",
+          "level": 1,
+          "line": 1269
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1271
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1275
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1294
+        },
+        {
+          "heading": "8.15 context_records：上下文记录表",
+          "level": 1,
+          "line": 1317
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1319
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1325
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1340
+        },
+        {
+          "heading": "8.16 prompt_templates：提示词模板表",
+          "level": 1,
+          "line": 1359
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1361
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1367
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1380
+        },
+        {
+          "heading": "8.17 ai_task_records：AI 任务记录表",
+          "level": 1,
+          "line": 1397
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1399
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1405
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 1427
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1454
+        },
+        {
+          "heading": "8.18 imported_assets：导入文件记录表",
+          "level": 1,
+          "line": 1480
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1482
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1494
+        },
+        {
+          "heading": "TypeScript 类型",
+          "level": 2,
+          "line": 1509
+        },
+        {
+          "heading": "8.19 settings：设置表",
+          "level": 1,
+          "line": 1528
+        },
+        {
+          "heading": "作用",
+          "level": 2,
+          "line": 1530
+        },
+        {
+          "heading": "字段设计",
+          "level": 2,
+          "line": 1542
+        },
+        {
+          "heading": "SQLite 建表示例",
+          "level": 2,
+          "line": 1552
+        },
+        {
+          "heading": "重要安全规则",
+          "level": 2,
+          "line": 1564
+        },
+        {
+          "heading": "9. 索引设计建议",
+          "level": 1,
+          "line": 1579
+        },
+        {
+          "heading": "10. 数据状态流转",
+          "level": 1,
+          "line": 1600
+        },
+        {
+          "heading": "10.1 章节状态流转",
+          "level": 2,
+          "line": 1602
+        },
+        {
+          "heading": "10.2 AI 任务状态流转",
+          "level": 2,
+          "line": 1634
+        },
+        {
+          "heading": "10.3 角色生成流程",
+          "level": 2,
+          "line": 1646
+        },
+        {
+          "heading": "10.4 事件生成流程",
+          "level": 2,
+          "line": 1664
+        },
+        {
+          "heading": "11. 工作台数据读取逻辑",
+          "level": 1,
+          "line": 1686
+        },
+        {
+          "heading": "12. 正文生成所需数据包",
+          "level": 1,
+          "line": 1710
+        },
+        {
+          "heading": "13. 本地数据文件位置建议",
+          "level": 1,
+          "line": 1751
+        },
+        {
+          "heading": "14. 迁移文件建议",
+          "level": 1,
+          "line": 1779
+        },
+        {
+          "heading": "15. Git 忽略规则建议",
+          "level": 1,
+          "line": 1811
+        },
+        {
+          "heading": "16. TypeScript 类型目录建议",
+          "level": 1,
+          "line": 1838
+        },
+        {
+          "heading": "17. 服务层目录建议",
+          "level": 1,
+          "line": 1859
+        },
+        {
+          "heading": "18. v0.1.0 数据实现范围",
+          "level": 1,
+          "line": 1892
+        },
+        {
+          "heading": "19. v0.2.0 数据实现范围",
+          "level": 1,
+          "line": 1921
+        },
+        {
+          "heading": "20. v0.3.0 数据实现范围",
+          "level": 1,
+          "line": 1938
+        },
+        {
+          "heading": "21. v0.5.0 数据实现范围",
+          "level": 1,
+          "line": 1953
+        },
+        {
+          "heading": "22. v0.6.0 数据实现范围",
+          "level": 1,
+          "line": 1969
+        },
+        {
+          "heading": "23. v0.7.0 数据实现范围",
+          "level": 1,
+          "line": 1985
+        },
+        {
+          "heading": "24. v0.8.0 数据实现范围",
+          "level": 1,
+          "line": 2001
+        },
+        {
+          "heading": "25. 数据安全与隐私",
+          "level": 1,
+          "line": 2015
+        },
+        {
+          "heading": "25.1 API Key",
+          "level": 2,
+          "line": 2017
+        },
+        {
+          "heading": "25.2 用户作品数据",
+          "level": 2,
+          "line": 2034
+        },
+        {
+          "heading": "25.3 AI 任务记录",
+          "level": 2,
+          "line": 2042
+        },
+        {
+          "heading": "26. 数据模型最高优先级总结",
+          "level": 1,
+          "line": 2057
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 137
+      }
+    },
+    {
+      "path": "docs/development-rules.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 1454,
+      "nonEmptyLines": 1070,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 开发规则文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "0. Agent 基础设施（v1.0.43 新增）",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "1. 项目基本定位",
+          "level": 2,
+          "line": 29
+        },
+        {
+          "heading": "2. 项目开发总原则",
+          "level": 2,
+          "line": 65
+        },
+        {
+          "heading": "2.1 不再沿用旧项目结构",
+          "level": 3,
+          "line": 67
+        },
+        {
+          "heading": "2.2 先稳定主干，再扩展高级功能",
+          "level": 3,
+          "line": 95
+        },
+        {
+          "heading": "2.3 每次开发必须小步提交",
+          "level": 3,
+          "line": 144
+        },
+        {
+          "heading": "3. 技术栈规则",
+          "level": 2,
+          "line": 167
+        },
+        {
+          "heading": "3.1 固定技术路线",
+          "level": 3,
+          "line": 169
+        },
+        {
+          "heading": "3.2 不随意更换技术栈",
+          "level": 3,
+          "line": 193
+        },
+        {
+          "heading": "3.3 TypeScript 规则",
+          "level": 3,
+          "line": 209
+        },
+        {
+          "heading": "4. 推荐项目目录结构",
+          "level": 2,
+          "line": 226
+        },
+        {
+          "heading": "5. 目录职责边界",
+          "level": 2,
+          "line": 334
+        },
+        {
+          "heading": "5.1 `src/pages/`",
+          "level": 3,
+          "line": 336
+        },
+        {
+          "heading": "5.2 `src/components/`",
+          "level": 3,
+          "line": 351
+        },
+        {
+          "heading": "5.3 `src/features/`",
+          "level": 3,
+          "line": 368
+        },
+        {
+          "heading": "5.4 `src/services/`",
+          "level": 3,
+          "line": 384
+        },
+        {
+          "heading": "5.5 `prompts/`",
+          "level": 3,
+          "line": 399
+        },
+        {
+          "heading": "5.6 `docs/`",
+          "level": 3,
+          "line": 409
+        },
+        {
+          "heading": "6. UI 开发规则",
+          "level": 2,
+          "line": 417
+        },
+        {
+          "heading": "6.1 UI 总方向",
+          "level": 3,
+          "line": 419
+        },
+        {
+          "heading": "6.2 首页 UI 规则",
+          "level": 3,
+          "line": 439
+        },
+        {
+          "heading": "6.3 写作工作台 UI 规则",
+          "level": 3,
+          "line": 468
+        },
+        {
+          "heading": "6.4 右侧栏 UI 规则",
+          "level": 3,
+          "line": 494
+        },
+        {
+          "heading": "6.5 工作台右侧栏职责",
+          "level": 3,
+          "line": 530
+        },
+        {
+          "heading": "7. AI 功能开发规则",
+          "level": 2,
+          "line": 561
+        },
+        {
+          "heading": "7.1 AI 不是单个生成按钮",
+          "level": 3,
+          "line": 563
+        },
+        {
+          "heading": "7.2 AI 输出不得直接成为正式正文",
+          "level": 3,
+          "line": 587
+        },
+        {
+          "heading": "7.3 提示词模板管理规则",
+          "level": 3,
+          "line": 619
+        },
+        {
+          "heading": "7.4 AI 任务记录规则",
+          "level": 3,
+          "line": 651
+        },
+        {
+          "heading": "7.5 AI 调用失败处理",
+          "level": 3,
+          "line": 674
+        },
+        {
+          "heading": "8. 数据开发规则",
+          "level": 2,
+          "line": 693
+        },
+        {
+          "heading": "8.1 数据以小说作品为核心",
+          "level": 3,
+          "line": 695
+        },
+        {
+          "heading": "8.2 MVP 阶段优先表",
+          "level": 3,
+          "line": 721
+        },
+        {
+          "heading": "8.3 数据状态规则",
+          "level": 3,
+          "line": 752
+        },
+        {
+          "heading": "9. 风格方案与输出控制规则",
+          "level": 2,
+          "line": 787
+        },
+        {
+          "heading": "9.1 风格导入不放在工作台",
+          "level": 3,
+          "line": 789
+        },
+        {
+          "heading": "9.2 TXT 导入规则",
+          "level": 3,
+          "line": 797
+        },
+        {
+          "heading": "9.3 JSON 导入规则",
+          "level": 3,
+          "line": 824
+        },
+        {
+          "heading": "10. 角色与事件开发规则",
+          "level": 2,
+          "line": 839
+        },
+        {
+          "heading": "10.1 角色生成规则",
+          "level": 3,
+          "line": 841
+        },
+        {
+          "heading": "10.2 事件生成规则",
+          "level": 3,
+          "line": 873
+        },
+        {
+          "heading": "11. Git 与 GitHub 规则",
+          "level": 2,
+          "line": 893
+        },
+        {
+          "heading": "11.1 GitHub 仓库",
+          "level": 3,
+          "line": 895
+        },
+        {
+          "heading": "11.2 每次开发前必须检查",
+          "level": 3,
+          "line": 913
+        },
+        {
+          "heading": "11.3 每个版本必须提交",
+          "level": 3,
+          "line": 931
+        },
+        {
+          "heading": "11.4 禁止提交的内容",
+          "level": 3,
+          "line": 956
+        },
+        {
+          "heading": "11.5 本地备份规则",
+          "level": 3,
+          "line": 988
+        },
+        {
+          "heading": "12. 版本路线规则",
+          "level": 2,
+          "line": 1006
+        },
+        {
+          "heading": "12.1 推荐版本路线",
+          "level": 3,
+          "line": 1008
+        },
+        {
+          "heading": "12.2 版本完成标准",
+          "level": 3,
+          "line": 1025
+        },
+        {
+          "heading": "13. 测试与验证规则",
+          "level": 2,
+          "line": 1043
+        },
+        {
+          "heading": "13.1 每次修改后至少验证",
+          "level": 3,
+          "line": 1045
+        },
+        {
+          "heading": "13.2 UI 验证",
+          "level": 3,
+          "line": 1066
+        },
+        {
+          "heading": "13.3 功能验证",
+          "level": 3,
+          "line": 1081
+        },
+        {
+          "heading": "14. 安全与隐私规则",
+          "level": 2,
+          "line": 1094
+        },
+        {
+          "heading": "14.1 API Key",
+          "level": 3,
+          "line": 1096
+        },
+        {
+          "heading": "14.2 用户小说内容",
+          "level": 3,
+          "line": 1114
+        },
+        {
+          "heading": "14.3 日志",
+          "level": 3,
+          "line": 1128
+        },
+        {
+          "heading": "15. Copilot / Agent 使用规则",
+          "level": 2,
+          "line": 1147
+        },
+        {
+          "heading": "15.1 Agent 开发前必须读取文档",
+          "level": 3,
+          "line": 1149
+        },
+        {
+          "heading": "15.2 Agent 不能随意扩大范围",
+          "level": 3,
+          "line": 1166
+        },
+        {
+          "heading": "15.3 Agent 必须解释修改",
+          "level": 3,
+          "line": 1184
+        },
+        {
+          "heading": "15.4 Agent 不得做的事情",
+          "level": 3,
+          "line": 1200
+        },
+        {
+          "heading": "16. 代码质量规则",
+          "level": 2,
+          "line": 1219
+        },
+        {
+          "heading": "16.1 组件拆分",
+          "level": 3,
+          "line": 1221
+        },
+        {
+          "heading": "16.2 命名规则",
+          "level": 3,
+          "line": 1241
+        },
+        {
+          "heading": "16.3 注释规则",
+          "level": 3,
+          "line": 1273
+        },
+        {
+          "heading": "17. 数据库迁移规则",
+          "level": 2,
+          "line": 1288
+        },
+        {
+          "heading": "18. 设置中心规则",
+          "level": 2,
+          "line": 1304
+        },
+        {
+          "heading": "19. 导入导出规则",
+          "level": 2,
+          "line": 1323
+        },
+        {
+          "heading": "19.1 导入",
+          "level": 3,
+          "line": 1325
+        },
+        {
+          "heading": "19.2 导出",
+          "level": 3,
+          "line": 1343
+        },
+        {
+          "heading": "20. 完成汇报模板",
+          "level": 2,
+          "line": 1361
+        },
+        {
+          "heading": "21. 开发前检查清单",
+          "level": 2,
+          "line": 1407
+        },
+        {
+          "heading": "22. 开发后检查清单",
+          "level": 2,
+          "line": 1423
+        },
+        {
+          "heading": "23. 总结",
+          "level": 2,
+          "line": 1444
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 77
+      }
+    },
+    {
+      "path": "docs/development-skills.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 107,
+      "nonEmptyLines": 75,
+      "sections": [
+        {
+          "heading": "AI Novel Studio — 项目开发辅助 Skills",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目开发辅助 Skills 的作用",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. Skills 与软件内部 Agent 功能的区别",
+          "level": 2,
+          "line": 22
+        },
+        {
+          "heading": "3. 用户真实协作流程",
+          "level": 2,
+          "line": 33
+        },
+        {
+          "heading": "4. 10 个 Skills 说明",
+          "level": 2,
+          "line": 49
+        },
+        {
+          "heading": "4.1 plan-version — 版本规划",
+          "level": 3,
+          "line": 51
+        },
+        {
+          "heading": "4.2 agent-task-writer — 任务书生成",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "4.3 implement-feature — 功能实现",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "4.4 bugfix-safe-patch — 安全修复",
+          "level": 3,
+          "line": 60
+        },
+        {
+          "heading": "4.5 verify-build — 构建验证",
+          "level": 3,
+          "line": 63
+        },
+        {
+          "heading": "4.6 review-ui — UI 审查",
+          "level": 3,
+          "line": 66
+        },
+        {
+          "heading": "4.7 docs-sync — 文档同步",
+          "level": 3,
+          "line": 69
+        },
+        {
+          "heading": "4.8 release-package — 发布收尾",
+          "level": 3,
+          "line": 72
+        },
+        {
+          "heading": "4.9 db-migration-guard — 数据库保护",
+          "level": 3,
+          "line": 75
+        },
+        {
+          "heading": "4.10 tauri-desktop-build — 桌面构建",
+          "level": 3,
+          "line": 78
+        },
+        {
+          "heading": "5. 什么时候使用哪个 Skill",
+          "level": 2,
+          "line": 83
+        },
+        {
+          "heading": "6. 后续如何扩展",
+          "level": 2,
+          "line": 98
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 17
+      }
+    },
+    {
+      "path": "docs/module-boundaries.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 228,
+      "nonEmptyLines": 165,
+      "sections": [
+        {
+          "heading": "AI Novel Studio — 模块边界文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 模块总览",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. 桌面壳模块（src-tauri/）",
+          "level": 2,
+          "line": 24
+        },
+        {
+          "heading": "职责",
+          "level": 3,
+          "line": 26
+        },
+        {
+          "heading": "可依赖",
+          "level": 3,
+          "line": 33
+        },
+        {
+          "heading": "禁止",
+          "level": 3,
+          "line": 38
+        },
+        {
+          "heading": "3. UI 层模块（src/）",
+          "level": 2,
+          "line": 45
+        },
+        {
+          "heading": "3.1 pages/（页面组件）",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "3.2 components/（通用组件）",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "3.3 styles/（样式文件）",
+          "level": 3,
+          "line": 83
+        },
+        {
+          "heading": "4. 业务逻辑层（src/features/）",
+          "level": 2,
+          "line": 93
+        },
+        {
+          "heading": "职责",
+          "level": 3,
+          "line": 95
+        },
+        {
+          "heading": "可依赖",
+          "level": 3,
+          "line": 103
+        },
+        {
+          "heading": "禁止",
+          "level": 3,
+          "line": 108
+        },
+        {
+          "heading": "5. 服务层（src/services/）",
+          "level": 2,
+          "line": 115
+        },
+        {
+          "heading": "5.1 services/ai/",
+          "level": 3,
+          "line": 117
+        },
+        {
+          "heading": "5.2 services/database/",
+          "level": 3,
+          "line": 128
+        },
+        {
+          "heading": "5.3 services/prompt/",
+          "level": 3,
+          "line": 139
+        },
+        {
+          "heading": "5.4 services/import/ & services/export/",
+          "level": 3,
+          "line": 150
+        },
+        {
+          "heading": "6. 数据层",
+          "level": 2,
+          "line": 158
+        },
+        {
+          "heading": "6.1 store/（状态管理）",
+          "level": 3,
+          "line": 160
+        },
+        {
+          "heading": "6.2 types/（类型定义）",
+          "level": 3,
+          "line": 168
+        },
+        {
+          "heading": "7. 提示词系统（prompts/）",
+          "level": 2,
+          "line": 178
+        },
+        {
+          "heading": "职责",
+          "level": 3,
+          "line": 180
+        },
+        {
+          "heading": "禁止",
+          "level": 3,
+          "line": 184
+        },
+        {
+          "heading": "8. Agent 系统（预留）",
+          "level": 2,
+          "line": 191
+        },
+        {
+          "heading": "未来职责",
+          "level": 3,
+          "line": 193
+        },
+        {
+          "heading": "当前状态",
+          "level": 3,
+          "line": 200
+        },
+        {
+          "heading": "9. 跨模块交互规则",
+          "level": 2,
+          "line": 207
+        },
+        {
+          "heading": "10. 禁止的跨模块依赖",
+          "level": 2,
+          "line": 218
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 30
+      }
+    },
+    {
+      "path": "docs/native-dialog-notification-plan.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 106,
+      "nonEmptyLines": 78,
+      "sections": [
+        {
+          "heading": "Native Feel P2.2 — 原生 Dialog 与通知落地规划",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 当前项目 DOM Modal / Overlay 清单",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. 当前项目 Toast / 状态提示清单",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "3. 本次 P2.2 实际完成内容",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "3.1 工具层",
+          "level": 3,
+          "line": 38
+        },
+        {
+          "heading": "3.2 Dialog 替换",
+          "level": 3,
+          "line": 45
+        },
+        {
+          "heading": "3.3 通知接入",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "3.4 配置变更",
+          "level": 3,
+          "line": 61
+        },
+        {
+          "heading": "4. 后续 P2.3 / P3 建议",
+          "level": 2,
+          "line": 69
+        },
+        {
+          "heading": "Dialog 方面",
+          "level": 3,
+          "line": 71
+        },
+        {
+          "heading": "Notification 方面",
+          "level": 3,
+          "line": 79
+        },
+        {
+          "heading": "架构方面",
+          "level": 3,
+          "line": 88
+        },
+        {
+          "heading": "5. 保留到后续的问题",
+          "level": 2,
+          "line": 98
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 13
+      }
+    },
+    {
+      "path": "docs/native-feel-p2-4-installation-report.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 96,
+      "nonEmptyLines": 76,
+      "sections": [
+        {
+          "heading": "Native Feel P2.4 — 安装包体验与分发检查报告",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 构建环境",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "2. 构建结果",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "3. 生成产物",
+          "level": 2,
+          "line": 24
+        },
+        {
+          "heading": "4. Tauri 配置检查",
+          "level": 2,
+          "line": 32
+        },
+        {
+          "heading": "5. 安装验证（待用户手动确认）",
+          "level": 2,
+          "line": 47
+        },
+        {
+          "heading": "6. 用户数据路径",
+          "level": 2,
+          "line": 59
+        },
+        {
+          "heading": "7. 卸载与重装",
+          "level": 2,
+          "line": 68
+        },
+        {
+          "heading": "8. 发现的问题",
+          "level": 2,
+          "line": 79
+        },
+        {
+          "heading": "9. 后续建议",
+          "level": 2,
+          "line": 88
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "docs/native-feel-p2-assessment.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 202,
+      "nonEmptyLines": 144,
+      "sections": [
+        {
+          "heading": "Native Feel P2 — Windows 原生外观增强技术评估",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 当前 Tauri 版本与能力",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "2. 当前 Windows 原生能力缺口",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "3. Mica / Acrylic 可行性分析",
+          "level": 2,
+          "line": 39
+        },
+        {
+          "heading": "路线 A：Tauri 1.7 + Win32 API",
+          "level": 3,
+          "line": 41
+        },
+        {
+          "heading": "路线 B：Tauri 2.x 升级",
+          "level": 3,
+          "line": 60
+        },
+        {
+          "heading": "本次结论",
+          "level": 3,
+          "line": 76
+        },
+        {
+          "heading": "4. 系统 Accent Color 方案",
+          "level": 2,
+          "line": 89
+        },
+        {
+          "heading": "已实现方案（本次）",
+          "level": 3,
+          "line": 91
+        },
+        {
+          "heading": "5. 原生 Dialog 替换方案",
+          "level": 2,
+          "line": 108
+        },
+        {
+          "heading": "评估",
+          "level": 3,
+          "line": 110
+        },
+        {
+          "heading": "本次结论",
+          "level": 3,
+          "line": 118
+        },
+        {
+          "heading": "6. 原生通知方案",
+          "level": 2,
+          "line": 126
+        },
+        {
+          "heading": "评估",
+          "level": 3,
+          "line": 128
+        },
+        {
+          "heading": "本次结论",
+          "level": 3,
+          "line": 137
+        },
+        {
+          "heading": "7. 安装包体验现状",
+          "level": 2,
+          "line": 145
+        },
+        {
+          "heading": "当前状态",
+          "level": 3,
+          "line": 147
+        },
+        {
+          "heading": "建议",
+          "level": 3,
+          "line": 161
+        },
+        {
+          "heading": "8. 推荐落地顺序",
+          "level": 2,
+          "line": 169
+        },
+        {
+          "heading": "9. 不建议当前实现的内容与原因",
+          "level": 2,
+          "line": 193
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 20
+      }
+    },
+    {
+      "path": "docs/product-design.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 1294,
+      "nonEmptyLines": 920,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 产品设计文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目定位",
+          "level": 1,
+          "line": 12
+        },
+        {
+          "heading": "2. 核心产品一句话",
+          "level": 1,
+          "line": 38
+        },
+        {
+          "heading": "3. 产品不是做什么",
+          "level": 1,
+          "line": 44
+        },
+        {
+          "heading": "3.1 不是普通写作软件",
+          "level": 2,
+          "line": 48
+        },
+        {
+          "heading": "3.2 不是普通网页后台",
+          "level": 2,
+          "line": 61
+        },
+        {
+          "heading": "3.3 不是一次性生成整本小说的网站",
+          "level": 2,
+          "line": 82
+        },
+        {
+          "heading": "4. 目标用户",
+          "level": 1,
+          "line": 98
+        },
+        {
+          "heading": "5. 核心设计原则",
+          "level": 1,
+          "line": 114
+        },
+        {
+          "heading": "5.1 用户负责方向，AI 负责扩展",
+          "level": 2,
+          "line": 116
+        },
+        {
+          "heading": "5.2 以章节为基本生成单位",
+          "level": 2,
+          "line": 140
+        },
+        {
+          "heading": "5.3 工作台只负责调用，不负责复杂配置",
+          "level": 2,
+          "line": 162
+        },
+        {
+          "heading": "5.4 所有 AI 结果都需要用户确认",
+          "level": 2,
+          "line": 183
+        },
+        {
+          "heading": "5.5 长篇连续性优先",
+          "level": 2,
+          "line": 198
+        },
+        {
+          "heading": "5.6 本地优先",
+          "level": 2,
+          "line": 221
+        },
+        {
+          "heading": "6. 核心概念定义",
+          "level": 1,
+          "line": 233
+        },
+        {
+          "heading": "6.1 小说作品 Novel",
+          "level": 2,
+          "line": 235
+        },
+        {
+          "heading": "6.2 分卷 Volume",
+          "level": 2,
+          "line": 255
+        },
+        {
+          "heading": "6.3 章节 Chapter",
+          "level": 2,
+          "line": 269
+        },
+        {
+          "heading": "6.4 正文草稿 Chapter Draft",
+          "level": 2,
+          "line": 296
+        },
+        {
+          "heading": "6.5 风格方案 Style Profile",
+          "level": 2,
+          "line": 310
+        },
+        {
+          "heading": "6.6 输出控制方案 Output Profile",
+          "level": 2,
+          "line": 336
+        },
+        {
+          "heading": "6.7 角色库 Character Library",
+          "level": 2,
+          "line": 359
+        },
+        {
+          "heading": "6.8 剧情事件 Chapter Event",
+          "level": 2,
+          "line": 381
+        },
+        {
+          "heading": "6.9 上下文 Context",
+          "level": 2,
+          "line": 396
+        },
+        {
+          "heading": "6.10 提示词模板 Prompt Template",
+          "level": 2,
+          "line": 413
+        },
+        {
+          "heading": "7. 总体功能结构",
+          "level": 1,
+          "line": 432
+        },
+        {
+          "heading": "8. 主界面设计",
+          "level": 1,
+          "line": 454
+        },
+        {
+          "heading": "8.1 左侧全局导航",
+          "level": 2,
+          "line": 458
+        },
+        {
+          "heading": "8.2 顶部状态栏",
+          "level": 2,
+          "line": 479
+        },
+        {
+          "heading": "8.3 首页快捷入口",
+          "level": 2,
+          "line": 490
+        },
+        {
+          "heading": "8.4 作品卡片",
+          "level": 2,
+          "line": 502
+        },
+        {
+          "heading": "9. 作品详情页设计",
+          "level": 1,
+          "line": 520
+        },
+        {
+          "heading": "9.1 基础设定",
+          "level": 2,
+          "line": 526
+        },
+        {
+          "heading": "9.2 大纲管理",
+          "level": 2,
+          "line": 539
+        },
+        {
+          "heading": "9.3 角色库",
+          "level": 2,
+          "line": 549
+        },
+        {
+          "heading": "9.4 风格方案",
+          "level": 2,
+          "line": 560
+        },
+        {
+          "heading": "9.5 输出控制方案",
+          "level": 2,
+          "line": 571
+        },
+        {
+          "heading": "10. 写作工作台设计",
+          "level": 1,
+          "line": 585
+        },
+        {
+          "heading": "10.1 左侧卷章目录树",
+          "level": 2,
+          "line": 600
+        },
+        {
+          "heading": "10.2 中间正文编辑区",
+          "level": 2,
+          "line": 619
+        },
+        {
+          "heading": "10.3 右侧竖向工具栏",
+          "level": 2,
+          "line": 638
+        },
+        {
+          "heading": "10.4 右侧弹出式面板",
+          "level": 2,
+          "line": 657
+        },
+        {
+          "heading": "AI 生成面板",
+          "level": 3,
+          "line": 663
+        },
+        {
+          "heading": "大纲面板",
+          "level": 3,
+          "line": 677
+        },
+        {
+          "heading": "角色面板",
+          "level": 3,
+          "line": 687
+        },
+        {
+          "heading": "事件面板",
+          "level": 3,
+          "line": 696
+        },
+        {
+          "heading": "检查面板",
+          "level": 3,
+          "line": 705
+        },
+        {
+          "heading": "11. AI 分工设计",
+          "level": 1,
+          "line": 717
+        },
+        {
+          "heading": "11.1 设定整理员",
+          "level": 2,
+          "line": 721
+        },
+        {
+          "heading": "11.2 角色生成员",
+          "level": 2,
+          "line": 736
+        },
+        {
+          "heading": "11.3 剧情事件策划员",
+          "level": 2,
+          "line": 754
+        },
+        {
+          "heading": "11.4 正文写手",
+          "level": 2,
+          "line": 771
+        },
+        {
+          "heading": "11.5 润色编辑",
+          "level": 2,
+          "line": 789
+        },
+        {
+          "heading": "11.6 质量检查员",
+          "level": 2,
+          "line": 808
+        },
+        {
+          "heading": "11.7 上下文总结员",
+          "level": 2,
+          "line": 827
+        },
+        {
+          "heading": "11.8 风格分析员",
+          "level": 2,
+          "line": 843
+        },
+        {
+          "heading": "12. 提示词调度中心",
+          "level": 1,
+          "line": 862
+        },
+        {
+          "heading": "13. 数据设计方向",
+          "level": 1,
+          "line": 892
+        },
+        {
+          "heading": "14. 导入导出设计",
+          "level": 1,
+          "line": 925
+        },
+        {
+          "heading": "14.1 TXT 导入",
+          "level": 2,
+          "line": 927
+        },
+        {
+          "heading": "14.2 JSON 导入",
+          "level": 2,
+          "line": 942
+        },
+        {
+          "heading": "14.3 导出",
+          "level": 2,
+          "line": 953
+        },
+        {
+          "heading": "15. 设置中心设计",
+          "level": 1,
+          "line": 967
+        },
+        {
+          "heading": "15.1 AI 设置",
+          "level": 2,
+          "line": 969
+        },
+        {
+          "heading": "15.2 本地数据设置",
+          "level": 2,
+          "line": 980
+        },
+        {
+          "heading": "15.3 界面设置",
+          "level": 2,
+          "line": 987
+        },
+        {
+          "heading": "16. MVP 范围",
+          "level": 1,
+          "line": 997
+        },
+        {
+          "heading": "16.1 v0.1.0 目标",
+          "level": 2,
+          "line": 999
+        },
+        {
+          "heading": "16.2 v0.1.0 不做内容",
+          "level": 2,
+          "line": 1019
+        },
+        {
+          "heading": "17. 后续版本路线",
+          "level": 1,
+          "line": 1034
+        },
+        {
+          "heading": "v0.2.0：作品详情与基础设定",
+          "level": 2,
+          "line": 1036
+        },
+        {
+          "heading": "v0.3.0：分卷与章节管理",
+          "level": 2,
+          "line": 1047
+        },
+        {
+          "heading": "v0.4.0：写作工作台 UI",
+          "level": 2,
+          "line": 1057
+        },
+        {
+          "heading": "v0.5.0：AI 正文生成闭环",
+          "level": 2,
+          "line": 1068
+        },
+        {
+          "heading": "v0.6.0：风格方案与输出控制",
+          "level": 2,
+          "line": 1081
+        },
+        {
+          "heading": "v0.7.0：角色与事件辅助",
+          "level": 2,
+          "line": 1091
+        },
+        {
+          "heading": "v0.8.0：上下文总结",
+          "level": 2,
+          "line": 1102
+        },
+        {
+          "heading": "v0.9.0：质量检查与润色",
+          "level": 2,
+          "line": 1111
+        },
+        {
+          "heading": "v1.0.0：可正式写长篇的基础版",
+          "level": 2,
+          "line": 1121
+        },
+        {
+          "heading": "18. UI 风格要求",
+          "level": 1,
+          "line": 1136
+        },
+        {
+          "heading": "18.1 首页 UI",
+          "level": 2,
+          "line": 1140
+        },
+        {
+          "heading": "18.2 工作台 UI",
+          "level": 2,
+          "line": 1151
+        },
+        {
+          "heading": "18.3 右侧栏 UI",
+          "level": 2,
+          "line": 1161
+        },
+        {
+          "heading": "19. 技术维护原则",
+          "level": 1,
+          "line": 1173
+        },
+        {
+          "heading": "19.1 模块化",
+          "level": 2,
+          "line": 1175
+        },
+        {
+          "heading": "19.2 类型优先",
+          "level": 2,
+          "line": 1189
+        },
+        {
+          "heading": "19.3 提示词模板独立管理",
+          "level": 2,
+          "line": 1204
+        },
+        {
+          "heading": "19.4 API Key 安全",
+          "level": 2,
+          "line": 1221
+        },
+        {
+          "heading": "19.5 GitHub 备份",
+          "level": 2,
+          "line": 1235
+        },
+        {
+          "heading": "20. 第一阶段验收标准",
+          "level": 1,
+          "line": 1259
+        },
+        {
+          "heading": "21. 最高优先级总结",
+          "level": 1,
+          "line": 1281
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 92
+      }
+    },
+    {
+      "path": "docs/project-architecture.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 216,
+      "nonEmptyLines": 182,
+      "sections": [
+        {
+          "heading": "AI Novel Studio — 项目架构文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目概述",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "2. 技术架构",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "3. 技术选型理由",
+          "level": 2,
+          "line": 48
+        },
+        {
+          "heading": "4. 数据流",
+          "level": 2,
+          "line": 61
+        },
+        {
+          "heading": "5. 核心概念",
+          "level": 2,
+          "line": 79
+        },
+        {
+          "heading": "5.1 小说工程",
+          "level": 3,
+          "line": 81
+        },
+        {
+          "heading": "5.2 AI 创作流程",
+          "level": 3,
+          "line": 97
+        },
+        {
+          "heading": "5.3 上下文系统",
+          "level": 3,
+          "line": 113
+        },
+        {
+          "heading": "6. 路由架构",
+          "level": 2,
+          "line": 125
+        },
+        {
+          "heading": "7. Agent 架构（预留）",
+          "level": 2,
+          "line": 138
+        },
+        {
+          "heading": "8. 文件结构总览",
+          "level": 2,
+          "line": 162
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 12
+      }
+    },
+    {
+      "path": "docs/prompt-system.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 967,
+      "nonEmptyLines": 757,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 提示词系统设计文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 提示词系统的核心定位",
+          "level": 2,
+          "line": 11
+        },
+        {
+          "heading": "2. 提示词系统必须遵守的产品原则",
+          "level": 2,
+          "line": 37
+        },
+        {
+          "heading": "2.1 用户负责方向，AI 负责扩展",
+          "level": 3,
+          "line": 39
+        },
+        {
+          "heading": "2.2 写作工作台只调用资产，不承担复杂资产管理",
+          "level": 3,
+          "line": 66
+        },
+        {
+          "heading": "2.3 中间正文区是 AI 正文输出区",
+          "level": 3,
+          "line": 84
+        },
+        {
+          "heading": "2.4 不直接模仿导入文本",
+          "level": 3,
+          "line": 100
+        },
+        {
+          "heading": "3. AI 任务类型总览",
+          "level": 2,
+          "line": 122
+        },
+        {
+          "heading": "4. 提示词模板目录结构",
+          "level": 2,
+          "line": 149
+        },
+        {
+          "heading": "5. 提示词模板基本格式",
+          "level": 2,
+          "line": 191
+        },
+        {
+          "heading": "6. 核心变量设计",
+          "level": 2,
+          "line": 251
+        },
+        {
+          "heading": "6.1 作品级变量",
+          "level": 3,
+          "line": 255
+        },
+        {
+          "heading": "6.2 世界设定变量",
+          "level": 3,
+          "line": 269
+        },
+        {
+          "heading": "6.3 规则体系变量",
+          "level": 3,
+          "line": 281
+        },
+        {
+          "heading": "6.4 主角变量",
+          "level": 3,
+          "line": 293
+        },
+        {
+          "heading": "6.5 章节变量",
+          "level": 3,
+          "line": 307
+        },
+        {
+          "heading": "6.6 角色变量",
+          "level": 3,
+          "line": 320
+        },
+        {
+          "heading": "6.7 风格方案变量",
+          "level": 3,
+          "line": 336
+        },
+        {
+          "heading": "6.8 输出控制变量",
+          "level": 3,
+          "line": 354
+        },
+        {
+          "heading": "7. 章节正文生成的上下文组装顺序",
+          "level": 2,
+          "line": 374
+        },
+        {
+          "heading": "8. 右侧工作台面板与 AI 任务关系",
+          "level": 2,
+          "line": 410
+        },
+        {
+          "heading": "9. 角色生成提示词规则",
+          "level": 2,
+          "line": 427
+        },
+        {
+          "heading": "10. 事件推荐提示词规则",
+          "level": 2,
+          "line": 470
+        },
+        {
+          "heading": "11. 正文生成提示词规则",
+          "level": 2,
+          "line": 512
+        },
+        {
+          "heading": "12. 重生成与修改提示词规则",
+          "level": 2,
+          "line": 539
+        },
+        {
+          "heading": "12.1 重新生成",
+          "level": 3,
+          "line": 541
+        },
+        {
+          "heading": "12.2 根据当前稿修改",
+          "level": 3,
+          "line": 551
+        },
+        {
+          "heading": "13. 润色提示词规则",
+          "level": 2,
+          "line": 566
+        },
+        {
+          "heading": "14. 质量检查提示词规则",
+          "level": 2,
+          "line": 591
+        },
+        {
+          "heading": "15. 章节总结与上下文更新规则",
+          "level": 2,
+          "line": 630
+        },
+        {
+          "heading": "16. 风格分析提示词规则",
+          "level": 2,
+          "line": 671
+        },
+        {
+          "heading": "17. JSON 风格配置导入规则",
+          "level": 2,
+          "line": 704
+        },
+        {
+          "heading": "18. AI 任务记录",
+          "level": 2,
+          "line": 735
+        },
+        {
+          "heading": "19. 提示词优先级规则",
+          "level": 2,
+          "line": 769
+        },
+        {
+          "heading": "20. 上下文长度控制",
+          "level": 2,
+          "line": 790
+        },
+        {
+          "heading": "21. 错误处理规则",
+          "level": 2,
+          "line": 811
+        },
+        {
+          "heading": "22. 开发实现建议",
+          "level": 2,
+          "line": 829
+        },
+        {
+          "heading": "23. MVP 阶段的最小提示词闭环",
+          "level": 2,
+          "line": 868
+        },
+        {
+          "heading": "24. 后续版本扩展顺序",
+          "level": 2,
+          "line": 903
+        },
+        {
+          "heading": "25. 对 Copilot Agent 的开发约束",
+          "level": 2,
+          "line": 918
+        },
+        {
+          "heading": "26. 总结",
+          "level": 2,
+          "line": 937
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 41
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.0.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 59,
+      "nonEmptyLines": 48,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.0 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本定位",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "已实现功能",
+          "level": 2,
+          "line": 7
+        },
+        {
+          "heading": "未实现功能",
+          "level": 2,
+          "line": 33
+        },
+        {
+          "heading": "已知限制",
+          "level": 2,
+          "line": 46
+        },
+        {
+          "heading": "后续规划",
+          "level": 2,
+          "line": 53
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.15.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 77,
+      "nonEmptyLines": 61,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.15 Release Notes",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "用户反馈问题",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "根因分析",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "本次修复内容",
+          "level": 2,
+          "line": 14
+        },
+        {
+          "heading": "1. WorkspacePage 加载状态机",
+          "level": 3,
+          "line": 16
+        },
+        {
+          "heading": "2. 无章节空状态",
+          "level": 3,
+          "line": 20
+        },
+        {
+          "heading": "3. 作品未找到状态",
+          "level": 3,
+          "line": 25
+        },
+        {
+          "heading": "4. 初始草稿加载",
+          "level": 3,
+          "line": 29
+        },
+        {
+          "heading": "5. 版本号更新",
+          "level": 3,
+          "line": 33
+        },
+        {
+          "heading": "6. 路由验证",
+          "level": 3,
+          "line": 38
+        },
+        {
+          "heading": "安全格式化验证",
+          "level": 2,
+          "line": 44
+        },
+        {
+          "heading": "测试建议",
+          "level": 2,
+          "line": 50
+        },
+        {
+          "heading": "无章节作品测试",
+          "level": 3,
+          "line": 52
+        },
+        {
+          "heading": "有章节作品测试",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "打包版验证",
+          "level": 3,
+          "line": 66
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 73
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 17
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.16.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 46,
+      "nonEmptyLines": 36,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.16 Release Notes",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "新增功能",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "1. 无章节作品可在工作台直接开始创作",
+          "level": 3,
+          "line": 8
+        },
+        {
+          "heading": "2. 左侧章节树内嵌新建分卷/章节",
+          "level": 3,
+          "line": 13
+        },
+        {
+          "heading": "3. 每个分卷内可新建章节",
+          "level": 3,
+          "line": 19
+        },
+        {
+          "heading": "4. 创建章节自动生成空草稿",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "修复内容",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "技术实现",
+          "level": 2,
+          "line": 31
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 35
+        },
+        {
+          "heading": "测试建议",
+          "level": 2,
+          "line": 42
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 11
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.17.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 43,
+      "nonEmptyLines": 34,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.17 Release Notes",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "用户反馈问题",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "根因分析",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "本次修复",
+          "level": 2,
+          "line": 14
+        },
+        {
+          "heading": "版本号统一",
+          "level": 3,
+          "line": 16
+        },
+        {
+          "heading": "按钮链路增强",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "版本号更新",
+          "level": 3,
+          "line": 27
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 31
+        },
+        {
+          "heading": "构建验证",
+          "level": 2,
+          "line": 40
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.18.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 38,
+      "nonEmptyLines": 29,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.18 Release Notes",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "用户反馈",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "根因分析",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "本次修复",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "1. 新增 `treeRefreshKey` 刷新机制",
+          "level": 3,
+          "line": 14
+        },
+        {
+          "heading": "2. 新增写入后验证",
+          "level": 3,
+          "line": 20
+        },
+        {
+          "heading": "3. 版本号",
+          "level": 3,
+          "line": 25
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "构建产物",
+          "level": 2,
+          "line": 35
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.19.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 41,
+      "nonEmptyLines": 33,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.19 Release Notes",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "根因分析",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "本次重构",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "VolumeTree 改为完全受控组件",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "WritingWorkspacePage 单一数据源",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "数据流",
+          "level": 3,
+          "line": 24
+        },
+        {
+          "heading": "存储 key",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 36
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    }
+  ]
+}

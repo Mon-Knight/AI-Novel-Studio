@@ -12,11 +12,14 @@ import { runWithLoading } from '../../../lib/runWithLoading';
 interface PolishPanelProps {
   novelId?: string; chapter?: Chapter;
   onGenerated?: (draft: ChapterDraft) => void; onAdopted?: () => void;
+  currentEditorContent?: string;
+  currentEditorDirty?: boolean;
+  currentEditorWordCount?: number;
 }
 
 const POLISH_MODES: PolishMode[] = ['keep_plot', 'enhance_description', 'reduce_redundancy', 'strengthen_conflict', 'adjust_pacing', 'unify_style', 'fix_language', 'custom'];
 
-function PolishPanel({ novelId, chapter, onGenerated }: PolishPanelProps) {
+function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, currentEditorDirty, currentEditorWordCount }: PolishPanelProps) {
   const [mode, setMode] = useState<PolishMode>('keep_plot');
   const [customInstruction, setCustomInstruction] = useState('');
   const [loading, setLoading] = useState(false);
@@ -33,7 +36,9 @@ function PolishPanel({ novelId, chapter, onGenerated }: PolishPanelProps) {
 
   const handleRunPolish = async () => {
     if (!novelId || !chapter || !currentDraft) return;
-    if (currentDraft.content.length < 10) { setError('正文过短，无法润色'); return; }
+    const sourceContent = (currentEditorContent ?? currentDraft.content).trim();
+    const sourceWordCount = currentEditorWordCount ?? currentDraft.wordCount;
+    if (sourceContent.length < 10 || sourceWordCount < 10) { setError('正文过短，无法润色'); return; }
     setLoading(true); setError(''); setStatusMsg('');
 
     try {
@@ -51,14 +56,28 @@ function PolishPanel({ novelId, chapter, onGenerated }: PolishPanelProps) {
             mode, customInstruction: customInstruction.trim() || undefined,
             preservePlot: true, preserveCharacters: true, preserveKeyEvents: true,
           };
-          const record = await polishService.create({ novelId, chapterId: chapter.id, sourceDraftId: currentDraft.id, mode, instruction: customInstruction.trim() || undefined });
+          let sourceDraft = currentDraft;
+          if (currentEditorDirty || currentDraft.content !== sourceContent) {
+            setMessage('正在保存当前正文快照……');
+            sourceDraft = await draftVersionService.create({
+              novelId,
+              chapterId: chapter.id,
+              title: `${chapter.title} - 润色快照`,
+              content: sourceContent,
+              source: 'user_edited',
+              note: '润色正文快照',
+            });
+            setCurrentDraft(sourceDraft);
+            onGenerated?.(sourceDraft);
+          }
+          const record = await polishService.create({ novelId, chapterId: chapter.id, sourceDraftId: sourceDraft.id, mode, instruction: customInstruction.trim() || undefined });
 
           setMessage('正在分析原文……');
           setStage('AI 正在润色正文……');
           setPercent(30);
           const polishedText = await polishAiService.runPolish({
-            novelId, chapterId: chapter.id, sourceDraftId: currentDraft.id,
-            draftContent: currentDraft.content, chapterTitle: chapter.title,
+            novelId, chapterId: chapter.id, sourceDraftId: sourceDraft.id,
+            draftContent: sourceContent, chapterTitle: chapter.title,
             chapterOutline: chapter.outline, options,
           });
 

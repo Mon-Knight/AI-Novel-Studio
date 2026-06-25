@@ -434,6 +434,9 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
             overall_score INTEGER,
             summary TEXT,
             ai_task_id TEXT,
+            content_hash TEXT,
+            content_length INTEGER,
+            checked_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (novel_id) REFERENCES novels(id),
@@ -889,6 +892,9 @@ fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
     // quality_check_reports: add draft_version, model columns
     ensure_column(conn, "quality_check_reports", "draft_version", "INTEGER")?;
     ensure_column(conn, "quality_check_reports", "model", "TEXT")?;
+    ensure_column(conn, "quality_check_reports", "content_hash", "TEXT")?;
+    ensure_column(conn, "quality_check_reports", "content_length", "INTEGER")?;
+    ensure_column(conn, "quality_check_reports", "checked_at", "TEXT")?;
 
     // quality_check_items: migrate from is_resolved boolean to status enum
     // Step 1: add new columns

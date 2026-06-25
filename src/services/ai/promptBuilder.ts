@@ -78,6 +78,8 @@ export interface QualityCheckPromptContext {
   chapterOutline?: string;
   chapterGoal?: string;
   draftContent: string;
+  contentHash?: string;
+  wordCount?: number;
   specialAbility?: string;
   forbiddenBehaviors?: string;
   /** v1.7.15 上下文注入 */
@@ -397,6 +399,13 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
     ctx.forbiddenBehaviors ? `禁止行为：${ctx.forbiddenBehaviors}` : '',
     ctx.contextSummary ? ctx.contextSummary : '',
     '',
+    '【检查范围硬性规则】',
+    '只分析用户当前提供的正文快照，不得虚构未出现的后续剧情，不得分析与当前正文无关的内容。',
+    '如果正文信息不足以判断某类问题，请说明“当前正文信息不足”，不要补写无关内容。',
+    '所有 evidence、quote、startOffset、endOffset 或 paragraphIndex 都必须来自下方正文。',
+    ctx.contentHash ? `正文快照 Hash：${ctx.contentHash}` : '',
+    typeof ctx.wordCount === 'number' ? `正文快照字数：${ctx.wordCount}` : '',
+    '',
     '请从以下维度检查：逻辑一致性、设定违背、角色行为一致性、前后文割裂、节奏问题、文风问题、语言问题。',
     '',
     '请严格按以下 JSON 格式返回检查结果，不要输出其他内容：',
@@ -408,10 +417,14 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
     '    {',
     '      "issueType": "logic / setting_violation / character_behavior / continuity / pacing / style / language / other",',
     '      "severity": "critical / high / medium / low",',
-    '      "title": "问题标题",',
-    '      "description": "问题描述",',
-    '      "evidence": "原文证据（可选）",',
-    '      "suggestion": "修改建议"',
+      '      "title": "问题标题",',
+      '      "description": "问题描述",',
+      '      "evidence": "原文证据（可选）",',
+      '      "suggestion": "修改建议",',
+      '      "quote": "与问题直接相关的原文片段（可选）",',
+      '      "startOffset": 0,',
+      '      "endOffset": 12,',
+      '      "paragraphIndex": 0',
     '    }',
     '  ]',
     '}',

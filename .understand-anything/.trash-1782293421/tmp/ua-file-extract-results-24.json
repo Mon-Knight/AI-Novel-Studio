@@ -1,0 +1,364 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 7,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "prompts/chapter_generate.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 182,
+      "nonEmptyLines": 151,
+      "sections": [
+        {
+          "heading": "AI Novel Studio - 章节正文生成提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "角色信息",
+          "level": 2,
+          "line": 36
+        },
+        {
+          "heading": "章节大纲执行清单",
+          "level": 2,
+          "line": 109
+        },
+        {
+          "heading": "大纲执行硬性规则",
+          "level": 2,
+          "line": 115
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "prompts/chapter_polish.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 67,
+      "nonEmptyLines": 54,
+      "sections": [
+        {
+          "heading": "正文润色提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "小说信息",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "当前章节",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "当前草稿正文",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "润色模式",
+          "level": 2,
+          "line": 20
+        },
+        {
+          "heading": "自定义要求",
+          "level": 2,
+          "line": 24
+        },
+        {
+          "heading": "风格约束",
+          "level": 2,
+          "line": 29
+        },
+        {
+          "heading": "输出控制",
+          "level": 2,
+          "line": 34
+        },
+        {
+          "heading": "本章信息",
+          "level": 2,
+          "line": 38
+        },
+        {
+          "heading": "前文上下文",
+          "level": 2,
+          "line": 47
+        },
+        {
+          "heading": "质量检查问题（需修复）",
+          "level": 2,
+          "line": 52
+        },
+        {
+          "heading": "强约束",
+          "level": 2,
+          "line": 56
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 12
+      }
+    },
+    {
+      "path": "prompts/chapter_summarize.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 76,
+      "nonEmptyLines": 65,
+      "sections": [
+        {
+          "heading": "章节总结提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "小说信息",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "当前章节",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "本章出场角色",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "本章事件",
+          "level": 2,
+          "line": 20
+        },
+        {
+          "heading": "已采用正文",
+          "level": 2,
+          "line": 25
+        },
+        {
+          "heading": "要求",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 40
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": "prompts/character_generate.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 33,
+      "nonEmptyLines": 27,
+      "sections": [
+        {
+          "heading": "角色生成提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "小说信息",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "当前章节",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "已有角色",
+          "level": 2,
+          "line": 14
+        },
+        {
+          "heading": "要求",
+          "level": 2,
+          "line": 19
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 5
+      }
+    },
+    {
+      "path": "prompts/event_suggest.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 33,
+      "nonEmptyLines": 26,
+      "sections": [
+        {
+          "heading": "事件建议提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "小说信息",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "当前章节",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "当前出场角色",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "未回收伏笔",
+          "level": 2,
+          "line": 20
+        },
+        {
+          "heading": "要求",
+          "level": 2,
+          "line": 25
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": "prompts/quality_check.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 88,
+      "nonEmptyLines": 74,
+      "sections": [
+        {
+          "heading": "正文质量检查提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "小说信息",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "当前章节",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "当前草稿正文",
+          "level": 2,
+          "line": 19
+        },
+        {
+          "heading": "世界设定与规则",
+          "level": 2,
+          "line": 24
+        },
+        {
+          "heading": "本章角色",
+          "level": 2,
+          "line": 41
+        },
+        {
+          "heading": "本章事件",
+          "level": 2,
+          "line": 46
+        },
+        {
+          "heading": "前文上下文",
+          "level": 2,
+          "line": 51
+        },
+        {
+          "heading": "检查要求",
+          "level": 2,
+          "line": 56
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 68
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "prompts/style_analyze.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 37,
+      "nonEmptyLines": 31,
+      "sections": [
+        {
+          "heading": "AI Novel Studio - 风格分析提示词模板",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "分析要求",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "参考文本",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 15
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    }
+  ]
+}

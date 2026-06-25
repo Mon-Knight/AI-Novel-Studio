@@ -1,0 +1,201 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 4,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": ".github/prompts/fix-bug.prompt.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 64,
+      "nonEmptyLines": 44,
+      "sections": [
+        {
+          "heading": "Bug Fix Prompt",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "任务",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "输入",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "分析要求",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "修复约束",
+          "level": 2,
+          "line": 50
+        },
+        {
+          "heading": "验证命令",
+          "level": 2,
+          "line": 57
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 6
+      }
+    },
+    {
+      "path": ".github/prompts/next-version.prompt.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 64,
+      "nonEmptyLines": 47,
+      "sections": [
+        {
+          "heading": "Next Version Planning Prompt",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "任务",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "输入",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "输出要求",
+          "level": 2,
+          "line": 20
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 59
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 5
+      }
+    },
+    {
+      "path": ".github/prompts/release-report.prompt.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 72,
+      "nonEmptyLines": 51,
+      "sections": [
+        {
+          "heading": "Release Report Prompt",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "任务",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "输入",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "输出要求",
+          "level": 2,
+          "line": 19
+        },
+        {
+          "heading": "约束",
+          "level": 2,
+          "line": 68
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 5
+      }
+    },
+    {
+      "path": ".github/prompts/verify-build.prompt.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 108,
+      "nonEmptyLines": 78,
+      "sections": [
+        {
+          "heading": "Build Verification Prompt",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "任务",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "验证步骤",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "第一步：环境检查",
+          "level": 3,
+          "line": 14
+        },
+        {
+          "heading": "第二步：Rust 编译检查",
+          "level": 3,
+          "line": 28
+        },
+        {
+          "heading": "第三步：前端构建",
+          "level": 3,
+          "line": 39
+        },
+        {
+          "heading": "第四步：Tauri 完整构建",
+          "level": 3,
+          "line": 50
+        },
+        {
+          "heading": "第五步：Git 状态",
+          "level": 3,
+          "line": 61
+        },
+        {
+          "heading": "输出格式",
+          "level": 2,
+          "line": 72
+        },
+        {
+          "heading": "如果失败",
+          "level": 2,
+          "line": 102
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    }
+  ]
+}

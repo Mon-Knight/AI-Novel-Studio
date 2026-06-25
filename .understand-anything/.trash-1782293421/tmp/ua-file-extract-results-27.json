@@ -1,0 +1,79 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 9,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "src/styles/app-shell.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 330,
+      "nonEmptyLines": 285,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/coming-soon.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 46,
+      "nonEmptyLines": 40,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/global.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 299,
+      "nonEmptyLines": 252,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/home.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 351,
+      "nonEmptyLines": 304,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/novel-detail.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 290,
+      "nonEmptyLines": 250,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/right-dock.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 356,
+      "nonEmptyLines": 308,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/setting-suggestions.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 242,
+      "nonEmptyLines": 206,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/variables.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 143,
+      "nonEmptyLines": 118,
+      "metrics": {}
+    },
+    {
+      "path": "src/styles/workspace.css",
+      "language": "css",
+      "fileCategory": "markup",
+      "totalLines": 424,
+      "nonEmptyLines": 365,
+      "metrics": {}
+    }
+  ]
+}

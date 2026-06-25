@@ -1,0 +1,262 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 5,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/user/ai-settings.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 49,
+      "nonEmptyLines": 33,
+      "sections": [
+        {
+          "heading": "AI 模式与模型配置",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "Mock 模式",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "API 配置",
+          "level": 2,
+          "line": 12
+        },
+        {
+          "heading": "OpenAI 兼容 API",
+          "level": 3,
+          "line": 14
+        },
+        {
+          "heading": "支持的模型",
+          "level": 3,
+          "line": 25
+        },
+        {
+          "heading": "API Key 安全",
+          "level": 2,
+          "line": 31
+        },
+        {
+          "heading": "模型参数",
+          "level": 2,
+          "line": 37
+        },
+        {
+          "heading": "当前限制",
+          "level": 2,
+          "line": 44
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": "docs/user/data-import-export.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 84,
+      "nonEmptyLines": 56,
+      "sections": [
+        {
+          "heading": "数据导入导出说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 功能定位",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. 当前支持的格式",
+          "level": 2,
+          "line": 16
+        },
+        {
+          "heading": "3. 保存位置选择",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "4. 常用入口",
+          "level": 2,
+          "line": 44
+        },
+        {
+          "heading": "5. 编码与内容",
+          "level": 2,
+          "line": 54
+        },
+        {
+          "heading": "6. 当前限制",
+          "level": 2,
+          "line": 63
+        },
+        {
+          "heading": "7. 验证建议",
+          "level": 2,
+          "line": 72
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": "docs/user/desktop-usage.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 50,
+      "nonEmptyLines": 35,
+      "sections": [
+        {
+          "heading": "Windows 桌面端使用说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "启动桌面应用",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "窗口控制",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "页面导航",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "写作工作台",
+          "level": 2,
+          "line": 31
+        },
+        {
+          "heading": "数据存储",
+          "level": 2,
+          "line": 40
+        },
+        {
+          "heading": "当前限制",
+          "level": 2,
+          "line": 46
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 7
+      }
+    },
+    {
+      "path": "docs/user/quick-start.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 61,
+      "nonEmptyLines": 41,
+      "sections": [
+        {
+          "heading": "快速开始指南",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "环境要求",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "安装",
+          "level": 2,
+          "line": 11
+        },
+        {
+          "heading": "启动",
+          "level": 2,
+          "line": 22
+        },
+        {
+          "heading": "浏览器开发模式（推荐开发时使用）",
+          "level": 3,
+          "line": 24
+        },
+        {
+          "heading": "Tauri 桌面模式",
+          "level": 3,
+          "line": 32
+        },
+        {
+          "heading": "构建",
+          "level": 2,
+          "line": 38
+        },
+        {
+          "heading": "首次使用",
+          "level": 2,
+          "line": 50
+        },
+        {
+          "heading": "下一步",
+          "level": 2,
+          "line": 57
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    },
+    {
+      "path": "docs/user/workflow-guide.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 23,
+      "nonEmptyLines": 17,
+      "sections": [
+        {
+          "heading": "创作工作流指南",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "推荐创作流程",
+          "level": 2,
+          "line": 5
+        },
+        {
+          "heading": "后续补充方向",
+          "level": 2,
+          "line": 15
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 3
+      }
+    }
+  ]
+}

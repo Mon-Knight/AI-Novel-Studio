@@ -1,0 +1,63 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 7,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "scripts/agent-workflow/check_ai_task_delete.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 107,
+      "nonEmptyLines": 91,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/agent-workflow/check_docs_sync.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 161,
+      "nonEmptyLines": 147,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/agent-workflow/check_setting_suggestions.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 57,
+      "nonEmptyLines": 45,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/agent-workflow/release_workflow.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 111,
+      "nonEmptyLines": 101,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/agent-workflow/run_feature_workflow.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 115,
+      "nonEmptyLines": 103,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/agent-workflow/runtime_check_ai_task_delete.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 17,
+      "nonEmptyLines": 13,
+      "metrics": {}
+    },
+    {
+      "path": "scripts/agent-workflow/verify_project.ps1",
+      "language": "powershell",
+      "fileCategory": "script",
+      "totalLines": 203,
+      "nonEmptyLines": 190,
+      "metrics": {}
+    }
+  ]
+}

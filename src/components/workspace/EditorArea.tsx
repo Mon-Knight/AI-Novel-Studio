@@ -7,6 +7,34 @@ import { ChapterStatusLabels } from '../../types/chapter';
 import { formatDateTime } from '../../utils/date';
 import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
+import { countTextWords, hashTextContent } from '../../utils/contentHash';
+import { confirmInfo } from '../../utils/nativeDialog';
+
+export type AiTextApplyMode = 'replace_all' | 'append';
+
+export interface AiTextApplyRequest {
+  id: string;
+  mode: AiTextApplyMode;
+  text: string;
+  source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
+}
+
+export interface EditorContentSnapshot {
+  chapterId?: string;
+  draftId?: string;
+  draftVersion?: number;
+  content: string;
+  wordCount: number;
+  isDirty: boolean;
+  contentHash: string;
+}
+
+export type EditorCommandType = 'save' | 'format' | 'adopt-current';
+
+export interface EditorCommandRequest {
+  id: string;
+  type: EditorCommandType;
+}
 
 interface EditorAreaProps {
   chapter?: Chapter;
@@ -15,31 +43,56 @@ interface EditorAreaProps {
   currentDraft?: ChapterDraft | null;
   onOpenPanel?: (panel: string) => void;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
+  onEditorContentChange?: (snapshot: EditorContentSnapshot) => void;
+  onDraftSaved?: (draft: ChapterDraft) => void;
+  applyTextRequest?: AiTextApplyRequest | null;
+  commandRequest?: EditorCommandRequest | null;
   onChapterUpdated?: (chapterId: string) => void;
   /** 定位目标：设置后自动在正文中搜索并高亮指定文本 */
   locateTarget?: { startOffset: number; endOffset: number; quote?: string; paragraphIndex?: number } | null;
   onLocateDone?: (result?: { found: boolean; message?: string }) => void;
 }
 
-function countWords(text: string): number {
-  const cleaned = text.replace(/[#*\-`>\s]+/g, ' ').trim();
-  if (!cleaned) return 0;
-  const cjk = (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  const words = (cleaned.match(/[a-zA-Z0-9]+/g) || []).length;
-  return cjk + words;
-}
-
-function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange, onChapterUpdated, locateTarget, onLocateDone }: EditorAreaProps) {
+function EditorArea({
+  chapter,
+  novelId,
+  currentDraft,
+  onOpenPanel,
+  onDraftChange,
+  onEditorContentChange,
+  onDraftSaved,
+  applyTextRequest,
+  commandRequest,
+  onChapterUpdated,
+  locateTarget,
+  onLocateDone,
+}: EditorAreaProps) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [lastSaved, setLastSaved] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastApplyRequestId = useRef('');
+  const lastCommandRequestId = useRef('');
 
   // v1.0.35 章节大纲行内编辑状态
   const [isEditingOutline, setIsEditingOutline] = useState(false);
   const [outlineDraft, setOutlineDraft] = useState('');
   const [outlineSaveMsg, setOutlineSaveMsg] = useState('');
+
+  const emitContentSnapshot = useCallback((value: string, dirty: boolean, draft: ChapterDraft | null | undefined = currentDraft) => {
+    const wc = countTextWords(value);
+    onDraftChange?.(wc, dirty);
+    onEditorContentChange?.({
+      chapterId: chapter?.id,
+      draftId: draft?.id,
+      draftVersion: draft?.versionNo,
+      content: value,
+      wordCount: wc,
+      isDirty: dirty,
+      contentHash: hashTextContent(value),
+    });
+  }, [chapter?.id, currentDraft, onDraftChange, onEditorContentChange]);
 
   // 加载当前草稿
   useEffect(() => {
@@ -47,18 +100,18 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
       setContent(currentDraft.content);
       setIsDirty(false);
       setLastSaved(formatDateTime(currentDraft.updatedAt));
-      onDraftChange?.(currentDraft.wordCount, false);
+      emitContentSnapshot(currentDraft.content, false, currentDraft);
     } else if (chapter) {
       setContent('');
       setIsDirty(false);
       setLastSaved('');
-      onDraftChange?.(0, false);
+      emitContentSnapshot('', false, null);
     }
     // 切换章节时重置大纲编辑状态
     setIsEditingOutline(false);
     setOutlineDraft('');
     setOutlineSaveMsg('');
-  }, [currentDraft, chapter, onDraftChange]);
+  }, [currentDraft, chapter, emitContentSnapshot]);
 
   // 定位正文功能 (v1.7.16: 多级策略 + 明显高亮)
   const [_highlightRange, setHighlightRange] = useState<{ start: number; end: number } | null>(null);
@@ -182,17 +235,35 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
     return () => window.removeEventListener('keydown', handler);
   }, [isEditingOutline, handleSaveOutline]);
 
-  const handleContentChange = (value: string) => {
+  const handleContentChange = useCallback((value: string) => {
     setContent(value);
-    const wc = countWords(value);
-    setIsDirty(wc !== (currentDraft?.wordCount || 0) || value !== (currentDraft?.content || ''));
-    onDraftChange?.(wc, value !== (currentDraft?.content || ''));
-  };
+    const dirty = value !== (currentDraft?.content || '');
+    setIsDirty(dirty);
+    emitContentSnapshot(value, dirty);
+  }, [currentDraft, emitContentSnapshot]);
 
-  const handleSave = useCallback(async () => {
-    if (!chapter || !novelId) return;
+  useEffect(() => {
+    if (!applyTextRequest) return;
+    if (lastApplyRequestId.current === applyTextRequest.id) return;
+    lastApplyRequestId.current = applyTextRequest.id;
+    const incoming = applyTextRequest.text.trim();
+    if (!incoming) return;
+    setContent((prev) => {
+      const nextContent = applyTextRequest.mode === 'append'
+        ? [prev.trimEnd(), incoming].filter(Boolean).join('\n\n')
+        : incoming;
+      setIsDirty(true);
+      emitContentSnapshot(nextContent, true);
+      return nextContent;
+    });
+    setSaveMsg('未保存');
+    textareaRef.current?.focus();
+  }, [applyTextRequest, emitContentSnapshot]);
+
+  const handleSave = useCallback(async (): Promise<ChapterDraft | null> => {
+    if (!chapter || !novelId) return null;
     try {
-      await runWithLoading(
+      const savedDraft = await runWithLoading(
         {
           title: '正在保存草稿',
           initialMessage: '正在保存正文……',
@@ -203,24 +274,90 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
         async ({ setMessage }) => {
           if (currentDraft && !currentDraft.isAdopted) {
             setMessage('正在更新草稿……');
-            await draftVersionService.update(currentDraft.id, chapter.id, content, 'user_edited');
-          } else {
-            setMessage('正在创建草稿……');
-            await draftVersionService.create({
-              novelId, chapterId: chapter.id, content, source: 'user_edited',
-            });
+            return await draftVersionService.update(currentDraft.id, chapter.id, content, 'user_edited');
           }
+          setMessage('正在创建草稿……');
+          return await draftVersionService.create({
+            novelId, chapterId: chapter.id, content, source: 'user_edited',
+          });
         },
       );
       setIsDirty(false);
       setSaveMsg('已保存');
       setLastSaved(formatDateTime(new Date()));
+      if (savedDraft) {
+        onDraftSaved?.(savedDraft);
+        emitContentSnapshot(savedDraft.content, false, savedDraft);
+      } else {
+        emitContentSnapshot(content, false, currentDraft);
+      }
       setTimeout(() => setSaveMsg(''), 2000);
+      return savedDraft ?? currentDraft ?? null;
     } catch {
       setSaveMsg('保存失败');
       setTimeout(() => setSaveMsg(''), 3000);
+      return null;
     }
-  }, [chapter, novelId, content, currentDraft]);
+  }, [chapter, novelId, content, currentDraft, onDraftSaved, emitContentSnapshot]);
+
+  const handleFormat = useCallback(() => {
+    handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim());
+    setSaveMsg('已排版');
+    setTimeout(() => setSaveMsg(''), 2000);
+  }, [content, handleContentChange]);
+
+  const handleAdoptCurrent = useCallback(async () => {
+    if (!chapter) return;
+    let draftToAdopt = currentDraft;
+    const needsSaveBeforeAdopt =
+      !draftToAdopt || draftToAdopt.content !== content || isDirty;
+
+    if (needsSaveBeforeAdopt) {
+      const ok = await confirmInfo({
+        title: '保存并采用',
+        message: '当前正文存在未保存修改。需要先保存为草稿，再将该草稿确认为正式正文。是否继续？',
+      });
+      if (!ok) return;
+      draftToAdopt = await handleSave();
+    } else if (draftToAdopt?.isAdopted) {
+      setSaveMsg('已采用');
+      setTimeout(() => setSaveMsg(''), 2000);
+      return;
+    } else if (!(await confirmInfo({
+      title: '采用草稿',
+      message: `确认采用草稿 v${draftToAdopt.versionNo} 作为正式正文？`,
+    }))) {
+      return;
+    }
+
+    if (!draftToAdopt) {
+      setSaveMsg('采用失败');
+      setTimeout(() => setSaveMsg(''), 3000);
+      return;
+    }
+
+    try {
+      const adopted = await runWithLoading(
+        {
+          title: '正在确认采用',
+          initialMessage: '正在更新正式正文版本……',
+          successMessage: '已采用为正式正文',
+          errorMessage: '采用失败',
+          successAutoCloseMs: 800,
+        },
+        async () => await draftVersionService.adopt(draftToAdopt.id, chapter.id),
+      );
+      const nextDraft = adopted ?? { ...draftToAdopt, isAdopted: true };
+      setSaveMsg('已采用');
+      onDraftSaved?.(nextDraft);
+      emitContentSnapshot(nextDraft.content, false, nextDraft);
+      onChapterUpdated?.(chapter.id);
+      setTimeout(() => setSaveMsg(''), 2000);
+    } catch {
+      setSaveMsg('采用失败');
+      setTimeout(() => setSaveMsg(''), 3000);
+    }
+  }, [chapter, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -229,6 +366,19 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isDirty, handleSave]);
+
+  useEffect(() => {
+    if (!commandRequest) return;
+    if (lastCommandRequestId.current === commandRequest.id) return;
+    lastCommandRequestId.current = commandRequest.id;
+    if (commandRequest.type === 'save') {
+      void handleSave();
+    } else if (commandRequest.type === 'format') {
+      handleFormat();
+    } else if (commandRequest.type === 'adopt-current') {
+      void handleAdoptCurrent();
+    }
+  }, [commandRequest, handleAdoptCurrent, handleFormat, handleSave]);
 
   if (!chapter) {
     return (
@@ -250,27 +400,12 @@ function EditorArea({ chapter, novelId, currentDraft, onOpenPanel, onDraftChange
 
   return (
     <div className="editor-content">
-      <div className="editor-toolbar">
-        <button className={`toolbar-btn`} onClick={handleSave} title="Ctrl+S 保存"
-          style={{ color: isDirty ? 'var(--color-warning)' : undefined }}>
-          💾 {saveMsg || (isDirty ? '保存草稿 *' : '保存草稿')}
-        </button>
-        <span className="toolbar-separator" />
-        <button className="toolbar-btn" onClick={() => onOpenPanel?.('ai-generate')}>🤖 AI 生成</button>
-        <button className="toolbar-btn" onClick={() => onOpenPanel?.('outline')}>📋 查看大纲</button>
-        <button className="toolbar-btn" onClick={() => onOpenPanel?.('draft-history')}>📋 草稿历史</button>
-        <span className="toolbar-separator" />
-        <button className="toolbar-btn" onClick={() => { handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim()); setSaveMsg('已排版'); setTimeout(() => setSaveMsg(''), 2000); }}>📐 一键排版</button>
-        <span className="toolbar-separator" />
-        <button className="toolbar-btn primary" onClick={() => onOpenPanel?.('ai-generate')}>✅ 确认采用</button>
-      </div>
-
       <div className="editor-chapter-title">第{chapter.chapterNumber}章：{chapter.title}</div>
 
       {/* 草稿版本信息 */}
       {currentDraft && (
         <div style={{
-          maxWidth: 880, margin: '0 auto 12px', padding: '8px 16px',
+          width: 'min(100%, 1180px)', maxWidth: 1180, margin: '0 auto 10px', padding: '7px 12px',
           background: currentDraft.isAdopted ? '#e8f5e9' : 'var(--color-bg-hover)',
           borderRadius: 6, fontSize: 13, display: 'flex', alignItems: 'center', gap: 16,
           border: currentDraft.isAdopted ? '1px solid #c8e6c9' : '1px solid var(--color-border-light)',

@@ -1,0 +1,4109 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 13,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "src/components/right-dock/panels/AiGeneratePanel.tsx",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 966,
+      "nonEmptyLines": 892,
+      "functions": [
+        {
+          "name": "namesText",
+          "startLine": 22,
+          "endLine": 24,
+          "params": [
+            "names"
+          ]
+        },
+        {
+          "name": "getChapterCharacterNames",
+          "startLine": 26,
+          "endLine": 28,
+          "params": [
+            "ctx"
+          ]
+        },
+        {
+          "name": "getRequiredCharacterNames",
+          "startLine": 30,
+          "endLine": 32,
+          "params": [
+            "ctx"
+          ]
+        },
+        {
+          "name": "getOutlineValidationStatus",
+          "startLine": 44,
+          "endLine": 48,
+          "params": [
+            "score"
+          ]
+        },
+        {
+          "name": "buildValidationNote",
+          "startLine": 50,
+          "endLine": 67,
+          "params": [
+            "input"
+          ]
+        },
+        {
+          "name": "buildValidationSnapshot",
+          "startLine": 69,
+          "endLine": 80,
+          "params": [
+            "ctx",
+            "generatedText"
+          ]
+        },
+        {
+          "name": "buildValidationWarningText",
+          "startLine": 82,
+          "endLine": 94,
+          "params": [
+            "validation"
+          ]
+        },
+        {
+          "name": "draftHasAdoptionRisk",
+          "startLine": 96,
+          "endLine": 104,
+          "params": [
+            "draft",
+            "validationState"
+          ]
+        },
+        {
+          "name": "AiGeneratePanel",
+          "startLine": 114,
+          "endLine": 964,
+          "params": [
+            "{ novelId, chapter, onGenerated, onAdopted, contextVersion = 0 }"
+          ]
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "namesText",
+          "callee": "names.join",
+          "lineNumber": 23
+        },
+        {
+          "caller": "getChapterCharacterNames",
+          "callee": "ctx?.chapterCharacterList?.map((item) => item.name).filter",
+          "lineNumber": 27
+        },
+        {
+          "caller": "getChapterCharacterNames",
+          "callee": "ctx?.chapterCharacterList?.map",
+          "lineNumber": 27
+        },
+        {
+          "caller": "getRequiredCharacterNames",
+          "callee": "ctx?.requiredCharacters?.map((item) => item.name).filter",
+          "lineNumber": 31
+        },
+        {
+          "caller": "getRequiredCharacterNames",
+          "callee": "ctx?.requiredCharacters?.map",
+          "lineNumber": 31
+        },
+        {
+          "caller": "buildValidationNote",
+          "callee": "getOutlineValidationStatus",
+          "lineNumber": 55
+        },
+        {
+          "caller": "buildValidationNote",
+          "callee": "input.outlineCompliance.missingPoints.map((point) => point.text).join",
+          "lineNumber": 57
+        },
+        {
+          "caller": "buildValidationNote",
+          "callee": "input.outlineCompliance.missingPoints.map",
+          "lineNumber": 57
+        },
+        {
+          "caller": "buildValidationNote",
+          "callee": "[\n    `大纲遵循检查：${outlineStatus}`,\n    `大纲遵循度：${input.outlineCompliance.score}分`,\n    `已覆盖：${input.outlineCompliance.coveredPoints.length}项`,\n    `缺失：${input.outlineCompliance.missingPoints.length}项`,\n    `缺失大纲关键点：${missingPoints}`,\n    `角色出场检查：${roleStatus}`,\n    `缺失必须出场角色：${input.missingRequiredNames.join('、') || '无'}`,\n  ].join",
+          "lineNumber": 58
+        },
+        {
+          "caller": "buildValidationNote",
+          "callee": "input.missingRequiredNames.join",
+          "lineNumber": 65
+        },
+        {
+          "caller": "buildValidationSnapshot",
+          "callee": "checkOutlineCompliance",
+          "lineNumber": 70
+        },
+        {
+          "caller": "buildValidationSnapshot",
+          "callee": "getRequiredCharacterNames",
+          "lineNumber": 71
+        },
+        {
+          "caller": "buildValidationSnapshot",
+          "callee": "requiredNames.filter",
+          "lineNumber": 72
+        },
+        {
+          "caller": "buildValidationSnapshot",
+          "callee": "generatedText.includes",
+          "lineNumber": 72
+        },
+        {
+          "caller": "buildValidationSnapshot",
+          "callee": "buildValidationNote",
+          "lineNumber": 73
+        },
+        {
+          "caller": "buildValidationWarningText",
+          "callee": "getOutlineValidationStatus",
+          "lineNumber": 84
+        },
+        {
+          "caller": "buildValidationWarningText",
+          "callee": "messages.push",
+          "lineNumber": 86
+        },
+        {
+          "caller": "buildValidationWarningText",
+          "callee": "messages.push",
+          "lineNumber": 88
+        },
+        {
+          "caller": "buildValidationWarningText",
+          "callee": "messages.push",
+          "lineNumber": 91
+        },
+        {
+          "caller": "buildValidationWarningText",
+          "callee": "validation.missingRequiredNames.join",
+          "lineNumber": 91
+        },
+        {
+          "caller": "buildValidationWarningText",
+          "callee": "messages.join",
+          "lineNumber": 93
+        },
+        {
+          "caller": "draftHasAdoptionRisk",
+          "callee": "note.includes",
+          "lineNumber": 101
+        },
+        {
+          "caller": "draftHasAdoptionRisk",
+          "callee": "note.includes",
+          "lineNumber": 102
+        },
+        {
+          "caller": "draftHasAdoptionRisk",
+          "callee": "note.includes",
+          "lineNumber": 103
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 115
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 116
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 117
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 118
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 119
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 120
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 121
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 124
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 125
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 126
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 127
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 130
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 131
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 132
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useEffect",
+          "lineNumber": 134
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setValidationState",
+          "lineNumber": 135
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useEffect",
+          "lineNumber": 139
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "(() => {\n      if (chapter?.targetWordCount && chapter.targetWordCount > 0) return chapter.targetWordCount;\n      if (selectedOutputId) {\n        const output = availableOutputs.find((o) => o.id === selectedOutputId);\n        const ot = output?.targetWordCount || output?.chapterWordRange?.default;\n        if (ot && ot > 0) return ot;\n      }\n      return 4000;\n    })",
+          "lineNumber": 140
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableOutputs.find",
+          "lineNumber": 143
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setWordCountDraft",
+          "lineNumber": 149
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setWordCountSaved",
+          "lineNumber": 150
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "setWordCountSaving",
+          "lineNumber": 156
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "chapterRepository.update",
+          "lineNumber": 158
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "setWordCountSaved",
+          "lineNumber": 159
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "setTimeout",
+          "lineNumber": 160
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "setWordCountSaved",
+          "lineNumber": 160
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "setErrorMsg",
+          "lineNumber": 162
+        },
+        {
+          "caller": "handleSaveWordCount",
+          "callee": "setWordCountSaving",
+          "lineNumber": 164
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 169
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 170
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 171
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useState",
+          "lineNumber": 174
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useEffect",
+          "lineNumber": 176
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextRecordService.getForGeneration({ novelId, maxCount: 15 })\n        .then((records) => setContextCount(records.length))\n        .catch",
+          "lineNumber": 178
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextRecordService.getForGeneration({ novelId, maxCount: 15 })\n        .then",
+          "lineNumber": 178
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextRecordService.getForGeneration",
+          "lineNumber": 178
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setContextCount",
+          "lineNumber": 179
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setContextCount",
+          "lineNumber": 180
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useEffect",
+          "lineNumber": 185
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "styleProfileService.getAll(novelId).then((list) => {\n        setAvailableStyles(list);\n        if (list.length > 0 && !selectedStyleId) setSelectedStyleId(list[0].id);\n      }).catch",
+          "lineNumber": 187
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "styleProfileService.getAll(novelId).then",
+          "lineNumber": 187
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "styleProfileService.getAll",
+          "lineNumber": 187
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setAvailableStyles",
+          "lineNumber": 188
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setSelectedStyleId",
+          "lineNumber": 189
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "outputProfileService.getAll(novelId).then((list) => {\n        setAvailableOutputs(list);\n        const def = list.find((o) => o.isDefault) || list[0];\n        if (def && !selectedOutputId) setSelectedOutputId(def.id);\n      }).catch",
+          "lineNumber": 191
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "outputProfileService.getAll(novelId).then",
+          "lineNumber": 191
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "outputProfileService.getAll",
+          "lineNumber": 191
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setAvailableOutputs",
+          "lineNumber": 192
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "list.find",
+          "lineNumber": 193
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setSelectedOutputId",
+          "lineNumber": 194
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useEffect",
+          "lineNumber": 200
+        },
+        {
+          "caller": "refresh",
+          "callee": "buildFreshChapterGenerationContext",
+          "lineNumber": 205
+        },
+        {
+          "caller": "refresh",
+          "callee": "setContextSummary",
+          "lineNumber": 214
+        },
+        {
+          "caller": "refresh",
+          "callee": "setPromptDebug",
+          "lineNumber": 215
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "refresh",
+          "lineNumber": 219
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "aiSettingsService.getSettings",
+          "lineNumber": 223
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "useCallback",
+          "lineNumber": 226
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "buildFreshChapterGenerationContext",
+          "lineNumber": 229
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "buildGenerateRequest",
+          "lineNumber": 237
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setContextSummary",
+          "lineNumber": 238
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setPromptDebug",
+          "lineNumber": 239
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setShowContext",
+          "lineNumber": 240
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "[\n            '上一次生成未遵循章节大纲，本次必须严格覆盖以下缺失点：',\n            ...options.retryMissingPoints.map((point, index) => `${index + 1}. ${point.text}`),\n          ].join",
+          "lineNumber": 250
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "options.retryMissingPoints.map",
+          "lineNumber": 252
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "[\n        userInstruction.trim(),\n        retryInstruction,\n      ].filter(Boolean).join",
+          "lineNumber": 255
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "[\n        userInstruction.trim(),\n        retryInstruction,\n      ].filter",
+          "lineNumber": 255
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "userInstruction.trim",
+          "lineNumber": 256
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "buildFreshChapterGenerationContext",
+          "lineNumber": 259
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setContextSummary",
+          "lineNumber": 268
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPromptDebug",
+          "lineNumber": 269
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setErrorMsg",
+          "lineNumber": 271
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStatusMsg",
+          "lineNumber": 278
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "preflightContext.chapterOutline?.trim",
+          "lineNumber": 282
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "preflightWarnings.push",
+          "lineNumber": 283
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "preflightWarnings.push",
+          "lineNumber": 286
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "confirmInfo",
+          "lineNumber": 289
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "preflightWarnings.join",
+          "lineNumber": 291
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setGenerating",
+          "lineNumber": 296
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setErrorMsg",
+          "lineNumber": 297
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setValidationState",
+          "lineNumber": 298
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "runWithLoading",
+          "lineNumber": 301
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "ctx.chapterEvents.match",
+          "lineNumber": 316
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "availableStyles.find",
+          "lineNumber": 318
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "availableOutputs.find",
+          "lineNumber": 319
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "[\n            `生成：${novelId.slice(0,8)}/${ctx.chapterTitle}`,\n            `大纲：${hasOutline}`,\n            `目标：${hasChapterGoal}`,\n            `角色：${charCount}个`,\n            `必须出场：${ctx.requiredCharacters?.length || 0}个`,\n            `事件：${eventCount}个`,\n            `前文：${hasPrevContext}`,\n            `风格：${styleName}`,\n            `输出：${outputName}`,\n            `字数：${ctx.targetWordCount || wordCountDraft}`,\n          ].join",
+          "lineNumber": 321
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "novelId.slice",
+          "lineNumber": 322
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "aiTaskService.create('chapter_generate', {\n            novelId,\n            chapterId: chapter.id,\n            runtimeMode: settings.runtimeMode,\n            provider: settings.provider,\n            modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,\n            inputSummary,\n          }).catch",
+          "lineNumber": 335
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "aiTaskService.create",
+          "lineNumber": 335
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStage",
+          "lineNumber": 344
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPercent",
+          "lineNumber": 345
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStage",
+          "lineNumber": 348
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPercent",
+          "lineNumber": 349
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "buildGenerateRequest",
+          "lineNumber": 350
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPromptDebug",
+          "lineNumber": 351
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStage",
+          "lineNumber": 354
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setMessage",
+          "lineNumber": 355
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPercent",
+          "lineNumber": 356
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "createAiClient",
+          "lineNumber": 357
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "client.generate",
+          "lineNumber": 358
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPercent",
+          "lineNumber": 360
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStage",
+          "lineNumber": 361
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "buildValidationSnapshot",
+          "lineNumber": 362
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "buildValidationWarningText",
+          "lineNumber": 363
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setMessage",
+          "lineNumber": 364
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "draftVersionService.create",
+          "lineNumber": 367
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setValidationState",
+          "lineNumber": 376
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPercent",
+          "lineNumber": 378
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "aiTaskService.markSucceeded",
+          "lineNumber": 382
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "response.text.slice",
+          "lineNumber": 383
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "request.promptDebug?.requiredCharacterNames.join",
+          "lineNumber": 384
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setPercent",
+          "lineNumber": 391
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStage",
+          "lineNumber": 392
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "console.info",
+          "lineNumber": 395
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "namesText",
+          "lineNumber": 406
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "getChapterCharacterNames",
+          "lineNumber": 406
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "namesText",
+          "lineNumber": 407
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "validation.outlineCompliance.missingPoints.map",
+          "lineNumber": 412
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "onGenerated",
+          "lineNumber": 420
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setErrorMsg",
+          "lineNumber": 424
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStatusMsg",
+          "lineNumber": 425
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setErrorMsg",
+          "lineNumber": 427
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStatusMsg",
+          "lineNumber": 428
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "notifyNative",
+          "lineNumber": 432
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setGenerating",
+          "lineNumber": 436
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setErrorMsg",
+          "lineNumber": 439
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setStatusMsg",
+          "lineNumber": 440
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "setGenerating",
+          "lineNumber": 441
+        },
+        {
+          "caller": "handleGenerate",
+          "callee": "notifyNative",
+          "lineNumber": 444
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setRevising",
+          "lineNumber": 454
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setGenerating",
+          "lineNumber": 455
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setErrorMsg",
+          "lineNumber": 456
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "draftVersionService.getLatestByChapterId",
+          "lineNumber": 459
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setErrorMsg",
+          "lineNumber": 461
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "buildFreshChapterGenerationContext",
+          "lineNumber": 465
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setContextSummary",
+          "lineNumber": 473
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "checkOutlineCompliance",
+          "lineNumber": 477
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setErrorMsg",
+          "lineNumber": 483
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "runWithLoading",
+          "lineNumber": 487
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "aiTaskService.create('chapter_rewrite', {\n            novelId,\n            chapterId: chapter.id,\n            runtimeMode: settings.runtimeMode,\n            provider: settings.provider,\n            modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,\n            inputSummary: `按大纲修正：${ctx.chapterTitle}，缺失${missingPoints.length}项，原草稿v${latest.versionNo}`,\n          }).catch",
+          "lineNumber": 496
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "aiTaskService.create",
+          "lineNumber": 496
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setStage",
+          "lineNumber": 505
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setPercent",
+          "lineNumber": 506
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "createAiClient",
+          "lineNumber": 507
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "reviseChapterByOutline",
+          "lineNumber": 508
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setPercent",
+          "lineNumber": 518
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setStage",
+          "lineNumber": 519
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "buildValidationSnapshot",
+          "lineNumber": 520
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "buildValidationWarningText",
+          "lineNumber": 521
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setMessage",
+          "lineNumber": 523
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "draftVersionService.create",
+          "lineNumber": 524
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setValidationState",
+          "lineNumber": 533
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "aiTaskService.markSucceeded",
+          "lineNumber": 536
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "validation.requiredNames.join",
+          "lineNumber": 538
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setPercent",
+          "lineNumber": 545
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setStage",
+          "lineNumber": 546
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "onGenerated",
+          "lineNumber": 547
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setErrorMsg",
+          "lineNumber": 550
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setStatusMsg",
+          "lineNumber": 551
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setErrorMsg",
+          "lineNumber": 553
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setStatusMsg",
+          "lineNumber": 554
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setErrorMsg",
+          "lineNumber": 560
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setStatusMsg",
+          "lineNumber": 561
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setRevising",
+          "lineNumber": 563
+        },
+        {
+          "caller": "handleReviseByOutline",
+          "callee": "setGenerating",
+          "lineNumber": 564
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "draftVersionService.getLatestByChapterId",
+          "lineNumber": 570
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "setErrorMsg",
+          "lineNumber": 572
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "draftHasAdoptionRisk",
+          "lineNumber": 575
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "confirmDanger",
+          "lineNumber": 579
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "confirmInfo",
+          "lineNumber": 580
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "draftVersionService.adopt",
+          "lineNumber": 584
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "setStatusMsg",
+          "lineNumber": 585
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "setTimeout",
+          "lineNumber": 586
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "setStatusMsg",
+          "lineNumber": 586
+        },
+        {
+          "caller": "handleAdopt",
+          "callee": "onAdopted",
+          "lineNumber": 587
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setWordCountDraft",
+          "lineNumber": 647
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "Number",
+          "lineNumber": 647
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setWordCountSaved",
+          "lineNumber": 647
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setWordCountDraft",
+          "lineNumber": 648
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setGenMode",
+          "lineNumber": 693
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setGenMode",
+          "lineNumber": 700
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setSelectedStyleId",
+          "lineNumber": 719
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableStyles.map",
+          "lineNumber": 725
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setSelectedOutputId",
+          "lineNumber": 735
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableOutputs.map",
+          "lineNumber": 741
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "(() => {\n              const s = availableStyles.find((x) => x.id === selectedStyleId);\n              if (!s) return null;\n              return [\n                s.narrativePerspective && `👁️ ${s.narrativePerspective}`,\n                s.tone && `🎭 ${s.tone}`,\n                s.pace && `⚡ ${s.pace}`,\n                `💬${Math.round(s.dialogueRatio * 100)}% 🖊️${Math.round(s.descriptionRatio * 100)}%`\n              ].filter(Boolean).join(' · ');\n            })",
+          "lineNumber": 748
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableStyles.find",
+          "lineNumber": 749
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "[\n                s.narrativePerspective && `👁️ ${s.narrativePerspective}`,\n                s.tone && `🎭 ${s.tone}`,\n                s.pace && `⚡ ${s.pace}`,\n                `💬${Math.round(s.dialogueRatio * 100)}% 🖊️${Math.round(s.descriptionRatio * 100)}%`\n              ].filter(Boolean).join",
+          "lineNumber": 751
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "[\n                s.narrativePerspective && `👁️ ${s.narrativePerspective}`,\n                s.tone && `🎭 ${s.tone}`,\n                s.pace && `⚡ ${s.pace}`,\n                `💬${Math.round(s.dialogueRatio * 100)}% 🖊️${Math.round(s.descriptionRatio * 100)}%`\n              ].filter",
+          "lineNumber": 751
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "Math.round",
+          "lineNumber": 755
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "Math.round",
+          "lineNumber": 755
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setUserInstruction",
+          "lineNumber": 768
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "(() => {\n              const nameList = getChapterCharacterNames(contextSummary);\n              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';\n            })",
+          "lineNumber": 783
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "getChapterCharacterNames",
+          "lineNumber": 784
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "nameList.join",
+          "lineNumber": 785
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "(() => {\n              const nameList = getRequiredCharacterNames(contextSummary);\n              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';\n            })",
+          "lineNumber": 787
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "getRequiredCharacterNames",
+          "lineNumber": 788
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "nameList.join",
+          "lineNumber": 789
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextSummary.chapterOutline?.trim",
+          "lineNumber": 801
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextSummary.chapterOutline?.trim",
+          "lineNumber": 806
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextSummary.chapterOutline.trim",
+          "lineNumber": 806
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "(() => {\n              const nameList = getChapterCharacterNames(contextSummary);\n              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';\n            })",
+          "lineNumber": 824
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "getChapterCharacterNames",
+          "lineNumber": 825
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "nameList.join",
+          "lineNumber": 826
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "(() => {\n              const nameList = getRequiredCharacterNames(contextSummary);\n              return nameList.length > 0 ? `${nameList.length} 个（${nameList.join('、')}）` : '0 个';\n            })",
+          "lineNumber": 828
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "getRequiredCharacterNames",
+          "lineNumber": 829
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "nameList.join",
+          "lineNumber": 830
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "contextSummary.chapterEvents.match",
+          "lineNumber": 832
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableStyles.find",
+          "lineNumber": 835
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableStyles.find",
+          "lineNumber": 835
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "availableOutputs.find",
+          "lineNumber": 836
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "statusMsg.includes",
+          "lineNumber": 860
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "statusMsg.includes",
+          "lineNumber": 861
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "getOutlineValidationStatus",
+          "lineNumber": 884
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "validationState.missingRequiredNames.join",
+          "lineNumber": 892
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "validationState.outlineCompliance.missingPoints.map",
+          "lineNumber": 899
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "handleGenerate",
+          "lineNumber": 913
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "setStatusMsg",
+          "lineNumber": 931
+        },
+        {
+          "caller": "AiGeneratePanel",
+          "callee": "handleGenerate",
+          "lineNumber": 946
+        }
+      ],
+      "metrics": {
+        "importCount": 18,
+        "exportCount": 0,
+        "functionCount": 9,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/components/right-dock/panels/StylePanel.tsx",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 244,
+      "nonEmptyLines": 226,
+      "functions": [
+        {
+          "name": "StylePanel",
+          "startLine": 20,
+          "endLine": 242,
+          "params": [
+            "{ novelId, chapter, onStyleChange, onOutputChange }"
+          ]
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 21
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 22
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 23
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 24
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 27
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 28
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 29
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 30
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useState",
+          "lineNumber": 31
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useEffect",
+          "lineNumber": 33
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "styleProfileService.getAll(novelId).then",
+          "lineNumber": 34
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "styleProfileService.getAll",
+          "lineNumber": 34
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setStyles",
+          "lineNumber": 35
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setSelectedStyleId",
+          "lineNumber": 37
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "onStyleChange",
+          "lineNumber": 38
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "outputProfileService.getAll(novelId).then",
+          "lineNumber": 41
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "outputProfileService.getAll",
+          "lineNumber": 41
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setOutputs",
+          "lineNumber": 42
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "list.find",
+          "lineNumber": 43
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setSelectedOutputId",
+          "lineNumber": 45
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "onOutputChange",
+          "lineNumber": 46
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "styles.find",
+          "lineNumber": 51
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "outputs.find",
+          "lineNumber": 52
+        },
+        {
+          "caller": "handleStyleSelect",
+          "callee": "setSelectedStyleId",
+          "lineNumber": 55
+        },
+        {
+          "caller": "handleStyleSelect",
+          "callee": "styles.find",
+          "lineNumber": 56
+        },
+        {
+          "caller": "handleStyleSelect",
+          "callee": "onStyleChange",
+          "lineNumber": 57
+        },
+        {
+          "caller": "handleOutputSelect",
+          "callee": "setSelectedOutputId",
+          "lineNumber": 61
+        },
+        {
+          "caller": "handleOutputSelect",
+          "callee": "outputs.find",
+          "lineNumber": 62
+        },
+        {
+          "caller": "handleOutputSelect",
+          "callee": "onOutputChange",
+          "lineNumber": 63
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "useCallback",
+          "lineNumber": 67
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "draftVersionService.getLatestByChapterId",
+          "lineNumber": 70
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setAnalyzeText",
+          "lineNumber": 72
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "draft.content.slice",
+          "lineNumber": 72
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setUseChapterContent",
+          "lineNumber": 73
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "analyzeText.trim",
+          "lineNumber": 80
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeError",
+          "lineNumber": 82
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeLoading",
+          "lineNumber": 85
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeError",
+          "lineNumber": 85
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeResult",
+          "lineNumber": 85
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "analyzeStyle",
+          "lineNumber": 87
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeResult",
+          "lineNumber": 88
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeError",
+          "lineNumber": 90
+        },
+        {
+          "caller": "handleAnalyzeStyle",
+          "callee": "setAnalyzeLoading",
+          "lineNumber": 92
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "new Date().toLocaleDateString",
+          "lineNumber": 100
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "styleProfileService.create",
+          "lineNumber": 101
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "setStyles",
+          "lineNumber": 113
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "setSelectedStyleId",
+          "lineNumber": 114
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "onStyleChange",
+          "lineNumber": 115
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "alert",
+          "lineNumber": 116
+        },
+        {
+          "caller": "handleSaveAsStyle",
+          "callee": "setAnalyzeError",
+          "lineNumber": 118
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "aiSettingsService.getSettings",
+          "lineNumber": 122
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setAnalyzeText",
+          "lineNumber": 158
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "setUseChapterContent",
+          "lineNumber": 158
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "analyzeText.trim",
+          "lineNumber": 166
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "Math.round",
+          "lineNumber": 190
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "Math.round",
+          "lineNumber": 190
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "handleStyleSelect",
+          "lineNumber": 210
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "styles.map",
+          "lineNumber": 211
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "Math.round",
+          "lineNumber": 218
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "Math.round",
+          "lineNumber": 218
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "handleOutputSelect",
+          "lineNumber": 225
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "outputs.map",
+          "lineNumber": 226
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "formatNumber",
+          "lineNumber": 230
+        },
+        {
+          "caller": "StylePanel",
+          "callee": "formatNumber",
+          "lineNumber": 232
+        }
+      ],
+      "metrics": {
+        "importCount": 9,
+        "exportCount": 0,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/features/styles/mockStyles.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 71,
+      "nonEmptyLines": 68,
+      "exports": [
+        {
+          "name": "mockStyleProfiles",
+          "line": 8,
+          "isDefault": false
+        },
+        {
+          "name": "mockOutputProfiles",
+          "line": 23,
+          "isDefault": false
+        },
+        {
+          "name": "mockCharacters",
+          "line": 40,
+          "isDefault": false
+        }
+      ],
+      "metrics": {
+        "importCount": 3,
+        "exportCount": 3,
+        "functionCount": 0,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 212,
+      "nonEmptyLines": 186,
+      "functions": [
+        {
+          "name": "StyleProfilesPage",
+          "startLine": 16,
+          "endLine": 210,
+          "params": []
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useNavigate",
+          "lineNumber": 17
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 18
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 19
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 20
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 21
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 22
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 24
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 25
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 26
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 28
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 29
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 30
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 32
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 33
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 34
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 35
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useState",
+          "lineNumber": 36
+        },
+        {
+          "caller": "flash",
+          "callee": "setMsg",
+          "lineNumber": 38
+        },
+        {
+          "caller": "flash",
+          "callee": "setTimeout",
+          "lineNumber": 38
+        },
+        {
+          "caller": "flash",
+          "callee": "setMsg",
+          "lineNumber": 38
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useEffect",
+          "lineNumber": 40
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "styleProfileService.getAll().then(setStyles).catch",
+          "lineNumber": 40
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "styleProfileService.getAll().then",
+          "lineNumber": 40
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "styleProfileService.getAll",
+          "lineNumber": 40
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useEffect",
+          "lineNumber": 41
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "outputProfileService.getAll().then(setOutputs).catch",
+          "lineNumber": 41
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "outputProfileService.getAll().then",
+          "lineNumber": 41
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "outputProfileService.getAll",
+          "lineNumber": 41
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "useEffect",
+          "lineNumber": 42
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "importedAssetService.getAll().then(setAssets).catch",
+          "lineNumber": 42
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "importedAssetService.getAll().then",
+          "lineNumber": 42
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "importedAssetService.getAll",
+          "lineNumber": 42
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "styleForm.name.trim",
+          "lineNumber": 45
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "flash",
+          "lineNumber": 45
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "styleProfileService.update",
+          "lineNumber": 47
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "flash",
+          "lineNumber": 47
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "styleProfileService.create",
+          "lineNumber": 48
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "flash",
+          "lineNumber": 48
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "setShowStyleForm",
+          "lineNumber": 49
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "setEditingStyle",
+          "lineNumber": 49
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "styleProfileService.getAll().then",
+          "lineNumber": 50
+        },
+        {
+          "caller": "saveStyle",
+          "callee": "styleProfileService.getAll",
+          "lineNumber": 50
+        },
+        {
+          "caller": "editStyle",
+          "callee": "setEditingStyle",
+          "lineNumber": 54
+        },
+        {
+          "caller": "editStyle",
+          "callee": "setStyleForm",
+          "lineNumber": 55
+        },
+        {
+          "caller": "editStyle",
+          "callee": "Math.round",
+          "lineNumber": 55
+        },
+        {
+          "caller": "editStyle",
+          "callee": "Math.round",
+          "lineNumber": 55
+        },
+        {
+          "caller": "editStyle",
+          "callee": "setShowStyleForm",
+          "lineNumber": 56
+        },
+        {
+          "caller": "deleteStyle",
+          "callee": "confirmDanger",
+          "lineNumber": 60
+        },
+        {
+          "caller": "deleteStyle",
+          "callee": "styleProfileService.getAll().then",
+          "lineNumber": 61
+        },
+        {
+          "caller": "deleteStyle",
+          "callee": "styleProfileService.getAll",
+          "lineNumber": 61
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "outputForm.name.trim",
+          "lineNumber": 65
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "flash",
+          "lineNumber": 65
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "outputProfileService.update",
+          "lineNumber": 66
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "flash",
+          "lineNumber": 66
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "outputProfileService.create",
+          "lineNumber": 67
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "flash",
+          "lineNumber": 67
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "setShowOutputForm",
+          "lineNumber": 68
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "setEditingOutput",
+          "lineNumber": 68
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "outputProfileService.getAll().then",
+          "lineNumber": 69
+        },
+        {
+          "caller": "saveOutput",
+          "callee": "outputProfileService.getAll",
+          "lineNumber": 69
+        },
+        {
+          "caller": "deleteOutput",
+          "callee": "confirmDanger",
+          "lineNumber": 73
+        },
+        {
+          "caller": "deleteOutput",
+          "callee": "outputProfileService.getAll().then",
+          "lineNumber": 74
+        },
+        {
+          "caller": "deleteOutput",
+          "callee": "outputProfileService.getAll",
+          "lineNumber": 74
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "analyzeText.trim",
+          "lineNumber": 78
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzeError",
+          "lineNumber": 78
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzing",
+          "lineNumber": 79
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzeError",
+          "lineNumber": 79
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzeResult",
+          "lineNumber": 79
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "analyzeStyle",
+          "lineNumber": 81
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzeResult",
+          "lineNumber": 82
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setStyleForm",
+          "lineNumber": 83
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "Math.round",
+          "lineNumber": 83
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "Math.round",
+          "lineNumber": 83
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzeError",
+          "lineNumber": 84
+        },
+        {
+          "caller": "handleAnalyze",
+          "callee": "setAnalyzing",
+          "lineNumber": 85
+        },
+        {
+          "caller": "applyAnalyzeResult",
+          "callee": "setShowAnalyze",
+          "lineNumber": 88
+        },
+        {
+          "caller": "applyAnalyzeResult",
+          "callee": "setShowStyleForm",
+          "lineNumber": 88
+        },
+        {
+          "caller": "applyAnalyzeResult",
+          "callee": "setEditingStyle",
+          "lineNumber": 88
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "tabs.map",
+          "lineNumber": 104
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setTab",
+          "lineNumber": 105
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setEditingStyle",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowStyleForm",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setAnalyzeText",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setAnalyzeResult",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setAnalyzeError",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowAnalyze",
+          "lineNumber": 110
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setEditingOutput",
+          "lineNumber": 111
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setOutputForm",
+          "lineNumber": 111
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowOutputForm",
+          "lineNumber": 111
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "styles.map",
+          "lineNumber": 117
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "sourceLabel",
+          "lineNumber": 119
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "Math.round",
+          "lineNumber": 124
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "Math.round",
+          "lineNumber": 124
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "editStyle",
+          "lineNumber": 127
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "deleteStyle",
+          "lineNumber": 128
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "outputs.map",
+          "lineNumber": 138
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "formatNumber",
+          "lineNumber": 141
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setEditingOutput",
+          "lineNumber": 143
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setOutputForm",
+          "lineNumber": 143
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowOutputForm",
+          "lineNumber": 143
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "deleteOutput",
+          "lineNumber": 144
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "assets.map",
+          "lineNumber": 153
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "a.fileType.toUpperCase",
+          "lineNumber": 155
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "importedAssetService.remove",
+          "lineNumber": 156
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "flash",
+          "lineNumber": 156
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "importedAssetService.getAll().then",
+          "lineNumber": 156
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "importedAssetService.getAll",
+          "lineNumber": 156
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowStyleForm",
+          "lineNumber": 163
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "e.stopPropagation",
+          "lineNumber": 164
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 167
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 168
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 168
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 169
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 169
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 170
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "Number",
+          "lineNumber": 170
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 170
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "Number",
+          "lineNumber": 170
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setStyleForm",
+          "lineNumber": 171
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowStyleForm",
+          "lineNumber": 172
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowOutputForm",
+          "lineNumber": 180
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "e.stopPropagation",
+          "lineNumber": 181
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setOutputForm",
+          "lineNumber": 184
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setOutputForm",
+          "lineNumber": 185
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "Number",
+          "lineNumber": 185
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setOutputForm",
+          "lineNumber": 186
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowOutputForm",
+          "lineNumber": 187
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowAnalyze",
+          "lineNumber": 195
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "e.stopPropagation",
+          "lineNumber": 196
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setAnalyzeText",
+          "lineNumber": 199
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "setShowAnalyze",
+          "lineNumber": 202
+        },
+        {
+          "caller": "StyleProfilesPage",
+          "callee": "navigate",
+          "lineNumber": 207
+        }
+      ],
+      "metrics": {
+        "importCount": 10,
+        "exportCount": 0,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/prompt/chapterOutlineDraftCache.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 33,
+      "nonEmptyLines": 27,
+      "functions": [
+        {
+          "name": "getStorage",
+          "startLine": 3,
+          "endLine": 10,
+          "params": []
+        },
+        {
+          "name": "keyOf",
+          "startLine": 12,
+          "endLine": 14,
+          "params": [
+            "chapterId"
+          ]
+        },
+        {
+          "name": "getCachedChapterOutlineDraft",
+          "startLine": 16,
+          "endLine": 20,
+          "params": [
+            "chapterId"
+          ]
+        },
+        {
+          "name": "setCachedChapterOutlineDraft",
+          "startLine": 22,
+          "endLine": 26,
+          "params": [
+            "chapterId",
+            "value"
+          ]
+        },
+        {
+          "name": "clearCachedChapterOutlineDraft",
+          "startLine": 28,
+          "endLine": 32,
+          "params": [
+            "chapterId"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "getCachedChapterOutlineDraft",
+          "line": 16,
+          "isDefault": false
+        },
+        {
+          "name": "setCachedChapterOutlineDraft",
+          "line": 22,
+          "isDefault": false
+        },
+        {
+          "name": "clearCachedChapterOutlineDraft",
+          "line": 28,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "getCachedChapterOutlineDraft",
+          "callee": "getStorage",
+          "lineNumber": 17
+        },
+        {
+          "caller": "getCachedChapterOutlineDraft",
+          "callee": "storage.getItem",
+          "lineNumber": 19
+        },
+        {
+          "caller": "getCachedChapterOutlineDraft",
+          "callee": "keyOf",
+          "lineNumber": 19
+        },
+        {
+          "caller": "setCachedChapterOutlineDraft",
+          "callee": "getStorage",
+          "lineNumber": 23
+        },
+        {
+          "caller": "setCachedChapterOutlineDraft",
+          "callee": "storage.setItem",
+          "lineNumber": 25
+        },
+        {
+          "caller": "setCachedChapterOutlineDraft",
+          "callee": "keyOf",
+          "lineNumber": 25
+        },
+        {
+          "caller": "clearCachedChapterOutlineDraft",
+          "callee": "getStorage",
+          "lineNumber": 29
+        },
+        {
+          "caller": "clearCachedChapterOutlineDraft",
+          "callee": "storage.removeItem",
+          "lineNumber": 31
+        },
+        {
+          "caller": "clearCachedChapterOutlineDraft",
+          "callee": "keyOf",
+          "lineNumber": 31
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 3,
+        "functionCount": 5,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/prompt/contextBuilder.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 482,
+      "nonEmptyLines": 457,
+      "functions": [
+        {
+          "name": "extractText",
+          "startLine": 23,
+          "endLine": 25,
+          "params": [
+            "summary"
+          ]
+        },
+        {
+          "name": "parseTimestamp",
+          "startLine": 27,
+          "endLine": 31,
+          "params": [
+            "value"
+          ]
+        },
+        {
+          "name": "isSameOrNewer",
+          "startLine": 33,
+          "endLine": 37,
+          "params": [
+            "left",
+            "right"
+          ]
+        },
+        {
+          "name": "safeLoad",
+          "startLine": 39,
+          "endLine": 45,
+          "params": [
+            "loader",
+            "fallback"
+          ]
+        },
+        {
+          "name": "roleLabel",
+          "startLine": 47,
+          "endLine": 56,
+          "params": [
+            "roleInChapter",
+            "roleType",
+            "isProtagonist"
+          ]
+        },
+        {
+          "name": "buildChapterCharacterSummary",
+          "startLine": 58,
+          "endLine": 75,
+          "params": [
+            "characters"
+          ]
+        },
+        {
+          "name": "buildRequiredCharactersSummary",
+          "startLine": 77,
+          "endLine": 80,
+          "params": [
+            "characters"
+          ]
+        },
+        {
+          "name": "buildFreshChapterGenerationContext",
+          "startLine": 82,
+          "endLine": 109,
+          "params": [
+            "params"
+          ]
+        },
+        {
+          "name": "buildChapterContext",
+          "startLine": 111,
+          "endLine": 455,
+          "params": [
+            "novelId",
+            "chapter",
+            "userInstruction",
+            "styleId",
+            "outputId"
+          ]
+        },
+        {
+          "name": "buildStyleSummary",
+          "startLine": 457,
+          "endLine": 470,
+          "params": [
+            "s"
+          ]
+        },
+        {
+          "name": "buildOutputSummary",
+          "startLine": 472,
+          "endLine": 482,
+          "params": [
+            "o"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "buildFreshChapterGenerationContext",
+          "line": 82,
+          "isDefault": false
+        },
+        {
+          "name": "buildChapterContext",
+          "line": 111,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "extractText",
+          "callee": "summary?.trim",
+          "lineNumber": 24
+        },
+        {
+          "caller": "parseTimestamp",
+          "callee": "value.replace",
+          "lineNumber": 29
+        },
+        {
+          "caller": "parseTimestamp",
+          "callee": "Date.parse",
+          "lineNumber": 30
+        },
+        {
+          "caller": "isSameOrNewer",
+          "callee": "parseTimestamp",
+          "lineNumber": 34
+        },
+        {
+          "caller": "isSameOrNewer",
+          "callee": "parseTimestamp",
+          "lineNumber": 35
+        },
+        {
+          "caller": "isSameOrNewer",
+          "callee": "Number.isFinite",
+          "lineNumber": 36
+        },
+        {
+          "caller": "isSameOrNewer",
+          "callee": "Number.isFinite",
+          "lineNumber": 36
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "characters.map((item, index) => {\n    const parts = [\n      `${index + 1}. ${item.name}`,\n      `- 角色定位：${roleLabel(item.roleInChapter, item.roleType, item.isProtagonist)}`,\n      `- 本章要求：${item.mustAppear ? '必须直接出场' : '本章出场'}`,\n    ];\n    if (item.identity) parts.push(`- 身份/背景：${item.identity}`);\n    if (item.faction) parts.push(`- 所属阵营：${item.faction}`);\n    if (item.personality) parts.push(`- 性格：${item.personality}`);\n    if (item.goal) parts.push(`- 目标：${item.goal}`);\n    if (item.behaviorLimits) parts.push(`- 行为限制：${item.behaviorLimits}`);\n    if (item.forbiddenBehaviors) parts.push(`- 禁止行为：${item.forbiddenBehaviors}`);\n    if (item.note) parts.push(`- 本章备注：${item.note}`);\n    return parts.join('\\n');\n  }).join",
+          "lineNumber": 60
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "characters.map",
+          "lineNumber": 60
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "roleLabel",
+          "lineNumber": 63
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 66
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 67
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 68
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 69
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 70
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 71
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.push",
+          "lineNumber": 72
+        },
+        {
+          "caller": "buildChapterCharacterSummary",
+          "callee": "parts.join",
+          "lineNumber": 73
+        },
+        {
+          "caller": "buildRequiredCharactersSummary",
+          "callee": "characters.map((item) => `- ${item.name}：必须在正文中直接出现，并参与本章剧情`).join",
+          "lineNumber": 79
+        },
+        {
+          "caller": "buildRequiredCharactersSummary",
+          "callee": "characters.map",
+          "lineNumber": 79
+        },
+        {
+          "caller": "buildFreshChapterGenerationContext",
+          "callee": "chapterRepository.getById",
+          "lineNumber": 91
+        },
+        {
+          "caller": "buildFreshChapterGenerationContext",
+          "callee": "buildChapterContext",
+          "lineNumber": 102
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.all",
+          "lineNumber": 118
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "novelRepository.getById",
+          "lineNumber": 119
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "settingRepository.getWorldSettings",
+          "lineNumber": 120
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "settingRepository.getRuleSystems",
+          "lineNumber": 121
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "protagonistRepository.getByNovelId",
+          "lineNumber": 122
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.all",
+          "lineNumber": 125
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "safeLoad",
+          "lineNumber": 126
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "masterOutlineService.getActive",
+          "lineNumber": 126
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "safeLoad",
+          "lineNumber": 127
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "volumeOutlineService.getActive",
+          "lineNumber": 127
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 127
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "safeLoad",
+          "lineNumber": 128
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterOutlineService.getActive",
+          "lineNumber": 128
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 128
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "worldSettings.find",
+          "lineNumber": 131
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "ruleSystems.filter",
+          "lineNumber": 132
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 135
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 136
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 137
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "volumeRepository.getById",
+          "lineNumber": 153
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 156
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 157
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 158
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "[volume.summary, volume.goal]\n        .filter(Boolean)\n        .join('\\n')\n        .trim",
+          "lineNumber": 160
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "[volume.summary, volume.goal]\n        .filter(Boolean)\n        .join",
+          "lineNumber": 160
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "[volume.summary, volume.goal]\n        .filter",
+          "lineNumber": 160
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 166
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "getCachedChapterOutlineDraft",
+          "lineNumber": 171
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 173
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 175
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 176
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "isSameOrNewer",
+          "lineNumber": 181
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractOutlineKeyPoints",
+          "lineNumber": 197
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "buildOutlineChecklistText",
+          "lineNumber": 198
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.all",
+          "lineNumber": 205
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "styleProfileService.getById",
+          "lineNumber": 206
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 206
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "outputProfileService.getById",
+          "lineNumber": 207
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.resolve",
+          "lineNumber": 207
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "buildStyleSummary",
+          "lineNumber": 209
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "buildOutputSummary",
+          "lineNumber": 211
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "settingRepository.getWorldSettings",
+          "lineNumber": 219
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "allSettings.filter((s) => s.isActive).slice",
+          "lineNumber": 221
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "allSettings.filter",
+          "lineNumber": 221
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "activeSettings\n        .map((s) => `- ${s.title}：${s.content?.slice(0, 300)}`)\n        .join",
+          "lineNumber": 223
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "activeSettings\n        .map",
+          "lineNumber": 223
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "s.content?.slice",
+          "lineNumber": 224
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "Promise.all",
+          "lineNumber": 240
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterCharacterService.getByChapterId",
+          "lineNumber": 241
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterEventService.getByChapterId",
+          "lineNumber": 242
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "characterService.getByNovelId",
+          "lineNumber": 245
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterChars.map",
+          "lineNumber": 246
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chars.find",
+          "lineNumber": 247
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "protagonistsInChapterNames.push",
+          "lineNumber": 251
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterCharacterContexts.filter",
+          "lineNumber": 272
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterCharacterContexts.map",
+          "lineNumber": 275
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "buildChapterCharacterSummary",
+          "lineNumber": 278
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "buildRequiredCharactersSummary",
+          "lineNumber": 279
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "requiredCharacterContexts.map((item) => item.name).filter(Boolean).join",
+          "lineNumber": 280
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "requiredCharacterContexts.map((item) => item.name).filter",
+          "lineNumber": 280
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "requiredCharacterContexts.map",
+          "lineNumber": 280
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "protagonistsInChapterNames.includes",
+          "lineNumber": 283
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "protagonistsNotInChapterNames.push",
+          "lineNumber": 284
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterEvents\n        .filter((e) => e.status !== 'forbidden' && e.status !== 'discarded')\n        .map((e) => {\n          const statusTag = e.status === 'required' ? '【必须发生！】' : e.status === 'selected' ? '【已选择】' : '';\n          const parts = [`- ${statusTag}${e.title}：${e.description}`];\n          if (e.impact) parts.push(`  影响：${e.impact}`);\n          if (e.risk) parts.push(`  风险：${e.risk}`);\n          return parts.join('\\n');\n        }).join",
+          "lineNumber": 289
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterEvents\n        .filter((e) => e.status !== 'forbidden' && e.status !== 'discarded')\n        .map",
+          "lineNumber": 289
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "chapterEvents\n        .filter",
+          "lineNumber": 289
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 294
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 295
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.join",
+          "lineNumber": 296
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "getContextForChapterTask",
+          "lineNumber": 304
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "buildContextPromptSection",
+          "lineNumber": 311
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "prots.map((p) => {\n      const parts = [`- ${p.label === 'primary' ? '主角A' : '主角B'}：${p.name}`];\n      if (p.identity) parts.push(`  身份：${p.identity}`);\n      if (p.personality) parts.push(`  性格：${p.personality}`);\n      if (p.goal) parts.push(`  目标：${p.goal}`);\n      if (p.motivation) parts.push(`  动机：${p.motivation}`);\n      if (p.specialAbility) parts.push(`  特殊能力：${p.specialAbility}`);\n      if (p.abilityLimits) parts.push(`  能力限制：${p.abilityLimits}`);\n      if (p.forbiddenBehaviors) parts.push(`  禁止行为：${p.forbiddenBehaviors}`);\n      if (p.background) parts.push(`  背景：${p.background}`);\n      if (p.arc) parts.push(`  人物成长线：${p.arc}`);\n      return parts.join('\\n');\n    }).join",
+          "lineNumber": 322
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "prots.map",
+          "lineNumber": 322
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 324
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 325
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 326
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 327
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 328
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 329
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 330
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 331
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 332
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.join",
+          "lineNumber": 333
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "prots.map((p) => p.name).filter(Boolean).join",
+          "lineNumber": 336
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "prots.map((p) => p.name).filter",
+          "lineNumber": 336
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "prots.map",
+          "lineNumber": 336
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 343
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 344
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 345
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 346
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 347
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 348
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.join",
+          "lineNumber": 349
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "(() => {\n        const parts: string[] = [];\n        if (protagonistsInChapterNames.length > 0) {\n          parts.push(`本章出场主角：${protagonistsInChapterNames.join('、')}。`);\n          if (protagonistMustAppear) {\n            parts.push('至少有一位主角必须直接出场并推动本章目标。');\n          }\n        }\n        if (protagonistsNotInChapterNames.length > 0) {\n          parts.push(`本章不直接出场主角：${protagonistsNotInChapterNames.join('、')}（不直接出场，但其影响/绑定关系/未来伏笔仍可作为隐性推动）。`);\n        }\n        if (parts.length === 0) {\n          parts.push('本章主角未加入出场角色，不要强制主角直接出场；剧情仍需服务主线和后续发展。');\n        }\n        return parts.join(' ');\n      })",
+          "lineNumber": 352
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 355
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "protagonistsInChapterNames.join",
+          "lineNumber": 355
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 357
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 361
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "protagonistsNotInChapterNames.join",
+          "lineNumber": 361
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.push",
+          "lineNumber": 364
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "parts.join",
+          "lineNumber": 366
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.push",
+          "lineNumber": 372
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.push",
+          "lineNumber": 373
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.push",
+          "lineNumber": 374
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.push",
+          "lineNumber": 375
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.push",
+          "lineNumber": 376
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.push",
+          "lineNumber": 377
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "relParts.join",
+          "lineNumber": 378
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "resolvedOutputProfileSummary.includes",
+          "lineNumber": 391
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 403
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 406
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "activeRules.map((r) => `【${r.title}】${r.content}`).join",
+          "lineNumber": 408
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "activeRules.map",
+          "lineNumber": 408
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 411
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 412
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 413
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 428
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "extractText",
+          "lineNumber": 440
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "console.info",
+          "lineNumber": 447
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "console.info",
+          "lineNumber": 448
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "console.info",
+          "lineNumber": 449
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "console.info",
+          "lineNumber": 450
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "console.info",
+          "lineNumber": 451
+        },
+        {
+          "caller": "buildChapterContext",
+          "callee": "outlineKeyPoints.map",
+          "lineNumber": 451
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 459
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 460
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 461
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 462
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 463
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "Math.round",
+          "lineNumber": 463
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "Math.round",
+          "lineNumber": 463
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 464
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 465
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 466
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 467
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.push",
+          "lineNumber": 468
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "s.prohibitedStyles.join",
+          "lineNumber": 468
+        },
+        {
+          "caller": "buildStyleSummary",
+          "callee": "parts.join",
+          "lineNumber": 469
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 474
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 475
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 476
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 477
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 478
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 479
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.push",
+          "lineNumber": 480
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "o.forbiddenItems.join",
+          "lineNumber": 480
+        },
+        {
+          "caller": "buildOutputSummary",
+          "callee": "parts.join",
+          "lineNumber": 481
+        }
+      ],
+      "metrics": {
+        "importCount": 18,
+        "exportCount": 2,
+        "functionCount": 11,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/styles/importedAssetService.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 35,
+      "nonEmptyLines": 29,
+      "functions": [
+        {
+          "name": "getAll",
+          "startLine": 9,
+          "endLine": 11,
+          "params": []
+        },
+        {
+          "name": "saveAll",
+          "startLine": 13,
+          "endLine": 15,
+          "params": [
+            "items"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "importedAssetService",
+          "line": 17,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "getAll",
+          "callee": "lsGet",
+          "lineNumber": 10
+        },
+        {
+          "caller": "saveAll",
+          "callee": "lsSet",
+          "lineNumber": 14
+        },
+        {
+          "caller": "getAll",
+          "callee": "getAll",
+          "lineNumber": 19
+        },
+        {
+          "caller": "getAll",
+          "callee": "list.filter",
+          "lineNumber": 20
+        },
+        {
+          "caller": "create",
+          "callee": "getAll",
+          "lineNumber": 25
+        },
+        {
+          "caller": "create",
+          "callee": "generateId",
+          "lineNumber": 26
+        },
+        {
+          "caller": "create",
+          "callee": "nowISO",
+          "lineNumber": 26
+        },
+        {
+          "caller": "create",
+          "callee": "list.unshift",
+          "lineNumber": 27
+        },
+        {
+          "caller": "create",
+          "callee": "saveAll",
+          "lineNumber": 28
+        },
+        {
+          "caller": "remove",
+          "callee": "saveAll",
+          "lineNumber": 33
+        },
+        {
+          "caller": "remove",
+          "callee": "getAll().filter",
+          "lineNumber": 33
+        },
+        {
+          "caller": "remove",
+          "callee": "getAll",
+          "lineNumber": 33
+        }
+      ],
+      "metrics": {
+        "importCount": 2,
+        "exportCount": 1,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/styles/outputProfileService.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 86,
+      "nonEmptyLines": 77,
+      "functions": [
+        {
+          "name": "getAll",
+          "startLine": 9,
+          "endLine": 11,
+          "params": []
+        },
+        {
+          "name": "saveAll",
+          "startLine": 13,
+          "endLine": 15,
+          "params": [
+            "items"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "outputProfileService",
+          "line": 23,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "getAll",
+          "callee": "lsGet",
+          "lineNumber": 10
+        },
+        {
+          "caller": "saveAll",
+          "callee": "lsSet",
+          "lineNumber": 14
+        },
+        {
+          "caller": "getAll",
+          "callee": "getAll",
+          "lineNumber": 25
+        },
+        {
+          "caller": "getAll",
+          "callee": "nowISO",
+          "lineNumber": 27
+        },
+        {
+          "caller": "getAll",
+          "callee": "defaultSeeds.map",
+          "lineNumber": 28
+        },
+        {
+          "caller": "getAll",
+          "callee": "generateId",
+          "lineNumber": 30
+        },
+        {
+          "caller": "getAll",
+          "callee": "saveAll",
+          "lineNumber": 40
+        },
+        {
+          "caller": "getAll",
+          "callee": "list.filter",
+          "lineNumber": 42
+        },
+        {
+          "caller": "getById",
+          "callee": "getAll().find",
+          "lineNumber": 47
+        },
+        {
+          "caller": "getById",
+          "callee": "getAll",
+          "lineNumber": 47
+        },
+        {
+          "caller": "create",
+          "callee": "getAll",
+          "lineNumber": 51
+        },
+        {
+          "caller": "create",
+          "callee": "nowISO",
+          "lineNumber": 52
+        },
+        {
+          "caller": "create",
+          "callee": "generateId",
+          "lineNumber": 55
+        },
+        {
+          "caller": "create",
+          "callee": "list.push",
+          "lineNumber": 65
+        },
+        {
+          "caller": "create",
+          "callee": "saveAll",
+          "lineNumber": 66
+        },
+        {
+          "caller": "update",
+          "callee": "getAll",
+          "lineNumber": 71
+        },
+        {
+          "caller": "update",
+          "callee": "list.findIndex",
+          "lineNumber": 72
+        },
+        {
+          "caller": "update",
+          "callee": "nowISO",
+          "lineNumber": 74
+        },
+        {
+          "caller": "update",
+          "callee": "saveAll",
+          "lineNumber": 79
+        },
+        {
+          "caller": "remove",
+          "callee": "saveAll",
+          "lineNumber": 84
+        },
+        {
+          "caller": "remove",
+          "callee": "getAll().filter",
+          "lineNumber": 84
+        },
+        {
+          "caller": "remove",
+          "callee": "getAll",
+          "lineNumber": 84
+        }
+      ],
+      "metrics": {
+        "importCount": 2,
+        "exportCount": 1,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/styles/styleAnalyzeService.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 68,
+      "nonEmptyLines": 56,
+      "functions": [
+        {
+          "name": "analyzeStyle",
+          "startLine": 11,
+          "endLine": 68,
+          "params": [
+            "text"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "analyzeStyle",
+          "line": 11,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "analyzeStyle",
+          "callee": "text.trim",
+          "lineNumber": 12
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "aiSettingsService.getSettings",
+          "lineNumber": 15
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "aiTaskService.create('style_analyze', {\n    runtimeMode: settings.runtimeMode,\n    provider: settings.provider,\n    modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,\n    inputSummary: `风格分析，参考文本 ${text.length} 字`,\n  }).catch",
+          "lineNumber": 16
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "aiTaskService.create",
+          "lineNumber": 16
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "text.slice",
+          "lineNumber": 23
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "fetch",
+          "lineNumber": 28
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "resp.text",
+          "lineNumber": 29
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "template.replace",
+          "lineNumber": 36
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "createAiClient",
+          "lineNumber": 39
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "client.generate",
+          "lineNumber": 40
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "extractJsonObject",
+          "lineNumber": 49
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "response.text.slice",
+          "lineNumber": 50
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "JSON.parse",
+          "lineNumber": 52
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "aiTaskService.markSucceeded",
+          "lineNumber": 55
+        },
+        {
+          "caller": "analyzeStyle",
+          "callee": "aiTaskService.markFailed",
+          "lineNumber": 65
+        }
+      ],
+      "metrics": {
+        "importCount": 4,
+        "exportCount": 1,
+        "functionCount": 1,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/services/styles/styleProfileService.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 144,
+      "nonEmptyLines": 132,
+      "functions": [
+        {
+          "name": "fromDto",
+          "startLine": 20,
+          "endLine": 38,
+          "params": [
+            "dto"
+          ]
+        },
+        {
+          "name": "getLocalAll",
+          "startLine": 46,
+          "endLine": 60,
+          "params": []
+        }
+      ],
+      "exports": [
+        {
+          "name": "styleProfileService",
+          "line": 62,
+          "isDefault": false
+        }
+      ],
+      "callGraph": [
+        {
+          "caller": "fromDto",
+          "callee": "JSON.parse",
+          "lineNumber": 22
+        },
+        {
+          "caller": "getLocalAll",
+          "callee": "lsGet",
+          "lineNumber": 47
+        },
+        {
+          "caller": "getLocalAll",
+          "callee": "nowISO",
+          "lineNumber": 49
+        },
+        {
+          "caller": "getLocalAll",
+          "callee": "defaultSeed.map",
+          "lineNumber": 50
+        },
+        {
+          "caller": "getLocalAll",
+          "callee": "generateId",
+          "lineNumber": 51
+        },
+        {
+          "caller": "getLocalAll",
+          "callee": "lsSet",
+          "lineNumber": 57
+        },
+        {
+          "caller": "getAll",
+          "callee": "await dbCall",
+          "lineNumber": 65
+        },
+        {
+          "caller": "getAll",
+          "callee": "getLocalAll().map",
+          "lineNumber": 66
+        },
+        {
+          "caller": "getAll",
+          "callee": "getLocalAll",
+          "lineNumber": 66
+        },
+        {
+          "caller": "getAll",
+          "callee": "JSON.stringify",
+          "lineNumber": 74
+        },
+        {
+          "caller": "getAll",
+          "callee": "dtos.map",
+          "lineNumber": 80
+        },
+        {
+          "caller": "getAll",
+          "callee": "profiles.filter",
+          "lineNumber": 81
+        },
+        {
+          "caller": "getAll",
+          "callee": "getLocalAll().filter",
+          "lineNumber": 82
+        },
+        {
+          "caller": "getAll",
+          "callee": "getLocalAll",
+          "lineNumber": 82
+        },
+        {
+          "caller": "getAll",
+          "callee": "getLocalAll",
+          "lineNumber": 82
+        },
+        {
+          "caller": "getActive",
+          "callee": "await dbCall",
+          "lineNumber": 87
+        },
+        {
+          "caller": "getActive",
+          "callee": "fromDto",
+          "lineNumber": 88
+        },
+        {
+          "caller": "getActive",
+          "callee": "getLocalAll().filter",
+          "lineNumber": 90
+        },
+        {
+          "caller": "getActive",
+          "callee": "getLocalAll",
+          "lineNumber": 90
+        },
+        {
+          "caller": "getActive",
+          "callee": "local.find",
+          "lineNumber": 91
+        },
+        {
+          "caller": "getById",
+          "callee": "this.getAll",
+          "lineNumber": 96
+        },
+        {
+          "caller": "getById",
+          "callee": "all.find",
+          "lineNumber": 96
+        },
+        {
+          "caller": "getById",
+          "callee": "getLocalAll().find",
+          "lineNumber": 97
+        },
+        {
+          "caller": "getById",
+          "callee": "getLocalAll",
+          "lineNumber": 97
+        },
+        {
+          "caller": "create",
+          "callee": "await dbCall",
+          "lineNumber": 103
+        },
+        {
+          "caller": "create",
+          "callee": "fromDto",
+          "lineNumber": 106
+        },
+        {
+          "caller": "create",
+          "callee": "getLocalAll",
+          "lineNumber": 108
+        },
+        {
+          "caller": "create",
+          "callee": "nowISO",
+          "lineNumber": 108
+        },
+        {
+          "caller": "create",
+          "callee": "generateId",
+          "lineNumber": 109
+        },
+        {
+          "caller": "create",
+          "callee": "list.push",
+          "lineNumber": 111
+        },
+        {
+          "caller": "create",
+          "callee": "lsSet",
+          "lineNumber": 111
+        },
+        {
+          "caller": "update",
+          "callee": "await dbCall",
+          "lineNumber": 118
+        },
+        {
+          "caller": "update",
+          "callee": "fromDto",
+          "lineNumber": 119
+        },
+        {
+          "caller": "update",
+          "callee": "getLocalAll",
+          "lineNumber": 121
+        },
+        {
+          "caller": "update",
+          "callee": "list.findIndex",
+          "lineNumber": 121
+        },
+        {
+          "caller": "update",
+          "callee": "nowISO",
+          "lineNumber": 123
+        },
+        {
+          "caller": "update",
+          "callee": "lsSet",
+          "lineNumber": 125
+        },
+        {
+          "caller": "setActive",
+          "callee": "await dbCall",
+          "lineNumber": 130
+        },
+        {
+          "caller": "setActive",
+          "callee": "getLocalAll",
+          "lineNumber": 132
+        },
+        {
+          "caller": "setActive",
+          "callee": "lsSet",
+          "lineNumber": 134
+        },
+        {
+          "caller": "remove",
+          "callee": "await dbCall",
+          "lineNumber": 141
+        },
+        {
+          "caller": "remove",
+          "callee": "lsSet",
+          "lineNumber": 142
+        },
+        {
+          "caller": "remove",
+          "callee": "getLocalAll().filter",
+          "lineNumber": 142
+        },
+        {
+          "caller": "remove",
+          "callee": "getLocalAll",
+          "lineNumber": 142
+        }
+      ],
+      "metrics": {
+        "importCount": 2,
+        "exportCount": 1,
+        "functionCount": 2,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/types/importedAsset.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 25,
+      "nonEmptyLines": 23,
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/types/output.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 47,
+      "nonEmptyLines": 44,
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0
+      }
+    },
+    {
+      "path": "src/types/style.ts",
+      "language": "typescript",
+      "fileCategory": "code",
+      "totalLines": 74,
+      "nonEmptyLines": 69,
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0
+      }
+    }
+  ]
+}

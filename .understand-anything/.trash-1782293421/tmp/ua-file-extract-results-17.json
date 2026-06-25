@@ -1,0 +1,1352 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 20,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/release-notes-v1.0.20.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 46,
+      "nonEmptyLines": 37,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.20 Release Notes",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "用户反馈问题",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "根因分析",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "本次修复",
+          "level": 2,
+          "line": 15
+        },
+        {
+          "heading": "新增 `chapterCreationService.ts`（统一章节创建服务）",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "OutlineManager 修复",
+          "level": 3,
+          "line": 22
+        },
+        {
+          "heading": "WritingWorkspacePage 修复",
+          "level": 3,
+          "line": 28
+        },
+        {
+          "heading": "存储 key（已验证一致）",
+          "level": 2,
+          "line": 33
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 40
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.21.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 95,
+      "nonEmptyLines": 76,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.21 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "一、版本概况",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "二、核心更新",
+          "level": 2,
+          "line": 11
+        },
+        {
+          "heading": "1. 统一 AI Client 架构",
+          "level": 3,
+          "line": 13
+        },
+        {
+          "heading": "2. AI 服务重构",
+          "level": 3,
+          "line": 19
+        },
+        {
+          "heading": "3. 右侧 AI 面板完善",
+          "level": 3,
+          "line": 25
+        },
+        {
+          "heading": "4. AI 设置优化",
+          "level": 3,
+          "line": 30
+        },
+        {
+          "heading": "5. AI 任务记录",
+          "level": 3,
+          "line": 36
+        },
+        {
+          "heading": "6. 最小调用次数策略",
+          "level": 3,
+          "line": 41
+        },
+        {
+          "heading": "7. 版本号更新",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "三、新增/修改文件",
+          "level": 2,
+          "line": 52
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "重要修改",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "四、构建说明",
+          "level": 2,
+          "line": 73
+        },
+        {
+          "heading": "五、Mock 模式验证",
+          "level": 2,
+          "line": 85
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.22.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 96,
+      "nonEmptyLines": 77,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.22 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "一、版本概况",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "二、用户反馈问题（已修复）",
+          "level": 2,
+          "line": 11
+        },
+        {
+          "heading": "1. 正式 EXE 版本不正确",
+          "level": 3,
+          "line": 13
+        },
+        {
+          "heading": "2. 新建作品卡在\"创建中...\"",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "3. Invalid Date",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "三、真实 API 调用修复（核心）",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "1. RealAiClient 重写",
+          "level": 3,
+          "line": 30
+        },
+        {
+          "heading": "2. aiSettingsService.testConnection 重写",
+          "level": 3,
+          "line": 41
+        },
+        {
+          "heading": "3. AI 任务记录增强",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "4. AiGeneratePanel 修复",
+          "level": 3,
+          "line": 52
+        },
+        {
+          "heading": "5. SettingsPage 修复",
+          "level": 3,
+          "line": 56
+        },
+        {
+          "heading": "四、新增/修改文件",
+          "level": 2,
+          "line": 60
+        },
+        {
+          "heading": "五、API 调用策略",
+          "level": 2,
+          "line": 79
+        },
+        {
+          "heading": "六、构建说明",
+          "level": 2,
+          "line": 87
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 16
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.23.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 20,
+      "nonEmptyLines": 14,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.23 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本主题",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "核心变更",
+          "level": 2,
+          "line": 7
+        },
+        {
+          "heading": "验证",
+          "level": 2,
+          "line": 16
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 4
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.24.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 78,
+      "nonEmptyLines": 62,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.24 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "本次更新",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "🔧 修复 1：写作工作台右侧栏点击即自动收回问题",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "✨ 新增功能：工作台右侧面板 AI 功能补全",
+          "level": 3,
+          "line": 24
+        },
+        {
+          "heading": "✨ 新增功能",
+          "level": 3,
+          "line": 28
+        },
+        {
+          "heading": "1. 大纲面板（OutlinePanel）- AI 大纲生成",
+          "level": 4,
+          "line": 30
+        },
+        {
+          "heading": "2. 风格面板（StylePanel）- AI 风格分析",
+          "level": 4,
+          "line": 38
+        },
+        {
+          "heading": "3. 章节总结面板（ChapterSummaryPanel）- AI 生成总结",
+          "level": 4,
+          "line": 45
+        },
+        {
+          "heading": "4. 类型扩展",
+          "level": 4,
+          "line": 52
+        },
+        {
+          "heading": "📋 完整的 AI 功能按钮矩阵",
+          "level": 3,
+          "line": 55
+        },
+        {
+          "heading": "🔗 技术实现",
+          "level": 3,
+          "line": 69
+        },
+        {
+          "heading": "📦 构建",
+          "level": 3,
+          "line": 76
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 13
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.25.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 64,
+      "nonEmptyLines": 51,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.25 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "本次更新",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "🔧 修复：AI 生成正文必须结合大纲、设定、角色、事件与风格配置",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "✨ 修改文件",
+          "level": 3,
+          "line": 14
+        },
+        {
+          "heading": "📋 AI 生成正文现在会注入的完整上下文",
+          "level": 3,
+          "line": 26
+        },
+        {
+          "heading": "🛡 降级策略",
+          "level": 3,
+          "line": 45
+        },
+        {
+          "heading": "⚠ 关键约束",
+          "level": 3,
+          "line": 54
+        },
+        {
+          "heading": "📦 构建",
+          "level": 3,
+          "line": 62
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 9
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.26.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 52,
+      "nonEmptyLines": 41,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.26 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "本次更新",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "🗑️ 新增：删除作品功能（级联删除）",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "📋 新增：Novel `outline` 字段（作品总大纲独立字段）",
+          "level": 3,
+          "line": 18
+        },
+        {
+          "heading": "🎨 新增：AI 生成面板风格方案与输出控制下拉选择",
+          "level": 3,
+          "line": 27
+        },
+        {
+          "heading": "📦 修改文件清单",
+          "level": 3,
+          "line": 35
+        },
+        {
+          "heading": "📦 构建",
+          "level": 3,
+          "line": 50
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.27.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 44,
+      "nonEmptyLines": 35,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.27 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "本次更新",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "📋 新增：模板中心自定义上传与管理",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "🗑️ 新增：AI 任务记录删除/清空",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "📦 修改文件清单",
+          "level": 3,
+          "line": 32
+        },
+        {
+          "heading": "📦 构建",
+          "level": 3,
+          "line": 42
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 7
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.28.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 58,
+      "nonEmptyLines": 48,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.28 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "本次更新",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "👥 新增：小说详情页主角设定支持双主角",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "数据模型扩展",
+          "level": 4,
+          "line": 12
+        },
+        {
+          "heading": "小说详情页 UI",
+          "level": 4,
+          "line": 19
+        },
+        {
+          "heading": "旧数据兼容",
+          "level": 4,
+          "line": 26
+        },
+        {
+          "heading": "AI Prompt 集成",
+          "level": 4,
+          "line": 31
+        },
+        {
+          "heading": "📦 修改文件清单（12 个文件）",
+          "level": 3,
+          "line": 38
+        },
+        {
+          "heading": "📦 构建",
+          "level": 3,
+          "line": 55
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 10
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.29.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 42,
+      "nonEmptyLines": 33,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.29 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "本次更新",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "🔧 修复：主角设定保存链路",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "根因",
+          "level": 4,
+          "line": 12
+        },
+        {
+          "heading": "修复内容",
+          "level": 4,
+          "line": 15
+        },
+        {
+          "heading": "📦 修改文件清单",
+          "level": 3,
+          "line": 28
+        },
+        {
+          "heading": "📦 构建",
+          "level": 3,
+          "line": 39
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.31.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 70,
+      "nonEmptyLines": 59,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.31 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "发布时间",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "版本概述",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "核心改动",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "🚀 新增大文本分片保存管道",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "🔧 数据库新增",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "📋 新增 Tauri 命令",
+          "level": 3,
+          "line": 22
+        },
+        {
+          "heading": "🔄 前端适配",
+          "level": 3,
+          "line": 31
+        },
+        {
+          "heading": "🛡️ 兼容性",
+          "level": 3,
+          "line": 37
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 43
+        },
+        {
+          "heading": "技术亮点",
+          "level": 2,
+          "line": 64
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 11
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.32.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 79,
+      "nonEmptyLines": 67,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.32 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "发布时间",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "版本概述",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "核心改动",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "🎨 新增 LoadingModal 组件",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "🔧 新增 useLoadingTask Hook",
+          "level": 3,
+          "line": 18
+        },
+        {
+          "heading": "📦 新增 runWithLoading 全局工具",
+          "level": 3,
+          "line": 23
+        },
+        {
+          "heading": "✅ 已接入功能（10个调用点）",
+          "level": 3,
+          "line": 29
+        },
+        {
+          "heading": "🛡️ 防重复点击",
+          "level": 3,
+          "line": 45
+        },
+        {
+          "heading": "🎯 与大文本保存衔接",
+          "level": 3,
+          "line": 51
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 56
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 11
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.33.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 92,
+      "nonEmptyLines": 81,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.33 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "发布时间",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "版本概述",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "核心改动",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "🗄️ 数据库新增",
+          "level": 3,
+          "line": 11
+        },
+        {
+          "heading": "🔧 后端新增（13个 Tauri 命令）",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "🎨 前端新增",
+          "level": 3,
+          "line": 34
+        },
+        {
+          "heading": "🧠 上下文驱动推演",
+          "level": 3,
+          "line": 51
+        },
+        {
+          "heading": "🔗 加载弹窗与防重复",
+          "level": 3,
+          "line": 63
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 68
+        },
+        {
+          "heading": "版本管理规则",
+          "level": 2,
+          "line": 86
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 11
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.34.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 61,
+      "nonEmptyLines": 49,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.34 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "发布时间",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "版本概述",
+          "level": 2,
+          "line": 6
+        },
+        {
+          "heading": "关键修复",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "后端新增",
+          "level": 2,
+          "line": 19
+        },
+        {
+          "heading": "5 个新 Tauri 命令",
+          "level": 3,
+          "line": 21
+        },
+        {
+          "heading": "上下文增强",
+          "level": 3,
+          "line": 30
+        },
+        {
+          "heading": "前端改动",
+          "level": 2,
+          "line": 34
+        },
+        {
+          "heading": "styleProfileService 全面重写",
+          "level": 3,
+          "line": 36
+        },
+        {
+          "heading": "AI 生成链路",
+          "level": 3,
+          "line": 41
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 49
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 11
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.36.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 66,
+      "nonEmptyLines": 56,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.36 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "核心修复：主角同步角色库与本章出场角色",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "问题背景",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "修复内容",
+          "level": 3,
+          "line": 16
+        },
+        {
+          "heading": "1. 数据库迁移",
+          "level": 4,
+          "line": 18
+        },
+        {
+          "heading": "2. Rust 后端新命令",
+          "level": 4,
+          "line": 23
+        },
+        {
+          "heading": "3. 前端服务层更新",
+          "level": 4,
+          "line": 34
+        },
+        {
+          "heading": "4. CharactersPanel 面板优化",
+          "level": 4,
+          "line": 40
+        },
+        {
+          "heading": "修改文件",
+          "level": 3,
+          "line": 49
+        },
+        {
+          "heading": "验收标准",
+          "level": 3,
+          "line": 59
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 11
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.37.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 67,
+      "nonEmptyLines": 54,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.37 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "核心修复：目标字数同步与应用",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "问题背景",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "根本原因",
+          "level": 3,
+          "line": 13
+        },
+        {
+          "heading": "修复内容",
+          "level": 3,
+          "line": 19
+        },
+        {
+          "heading": "1. 数据层修复（chapterRepository.ts）",
+          "level": 4,
+          "line": 21
+        },
+        {
+          "heading": "2. 上下文构建器修复（contextBuilder.ts）",
+          "level": 4,
+          "line": 26
+        },
+        {
+          "heading": "3. AI 生成面板修复（AiGeneratePanel.tsx）",
+          "level": 4,
+          "line": 30
+        },
+        {
+          "heading": "4. 章节表单修复（ChapterFormModal.tsx）",
+          "level": 4,
+          "line": 35
+        },
+        {
+          "heading": "5. 大纲生成修复（outlineGenerateService.ts）",
+          "level": 4,
+          "line": 39
+        },
+        {
+          "heading": "目标字数优先级",
+          "level": 3,
+          "line": 42
+        },
+        {
+          "heading": "修改文件",
+          "level": 3,
+          "line": 51
+        },
+        {
+          "heading": "验收标准",
+          "level": 3,
+          "line": 60
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 14
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.38.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 27,
+      "nonEmptyLines": 23,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.38 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "核心修复",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 14
+        },
+        {
+          "heading": "验收重点",
+          "level": 2,
+          "line": 23
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 5
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.39.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 36,
+      "nonEmptyLines": 30,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.39 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "修复内容",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "1. ESLint 配置补充",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "2. 数据库迁移顺序修复",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "修改文件",
+          "level": 3,
+          "line": 24
+        },
+        {
+          "heading": "验证结果",
+          "level": 3,
+          "line": 33
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 7
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.41.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 48,
+      "nonEmptyLines": 41,
+      "sections": [
+        {
+          "heading": "AI Novel Studio v1.0.41 发布说明",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "核心修复",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "1. 本章目标可编辑并参与生成",
+          "level": 3,
+          "line": 10
+        },
+        {
+          "heading": "2. 主角同步到角色库并可选本章出场",
+          "level": 3,
+          "line": 17
+        },
+        {
+          "heading": "3. 数据库兼容与防重复",
+          "level": 3,
+          "line": 24
+        },
+        {
+          "heading": "修改文件",
+          "level": 2,
+          "line": 28
+        },
+        {
+          "heading": "验证结果",
+          "level": 2,
+          "line": 44
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 8
+      }
+    },
+    {
+      "path": "docs/release-notes-v1.0.43.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 121,
+      "nonEmptyLines": 99,
+      "sections": [
+        {
+          "heading": "v1.0.43 发布说明 — Agent 基础设施建设",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "版本信息",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "版本定位",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "新增内容",
+          "level": 2,
+          "line": 14
+        },
+        {
+          "heading": "核心规则文件",
+          "level": 3,
+          "line": 16
+        },
+        {
+          "heading": "Instructions（6 个分领域开发指令）",
+          "level": 3,
+          "line": 19
+        },
+        {
+          "heading": "Prompts（4 个标准 Prompt 模板）",
+          "level": 3,
+          "line": 27
+        },
+        {
+          "heading": "Skills（5 个多步骤 Agent 工作流）",
+          "level": 3,
+          "line": 33
+        },
+        {
+          "heading": "Cursor Rules（5 个 IDE 规则）",
+          "level": 3,
+          "line": 40
+        },
+        {
+          "heading": "Docs（4 个新文档）",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "修改内容",
+          "level": 2,
+          "line": 53
+        },
+        {
+          "heading": "新增文件清单（共 27 个）",
+          "level": 2,
+          "line": 61
+        },
+        {
+          "heading": "测试结果",
+          "level": 2,
+          "line": 93
+        },
+        {
+          "heading": "本次禁止事项（严格执行）",
+          "level": 2,
+          "line": 102
+        },
+        {
+          "heading": "后续计划",
+          "level": 2,
+          "line": 113
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 15
+      }
+    }
+  ]
+}

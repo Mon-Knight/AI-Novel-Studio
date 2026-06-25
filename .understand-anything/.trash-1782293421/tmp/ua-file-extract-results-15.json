@@ -1,0 +1,646 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 7,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "AGENTS.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 290,
+      "nonEmptyLines": 216,
+      "sections": [
+        {
+          "heading": "AGENTS.md — AI Novel Studio",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目身份",
+          "level": 2,
+          "line": 8
+        },
+        {
+          "heading": "2. 技术栈（不可变）",
+          "level": 2,
+          "line": 27
+        },
+        {
+          "heading": "3. 开发最高原则",
+          "level": 2,
+          "line": 43
+        },
+        {
+          "heading": "3.1 必须遵守",
+          "level": 3,
+          "line": 45
+        },
+        {
+          "heading": "3.2 严格禁止",
+          "level": 3,
+          "line": 55
+        },
+        {
+          "heading": "4. 开发工作流（强制）",
+          "level": 2,
+          "line": 74
+        },
+        {
+          "heading": "5. 模块边界（不可跨）",
+          "level": 2,
+          "line": 104
+        },
+        {
+          "heading": "6. UI 硬约束",
+          "level": 2,
+          "line": 119
+        },
+        {
+          "heading": "6.1 必须",
+          "level": 3,
+          "line": 121
+        },
+        {
+          "heading": "6.2 禁止",
+          "level": 3,
+          "line": 130
+        },
+        {
+          "heading": "7. 版本体系",
+          "level": 2,
+          "line": 140
+        },
+        {
+          "heading": "7.1 版本号规则",
+          "level": 3,
+          "line": 142
+        },
+        {
+          "heading": "7.2 当前版本",
+          "level": 3,
+          "line": 148
+        },
+        {
+          "heading": "7.3 发布流程",
+          "level": 3,
+          "line": 152
+        },
+        {
+          "heading": "8. 测试要求（每次修改后）",
+          "level": 2,
+          "line": 165
+        },
+        {
+          "heading": "9. 文档体系",
+          "level": 2,
+          "line": 176
+        },
+        {
+          "heading": "10. AI Agent 行为守则",
+          "level": 2,
+          "line": 199
+        },
+        {
+          "heading": "10.1 分析优先",
+          "level": 3,
+          "line": 201
+        },
+        {
+          "heading": "10.2 克制修改",
+          "level": 3,
+          "line": 210
+        },
+        {
+          "heading": "10.3 验证闭环",
+          "level": 3,
+          "line": 217
+        },
+        {
+          "heading": "10.4 文档同步",
+          "level": 3,
+          "line": 223
+        },
+        {
+          "heading": "11. 用户与 Agent 的真实协作流程",
+          "level": 2,
+          "line": 232
+        },
+        {
+          "heading": "11.1 当前协作模式（v1.x）",
+          "level": 3,
+          "line": 234
+        },
+        {
+          "heading": "11.2 Agent 的角色定位",
+          "level": 3,
+          "line": 254
+        },
+        {
+          "heading": "11.3 任务书要求",
+          "level": 3,
+          "line": 264
+        },
+        {
+          "heading": "11.4 开发辅助 Skills 的作用",
+          "level": 3,
+          "line": 276
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 27
+      }
+    },
+    {
+      "path": "CHANGELOG.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 341,
+      "nonEmptyLines": 234,
+      "sections": [
+        {
+          "heading": "AI Novel Studio - CHANGELOG",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "v1.7.13 (2026-06-24) - 章节总结升级为章节上下文，打通上下文入库",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 5
+        },
+        {
+          "heading": "数据库迁移",
+          "level": 3,
+          "line": 40
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 45
+        },
+        {
+          "heading": "v1.7.12 (2026-06-24) - 修复 AI 任务记录删除 FOREIGN KEY 约束失败 + 质量检查问题处理闭环",
+          "level": 2,
+          "line": 58
+        },
+        {
+          "heading": "修复",
+          "level": 3,
+          "line": 60
+        },
+        {
+          "heading": "新增：质量检查「问题处理闭环」正式可用化",
+          "level": 3,
+          "line": 71
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 101
+        },
+        {
+          "heading": "修改（续）",
+          "level": 3,
+          "line": 113
+        },
+        {
+          "heading": "备注",
+          "level": 3,
+          "line": 121
+        },
+        {
+          "heading": "v1.7.11 (2026-06-08) - 发布收尾、本地构建产物清理与安装包验证",
+          "level": 2,
+          "line": 126
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 128
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 137
+        },
+        {
+          "heading": "修复",
+          "level": 3,
+          "line": 144
+        },
+        {
+          "heading": "备注",
+          "level": 3,
+          "line": 152
+        },
+        {
+          "heading": "v1.7.10 (2026-06-08) - 候选设定采纳与测试补齐",
+          "level": 2,
+          "line": 162
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 164
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 171
+        },
+        {
+          "heading": "验证",
+          "level": 3,
+          "line": 176
+        },
+        {
+          "heading": "开发者备注",
+          "level": 3,
+          "line": 180
+        },
+        {
+          "heading": "v1.7.9 (2026-06-08) - 设定库 AI 推演基础版",
+          "level": 2,
+          "line": 190
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 192
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 201
+        },
+        {
+          "heading": "开发者备注",
+          "level": 3,
+          "line": 206
+        },
+        {
+          "heading": "v1.7.8 (2026-06-08) - 导出文件位置选择与导出体验优化",
+          "level": 2,
+          "line": 213
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 215
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 221
+        },
+        {
+          "heading": "修复",
+          "level": 3,
+          "line": 226
+        },
+        {
+          "heading": "v1.7.7 (2026-06-08) - 桌面端窗口与 2K 适配",
+          "level": 2,
+          "line": 234
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 236
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 241
+        },
+        {
+          "heading": "v1.7.6 (2026-06-08) - 阶段性整理、文档体系重整与 EXE 验证",
+          "level": 2,
+          "line": 248
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 250
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 258
+        },
+        {
+          "heading": "验证",
+          "level": 3,
+          "line": 265
+        },
+        {
+          "heading": "开发者备注",
+          "level": 3,
+          "line": 270
+        },
+        {
+          "heading": "v1.0.46 (2026-05-26) - Tool Layer 接入真实项目读取",
+          "level": 2,
+          "line": 278
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 280
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 288
+        },
+        {
+          "heading": "开发者备注",
+          "level": 3,
+          "line": 294
+        },
+        {
+          "heading": "v1.0.45 (2026-05-26) - 项目开发辅助 Skills 增强版",
+          "level": 2,
+          "line": 301
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 303
+        },
+        {
+          "heading": "修改",
+          "level": 3,
+          "line": 307
+        },
+        {
+          "heading": "v1.0.44 (2026-05-26) - Agent Workflow Runtime 最小闭环",
+          "level": 2,
+          "line": 313
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 315
+        },
+        {
+          "heading": "开发者备注",
+          "level": 3,
+          "line": 319
+        },
+        {
+          "heading": "v1.0.43 (2026-05-26) - Agent 基础设施建设",
+          "level": 2,
+          "line": 327
+        },
+        {
+          "heading": "新增",
+          "level": 3,
+          "line": 329
+        },
+        {
+          "heading": "开发者备注",
+          "level": 3,
+          "line": 333
+        },
+        {
+          "heading": "v1.0.41",
+          "level": 2,
+          "line": 339
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 51
+      }
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 238,
+      "nonEmptyLines": 176,
+      "sections": [
+        {
+          "heading": "AI Novel Studio",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目简介",
+          "level": 2,
+          "line": 7
+        },
+        {
+          "heading": "2. 当前版本与定位",
+          "level": 2,
+          "line": 26
+        },
+        {
+          "heading": "3. 当前核心能力",
+          "level": 2,
+          "line": 37
+        },
+        {
+          "heading": "4. 快速开始",
+          "level": 2,
+          "line": 57
+        },
+        {
+          "heading": "环境要求",
+          "level": 3,
+          "line": 59
+        },
+        {
+          "heading": "安装与启动",
+          "level": 3,
+          "line": 65
+        },
+        {
+          "heading": "构建 EXE",
+          "level": 3,
+          "line": 80
+        },
+        {
+          "heading": "5. Windows 桌面规格",
+          "level": 2,
+          "line": 90
+        },
+        {
+          "heading": "6. 页面与功能入口",
+          "level": 2,
+          "line": 104
+        },
+        {
+          "heading": "7. AI 模式与模型配置",
+          "level": 2,
+          "line": 124
+        },
+        {
+          "heading": "8. 核心安全规则",
+          "level": 2,
+          "line": 137
+        },
+        {
+          "heading": "9. 当前版本路线",
+          "level": 2,
+          "line": 149
+        },
+        {
+          "heading": "10. 项目结构",
+          "level": 2,
+          "line": 171
+        },
+        {
+          "heading": "11. 测试与构建",
+          "level": 2,
+          "line": 194
+        },
+        {
+          "heading": "12. 当前限制",
+          "level": 2,
+          "line": 220
+        },
+        {
+          "heading": "13. 文档索引",
+          "level": 2,
+          "line": 230
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 17
+      }
+    },
+    {
+      "path": "index.html",
+      "language": "html",
+      "fileCategory": "markup",
+      "totalLines": 13,
+      "nonEmptyLines": 13,
+      "metrics": {}
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "fileCategory": "config",
+      "totalLines": 39,
+      "nonEmptyLines": 39,
+      "sections": [
+        {
+          "heading": "name",
+          "level": 1,
+          "line": 2
+        },
+        {
+          "heading": "private",
+          "level": 1,
+          "line": 3
+        },
+        {
+          "heading": "version",
+          "level": 1,
+          "line": 4
+        },
+        {
+          "heading": "type",
+          "level": 1,
+          "line": 5
+        },
+        {
+          "heading": "scripts",
+          "level": 1,
+          "line": 6
+        },
+        {
+          "heading": "dependencies",
+          "level": 1,
+          "line": 20
+        },
+        {
+          "heading": "devDependencies",
+          "level": 1,
+          "line": 26
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 7
+      }
+    },
+    {
+      "path": "tsconfig.json",
+      "language": "json",
+      "fileCategory": "config",
+      "totalLines": 25,
+      "nonEmptyLines": 25,
+      "sections": [
+        {
+          "heading": "compilerOptions",
+          "level": 1,
+          "line": 2
+        },
+        {
+          "heading": "include",
+          "level": 1,
+          "line": 23
+        },
+        {
+          "heading": "references",
+          "level": 1,
+          "line": 24
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 3
+      }
+    },
+    {
+      "path": "tsconfig.node.json",
+      "language": "json",
+      "fileCategory": "config",
+      "totalLines": 10,
+      "nonEmptyLines": 10,
+      "sections": [
+        {
+          "heading": "compilerOptions",
+          "level": 1,
+          "line": 2
+        },
+        {
+          "heading": "include",
+          "level": 1,
+          "line": 9
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 2
+      }
+    }
+  ]
+}

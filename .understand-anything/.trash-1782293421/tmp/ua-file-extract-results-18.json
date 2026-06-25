@@ -1,0 +1,676 @@
+{
+  "scriptCompleted": true,
+  "filesAnalyzed": 4,
+  "filesSkipped": [],
+  "results": [
+    {
+      "path": "docs/tauri2-mica-assessment.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 315,
+      "nonEmptyLines": 237,
+      "sections": [
+        {
+          "heading": "Tauri 2.x 升级评估与 Mica / Acrylic 可行性分析",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 当前项目结构总览",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "1.1 前端依赖",
+          "level": 3,
+          "line": 12
+        },
+        {
+          "heading": "1.2 Rust 依赖",
+          "level": 3,
+          "line": 22
+        },
+        {
+          "heading": "1.3 Rust 模块结构（8 个源文件）",
+          "level": 3,
+          "line": 33
+        },
+        {
+          "heading": "2. Tauri 1.7 → Tauri 2.x 迁移变更点",
+          "level": 2,
+          "line": 48
+        },
+        {
+          "heading": "2.1 Cargo.toml",
+          "level": 3,
+          "line": 50
+        },
+        {
+          "heading": "2.2 tauri.conf.json",
+          "level": 3,
+          "line": 64
+        },
+        {
+          "heading": "2.3 main.rs",
+          "level": 3,
+          "line": 85
+        },
+        {
+          "heading": "2.4 window_state.rs 影响",
+          "level": 3,
+          "line": 106
+        },
+        {
+          "heading": "2.5 前端 @tauri-apps/api 变更",
+          "level": 3,
+          "line": 126
+        },
+        {
+          "heading": "2.6 build.rs",
+          "level": 3,
+          "line": 135
+        },
+        {
+          "heading": "3. 现有功能 Tauri 2 兼容风险评估",
+          "level": 2,
+          "line": 147
+        },
+        {
+          "heading": "4. Mica / Acrylic 可行性分析",
+          "level": 2,
+          "line": 166
+        },
+        {
+          "heading": "4.1 Tauri 2.x 原生能力",
+          "level": 3,
+          "line": 168
+        },
+        {
+          "heading": "4.2 Win32 API 路线",
+          "level": 3,
+          "line": 177
+        },
+        {
+          "heading": "4.3 Windows 10/11 兼容",
+          "level": 3,
+          "line": 196
+        },
+        {
+          "heading": "4.4 WebView 透明陷阱",
+          "level": 3,
+          "line": 205
+        },
+        {
+          "heading": "5. 三条路线对比",
+          "level": 2,
+          "line": 214
+        },
+        {
+          "heading": "路线 A：继续 Tauri 1.7 + Win32 API",
+          "level": 3,
+          "line": 216
+        },
+        {
+          "heading": "路线 B：升级 Tauri 2.x + 未来 Mica",
+          "level": 3,
+          "line": 232
+        },
+        {
+          "heading": "路线 C：暂缓 Mica，优化 CSS 原生感",
+          "level": 3,
+          "line": 242
+        },
+        {
+          "heading": "6. 结论与推荐",
+          "level": 2,
+          "line": 254
+        },
+        {
+          "heading": "核心发现",
+          "level": 3,
+          "line": 256
+        },
+        {
+          "heading": "推荐决策",
+          "level": 3,
+          "line": 262
+        },
+        {
+          "heading": "实验分支",
+          "level": 3,
+          "line": 279
+        },
+        {
+          "heading": "7. 后续建议",
+          "level": 2,
+          "line": 291
+        },
+        {
+          "heading": "P2.2 建议（下一阶段）",
+          "level": 3,
+          "line": 293
+        },
+        {
+          "heading": "8. 参考资料",
+          "level": 2,
+          "line": 310
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 29
+      }
+    },
+    {
+      "path": "docs/ui-reference.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 1346,
+      "nonEmptyLines": 985,
+      "sections": [
+        {
+          "heading": "AI Novel Studio UI 参考设计文档",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 文档目的",
+          "level": 1,
+          "line": 12
+        },
+        {
+          "heading": "2. UI 总体定位",
+          "level": 1,
+          "line": 31
+        },
+        {
+          "heading": "3. UI 设计原则",
+          "level": 1,
+          "line": 53
+        },
+        {
+          "heading": "3.1 桌面软件感优先",
+          "level": 2,
+          "line": 55
+        },
+        {
+          "heading": "3.2 首页像作品管理软件",
+          "level": 2,
+          "line": 82
+        },
+        {
+          "heading": "3.3 工作台像专业写作软件",
+          "level": 2,
+          "line": 102
+        },
+        {
+          "heading": "3.4 右侧栏是弹出式生成控制台",
+          "level": 2,
+          "line": 140
+        },
+        {
+          "heading": "4. 全局视觉风格",
+          "level": 1,
+          "line": 158
+        },
+        {
+          "heading": "4.1 色彩方向",
+          "level": 2,
+          "line": 160
+        },
+        {
+          "heading": "4.2 字体方向",
+          "level": 2,
+          "line": 189
+        },
+        {
+          "heading": "4.3 边框与阴影",
+          "level": 2,
+          "line": 224
+        },
+        {
+          "heading": "5. 应用窗口结构",
+          "level": 1,
+          "line": 242
+        },
+        {
+          "heading": "6. 主界面：作品管理首页",
+          "level": 1,
+          "line": 272
+        },
+        {
+          "heading": "6.1 首页整体布局",
+          "level": 2,
+          "line": 274
+        },
+        {
+          "heading": "6.2 左侧全局导航",
+          "level": 2,
+          "line": 301
+        },
+        {
+          "heading": "6.3 顶部状态栏",
+          "level": 2,
+          "line": 336
+        },
+        {
+          "heading": "6.4 首页横幅区域",
+          "level": 2,
+          "line": 359
+        },
+        {
+          "heading": "6.5 快捷入口卡片",
+          "level": 2,
+          "line": 382
+        },
+        {
+          "heading": "6.6 作品卡片",
+          "level": 2,
+          "line": 414
+        },
+        {
+          "heading": "7. 作品详情页",
+          "level": 1,
+          "line": 451
+        },
+        {
+          "heading": "7.1 作品详情页定位",
+          "level": 2,
+          "line": 453
+        },
+        {
+          "heading": "7.2 作品详情页布局",
+          "level": 2,
+          "line": 473
+        },
+        {
+          "heading": "7.3 基础设定模块",
+          "level": 2,
+          "line": 491
+        },
+        {
+          "heading": "7.4 大纲管理模块",
+          "level": 2,
+          "line": 511
+        },
+        {
+          "heading": "7.5 角色库模块",
+          "level": 2,
+          "line": 534
+        },
+        {
+          "heading": "7.6 风格方案模块",
+          "level": 2,
+          "line": 556
+        },
+        {
+          "heading": "7.7 输出控制方案模块",
+          "level": 2,
+          "line": 579
+        },
+        {
+          "heading": "8. 写作工作台",
+          "level": 1,
+          "line": 610
+        },
+        {
+          "heading": "8.1 工作台整体布局",
+          "level": 2,
+          "line": 612
+        },
+        {
+          "heading": "8.2 顶部工具栏",
+          "level": 2,
+          "line": 637
+        },
+        {
+          "heading": "8.3 左侧卷章目录树",
+          "level": 2,
+          "line": 663
+        },
+        {
+          "heading": "8.4 中间正文编辑区",
+          "level": 2,
+          "line": 702
+        },
+        {
+          "heading": "8.5 底部状态栏",
+          "level": 2,
+          "line": 748
+        },
+        {
+          "heading": "9. 右侧竖向工具栏",
+          "level": 1,
+          "line": 768
+        },
+        {
+          "heading": "9.1 右侧工具栏定位",
+          "level": 2,
+          "line": 770
+        },
+        {
+          "heading": "9.2 右侧工具栏视觉要求",
+          "level": 2,
+          "line": 791
+        },
+        {
+          "heading": "9.3 右侧弹出面板行为",
+          "level": 2,
+          "line": 827
+        },
+        {
+          "heading": "10. 右侧面板内容设计",
+          "level": 1,
+          "line": 863
+        },
+        {
+          "heading": "10.1 AI 生成面板",
+          "level": 2,
+          "line": 865
+        },
+        {
+          "heading": "10.2 大纲面板",
+          "level": 2,
+          "line": 920
+        },
+        {
+          "heading": "10.3 角色面板",
+          "level": 2,
+          "line": 943
+        },
+        {
+          "heading": "10.4 事件面板",
+          "level": 2,
+          "line": 975
+        },
+        {
+          "heading": "10.5 设定面板",
+          "level": 2,
+          "line": 1012
+        },
+        {
+          "heading": "10.6 风格面板",
+          "level": 2,
+          "line": 1035
+        },
+        {
+          "heading": "10.7 检查面板",
+          "level": 2,
+          "line": 1054
+        },
+        {
+          "heading": "10.8 润色面板",
+          "level": 2,
+          "line": 1075
+        },
+        {
+          "heading": "11. 路由与页面结构建议",
+          "level": 1,
+          "line": 1094
+        },
+        {
+          "heading": "12. 组件结构建议",
+          "level": 1,
+          "line": 1120
+        },
+        {
+          "heading": "13. 样式文件建议",
+          "level": 1,
+          "line": 1169
+        },
+        {
+          "heading": "14. v0.1.0 UI 实现范围",
+          "level": 1,
+          "line": 1194
+        },
+        {
+          "heading": "15. v0.1.0 验收标准",
+          "level": 1,
+          "line": 1230
+        },
+        {
+          "heading": "16. 后续 UI 版本路线",
+          "level": 1,
+          "line": 1254
+        },
+        {
+          "heading": "v0.2.0 UI：作品详情页完善",
+          "level": 2,
+          "line": 1256
+        },
+        {
+          "heading": "v0.3.0 UI：分卷与章节管理",
+          "level": 2,
+          "line": 1271
+        },
+        {
+          "heading": "v0.4.0 UI：写作工作台完善",
+          "level": 2,
+          "line": 1285
+        },
+        {
+          "heading": "v0.5.0 UI：AI 生成闭环",
+          "level": 2,
+          "line": 1299
+        },
+        {
+          "heading": "17. 对 Copilot / Agent 的 UI 开发约束",
+          "level": 1,
+          "line": 1314
+        },
+        {
+          "heading": "18. UI 最高优先级总结",
+          "level": 1,
+          "line": 1333
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 59
+      }
+    },
+    {
+      "path": "docs/user-guide.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 107,
+      "nonEmptyLines": 77,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 用户指南",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 创建作品",
+          "level": 2,
+          "line": 3
+        },
+        {
+          "heading": "2. 填写世界背景",
+          "level": 2,
+          "line": 9
+        },
+        {
+          "heading": "3. 设定规则体系",
+          "level": 2,
+          "line": 17
+        },
+        {
+          "heading": "4. 设定主角",
+          "level": 2,
+          "line": 23
+        },
+        {
+          "heading": "5. 创建分卷与章节",
+          "level": 2,
+          "line": 30
+        },
+        {
+          "heading": "6. 配置 AI",
+          "level": 2,
+          "line": 37
+        },
+        {
+          "heading": "7. 使用 Mock 模式",
+          "level": 2,
+          "line": 43
+        },
+        {
+          "heading": "8. 生成章节正文",
+          "level": 2,
+          "line": 54
+        },
+        {
+          "heading": "9. 保存草稿与确认采用",
+          "level": 2,
+          "line": 63
+        },
+        {
+          "heading": "10. 生成章节总结",
+          "level": 2,
+          "line": 71
+        },
+        {
+          "heading": "11. 质量检查",
+          "level": 2,
+          "line": 79
+        },
+        {
+          "heading": "12. 正文润色",
+          "level": 2,
+          "line": 87
+        },
+        {
+          "heading": "13. 导出作品",
+          "level": 2,
+          "line": 95
+        },
+        {
+          "heading": "14. 下一章创作",
+          "level": 2,
+          "line": 102
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 15
+      }
+    },
+    {
+      "path": "docs/version-roadmap.md",
+      "language": "markdown",
+      "fileCategory": "docs",
+      "totalLines": 225,
+      "nonEmptyLines": 170,
+      "sections": [
+        {
+          "heading": "AI Novel Studio 版本路线图",
+          "level": 1,
+          "line": 1
+        },
+        {
+          "heading": "1. 项目总体目标",
+          "level": 2,
+          "line": 10
+        },
+        {
+          "heading": "2. 版本规划原则",
+          "level": 2,
+          "line": 45
+        },
+        {
+          "heading": "2.1 先 UI 框架，后 AI 能力",
+          "level": 3,
+          "line": 47
+        },
+        {
+          "heading": "2.2 主界面负责资产准备，工作台负责调用资产",
+          "level": 3,
+          "line": 57
+        },
+        {
+          "heading": "2.3 AI 功能必须围绕“逐章完成小说”",
+          "level": 3,
+          "line": 82
+        },
+        {
+          "heading": "2.4 每个版本必须可运行、可回退、可备份",
+          "level": 3,
+          "line": 95
+        },
+        {
+          "heading": "3. 总体版本路线",
+          "level": 2,
+          "line": 107
+        },
+        {
+          "heading": "4. 应用化优化阶段：v1.7.x",
+          "level": 2,
+          "line": 131
+        },
+        {
+          "heading": "v1.7.6 阶段性整理",
+          "level": 3,
+          "line": 142
+        },
+        {
+          "heading": "v1.7.7 桌面窗口与 2K 适配",
+          "level": 3,
+          "line": 148
+        },
+        {
+          "heading": "v1.7.8 导出体验优化",
+          "level": 3,
+          "line": 154
+        },
+        {
+          "heading": "v1.7.9 设定库 AI 推演基础版",
+          "level": 3,
+          "line": 160
+        },
+        {
+          "heading": "v1.7.10 候选采纳与测试补齐",
+          "level": 3,
+          "line": 167
+        },
+        {
+          "heading": "v1.7.11 发布收尾",
+          "level": 3,
+          "line": 175
+        },
+        {
+          "heading": "5. 下一阶段：v1.8.0+",
+          "level": 2,
+          "line": 187
+        },
+        {
+          "heading": "6. Agent Runtime 阶段",
+          "level": 2,
+          "line": 200
+        },
+        {
+          "heading": "7. 发布规则",
+          "level": 2,
+          "line": 212
+        }
+      ],
+      "metrics": {
+        "importCount": 0,
+        "exportCount": 0,
+        "functionCount": 0,
+        "classCount": 0,
+        "sectionCount": 18
+      }
+    }
+  ]
+}

@@ -1,0 +1,1023 @@
+{
+  "scriptCompleted": true,
+  "stats": {
+    "filesScanned": 328,
+    "filesWithImports": 122,
+    "totalEdges": 563
+  },
+  "importMap": {
+    ".cursor/rules/agent-safety.mdc": [],
+    ".cursor/rules/bugfix-rules.mdc": [],
+    ".cursor/rules/database-rules.mdc": [],
+    ".cursor/rules/project-architecture.mdc": [],
+    ".cursor/rules/release-rules.mdc": [],
+    ".cursor/rules/task-writing-rules.mdc": [],
+    ".cursor/rules/testing-rules.mdc": [],
+    ".cursor/rules/ui-rules.mdc": [],
+    ".github/checklists/bugfix.checklist.md": [],
+    ".github/checklists/database-change.checklist.md": [],
+    ".github/checklists/docs-sync.checklist.md": [],
+    ".github/checklists/feature-development.checklist.md": [],
+    ".github/checklists/release.checklist.md": [],
+    ".github/checklists/tauri-build.checklist.md": [],
+    ".github/checklists/ui-review.checklist.md": [],
+    ".github/checklists/verification.checklist.md": [],
+    ".github/copilot-instructions.md": [],
+    ".github/instructions/agent-behavior.instructions.md": [],
+    ".github/instructions/database.instructions.md": [],
+    ".github/instructions/documentation.instructions.md": [],
+    ".github/instructions/frontend.instructions.md": [],
+    ".github/instructions/tauri.instructions.md": [],
+    ".github/instructions/testing.instructions.md": [],
+    ".github/prompts/fix-bug.prompt.md": [],
+    ".github/prompts/next-version.prompt.md": [],
+    ".github/prompts/release-report.prompt.md": [],
+    ".github/prompts/verify-build.prompt.md": [],
+    ".github/skills/agent-task-writer/SKILL.md": [],
+    ".github/skills/bugfix-safe-patch/SKILL.md": [],
+    ".github/skills/db-migration-guard/SKILL.md": [],
+    ".github/skills/docs-sync/SKILL.md": [],
+    ".github/skills/implement-feature/SKILL.md": [],
+    ".github/skills/plan-version/SKILL.md": [],
+    ".github/skills/release-package/SKILL.md": [],
+    ".github/skills/review-ui/SKILL.md": [],
+    ".github/skills/tauri-desktop-build/SKILL.md": [],
+    ".github/skills/verify-build/SKILL.md": [],
+    ".github/workflows-docs/agent-runtime-overview.md": [],
+    ".github/workflows-docs/workflow-script-usage.md": [],
+    ".understand-anything/.understandignore": [],
+    ".understand-anything/config.json": [],
+    ".understand-anything/tmp/all-files.json": [],
+    "AGENTS.md": [],
+    "CHANGELOG.md": [],
+    "docs/agent-runtime.md": [],
+    "docs/agent-workflow.md": [],
+    "docs/ai-agent-roadmap.md": [],
+    "docs/data-model.md": [],
+    "docs/design/context-assets.md": [],
+    "docs/design/future-interactive-story.md": [],
+    "docs/design/novel-engineering.md": [],
+    "docs/design/setting-suggestions.md": [],
+    "docs/development-rules.md": [],
+    "docs/development-skills.md": [],
+    "docs/import-samples/sample-novel.txt": [],
+    "docs/import-samples/sample-output-profile.json": [],
+    "docs/import-samples/sample-style-profile.json": [],
+    "docs/module-boundaries.md": [],
+    "docs/native-dialog-notification-plan.md": [],
+    "docs/native-feel-p2-4-installation-report.md": [],
+    "docs/native-feel-p2-assessment.md": [],
+    "docs/product-design.md": [],
+    "docs/project-architecture.md": [],
+    "docs/project/agent-task-rules.md": [],
+    "docs/project/release-history.md": [],
+    "docs/project/version-roadmap.md": [],
+    "docs/prompt-system.md": [],
+    "docs/README.md": [],
+    "docs/release-notes-v1.0.0.md": [],
+    "docs/release-notes-v1.0.15.md": [],
+    "docs/release-notes-v1.0.16.md": [],
+    "docs/release-notes-v1.0.17.md": [],
+    "docs/release-notes-v1.0.18.md": [],
+    "docs/release-notes-v1.0.19.md": [],
+    "docs/release-notes-v1.0.20.md": [],
+    "docs/release-notes-v1.0.21.md": [],
+    "docs/release-notes-v1.0.22.md": [],
+    "docs/release-notes-v1.0.23.md": [],
+    "docs/release-notes-v1.0.24.md": [],
+    "docs/release-notes-v1.0.25.md": [],
+    "docs/release-notes-v1.0.26.md": [],
+    "docs/release-notes-v1.0.27.md": [],
+    "docs/release-notes-v1.0.28.md": [],
+    "docs/release-notes-v1.0.29.md": [],
+    "docs/release-notes-v1.0.31.md": [],
+    "docs/release-notes-v1.0.32.md": [],
+    "docs/release-notes-v1.0.33.md": [],
+    "docs/release-notes-v1.0.34.md": [],
+    "docs/release-notes-v1.0.36.md": [],
+    "docs/release-notes-v1.0.37.md": [],
+    "docs/release-notes-v1.0.38.md": [],
+    "docs/release-notes-v1.0.39.md": [],
+    "docs/release-notes-v1.0.41.md": [],
+    "docs/release-notes-v1.0.43.md": [],
+    "docs/tauri2-mica-assessment.md": [],
+    "docs/technical/api-routes.md": [],
+    "docs/technical/architecture.md": [],
+    "docs/technical/database.md": [],
+    "docs/technical/deployment.md": [],
+    "docs/technical/desktop-build.md": [],
+    "docs/technical/installer-verification.md": [],
+    "docs/technical/local-build-cleanup.md": [],
+    "docs/technical/release-artifact-policy.md": [],
+    "docs/technical/testing.md": [],
+    "docs/ui-reference.md": [],
+    "docs/user-guide.md": [],
+    "docs/user/ai-settings.md": [],
+    "docs/user/data-import-export.md": [],
+    "docs/user/desktop-usage.md": [],
+    "docs/user/quick-start.md": [],
+    "docs/user/workflow-guide.md": [],
+    "docs/version-roadmap.md": [],
+    "index.html": [],
+    "package.json": [],
+    "prompts/chapter_generate.md": [],
+    "prompts/chapter_polish.md": [],
+    "prompts/chapter_summarize.md": [],
+    "prompts/character_generate.md": [],
+    "prompts/event_suggest.md": [],
+    "prompts/quality_check.md": [],
+    "prompts/style_analyze.md": [],
+    "README.md": [],
+    "reports/local-storage-report.md": [],
+    "scripts/agent-workflow/check_ai_task_delete.ps1": [],
+    "scripts/agent-workflow/check_docs_sync.ps1": [],
+    "scripts/agent-workflow/check_setting_suggestions.ps1": [],
+    "scripts/agent-workflow/release_workflow.ps1": [],
+    "scripts/agent-workflow/run_feature_workflow.ps1": [],
+    "scripts/agent-workflow/runtime_check_ai_task_delete.ps1": [],
+    "scripts/agent-workflow/verify_project.ps1": [],
+    "scripts/maintenance/archive_old_builds.ps1": [],
+    "scripts/maintenance/clean_old_builds.ps1": [],
+    "scripts/maintenance/report_large_files.ps1": [],
+    "scripts/package-windows.ps1": [],
+    "src-tauri/build.rs": [],
+    "src-tauri/Cargo.toml": [],
+    "src-tauri/icons/icon.icns": [],
+    "src-tauri/src/ai.rs": [],
+    "src-tauri/src/commands.rs": [
+      "src-tauri/src/db.rs"
+    ],
+    "src-tauri/src/db.rs": [],
+    "src-tauri/src/large_text_save.rs": [
+      "src-tauri/src/db.rs"
+    ],
+    "src-tauri/src/main.rs": [
+      "src-tauri/src/ai.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/db.rs",
+      "src-tauri/src/large_text_save.rs",
+      "src-tauri/src/outline_commands.rs",
+      "src-tauri/src/system_accent.rs",
+      "src-tauri/src/window_state.rs"
+    ],
+    "src-tauri/src/outline_commands.rs": [
+      "src-tauri/src/db.rs"
+    ],
+    "src-tauri/src/system_accent.rs": [],
+    "src-tauri/src/window_state.rs": [],
+    "src-tauri/tauri.conf.json": [],
+    "src/agent-tools/chapter-tools.ts": [
+      "src/agent-tools/tool-types.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftService.ts",
+      "src/services/database/volumeRepository.ts"
+    ],
+    "src/agent-tools/context-tools.ts": [
+      "src/agent-tools/chapter-tools.ts",
+      "src/agent-tools/project-tools.ts",
+      "src/agent-tools/style-tools.ts",
+      "src/agent-tools/tool-types.ts"
+    ],
+    "src/agent-tools/project-tools.ts": [
+      "src/agent-tools/tool-types.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/novels/novelService.ts"
+    ],
+    "src/agent-tools/style-tools.ts": [
+      "src/agent-tools/tool-types.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts"
+    ],
+    "src/agent-tools/tool-types.ts": [],
+    "src/agent-tools/verification-tools.ts": [
+      "src/agent-tools/tool-types.ts"
+    ],
+    "src/agent/context-summary.ts": [],
+    "src/agent/planner-lite.ts": [
+      "src/agent/types.ts"
+    ],
+    "src/agent/types.ts": [],
+    "src/agent/workflow-runner.ts": [
+      "src/agent/types.ts"
+    ],
+    "src/App.tsx": [
+      "src/components/common/ErrorBoundary.tsx",
+      "src/components/common/LoadingModal.tsx",
+      "src/components/layout/AppShell.tsx",
+      "src/lib/runWithLoading.ts",
+      "src/pages/AiTasks/AiTasksPage.tsx",
+      "src/pages/Assets/AssetsPage.tsx",
+      "src/pages/ComingSoon/ComingSoonPage.tsx",
+      "src/pages/Home/HomePage.tsx",
+      "src/pages/ImportExport/ImportExportPage.tsx",
+      "src/pages/NotFound/NotFoundPage.tsx",
+      "src/pages/NovelDetail/NovelDetailPage.tsx",
+      "src/pages/OutlineEditor/OutlineEditorPage.tsx",
+      "src/pages/Settings/SettingsPage.tsx",
+      "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+      "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+      "src/pages/Templates/TemplatesPage.tsx",
+      "src/pages/WritingWorkspace/WritingWorkspacePage.tsx"
+    ],
+    "src/app/README.md": [],
+    "src/components/chapter-summary/ChapterSummaryDialog.tsx": [
+      "src/types/chapterSummary.ts"
+    ],
+    "src/components/common/BackButton.tsx": [],
+    "src/components/common/EmptyState.tsx": [],
+    "src/components/common/ErrorBoundary.tsx": [
+      "src/services/database/novelRepository.ts"
+    ],
+    "src/components/common/ErrorState.tsx": [],
+    "src/components/common/FirstTimeGuide.tsx": [],
+    "src/components/common/LoadingModal.css": [],
+    "src/components/common/LoadingModal.tsx": [
+      "src/components/common/LoadingModal.css"
+    ],
+    "src/components/common/LoadingState.tsx": [],
+    "src/components/common/README.md": [],
+    "src/components/context-records/ContextRecordForm.tsx": [
+      "src/types/context.ts"
+    ],
+    "src/components/context-records/ContextRecordList.tsx": [
+      "src/types/context.ts"
+    ],
+    "src/components/import/ImportJsonDialog.tsx": [
+      "src/features/novels/novelNormalizer.ts",
+      "src/lib/runWithLoading.ts",
+      "src/services/import/jsonImportService.ts",
+      "src/services/novels/novelService.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts"
+    ],
+    "src/components/import/ImportTxtDialog.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/import/txtImportService.ts",
+      "src/services/novels/novelService.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/layout/AppShell.tsx": [
+      "src/components/sidebar/Sidebar.tsx",
+      "src/components/topbar/TopBar.tsx",
+      "src/styles/app-shell.css"
+    ],
+    "src/components/novel-card/CharacterLibraryCard.tsx": [
+      "src/services/characters/characterService.ts",
+      "src/types/character.ts"
+    ],
+    "src/components/novel-card/ContextOverviewCard.tsx": [
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts"
+    ],
+    "src/components/novel-card/ExportCard.tsx": [
+      "src/services/export/exportService.ts"
+    ],
+    "src/components/novel-card/NovelCard.tsx": [
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/novel.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/novel-detail/NovelDetailCards.tsx": [
+      "src/features/novels/novelNormalizer.ts",
+      "src/types/novel.ts",
+      "src/types/protagonist.ts",
+      "src/types/setting.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/components/outline/ChapterFormModal.tsx": [
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/components/outline/OutlineEditor.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/types/outline.ts"
+    ],
+    "src/components/outline/OutlineManager.tsx": [
+      "src/components/outline/ChapterFormModal.tsx",
+      "src/components/outline/VolumeCard.tsx",
+      "src/components/outline/VolumeFormModal.tsx",
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/outlineGenerateService.ts",
+      "src/services/chapters/chapterCreationService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/types/chapter.ts",
+      "src/types/outline.ts",
+      "src/types/volume.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/components/outline/VolumeCard.tsx": [
+      "src/types/chapter.ts",
+      "src/types/volume.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/outline/VolumeFormModal.tsx": [
+      "src/types/volume.ts"
+    ],
+    "src/components/right-dock/panels/AiGeneratePanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/chapterRevisionService.ts",
+      "src/services/ai/outlineComplianceChecker.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/prompt/contextBuilder.ts",
+      "src/services/prompt/promptOrchestrator.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/output.ts",
+      "src/types/style.ts",
+      "src/utils/nativeDialog.ts",
+      "src/utils/nativeNotification.ts"
+    ],
+    "src/components/right-dock/panels/ChapterSummaryPanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/chapterSummarizeService.ts",
+      "src/services/ai/summaryValidator.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/characterStateService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/utils/date.ts"
+    ],
+    "src/components/right-dock/panels/CharactersPanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/characterGenerateService.ts",
+      "src/services/characters/chapterCharacterService.ts",
+      "src/services/characters/characterService.ts",
+      "src/types/chapter.ts",
+      "src/types/character.ts"
+    ],
+    "src/components/right-dock/panels/CheckPanel.tsx": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/fixRunStore.ts",
+      "src/services/ai/qualityCheckAiService.ts",
+      "src/services/ai/qualityFixService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/prompt/contextReaderService.ts",
+      "src/services/quality/qualityCheckService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/components/right-dock/panels/ContextViewPanel.tsx": [
+      "src/components/context-records/ContextRecordForm.tsx",
+      "src/components/context-records/ContextRecordList.tsx",
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/volumeSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/context.ts",
+      "src/types/volume.ts"
+    ],
+    "src/components/right-dock/panels/DraftHistoryPanel.tsx": [
+      "src/services/database/draftVersionService.ts",
+      "src/types/ai.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/components/right-dock/panels/EventsPanel.tsx": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/eventSuggestService.ts",
+      "src/services/characters/chapterCharacterService.ts",
+      "src/services/characters/chapterEventService.ts",
+      "src/services/characters/characterService.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterEvent.ts",
+      "src/types/character.ts"
+    ],
+    "src/components/right-dock/panels/OutlinePanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/outlineGenerateService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/prompt/chapterOutlineDraftCache.ts",
+      "src/types/chapter.ts",
+      "src/types/volume.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/right-dock/panels/PolishPanel.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/polishAiService.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/quality/polishService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/polish.ts"
+    ],
+    "src/components/right-dock/panels/SettingPanel.tsx": [
+      "src/services/ai/settingExpandService.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/types/chapter.ts",
+      "src/types/protagonist.ts",
+      "src/types/setting.ts"
+    ],
+    "src/components/right-dock/panels/StylePanel.tsx": [
+      "src/services/ai/aiClient.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleAnalyzeService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/chapter.ts",
+      "src/types/output.ts",
+      "src/types/style.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/right-dock/RightPanel.tsx": [
+      "src/components/right-dock/panels/AiGeneratePanel.tsx",
+      "src/components/right-dock/panels/ChapterSummaryPanel.tsx",
+      "src/components/right-dock/panels/CharactersPanel.tsx",
+      "src/components/right-dock/panels/CheckPanel.tsx",
+      "src/components/right-dock/panels/ContextViewPanel.tsx",
+      "src/components/right-dock/panels/EventsPanel.tsx",
+      "src/components/right-dock/panels/OutlinePanel.tsx",
+      "src/components/right-dock/panels/PolishPanel.tsx",
+      "src/components/right-dock/panels/SettingPanel.tsx",
+      "src/components/right-dock/panels/StylePanel.tsx",
+      "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+      "src/types/ai.ts",
+      "src/types/chapter.ts"
+    ],
+    "src/components/right-dock/RightToolbar.tsx": [
+      "src/pages/WritingWorkspace/WritingWorkspacePage.tsx"
+    ],
+    "src/components/sidebar/Sidebar.tsx": [
+      "src/constants/version.ts"
+    ],
+    "src/components/Toast.css": [],
+    "src/components/ToastProvider.tsx": [
+      "src/components/Toast.css",
+      "src/utils/toast.ts"
+    ],
+    "src/components/topbar/TopBar.tsx": [
+      "src/constants/version.ts"
+    ],
+    "src/components/workspace/EditorArea.tsx": [
+      "src/lib/runWithLoading.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/workspace/GlobalAiTaskModal.tsx": [],
+    "src/components/workspace/StatusBar.tsx": [
+      "src/types/chapter.ts",
+      "src/utils/format.ts"
+    ],
+    "src/components/workspace/VolumeTree.tsx": [
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/constants/version.ts": [],
+    "src/features/chapters/mockChapters.ts": [
+      "src/types/chapter.ts"
+    ],
+    "src/features/novels/mockNovels.ts": [
+      "src/types/novel.ts"
+    ],
+    "src/features/novels/novelNormalizer.ts": [
+      "src/services/database/db.ts",
+      "src/types/novel.ts",
+      "src/utils/dataGuard.ts",
+      "src/utils/date.ts"
+    ],
+    "src/features/styles/mockStyles.ts": [
+      "src/types/character.ts",
+      "src/types/output.ts",
+      "src/types/style.ts"
+    ],
+    "src/hooks/useLoadingTask.ts": [
+      "src/components/common/LoadingModal.tsx"
+    ],
+    "src/lib/runWithLoading.ts": [
+      "src/hooks/useLoadingTask.ts"
+    ],
+    "src/main.tsx": [
+      "src/App.tsx",
+      "src/components/ToastProvider.tsx",
+      "src/services/tauri/runtime.ts",
+      "src/styles/global.css",
+      "src/styles/variables.css"
+    ],
+    "src/pages/AiTasks/AiTasksPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/ai/aiTaskService.ts",
+      "src/types/ai.ts",
+      "src/utils/date.ts",
+      "src/utils/errorMessage.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/Assets/AssetsPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/characters/characterService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/settingSuggestions/settingSuggestionService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/novel.ts"
+    ],
+    "src/pages/ComingSoon/ComingSoonPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/styles/coming-soon.css"
+    ],
+    "src/pages/Home/HomePage.tsx": [
+      "src/components/common/FirstTimeGuide.tsx",
+      "src/components/import/ImportJsonDialog.tsx",
+      "src/components/import/ImportTxtDialog.tsx",
+      "src/components/novel-card/NovelCard.tsx",
+      "src/services/database/novelRepository.ts",
+      "src/services/novels/novelService.ts",
+      "src/styles/home.css",
+      "src/types/novel.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/ImportExport/ImportExportPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/components/import/ImportJsonDialog.tsx",
+      "src/components/import/ImportTxtDialog.tsx",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/export/exportService.ts",
+      "src/types/chapter.ts",
+      "src/types/novel.ts"
+    ],
+    "src/pages/NotFound/NotFoundPage.tsx": [],
+    "src/pages/NovelDetail/NovelDetailPage.tsx": [
+      "src/components/novel-card/CharacterLibraryCard.tsx",
+      "src/components/novel-card/ContextOverviewCard.tsx",
+      "src/components/novel-card/ExportCard.tsx",
+      "src/components/novel-detail/NovelDetailCards.tsx",
+      "src/components/outline/OutlineManager.tsx",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/novels/novelService.ts",
+      "src/styles/novel-detail.css",
+      "src/types/novel.ts",
+      "src/types/protagonist.ts",
+      "src/types/setting.ts",
+      "src/utils/format.ts"
+    ],
+    "src/pages/OutlineEditor/OutlineEditorPage.tsx": [
+      "src/components/outline/OutlineEditor.tsx",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/pages/Settings/SettingsPage.tsx": [
+      "src/constants/version.ts",
+      "src/services/ai/aiClient.ts",
+      "src/services/database/novelRepository.ts",
+      "src/styles/novel-detail.css",
+      "src/types/ai.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/database/novelRepository.ts",
+      "src/services/settingSuggestions/settingSuggestionService.ts",
+      "src/styles/setting-suggestions.css",
+      "src/types/novel.ts",
+      "src/types/settingSuggestion.ts"
+    ],
+    "src/pages/StyleProfiles/StyleProfilesPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/styles/importedAssetService.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleAnalyzeService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/importedAsset.ts",
+      "src/types/output.ts",
+      "src/types/style.ts",
+      "src/utils/format.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/Templates/TemplatesPage.tsx": [
+      "src/components/common/BackButton.tsx",
+      "src/services/templates/templateService.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/pages/WritingWorkspace/WritingWorkspacePage.tsx": [
+      "src/components/chapter-summary/ChapterSummaryDialog.tsx",
+      "src/components/common/BackButton.tsx",
+      "src/components/right-dock/panels/DraftHistoryPanel.tsx",
+      "src/components/right-dock/RightPanel.tsx",
+      "src/components/right-dock/RightToolbar.tsx",
+      "src/components/workspace/EditorArea.tsx",
+      "src/components/workspace/GlobalAiTaskModal.tsx",
+      "src/components/workspace/StatusBar.tsx",
+      "src/components/workspace/VolumeTree.tsx",
+      "src/services/ai/chapterSummarizeService.ts",
+      "src/services/chapters/chapterCreationService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/characterStateService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/styles/right-dock.css",
+      "src/styles/workspace.css",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/novel.ts",
+      "src/types/volume.ts",
+      "src/utils/nativeDialog.ts"
+    ],
+    "src/prompts/chapter/chapter-generation-prompt.ts": [],
+    "src/prompts/README.md": [],
+    "src/prompts/style/style-constraint-prompt.ts": [],
+    "src/prompts/system/base-system-prompt.ts": [],
+    "src/prompts/verification/chapter-verification-prompt.ts": [],
+    "src/services/ai/aiClient.ts": [
+      "src/services/ai/aiSettingsService.ts",
+      "src/services/ai/mockAiClient.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/aiSettingsService.ts": [
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/realAiClient.ts",
+      "src/services/database/db.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/aiTaskService.ts": [
+      "src/services/database/db.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/chapterRevisionService.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/chapterSummarizeService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/context.ts"
+    ],
+    "src/services/ai/characterGenerateService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/ai/eventSuggestService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/ai/fixRunStore.ts": [
+      "src/services/ai/qualityFixService.ts",
+      "src/services/database/db.ts"
+    ],
+    "src/services/ai/jsonUtils.ts": [],
+    "src/services/ai/mockAiClient.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/outlineComplianceChecker.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/outlineGenerateService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/services/styles/styleProfileService.ts"
+    ],
+    "src/services/ai/polishAiService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/types/polish.ts"
+    ],
+    "src/services/ai/promptBuilder.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/qualityCheckAiService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/prompt/contextReaderService.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/services/ai/qualityFixService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/fixRunStore.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/types/ai.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/services/ai/realAiClient.ts": [
+      "src/services/database/db.ts",
+      "src/types/ai.ts"
+    ],
+    "src/services/ai/settingExpandService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/ai/promptBuilder.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/settingRepository.ts"
+    ],
+    "src/services/ai/summaryValidator.ts": [
+      "src/types/chapterSummary.ts"
+    ],
+    "src/services/ai/volumeSummaryService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/types/chapter.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/volume.ts"
+    ],
+    "src/services/chapters/chapterCreationService.ts": [
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/volume.ts"
+    ],
+    "src/services/characters/chapterCharacterService.ts": [
+      "src/services/database/db.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/characters/chapterEventService.ts": [
+      "src/services/database/db.ts",
+      "src/types/chapterEvent.ts"
+    ],
+    "src/services/characters/characterService.ts": [
+      "src/services/database/db.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/context/chapterSummaryService.ts": [
+      "src/services/database/db.ts",
+      "src/types/chapterSummary.ts"
+    ],
+    "src/services/context/characterStateService.ts": [
+      "src/services/characters/characterService.ts",
+      "src/services/database/db.ts",
+      "src/types/character.ts"
+    ],
+    "src/services/context/contextRecordService.ts": [
+      "src/services/database/db.ts",
+      "src/types/context.ts"
+    ],
+    "src/services/database/chapterRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/chapter.ts"
+    ],
+    "src/services/database/db.ts": [
+      "src/services/tauri/runtime.ts",
+      "src/utils/dataGuard.ts",
+      "src/utils/errorMessage.ts"
+    ],
+    "src/services/database/draftService.ts": [
+      "src/services/database/db.ts"
+    ],
+    "src/services/database/draftVersionService.ts": [
+      "src/services/database/db.ts",
+      "src/services/largeTextSave.ts",
+      "src/services/tauri/runtime.ts",
+      "src/types/ai.ts",
+      "src/types/largeTextSave.ts"
+    ],
+    "src/services/database/index.ts": [],
+    "src/services/database/novelRepository.ts": [
+      "src/features/novels/mockNovels.ts",
+      "src/features/novels/novelNormalizer.ts",
+      "src/services/database/db.ts",
+      "src/types/novel.ts",
+      "src/utils/date.ts"
+    ],
+    "src/services/database/protagonistRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/protagonist.ts"
+    ],
+    "src/services/database/settingRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/setting.ts"
+    ],
+    "src/services/database/volumeRepository.ts": [
+      "src/services/database/db.ts",
+      "src/types/volume.ts"
+    ],
+    "src/services/export/exportService.ts": [
+      "src/services/characters/characterService.ts",
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/draftVersionService.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/utils/date.ts",
+      "src/utils/format.ts"
+    ],
+    "src/services/import/jsonImportService.ts": [],
+    "src/services/import/txtImportService.ts": [],
+    "src/services/largeTextSave.ts": [
+      "src/services/tauri/runtime.ts",
+      "src/types/largeTextSave.ts"
+    ],
+    "src/services/novels/novelService.ts": [
+      "src/services/database/novelRepository.ts",
+      "src/types/novel.ts"
+    ],
+    "src/services/outlines/outlineService.ts": [
+      "src/services/database/db.ts",
+      "src/types/outline.ts"
+    ],
+    "src/services/prompt/chapterOutlineDraftCache.ts": [],
+    "src/services/prompt/contextBuilder.ts": [
+      "src/services/characters/chapterCharacterService.ts",
+      "src/services/characters/chapterEventService.ts",
+      "src/services/characters/characterService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/protagonistRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/services/outlines/outlineService.ts",
+      "src/services/prompt/chapterOutlineDraftCache.ts",
+      "src/services/prompt/contextReaderService.ts",
+      "src/services/prompt/outlineKeyPointExtractor.ts",
+      "src/services/styles/outputProfileService.ts",
+      "src/services/styles/styleProfileService.ts",
+      "src/types/ai.ts",
+      "src/types/chapter.ts",
+      "src/types/output.ts",
+      "src/types/style.ts"
+    ],
+    "src/services/prompt/contextReaderService.ts": [
+      "src/services/context/chapterSummaryService.ts",
+      "src/services/context/contextRecordService.ts",
+      "src/services/database/chapterRepository.ts",
+      "src/services/database/db.ts",
+      "src/services/database/volumeRepository.ts",
+      "src/types/chapterSummary.ts",
+      "src/types/context.ts"
+    ],
+    "src/services/prompt/outlineKeyPointExtractor.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/prompt/promptOrchestrator.ts": [
+      "src/types/ai.ts"
+    ],
+    "src/services/quality/polishService.ts": [
+      "src/services/database/db.ts",
+      "src/types/polish.ts"
+    ],
+    "src/services/quality/qualityCheckService.ts": [
+      "src/services/database/db.ts",
+      "src/types/qualityCheck.ts"
+    ],
+    "src/services/README.md": [],
+    "src/services/settingSuggestions/settingSuggestionService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/characters/characterService.ts",
+      "src/services/database/db.ts",
+      "src/services/database/novelRepository.ts",
+      "src/services/database/settingRepository.ts",
+      "src/types/character.ts",
+      "src/types/setting.ts",
+      "src/types/settingSuggestion.ts",
+      "src/utils/dataGuard.ts"
+    ],
+    "src/services/styles/importedAssetService.ts": [
+      "src/services/database/db.ts",
+      "src/types/importedAsset.ts"
+    ],
+    "src/services/styles/outputProfileService.ts": [
+      "src/services/database/db.ts",
+      "src/types/output.ts"
+    ],
+    "src/services/styles/styleAnalyzeService.ts": [
+      "src/services/ai/aiClient.ts",
+      "src/services/ai/aiTaskService.ts",
+      "src/services/ai/jsonUtils.ts",
+      "src/types/style.ts"
+    ],
+    "src/services/styles/styleProfileService.ts": [
+      "src/services/database/db.ts",
+      "src/types/style.ts"
+    ],
+    "src/services/tauri/runtime.ts": [],
+    "src/services/templates/templateService.ts": [
+      "src/services/database/db.ts"
+    ],
+    "src/store/README.md": [],
+    "src/styles/app-shell.css": [],
+    "src/styles/coming-soon.css": [],
+    "src/styles/global.css": [],
+    "src/styles/home.css": [],
+    "src/styles/novel-detail.css": [],
+    "src/styles/right-dock.css": [],
+    "src/styles/setting-suggestions.css": [],
+    "src/styles/variables.css": [],
+    "src/styles/workspace.css": [],
+    "src/types/ai.ts": [],
+    "src/types/chapter.ts": [],
+    "src/types/chapterEvent.ts": [],
+    "src/types/chapterSummary.ts": [
+      "src/types/context.ts"
+    ],
+    "src/types/character.ts": [],
+    "src/types/context.ts": [],
+    "src/types/importedAsset.ts": [],
+    "src/types/index.ts": [],
+    "src/types/largeTextSave.ts": [],
+    "src/types/novel.ts": [
+      "src/types/volume.ts"
+    ],
+    "src/types/outline.ts": [],
+    "src/types/output.ts": [],
+    "src/types/polish.ts": [],
+    "src/types/protagonist.ts": [],
+    "src/types/qualityCheck.ts": [],
+    "src/types/setting.ts": [],
+    "src/types/settingSuggestion.ts": [],
+    "src/types/style.ts": [],
+    "src/types/volume.ts": [],
+    "src/utils/dataGuard.ts": [],
+    "src/utils/date.ts": [],
+    "src/utils/debugSeed.ts": [
+      "src/services/database/db.ts"
+    ],
+    "src/utils/errorMessage.ts": [],
+    "src/utils/format.ts": [],
+    "src/utils/nativeDialog.ts": [],
+    "src/utils/nativeNotification.ts": [
+      "src/utils/toast.ts"
+    ],
+    "src/utils/toast.ts": [],
+    "src/vite-env.d.ts": [],
+    "tsconfig.json": [],
+    "tsconfig.node.json": [],
+    "vite.config.ts": []
+  }
+}

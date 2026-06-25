@@ -1,9 +1,15 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type MouseEvent } from 'react';
 import { confirmInfo } from '../../utils/nativeDialog';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import VolumeTree from '../../components/workspace/VolumeTree';
-import EditorArea from '../../components/workspace/EditorArea';
+import EditorArea, {
+  type AiTextApplyMode,
+  type AiTextApplyRequest,
+  type EditorCommandRequest,
+  type EditorCommandType,
+  type EditorContentSnapshot,
+} from '../../components/workspace/EditorArea';
 import StatusBar from '../../components/workspace/StatusBar';
 import RightToolbar from '../../components/right-dock/RightToolbar';
 import RightPanel from '../../components/right-dock/RightPanel';
@@ -25,6 +31,7 @@ import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
 import type { ChapterDraft } from '../../types/ai';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
+import { hashTextContent } from '../../utils/contentHash';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
 
@@ -32,6 +39,38 @@ export type PanelType =
   | 'ai-generate' | 'outline' | 'characters' | 'events'
   | 'setting' | 'style' | 'check' | 'polish'
   | 'draft-history' | 'chapter-summary' | 'context-view' | null;
+
+const NOVEL_LOAD_RETRY_DELAYS_MS = [120, 240, 480];
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function getNovelForWorkspace(novelId: string): Promise<Novel | null> {
+  for (let attempt = 0; attempt <= NOVEL_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    const found = await novelRepository.getById(novelId);
+    if (found) return found;
+
+    const delay = NOVEL_LOAD_RETRY_DELAYS_MS[attempt];
+    if (delay) {
+      console.info('[Workspace] novel not found on first read, retrying...', {
+        novelId,
+        attempt: attempt + 1,
+        delay,
+      });
+      await wait(delay);
+    }
+  }
+
+  const allNovels = await novelRepository.getAll().catch((error) => {
+    console.warn('[Workspace] failed to recheck novel list after missing novel', {
+      novelId,
+      error,
+    });
+    return [];
+  });
+  return allNovels.find((item) => item.id === novelId) ?? null;
+}
 
 function WritingWorkspacePage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -43,6 +82,14 @@ function WritingWorkspacePage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [activeChapterId, setActiveChapterId] = useState<string>('');
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
+  const [editorSnapshot, setEditorSnapshot] = useState<EditorContentSnapshot>({
+    content: '',
+    wordCount: 0,
+    isDirty: false,
+    contentHash: hashTextContent(''),
+  });
+  const [applyTextRequest, setApplyTextRequest] = useState<AiTextApplyRequest | null>(null);
+  const [editorCommandRequest, setEditorCommandRequest] = useState<EditorCommandRequest | null>(null);
   const [draftWordCount, setDraftWordCount] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
   const [chapterGoalDirty, setChapterGoalDirty] = useState(false);
@@ -84,6 +131,8 @@ function WritingWorkspacePage() {
   const [summaryExists, setSummaryExists] = useState(false);
 
   const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
+  const activeQcReport = qcReport?.chapterId === activeChapterId ? qcReport : null;
+  const activeQcItems = activeQcReport ? qcItems.filter((item) => item.chapterId === activeChapterId) : [];
 
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState('');
@@ -138,7 +187,7 @@ function WritingWorkspacePage() {
 
     // 并行加载，任一失败不影响
     Promise.allSettled([
-      novelRepository.getById(novelId),
+      getNovelForWorkspace(novelId),
       volumeRepository.getByNovelId(novelId),
       chapterRepository.getByNovelId(novelId),
     ]).then(([nr, vr, cr]) => {
@@ -204,11 +253,70 @@ function WritingWorkspacePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleClosePanel]);
 
-  const handleEditorClick = useCallback(() => handleClosePanel(), [handleClosePanel]);
+  const handleEditorClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest('button, a, input, textarea, select, [role="button"], .editor-toolbar, .workspace-topbar')
+    ) {
+      return;
+    }
+    handleClosePanel();
+  }, [handleClosePanel]);
 
   const handleDraftChange = useCallback((wordCount: number, dirty: boolean) => {
     setDraftWordCount(wordCount);
     setIsDirty(dirty);
+  }, []);
+
+  const handleEditorContentChange = useCallback((snapshot: EditorContentSnapshot) => {
+    setEditorSnapshot(snapshot);
+    setDraftWordCount(snapshot.wordCount);
+    setIsDirty(snapshot.isDirty);
+  }, []);
+
+  const handleDraftApplied = useCallback((draft: ChapterDraft) => {
+    setCurrentDraft(draft);
+    setDraftWordCount(draft.wordCount);
+    setIsDirty(false);
+    setEditorSnapshot({
+      chapterId: draft.chapterId,
+      draftId: draft.id,
+      draftVersion: draft.versionNo,
+      content: draft.content,
+      wordCount: draft.wordCount,
+      isDirty: false,
+      contentHash: hashTextContent(draft.content),
+    });
+  }, []);
+
+  const applyAiTextToEditor = useCallback(async (payload: {
+    mode: AiTextApplyMode;
+    text: string;
+    source: AiTextApplyRequest['source'];
+  }) => {
+    const text = payload.text.trim();
+    if (!text) return false;
+    if (payload.mode === 'replace_all') {
+      const ok = await confirmInfo({
+        title: '应用 AI 输出',
+        message: `${editorSnapshot.isDirty ? '当前正文存在未保存修改，建议先保存草稿。\n\n' : ''}将用 AI 输出替换当前正文，是否继续？`,
+      });
+      if (!ok) return false;
+    }
+    setApplyTextRequest({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      mode: payload.mode,
+      text,
+      source: payload.source,
+    });
+    return true;
+  }, [editorSnapshot.isDirty]);
+
+  const runEditorCommand = useCallback((type: EditorCommandType) => {
+    setEditorCommandRequest({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      type,
+    });
   }, []);
 
   // v0.8.0 章节总结相关处理
@@ -361,7 +469,7 @@ function WritingWorkspacePage() {
   }, [novelId]);
 
   return (
-    <div className="workspace-page">
+    <div className={`workspace-page${activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}>
       {pageLoading && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
           <div style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
@@ -472,26 +580,8 @@ function WritingWorkspacePage() {
               当前：第{activeChapter.chapterNumber}章 {activeChapter.title}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 4 }}>
-            {activeChapter && activeChapter.status === 'adopted' && !summaryExists && (
-              <button className="btn btn-primary btn-sm" onClick={handleGenerateSummary} disabled={summaryLoading}>
-                {summaryLoading ? '⏳ 总结中...' : '📝 生成章节总结'}
-              </button>
-            )}
-            {summaryExists && (
-              <button className="btn btn-secondary btn-sm" onClick={() => handleOpenPanel('chapter-summary')}>
-                ✅ 查看总结
-              </button>
-            )}
-            <button className="btn btn-secondary btn-sm" onClick={() => handleOpenPanel('ai-generate')}>
-              🤖 AI生成
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => handleOpenPanel('draft-history')}>
-              📋 草稿历史
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setActivePanel(null)}>
-              🖊️ 专注模式
-            </button>
+          <div className="workspace-topbar-hint">
+            {summaryExists ? '本章总结已生成，右侧“总结”可查看' : '功能入口已收纳到右侧工具栏'}
           </div>
         </div>
 
@@ -502,6 +592,10 @@ function WritingWorkspacePage() {
           currentDraft={currentDraft}
           onOpenPanel={handleOpenPanel}
           onDraftChange={handleDraftChange}
+          onEditorContentChange={handleEditorContentChange}
+          onDraftSaved={handleDraftApplied}
+          applyTextRequest={applyTextRequest}
+          commandRequest={editorCommandRequest}
           onChapterUpdated={handleChapterOutlineApplied}
           locateTarget={locateTarget}
           onLocateDone={handleLocateDone}
@@ -515,14 +609,14 @@ function WritingWorkspacePage() {
       </div>
 
       {/* 右侧工具栏 */}
-      <RightToolbar activePanel={activePanel} onTogglePanel={handleTogglePanel} />
+      <RightToolbar activePanel={activePanel} onTogglePanel={handleTogglePanel} onRunCommand={runEditorCommand} />
 
       {/* 草稿历史面板 */}
       {activePanel === 'draft-history' && (
         <DraftHistoryPanel
           chapterId={activeChapterId}
           currentDraftId={currentDraft?.id}
-          onLoadDraft={(draft) => { setCurrentDraft(draft); setDraftWordCount(draft.wordCount); setIsDirty(false); setActivePanel(null); }}
+          onLoadDraft={(draft) => { handleDraftApplied(draft); setActivePanel(null); }}
           onClose={handleClosePanel}
         />
       )}
@@ -534,7 +628,7 @@ function WritingWorkspacePage() {
           onClose={handleClosePanel}
           novelId={novelId}
           chapter={activeChapter}
-          onGenerated={(draft) => { setCurrentDraft(draft); setDraftWordCount(draft.wordCount); setIsDirty(false); }}
+          onGenerated={handleDraftApplied}
           onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
           onChapterOutlineApplied={handleChapterOutlineApplied}
           onChapterGoalDirtyChange={setChapterGoalDirty}
@@ -542,9 +636,16 @@ function WritingWorkspacePage() {
           contextVersion={contextVersion}
           onLocateText={handleLocateText}
           // v1.7.19 质量检查状态
-          qcReport={qcReport}
-          qcItems={qcItems}
+          qcReport={activeQcReport}
+          qcItems={activeQcItems}
           onQcChange={(report: any, items: any[]) => { setQcReport(report); setQcItems(items); }}
+          currentEditorContent={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : currentDraft?.content || ''}
+          currentEditorWordCount={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.wordCount : currentDraft?.wordCount || 0}
+          currentEditorDirty={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.isDirty : false}
+          currentContentHash={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.contentHash : hashTextContent(currentDraft?.content || '')}
+          currentDraftId={currentDraft?.id}
+          currentDraftVersion={currentDraft?.versionNo}
+          onApplyAiText={applyAiTextToEditor}
           // v1.7.19 全局 AI 弹窗
           showAiModal={showAiModal}
           updateAiModal={updateAiModal}

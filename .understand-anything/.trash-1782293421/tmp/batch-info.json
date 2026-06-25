@@ -1,0 +1,955 @@
+{
+  "count": 29,
+  "sample": {
+    "batchIndex": 1,
+    "files": [
+      {
+        "path": "src/App.tsx",
+        "language": "typescript",
+        "sizeLines": 63,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/common/BackButton.tsx",
+        "language": "typescript",
+        "sizeLines": 30,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/common/ErrorBoundary.tsx",
+        "language": "typescript",
+        "sizeLines": 50,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/common/FirstTimeGuide.tsx",
+        "language": "typescript",
+        "sizeLines": 45,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/common/LoadingModal.tsx",
+        "language": "typescript",
+        "sizeLines": 163,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/import/ImportJsonDialog.tsx",
+        "language": "typescript",
+        "sizeLines": 169,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/import/ImportTxtDialog.tsx",
+        "language": "typescript",
+        "sizeLines": 166,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/layout/AppShell.tsx",
+        "language": "typescript",
+        "sizeLines": 24,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/sidebar/Sidebar.tsx",
+        "language": "typescript",
+        "sizeLines": 72,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/components/topbar/TopBar.tsx",
+        "language": "typescript",
+        "sizeLines": 41,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/constants/version.ts",
+        "language": "typescript",
+        "sizeLines": 6,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/features/novels/mockNovels.ts",
+        "language": "typescript",
+        "sizeLines": 71,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/features/novels/novelNormalizer.ts",
+        "language": "typescript",
+        "sizeLines": 332,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/hooks/useLoadingTask.ts",
+        "language": "typescript",
+        "sizeLines": 184,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/lib/runWithLoading.ts",
+        "language": "typescript",
+        "sizeLines": 236,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/Assets/AssetsPage.tsx",
+        "language": "typescript",
+        "sizeLines": 101,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/ComingSoon/ComingSoonPage.tsx",
+        "language": "typescript",
+        "sizeLines": 50,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/Home/HomePage.tsx",
+        "language": "typescript",
+        "sizeLines": 202,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/ImportExport/ImportExportPage.tsx",
+        "language": "typescript",
+        "sizeLines": 152,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/NotFound/NotFoundPage.tsx",
+        "language": "typescript",
+        "sizeLines": 21,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+        "language": "typescript",
+        "sizeLines": 392,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/Settings/SettingsPage.tsx",
+        "language": "typescript",
+        "sizeLines": 267,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/pages/Templates/TemplatesPage.tsx",
+        "language": "typescript",
+        "sizeLines": 294,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/services/database/novelRepository.ts",
+        "language": "typescript",
+        "sizeLines": 288,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/services/import/jsonImportService.ts",
+        "language": "typescript",
+        "sizeLines": 39,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/services/import/txtImportService.ts",
+        "language": "typescript",
+        "sizeLines": 89,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/services/novels/novelService.ts",
+        "language": "typescript",
+        "sizeLines": 44,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/services/settingSuggestions/settingSuggestionService.ts",
+        "language": "typescript",
+        "sizeLines": 332,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/services/templates/templateService.ts",
+        "language": "typescript",
+        "sizeLines": 127,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/types/novel.ts",
+        "language": "typescript",
+        "sizeLines": 102,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/types/settingSuggestion.ts",
+        "language": "typescript",
+        "sizeLines": 54,
+        "fileCategory": "code"
+      },
+      {
+        "path": "src/utils/dataGuard.ts",
+        "language": "typescript",
+        "sizeLines": 31,
+        "fileCategory": "code"
+      }
+    ],
+    "batchImportData": {
+      "src/App.tsx": [
+        "src/components/common/ErrorBoundary.tsx",
+        "src/components/common/LoadingModal.tsx",
+        "src/components/layout/AppShell.tsx",
+        "src/lib/runWithLoading.ts",
+        "src/pages/AiTasks/AiTasksPage.tsx",
+        "src/pages/Assets/AssetsPage.tsx",
+        "src/pages/ComingSoon/ComingSoonPage.tsx",
+        "src/pages/Home/HomePage.tsx",
+        "src/pages/ImportExport/ImportExportPage.tsx",
+        "src/pages/NotFound/NotFoundPage.tsx",
+        "src/pages/NovelDetail/NovelDetailPage.tsx",
+        "src/pages/OutlineEditor/OutlineEditorPage.tsx",
+        "src/pages/Settings/SettingsPage.tsx",
+        "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx",
+        "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+        "src/pages/Templates/TemplatesPage.tsx",
+        "src/pages/WritingWorkspace/WritingWorkspacePage.tsx"
+      ],
+      "src/components/common/BackButton.tsx": [],
+      "src/components/common/ErrorBoundary.tsx": [
+        "src/services/database/novelRepository.ts"
+      ],
+      "src/components/common/FirstTimeGuide.tsx": [],
+      "src/components/common/LoadingModal.tsx": [
+        "src/components/common/LoadingModal.css"
+      ],
+      "src/components/import/ImportJsonDialog.tsx": [
+        "src/features/novels/novelNormalizer.ts",
+        "src/lib/runWithLoading.ts",
+        "src/services/import/jsonImportService.ts",
+        "src/services/novels/novelService.ts",
+        "src/services/styles/outputProfileService.ts",
+        "src/services/styles/styleProfileService.ts"
+      ],
+      "src/components/import/ImportTxtDialog.tsx": [
+        "src/lib/runWithLoading.ts",
+        "src/services/database/chapterRepository.ts",
+        "src/services/database/draftVersionService.ts",
+        "src/services/database/volumeRepository.ts",
+        "src/services/import/txtImportService.ts",
+        "src/services/novels/novelService.ts",
+        "src/utils/format.ts"
+      ],
+      "src/components/layout/AppShell.tsx": [
+        "src/components/sidebar/Sidebar.tsx",
+        "src/components/topbar/TopBar.tsx",
+        "src/styles/app-shell.css"
+      ],
+      "src/components/sidebar/Sidebar.tsx": [
+        "src/constants/version.ts"
+      ],
+      "src/components/topbar/TopBar.tsx": [
+        "src/constants/version.ts"
+      ],
+      "src/constants/version.ts": [],
+      "src/features/novels/mockNovels.ts": [
+        "src/types/novel.ts"
+      ],
+      "src/features/novels/novelNormalizer.ts": [
+        "src/services/database/db.ts",
+        "src/types/novel.ts",
+        "src/utils/dataGuard.ts",
+        "src/utils/date.ts"
+      ],
+      "src/hooks/useLoadingTask.ts": [
+        "src/components/common/LoadingModal.tsx"
+      ],
+      "src/lib/runWithLoading.ts": [
+        "src/hooks/useLoadingTask.ts"
+      ],
+      "src/pages/Assets/AssetsPage.tsx": [
+        "src/components/common/BackButton.tsx",
+        "src/services/characters/characterService.ts",
+        "src/services/context/chapterSummaryService.ts",
+        "src/services/context/contextRecordService.ts",
+        "src/services/database/novelRepository.ts",
+        "src/services/settingSuggestions/settingSuggestionService.ts",
+        "src/services/styles/styleProfileService.ts",
+        "src/types/novel.ts"
+      ],
+      "src/pages/ComingSoon/ComingSoonPage.tsx": [
+        "src/components/common/BackButton.tsx",
+        "src/styles/coming-soon.css"
+      ],
+      "src/pages/Home/HomePage.tsx": [
+        "src/components/common/FirstTimeGuide.tsx",
+        "src/components/import/ImportJsonDialog.tsx",
+        "src/components/import/ImportTxtDialog.tsx",
+        "src/components/novel-card/NovelCard.tsx",
+        "src/services/database/novelRepository.ts",
+        "src/services/novels/novelService.ts",
+        "src/styles/home.css",
+        "src/types/novel.ts",
+        "src/utils/nativeDialog.ts"
+      ],
+      "src/pages/ImportExport/ImportExportPage.tsx": [
+        "src/components/common/BackButton.tsx",
+        "src/components/import/ImportJsonDialog.tsx",
+        "src/components/import/ImportTxtDialog.tsx",
+        "src/services/database/chapterRepository.ts",
+        "src/services/database/novelRepository.ts",
+        "src/services/export/exportService.ts",
+        "src/types/chapter.ts",
+        "src/types/novel.ts"
+      ],
+      "src/pages/NotFound/NotFoundPage.tsx": [],
+      "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx": [
+        "src/components/common/BackButton.tsx",
+        "src/services/database/novelRepository.ts",
+        "src/services/settingSuggestions/settingSuggestionService.ts",
+        "src/styles/setting-suggestions.css",
+        "src/types/novel.ts",
+        "src/types/settingSuggestion.ts"
+      ],
+      "src/pages/Settings/SettingsPage.tsx": [
+        "src/constants/version.ts",
+        "src/services/ai/aiClient.ts",
+        "src/services/database/novelRepository.ts",
+        "src/styles/novel-detail.css",
+        "src/types/ai.ts",
+        "src/utils/nativeDialog.ts"
+      ],
+      "src/pages/Templates/TemplatesPage.tsx": [
+        "src/components/common/BackButton.tsx",
+        "src/services/templates/templateService.ts",
+        "src/utils/nativeDialog.ts"
+      ],
+      "src/services/database/novelRepository.ts": [
+        "src/features/novels/mockNovels.ts",
+        "src/features/novels/novelNormalizer.ts",
+        "src/services/database/db.ts",
+        "src/types/novel.ts",
+        "src/utils/date.ts"
+      ],
+      "src/services/import/jsonImportService.ts": [],
+      "src/services/import/txtImportService.ts": [],
+      "src/services/novels/novelService.ts": [
+        "src/services/database/novelRepository.ts",
+        "src/types/novel.ts"
+      ],
+      "src/services/settingSuggestions/settingSuggestionService.ts": [
+        "src/services/ai/aiClient.ts",
+        "src/services/ai/aiTaskService.ts",
+        "src/services/characters/characterService.ts",
+        "src/services/database/db.ts",
+        "src/services/database/novelRepository.ts",
+        "src/services/database/settingRepository.ts",
+        "src/types/character.ts",
+        "src/types/setting.ts",
+        "src/types/settingSuggestion.ts",
+        "src/utils/dataGuard.ts"
+      ],
+      "src/services/templates/templateService.ts": [
+        "src/services/database/db.ts"
+      ],
+      "src/types/novel.ts": [
+        "src/types/volume.ts"
+      ],
+      "src/types/settingSuggestion.ts": [],
+      "src/utils/dataGuard.ts": []
+    },
+    "neighborMap": {
+      "src/App.tsx": [
+        {
+          "path": "src/pages/AiTasks/AiTasksPage.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/NovelDetail/NovelDetailPage.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/OutlineEditor/OutlineEditorPage.tsx",
+          "batchIndex": 6,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+          "batchIndex": 7,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+          "batchIndex": 2,
+          "symbols": []
+        },
+        {
+          "path": "src/main.tsx",
+          "batchIndex": 9,
+          "symbols": []
+        }
+      ],
+      "src/components/common/BackButton.tsx": [
+        {
+          "path": "src/pages/AiTasks/AiTasksPage.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/StyleProfiles/StyleProfilesPage.tsx",
+          "batchIndex": 7,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+          "batchIndex": 2,
+          "symbols": []
+        }
+      ],
+      "src/components/common/LoadingModal.tsx": [
+        {
+          "path": "src/components/common/LoadingModal.css",
+          "batchIndex": 29,
+          "symbols": []
+        }
+      ],
+      "src/components/import/ImportJsonDialog.tsx": [
+        {
+          "path": "src/services/styles/outputProfileService.ts",
+          "batchIndex": 7,
+          "symbols": [
+            "outputProfileService"
+          ]
+        },
+        {
+          "path": "src/services/styles/styleProfileService.ts",
+          "batchIndex": 7,
+          "symbols": [
+            "styleProfileService"
+          ]
+        }
+      ],
+      "src/components/import/ImportTxtDialog.tsx": [
+        {
+          "path": "src/services/database/chapterRepository.ts",
+          "batchIndex": 6,
+          "symbols": [
+            "chapterRepository"
+          ]
+        },
+        {
+          "path": "src/services/database/draftVersionService.ts",
+          "batchIndex": 9,
+          "symbols": [
+            "draftVersionService"
+          ]
+        },
+        {
+          "path": "src/services/database/volumeRepository.ts",
+          "batchIndex": 6,
+          "symbols": [
+            "volumeRepository"
+          ]
+        },
+        {
+          "path": "src/utils/format.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "formatNumber",
+            "formatWordCount",
+            "formatTokenCount",
+            "formatFileSize",
+            "formatPercent"
+          ]
+        }
+      ],
+      "src/components/layout/AppShell.tsx": [
+        {
+          "path": "src/styles/app-shell.css",
+          "batchIndex": 27,
+          "symbols": []
+        }
+      ],
+      "src/features/novels/novelNormalizer.ts": [
+        {
+          "path": "src/services/database/db.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "getDbMode",
+            "isTauri",
+            "dbCall",
+            "lsGet",
+            "lsSet",
+            "lsRemove",
+            "generateId",
+            "nowISO"
+          ]
+        },
+        {
+          "path": "src/utils/date.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "toValidDate",
+            "formatDate",
+            "formatDateTime",
+            "toIsoDateOrNow"
+          ]
+        },
+        {
+          "path": "src/components/novel-detail/NovelDetailCards.tsx",
+          "batchIndex": 4,
+          "symbols": [
+            "NovelBasicInfoCard",
+            "WorldSettingCard",
+            "RuleSystemCard",
+            "ProtagonistCard"
+          ]
+        }
+      ],
+      "src/lib/runWithLoading.ts": [
+        {
+          "path": "src/components/outline/OutlineEditor.tsx",
+          "batchIndex": 6,
+          "symbols": []
+        },
+        {
+          "path": "src/components/outline/OutlineManager.tsx",
+          "batchIndex": 6,
+          "symbols": []
+        },
+        {
+          "path": "src/components/right-dock/panels/AiGeneratePanel.tsx",
+          "batchIndex": 7,
+          "symbols": []
+        },
+        {
+          "path": "src/components/right-dock/panels/ChapterSummaryPanel.tsx",
+          "batchIndex": 2,
+          "symbols": []
+        },
+        {
+          "path": "src/components/right-dock/panels/CharactersPanel.tsx",
+          "batchIndex": 3,
+          "symbols": []
+        },
+        {
+          "path": "src/components/right-dock/panels/ContextViewPanel.tsx",
+          "batchIndex": 2,
+          "symbols": []
+        },
+        {
+          "path": "src/components/right-dock/panels/OutlinePanel.tsx",
+          "batchIndex": 6,
+          "symbols": []
+        },
+        {
+          "path": "src/components/right-dock/panels/PolishPanel.tsx",
+          "batchIndex": 3,
+          "symbols": []
+        },
+        {
+          "path": "src/components/workspace/EditorArea.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        }
+      ],
+      "src/pages/Assets/AssetsPage.tsx": [
+        {
+          "path": "src/services/characters/characterService.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "characterService"
+          ]
+        },
+        {
+          "path": "src/services/context/chapterSummaryService.ts",
+          "batchIndex": 2,
+          "symbols": [
+            "chapterSummaryService"
+          ]
+        },
+        {
+          "path": "src/services/context/contextRecordService.ts",
+          "batchIndex": 2,
+          "symbols": [
+            "contextRecordService",
+            "buildContextSummary"
+          ]
+        },
+        {
+          "path": "src/services/styles/styleProfileService.ts",
+          "batchIndex": 7,
+          "symbols": [
+            "styleProfileService"
+          ]
+        }
+      ],
+      "src/pages/ComingSoon/ComingSoonPage.tsx": [
+        {
+          "path": "src/styles/coming-soon.css",
+          "batchIndex": 27,
+          "symbols": []
+        }
+      ],
+      "src/pages/Home/HomePage.tsx": [
+        {
+          "path": "src/components/novel-card/NovelCard.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        },
+        {
+          "path": "src/styles/home.css",
+          "batchIndex": 27,
+          "symbols": []
+        },
+        {
+          "path": "src/utils/nativeDialog.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "confirmDanger",
+            "confirmInfo",
+            "showInfo",
+            "showError"
+          ]
+        }
+      ],
+      "src/pages/ImportExport/ImportExportPage.tsx": [
+        {
+          "path": "src/services/database/chapterRepository.ts",
+          "batchIndex": 6,
+          "symbols": [
+            "chapterRepository"
+          ]
+        },
+        {
+          "path": "src/services/export/exportService.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "exportChapterToTxt",
+            "exportChapterToMarkdown",
+            "exportNovelToTxt",
+            "exportNovelToMarkdown",
+            "exportNovelBackupJson",
+            "exportService"
+          ]
+        },
+        {
+          "path": "src/types/chapter.ts",
+          "batchIndex": 6,
+          "symbols": [
+            "ChapterStatusLabels"
+          ]
+        }
+      ],
+      "src/pages/SettingSuggestions/SettingSuggestionsPage.tsx": [
+        {
+          "path": "src/styles/setting-suggestions.css",
+          "batchIndex": 27,
+          "symbols": []
+        }
+      ],
+      "src/pages/Settings/SettingsPage.tsx": [
+        {
+          "path": "src/services/ai/aiClient.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "createAiClient",
+            "aiSettingsService",
+            "MockAiClient",
+            "RealAiClient"
+          ]
+        },
+        {
+          "path": "src/styles/novel-detail.css",
+          "batchIndex": 27,
+          "symbols": []
+        },
+        {
+          "path": "src/types/ai.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "AiTaskTypeLabels"
+          ]
+        },
+        {
+          "path": "src/utils/nativeDialog.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "confirmDanger",
+            "confirmInfo",
+            "showInfo",
+            "showError"
+          ]
+        }
+      ],
+      "src/pages/Templates/TemplatesPage.tsx": [
+        {
+          "path": "src/utils/nativeDialog.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "confirmDanger",
+            "confirmInfo",
+            "showInfo",
+            "showError"
+          ]
+        }
+      ],
+      "src/services/database/novelRepository.ts": [
+        {
+          "path": "src/services/database/db.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "getDbMode",
+            "isTauri",
+            "dbCall",
+            "lsGet",
+            "lsSet",
+            "lsRemove",
+            "generateId",
+            "nowISO"
+          ]
+        },
+        {
+          "path": "src/utils/date.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "toValidDate",
+            "formatDate",
+            "formatDateTime",
+            "toIsoDateOrNow"
+          ]
+        },
+        {
+          "path": "src/agent-tools/project-tools.ts",
+          "batchIndex": 10,
+          "symbols": [
+            "readProjectContext",
+            "readProjectList",
+            "readProjectSettings"
+          ]
+        },
+        {
+          "path": "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+          "batchIndex": 2,
+          "symbols": []
+        },
+        {
+          "path": "src/services/ai/chapterSummarizeService.ts",
+          "batchIndex": 2,
+          "symbols": [
+            "chapterSummarizeService"
+          ]
+        },
+        {
+          "path": "src/services/ai/characterGenerateService.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "characterGenerateService"
+          ]
+        },
+        {
+          "path": "src/services/ai/eventSuggestService.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "eventSuggestService"
+          ]
+        },
+        {
+          "path": "src/services/ai/outlineGenerateService.ts",
+          "batchIndex": 6,
+          "symbols": [
+            "outlineGenerateService"
+          ]
+        },
+        {
+          "path": "src/services/ai/polishAiService.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "polishAiService"
+          ]
+        },
+        {
+          "path": "src/services/ai/qualityCheckAiService.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "qualityCheckAiService"
+          ]
+        },
+        {
+          "path": "src/services/ai/settingExpandService.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "settingExpandService"
+          ]
+        },
+        {
+          "path": "src/services/export/exportService.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "exportChapterToTxt",
+            "exportChapterToMarkdown",
+            "exportNovelToTxt",
+            "exportNovelToMarkdown",
+            "exportNovelBackupJson",
+            "exportService"
+          ]
+        },
+        {
+          "path": "src/services/prompt/contextBuilder.ts",
+          "batchIndex": 7,
+          "symbols": [
+            "buildFreshChapterGenerationContext",
+            "buildChapterContext"
+          ]
+        }
+      ],
+      "src/services/novels/novelService.ts": [
+        {
+          "path": "src/agent-tools/project-tools.ts",
+          "batchIndex": 10,
+          "symbols": [
+            "readProjectContext",
+            "readProjectList",
+            "readProjectSettings"
+          ]
+        },
+        {
+          "path": "src/pages/NovelDetail/NovelDetailPage.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        }
+      ],
+      "src/services/settingSuggestions/settingSuggestionService.ts": [
+        {
+          "path": "src/services/ai/aiClient.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "createAiClient",
+            "aiSettingsService",
+            "MockAiClient",
+            "RealAiClient"
+          ]
+        },
+        {
+          "path": "src/services/ai/aiTaskService.ts",
+          "batchIndex": 3,
+          "symbols": [
+            "aiTaskService"
+          ]
+        },
+        {
+          "path": "src/services/characters/characterService.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "characterService"
+          ]
+        },
+        {
+          "path": "src/services/database/db.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "getDbMode",
+            "isTauri",
+            "dbCall",
+            "lsGet",
+            "lsSet",
+            "lsRemove",
+            "generateId",
+            "nowISO"
+          ]
+        },
+        {
+          "path": "src/services/database/settingRepository.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "settingRepository"
+          ]
+        },
+        {
+          "path": "src/types/character.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "CharacterRoleLabels",
+            "ChapterCharacterRoleLabels"
+          ]
+        },
+        {
+          "path": "src/types/setting.ts",
+          "batchIndex": 4,
+          "symbols": [
+            "RuleCategoryLabels"
+          ]
+        }
+      ],
+      "src/services/templates/templateService.ts": [
+        {
+          "path": "src/services/database/db.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "getDbMode",
+            "isTauri",
+            "dbCall",
+            "lsGet",
+            "lsSet",
+            "lsRemove",
+            "generateId",
+            "nowISO"
+          ]
+        }
+      ],
+      "src/types/novel.ts": [
+        {
+          "path": "src/types/volume.ts",
+          "batchIndex": 6,
+          "symbols": [
+            "VolumeStatusLabels"
+          ]
+        },
+        {
+          "path": "src/components/novel-card/NovelCard.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        },
+        {
+          "path": "src/components/novel-detail/NovelDetailCards.tsx",
+          "batchIndex": 4,
+          "symbols": [
+            "NovelBasicInfoCard",
+            "WorldSettingCard",
+            "RuleSystemCard",
+            "ProtagonistCard"
+          ]
+        },
+        {
+          "path": "src/pages/NovelDetail/NovelDetailPage.tsx",
+          "batchIndex": 4,
+          "symbols": []
+        },
+        {
+          "path": "src/pages/WritingWorkspace/WritingWorkspacePage.tsx",
+          "batchIndex": 2,
+          "symbols": []
+        }
+      ],
+      "src/utils/dataGuard.ts": [
+        {
+          "path": "src/services/database/db.ts",
+          "batchIndex": 5,
+          "symbols": [
+            "getDbMode",
+            "isTauri",
+            "dbCall",
+            "lsGet",
+            "lsSet",
+            "lsRemove",
+            "generateId",
+            "nowISO"
+          ]
+        }
+      ]
+    }
+  }
+}

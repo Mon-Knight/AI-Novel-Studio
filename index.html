@@ -5,8 +5,119 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Novel Studio</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #f5f6f8;
+      }
+
+      #startup-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f5f6f8;
+        color: #1a1a2e;
+        font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+        transition: opacity 180ms ease, visibility 180ms ease;
+      }
+
+      #startup-splash.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .startup-card {
+        min-width: 280px;
+        padding: 28px 32px;
+        border: 1px solid #e8e8f0;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        text-align: center;
+      }
+
+      .startup-title {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .startup-message {
+        font-size: 13px;
+        color: #5a5a7a;
+        margin-bottom: 18px;
+      }
+
+      .startup-progress {
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e8effe;
+      }
+
+      .startup-progress::before {
+        content: "";
+        display: block;
+        width: 42%;
+        height: 100%;
+        border-radius: inherit;
+        background: #4a7cf7;
+        animation: startup-progress 1.1s ease-in-out infinite;
+      }
+
+      @keyframes startup-progress {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body,
+        #startup-splash {
+          background: #1f1f1f;
+          color: #f3f3f3;
+        }
+
+        .startup-card {
+          background: #252526;
+          border-color: #3c3c3c;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        }
+
+        .startup-message {
+          color: #c8c8c8;
+        }
+
+        .startup-progress {
+          background: #1e2a45;
+        }
+
+        .startup-progress::before {
+          background: #7aa2ff;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="startup-splash" aria-hidden="true">
+      <div class="startup-card">
+        <div class="startup-title">AI Novel Studio</div>
+        <div class="startup-message">正在加载创作工作台...</div>
+        <div class="startup-progress"></div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

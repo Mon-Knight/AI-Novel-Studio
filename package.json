@@ -13,6 +13,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",
+    "test:quality-workspace": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_quality_workspace.ps1",
     "test:ai-tasks-delete": "npm run test:ai-tasks-delete:static && npm run test:ai-tasks-delete:runtime",
     "test:ai-tasks-delete:static": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_ai_task_delete.ps1",
     "test:ai-tasks-delete:runtime": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_ai_task_delete.ps1"

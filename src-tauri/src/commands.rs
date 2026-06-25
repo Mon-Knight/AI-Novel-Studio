@@ -2798,6 +2798,9 @@ pub struct QualityCheckReportDto {
     pub ai_task_id: Option<String>,
     pub draft_version: Option<i64>,
     pub model: Option<String>,
+    pub content_hash: Option<String>,
+    pub content_length: Option<i64>,
+    pub checked_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -2852,6 +2855,18 @@ pub struct GetQualityCheckIssuesResult {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateQualityReportInput {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub draft_id: String,
+    pub scope: Option<String>,
+    pub content_hash: Option<String>,
+    pub content_length: Option<i64>,
+    pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveQualityCheckResultInput {
     pub report_id: String,
     pub novel_id: String,
@@ -2860,6 +2875,9 @@ pub struct SaveQualityCheckResultInput {
     pub result: QualityCheckResultDto,
     pub draft_version: Option<i64>,
     pub model: Option<String>,
+    pub content_hash: Option<String>,
+    pub content_length: Option<i64>,
+    pub checked_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2900,8 +2918,11 @@ fn map_quality_report_row(row: &rusqlite::Row) -> rusqlite::Result<QualityCheckR
         ai_task_id: row.get(8)?,
         draft_version: row.get(9)?,
         model: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        content_hash: row.get(11)?,
+        content_length: row.get(12)?,
+        checked_at: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
@@ -2937,7 +2958,50 @@ fn quality_item_select_sql() -> &'static str {
 }
 
 fn quality_report_select_sql() -> &'static str {
-    "SELECT id, novel_id, chapter_id, draft_id, scope, status, overall_score, summary, ai_task_id, draft_version, model, created_at, updated_at FROM quality_check_reports"
+    "SELECT id, novel_id, chapter_id, draft_id, scope, status, overall_score, summary, ai_task_id, draft_version, model, content_hash, content_length, checked_at, created_at, updated_at FROM quality_check_reports"
+}
+
+/// 创建质量检查报告占位记录
+#[tauri::command]
+pub fn create_quality_check_report(
+    input: CreateQualityReportInput,
+) -> Result<QualityCheckReportDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let scope = input
+        .scope
+        .unwrap_or_else(|| "current_draft".to_string());
+    println!(
+        "[QUALITY_CHECK] create_report start id={} novel_id={} chapter_id={} draft_id={}",
+        id, input.novel_id, input.chapter_id, input.draft_id
+    );
+
+    conn.execute(
+        "INSERT INTO quality_check_reports (id, novel_id, chapter_id, draft_id, scope, status, content_hash, content_length, checked_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ?9, ?9)",
+        params![
+            &id,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.draft_id,
+            &scope,
+            &input.content_hash,
+            &input.content_length,
+            &input.checked_at,
+            &now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    println!(
+        "[QUALITY_CHECK] create_report done id={} chapter_id={}",
+        id, input.chapter_id
+    );
+
+    let mut stmt = conn
+        .prepare(&format!("{} WHERE id = ?1", quality_report_select_sql()))
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![&id], map_quality_report_row)
+        .map_err(|e| e.to_string())
 }
 
 /// 获取章节的质量检查结果（最新报告 + 问题列表 + 统计）
@@ -3076,16 +3140,27 @@ pub fn save_quality_check_result(
 ) -> Result<GetQualityCheckIssuesResult, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
+    println!(
+        "[QUALITY_CHECK] save_result start report_id={} novel_id={} chapter_id={} draft_id={} item_count={}",
+        input.report_id,
+        input.novel_id,
+        input.chapter_id,
+        input.draft_id,
+        input.result.items.len()
+    );
 
     // 1. 更新报告状态
     let affected = conn
         .execute(
-            "UPDATE quality_check_reports SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3, model = ?4, updated_at = ?5 WHERE id = ?6",
+            "UPDATE quality_check_reports SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3, model = ?4, content_hash = COALESCE(?5, content_hash), content_length = COALESCE(?6, content_length), checked_at = COALESCE(?7, checked_at), updated_at = ?8 WHERE id = ?9",
             params![
                 &input.result.overall_score,
                 &input.result.summary,
                 &input.draft_version,
                 &input.model,
+                &input.content_hash,
+                &input.content_length,
+                &input.checked_at,
                 &now,
                 &input.report_id,
             ],
@@ -3093,7 +3168,21 @@ pub fn save_quality_check_result(
         .map_err(|e| e.to_string())?;
 
     if affected == 0 {
-        return Err("报告不存在".to_string());
+        let chapter_report_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM quality_check_reports WHERE chapter_id = ?1",
+                params![&input.chapter_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1);
+        eprintln!(
+            "[QUALITY_CHECK] save_result missing report report_id={} chapter_id={} chapter_report_count={}",
+            input.report_id, input.chapter_id, chapter_report_count
+        );
+        return Err(format!(
+            "报告不存在: report_id={}, chapter_id={}, chapter_report_count={}",
+            input.report_id, input.chapter_id, chapter_report_count
+        ));
     }
 
     // 2. 查询历史问题（用于合并）
@@ -3218,6 +3307,12 @@ pub fn save_quality_check_result(
         .map_err(|e| e.to_string())?;
 
     let statistics = compute_statistics(&saved_items);
+    println!(
+        "[QUALITY_CHECK] save_result done report_id={} chapter_id={} saved_item_count={}",
+        input.report_id,
+        input.chapter_id,
+        saved_items.len()
+    );
 
     Ok(GetQualityCheckIssuesResult {
         report,
