@@ -356,10 +356,8 @@
   user-select: none;
 }
 
-.workspace-topbar-hint {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  white-space: nowrap;
+.workspace-topbar-spacer {
+  flex: 0 0 1px;
 }
 
 /* === v0.4.0 新增：纸张风格正文编辑区 === */

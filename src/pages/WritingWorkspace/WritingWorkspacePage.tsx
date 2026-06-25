@@ -235,12 +235,6 @@ function WritingWorkspacePage() {
     setActivePanel((prev) => (prev === panel ? null : panel));
   }, [activePanel, confirmDiscardChapterGoal]);
 
-  const handleOpenPanel = useCallback(async (panel: string) => {
-    if (activePanel === 'outline' && panel !== 'outline' && !(await confirmDiscardChapterGoal())) return;
-    if (activePanel === 'outline' && panel !== 'outline') setChapterGoalDirty(false);
-    setActivePanel(panel as PanelType);
-  }, [activePanel, confirmDiscardChapterGoal]);
-
   const handleClosePanel = useCallback(async () => {
     if (!(await confirmDiscardChapterGoal())) return;
     setChapterGoalDirty(false);
@@ -469,7 +463,10 @@ function WritingWorkspacePage() {
   }, [novelId]);
 
   return (
-    <div className={`workspace-page${activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}>
+    <div
+      className={`workspace-page${activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}
+      data-summary-exists={summaryExists ? 'true' : 'false'}
+    >
       {pageLoading && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
           <div style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
@@ -580,9 +577,7 @@ function WritingWorkspacePage() {
               当前：第{activeChapter.chapterNumber}章 {activeChapter.title}
             </div>
           )}
-          <div className="workspace-topbar-hint">
-            {summaryExists ? '本章总结已生成，右侧“总结”可查看' : '功能入口已收纳到右侧工具栏'}
-          </div>
+          <div className="workspace-topbar-spacer" aria-hidden="true" />
         </div>
 
         <EditorArea
@@ -590,7 +585,6 @@ function WritingWorkspacePage() {
           novelTitle={novel?.title}
           novelId={novelId}
           currentDraft={currentDraft}
-          onOpenPanel={handleOpenPanel}
           onDraftChange={handleDraftChange}
           onEditorContentChange={handleEditorContentChange}
           onDraftSaved={handleDraftApplied}

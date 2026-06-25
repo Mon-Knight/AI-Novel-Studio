@@ -41,7 +41,6 @@ interface EditorAreaProps {
   novelTitle?: string;
   novelId?: string;
   currentDraft?: ChapterDraft | null;
-  onOpenPanel?: (panel: string) => void;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
   onEditorContentChange?: (snapshot: EditorContentSnapshot) => void;
   onDraftSaved?: (draft: ChapterDraft) => void;
@@ -57,7 +56,6 @@ function EditorArea({
   chapter,
   novelId,
   currentDraft,
-  onOpenPanel,
   onDraftChange,
   onEditorContentChange,
   onDraftSaved,
@@ -309,25 +307,27 @@ function EditorArea({
   const handleAdoptCurrent = useCallback(async () => {
     if (!chapter) return;
     let draftToAdopt = currentDraft;
-    const needsSaveBeforeAdopt =
-      !draftToAdopt || draftToAdopt.content !== content || isDirty;
 
-    if (needsSaveBeforeAdopt) {
+    if (!draftToAdopt || draftToAdopt.content !== content || isDirty) {
       const ok = await confirmInfo({
         title: '保存并采用',
         message: '当前正文存在未保存修改。需要先保存为草稿，再将该草稿确认为正式正文。是否继续？',
       });
       if (!ok) return;
       draftToAdopt = await handleSave();
-    } else if (draftToAdopt?.isAdopted) {
-      setSaveMsg('已采用');
-      setTimeout(() => setSaveMsg(''), 2000);
-      return;
-    } else if (!(await confirmInfo({
-      title: '采用草稿',
-      message: `确认采用草稿 v${draftToAdopt.versionNo} 作为正式正文？`,
-    }))) {
-      return;
+    } else {
+      const existingDraft = draftToAdopt;
+      if (existingDraft.isAdopted) {
+        setSaveMsg('已采用');
+        setTimeout(() => setSaveMsg(''), 2000);
+        return;
+      }
+      if (!(await confirmInfo({
+        title: '采用草稿',
+        message: `确认采用草稿 v${existingDraft.versionNo} 作为正式正文？`,
+      }))) {
+        return;
+      }
     }
 
     if (!draftToAdopt) {
@@ -335,6 +335,7 @@ function EditorArea({
       setTimeout(() => setSaveMsg(''), 3000);
       return;
     }
+    const draftForAdoption = draftToAdopt;
 
     try {
       const adopted = await runWithLoading(
@@ -345,9 +346,9 @@ function EditorArea({
           errorMessage: '采用失败',
           successAutoCloseMs: 800,
         },
-        async () => await draftVersionService.adopt(draftToAdopt.id, chapter.id),
+        async () => await draftVersionService.adopt(draftForAdoption.id, chapter.id),
       );
-      const nextDraft = adopted ?? { ...draftToAdopt, isAdopted: true };
+      const nextDraft = adopted ?? { ...draftForAdoption, isAdopted: true };
       setSaveMsg('已采用');
       onDraftSaved?.(nextDraft);
       emitContentSnapshot(nextDraft.content, false, nextDraft);
@@ -414,6 +415,7 @@ function EditorArea({
           <span>来源：{draftSourceLabel[currentDraft.source] || currentDraft.source}</span>
           <span>字数：{formatNumber(currentDraft.wordCount)}</span>
           {currentDraft.isAdopted && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>✅ 已采用</span>}
+          {saveMsg && <span style={{ color: saveMsg.includes('失败') ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 600 }}>{saveMsg}</span>}
         </div>
       )}
 
@@ -520,11 +522,7 @@ function EditorArea({
           <div className="editor-empty-icon">✍️</div>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>当前章节还没有正文</div>
           <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
-            点击右侧 AI 生成面板，AI 将根据章节大纲自动生成正文。
-          </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-            <button className="btn btn-primary btn-sm" onClick={() => onOpenPanel?.('ai-generate')}>🤖 打开 AI 生成面板</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => onOpenPanel?.('outline')}>📋 查看大纲</button>
+            正文为空。
           </div>
         </div>
       )}
