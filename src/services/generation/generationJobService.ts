@@ -9,6 +9,7 @@ import { countTextWords, hashTextContent } from '../../utils/contentHash';
 import { toSafeNumber, toSafeString } from '../../utils/dataGuard';
 import type { AiGenerateRequest, ChapterDraft } from '../../types/ai';
 import type { ChapterGenerationSnapshot } from '../../types/generationContext';
+import type { QualityCheckItem } from '../../types/qualityCheck';
 import type {
   CreateGenerationJobInput,
   GenerationJob,
@@ -76,6 +77,14 @@ interface UpdateGenerationJobInput {
 
 type GenerationJobProgressCallback = (job: GenerationJob, steps: GenerationStepResult[]) => void;
 type ChapterDraftJobResult = { job: GenerationJob; draft?: ChapterDraft };
+type PatchCandidate = {
+  issueId: string;
+  severity: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  quote: string;
+  replacementText: string;
+  rationale: string;
+};
 
 function stepsKey(jobId: string): string {
   return `${STEPS_KEY_PREFIX}${jobId}`;
@@ -298,6 +307,51 @@ function buildSnapshotGenerateRequest(snapshot: ChapterGenerationSnapshot): AiGe
     ],
     promptTemplateSource: 'generation_context_snapshot',
   };
+}
+
+function buildPatchCandidates(items: QualityCheckItem[]): PatchCandidate[] {
+  return items
+    .filter((item) => item.status === 'pending' && item.quote?.trim() && item.suggestion?.trim())
+    .map((item) => {
+      const quote = item.quote?.trim() || '';
+      const suggestion = item.suggestion?.trim() || '';
+      const riskLevel: PatchCandidate['riskLevel'] = item.severity === 'low' && quote.length <= 120
+        ? 'low'
+        : item.severity === 'critical' || item.severity === 'high'
+          ? 'high'
+          : 'medium';
+      return {
+        issueId: item.id,
+        severity: item.severity,
+        riskLevel,
+        quote,
+        replacementText: suggestion,
+        rationale: item.title || item.description,
+      };
+    });
+}
+
+function applyLowRiskPatches(content: string, patches: PatchCandidate[]): {
+  content: string;
+  applied: PatchCandidate[];
+  skipped: PatchCandidate[];
+} {
+  let nextContent = content;
+  const applied: PatchCandidate[] = [];
+  const skipped: PatchCandidate[] = [];
+  for (const patch of patches) {
+    if (patch.riskLevel !== 'low' || !patch.quote || !patch.replacementText) {
+      skipped.push(patch);
+      continue;
+    }
+    if (!nextContent.includes(patch.quote)) {
+      skipped.push(patch);
+      continue;
+    }
+    nextContent = nextContent.replace(patch.quote, patch.replacementText);
+    applied.push(patch);
+  }
+  return { content: nextContent, applied, skipped };
 }
 
 export const generationJobService = {
@@ -575,6 +629,8 @@ export const generationJobService = {
     });
     let steps: GenerationStepResult[] = [];
     let savedDraft: ChapterDraft | undefined;
+    let qualityItems: QualityCheckItem[] = [];
+    let patchCandidates: PatchCandidate[] = [];
 
     const emit = async () => {
       steps = await this.getSteps(job.id);
@@ -712,6 +768,7 @@ export const generationJobService = {
           contentLength: savedDraft.content.length,
           checkedAt,
         });
+        qualityItems = saved.items;
         return {
           outputJson: {
             reportId: saved.report?.id || report.id,
@@ -720,6 +777,48 @@ export const generationJobService = {
             pendingCount: saved.statistics.pending,
           },
           outputText: `质量检查完成：评分 ${result.overallScore}，发现 ${result.items.length} 个问题。`,
+        };
+      });
+      await runStep('patch_generation', 99, async () => {
+        patchCandidates = buildPatchCandidates(qualityItems);
+        return {
+          outputJson: {
+            patchCount: patchCandidates.length,
+            lowRiskCount: patchCandidates.filter((patch) => patch.riskLevel === 'low').length,
+            patches: patchCandidates,
+          },
+          outputText: patchCandidates.length
+            ? `已生成 ${patchCandidates.length} 个局部修复建议，其中 ${patchCandidates.filter((patch) => patch.riskLevel === 'low').length} 个为低风险。`
+            : '未生成可自动处理的局部修复建议。',
+        };
+      });
+      await runStep('patch_apply', 99, async () => {
+        if (!savedDraft) throw new Error('missing_saved_draft');
+        const result = applyLowRiskPatches(savedDraft.content, patchCandidates);
+        if (result.applied.length === 0 || result.content === savedDraft.content) {
+          return {
+            status: 'skipped',
+            outputJson: { appliedCount: 0, skippedCount: result.skipped.length },
+            outputText: '没有可自动应用的低风险 patch。',
+          };
+        }
+        const patchedDraft = await draftVersionService.create({
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          title: `${input.title || '章节'} - AI 局部修复`,
+          content: result.content,
+          source: 'ai_regenerated',
+          note: `v2.0.2 auto patch from generation job ${job.id}; applied ${result.applied.length} low-risk patches`,
+        });
+        savedDraft = patchedDraft;
+        return {
+          outputJson: {
+            draftId: patchedDraft.id,
+            versionNo: patchedDraft.versionNo,
+            appliedCount: result.applied.length,
+            skippedCount: result.skipped.length,
+          },
+          outputText: `已自动应用 ${result.applied.length} 个低风险 patch，并保存修复草稿 v${patchedDraft.versionNo}。`,
         };
       });
       job = await this.update({
