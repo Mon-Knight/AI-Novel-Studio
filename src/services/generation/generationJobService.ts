@@ -723,6 +723,7 @@ export const generationJobService = {
           title: input.title || `AI 初稿 ${new Date().toLocaleString()}`,
           content: generatedText,
           source: 'ai_generated',
+          aiTaskId: job.id,
           note: `v2.0.0 generation job ${job.id} / context ${snapshot.contextHash}`,
         });
         return {
@@ -808,6 +809,7 @@ export const generationJobService = {
           title: `${input.title || '章节'} - AI 局部修复`,
           content: result.content,
           source: 'ai_regenerated',
+          aiTaskId: job.id,
           note: `v2.0.2 auto patch from generation job ${job.id}; applied ${result.applied.length} low-risk patches`,
         });
         savedDraft = patchedDraft;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { chapterEngineeringService, createDefaultChapterCard, createDefaultGenerationConstraints, createDefaultQualityRules, createDefaultScenePlan } from '../../../services/engineering/chapterEngineeringService';
 import { generationContextCompiler } from '../../../services/generation/generationContextCompiler';
 import { generationJobService } from '../../../services/generation/generationJobService';
+import { qualityCheckService } from '../../../services/quality/qualityCheckService';
 import { generateId } from '../../../services/database/db';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
@@ -15,7 +16,8 @@ import type {
   ScenePlanItem,
 } from '../../../types/chapterEngineering';
 import type { ChapterGenerationSnapshot } from '../../../types/generationContext';
-import type { GenerationJob, GenerationStepResult } from '../../../types/generationJob';
+import type { GenerationJob, GenerationStepName, GenerationStepResult } from '../../../types/generationJob';
+import type { GetQualityCheckIssuesResult, QualityCheckItem } from '../../../types/qualityCheck';
 
 interface ChapterEngineeringPanelProps {
   novelId?: string;
@@ -45,6 +47,41 @@ const QUALITY_CHECK_OPTIONS: Array<{ id: string; label: string }> = [
   { id: 'logic', label: '情节逻辑' },
 ];
 
+type LoopStatus = 'done' | 'warning' | 'pending' | 'failed';
+
+interface LoopItem {
+  label: string;
+  value: string;
+  status: LoopStatus;
+}
+
+const EMPTY_QUALITY_RESULT: GetQualityCheckIssuesResult = {
+  report: null,
+  items: [],
+  statistics: {
+    total: 0,
+    pending: 0,
+    resolved: 0,
+    ignored: 0,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+  },
+};
+
+const STEP_LABELS: Record<GenerationStepName, string> = {
+  preflight: '预检',
+  compile_context: '上下文',
+  chapter_card: '章节卡',
+  scene_plan: '场景',
+  draft_generation: '初稿',
+  quality_check: '质检',
+  patch_generation: '修复建议',
+  patch_apply: '应用修复',
+  save_version: '版本',
+};
+
 function linesToArray(value: string): string[] {
   return value
     .split('\n')
@@ -61,6 +98,25 @@ function formatDate(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function outputNumber(step: GenerationStepResult | undefined, key: string): number | undefined {
+  const value = asRecord(step?.outputJson)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function stepStatusClass(status: string): string {
+  if (status === 'succeeded') return 'used';
+  if (status === 'failed') return 'missing';
+  return 'fallback';
+}
+
+function formatQualityTitle(item: QualityCheckItem): string {
+  return item.category || item.issueType || '质量问题';
 }
 
 function TextField({
@@ -182,6 +238,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
   const [latestSnapshot, setLatestSnapshot] = useState<ChapterGenerationSnapshot | null>(null);
   const [latestJob, setLatestJob] = useState<GenerationJob | null>(null);
   const [jobSteps, setJobSteps] = useState<GenerationStepResult[]>([]);
+  const [qualityResult, setQualityResult] = useState<GetQualityCheckIssuesResult>(EMPTY_QUALITY_RESULT);
   const [card, setCard] = useState<ChapterCard>(() => createDefaultChapterCard());
   const [scenePlan, setScenePlan] = useState<ScenePlanItem[]>(() => createDefaultScenePlan());
   const [constraints, setConstraints] = useState<GenerationConstraints>(() => createDefaultGenerationConstraints());
@@ -205,6 +262,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
       setLatestSnapshot(null);
       setLatestJob(null);
       setJobSteps([]);
+      setQualityResult(EMPTY_QUALITY_RESULT);
       setCard(createDefaultChapterCard());
       setScenePlan(createDefaultScenePlan());
       setConstraints(createDefaultGenerationConstraints());
@@ -218,12 +276,14 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
       chapterEngineeringService.getBundle(chapter.id, chapter),
       generationContextCompiler.getLatestByChapterId(chapter.id),
       generationJobService.getByChapterId(chapter.id),
+      qualityCheckService.getChapterIssues(chapter.id).catch(() => EMPTY_QUALITY_RESULT),
     ])
-      .then(async ([nextBundle, snapshot, jobs]) => {
+      .then(async ([nextBundle, snapshot, jobs, quality]) => {
         if (!alive) return;
         const source = nextBundle.latestDraft ?? nextBundle.activeState;
         setBundle(nextBundle);
         setLatestSnapshot(snapshot);
+        setQualityResult(quality);
         const latest = jobs[0] ?? null;
         setLatestJob(latest);
         if (latest) {
@@ -254,6 +314,75 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
     const draft = bundle?.latestDraft ? `草稿 v${bundle.latestDraft.draftVersion}` : '无草稿';
     return `${active} / ${draft}${bundle?.hasUnappliedDraft ? ' / 有未应用草稿' : ''}`;
   }, [bundle]);
+
+  const patchGenerationStep = useMemo(
+    () => jobSteps.find((step) => step.stepName === 'patch_generation'),
+    [jobSteps],
+  );
+  const patchApplyStep = useMemo(
+    () => jobSteps.find((step) => step.stepName === 'patch_apply'),
+    [jobSteps],
+  );
+  const visibleQualityItems = useMemo(
+    () => qualityResult.items.filter((item) => item.status === 'pending').slice(0, 6),
+    [qualityResult.items],
+  );
+  const loopItems = useMemo<LoopItem[]>(() => {
+    const jobStatus: LoopStatus = !latestJob
+      ? 'pending'
+      : latestJob.status === 'failed'
+        ? 'failed'
+        : latestJob.status === 'cancelled'
+          ? 'warning'
+          : latestJob.status === 'completed'
+            ? 'done'
+            : 'warning';
+    const qualityStatus: LoopStatus = !qualityResult.report
+      ? 'pending'
+      : qualityResult.statistics.critical > 0 || qualityResult.statistics.high > 0 || qualityResult.statistics.pending > 0
+        ? 'warning'
+        : 'done';
+    const patchStatus: LoopStatus = !patchApplyStep
+      ? 'pending'
+      : patchApplyStep.status === 'failed'
+        ? 'failed'
+        : 'done';
+    const appliedCount = outputNumber(patchApplyStep, 'appliedCount') ?? 0;
+    return [
+      {
+        label: '工程',
+        value: bundle?.activeState ? `active v${bundle.activeState.draftVersion}` : '未应用',
+        status: bundle?.activeState ? 'done' : 'pending',
+      },
+      {
+        label: '快照',
+        value: latestSnapshot ? latestSnapshot.contextHash.slice(0, 8) : '未编译',
+        status: latestSnapshot ? 'done' : 'pending',
+      },
+      {
+        label: '生成',
+        value: latestJob ? `${latestJob.status} ${latestJob.progressPercent}%` : '未运行',
+        status: jobStatus,
+      },
+      {
+        label: '版本',
+        value: qualityResult.report?.draftVersion ? `草稿 v${qualityResult.report.draftVersion}` : (latestJob?.status === 'completed' ? '已保存' : '待生成'),
+        status: latestJob?.status === 'completed' ? 'done' : 'pending',
+      },
+      {
+        label: '质检',
+        value: qualityResult.report
+          ? `${qualityResult.report.overallScore ?? '-'} 分 / ${qualityResult.statistics.pending} 待处理`
+          : '未检查',
+        status: qualityStatus,
+      },
+      {
+        label: '修复',
+        value: patchApplyStep ? (appliedCount > 0 ? `已应用 ${appliedCount}` : '无自动修复') : '未执行',
+        status: patchStatus,
+      },
+    ];
+  }, [bundle?.activeState, latestJob, latestSnapshot, patchApplyStep, qualityResult]);
 
   const updateCard = <K extends keyof ChapterCard>(key: K, value: ChapterCard[K]) => {
     setCard((prev) => ({ ...prev, [key]: value }));
@@ -433,6 +562,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
       });
       setLatestJob(result.job);
       setJobSteps(await generationJobService.getSteps(result.job.id));
+      setQualityResult(await qualityCheckService.getChapterIssues(chapter.id).catch(() => EMPTY_QUALITY_RESULT));
       if (result.draft) {
         onGenerated?.(result.draft);
         setMessage(`已生成并保存正文草稿 v${result.draft.versionNo}`);
@@ -485,6 +615,15 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
       <div className="engineering-status">
         <span>{statusText}</span>
         {dirty && <strong>已修改</strong>}
+      </div>
+
+      <div className="engineering-loop-grid">
+        {loopItems.map((item) => (
+          <div className={`engineering-loop-item ${item.status}`} key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        ))}
       </div>
 
       <div className="engineering-tabs">
@@ -623,6 +762,54 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
           </label>
           <ListField label="自定义规则" value={qualityRules.customRules} onChange={(value) => updateQuality('customRules', value)} />
           <ListField label="自动修复禁区" value={qualityRules.autoFixForbidden} onChange={(value) => updateQuality('autoFixForbidden', value)} />
+
+          <div className="panel-section-title">Latest Quality Report</div>
+          {!qualityResult.report && <div className="engineering-empty">暂无结构化质量报告。</div>}
+          {qualityResult.report && (
+            <>
+              <div className="engineering-quality-summary">
+                <div>
+                  <span>综合评分</span>
+                  <strong>{qualityResult.report.overallScore ?? '-'}</strong>
+                </div>
+                <div>
+                  <span>待处理</span>
+                  <strong>{qualityResult.statistics.pending}</strong>
+                </div>
+                <div>
+                  <span>高风险</span>
+                  <strong>{qualityResult.statistics.critical + qualityResult.statistics.high}</strong>
+                </div>
+                <div>
+                  <span>已处理</span>
+                  <strong>{qualityResult.statistics.resolved}</strong>
+                </div>
+              </div>
+              {qualityResult.report.summary && (
+                <div className="engineering-message">{qualityResult.report.summary}</div>
+              )}
+              {visibleQualityItems.length === 0 && (
+                <div className="engineering-empty">当前没有待处理质量问题。</div>
+              )}
+              {visibleQualityItems.length > 0 && (
+                <div className="engineering-step-list">
+                  {visibleQualityItems.map((item) => (
+                    <div className="engineering-step-row" key={item.id}>
+                      <div>
+                        <strong>{formatQualityTitle(item)}</strong>
+                        <span className={`source-${item.severity === 'critical' || item.severity === 'high' ? 'missing' : item.severity === 'medium' ? 'fallback' : 'used'}`}>
+                          {item.severity} / {item.status}
+                        </span>
+                      </div>
+                      <small>{item.title}</small>
+                      {item.quote && <small>原文：{item.quote}</small>}
+                      {item.suggestion && <small>建议：{item.suggestion}</small>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -734,8 +921,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
                 {jobSteps.map((step) => (
                   <div className="engineering-step-row" key={step.id}>
                     <div>
-                      <strong>{step.stepName}</strong>
-                      <span className={`source-${step.status === 'succeeded' ? 'used' : step.status === 'failed' ? 'missing' : 'fallback'}`}>
+                      <strong>{STEP_LABELS[step.stepName]}</strong>
+                      <span className={`source-${stepStatusClass(step.status)}`}>
                         {step.status}
                       </span>
                     </div>
@@ -744,6 +931,26 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
                   </div>
                 ))}
               </div>
+              {patchGenerationStep && (
+                <div className="engineering-patch-summary">
+                  <div>
+                    <span>修复建议</span>
+                    <strong>{outputNumber(patchGenerationStep, 'patchCount') ?? 0}</strong>
+                  </div>
+                  <div>
+                    <span>低风险</span>
+                    <strong>{outputNumber(patchGenerationStep, 'lowRiskCount') ?? 0}</strong>
+                  </div>
+                  <div>
+                    <span>自动应用</span>
+                    <strong>{outputNumber(patchApplyStep, 'appliedCount') ?? 0}</strong>
+                  </div>
+                  <div>
+                    <span>待确认</span>
+                    <strong>{outputNumber(patchApplyStep, 'skippedCount') ?? 0}</strong>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
