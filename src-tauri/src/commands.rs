@@ -1355,6 +1355,131 @@ pub fn activate_chapter_engineering_state(
     get_chapter_engineering_state_by_id_internal(&conn, &id)
 }
 
+// ==================== Chapter Generation Snapshot ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterGenerationSnapshotDto {
+    pub id: String,
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub chapter_id: String,
+    pub engineering_state_id: Option<String>,
+    pub style_profile_id: Option<String>,
+    pub output_profile_id: Option<String>,
+    pub compiled_context_json: String,
+    pub compiled_prompt_text: String,
+    pub prompt_summary: String,
+    pub context_hash: String,
+    pub sources_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveChapterGenerationSnapshotInput {
+    pub id: String,
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub chapter_id: String,
+    pub engineering_state_id: Option<String>,
+    pub style_profile_id: Option<String>,
+    pub output_profile_id: Option<String>,
+    pub compiled_context_json: String,
+    pub compiled_prompt_text: String,
+    pub prompt_summary: String,
+    pub context_hash: String,
+    pub sources_json: String,
+    pub created_at: String,
+}
+
+fn map_chapter_generation_snapshot_row(row: &Row<'_>) -> rusqlite::Result<ChapterGenerationSnapshotDto> {
+    Ok(ChapterGenerationSnapshotDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        volume_id: row.get(2)?,
+        chapter_id: row.get(3)?,
+        engineering_state_id: row.get(4)?,
+        style_profile_id: row.get(5)?,
+        output_profile_id: row.get(6)?,
+        compiled_context_json: row.get(7)?,
+        compiled_prompt_text: row.get(8)?,
+        prompt_summary: row.get(9)?,
+        context_hash: row.get(10)?,
+        sources_json: row.get(11)?,
+        created_at: row.get(12)?,
+    })
+}
+
+fn get_chapter_generation_snapshot_by_id_internal(
+    conn: &Connection,
+    id: &str,
+) -> Result<ChapterGenerationSnapshotDto, String> {
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, volume_id, chapter_id, engineering_state_id, style_profile_id, output_profile_id, compiled_context_json, compiled_prompt_text, prompt_summary, context_hash, sources_json, created_at FROM chapter_generation_snapshots WHERE id = ?1",
+    ).map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], map_chapter_generation_snapshot_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_chapter_generation_snapshot(
+    input: SaveChapterGenerationSnapshotInput,
+) -> Result<ChapterGenerationSnapshotDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO chapter_generation_snapshots (id, novel_id, volume_id, chapter_id, engineering_state_id, style_profile_id, output_profile_id, compiled_context_json, compiled_prompt_text, prompt_summary, context_hash, sources_json, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        params![
+            &input.id,
+            &input.novel_id,
+            &input.volume_id,
+            &input.chapter_id,
+            &input.engineering_state_id,
+            &input.style_profile_id,
+            &input.output_profile_id,
+            &input.compiled_context_json,
+            &input.compiled_prompt_text,
+            &input.prompt_summary,
+            &input.context_hash,
+            &input.sources_json,
+            &input.created_at,
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    get_chapter_generation_snapshot_by_id_internal(&conn, &input.id)
+}
+
+#[tauri::command]
+pub fn get_chapter_generation_snapshots(
+    chapter_id: String,
+) -> Result<Vec<ChapterGenerationSnapshotDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, volume_id, chapter_id, engineering_state_id, style_profile_id, output_profile_id, compiled_context_json, compiled_prompt_text, prompt_summary, context_hash, sources_json, created_at FROM chapter_generation_snapshots WHERE chapter_id = ?1 ORDER BY created_at DESC",
+    ).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![chapter_id], map_chapter_generation_snapshot_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn get_latest_chapter_generation_snapshot(
+    chapter_id: String,
+) -> Result<Option<ChapterGenerationSnapshotDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, volume_id, chapter_id, engineering_state_id, style_profile_id, output_profile_id, compiled_context_json, compiled_prompt_text, prompt_summary, context_hash, sources_json, created_at FROM chapter_generation_snapshots WHERE chapter_id = ?1 ORDER BY created_at DESC LIMIT 1",
+    ).map_err(|e| e.to_string())?;
+    match stmt.query_row(params![chapter_id], map_chapter_generation_snapshot_row) {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 // ==================== AI Task Records ====================
 
 #[derive(Debug, Serialize, Deserialize)]

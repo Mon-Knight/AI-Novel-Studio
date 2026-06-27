@@ -1,5 +1,17 @@
 # AI Novel Studio - CHANGELOG
 
+## v1.9.6 (2026-06-27) - 生成上下文编译器
+
+### 新增
+
+- 新增 `GenerationContextCompiler`，将旧式章节上下文、active 章节工程状态、风格/输出控制、当前正文修改编译为统一 `generation_context_snapshot`。
+- 新增 `chapter_generation_snapshots` SQLite 表、迁移与 Tauri 读写命令，保存 `compiled_context_json`、`compiled_prompt_text`、`prompt_summary`、`context_hash` 与上下文来源列表。
+- 章节工程面板新增“快照”页签，支持手动编译上下文快照、查看来源状态、摘要、hash 与 prompt 预览。
+
+### 修改
+
+- 应用版本号更新为 `v1.9.6`。
+
 ## v1.9.5 (2026-06-27) - 章节工程面板
 
 ### 新增

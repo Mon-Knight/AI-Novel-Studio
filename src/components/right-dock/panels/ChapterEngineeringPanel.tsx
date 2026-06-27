@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { chapterEngineeringService, createDefaultChapterCard, createDefaultGenerationConstraints, createDefaultQualityRules, createDefaultScenePlan } from '../../../services/engineering/chapterEngineeringService';
+import { generationContextCompiler } from '../../../services/generation/generationContextCompiler';
 import { generateId } from '../../../services/database/db';
 import type { Chapter } from '../../../types/chapter';
 import type {
@@ -11,19 +12,22 @@ import type {
   QualityStrictness,
   ScenePlanItem,
 } from '../../../types/chapterEngineering';
+import type { ChapterGenerationSnapshot } from '../../../types/generationContext';
 
 interface ChapterEngineeringPanelProps {
   novelId?: string;
   chapter?: Chapter;
+  currentEditorContent?: string;
 }
 
-type TabId = 'card' | 'scenes' | 'constraints' | 'quality' | 'versions';
+type TabId = 'card' | 'scenes' | 'constraints' | 'quality' | 'snapshot' | 'versions';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'card', label: '章节卡' },
   { id: 'scenes', label: '场景' },
   { id: 'constraints', label: '约束' },
   { id: 'quality', label: '质检' },
+  { id: 'snapshot', label: '快照' },
   { id: 'versions', label: '版本' },
 ];
 
@@ -166,16 +170,18 @@ function createEmptyScene(sceneNo: number): ScenePlanItem {
   };
 }
 
-function ChapterEngineeringPanel({ novelId, chapter }: ChapterEngineeringPanelProps) {
+function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: ChapterEngineeringPanelProps) {
   const effectiveNovelId = novelId ?? chapter?.novelId;
   const [activeTab, setActiveTab] = useState<TabId>('card');
   const [bundle, setBundle] = useState<ChapterEngineeringBundle | null>(null);
+  const [latestSnapshot, setLatestSnapshot] = useState<ChapterGenerationSnapshot | null>(null);
   const [card, setCard] = useState<ChapterCard>(() => createDefaultChapterCard());
   const [scenePlan, setScenePlan] = useState<ScenePlanItem[]>(() => createDefaultScenePlan());
   const [constraints, setConstraints] = useState<GenerationConstraints>(() => createDefaultGenerationConstraints());
   const [qualityRules, setQualityRules] = useState<QualityRules>(() => createDefaultQualityRules());
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [compiling, setCompiling] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -187,6 +193,7 @@ function ChapterEngineeringPanel({ novelId, chapter }: ChapterEngineeringPanelPr
 
     if (!chapter?.id) {
       setBundle(null);
+      setLatestSnapshot(null);
       setCard(createDefaultChapterCard());
       setScenePlan(createDefaultScenePlan());
       setConstraints(createDefaultGenerationConstraints());
@@ -196,11 +203,15 @@ function ChapterEngineeringPanel({ novelId, chapter }: ChapterEngineeringPanelPr
     }
 
     setLoading(true);
-    chapterEngineeringService.getBundle(chapter.id, chapter)
-      .then((nextBundle) => {
+    Promise.all([
+      chapterEngineeringService.getBundle(chapter.id, chapter),
+      generationContextCompiler.getLatestByChapterId(chapter.id),
+    ])
+      .then(([nextBundle, snapshot]) => {
         if (!alive) return;
         const source = nextBundle.latestDraft ?? nextBundle.activeState;
         setBundle(nextBundle);
+        setLatestSnapshot(snapshot);
         setCard(source?.chapterCard ?? createDefaultChapterCard(chapter));
         setScenePlan(source?.scenePlan.length ? source.scenePlan : createDefaultScenePlan(chapter));
         setConstraints(source?.generationConstraints ?? createDefaultGenerationConstraints(chapter));
@@ -312,6 +323,35 @@ function ChapterEngineeringPanel({ novelId, chapter }: ChapterEngineeringPanelPr
       setMessage('');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleCompileSnapshot = async () => {
+    if (!chapter?.id || !effectiveNovelId) {
+      setError('请先选择章节');
+      return;
+    }
+    if (dirty) {
+      setError('请先保存并应用当前工程修改，再编译上下文快照。');
+      return;
+    }
+    setCompiling(true);
+    setError('');
+    setMessage('正在编译上下文快照...');
+    try {
+      const snapshot = await generationContextCompiler.compileAndSave({
+        novelId: effectiveNovelId,
+        volumeId: chapter.volumeId,
+        chapterId: chapter.id,
+        currentEditorContent,
+      });
+      setLatestSnapshot(snapshot);
+      setMessage(`已编译上下文快照 ${snapshot.contextHash}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '上下文快照编译失败');
+      setMessage('');
+    } finally {
+      setCompiling(false);
     }
   };
 
@@ -496,11 +536,56 @@ function ChapterEngineeringPanel({ novelId, chapter }: ChapterEngineeringPanelPr
         </div>
       )}
 
+      {activeTab === 'snapshot' && (
+        <div className="panel-section">
+          <div className="panel-section-title">Generation Snapshot</div>
+          <button
+            type="button"
+            className="panel-btn panel-btn-secondary"
+            disabled={busy || loading || compiling}
+            onClick={handleCompileSnapshot}
+          >
+            {compiling ? '正在编译...' : '编译上下文快照'}
+          </button>
+          {!latestSnapshot && <div className="engineering-empty">暂无上下文快照。</div>}
+          {latestSnapshot && (
+            <>
+              <div className="engineering-version-row">
+                <div>
+                  <strong>{latestSnapshot.contextHash}</strong>
+                  <span>{latestSnapshot.engineeringStateId ? 'active engineering' : 'no engineering'}</span>
+                </div>
+                <small>创建：{formatDate(latestSnapshot.createdAt)}</small>
+              </div>
+              <pre className="engineering-snapshot-summary">{latestSnapshot.promptSummary}</pre>
+              {latestSnapshot.compiledContext.warnings.length > 0 && (
+                <div className="engineering-error">{latestSnapshot.compiledContext.warnings.join('；')}</div>
+              )}
+              <div className="engineering-source-list">
+                {latestSnapshot.sources.map((item) => (
+                  <div className="engineering-source-row" key={`${item.type}-${item.title}`}>
+                    <span>{item.title}</span>
+                    <strong className={`source-${item.status}`}>{item.status}</strong>
+                    {item.summary && <small>{item.summary}</small>}
+                  </div>
+                ))}
+              </div>
+              <textarea
+                className="panel-textarea engineering-snapshot-preview"
+                value={latestSnapshot.compiledPromptText}
+                readOnly
+                rows={10}
+              />
+            </>
+          )}
+        </div>
+      )}
+
       <div className="engineering-actions">
         <button
           type="button"
           className="panel-btn panel-btn-secondary"
-          disabled={busy || loading}
+          disabled={busy || loading || compiling}
           onClick={handleSaveDraft}
         >
           保存草稿
@@ -508,7 +593,7 @@ function ChapterEngineeringPanel({ novelId, chapter }: ChapterEngineeringPanelPr
         <button
           type="button"
           className="panel-btn panel-btn-primary"
-          disabled={busy || loading}
+          disabled={busy || loading || compiling}
           onClick={handleSaveAndApply}
         >
           保存并应用

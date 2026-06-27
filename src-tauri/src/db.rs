@@ -231,6 +231,31 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_chapter_engineering_states_status
             ON chapter_engineering_states(chapter_id, status);
 
+        CREATE TABLE IF NOT EXISTS chapter_generation_snapshots (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            volume_id TEXT,
+            chapter_id TEXT NOT NULL,
+            engineering_state_id TEXT,
+            style_profile_id TEXT,
+            output_profile_id TEXT,
+            compiled_context_json TEXT NOT NULL DEFAULT '{}',
+            compiled_prompt_text TEXT NOT NULL DEFAULT '',
+            prompt_summary TEXT NOT NULL DEFAULT '',
+            context_hash TEXT NOT NULL DEFAULT '',
+            sources_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (volume_id) REFERENCES volumes(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id),
+            FOREIGN KEY (engineering_state_id) REFERENCES chapter_engineering_states(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chapter_generation_snapshots_chapter_id
+            ON chapter_generation_snapshots(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_chapter_generation_snapshots_context_hash
+            ON chapter_generation_snapshots(context_hash);
+
         CREATE TABLE IF NOT EXISTS ai_task_records (
             id TEXT PRIMARY KEY,
             novel_id TEXT,
@@ -580,6 +605,7 @@ fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     ensure_ai_task_record_columns(conn)?;
     ensure_large_text_ref_columns(conn)?;
     migrate_chapter_engineering_states_table(conn)?;
+    migrate_chapter_generation_snapshots_table(conn)?;
     migrate_characters_table(conn)?;
     migrate_chapter_characters_table(conn)?;
     migrate_quality_check_tables(conn)?;
@@ -1101,6 +1127,55 @@ fn migrate_chapter_engineering_states_table(conn: &Connection) -> SqliteResult<(
             ON chapter_engineering_states(chapter_id);
         CREATE INDEX IF NOT EXISTS idx_chapter_engineering_states_status
             ON chapter_engineering_states(chapter_id, status);
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_chapter_generation_snapshots_table(conn: &Connection) -> SqliteResult<()> {
+    ensure_column(conn, "chapter_generation_snapshots", "novel_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "chapter_generation_snapshots", "volume_id", "TEXT")?;
+    ensure_column(conn, "chapter_generation_snapshots", "chapter_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "chapter_generation_snapshots", "engineering_state_id", "TEXT")?;
+    ensure_column(conn, "chapter_generation_snapshots", "style_profile_id", "TEXT")?;
+    ensure_column(conn, "chapter_generation_snapshots", "output_profile_id", "TEXT")?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "compiled_context_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "compiled_prompt_text",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "prompt_summary",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "context_hash",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "sources_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(conn, "chapter_generation_snapshots", "created_at", "TEXT")?;
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_chapter_generation_snapshots_chapter_id
+            ON chapter_generation_snapshots(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_chapter_generation_snapshots_context_hash
+            ON chapter_generation_snapshots(context_hash);
         ",
     )?;
     Ok(())
