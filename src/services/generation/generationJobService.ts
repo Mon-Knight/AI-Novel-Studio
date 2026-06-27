@@ -1,7 +1,11 @@
 import { dbCall, generateId, lsGet, lsSet, nowISO } from '../database/db';
 import { createAiClient, aiSettingsService } from '../ai/aiClient';
+import { qualityCheckAiService } from '../ai/qualityCheckAiService';
+import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
+import { qualityCheckService } from '../quality/qualityCheckService';
 import { generationContextCompiler } from './generationContextCompiler';
+import { countTextWords, hashTextContent } from '../../utils/contentHash';
 import { toSafeNumber, toSafeString } from '../../utils/dataGuard';
 import type { AiGenerateRequest, ChapterDraft } from '../../types/ai';
 import type { ChapterGenerationSnapshot } from '../../types/generationContext';
@@ -668,6 +672,54 @@ export const generationJobService = {
         return {
           outputJson: { draftId: savedDraft.id, versionNo: savedDraft.versionNo, contextHash: snapshot.contextHash },
           outputText: `已保存正文草稿 v${savedDraft.versionNo}。`,
+        };
+      });
+      await runStep('quality_check', 99, async () => {
+        if (!savedDraft) throw new Error('missing_saved_draft');
+        const chapter = await chapterRepository.getById(input.chapterId);
+        const contentHash = hashTextContent(savedDraft.content);
+        const checkedAt = nowISO();
+        const report = await qualityCheckService.createReport({
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          draftId: savedDraft.id,
+          scope: 'current_draft',
+          contentHash,
+          contentLength: savedDraft.content.length,
+          checkedAt,
+        });
+        const result = await qualityCheckAiService.runCheck({
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          draftId: savedDraft.id,
+          volumeId: input.volumeId,
+          draftContent: savedDraft.content,
+          chapterTitle: chapter?.title || input.title || '未命名章节',
+          chapterOutline: chapter?.outline,
+          chapterGoal: chapter?.goal,
+          contentHash,
+          wordCount: countTextWords(savedDraft.content),
+        });
+        const saved = await qualityCheckService.saveResult({
+          reportId: report.id,
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          draftId: savedDraft.id,
+          result,
+          draftVersion: savedDraft.versionNo,
+          model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+          contentHash,
+          contentLength: savedDraft.content.length,
+          checkedAt,
+        });
+        return {
+          outputJson: {
+            reportId: saved.report?.id || report.id,
+            score: result.overallScore,
+            issueCount: result.items.length,
+            pendingCount: saved.statistics.pending,
+          },
+          outputText: `质量检查完成：评分 ${result.overallScore}，发现 ${result.items.length} 个问题。`,
         };
       });
       job = await this.update({
