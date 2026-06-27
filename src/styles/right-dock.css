@@ -437,9 +437,78 @@
   color: var(--color-warning);
 }
 
+.engineering-step-row .source-used {
+  color: var(--color-success);
+}
+
+.engineering-step-row .source-missing {
+  color: var(--color-error);
+}
+
+.engineering-step-row .source-fallback {
+  color: var(--color-warning);
+}
+
 .engineering-snapshot-preview {
   font-family: var(--font-family-mono);
   font-size: 12px;
+}
+
+.engineering-job-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.engineering-job-actions .panel-btn {
+  margin-bottom: var(--spacing-sm);
+}
+
+.engineering-job-progress {
+  grid-column: 1 / -1;
+  height: 5px;
+  margin-top: var(--spacing-xs);
+  border-radius: 999px;
+  background: var(--color-border-light);
+  overflow: hidden;
+}
+
+.engineering-job-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.engineering-step-list {
+  display: grid;
+  gap: var(--spacing-xs);
+}
+
+.engineering-step-row {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-card);
+}
+
+.engineering-step-row div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+}
+
+.engineering-step-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  max-height: 80px;
+  overflow: auto;
 }
 
 .engineering-actions {

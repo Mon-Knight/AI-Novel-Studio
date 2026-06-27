@@ -22,3 +22,4 @@ export * from './outline';
 export * from './settingSuggestion';
 export * from './chapterEngineering';
 export * from './generationContext';
+export * from './generationJob';

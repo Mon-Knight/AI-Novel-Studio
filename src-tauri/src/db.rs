@@ -256,6 +256,55 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_chapter_generation_snapshots_context_hash
             ON chapter_generation_snapshots(context_hash);
 
+        CREATE TABLE IF NOT EXISTS generation_jobs (
+            id TEXT PRIMARY KEY,
+            world_id TEXT,
+            novel_id TEXT NOT NULL,
+            volume_id TEXT,
+            chapter_id TEXT NOT NULL,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            current_step TEXT,
+            progress_percent INTEGER NOT NULL DEFAULT 0,
+            provider TEXT,
+            model_name TEXT,
+            input_token_estimate INTEGER,
+            output_token_estimate INTEGER,
+            actual_input_tokens INTEGER,
+            actual_output_tokens INTEGER,
+            cost_estimate REAL,
+            error_code TEXT,
+            error_message TEXT,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (volume_id) REFERENCES volumes(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_generation_jobs_chapter_id
+            ON generation_jobs(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_generation_jobs_status
+            ON generation_jobs(status);
+
+        CREATE TABLE IF NOT EXISTS generation_step_results (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            step_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            input_snapshot_json TEXT,
+            output_json TEXT,
+            output_text TEXT,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (job_id) REFERENCES generation_jobs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_generation_step_results_job_id
+            ON generation_step_results(job_id);
+
         CREATE TABLE IF NOT EXISTS ai_task_records (
             id TEXT PRIMARY KEY,
             novel_id TEXT,
@@ -606,6 +655,7 @@ fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     ensure_large_text_ref_columns(conn)?;
     migrate_chapter_engineering_states_table(conn)?;
     migrate_chapter_generation_snapshots_table(conn)?;
+    migrate_generation_jobs_table(conn)?;
     migrate_characters_table(conn)?;
     migrate_chapter_characters_table(conn)?;
     migrate_quality_check_tables(conn)?;
@@ -1176,6 +1226,50 @@ fn migrate_chapter_generation_snapshots_table(conn: &Connection) -> SqliteResult
             ON chapter_generation_snapshots(chapter_id);
         CREATE INDEX IF NOT EXISTS idx_chapter_generation_snapshots_context_hash
             ON chapter_generation_snapshots(context_hash);
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_generation_jobs_table(conn: &Connection) -> SqliteResult<()> {
+    ensure_column(conn, "generation_jobs", "world_id", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "novel_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "generation_jobs", "volume_id", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "chapter_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "generation_jobs", "job_type", "TEXT NOT NULL DEFAULT 'chapter_generation_mock'")?;
+    ensure_column(conn, "generation_jobs", "status", "TEXT NOT NULL DEFAULT 'pending'")?;
+    ensure_column(conn, "generation_jobs", "current_step", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "progress_percent", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "generation_jobs", "provider", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "model_name", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "input_token_estimate", "INTEGER")?;
+    ensure_column(conn, "generation_jobs", "output_token_estimate", "INTEGER")?;
+    ensure_column(conn, "generation_jobs", "actual_input_tokens", "INTEGER")?;
+    ensure_column(conn, "generation_jobs", "actual_output_tokens", "INTEGER")?;
+    ensure_column(conn, "generation_jobs", "cost_estimate", "REAL")?;
+    ensure_column(conn, "generation_jobs", "error_code", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "error_message", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "generation_jobs", "created_at", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "started_at", "TEXT")?;
+    ensure_column(conn, "generation_jobs", "finished_at", "TEXT")?;
+
+    ensure_column(conn, "generation_step_results", "job_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "generation_step_results", "step_name", "TEXT NOT NULL DEFAULT 'preflight'")?;
+    ensure_column(conn, "generation_step_results", "status", "TEXT NOT NULL DEFAULT 'pending'")?;
+    ensure_column(conn, "generation_step_results", "input_snapshot_json", "TEXT")?;
+    ensure_column(conn, "generation_step_results", "output_json", "TEXT")?;
+    ensure_column(conn, "generation_step_results", "output_text", "TEXT")?;
+    ensure_column(conn, "generation_step_results", "error_message", "TEXT")?;
+    ensure_column(conn, "generation_step_results", "created_at", "TEXT")?;
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_generation_jobs_chapter_id
+            ON generation_jobs(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_generation_jobs_status
+            ON generation_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_generation_step_results_job_id
+            ON generation_step_results(job_id);
         ",
     )?;
     Ok(())

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { chapterEngineeringService, createDefaultChapterCard, createDefaultGenerationConstraints, createDefaultQualityRules, createDefaultScenePlan } from '../../../services/engineering/chapterEngineeringService';
 import { generationContextCompiler } from '../../../services/generation/generationContextCompiler';
+import { generationJobService } from '../../../services/generation/generationJobService';
 import { generateId } from '../../../services/database/db';
 import type { Chapter } from '../../../types/chapter';
 import type {
@@ -13,6 +14,7 @@ import type {
   ScenePlanItem,
 } from '../../../types/chapterEngineering';
 import type { ChapterGenerationSnapshot } from '../../../types/generationContext';
+import type { GenerationJob, GenerationStepResult } from '../../../types/generationJob';
 
 interface ChapterEngineeringPanelProps {
   novelId?: string;
@@ -20,7 +22,7 @@ interface ChapterEngineeringPanelProps {
   currentEditorContent?: string;
 }
 
-type TabId = 'card' | 'scenes' | 'constraints' | 'quality' | 'snapshot' | 'versions';
+type TabId = 'card' | 'scenes' | 'constraints' | 'quality' | 'snapshot' | 'jobs' | 'versions';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'card', label: '章节卡' },
@@ -28,6 +30,7 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'constraints', label: '约束' },
   { id: 'quality', label: '质检' },
   { id: 'snapshot', label: '快照' },
+  { id: 'jobs', label: '任务' },
   { id: 'versions', label: '版本' },
 ];
 
@@ -175,6 +178,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
   const [activeTab, setActiveTab] = useState<TabId>('card');
   const [bundle, setBundle] = useState<ChapterEngineeringBundle | null>(null);
   const [latestSnapshot, setLatestSnapshot] = useState<ChapterGenerationSnapshot | null>(null);
+  const [latestJob, setLatestJob] = useState<GenerationJob | null>(null);
+  const [jobSteps, setJobSteps] = useState<GenerationStepResult[]>([]);
   const [card, setCard] = useState<ChapterCard>(() => createDefaultChapterCard());
   const [scenePlan, setScenePlan] = useState<ScenePlanItem[]>(() => createDefaultScenePlan());
   const [constraints, setConstraints] = useState<GenerationConstraints>(() => createDefaultGenerationConstraints());
@@ -182,6 +187,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [jobRunning, setJobRunning] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -194,6 +200,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
     if (!chapter?.id) {
       setBundle(null);
       setLatestSnapshot(null);
+      setLatestJob(null);
+      setJobSteps([]);
       setCard(createDefaultChapterCard());
       setScenePlan(createDefaultScenePlan());
       setConstraints(createDefaultGenerationConstraints());
@@ -206,12 +214,21 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
     Promise.all([
       chapterEngineeringService.getBundle(chapter.id, chapter),
       generationContextCompiler.getLatestByChapterId(chapter.id),
+      generationJobService.getByChapterId(chapter.id),
     ])
-      .then(([nextBundle, snapshot]) => {
+      .then(async ([nextBundle, snapshot, jobs]) => {
         if (!alive) return;
         const source = nextBundle.latestDraft ?? nextBundle.activeState;
         setBundle(nextBundle);
         setLatestSnapshot(snapshot);
+        const latest = jobs[0] ?? null;
+        setLatestJob(latest);
+        if (latest) {
+          const steps = await generationJobService.getSteps(latest.id);
+          if (alive) setJobSteps(steps);
+        } else {
+          setJobSteps([]);
+        }
         setCard(source?.chapterCard ?? createDefaultChapterCard(chapter));
         setScenePlan(source?.scenePlan.length ? source.scenePlan : createDefaultScenePlan(chapter));
         setConstraints(source?.generationConstraints ?? createDefaultGenerationConstraints(chapter));
@@ -352,6 +369,54 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
       setMessage('');
     } finally {
       setCompiling(false);
+    }
+  };
+
+  const handleRunMockJob = async () => {
+    if (!chapter?.id || !effectiveNovelId) {
+      setError('请先选择章节');
+      return;
+    }
+    if (dirty) {
+      setError('请先保存并应用当前工程修改，再启动 Mock 任务。');
+      return;
+    }
+    setJobRunning(true);
+    setError('');
+    setMessage('正在运行 Mock 生成任务...');
+    try {
+      const finalJob = await generationJobService.runMockChapterJob({
+        novelId: effectiveNovelId,
+        volumeId: chapter.volumeId,
+        chapterId: chapter.id,
+        currentEditorContent,
+      }, (job, steps) => {
+        setLatestJob(job);
+        setJobSteps(steps);
+      });
+      setLatestJob(finalJob);
+      setJobSteps(await generationJobService.getSteps(finalJob.id));
+      setMessage(`Mock 任务已${finalJob.status === 'completed' ? '完成' : finalJob.status}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Mock 生成任务失败');
+      setMessage('');
+    } finally {
+      setJobRunning(false);
+    }
+  };
+
+  const handleCancelJob = async () => {
+    if (!latestJob || latestJob.status === 'completed' || latestJob.status === 'failed' || latestJob.status === 'cancelled') return;
+    setError('');
+    try {
+      const cancelled = await generationJobService.cancel(latestJob.id);
+      if (cancelled) {
+        setLatestJob(cancelled);
+        setJobSteps(await generationJobService.getSteps(cancelled.id));
+        setMessage('任务已取消');
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '任务取消失败');
     }
   };
 
@@ -581,11 +646,64 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
         </div>
       )}
 
+      {activeTab === 'jobs' && (
+        <div className="panel-section">
+          <div className="panel-section-title">Generation Jobs</div>
+          <div className="engineering-job-actions">
+            <button
+              type="button"
+              className="panel-btn panel-btn-secondary"
+              disabled={busy || loading || compiling || jobRunning}
+              onClick={handleRunMockJob}
+            >
+              {jobRunning ? 'Mock 运行中...' : '启动 Mock 任务'}
+            </button>
+            <button
+              type="button"
+              className="panel-btn panel-btn-warning"
+              disabled={!latestJob || ['completed', 'failed', 'cancelled'].includes(latestJob.status)}
+              onClick={handleCancelJob}
+            >
+              取消任务
+            </button>
+          </div>
+          {!latestJob && <div className="engineering-empty">暂无生成任务。</div>}
+          {latestJob && (
+            <>
+              <div className="engineering-version-row">
+                <div>
+                  <strong>{latestJob.status}</strong>
+                  <span>{latestJob.currentStep || latestJob.jobType}</span>
+                </div>
+                <small>进度：{latestJob.progressPercent}% / provider：{latestJob.provider || '-'}</small>
+                <div className="engineering-job-progress">
+                  <span style={{ width: `${Math.max(0, Math.min(100, latestJob.progressPercent))}%` }} />
+                </div>
+              </div>
+              <div className="engineering-step-list">
+                {jobSteps.map((step) => (
+                  <div className="engineering-step-row" key={step.id}>
+                    <div>
+                      <strong>{step.stepName}</strong>
+                      <span className={`source-${step.status === 'succeeded' ? 'used' : step.status === 'failed' ? 'missing' : 'fallback'}`}>
+                        {step.status}
+                      </span>
+                    </div>
+                    {step.outputText && <small>{step.outputText}</small>}
+                    {step.errorMessage && <small>{step.errorMessage}</small>}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="engineering-actions">
         <button
           type="button"
           className="panel-btn panel-btn-secondary"
-          disabled={busy || loading || compiling}
+          disabled={busy || loading || compiling || jobRunning}
           onClick={handleSaveDraft}
         >
           保存草稿
@@ -593,7 +711,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
         <button
           type="button"
           className="panel-btn panel-btn-primary"
-          disabled={busy || loading || compiling}
+          disabled={busy || loading || compiling || jobRunning}
           onClick={handleSaveAndApply}
         >
           保存并应用

@@ -1,5 +1,17 @@
 # AI Novel Studio - CHANGELOG
 
+## v1.9.7 (2026-06-27) - API 任务队列与 Mock Runner
+
+### 新增
+
+- 新增 `generation_jobs` 与 `generation_step_results` SQLite 表、迁移和 Tauri 命令，支持创建、查询、更新、取消生成任务，并记录每一步结果。
+- 新增 `GenerationJobService`，支持 `chapter_generation_mock` 任务从预检、上下文编译、章节卡、场景计划到 mock draft / skipped 后续步骤的完整跑通。
+- 章节工程面板新增“任务”页签，可启动 Mock 任务、查看任务进度、step 输出和取消正在运行的任务。
+
+### 修改
+
+- 应用版本号更新为 `v1.9.7`。
+
 ## v1.9.6 (2026-06-27) - 生成上下文编译器
 
 ### 新增

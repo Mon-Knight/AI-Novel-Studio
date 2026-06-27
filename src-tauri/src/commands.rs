@@ -1480,6 +1480,282 @@ pub fn get_latest_chapter_generation_snapshot(
     }
 }
 
+// ==================== Generation Jobs ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationJobDto {
+    pub id: String,
+    pub world_id: Option<String>,
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub chapter_id: String,
+    pub job_type: String,
+    pub status: String,
+    pub current_step: Option<String>,
+    pub progress_percent: i64,
+    pub provider: Option<String>,
+    pub model_name: Option<String>,
+    pub input_token_estimate: Option<i64>,
+    pub output_token_estimate: Option<i64>,
+    pub actual_input_tokens: Option<i64>,
+    pub actual_output_tokens: Option<i64>,
+    pub cost_estimate: Option<f64>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retry_count: i64,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateGenerationJobInput {
+    pub id: String,
+    pub world_id: Option<String>,
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub chapter_id: String,
+    pub job_type: String,
+    pub status: String,
+    pub current_step: Option<String>,
+    pub progress_percent: i64,
+    pub provider: Option<String>,
+    pub model_name: Option<String>,
+    pub retry_count: i64,
+    pub created_at: String,
+    pub started_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateGenerationJobInput {
+    pub id: String,
+    pub status: Option<String>,
+    pub current_step: Option<String>,
+    pub progress_percent: Option<i64>,
+    pub provider: Option<String>,
+    pub model_name: Option<String>,
+    pub input_token_estimate: Option<i64>,
+    pub output_token_estimate: Option<i64>,
+    pub actual_input_tokens: Option<i64>,
+    pub actual_output_tokens: Option<i64>,
+    pub cost_estimate: Option<f64>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub retry_count: Option<i64>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationStepResultDto {
+    pub id: String,
+    pub job_id: String,
+    pub step_name: String,
+    pub status: String,
+    pub input_snapshot_json: Option<String>,
+    pub output_json: Option<String>,
+    pub output_text: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveGenerationStepResultInput {
+    pub id: String,
+    pub job_id: String,
+    pub step_name: String,
+    pub status: String,
+    pub input_snapshot_json: Option<String>,
+    pub output_json: Option<String>,
+    pub output_text: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+fn map_generation_job_row(row: &Row<'_>) -> rusqlite::Result<GenerationJobDto> {
+    Ok(GenerationJobDto {
+        id: row.get(0)?,
+        world_id: row.get(1)?,
+        novel_id: row.get(2)?,
+        volume_id: row.get(3)?,
+        chapter_id: row.get(4)?,
+        job_type: row.get(5)?,
+        status: row.get(6)?,
+        current_step: row.get(7)?,
+        progress_percent: row.get(8)?,
+        provider: row.get(9)?,
+        model_name: row.get(10)?,
+        input_token_estimate: row.get(11)?,
+        output_token_estimate: row.get(12)?,
+        actual_input_tokens: row.get(13)?,
+        actual_output_tokens: row.get(14)?,
+        cost_estimate: row.get(15)?,
+        error_code: row.get(16)?,
+        error_message: row.get(17)?,
+        retry_count: row.get(18)?,
+        created_at: row.get(19)?,
+        started_at: row.get(20)?,
+        finished_at: row.get(21)?,
+    })
+}
+
+fn map_generation_step_result_row(row: &Row<'_>) -> rusqlite::Result<GenerationStepResultDto> {
+    Ok(GenerationStepResultDto {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        step_name: row.get(2)?,
+        status: row.get(3)?,
+        input_snapshot_json: row.get(4)?,
+        output_json: row.get(5)?,
+        output_text: row.get(6)?,
+        error_message: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+fn get_generation_job_by_id_internal(conn: &Connection, id: &str) -> Result<GenerationJobDto, String> {
+    let mut stmt = conn.prepare(
+        "SELECT id, world_id, novel_id, volume_id, chapter_id, job_type, status, current_step, progress_percent, provider, model_name, input_token_estimate, output_token_estimate, actual_input_tokens, actual_output_tokens, cost_estimate, error_code, error_message, retry_count, created_at, started_at, finished_at FROM generation_jobs WHERE id = ?1",
+    ).map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], map_generation_job_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_generation_job(input: CreateGenerationJobInput) -> Result<GenerationJobDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO generation_jobs (id, world_id, novel_id, volume_id, chapter_id, job_type, status, current_step, progress_percent, provider, model_name, retry_count, created_at, started_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        params![
+            &input.id,
+            &input.world_id,
+            &input.novel_id,
+            &input.volume_id,
+            &input.chapter_id,
+            &input.job_type,
+            &input.status,
+            &input.current_step,
+            input.progress_percent,
+            &input.provider,
+            &input.model_name,
+            input.retry_count,
+            &input.created_at,
+            &input.started_at,
+        ],
+    ).map_err(|e| e.to_string())?;
+    get_generation_job_by_id_internal(&conn, &input.id)
+}
+
+#[tauri::command]
+pub fn update_generation_job(input: UpdateGenerationJobInput) -> Result<GenerationJobDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE generation_jobs SET status = COALESCE(?1, status), current_step = COALESCE(?2, current_step), progress_percent = COALESCE(?3, progress_percent), provider = COALESCE(?4, provider), model_name = COALESCE(?5, model_name), input_token_estimate = COALESCE(?6, input_token_estimate), output_token_estimate = COALESCE(?7, output_token_estimate), actual_input_tokens = COALESCE(?8, actual_input_tokens), actual_output_tokens = COALESCE(?9, actual_output_tokens), cost_estimate = COALESCE(?10, cost_estimate), error_code = COALESCE(?11, error_code), error_message = COALESCE(?12, error_message), retry_count = COALESCE(?13, retry_count), started_at = COALESCE(?14, started_at), finished_at = COALESCE(?15, finished_at) WHERE id = ?16",
+        params![
+            &input.status,
+            &input.current_step,
+            input.progress_percent,
+            &input.provider,
+            &input.model_name,
+            input.input_token_estimate,
+            input.output_token_estimate,
+            input.actual_input_tokens,
+            input.actual_output_tokens,
+            input.cost_estimate,
+            &input.error_code,
+            &input.error_message,
+            input.retry_count,
+            &input.started_at,
+            &input.finished_at,
+            &input.id,
+        ],
+    ).map_err(|e| e.to_string())?;
+    get_generation_job_by_id_internal(&conn, &input.id)
+}
+
+#[tauri::command]
+pub fn get_generation_job(id: String) -> Result<Option<GenerationJobDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    match get_generation_job_by_id_internal(&conn, &id) {
+        Ok(job) => Ok(Some(job)),
+        Err(err) if err.contains("Query returned no rows") => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+#[tauri::command]
+pub fn get_generation_jobs_by_chapter_id(chapter_id: String) -> Result<Vec<GenerationJobDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, world_id, novel_id, volume_id, chapter_id, job_type, status, current_step, progress_percent, provider, model_name, input_token_estimate, output_token_estimate, actual_input_tokens, actual_output_tokens, cost_estimate, error_code, error_message, retry_count, created_at, started_at, finished_at FROM generation_jobs WHERE chapter_id = ?1 ORDER BY created_at DESC",
+    ).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![chapter_id], map_generation_job_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn cancel_generation_job(id: String, finished_at: String) -> Result<Option<GenerationJobDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE generation_jobs SET status = 'cancelled', finished_at = ?1 WHERE id = ?2 AND status NOT IN ('completed', 'failed', 'cancelled')",
+        params![&finished_at, &id],
+    ).map_err(|e| e.to_string())?;
+    match get_generation_job_by_id_internal(&conn, &id) {
+        Ok(job) => Ok(Some(job)),
+        Err(err) if err.contains("Query returned no rows") => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+#[tauri::command]
+pub fn save_generation_step_result(
+    input: SaveGenerationStepResultInput,
+) -> Result<GenerationStepResultDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO generation_step_results (id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        params![
+            &input.id,
+            &input.job_id,
+            &input.step_name,
+            &input.status,
+            &input.input_snapshot_json,
+            &input.output_json,
+            &input.output_text,
+            &input.error_message,
+            &input.created_at,
+        ],
+    ).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at FROM generation_step_results WHERE id = ?1",
+    ).map_err(|e| e.to_string())?;
+    stmt.query_row(params![&input.id], map_generation_step_result_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_generation_step_results(job_id: String) -> Result<Vec<GenerationStepResultDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at FROM generation_step_results WHERE job_id = ?1 ORDER BY created_at ASC",
+    ).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![job_id], map_generation_step_result_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
 // ==================== AI Task Records ====================
 
 #[derive(Debug, Serialize, Deserialize)]
