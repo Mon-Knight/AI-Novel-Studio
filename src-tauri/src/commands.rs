@@ -1200,6 +1200,161 @@ pub fn delete_chapter_draft(id: String, chapter_id: String) -> Result<(), String
     Ok(())
 }
 
+// ==================== Chapter Engineering State ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterEngineeringStateDto {
+    pub id: String,
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub chapter_id: String,
+    pub chapter_card_json: String,
+    pub scene_plan_json: String,
+    pub generation_constraints_json: String,
+    pub quality_rules_json: String,
+    pub draft_version: i64,
+    pub active_version: i64,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub activated_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveChapterEngineeringDraftInput {
+    pub novel_id: String,
+    pub volume_id: Option<String>,
+    pub chapter_id: String,
+    pub chapter_card_json: String,
+    pub scene_plan_json: String,
+    pub generation_constraints_json: String,
+    pub quality_rules_json: String,
+}
+
+fn map_chapter_engineering_state_row(row: &Row<'_>) -> rusqlite::Result<ChapterEngineeringStateDto> {
+    Ok(ChapterEngineeringStateDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        volume_id: row.get(2)?,
+        chapter_id: row.get(3)?,
+        chapter_card_json: row.get(4)?,
+        scene_plan_json: row.get(5)?,
+        generation_constraints_json: row.get(6)?,
+        quality_rules_json: row.get(7)?,
+        draft_version: row.get(8)?,
+        active_version: row.get(9)?,
+        status: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        activated_at: row.get(13)?,
+    })
+}
+
+fn get_chapter_engineering_state_by_id_internal(
+    conn: &Connection,
+    id: &str,
+) -> Result<ChapterEngineeringStateDto, String> {
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, volume_id, chapter_id, chapter_card_json, scene_plan_json, generation_constraints_json, quality_rules_json, draft_version, active_version, status, created_at, updated_at, activated_at FROM chapter_engineering_states WHERE id = ?1",
+    ).map_err(|e| e.to_string())?;
+    stmt.query_row(params![id], map_chapter_engineering_state_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_chapter_engineering_states(
+    chapter_id: String,
+) -> Result<Vec<ChapterEngineeringStateDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, novel_id, volume_id, chapter_id, chapter_card_json, scene_plan_json, generation_constraints_json, quality_rules_json, draft_version, active_version, status, created_at, updated_at, activated_at FROM chapter_engineering_states WHERE chapter_id = ?1 ORDER BY draft_version DESC, updated_at DESC",
+    ).map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![chapter_id], map_chapter_engineering_state_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn save_chapter_engineering_draft(
+    input: SaveChapterEngineeringDraftInput,
+) -> Result<ChapterEngineeringStateDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let max_version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(draft_version), 0) FROM chapter_engineering_states WHERE chapter_id = ?1",
+            params![&input.chapter_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let active_version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(draft_version), 0) FROM chapter_engineering_states WHERE chapter_id = ?1 AND status = 'active'",
+            params![&input.chapter_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "INSERT INTO chapter_engineering_states (id, novel_id, volume_id, chapter_id, chapter_card_json, scene_plan_json, generation_constraints_json, quality_rules_json, draft_version, active_version, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'draft',?11,?11)",
+        params![
+            &id,
+            &input.novel_id,
+            &input.volume_id,
+            &input.chapter_id,
+            &input.chapter_card_json,
+            &input.scene_plan_json,
+            &input.generation_constraints_json,
+            &input.quality_rules_json,
+            max_version + 1,
+            active_version,
+            &now,
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    get_chapter_engineering_state_by_id_internal(&conn, &id)
+}
+
+#[tauri::command]
+pub fn activate_chapter_engineering_state(
+    id: String,
+    chapter_id: String,
+) -> Result<ChapterEngineeringStateDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let draft_version: i64 = match conn.query_row(
+        "SELECT draft_version FROM chapter_engineering_states WHERE id = ?1 AND chapter_id = ?2",
+        params![&id, &chapter_id],
+        |row| row.get(0),
+    ) {
+        Ok(version) => version,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err("chapter engineering state not found".to_string())
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE chapter_engineering_states SET status = 'archived', updated_at = ?1 WHERE chapter_id = ?2 AND status = 'active'",
+        params![&now, &chapter_id],
+    ).map_err(|e| e.to_string())?;
+    let affected = conn.execute(
+        "UPDATE chapter_engineering_states SET status = 'active', active_version = ?1, updated_at = ?2, activated_at = ?2 WHERE id = ?3 AND chapter_id = ?4",
+        params![draft_version, &now, &id, &chapter_id],
+    ).map_err(|e| e.to_string())?;
+    if affected == 0 {
+        return Err("chapter engineering state not found".to_string());
+    }
+
+    get_chapter_engineering_state_by_id_internal(&conn, &id)
+}
+
 // ==================== AI Task Records ====================
 
 #[derive(Debug, Serialize, Deserialize)]

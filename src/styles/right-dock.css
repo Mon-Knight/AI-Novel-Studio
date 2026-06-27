@@ -179,6 +179,25 @@
   border-color: var(--color-primary);
 }
 
+.panel-input,
+.panel-textarea {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  padding: var(--spacing-sm) var(--spacing-md);
+  resize: vertical;
+}
+
+.panel-input:focus,
+.panel-textarea:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
 .panel-btn {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-lg);
@@ -218,6 +237,187 @@
 
 .panel-btn-warning:hover {
   background: #ffe0b2;
+}
+
+/* === 章节工程面板 === */
+.engineering-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding-bottom: 72px;
+}
+
+.engineering-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.engineering-status strong {
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.engineering-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border-light);
+  padding-bottom: var(--spacing-xs);
+}
+
+.engineering-tab {
+  min-width: 0;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  transition: all var(--transition-fast);
+}
+
+.engineering-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.engineering-tab.active {
+  background: var(--color-bg-active);
+  color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.engineering-field {
+  display: block;
+}
+
+.engineering-two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.engineering-scene {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  background: var(--color-bg-card);
+}
+
+.engineering-scene-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.engineering-link-btn {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.engineering-link-btn:hover {
+  color: var(--color-error);
+}
+
+.engineering-check-list {
+  display: grid;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+}
+
+.engineering-check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  margin-bottom: var(--spacing-sm);
+}
+
+.engineering-check-row input {
+  flex: 0 0 auto;
+}
+
+.engineering-version-row {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  background: var(--color-bg-card);
+}
+
+.engineering-version-row div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.engineering-version-row span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.engineering-version-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.engineering-actions {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--spacing-sm);
+  padding-top: var(--spacing-sm);
+  background: var(--color-bg-panel);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.engineering-actions .panel-btn {
+  margin-bottom: 0;
+}
+
+.engineering-message,
+.engineering-error,
+.engineering-empty {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.engineering-message {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.engineering-error {
+  background: #fff5f5;
+  color: var(--color-error);
+  border: 1px solid #ffd6d6;
+}
+
+.engineering-empty {
+  color: var(--color-text-muted);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
 }
 
 /* === 角色列表 === */

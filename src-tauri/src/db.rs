@@ -206,6 +206,31 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
 
         CREATE INDEX IF NOT EXISTS idx_chapter_drafts_chapter_id ON chapter_drafts(chapter_id);
 
+        CREATE TABLE IF NOT EXISTS chapter_engineering_states (
+            id TEXT PRIMARY KEY,
+            novel_id TEXT NOT NULL,
+            volume_id TEXT,
+            chapter_id TEXT NOT NULL,
+            chapter_card_json TEXT NOT NULL DEFAULT '{}',
+            scene_plan_json TEXT NOT NULL DEFAULT '[]',
+            generation_constraints_json TEXT NOT NULL DEFAULT '{}',
+            quality_rules_json TEXT NOT NULL DEFAULT '{}',
+            draft_version INTEGER NOT NULL DEFAULT 1,
+            active_version INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            activated_at TEXT,
+            FOREIGN KEY (novel_id) REFERENCES novels(id),
+            FOREIGN KEY (volume_id) REFERENCES volumes(id),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chapter_engineering_states_chapter_id
+            ON chapter_engineering_states(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_chapter_engineering_states_status
+            ON chapter_engineering_states(chapter_id, status);
+
         CREATE TABLE IF NOT EXISTS ai_task_records (
             id TEXT PRIMARY KEY,
             novel_id TEXT,
@@ -554,6 +579,7 @@ fn run_migrations(conn: &Connection) -> SqliteResult<()> {
     migrate_chapters_table(conn)?;
     ensure_ai_task_record_columns(conn)?;
     ensure_large_text_ref_columns(conn)?;
+    migrate_chapter_engineering_states_table(conn)?;
     migrate_characters_table(conn)?;
     migrate_chapter_characters_table(conn)?;
     migrate_quality_check_tables(conn)?;
@@ -1016,6 +1042,66 @@ fn ensure_large_text_ref_columns(conn: &Connection) -> SqliteResult<()> {
         "rule_systems",
         "large_text_ref_id",
         "ALTER TABLE rule_systems ADD COLUMN large_text_ref_id TEXT",
+    )?;
+    Ok(())
+}
+
+fn migrate_chapter_engineering_states_table(conn: &Connection) -> SqliteResult<()> {
+    ensure_column(conn, "chapter_engineering_states", "novel_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(conn, "chapter_engineering_states", "volume_id", "TEXT")?;
+    ensure_column(conn, "chapter_engineering_states", "chapter_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "chapter_card_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "scene_plan_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "generation_constraints_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "quality_rules_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "draft_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "active_version",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "status",
+        "TEXT NOT NULL DEFAULT 'draft'",
+    )?;
+    ensure_column(conn, "chapter_engineering_states", "created_at", "TEXT")?;
+    ensure_column(conn, "chapter_engineering_states", "updated_at", "TEXT")?;
+    ensure_column(conn, "chapter_engineering_states", "activated_at", "TEXT")?;
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_chapter_engineering_states_chapter_id
+            ON chapter_engineering_states(chapter_id);
+        CREATE INDEX IF NOT EXISTS idx_chapter_engineering_states_status
+            ON chapter_engineering_states(chapter_id, status);
+        ",
     )?;
     Ok(())
 }

@@ -4,6 +4,7 @@ import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import type { AiTextApplyMode, AiTextApplyRequest } from '../workspace/EditorArea';
 import AiGeneratePanel from './panels/AiGeneratePanel';
+import ChapterEngineeringPanel from './panels/ChapterEngineeringPanel';
 import OutlinePanel from './panels/OutlinePanel';
 import CharactersPanel from './panels/CharactersPanel';
 import EventsPanel from './panels/EventsPanel';
@@ -49,6 +50,7 @@ interface RightPanelProps {
 
 const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
   'ai-generate': { title: 'AI 章节生成', component: AiGeneratePanel },
+  'engineering': { title: '章节工程', component: ChapterEngineeringPanel },
   'outline': { title: '大纲查看', component: OutlinePanel },
   'characters': { title: '角色管理', component: CharactersPanel },
   'events': { title: '事件管理', component: EventsPanel },

@@ -21,6 +21,7 @@ const toolbarButtons: ToolbarButton[] = [
   { kind: 'command', command: 'save', icon: '💾', label: '保存' },
   { kind: 'panel', id: 'draft-history', icon: '📚', label: '草稿' },
   { kind: 'panel', id: 'ai-generate', icon: '🤖', label: 'AI生成' },
+  { kind: 'panel', id: 'engineering', icon: '🧩', label: '工程' },
   { kind: 'panel', id: 'outline', icon: '📋', label: '大纲' },
   { kind: 'panel', id: 'characters', icon: '👥', label: '角色' },
   { kind: 'panel', id: 'events', icon: '⚡', label: '事件' },

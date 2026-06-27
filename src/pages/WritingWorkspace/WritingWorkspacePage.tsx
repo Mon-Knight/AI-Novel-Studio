@@ -36,7 +36,7 @@ import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
 
 export type PanelType =
-  | 'ai-generate' | 'outline' | 'characters' | 'events'
+  | 'ai-generate' | 'engineering' | 'outline' | 'characters' | 'events'
   | 'setting' | 'style' | 'check' | 'polish'
   | 'draft-history' | 'chapter-summary' | 'context-view' | null;
 

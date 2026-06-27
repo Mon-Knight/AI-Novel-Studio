@@ -1,7 +1,7 @@
 {
   "name": "ai-novel-studio",
   "private": true,
-  "version": "1.7.20",
+  "version": "1.9.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
