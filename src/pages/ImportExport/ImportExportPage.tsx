@@ -1,7 +1,7 @@
 /**
  * AI Novel Studio - 导入导出中心页面
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
@@ -23,17 +23,40 @@ function ImportExportPage() {
   const [showTxtImport, setShowTxtImport] = useState(false);
   const [showJsonImport, setShowJsonImport] = useState(false);
 
-  useEffect(() => {
-    novelRepository.getAll().then((list) => { setNovels(list); if (list.length > 0) setSelectedNovelId(list[0].id); });
+  const loadNovels = useCallback(async () => {
+    const list = await novelRepository.getAll();
+    setNovels(list);
+    setSelectedNovelId((current) => {
+      if (current && list.some((novel) => novel.id === current)) return current;
+      return list[0]?.id ?? '';
+    });
+    if (list.length === 0) {
+      setChapters([]);
+      setSelectedChapterId('');
+    }
   }, []);
 
   useEffect(() => {
-    if (!selectedNovelId) return;
+    void loadNovels();
+  }, [loadNovels]);
+
+  useEffect(() => {
+    if (!selectedNovelId) {
+      setChapters([]);
+      setSelectedChapterId('');
+      return;
+    }
+    let cancelled = false;
     chapterRepository.getByNovelId(selectedNovelId).then((list) => {
+      if (cancelled) return;
       setChapters(list);
       const adopted = list.filter((c) => c.status === 'adopted' || c.status === 'summarized');
-      if (adopted.length > 0) setSelectedChapterId(adopted[0].id);
+      setSelectedChapterId((current) => {
+        if (current && adopted.some((chapter) => chapter.id === current)) return current;
+        return adopted[0]?.id ?? '';
+      });
     });
+    return () => { cancelled = true; };
   }, [selectedNovelId]);
 
   const handleExport = async (fn: () => Promise<string | void>) => {
@@ -51,7 +74,7 @@ function ImportExportPage() {
     <div className="page-container form-page" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>📥 导入导出中心</div>
-      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>导出已采用章节正文，导入风格方案和输出控制</div>
+      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>导出已采用章节正文或完整 JSON 备份，导入作品、风格方案和输出控制</div>
 
       {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: 'var(--color-primary)' }}>{msg}</div>}
       {err && <div style={{ padding: '8px 16px', marginBottom: 16, background: '#fee2e2', borderRadius: 6, fontSize: 13, color: 'var(--color-error)' }}>{err}</div>}
@@ -91,6 +114,10 @@ function ImportExportPage() {
           <button className="btn btn-secondary btn-sm" disabled={adoptedChapters.length === 0}
             onClick={() => handleExport(() => exportService.exportNovelToMarkdown(selectedNovelId))}>
             📝 导出 Markdown
+          </button>
+          <button className="btn btn-secondary btn-sm" disabled={!selectedNovelId}
+            onClick={() => handleExport(() => exportService.exportNovelBackupJson(selectedNovelId))}>
+            💾 备份完整 JSON
           </button>
         </div>
       </div>
@@ -143,8 +170,8 @@ function ImportExportPage() {
       <button className="btn btn-secondary btn-sm" onClick={() => navigate('/')}>← 返回首页</button>
 
       {/* 导入弹窗 */}
-      {showTxtImport && <ImportTxtDialog onClose={() => setShowTxtImport(false)} />}
-      {showJsonImport && <ImportJsonDialog onClose={() => setShowJsonImport(false)} />}
+      {showTxtImport && <ImportTxtDialog onClose={() => { setShowTxtImport(false); void loadNovels(); }} />}
+      {showJsonImport && <ImportJsonDialog onClose={() => { setShowJsonImport(false); void loadNovels(); }} />}
     </div>
   );
 }

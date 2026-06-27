@@ -27,6 +27,9 @@ export interface EditorContentSnapshot {
   wordCount: number;
   isDirty: boolean;
   contentHash: string;
+  /** v1.0.45: 选中文本起止位置 */
+  selectionStart?: number;
+  selectionEnd?: number;
 }
 
 export type EditorCommandType = 'save' | 'format' | 'adopt-current';
@@ -80,6 +83,7 @@ function EditorArea({
 
   const emitContentSnapshot = useCallback((value: string, dirty: boolean, draft: ChapterDraft | null | undefined = currentDraft) => {
     const wc = countTextWords(value);
+    const ta = textareaRef.current;
     onDraftChange?.(wc, dirty);
     onEditorContentChange?.({
       chapterId: chapter?.id,
@@ -89,6 +93,9 @@ function EditorArea({
       wordCount: wc,
       isDirty: dirty,
       contentHash: hashTextContent(value),
+      // v1.0.45: 传递选中文本位置
+      selectionStart: ta?.selectionStart ?? 0,
+      selectionEnd: ta?.selectionEnd ?? 0,
     });
   }, [chapter?.id, currentDraft, onDraftChange, onEditorContentChange]);
 
@@ -239,6 +246,23 @@ function EditorArea({
     setIsDirty(dirty);
     emitContentSnapshot(value, dirty);
   }, [currentDraft, emitContentSnapshot]);
+
+  // v1.0.45: 选中文本变化时也通知父组件（不改变 content/dirty）
+  const handleSelectionChange = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    onEditorContentChange?.({
+      chapterId: chapter?.id,
+      draftId: currentDraft?.id,
+      draftVersion: currentDraft?.versionNo,
+      content: content,
+      wordCount: countTextWords(content),
+      isDirty,
+      contentHash: hashTextContent(content),
+      selectionStart: ta.selectionStart,
+      selectionEnd: ta.selectionEnd,
+    });
+  }, [chapter?.id, currentDraft, content, isDirty, onEditorContentChange]);
 
   useEffect(() => {
     if (!applyTextRequest) return;
@@ -513,6 +537,7 @@ function EditorArea({
       <div className="editor-paper">
         <textarea ref={textareaRef} className="editor-textarea" value={content}
           onChange={(e) => handleContentChange(e.target.value)}
+          onSelect={handleSelectionChange}
           placeholder="在这里输入或粘贴正文内容...&#10;&#10;点击右侧 AI 生成面板，AI 将根据章节大纲生成正文。"
           spellCheck={false} />
       </div>

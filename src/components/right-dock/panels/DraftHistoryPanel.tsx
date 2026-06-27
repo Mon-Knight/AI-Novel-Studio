@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { draftVersionService } from '../../../services/database/draftVersionService';
@@ -11,6 +11,7 @@ interface DraftHistoryPanelProps {
   chapterId: string;
   currentDraftId?: string;
   onLoadDraft: (draft: ChapterDraft) => void;
+  onDraftAdopted?: (draft: ChapterDraft) => void;
   onClose: () => void;
 }
 
@@ -23,7 +24,8 @@ const sourceLabels: Record<string, string> = {
   manual_placeholder: '手动占位',
 };
 
-function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: DraftHistoryPanelProps) {
+function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdopted, onClose }: DraftHistoryPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<ChapterDraft[]>([]);
   const [latestReport, setLatestReport] = useState<QualityCheckReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,9 +46,23 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    function handleDocumentMouseDown(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (panelRef.current?.contains(target)) return;
+      if (target.closest('.right-toolbar')) return;
+      onClose();
+    }
+
+    document.addEventListener('mousedown', handleDocumentMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
+  }, [onClose]);
+
   const handleAdopt = async (draft: ChapterDraft) => {
     if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
-    await draftVersionService.adopt(draft.id, chapterId);
+    const adoptedDraft = await draftVersionService.adopt(draft.id, chapterId);
+    const syncedDraft = await draftVersionService.getAdoptedByChapterId(chapterId);
+    onDraftAdopted?.(syncedDraft ?? adoptedDraft ?? { ...draft, isAdopted: true });
     setMsg(`v${draft.versionNo} 已采用`);
     setTimeout(() => setMsg(''), 2000);
     await load();
@@ -63,7 +79,13 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
   return (
     <>
       <div className="right-panel-overlay" onClick={onClose} />
-      <div className="right-panel" onClick={(e) => e.stopPropagation()} style={{ width: 360 }}>
+      <div
+        ref={panelRef}
+        className="right-panel"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 360 }}
+      >
         <div className="right-panel-header">
           <span className="right-panel-title">📋 草稿历史</span>
           <button className="right-panel-close" onClick={onClose}>✕</button>

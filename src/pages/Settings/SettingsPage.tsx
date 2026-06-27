@@ -225,7 +225,7 @@ function SettingsPage() {
           <div>数据目录：<code>C:\Users\...\AppData\Local\AI Novel Studio\</code></div>
           <div style={{ marginTop: 8 }}>
             <strong>📦 备份与恢复：</strong><br />
-            · 在作品详情页使用「💾 备份完整 JSON」导出全部数据<br />
+            · 在导入导出中心或作品详情页使用「💾 备份完整 JSON」导出全部数据<br />
             · 在首页使用「📋 导入 JSON」恢复已备份的作品<br />
             · 备份文件包含作品、章节、草稿、设定、角色、事件等
           </div>

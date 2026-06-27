@@ -53,9 +53,8 @@ async function saveFile(text: string, filename: string, mime: string): Promise<s
 }
 
 async function getAdoptedContent(chapterId: string): Promise<string | null> {
-  const draft = await draftVersionService.getLatestByChapterId(chapterId);
-  if (!draft || !draft.isAdopted) return null;
-  return draft.content;
+  const draft = await draftVersionService.getAdoptedByChapterId(chapterId);
+  return draft?.content || null;
 }
 
 export async function exportChapterToTxt(chapterId: string): Promise<string> {
@@ -122,7 +121,11 @@ export async function exportNovelToMarkdown(novelId: string): Promise<string> {
     }
   }
   const orphanChapters = adoptedChapters.filter((c) => !c.volumeId).sort((a, b) => a.orderIndex - b.orderIndex);
-  orphanChapters.forEach((ch) => { md += `### 第${ch.chapterNumber}章 ${ch.title}\n\n（未关联分卷）\n\n---\n\n`; });
+  for (const ch of orphanChapters) {
+    const content = await getAdoptedContent(ch.id);
+    if (!content) continue;
+    md += `### 第${ch.chapterNumber}章 ${ch.title}\n\n${content}\n\n---\n\n`;
+  }
   md += `\n*总字数：${formatNumber(adoptedChapters.reduce((s, c) => s + c.wordCount, 0))} 字 · 导出时间：${formatDateTime(new Date())}*`;
   const dateStr = new Date().toISOString().slice(0, 10);
   const filename = `${sanitizeFilename(novel.title)}_全文_${dateStr}.md`;

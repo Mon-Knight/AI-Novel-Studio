@@ -32,6 +32,15 @@ import type { Volume } from '../../types/volume';
 import type { ChapterDraft } from '../../types/ai';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
 import { hashTextContent } from '../../utils/contentHash';
+import { getCurrentWritingContext, type WritingContext } from '../../utils/writingContext';
+import {
+  createInitialSidebarState,
+  updateToolState,
+  switchTool,
+  closePanel,
+  type RightSidebarState,
+  type PanelToolState,
+} from '../../store/rightSidebarStore';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
 
@@ -76,7 +85,10 @@ function WritingWorkspacePage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [activePanel, setActivePanel] = useState<PanelType>(null);
+  // v1.0.45 统一右侧栏状态模型（必须在 activePanel 之前声明）
+  const [sidebarState, setSidebarState] = useState<RightSidebarState>(createInitialSidebarState);
+  // v1.0.45: activePanel 从统一 sidebarState 派生，不再独立管理
+  const activePanel = sidebarState.activeTool;
   const [novel, setNovel] = useState<Novel | null>(null);
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -131,6 +143,16 @@ function WritingWorkspacePage() {
   const [summaryExists, setSummaryExists] = useState(false);
 
   const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
+
+  // v1.0.45 统一写作上下文（派生状态，面板通过此获取全文/选中文本/章节等）
+  const writingContext: WritingContext = getCurrentWritingContext({
+    fullText: editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : currentDraft?.content || '',
+    chapter: activeChapter,
+    currentDraft,
+    novelId,
+    isDirty: editorSnapshot.chapterId === activeChapterId ? editorSnapshot.isDirty : false,
+  });
+
   const activeQcReport = qcReport?.chapterId === activeChapterId ? qcReport : null;
   const activeQcItems = activeQcReport ? qcItems.filter((item) => item.chapterId === activeChapterId) : [];
 
@@ -232,13 +254,13 @@ function WritingWorkspacePage() {
   const handleTogglePanel = useCallback(async (panel: PanelType) => {
     if (activePanel === 'outline' && !(await confirmDiscardChapterGoal())) return;
     if (activePanel === 'outline') setChapterGoalDirty(false);
-    setActivePanel((prev) => (prev === panel ? null : panel));
+    setSidebarState((prev) => switchTool(prev, panel));
   }, [activePanel, confirmDiscardChapterGoal]);
 
   const handleClosePanel = useCallback(async () => {
     if (!(await confirmDiscardChapterGoal())) return;
     setChapterGoalDirty(false);
-    setActivePanel(null);
+    setSidebarState((prev) => closePanel(prev));
   }, [confirmDiscardChapterGoal]);
 
   useEffect(() => {
@@ -610,42 +632,50 @@ function WritingWorkspacePage() {
         <DraftHistoryPanel
           chapterId={activeChapterId}
           currentDraftId={currentDraft?.id}
-          onLoadDraft={(draft) => { handleDraftApplied(draft); setActivePanel(null); }}
+          onLoadDraft={(draft) => { handleDraftApplied(draft); setSidebarState((prev) => closePanel(prev)); }}
+          onDraftAdopted={(draft) => {
+            handleDraftApplied(draft);
+            void handleChapterOutlineApplied(draft.chapterId);
+          }}
           onClose={handleClosePanel}
         />
       )}
 
       {/* 右侧弹出面板 */}
-      {activePanel && activePanel !== 'draft-history' && (
-        <RightPanel
-          panelType={activePanel}
-          onClose={handleClosePanel}
-          novelId={novelId}
-          chapter={activeChapter}
-          onGenerated={handleDraftApplied}
-          onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
-          onChapterOutlineApplied={handleChapterOutlineApplied}
-          onChapterGoalDirtyChange={setChapterGoalDirty}
-          onChapterCharactersChanged={bumpContextVersion}
-          contextVersion={contextVersion}
-          onLocateText={handleLocateText}
-          // v1.7.19 质量检查状态
-          qcReport={activeQcReport}
-          qcItems={activeQcItems}
-          onQcChange={(report: any, items: any[]) => { setQcReport(report); setQcItems(items); }}
-          currentEditorContent={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : currentDraft?.content || ''}
-          currentEditorWordCount={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.wordCount : currentDraft?.wordCount || 0}
-          currentEditorDirty={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.isDirty : false}
-          currentContentHash={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.contentHash : hashTextContent(currentDraft?.content || '')}
-          currentDraftId={currentDraft?.id}
-          currentDraftVersion={currentDraft?.versionNo}
-          onApplyAiText={applyAiTextToEditor}
-          // v1.7.19 全局 AI 弹窗
-          showAiModal={showAiModal}
-          updateAiModal={updateAiModal}
-          hideAiModal={hideAiModal}
-        />
-      )}
+      <RightPanel
+        panelType={activePanel === 'draft-history' ? null : activePanel}
+        onClose={handleClosePanel}
+        novelId={novelId}
+        chapter={activeChapter}
+        onGenerated={handleDraftApplied}
+        onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
+        onChapterOutlineApplied={handleChapterOutlineApplied}
+        onChapterGoalDirtyChange={setChapterGoalDirty}
+        onChapterCharactersChanged={bumpContextVersion}
+        contextVersion={contextVersion}
+        onLocateText={handleLocateText}
+        // v1.7.19 质量检查状态
+        qcReport={activeQcReport}
+        qcItems={activeQcItems}
+        onQcChange={(report: any, items: any[]) => { setQcReport(report); setQcItems(items); }}
+        currentEditorContent={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : currentDraft?.content || ''}
+        currentEditorWordCount={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.wordCount : currentDraft?.wordCount || 0}
+        currentEditorDirty={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.isDirty : false}
+        currentContentHash={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.contentHash : hashTextContent(currentDraft?.content || '')}
+        currentDraftId={currentDraft?.id}
+        currentDraftVersion={currentDraft?.versionNo}
+        onApplyAiText={applyAiTextToEditor}
+        // v1.7.19 全局 AI 弹窗
+        showAiModal={showAiModal}
+        updateAiModal={updateAiModal}
+        hideAiModal={hideAiModal}
+        // v1.0.45 统一上下文 + 侧栏状态
+        writingContext={writingContext}
+        sidebarState={sidebarState}
+        onUpdateToolState={(toolKey: string, patch: Partial<PanelToolState>) => {
+          setSidebarState((prev) => updateToolState(prev, toolKey, patch));
+        }}
+      />
 
       {/* v0.8.0 章节总结确认弹窗 */}
       {summaryDialogOpen && summaryResult && (

@@ -3,6 +3,9 @@ import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePag
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import type { AiTextApplyMode, AiTextApplyRequest } from '../workspace/EditorArea';
+import type { WritingContext } from '../../utils/writingContext';
+import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
+import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
 import AiGeneratePanel from './panels/AiGeneratePanel';
 import ChapterEngineeringPanel from './panels/ChapterEngineeringPanel';
 import OutlinePanel from './panels/OutlinePanel';
@@ -46,6 +49,12 @@ interface RightPanelProps {
   showAiModal?: (title: string, subtitle?: string) => void;
   updateAiModal?: (stage: string, progress: number) => void;
   hideAiModal?: () => void;
+  /** v1.0.45 统一写作上下文 */
+  writingContext?: WritingContext;
+  /** v1.0.45 统一右侧栏状态模型 */
+  sidebarState?: RightSidebarState;
+  /** v1.0.45 更新面板运行时状态 */
+  onUpdateToolState?: (toolKey: string, patch: Partial<PanelToolState>) => void;
 }
 
 const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
@@ -87,6 +96,9 @@ function RightPanel({
   showAiModal,
   updateAiModal,
   hideAiModal,
+  writingContext,
+  sidebarState,
+  onUpdateToolState,
 }: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   // v1.0.44: 记住上次活跃面板类型，收起时用 CSS 隐藏而非卸载，保留面板内部状态
@@ -95,6 +107,14 @@ function RightPanel({
   useEffect(() => {
     if (panelType) setLastPanelType(panelType);
   }, [panelType]);
+
+  // v1.0.45: 检测当前面板的 AI 输出是否基于旧正文
+  const effectivePanelType = panelType || lastPanelType;
+  const currentToolState: PanelToolState | undefined = effectivePanelType
+    ? getOrCreateToolState(sidebarState ?? createInitialSidebarState(), effectivePanelType)
+    : undefined;
+  const toolOutputStale = !!(effectivePanelType && writingContext && currentToolState?.relatedContentHash
+    && currentToolState.relatedContentHash !== writingContext.contentHash);
 
   // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
   useEffect(() => {
@@ -110,7 +130,6 @@ function RightPanel({
   }, [onClose, panelType]);
 
   // v1.0.44: 面板收起时使用 display:none 而非卸载，保留 AI 输出等状态
-  const effectivePanelType = panelType || lastPanelType;
   if (!effectivePanelType) return null;
   const config = panelConfig[effectivePanelType];
   if (!config) return null;
@@ -142,6 +161,13 @@ function RightPanel({
           </button>
         </div>
         <div className="right-panel-body" onMouseDown={stopAll} onClick={stopAll}>
+          {/* v1.0.45: 正文变更后提示旧 AI 输出可能过期 */}
+          {toolOutputStale && (
+            <div className="panel-stale-warning">
+              <span className="panel-stale-warning-icon">⚠️</span>
+              <span>正文已修改，当前 AI 输出可能基于旧正文。建议重新生成。</span>
+            </div>
+          )}
           <PanelComponent
             novelId={novelId}
             chapter={chapter}
@@ -165,6 +191,9 @@ function RightPanel({
             showAiModal={showAiModal}
             updateAiModal={updateAiModal}
             hideAiModal={hideAiModal}
+            // v1.0.45 统一上下文 + 状态
+            writingContext={writingContext}
+            onUpdateToolState={effectivePanelType ? (patch: Partial<PanelToolState>) => onUpdateToolState?.(effectivePanelType, patch) : undefined}
           />
         </div>
       </div>

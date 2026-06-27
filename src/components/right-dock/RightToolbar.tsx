@@ -45,7 +45,8 @@ function RightToolbar({ activePanel, onTogglePanel, onRunCommand }: RightToolbar
   return (
     <div className="right-toolbar">
       {toolbarButtons.map((btn) => (
-        <div
+        <button
+          type="button"
           key={btn.kind === 'panel' ? btn.id : btn.command}
           className={`right-toolbar-btn ${btn.kind === 'panel' && activePanel === btn.id ? 'active' : ''}`}
           onClick={() => {
@@ -56,7 +57,7 @@ function RightToolbar({ activePanel, onTogglePanel, onRunCommand }: RightToolbar
         >
           <span className="tb-icon">{btn.icon}</span>
           <span className="tb-label">{btn.label}</span>
-        </div>
+        </button>
       ))}
     </div>
   );
