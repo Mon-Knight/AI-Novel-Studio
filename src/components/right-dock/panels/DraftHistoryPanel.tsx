@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { draftVersionService } from '../../../services/database/draftVersionService';
+import { qualityCheckService } from '../../../services/quality/qualityCheckService';
 import { formatDateTime } from '../../../utils/date';
 import { formatNumber } from '../../../utils/format';
+import type { QualityCheckReport } from '../../../types/qualityCheck';
 
 interface DraftHistoryPanelProps {
   chapterId: string;
@@ -23,14 +25,19 @@ const sourceLabels: Record<string, string> = {
 
 function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: DraftHistoryPanelProps) {
   const [drafts, setDrafts] = useState<ChapterDraft[]>([]);
+  const [latestReport, setLatestReport] = useState<QualityCheckReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
     if (!chapterId) { setLoading(false); return; }
     try {
-      const list = await draftVersionService.getByChapterId(chapterId);
+      const [list, report] = await Promise.all([
+        draftVersionService.getByChapterId(chapterId),
+        qualityCheckService.getLatestReport(chapterId).catch(() => null),
+      ]);
       setDrafts(list.sort((a, b) => b.versionNo - a.versionNo));
+      setLatestReport(report);
     } catch { /* ignore */ }
     setLoading(false);
   }, [chapterId]);
@@ -41,6 +48,14 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
     if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
     await draftVersionService.adopt(draft.id, chapterId);
     setMsg(`v${draft.versionNo} 已采用`);
+    setTimeout(() => setMsg(''), 2000);
+    await load();
+  };
+
+  const handleDelete = async (draft: ChapterDraft) => {
+    if (!(await confirmInfo({ title: '废弃草稿', message: `确认废弃 v${draft.versionNo}？此操作不会删除已采用正文。` }))) return;
+    await draftVersionService.delete(draft.id, chapterId);
+    setMsg(`v${draft.versionNo} 已废弃`);
     setTimeout(() => setMsg(''), 2000);
     await load();
   };
@@ -86,13 +101,22 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onClose }: 
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>
                     {sourceLabels[draft.source] || draft.source} · {formatDateTime(draft.createdAt)}
+                    {latestReport?.draftId === draft.id && latestReport.overallScore != null && (
+                      <span style={{ marginLeft: 8, color: 'var(--color-primary)', fontWeight: 600 }}>
+                        质检 {latestReport.overallScore}
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button className="btn btn-secondary btn-sm" onClick={() => onLoadDraft(draft)}
-                      style={{ fontSize: 12 }}>📖 载入</button>
+                      style={{ fontSize: 12 }}>📖 恢复</button>
                     {!draft.isAdopted && (
                       <button className="btn btn-primary btn-sm" onClick={() => handleAdopt(draft)}
                         style={{ fontSize: 12 }}>✅ 采用</button>
+                    )}
+                    {!draft.isAdopted && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(draft)}
+                        style={{ fontSize: 12 }}>废弃</button>
                     )}
                   </div>
                 </div>
