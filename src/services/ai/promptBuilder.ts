@@ -39,6 +39,8 @@ export interface ChapterGeneratePromptContext {
   outputProfile?: string;
   previousContext?: string;
   userInstruction?: string;
+  /** 当前草稿正文（重新生成/改写模式时传入） */
+  draftContent?: string;
 }
 
 export interface CharacterGeneratePromptContext {
@@ -244,6 +246,21 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
         ].join('\n')
       : '',
     ctx.userInstruction ? `特别要求：${ctx.userInstruction}` : '',
+    '',
+    ctx.draftContent
+      ? [
+          '【当前草稿正文（请基于此改写）】',
+          '以下是当前章节的草稿正文。请在此基础之上进行改写、优化或重写：',
+          '',
+          ctx.draftContent.slice(0, 8000),
+          '',
+          '改写要求：',
+          '- 保持核心剧情、人物关系和关键事件不变',
+          '- 可以根据大纲和设定进行优化、扩展或删减',
+          '- 修复逻辑问题、角色行为不一致和设定违背',
+          '- 补充大纲中要求的但当前草稿缺失的内容',
+        ].join('\n')
+      : '',
     '',
     '正文必须优先执行【当前章节大纲】和【章节大纲执行清单】；章节大纲中的关键事件、冲突推进和结尾安排必须保留。',
     '如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。',

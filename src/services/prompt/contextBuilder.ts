@@ -87,6 +87,7 @@ export async function buildFreshChapterGenerationContext(params: {
   styleId?: string;
   outputId?: string;
   targetWordCount?: number;
+  draftContent?: string;
 }): Promise<ChapterGenerationContext> {
   const freshChapter = await chapterRepository.getById(params.chapterId);
   if (!freshChapter) {
@@ -105,6 +106,7 @@ export async function buildFreshChapterGenerationContext(params: {
     params.userInstruction,
     params.styleId,
     params.outputId,
+    params.draftContent,
   );
 }
 
@@ -114,6 +116,7 @@ export async function buildChapterContext(
   userInstruction?: string,
   styleId?: string,
   outputId?: string,
+  draftContent?: string,
 ): Promise<ChapterGenerationContext> {
   const [novel, worldSettings, ruleSystems, protagonist] = await Promise.all([
     novelRepository.getById(novelId),
@@ -438,6 +441,7 @@ export async function buildChapterContext(
     chapterSettings: chapterSettingsSummary,
     previousContext,
     userInstruction: extractText(userInstruction),
+    draftContent: extractText(draftContent),
     chapterOutlineSource: resolvedChapterOutlineSource,
     volumeOutlineSource,
     masterOutlineSource,

@@ -110,6 +110,7 @@ interface AiGeneratePanelProps {
   onAdopted?: () => void;
   contextVersion?: number;
   currentDraftId?: string;
+  currentEditorContent?: string;
   onApplyAiText?: (payload: {
     mode: 'replace_all' | 'append';
     text: string;
@@ -117,7 +118,7 @@ interface AiGeneratePanelProps {
   }) => Promise<boolean>;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, onApplyAiText }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentEditorContent, onApplyAiText }: AiGeneratePanelProps) {
   const [userInstruction, setUserInstruction] = useState('');
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -272,6 +273,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         styleId: selectedStyleId || undefined,
         outputId: selectedOutputId || undefined,
         targetWordCount: wordCountDraft || undefined,
+        draftContent: genMode === 'rewrite' ? (currentEditorContent?.trim() || undefined) : undefined,
       });
       setContextSummary(preflightContext);
       setPromptDebug(null);

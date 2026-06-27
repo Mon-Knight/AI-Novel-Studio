@@ -272,6 +272,8 @@ export interface ChapterGenerationContext {
   chapterSettings?: string;
   previousContext?: string;
   userInstruction?: string;
+  /** 当前草稿正文（重新生成/改写模式时传入） */
+  draftContent?: string;
   chapterOutlineSource?: 'active_chapter_outline' | 'chapter_field' | 'draft' | 'empty';
   volumeOutlineSource?: 'active_outline' | 'volume_field' | 'none';
   masterOutlineSource?: 'active_outline' | 'novel_field' | 'novel_description' | 'none';

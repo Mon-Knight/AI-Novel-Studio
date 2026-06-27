@@ -225,7 +225,7 @@ function WritingWorkspacePage() {
     if (!(await confirmDiscardChapterGoal())) return;
     setChapterGoalDirty(false);
     setActiveChapterId(chapterId);
-    setActivePanel(null); // 切换章节关闭面板
+    // v1.0.44: 切换章节时不再强制关闭面板，面板会通过 props 更新感知新章节
     loadChapterDraft(chapterId);
   }, [confirmDiscardChapterGoal, loadChapterDraft]);
 

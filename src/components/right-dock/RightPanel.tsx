@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePage';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
@@ -89,6 +89,12 @@ function RightPanel({
   hideAiModal,
 }: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // v1.0.44: 记住上次活跃面板类型，收起时用 CSS 隐藏而非卸载，保留面板内部状态
+  const [lastPanelType, setLastPanelType] = useState<PanelType>(null);
+
+  useEffect(() => {
+    if (panelType) setLastPanelType(panelType);
+  }, [panelType]);
 
   // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
   useEffect(() => {
@@ -103,8 +109,10 @@ function RightPanel({
     return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
   }, [onClose, panelType]);
 
-  if (!panelType) return null;
-  const config = panelConfig[panelType];
+  // v1.0.44: 面板收起时使用 display:none 而非卸载，保留 AI 输出等状态
+  const effectivePanelType = panelType || lastPanelType;
+  if (!effectivePanelType) return null;
+  const config = panelConfig[effectivePanelType];
   if (!config) return null;
 
   const PanelComponent = config.component;
@@ -116,7 +124,7 @@ function RightPanel({
   };
 
   return (
-    <div className="right-panel-overlay">
+    <div className="right-panel-overlay" style={!panelType ? { display: 'none' } : undefined}>
       <div
         ref={panelRef}
         className="right-panel"

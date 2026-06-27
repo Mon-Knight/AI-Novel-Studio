@@ -15,17 +15,23 @@ interface PolishPanelProps {
   currentEditorContent?: string;
   currentEditorDirty?: boolean;
   currentEditorWordCount?: number;
+  onApplyAiText?: (payload: {
+    mode: 'replace_all' | 'append';
+    text: string;
+    source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
+  }) => Promise<boolean>;
 }
 
 const POLISH_MODES: PolishMode[] = ['keep_plot', 'enhance_description', 'reduce_redundancy', 'strengthen_conflict', 'adjust_pacing', 'unify_style', 'fix_language', 'custom'];
 
-function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, currentEditorDirty, currentEditorWordCount }: PolishPanelProps) {
+function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, currentEditorDirty, currentEditorWordCount, onApplyAiText }: PolishPanelProps) {
   const [mode, setMode] = useState<PolishMode>('keep_plot');
   const [customInstruction, setCustomInstruction] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
+  const [lastPolishResult, setLastPolishResult] = useState<ChapterDraft | null>(null);
 
   const loadDraft = useCallback(async () => {
     if (!chapter?.id) return;
@@ -33,6 +39,13 @@ function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, curr
   }, [chapter?.id]);
 
   useEffect(() => { loadDraft(); }, [loadDraft]);
+
+  // 切换章节时清除上次润色结果
+  useEffect(() => {
+    setLastPolishResult(null);
+    setError('');
+    setStatusMsg('');
+  }, [chapter?.id]);
 
   const handleRunPolish = async () => {
     if (!novelId || !chapter || !currentDraft) return;
@@ -93,6 +106,8 @@ function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, curr
           setPercent(100);
 
           onGenerated?.(resultDraft);
+          setLastPolishResult(resultDraft);
+          setStatusMsg(`润色完成！已保存为草稿 v${resultDraft.versionNo}。`);
         },
       );
     } catch (e: any) {
@@ -147,6 +162,42 @@ function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, curr
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>}
         {statusMsg && <div style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 6 }}>{statusMsg}</div>}
       </div>
+
+      {lastPolishResult && (
+        <div className="panel-section">
+          <div className="panel-section-title">📄 应用润色结果</div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+            润色结果已保存为草稿 v{lastPolishResult.versionNo}（{lastPolishResult.wordCount} 字）
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => onApplyAiText?.({
+                mode: 'append',
+                text: lastPolishResult.content,
+                source: 'polish',
+              })}
+              disabled={!onApplyAiText}
+              style={{ flex: 1 }}
+              title="追加到当前正文末尾"
+            >
+              追加到正文
+            </button>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => onApplyAiText?.({
+                mode: 'replace_all',
+                text: lastPolishResult.content,
+                source: 'polish',
+              })}
+              disabled={!onApplyAiText}
+              style={{ flex: 1 }}
+            >
+              替换全文
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="panel-section" style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
         <div>润色结果将保存为新的草稿版本，不会覆盖当前正文。</div>

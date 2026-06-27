@@ -42,6 +42,7 @@ $rightToolbar = Join-Path $root "src\components\right-dock\RightToolbar.tsx"
 $rightPanel = Join-Path $root "src\components\right-dock\RightPanel.tsx"
 $checkPanel = Join-Path $root "src\components\right-dock\panels\CheckPanel.tsx"
 $qualityService = Join-Path $root "src\services\quality\qualityCheckService.ts"
+$qualityFixService = Join-Path $root "src\services\ai\qualityFixService.ts"
 $qualityTypes = Join-Path $root "src\types\qualityCheck.ts"
 $commandsFile = Join-Path $root "src-tauri\src\commands.rs"
 $dbFile = Join-Path $root "src-tauri\src\db.rs"
@@ -53,6 +54,7 @@ Assert-FileExists $rightToolbar
 Assert-FileExists $rightPanel
 Assert-FileExists $checkPanel
 Assert-FileExists $qualityService
+Assert-FileExists $qualityFixService
 Assert-FileExists $qualityTypes
 Assert-FileExists $commandsFile
 Assert-FileExists $dbFile
@@ -109,6 +111,11 @@ Assert-Contains $qualityService "save_quality_check_result', \{ input: nextPaylo
 Assert-Contains $qualityService "contentHash: input\.contentHash" "quality service save payload content hash"
 Assert-Contains $qualityService "contentLength: input\.contentLength" "quality service save payload content length"
 Assert-Contains $qualityService "checkedAt: input\.checkedAt" "quality service save payload checked timestamp"
+
+Assert-Contains $qualityFixService "normalizeFixResult" "quality fix normalizes AI response"
+Assert-Contains $qualityFixService "revised_content" "quality fix accepts snake case revised content"
+Assert-Contains $qualityFixService "fixed_issue_keys" "quality fix accepts snake case fixed issue keys"
+Assert-Contains $qualityFixService "changed_ranges" "quality fix accepts snake case changed ranges"
 
 Assert-Contains $commandsFile "pub content_hash: Option<String>" "Rust report DTO content hash"
 Assert-Contains $commandsFile "pub content_length: Option<i64>" "Rust report DTO content length"

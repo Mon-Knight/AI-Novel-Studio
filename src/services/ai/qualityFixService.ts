@@ -4,7 +4,7 @@
  */
 import { createAiClient, aiSettingsService } from './aiClient';
 import { aiTaskService } from './aiTaskService';
-import { safeJsonParse } from './jsonUtils';
+import { extractJsonObject, safeJsonParse } from './jsonUtils';
 import { fixRunStore } from './fixRunStore';
 import type { QualityCheckItem } from '../../types/qualityCheck';
 import type { ChapterDraft } from '../../types/ai';
@@ -88,6 +88,15 @@ export interface FixComparison {
   summary: string;
 }
 
+type RawFixResult = Partial<FixResult> & {
+  revision_plan?: unknown;
+  fixed_issue_keys?: unknown;
+  revision_summary?: unknown;
+  changed_ranges?: unknown;
+  revised_content?: unknown;
+  unchanged_policy?: unknown;
+};
+
 /** 生成简单哈希 */
 function hashContent(content: string): string {
   let hash = 0;
@@ -95,6 +104,89 @@ function hashContent(content: string): string {
     hash = ((hash << 5) - hash + content.charCodeAt(i)) | 0;
   }
   return 'fx_' + (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function readString(record: Record<string, unknown>, keys: string[], fallback = ''): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  }
+  return fallback;
+}
+
+function readArray(record: Record<string, unknown>, keys: string[]): unknown[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+function stripOuterFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json|text|markdown)?\s*([\s\S]*?)```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function extractPlainRevisedContent(rawText: string, sourceContent: string): string {
+  const cleaned = stripOuterFence(rawText);
+  if (!cleaned || extractJsonObject(cleaned)) return '';
+
+  const markerMatch = cleaned.match(/(?:revised_content|修订后正文|修订版正文|完整修订后章节正文)\s*[:：]\s*([\s\S]+)$/i);
+  const candidate = (markerMatch?.[1] || cleaned).trim();
+  const minLength = Math.min(120, Math.max(20, Math.round(sourceContent.trim().length * 0.3)));
+  return candidate.length >= minLength ? candidate : '';
+}
+
+function normalizeRevisionPlan(value: unknown): FixResult['revisionPlan'] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const record = asRecord(item);
+    return {
+      issue_key: readString(record, ['issue_key', 'issueKey']),
+      target_quote: readString(record, ['target_quote', 'targetQuote']) || undefined,
+      fix_strategy: readString(record, ['fix_strategy', 'fixStrategy']),
+      change_scope: readString(record, ['change_scope', 'changeScope']),
+    };
+  });
+}
+
+function normalizeChangedRanges(value: unknown): FixResult['changedRanges'] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const record = asRecord(item);
+    return {
+      issue_key: readString(record, ['issue_key', 'issueKey']) || undefined,
+      reason: readString(record, ['reason']),
+      before: readString(record, ['before']),
+      after: readString(record, ['after']),
+    };
+  });
+}
+
+function normalizeFixResult(raw: RawFixResult, rawText: string, sourceContent: string): FixResult {
+  const record = asRecord(raw);
+  const fixedIssueKeys = readArray(record, ['fixedIssueKeys', 'fixed_issue_keys'])
+    .filter((item): item is string => typeof item === 'string');
+  const revisedContent =
+    readString(record, ['revisedContent', 'revised_content'])
+    || extractPlainRevisedContent(rawText, sourceContent)
+    || sourceContent;
+
+  return {
+    mode: readString(record, ['mode']) === 'targeted_fix' ? 'targeted_fix' : 'conservative',
+    revisionPlan: normalizeRevisionPlan(record.revisionPlan ?? record.revision_plan),
+    fixedIssueKeys,
+    revisionSummary: readString(record, ['revisionSummary', 'revision_summary'], '无修复摘要'),
+    changedRanges: normalizeChangedRanges(record.changedRanges ?? record.changed_ranges),
+    revisedContent,
+    unchangedPolicy: readString(record, ['unchangedPolicy', 'unchanged_policy']),
+  };
 }
 
 /** 构建 AI 修稿 Prompt (v1.7.19 精准局部修稿) */
@@ -318,7 +410,7 @@ export const qualityFixService = {
         maxTokens: request.maxTokens,
       });
 
-      const fixResult = safeJsonParse<FixResult>(response.text, {
+      const fixResult = safeJsonParse<RawFixResult>(response.text, {
         mode: 'conservative',
         fixedIssueKeys: [],
         revisionSummary: 'AI 返回格式不规范，无法解析修稿结果。',
@@ -326,16 +418,8 @@ export const qualityFixService = {
         revisedContent: params.currentDraft.content,
       });
 
-      // v1.7.18 安全规范化，v1.7.19 增加 targeted_fix 字段
-      const safeFixResult: FixResult = {
-        mode: (fixResult as any).mode === 'targeted_fix' ? 'targeted_fix' : 'targeted_fix',
-        revisionPlan: Array.isArray((fixResult as any).revisionPlan) ? (fixResult as any).revisionPlan : [],
-        fixedIssueKeys: Array.isArray(fixResult.fixedIssueKeys) ? fixResult.fixedIssueKeys : [],
-        revisionSummary: fixResult.revisionSummary || '无修复摘要',
-        changedRanges: Array.isArray(fixResult.changedRanges) ? fixResult.changedRanges : [],
-        revisedContent: fixResult.revisedContent || '',
-        unchangedPolicy: (fixResult as any).unchangedPolicy || '',
-      };
+      // v1.7.20: 兼容 Prompt 要求的 snake_case、前端历史 camelCase，以及少数模型的纯正文输出。
+      const safeFixResult = normalizeFixResult(fixResult, response.text, params.currentDraft.content);
 
       // 校验 revisedContent 非空
       if (!safeFixResult.revisedContent.trim()) {

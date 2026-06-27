@@ -209,8 +209,12 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{#userInstruction}}
 【本章特别要求】
 {{userInstruction}}
-{{/userInstruction}}
-
+{{/userInstruction}}{{#draftContent}}
+【当前草稿正文（请基于此改写）】
+以下是当前章节的草稿正文。请在此基础之上进行改写、优化或重写：
+{{draftContent}}
+改写要求：保持核心剧情、人物关系和关键事件不变，但可以根据大纲和设定优化、扩展或删减，修复逻辑问题、角色行为不一致和设定违背。
+{{/draftContent}}
 请直接输出小说正文，不要写“以下是正文”等引导语，不要输出 Markdown 标记。字数尽量接近目标字数 {{targetWordCount}} 字。`;
 
 export async function buildGenerateRequest(
