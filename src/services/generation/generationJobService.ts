@@ -1,6 +1,9 @@
 import { dbCall, generateId, lsGet, lsSet, nowISO } from '../database/db';
+import { createAiClient, aiSettingsService } from '../ai/aiClient';
+import { draftVersionService } from '../database/draftVersionService';
 import { generationContextCompiler } from './generationContextCompiler';
 import { toSafeNumber, toSafeString } from '../../utils/dataGuard';
+import type { AiGenerateRequest, ChapterDraft } from '../../types/ai';
 import type { ChapterGenerationSnapshot } from '../../types/generationContext';
 import type {
   CreateGenerationJobInput,
@@ -9,6 +12,7 @@ import type {
   GenerationStepName,
   GenerationStepResult,
   GenerationStepStatus,
+  RunChapterDraftGenerationJobInput,
   RunMockGenerationJobInput,
 } from '../../types/generationJob';
 
@@ -67,6 +71,7 @@ interface UpdateGenerationJobInput {
 }
 
 type GenerationJobProgressCallback = (job: GenerationJob, steps: GenerationStepResult[]) => void;
+type ChapterDraftJobResult = { job: GenerationJob; draft?: ChapterDraft };
 
 function stepsKey(jobId: string): string {
   return `${STEPS_KEY_PREFIX}${jobId}`;
@@ -260,6 +265,35 @@ function buildMockDraft(snapshot: ChapterGenerationSnapshot): string {
     '',
     '这里是 v1.9.7 Mock Provider 生成的占位正文结果，用于验证任务队列、步骤记录、轮询与取消链路；真实正文生成将在 v2.0.0 接入。',
   ].join('\n');
+}
+
+function buildSnapshotGenerateRequest(snapshot: ChapterGenerationSnapshot): AiGenerateRequest {
+  const base = snapshot.compiledContext.baseContext;
+  return {
+    taskType: 'chapter_generate',
+    messages: [
+      {
+        role: 'system',
+        content: [
+          '你是一位专业小说作家。',
+          '你必须只依据本次 generation_context_snapshot 生成正文。',
+          '不得引入快照之外的新设定、新角色、新秘密提前揭示或未授权剧情。',
+          '请直接输出小说正文，不要输出说明、分析或 Markdown 标记。',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `请根据以下 generation_context_snapshot 生成《${base.chapterTitle || '未命名章节'}》正文。`,
+          `目标字数：${base.targetWordCount || snapshot.compiledContext.activeEngineeringState?.chapterCard.targetWordCount || '按上下文要求'}`,
+          `context_hash：${snapshot.contextHash}`,
+          '',
+          snapshot.compiledPromptText,
+        ].join('\n'),
+      },
+    ],
+    promptTemplateSource: 'generation_context_snapshot',
+  };
 }
 
 export const generationJobService = {
@@ -519,6 +553,161 @@ export const generationJobService = {
       });
       await emit();
       return job;
+    }
+  },
+
+  async runChapterDraftJob(
+    input: RunChapterDraftGenerationJobInput,
+    onProgress?: GenerationJobProgressCallback,
+  ): Promise<ChapterDraftJobResult> {
+    const settings = aiSettingsService.getSettings();
+    let job = await this.create({
+      novelId: input.novelId,
+      volumeId: input.volumeId,
+      chapterId: input.chapterId,
+      jobType: 'chapter_generation',
+      provider: settings.provider,
+      modelName: settings.modelName,
+    });
+    let steps: GenerationStepResult[] = [];
+    let savedDraft: ChapterDraft | undefined;
+
+    const emit = async () => {
+      steps = await this.getSteps(job.id);
+      onProgress?.(job, steps);
+    };
+    const ensureNotCancelled = async () => {
+      const latest = await this.getById(job.id);
+      if (latest?.status === 'cancelled') throw new Error('generation_job_cancelled');
+    };
+    const updateJob = async (patch: Omit<UpdateGenerationJobInput, 'id'>) => {
+      job = await this.update({ ...patch, id: job.id });
+      await emit();
+    };
+    const runStep = async (
+      stepName: GenerationStepName,
+      progressPercent: number,
+      action: () => Promise<{ outputJson?: unknown; outputText?: string; status?: GenerationStepStatus }>,
+      inputSnapshot?: unknown,
+    ) => {
+      await ensureNotCancelled();
+      await updateJob({ status: 'running', currentStep: stepName, progressPercent });
+      const result = await action();
+      const step = await this.saveStep({
+        jobId: job.id,
+        stepName,
+        status: result.status ?? 'succeeded',
+        inputSnapshot,
+        outputJson: result.outputJson,
+        outputText: result.outputText,
+      });
+      steps = [...steps, step];
+      onProgress?.(job, steps);
+    };
+
+    try {
+      await updateJob({ status: 'running', startedAt: nowISO(), progressPercent: 1 });
+      await runStep('preflight', 8, async () => ({
+        outputJson: {
+          runtimeMode: settings.runtimeMode,
+          provider: settings.provider,
+          modelName: settings.modelName,
+          chapterId: input.chapterId,
+        },
+        outputText: '正文生成预检通过。',
+      }));
+      let snapshot: ChapterGenerationSnapshot | null = null;
+      await runStep('compile_context', 24, async () => {
+        snapshot = await generationContextCompiler.compileAndSave({
+          novelId: input.novelId,
+          volumeId: input.volumeId,
+          chapterId: input.chapterId,
+          currentEditorContent: input.currentEditorContent,
+        });
+        return {
+          outputJson: { snapshotId: snapshot.id, contextHash: snapshot.contextHash },
+          outputText: snapshot.promptSummary,
+        };
+      });
+      let generatedText = '';
+      await runStep('draft_generation', 72, async () => {
+        if (!snapshot) throw new Error('missing_context_snapshot');
+        const request = buildSnapshotGenerateRequest(snapshot);
+        const client = createAiClient(settings);
+        const response = await client.generate(request);
+        generatedText = response.text.trim();
+        if (!generatedText) throw new Error('正文模型返回为空');
+        job = await this.update({
+          id: job.id,
+          actualInputTokens: response.tokenInput,
+          actualOutputTokens: response.tokenOutput,
+        });
+        return {
+          outputJson: {
+            provider: settings.provider,
+            modelName: settings.modelName,
+            contextHash: snapshot.contextHash,
+            tokenInput: response.tokenInput,
+            tokenOutput: response.tokenOutput,
+            tokenTotal: response.tokenTotal,
+            textLength: generatedText.length,
+          },
+          outputText: generatedText,
+        };
+      });
+      await runStep('save_version', 96, async () => {
+        if (!snapshot) throw new Error('missing_context_snapshot');
+        savedDraft = await draftVersionService.create({
+          novelId: input.novelId,
+          chapterId: input.chapterId,
+          title: input.title || `AI 初稿 ${new Date().toLocaleString()}`,
+          content: generatedText,
+          source: 'ai_generated',
+          note: `v2.0.0 generation job ${job.id} / context ${snapshot.contextHash}`,
+        });
+        return {
+          outputJson: { draftId: savedDraft.id, versionNo: savedDraft.versionNo, contextHash: snapshot.contextHash },
+          outputText: `已保存正文草稿 v${savedDraft.versionNo}。`,
+        };
+      });
+      job = await this.update({
+        id: job.id,
+        status: 'completed',
+        progressPercent: 100,
+        currentStep: 'save_version',
+        finishedAt: nowISO(),
+      });
+      await emit();
+      return { job, draft: savedDraft };
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message === 'generation_job_cancelled') {
+        const cancelled = await this.cancel(job.id);
+        if (cancelled) job = cancelled;
+        await this.saveStep({
+          jobId: job.id,
+          stepName: job.currentStep ?? 'preflight',
+          status: 'cancelled',
+          outputText: '任务已取消。',
+        });
+        await emit();
+        return { job };
+      }
+      const message = e instanceof Error ? e.message : '正文生成任务失败';
+      job = await this.update({
+        id: job.id,
+        status: 'failed',
+        errorMessage: message,
+        progressPercent: job.progressPercent,
+        finishedAt: nowISO(),
+      });
+      await this.saveStep({
+        jobId: job.id,
+        stepName: job.currentStep ?? 'preflight',
+        status: 'failed',
+        errorMessage: message,
+      });
+      await emit();
+      return { job };
     }
   },
 };

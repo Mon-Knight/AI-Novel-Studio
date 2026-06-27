@@ -79,3 +79,7 @@ export interface RunMockGenerationJobInput {
   chapterId: string;
   currentEditorContent?: string;
 }
+
+export interface RunChapterDraftGenerationJobInput extends RunMockGenerationJobInput {
+  title?: string;
+}

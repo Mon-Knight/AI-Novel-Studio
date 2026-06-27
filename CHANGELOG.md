@@ -1,5 +1,17 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.0.0 (2026-06-27) - 基于工程面板的正文初稿生成
+
+### 新增
+
+- `GenerationJobService` 新增真实正文初稿任务：编译 `generation_context_snapshot` 后调用当前 AI 设置的正文模型，并将结果保存为章节草稿版本。
+- 章节工程面板“任务”页签新增“生成本章初稿”入口，展示任务进度与 step 输出，生成成功后同步回写作台草稿流。
+- 正文生成请求改为基于已编译快照构造 prompt，记录 context hash、模型信息与 token 返回摘要。
+
+### 修改
+
+- 应用版本号更新为 `v2.0.0`。
+
 ## v1.9.7 (2026-06-27) - API 任务队列与 Mock Runner
 
 ### 新增

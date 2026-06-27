@@ -4,6 +4,7 @@ import { generationContextCompiler } from '../../../services/generation/generati
 import { generationJobService } from '../../../services/generation/generationJobService';
 import { generateId } from '../../../services/database/db';
 import type { Chapter } from '../../../types/chapter';
+import type { ChapterDraft } from '../../../types/ai';
 import type {
   ChapterCard,
   ChapterEngineeringBundle,
@@ -20,6 +21,7 @@ interface ChapterEngineeringPanelProps {
   novelId?: string;
   chapter?: Chapter;
   currentEditorContent?: string;
+  onGenerated?: (draft: ChapterDraft) => void;
 }
 
 type TabId = 'card' | 'scenes' | 'constraints' | 'quality' | 'snapshot' | 'jobs' | 'versions';
@@ -173,7 +175,7 @@ function createEmptyScene(sceneNo: number): ScenePlanItem {
   };
 }
 
-function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: ChapterEngineeringPanelProps) {
+function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGenerated }: ChapterEngineeringPanelProps) {
   const effectiveNovelId = novelId ?? chapter?.novelId;
   const [activeTab, setActiveTab] = useState<TabId>('card');
   const [bundle, setBundle] = useState<ChapterEngineeringBundle | null>(null);
@@ -188,6 +190,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
   const [busy, setBusy] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [jobRunning, setJobRunning] = useState(false);
+  const [draftRunning, setDraftRunning] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -402,6 +405,45 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
       setMessage('');
     } finally {
       setJobRunning(false);
+    }
+  };
+
+  const handleRunDraftJob = async () => {
+    if (!chapter?.id || !effectiveNovelId) {
+      setError('请先选择章节');
+      return;
+    }
+    if (dirty) {
+      setError('请先保存并应用当前工程修改，再生成本章初稿。');
+      return;
+    }
+    setDraftRunning(true);
+    setError('');
+    setMessage('正在生成本章初稿...');
+    try {
+      const result = await generationJobService.runChapterDraftJob({
+        novelId: effectiveNovelId,
+        volumeId: chapter.volumeId,
+        chapterId: chapter.id,
+        title: `${chapter.title || '章节'} - AI 初稿`,
+        currentEditorContent,
+      }, (job, steps) => {
+        setLatestJob(job);
+        setJobSteps(steps);
+      });
+      setLatestJob(result.job);
+      setJobSteps(await generationJobService.getSteps(result.job.id));
+      if (result.draft) {
+        onGenerated?.(result.draft);
+        setMessage(`已生成并保存正文草稿 v${result.draft.versionNo}`);
+      } else {
+        setMessage(`正文生成任务已${result.job.status}`);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '正文生成任务失败');
+      setMessage('');
+    } finally {
+      setDraftRunning(false);
     }
   };
 
@@ -652,8 +694,16 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
           <div className="engineering-job-actions">
             <button
               type="button"
+              className="panel-btn panel-btn-primary"
+              disabled={busy || loading || compiling || jobRunning || draftRunning}
+              onClick={handleRunDraftJob}
+            >
+              {draftRunning ? '生成中...' : '生成本章初稿'}
+            </button>
+            <button
+              type="button"
               className="panel-btn panel-btn-secondary"
-              disabled={busy || loading || compiling || jobRunning}
+              disabled={busy || loading || compiling || jobRunning || draftRunning}
               onClick={handleRunMockJob}
             >
               {jobRunning ? 'Mock 运行中...' : '启动 Mock 任务'}
@@ -703,7 +753,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
         <button
           type="button"
           className="panel-btn panel-btn-secondary"
-          disabled={busy || loading || compiling || jobRunning}
+          disabled={busy || loading || compiling || jobRunning || draftRunning}
           onClick={handleSaveDraft}
         >
           保存草稿
@@ -711,7 +761,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent }: Cha
         <button
           type="button"
           className="panel-btn panel-btn-primary"
-          disabled={busy || loading || compiling || jobRunning}
+          disabled={busy || loading || compiling || jobRunning || draftRunning}
           onClick={handleSaveAndApply}
         >
           保存并应用
