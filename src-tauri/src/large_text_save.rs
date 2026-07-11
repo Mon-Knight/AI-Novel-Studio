@@ -235,6 +235,11 @@ pub fn finalize_large_text_save(
     input: FinalizeLargeTextSaveInput,
 ) -> Result<FinalizeLargeTextSaveOutput, String> {
     let manifest = load_manifest(&input.session_id)?;
+    if manifest.target_type == "draft" || manifest.target_type == "chapter_draft" {
+        return Err(
+            "WORKSPACE_SAVE_FAILED: 草稿正文必须通过 save_chapter_draft_atomic 提交".to_string(),
+        );
+    }
 
     // Verify all chunks exist and are valid
     let _cache_dir = session_cache_dir(&input.session_id);
@@ -278,11 +283,10 @@ pub fn finalize_large_text_save(
     if let Some(ref expected_sha256) = manifest.content_sha256 {
         let actual_sha256 = compute_sha256(&full_content);
         if actual_sha256 != *expected_sha256 {
-            // Don't fail on SHA mismatch - log warning but continue
-            eprintln!(
-                "WARNING: Full content SHA-256 mismatch for session {}. Expected: {}, Actual: {}",
-                input.session_id, expected_sha256, actual_sha256
-            );
+            return Err(format!(
+                "LARGE_TEXT_HASH_MISMATCH: expected={}, actual={}",
+                expected_sha256, actual_sha256
+            ));
         }
     }
 
@@ -358,7 +362,19 @@ pub fn finalize_large_text_save(
     tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
 
     // Clean up cache directory
-    cleanup_session_cache(&input.session_id)?;
+    if let Err(error) = cleanup_session_cache(&input.session_id) {
+        crate::errors::log_workspace_event(crate::errors::WorkspaceLogEvent {
+            level: "warn",
+            event: "legacy_large_text_post_commit_cleanup_failed",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: None,
+            metadata: Some(serde_json::json!({ "maintenanceError": error })),
+        });
+    }
 
     Ok(FinalizeLargeTextSaveOutput {
         document_id,
@@ -428,38 +444,9 @@ pub fn cleanup_expired_large_text_save_sessions() -> Result<usize, String> {
 /// Read the full content of a large text document by assembling chunks from the database
 pub fn read_large_text_document(document_id: &str) -> Result<String, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-
-    // Check document exists
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM large_text_documents WHERE id = ?1",
-            params![document_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if exists == 0 {
-        return Err(format!("大文本文档不存在: {}", document_id));
-    }
-
-    // Read all chunks in order
-    let mut stmt = conn
-        .prepare(
-            "SELECT chunk_index, content FROM large_text_chunks WHERE document_id = ?1 ORDER BY chunk_index ASC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let chunks: Vec<(i64, String)> = stmt
-        .query_map(params![document_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    let full_content: String = chunks.into_iter().map(|(_, content)| content).collect();
-
-    Ok(full_content)
+    crate::repositories::large_text_repository::read_verified_document(&conn, document_id)
+        .map(|verified| verified.content)
+        .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
 }
 
 /// Check if content is stored as chunked large text (returns document_id if so)
@@ -542,6 +529,12 @@ pub fn update_large_text_ref(input: UpdateLargeTextRefInput) -> Result<(), Strin
     if !allowed_tables.contains(&input.table_name.as_str()) {
         return Err(format!("不允许的表名: {}", input.table_name));
     }
+    if input.table_name == "chapter_drafts" {
+        return Err(
+            "WORKSPACE_SAVE_FAILED: 草稿大文本引用只能通过 save_chapter_draft_atomic 更新"
+                .to_string(),
+        );
+    }
 
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
 
@@ -587,7 +580,7 @@ fn count_saved_chunks(cache_dir: &PathBuf) -> Result<usize, String> {
     Ok(count)
 }
 
-fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
+pub(crate) fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
     let cache_dir = session_cache_dir(session_id);
     if cache_dir.exists() {
         fs::remove_dir_all(&cache_dir)
@@ -597,44 +590,3 @@ fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
 }
 
 // ==================== Database Initialization ====================
-
-/// Create the large_text tables. Called from db::init_database.
-pub fn create_large_text_tables(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS large_text_documents (
-            id TEXT PRIMARY KEY,
-            target_type TEXT NOT NULL,
-            target_id TEXT,
-            field_name TEXT NOT NULL,
-            title TEXT,
-            total_chars INTEGER NOT NULL DEFAULT 0,
-            total_bytes INTEGER NOT NULL DEFAULT 0,
-            chunk_count INTEGER NOT NULL DEFAULT 0,
-            content_sha256 TEXT,
-            storage_type TEXT NOT NULL DEFAULT 'chunked',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS large_text_chunks (
-            document_id TEXT NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            char_count INTEGER NOT NULL DEFAULT 0,
-            byte_count INTEGER NOT NULL DEFAULT 0,
-            chunk_sha256 TEXT,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY (document_id, chunk_index),
-            FOREIGN KEY (document_id) REFERENCES large_text_documents(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_large_text_documents_target
-        ON large_text_documents(target_type, target_id, field_name);
-
-        CREATE INDEX IF NOT EXISTS idx_large_text_chunks_document
-        ON large_text_chunks(document_id, chunk_index);
-        ",
-    )?;
-    Ok(())
-}

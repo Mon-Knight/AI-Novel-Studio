@@ -155,6 +155,8 @@ export interface ChapterDraft {
   aiTaskId?: string;
   note?: string;
   largeTextRefId?: string;
+  /** Full-content availability. `content` is always empty when unavailable. */
+  contentState?: import('./draftContentState').DraftContentState;
   createdAt: string;
   updatedAt: string;
 }

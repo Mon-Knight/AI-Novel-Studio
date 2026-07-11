@@ -43,13 +43,13 @@ pub fn init_database() {
     fs::create_dir_all(&data_dir).expect("Failed to create data directory");
 
     let db_path = get_database_path();
-    let connection = Connection::open(&db_path).expect("Failed to open database");
+    let mut connection = Connection::open(&db_path).expect("Failed to open database");
 
     connection
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .expect("Failed to set pragmas");
 
-    create_tables(&connection).expect("Failed to create tables");
+    create_tables(&mut connection).expect("Failed to create tables");
 
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");
@@ -61,12 +61,12 @@ pub fn get_connection() -> &'static Mutex<Connection> {
     DB.get().expect("Database not initialized")
 }
 
-fn create_tables(conn: &Connection) -> SqliteResult<()> {
+fn create_tables(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
     create_base_tables(conn)?;
     run_migrations(conn)?;
     create_indexes(conn)?;
-    crate::large_text_save::create_large_text_tables(conn)?;
     crate::outline_commands::create_outline_tables(conn)?;
+    crate::migrations::run_migrations(conn)?;
     Ok(())
 }
 
@@ -1280,8 +1280,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrates_legacy_characters_table_before_protagonist_index() -> SqliteResult<()> {
-        let conn = Connection::open_in_memory()?;
+    fn migrates_legacy_characters_table_before_protagonist_index(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
         conn.execute_batch(
             "
             CREATE TABLE characters (
@@ -1295,7 +1296,7 @@ mod tests {
             ",
         )?;
 
-        create_tables(&conn)?;
+        create_tables(&mut conn)?;
 
         for column in [
             "is_protagonist",
@@ -1340,7 +1341,7 @@ mod tests {
         assert!(!timestamps.0.is_empty());
         assert!(!timestamps.1.is_empty());
 
-        create_tables(&conn)?;
+        create_tables(&mut conn)?;
         Ok(())
     }
 }

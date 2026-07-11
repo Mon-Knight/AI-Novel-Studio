@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "AI Novel Studio",
-    "version": "2.1.1"
+    "version": "2.2.0"
   },
   "tauri": {
     "allowlist": {
@@ -27,6 +27,10 @@
       },
       "notification": {
         "all": true
+      },
+      "window": {
+        "all": false,
+        "close": true
       }
     },
     "bundle": {

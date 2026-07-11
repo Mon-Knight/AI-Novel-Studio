@@ -52,6 +52,7 @@ interface RightPanelProps {
   sidebarState?: RightSidebarState;
   /** v1.0.45 更新面板运行时状态 */
   onUpdateToolState?: (toolKey: string, patch: Partial<PanelToolState>) => void;
+  documentAvailable?: boolean;
 }
 
 const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
@@ -97,6 +98,7 @@ function RightPanel({
   writingContext,
   sidebarState,
   onUpdateToolState,
+  documentAvailable = true,
 }: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   // v1.0.44: 记住上次活跃面板类型，收起时用 CSS 隐藏而非卸载，保留面板内部状态
@@ -133,6 +135,8 @@ function RightPanel({
   if (!config) return null;
 
   const PanelComponent = config.component;
+  const documentRequired = ['ai-generate', 'engineering', 'check', 'polish', 'chapter-summary']
+    .includes(effectivePanelType);
 
   // v1.0.24: 阻止面板内部所有交互事件冒泡到外部
   const stopAll = (e: React.SyntheticEvent) => {
@@ -166,7 +170,12 @@ function RightPanel({
               <span>正文已修改，当前 AI 输出可能基于旧正文。建议重新生成。</span>
             </div>
           )}
-          <PanelComponent
+          {!documentAvailable && documentRequired ? (
+            <div className="panel-content-unavailable" role="alert">
+              <strong>完整正文暂时无法读取</strong>
+              <p>为避免截断内容进入 AI 上下文，本面板已暂停。请先在编辑区重新读取正文。</p>
+            </div>
+          ) : <PanelComponent
             novelId={novelId}
             chapter={chapter}
             onGenerated={onGenerated}
@@ -193,7 +202,7 @@ function RightPanel({
             // v1.0.45 统一上下文 + 状态
             writingContext={writingContext}
             onUpdateToolState={effectivePanelType ? (patch: Partial<PanelToolState>) => onUpdateToolState?.(effectivePanelType, patch) : undefined}
-          />
+          />}
         </div>
       </div>
     </div>

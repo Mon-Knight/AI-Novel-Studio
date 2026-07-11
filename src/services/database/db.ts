@@ -5,6 +5,7 @@
 
 import { safeJsonParse } from '../../utils/dataGuard';
 import { describeUnknownError } from '../../utils/errorMessage';
+import { normalizeAppError } from '../../types/appError';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 
 // ==================== localStorage 回退实现 ====================
@@ -56,19 +57,29 @@ function shouldLogDbCommand(command: string): boolean {
   return command.includes('ai_task');
 }
 
-function sanitizeForDbLog(value: unknown, depth = 0): unknown {
+function isSensitiveLogKey(key: string): boolean {
+  if (/hash|length|count|id|version|status/i.test(key)) return false;
+  return /(^|_)(content|recovery_content|text|body|prompt|messages?|api_?key|token|secret)($|_)/i.test(key)
+    || /recoveryContent|currentEditorContent|adoptedContent|apiKey/i.test(key);
+}
+
+function sanitizeForDbLog(value: unknown, depth = 0, key = ''): unknown {
+  if (isSensitiveLogKey(key)) {
+    const length = typeof value === 'string' ? value.length : undefined;
+    return length === undefined ? '[REDACTED]' : `[REDACTED length=${length}]`;
+  }
   if (depth > 3) return '[MaxDepth]';
   if (typeof value === 'string') {
     return value.length > 300 ? `${value.slice(0, 300)}...[truncated]` : value;
   }
   if (Array.isArray(value)) {
-    return value.slice(0, 20).map((item) => sanitizeForDbLog(item, depth + 1));
+    return value.slice(0, 20).map((item) => sanitizeForDbLog(item, depth + 1, key));
   }
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        sanitizeForDbLog(item, depth + 1),
+        sanitizeForDbLog(item, depth + 1, key),
       ]),
     );
   }
@@ -107,11 +118,14 @@ export async function dbCall<T>(
       return result;
     } catch (e: unknown) {
       const errorMessage = describeUnknownError(e, `Tauri command failed: ${command}`);
+      const appError = normalizeAppError(e, errorMessage);
       console.error('[DB_CALL_FAILED]', {
         command,
         args: sanitizeForDbLog(args),
-        errorMessage,
-        rawError: e,
+        code: appError.code,
+        retryable: appError.retryable,
+        traceId: appError.traceId,
+        operationId: appError.operationId,
       });
       if (e instanceof Error) {
         throw e;

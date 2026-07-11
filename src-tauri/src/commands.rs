@@ -2,6 +2,9 @@ use crate::db::{get_connection, get_database_path};
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
+pub mod drafts;
+pub mod recovery;
+
 // ==================== Novel ====================
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -961,13 +964,41 @@ pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDt
 
 #[tauri::command]
 pub fn delete_chapter(id: String) -> Result<(), String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    let novel_id: String = transaction
+        .query_row(
+            "SELECT novel_id FROM chapters WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
+    let affected = transaction
+        .execute(
         "UPDATE chapters SET deleted_at = ?1 WHERE id = ?2",
-        params![now, id],
+        params![now, &id],
+    ).map_err(|e| e.to_string())?;
+    if affected != 1 {
+        return Err("TARGET_CHAPTER_NOT_FOUND: 章节删除未命中唯一目标".to_string());
+    }
+    let recovery_document_id = crate::repositories::recovery_repository::get(
+        &transaction,
+        &novel_id,
+        &id,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|error| error.to_string())?
+    .and_then(|snapshot| snapshot.large_text_ref_id);
+    crate::repositories::recovery_repository::delete_exact(&transaction, &novel_id, &id)
+        .map_err(|error| error.to_string())?;
+    if let Some(document_id) = recovery_document_id {
+        crate::repositories::large_text_repository::delete_if_unreferenced(
+            &transaction,
+            &document_id,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1014,6 +1045,7 @@ pub struct ChapterDraftDto {
     pub updated_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateChapterDraftInput {
@@ -1051,6 +1083,7 @@ fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterDraftDto> {
     })
 }
 
+#[allow(dead_code)]
 fn get_draft_by_id_internal(
     conn: &rusqlite::Connection,
     id: &str,
@@ -1102,6 +1135,7 @@ pub fn get_latest_draft_by_chapter_id(
 }
 
 #[tauri::command]
+#[allow(dead_code)]
 pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDraftDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -1181,6 +1215,7 @@ fn update_chapter_draft_internal(
 }
 
 #[tauri::command]
+#[allow(dead_code)]
 pub fn update_chapter_draft(
     id: String,
     chapter_id: String,

@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { HashRouter } from 'react-router-dom';
+import { createHashRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
 import { tauriInvoke } from './services/tauri/runtime';
@@ -44,6 +44,20 @@ function scheduleHideStartupSplash() {
   window.setTimeout(hideStartupSplash, delay);
 }
 
+// Keep hash-based desktop URLs while opting into React Router's data-router
+// transition coordinator. The workspace Leave Guard relies on its blocker to
+// cover Link, navigate(), browser history and direct hash transitions.
+const router = createHashRouter([
+  {
+    path: '*',
+    element: (
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    ),
+  },
+]);
+
 // Native Feel P1: 禁用 WebView 默认右键菜单（保留输入框和编辑区的原生右键）
 window.addEventListener('contextmenu', (event) => {
   const target = event.target as HTMLElement | null;
@@ -78,11 +92,7 @@ async function applySystemAccentColor() {
 markStartup('react-before-render');
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <HashRouter>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    </HashRouter>
+    <RouterProvider router={router} />
   </React.StrictMode>,
 );
 

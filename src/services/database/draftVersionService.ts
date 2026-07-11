@@ -1,14 +1,23 @@
 /**
- * AI Novel Studio - 章节草稿版本服务
- * Tauri 桌面端使用 SQLite，浏览器开发态使用 localStorage。
- * 支持大文本分片保存（超过 100KB 自动使用分片管道）。
+ * Chapter draft persistence facade.
+ *
+ * Tauri writes use one authoritative atomic command. Large-text read failures
+ * are represented as `contentState: unavailable`; preview text is never put in
+ * `draft.content` and therefore cannot enter the editor or an AI prompt.
  */
-import { dbCall, lsGet, lsSet, generateId, nowISO } from '../database/db';
-import { saveLargeTextWithChunks } from '../largeTextSave';
-import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
-import { shouldUseLargeTextSave } from '../../types/largeTextSave';
+import { dbCall, generateId, lsGet, lsSet, nowISO } from './db';
+import { isTauriRuntime } from '../tauri/runtime';
 import type { ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
+import type { DraftContentState } from '../../types/draftContentState';
 import type { LargeTextSaveProgress } from '../../types/largeTextSave';
+import { normalizeAppError } from '../../types/appError';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { countTextWords } from '../../utils/contentHash';
+import {
+  createOperationId,
+  createTraceId,
+  logWorkspaceError,
+} from '../workspace/workspaceErrorService';
 
 const DRAFTS_LIST_KEY_PREFIX = 'ai_novel_studio_drafts_list_';
 
@@ -24,16 +33,48 @@ type DraftRecord = Partial<ChapterDraft> & {
   updated_at?: string;
 };
 
-function draftsKey(chapterId: string): string {
-  return `${DRAFTS_LIST_KEY_PREFIX}${chapterId}`;
+type AtomicSaveRecord = {
+  operationId?: string;
+  operation_id?: string;
+  traceId?: string;
+  trace_id?: string;
+  draft?: unknown;
+  contentHash?: string;
+  content_hash?: string;
+  contentLength?: number;
+  content_length?: number;
+  storageMode?: string;
+  storage_mode?: string;
+  idempotentReplay?: boolean;
+  idempotent_replay?: boolean;
+};
+
+type UpdateDraftBase = Pick<ChapterDraft,
+  'id' | 'novelId' | 'chapterId' | 'title' | 'versionNo' | 'isAdopted' | 'contentState'>;
+
+// A retry of the same business payload must reuse its operationId. Entries are
+// removed only after an authoritative success; changed content/base identity
+// naturally produces a different key.
+const pendingOperationIds = new Map<string, string>();
+
+function unicodeScalarLength(content: string): number {
+  return Array.from(content).length;
 }
 
-function countWords(text: string): number {
-  const cleaned = text.replace(/[#*\-`>\s]+/g, ' ').trim();
-  if (!cleaned) return 0;
-  const cjk = (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  const words = (cleaned.match(/[a-zA-Z0-9]+/g) || []).length;
-  return cjk + words;
+function operationIdFor(key: string): string {
+  const existing = pendingOperationIds.get(key);
+  if (existing) return existing;
+  if (pendingOperationIds.size >= 100) {
+    const oldest = pendingOperationIds.keys().next().value as string | undefined;
+    if (oldest) pendingOperationIds.delete(oldest);
+  }
+  const operationId = createOperationId();
+  pendingOperationIds.set(key, operationId);
+  return operationId;
+}
+
+function draftsKey(chapterId: string): string {
+  return `${DRAFTS_LIST_KEY_PREFIX}${chapterId}`;
 }
 
 function toNumber(value: unknown, fallback: number): number {
@@ -64,11 +105,12 @@ function normalizeDraft(raw: unknown): ChapterDraft | null {
     content,
     source: item.source ?? 'manual_placeholder',
     versionNo: toNumber(item.versionNo ?? item.version_no, 1),
-    wordCount: toNumber(item.wordCount ?? item.word_count, countWords(content)),
+    wordCount: toNumber(item.wordCount ?? item.word_count, countTextWords(content)),
     isAdopted: toBoolean(item.isAdopted ?? item.is_adopted),
     aiTaskId: item.aiTaskId ?? item.ai_task_id ?? undefined,
     note: item.note,
     largeTextRefId: item.largeTextRefId ?? item.large_text_ref_id ?? undefined,
+    contentState: item.contentState,
     createdAt: item.createdAt ?? item.created_at ?? now,
     updatedAt: item.updatedAt ?? item.updated_at ?? now,
   };
@@ -92,267 +134,439 @@ function saveLocalDrafts(chapterId: string, drafts: ChapterDraft[]): void {
   lsSet(draftsKey(chapterId), drafts);
 }
 
-/**
- * 从大文本存储中读取完整内容
- */
-async function readFullContent(largeTextRefId: string): Promise<string | null> {
-  // 检测是否在 Tauri 环境
-  if (isTauriRuntime()) {
-    try {
-      const result = await tauriInvoke<{ content: string }>('read_large_text_content', {
-        input: { documentId: largeTextRefId },
-      });
-      return result?.content ?? null;
-    } catch {
-      return null;
+async function readyState(content: string, contentHash?: string): Promise<DraftContentState> {
+  return {
+    status: 'ready',
+    content,
+    contentHash: contentHash ?? await computeContentSha256(content),
+    contentLength: unicodeScalarLength(content),
+  };
+}
+
+function unavailableState(
+  preview: string,
+  value: unknown,
+  traceId: string,
+): Extract<DraftContentState, { status: 'unavailable' }> {
+  const error = normalizeAppError(value, '完整正文暂时无法读取。', { traceId });
+  const details = error.details;
+  return {
+    status: 'unavailable',
+    preview: preview || undefined,
+    errorCode: error.code === 'UNKNOWN_ERROR' ? 'LARGE_TEXT_CONTENT_UNAVAILABLE' : error.code,
+    retryable: error.retryable || error.code === 'UNKNOWN_ERROR',
+    expectedHash: typeof details?.expectedHash === 'string'
+      ? details.expectedHash
+      : typeof details?.expected_hash === 'string'
+        ? details.expected_hash
+        : undefined,
+    actualHash: typeof details?.actualHash === 'string'
+      ? details.actualHash
+      : typeof details?.actual_hash === 'string'
+        ? details.actual_hash
+        : undefined,
+    error: error.code === 'UNKNOWN_ERROR'
+      ? { ...error, code: 'LARGE_TEXT_CONTENT_UNAVAILABLE', retryable: true }
+      : error,
+  };
+}
+
+function normalizeReadState(raw: unknown, preview: string, traceId: string): DraftContentState {
+  if (!raw || typeof raw !== 'object') return unavailableState(preview, raw, traceId);
+  const wrapper = raw as Record<string, unknown>;
+  const stateRaw = (wrapper.contentState ?? wrapper.content_state ?? wrapper) as Record<string, unknown>;
+  if (!stateRaw || typeof stateRaw !== 'object') return unavailableState(preview, raw, traceId);
+  if (stateRaw.status === 'ready') {
+    const content = typeof stateRaw.content === 'string' ? stateRaw.content : null;
+    const contentHash = typeof stateRaw.contentHash === 'string'
+      ? stateRaw.contentHash
+      : typeof stateRaw.content_hash === 'string'
+        ? stateRaw.content_hash
+        : null;
+    const contentLength = toNumber(stateRaw.contentLength ?? stateRaw.content_length, -1);
+    if (content !== null && contentHash && contentLength === unicodeScalarLength(content)) {
+      return { status: 'ready', content, contentHash, contentLength };
     }
+    return unavailableState(preview, {
+      code: 'LARGE_TEXT_CONTENT_UNAVAILABLE',
+      message: '正文读取结果缺少完整性字段。',
+      retryable: true,
+      traceId,
+    }, traceId);
   }
-  // 浏览器模式下内容已在 localStorage 中
-  return null;
+  return unavailableState(preview, {
+    code: typeof stateRaw.errorCode === 'string'
+      ? stateRaw.errorCode
+      : typeof stateRaw.error_code === 'string'
+        ? stateRaw.error_code
+        : 'LARGE_TEXT_CONTENT_UNAVAILABLE',
+    message: typeof stateRaw.message === 'string' ? stateRaw.message : '完整正文暂时无法读取。',
+    retryable: stateRaw.retryable !== false,
+    traceId,
+    details: {
+      expectedHash: stateRaw.expectedHash ?? stateRaw.expected_hash,
+      actualHash: stateRaw.actualHash ?? stateRaw.actual_hash,
+    },
+  }, traceId);
+}
+
+async function hydrateDraftContent(draft: ChapterDraft): Promise<ChapterDraft> {
+  if (!draft.largeTextRefId || !isTauriRuntime()) {
+    const state = await readyState(draft.content);
+    return { ...draft, contentState: state };
+  }
+  const preview = draft.content;
+  const traceId = createTraceId('draft-read');
+  try {
+    const raw = await dbCall<unknown>('read_chapter_draft_content', {
+      input: {
+        novelId: draft.novelId,
+        chapterId: draft.chapterId,
+        draftId: draft.id,
+        traceId,
+      },
+    });
+    const wrapper = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const returnedDraftId = wrapper.draftId ?? wrapper.draft_id;
+    const returnedVersion = wrapper.draftVersion ?? wrapper.draft_version;
+    if ((typeof returnedDraftId === 'string' && returnedDraftId !== draft.id)
+      || (typeof returnedVersion === 'number' && returnedVersion !== draft.versionNo)) {
+      throw {
+        code: 'LARGE_TEXT_REFERENCE_INVALID',
+        message: '正文读取结果与目标草稿不一致。',
+        retryable: false,
+        traceId,
+      };
+    }
+    const state = normalizeReadState(raw, preview, traceId);
+    return {
+      ...draft,
+      // Critical invariant: preview never occupies the editable content field.
+      content: state.status === 'ready' ? state.content : '',
+      wordCount: state.status === 'ready' ? countTextWords(state.content) : draft.wordCount,
+      contentState: state,
+    };
+  } catch (error) {
+    const state = unavailableState(preview, error, traceId);
+    logWorkspaceError('draft_content_read_failed', error, {
+      traceId,
+      novelId: draft.novelId,
+      chapterId: draft.chapterId,
+      draftId: draft.id,
+      draftVersion: draft.versionNo,
+    });
+    return { ...draft, content: '', contentState: state };
+  }
+}
+
+async function normalizeAtomicSave(
+  raw: unknown,
+  expected: {
+    operationId: string;
+    traceId: string;
+    novelId: string;
+    chapterId: string;
+    draftId?: string;
+    allowNewDraftId?: boolean;
+    content: string;
+    contentHash: string;
+  },
+): Promise<ChapterDraft> {
+  if (!raw || typeof raw !== 'object') {
+    throw {
+      code: 'DATABASE_TRANSACTION_FAILED',
+      message: '原子保存未返回结果。',
+      retryable: true,
+      traceId: expected.traceId,
+      operationId: expected.operationId,
+    };
+  }
+  const record = raw as AtomicSaveRecord;
+  const returnedOperationId = record.operationId ?? record.operation_id;
+  const returnedHash = record.contentHash ?? record.content_hash;
+  const returnedLength = toNumber(record.contentLength ?? record.content_length, -1);
+  const draft = normalizeDraft(record.draft);
+  if (returnedOperationId !== expected.operationId
+    || returnedHash !== expected.contentHash
+    || returnedLength !== unicodeScalarLength(expected.content)
+    || !draft
+    || draft.novelId !== expected.novelId
+    || draft.chapterId !== expected.chapterId
+    || (expected.draftId && !expected.allowNewDraftId && draft.id !== expected.draftId)) {
+    throw {
+      code: 'DOCUMENT_HASH_MISMATCH',
+      message: '原子保存返回的正文身份校验失败。',
+      retryable: false,
+      traceId: record.traceId ?? record.trace_id ?? expected.traceId,
+      operationId: expected.operationId,
+    };
+  }
+  return {
+    ...draft,
+    content: expected.content,
+    wordCount: countTextWords(expected.content),
+    contentState: await readyState(expected.content, expected.contentHash),
+  };
 }
 
 export const draftVersionService = {
   async getByChapterId(chapterId: string): Promise<ChapterDraft[]> {
-    const drafts = await dbCall<unknown[]>(
+    const traceId = createTraceId('draft-list');
+    const raw = await dbCall<unknown[]>(
       'get_drafts_by_chapter_id',
-      { chapterId },
+      { chapterId, traceId },
       () => getLocalDrafts(chapterId),
     );
-    const normalized = normalizeDrafts(drafts);
-
-    // 加载大文本完整内容
-    for (const draft of normalized) {
-      if (draft.largeTextRefId && draft.content.length < 600) {
-        const fullContent = await readFullContent(draft.largeTextRefId);
-        if (fullContent) {
-          draft.content = fullContent;
-          draft.wordCount = countWords(fullContent);
-        }
-      }
-    }
-
-    return normalized;
+    return Promise.all(normalizeDrafts(raw).map(hydrateDraftContent));
   },
 
   async getLatestByChapterId(chapterId: string): Promise<ChapterDraft | null> {
-    const draft = await dbCall<unknown | null>(
+    const traceId = createTraceId('draft-latest');
+    const raw = await dbCall<unknown | null>(
       'get_latest_draft_by_chapter_id',
-      { chapterId },
+      { chapterId, traceId },
       () => {
         const drafts = getLocalDrafts(chapterId);
-        if (drafts.length === 0) return null;
-        return drafts.sort((a, b) => b.versionNo - a.versionNo)[0];
+        return drafts.sort((left, right) => right.versionNo - left.versionNo)[0] ?? null;
       },
     );
-    const normalized = normalizeDraft(draft);
-
-    // 加载大文本完整内容
-    if (normalized?.largeTextRefId && normalized.content.length < 600) {
-      const fullContent = await readFullContent(normalized.largeTextRefId);
-      if (fullContent) {
-        normalized.content = fullContent;
-        normalized.wordCount = countWords(fullContent);
-      }
-    }
-
-    return normalized;
+    const draft = normalizeDraft(raw);
+    return draft ? hydrateDraftContent(draft) : null;
   },
 
   async getAdoptedByChapterId(chapterId: string): Promise<ChapterDraft | null> {
     const drafts = await this.getByChapterId(chapterId);
-    return drafts.find((d) => d.isAdopted) ?? null;
+    return drafts.find((draft) => draft.isAdopted) ?? null;
   },
 
-  async create(input: CreateChapterDraftInput, onProgress?: (p: LargeTextSaveProgress) => void): Promise<ChapterDraft> {
-    // 如果内容较大，先通过大文本管道保存
-    let largeTextRefId: string | undefined;
-    let contentForDb = input.content;
-
-    if (shouldUseLargeTextSave(input.content)) {
-      onProgress?.({ stage: 'creating', percent: 0, message: '正在准备保存大文本...' });
-      const saveResult = await saveLargeTextWithChunks({
-        targetType: 'draft',
-        targetId: input.chapterId,
-        fieldName: 'content',
+  async create(
+    input: CreateChapterDraftInput,
+    onProgress?: (progress: LargeTextSaveProgress) => void,
+  ): Promise<ChapterDraft> {
+    if (!isTauriRuntime()) {
+      const drafts = getLocalDrafts(input.chapterId);
+      const now = nowISO();
+      const contentState = await readyState(input.content);
+      const draft: ChapterDraft = {
+        id: generateId(),
+        novelId: input.novelId,
+        chapterId: input.chapterId,
         title: input.title,
         content: input.content,
-        onProgress,
-      });
-
-      if (!saveResult.success) {
-        throw new Error(saveResult.error || '大文本保存失败');
-      }
-
-      if (saveResult.documentId) {
-        largeTextRefId = saveResult.documentId;
-        // 存储截断预览到 content 字段（前 500 字符）
-        contentForDb = input.content.slice(0, 500);
-        if (input.content.length > 500) {
-          contentForDb += `\n\n[大文本已分片保存，完整内容通过 largeTextRefId 读取: ${largeTextRefId}]`;
-        }
-      }
+        source: input.source,
+        versionNo: drafts.reduce((max, item) => Math.max(max, item.versionNo), 0) + 1,
+        wordCount: countTextWords(input.content),
+        isAdopted: false,
+        aiTaskId: input.aiTaskId,
+        note: input.note,
+        contentState,
+        createdAt: now,
+        updatedAt: now,
+      };
+      drafts.push(draft);
+      saveLocalDrafts(input.chapterId, drafts);
+      return draft;
     }
 
-    const inputWithRef = { ...input, content: contentForDb, largeTextRefId };
-
-    const draft = await dbCall<unknown>(
-      'create_chapter_draft',
-      { input: inputWithRef },
-      () => {
-        const drafts = getLocalDrafts(input.chapterId);
-        const maxVersion = drafts.reduce((max, d) => Math.max(max, d.versionNo), 0);
-        const now = nowISO();
-        const localDraft: ChapterDraft = {
-          id: generateId(),
+    const traceId = createTraceId('draft-save');
+    const currentContentHash = await computeContentSha256(input.content);
+    const operationKey = JSON.stringify([
+      'create', input.novelId, input.chapterId, currentContentHash, input.source, input.title ?? '',
+    ]);
+    const operationId = operationIdFor(operationKey);
+    onProgress?.({ stage: 'finalizing', percent: 20, message: '正在原子保存正文…' });
+    try {
+      const raw = await dbCall<unknown>('save_chapter_draft_atomic', {
+        input: {
+          operationId,
+          traceId,
           novelId: input.novelId,
           chapterId: input.chapterId,
-          title: input.title,
-          content: input.content, // localStorage 保存完整内容
+          currentContentHash,
+          content: input.content,
+          wordCount: countTextWords(input.content),
           source: input.source,
-          versionNo: maxVersion + 1,
-          wordCount: countWords(input.content),
-          isAdopted: false,
-          aiTaskId: input.aiTaskId,
-          note: input.note,
-          largeTextRefId,
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        drafts.push(localDraft);
-        saveLocalDrafts(input.chapterId, drafts);
-        return localDraft;
-      },
-    );
-    const normalized = normalizeDraft(draft);
-    if (!normalized?.id) throw new Error('草稿创建返回无效数据');
-
-    // 如果是大文本且有 largeTextRefId，加载完整内容
-    if (normalized.largeTextRefId) {
-      try {
-        const fullContent = await readFullContent(normalized.largeTextRefId);
-        if (fullContent) {
-          normalized.content = fullContent;
-        }
-      } catch {
-        // 读取失败时保留截断预览
-        console.warn('无法读取大文本完整内容，使用截断预览');
-      }
+          title: input.title,
+        },
+      });
+      const draft = await normalizeAtomicSave(raw, {
+        operationId,
+        traceId,
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        content: input.content,
+        contentHash: currentContentHash,
+      });
+      pendingOperationIds.delete(operationKey);
+      onProgress?.({ stage: 'done', percent: 100, message: '正文已保存' });
+      return draft;
+    } catch (error) {
+      onProgress?.({ stage: 'error', percent: 0, message: '保存失败' });
+      throw logWorkspaceError('draft_atomic_create_failed', error, {
+        traceId,
+        operationId,
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        contentHash: currentContentHash,
+      });
     }
-
-    return normalized;
   },
 
-  async update(id: string, chapterId: string, content: string, source?: DraftSource, onProgress?: (p: LargeTextSaveProgress) => void): Promise<ChapterDraft> {
-    // 如果内容较大，先通过大文本管道保存
-    let largeTextRefId: string | undefined;
-    let contentForDb = content;
-
-    if (shouldUseLargeTextSave(content)) {
-      onProgress?.({ stage: 'creating', percent: 0, message: '正在准备保存大文本...' });
-      const saveResult = await saveLargeTextWithChunks({
-        targetType: 'draft',
-        targetId: chapterId,
-        fieldName: 'content',
-        content,
-        onProgress,
-      });
-
-      if (!saveResult.success) {
-        throw new Error(saveResult.error || '大文本保存失败');
-      }
-
-      if (saveResult.documentId) {
-        largeTextRefId = saveResult.documentId;
-        contentForDb = content.slice(0, 500);
-        if (content.length > 500) {
-          contentForDb += `\n\n[大文本已分片保存: ${largeTextRefId}]`;
-        }
-      }
-    }
-
-    const draft = await dbCall<unknown | null>(
-      'update_chapter_draft',
-      { id, chapterId, content: contentForDb, source, largeTextRefId: largeTextRefId ?? null },
-      () => {
-        const drafts = getLocalDrafts(chapterId);
-        const idx = drafts.findIndex((d) => d.id === id);
-        if (idx === -1) {
-          throw new Error('draft_update_conflict: 草稿不存在或不属于当前章节');
-        }
-
-        drafts[idx] = {
-          ...drafts[idx],
-          content, // localStorage 保存完整内容
-          source: source || 'user_edited',
-          wordCount: countWords(content),
-          largeTextRefId: largeTextRefId || drafts[idx].largeTextRefId,
-          updatedAt: nowISO(),
+  async update(
+    id: string,
+    chapterId: string,
+    content: string,
+    source: DraftSource = 'user_edited',
+    onProgress?: (progress: LargeTextSaveProgress) => void,
+    baseDraft?: UpdateDraftBase,
+  ): Promise<ChapterDraft> {
+    if (!isTauriRuntime()) {
+      const drafts = getLocalDrafts(chapterId);
+      const index = drafts.findIndex((draft) => draft.id === id);
+      if (index < 0) {
+        throw {
+          code: 'TARGET_DRAFT_NOT_FOUND',
+          message: '草稿不存在或不属于当前章节。',
+          retryable: false,
         };
-        saveLocalDrafts(chapterId, drafts);
-        return drafts[idx];
-      },
-    );
-
-    const normalized = normalizeDraft(draft);
-    if (!normalized || normalized.id !== id || normalized.chapterId !== chapterId) {
-      throw new Error('draft_update_conflict: 草稿更新结果与目标章节不一致');
-    }
-
-    // 如果是大文本且有 largeTextRefId，加载完整内容
-    if (normalized?.largeTextRefId) {
-      try {
-        const fullContent = await readFullContent(normalized.largeTextRefId);
-        if (fullContent) {
-          normalized.content = fullContent;
-        }
-      } catch {
-        console.warn('无法读取大文本完整内容，使用截断预览');
       }
+      const updated: ChapterDraft = {
+        ...drafts[index],
+        content,
+        source,
+        wordCount: countTextWords(content),
+        contentState: await readyState(content),
+        updatedAt: nowISO(),
+      };
+      drafts[index] = updated;
+      saveLocalDrafts(chapterId, drafts);
+      return updated;
     }
 
-    return normalized;
+    const persisted = baseDraft
+      ?? (await this.getByChapterId(chapterId)).find((draft) => draft.id === id);
+    if (!persisted) {
+      throw {
+        code: 'TARGET_DRAFT_NOT_FOUND',
+        message: '目标草稿不存在。',
+        retryable: false,
+      };
+    }
+    if (persisted.id !== id || persisted.chapterId !== chapterId) {
+      throw {
+        code: 'LARGE_TEXT_REFERENCE_INVALID',
+        message: '保存基线与目标草稿不一致。',
+        retryable: false,
+      };
+    }
+    if (persisted.contentState?.status !== 'ready') {
+      throw persisted.contentState?.error ?? {
+        code: 'LARGE_TEXT_CONTENT_UNAVAILABLE',
+        message: '完整正文不可用，已阻止保存。',
+        retryable: true,
+      };
+    }
+
+    const traceId = createTraceId('draft-save');
+    const currentContentHash = await computeContentSha256(content);
+    const operationKey = JSON.stringify([
+      'update', persisted.novelId, chapterId, id, persisted.versionNo,
+      persisted.contentState.contentHash, currentContentHash, source, persisted.title ?? '',
+    ]);
+    const operationId = operationIdFor(operationKey);
+    onProgress?.({ stage: 'finalizing', percent: 20, message: '正在原子保存正文…' });
+    try {
+      const raw = await dbCall<unknown>('save_chapter_draft_atomic', {
+        input: {
+          operationId,
+          traceId,
+          novelId: persisted.novelId,
+          chapterId,
+          draftId: id,
+          draftVersion: persisted.versionNo,
+          baseContentHash: persisted.contentState.contentHash,
+          currentContentHash,
+          content,
+          wordCount: countTextWords(content),
+          source,
+          title: persisted.title,
+        },
+      });
+      const draft = await normalizeAtomicSave(raw, {
+        operationId,
+        traceId,
+        novelId: persisted.novelId,
+        chapterId,
+        draftId: id,
+        allowNewDraftId: persisted.isAdopted,
+        content,
+        contentHash: currentContentHash,
+      });
+      pendingOperationIds.delete(operationKey);
+      onProgress?.({ stage: 'done', percent: 100, message: '正文已保存' });
+      return draft;
+    } catch (error) {
+      onProgress?.({ stage: 'error', percent: 0, message: '保存失败' });
+      throw logWorkspaceError('draft_atomic_update_failed', error, {
+        traceId,
+        operationId,
+        novelId: persisted.novelId,
+        chapterId,
+        draftId: id,
+        draftVersion: persisted.versionNo,
+        contentHash: currentContentHash,
+      });
+    }
   },
 
   async adopt(draftId: string, chapterId: string): Promise<ChapterDraft> {
-    const draft = await dbCall<unknown | null>(
+    const target = (await this.getByChapterId(chapterId)).find((draft) => draft.id === draftId);
+    if (!target) {
+      throw { code: 'TARGET_DRAFT_NOT_FOUND', message: '目标草稿不存在。', retryable: false };
+    }
+    if (target.contentState?.status !== 'ready') {
+      throw target.contentState?.error ?? {
+        code: 'LARGE_TEXT_CONTENT_UNAVAILABLE',
+        message: '完整正文不可用，已阻止采用。',
+        retryable: true,
+      };
+    }
+    const traceId = createTraceId('draft-adopt');
+    const raw = await dbCall<unknown | null>(
       'adopt_chapter_draft',
-      { draftId, chapterId },
+      { draftId, chapterId, traceId },
       () => {
         const drafts = getLocalDrafts(chapterId);
-        const target = drafts.find((draft) => draft.id === draftId);
-        if (!target) {
-          throw new Error('draft_adopt_target_mismatch: 草稿不存在或不属于当前章节');
-        }
         let adopted: ChapterDraft | null = null;
-
-        const updated = drafts.map((d) => {
-          if (d.id === draftId) {
-            adopted = { ...d, isAdopted: true, updatedAt: nowISO() };
+        const updated = drafts.map((draft) => {
+          if (draft.id === draftId) {
+            adopted = { ...draft, isAdopted: true, updatedAt: nowISO() };
             return adopted;
           }
-          return { ...d, isAdopted: false };
+          return { ...draft, isAdopted: false };
         });
-
         saveLocalDrafts(chapterId, updated);
         return adopted;
       },
     );
-    const normalized = normalizeDraft(draft);
-    if (!normalized || normalized.id !== draftId || normalized.chapterId !== chapterId || !normalized.isAdopted) {
-      throw new Error('draft_adopt_conflict: 正文采用结果无效');
+    const adopted = normalizeDraft(raw);
+    if (!adopted || adopted.id !== draftId || adopted.chapterId !== chapterId || !adopted.isAdopted) {
+      throw {
+        code: 'DOCUMENT_VERSION_CONFLICT',
+        message: '正文采用结果无效。',
+        retryable: true,
+        traceId,
+      };
     }
-    return normalized;
+    return { ...adopted, content: target.content, contentState: target.contentState };
   },
 
   async delete(id: string, chapterId: string): Promise<void> {
+    const traceId = createTraceId('draft-delete');
     await dbCall<void>(
       'delete_chapter_draft',
-      { id, chapterId },
-      () => {
-        const drafts = getLocalDrafts(chapterId).filter((d) => d.id !== id);
-        saveLocalDrafts(chapterId, drafts);
-      },
+      { id, chapterId, traceId },
+      () => saveLocalDrafts(chapterId, getLocalDrafts(chapterId).filter((draft) => draft.id !== id)),
     );
   },
 };

@@ -78,20 +78,14 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
   }, [onClose]);
 
   const handleAdopt = async (draft: ChapterDraft) => {
-    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
     if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
+    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
     try {
       const adoptedDraft = await draftVersionService.adopt(draft.id, chapterId);
       const syncedDraft = await draftVersionService.getAdoptedByChapterId(chapterId);
       const verifiedDraft = syncedDraft ?? adoptedDraft;
       if (verifiedDraft.id !== draft.id || verifiedDraft.chapterId !== chapterId || !verifiedDraft.isAdopted) {
         throw new Error('正文采用结果与目标章节不一致');
-      }
-      if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) {
-        setMsg(`v${draft.versionNo} 已采用，当前未保存正文已保留`);
-        await load();
-        setTimeout(() => setMsg(''), 3000);
-        return;
       }
       onDraftAdopted?.(verifiedDraft);
       setMsg(`v${draft.versionNo} 已采用`);

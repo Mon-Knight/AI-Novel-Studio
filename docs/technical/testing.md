@@ -1,17 +1,18 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.1（正文变更安全门）
+> 当前版本：v2.2.0（工作区可靠性与基础设施收口）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-v2.1.1 开始采用以下验证层次：
+v2.2.0 采用以下验证层次：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
-→ Rust / SQLite command 测试（完整临时 Schema + 事务故障路径）
+→ Vitest / React Testing Library（jsdom、fake timer、Hash Router、关闭适配器）
+→ Rust / SQLite 测试（临时 Schema、正式迁移、事务与故障注入）
 → TypeScript / ESLint / Rust 编译与 Tauri 构建
 → Windows 桌面手动回归
 ```
@@ -25,9 +26,29 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.1.1 动态测试入口
+## 2. v2.2.0 动态测试入口
 
-### 2.1 全部现有前端安全原语动态测试
+### 2.1 工作区可靠性专项
+
+```powershell
+npm run test:components
+npm run test:workspace-reliability
+npm run test:workspace-recovery
+npm run test:large-text-integrity
+npm run test:migrations
+```
+
+专项脚本必须运行动态测试并原样传播退出码：
+
+- `components`：正文不可用状态与恢复对话框。
+- `workspace-reliability`：T01～T07、T12，覆盖快速切章、保存/取消、Hash 路由与 Tauri 关闭防重入。
+- `workspace-recovery`：T09～T11，覆盖 debounce、StrictMode、恢复冲突、内存恢复和精确清理。
+- `large-text-integrity`：前端 fail-closed / operation 重试与 Rust DB04～DB11。
+- `migrations`：AppError 契约与 Rust DB01～DB03、DB15～DB16。
+
+PowerShell 聚合脚本会先检查完整 Rust 测试名是否真实存在，再运行 Cargo；Cargo 过滤命中 0 个测试不得被当作通过。
+
+### 2.2 全部现有前端安全原语动态测试
 
 ```powershell
 npm run test
@@ -35,7 +56,7 @@ npm run test
 
 该命令要求 Node.js >= 22.6，使用原生 `node:test` 和 `--experimental-strip-types` 直接执行生产安全模块，不新增测试依赖。类型剔除不代替 `tsc` 类型检查。
 
-### 2.2 正文变更安全门定向测试
+### 2.3 正文变更安全门定向测试
 
 ```powershell
 npm run test:workspace-safety
@@ -51,12 +72,12 @@ src/features/workspace/documentSafety.test.mjs
 
 - A 章节请求未完成时切换到 B，单调加载 guard 在 commit 前拒绝 A 的迟到 token。
 - 请求目标作品 / 章节与当前文档不一致时拒绝应用。
-- 基础正文哈希变化时返回冲突。来源草稿 ID / revision 由工作台生产路径校验，尚无 React 组件级自动测试。
+- 基础正文哈希变化时返回冲突；来源草稿 ID / revision 继续由生产安全门校验，快速切章和离开决策另有 React 组件动态测试。
 - 相同结果、目标、基础哈希和模式生成稳定幂等键；当前工作区会话中重复 claim 被拒绝，应用失败释放后允许重试。
 
 测试必须使用可控 Promise 顺序验证行为，不得退化为读取源码字符串。
 
-### 2.3 Rust / SQLite 命令安全测试
+### 2.4 Rust / SQLite 全量测试
 
 ```powershell
 cd src-tauri
@@ -72,7 +93,7 @@ cargo test commands::tests -- --nocapture
 cd ..
 ```
 
-最低动态覆盖：
+v2.2.0 新增 DB01～DB16 覆盖迁移账本、checksum 冲突、长正文事务回滚、operation 幂等、提交后清理、fail-closed 读取、恢复隔离、旧库升级和错误序列化。以下 v2.1.1 用例继续作为回归保留：
 
 | 编号 | 场景 | 预期 |
 |------|------|------|
@@ -135,7 +156,7 @@ scripts/agent-workflow/check_ai_task_delete.ps1
 - SQLite 多步写入失败时会整体回滚。
 - 取消、超时、进程重启和桌面 WebView 生命周期行为正确。
 
-因此，静态检查通过只能作为补充证据，不能单独满足 v2.1.1 发布验收。
+因此，静态检查通过只能作为补充证据，不能单独满足 v2.2.0 发布验收。
 
 ---
 
@@ -168,7 +189,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ---
 
-## 5. v2.1.1 手动安全回归
+## 5. v2.2.0 手动安全回归
 
 ### 5.1 迟到响应与章节切换
 
@@ -199,6 +220,13 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 2. 尝试采用其他章节草稿，确认两章均不变化。
 3. 在事务中途注入失败，确认采用状态整体回滚。
 
+### 5.5 长正文、恢复与桌面关闭
+
+1. 保存超过 100 KB 的正文，重启后确认全文、字数和哈希一致；破坏测试库分片后确认编辑器进入不可用状态。
+2. 输入未保存正文并等待恢复快照更新，模拟异常退出；重新打开后分别验证匹配恢复和旧基线冲突。
+3. 对章节切换、侧栏导航、浏览器式前进后退和 Tauri 窗口关闭分别选择保存、放弃、取消。
+4. 保存期间重复触发关闭，确认只出现一个决策、一次保存和一次最终关闭。
+
 ---
 
 ## 6. 其他功能手动抽查
@@ -226,12 +254,9 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ## 7. 当前测试限制
 
-- v2.1.1 已引入 Node 原生安全原语动态测试，它验证 guard 而非 React 编辑器状态；组件级并发集成覆盖仍需继续补齐。
-- HashRouter 非按钮导航与 Tauri 原生窗口 close-request 尚未纳入可恢复离开保护的自动化闭环。
-- 当前动态测试已证明会话级幂等 claim / release；该状态尚未持久化，应用重启后的重复结果仍需持久化操作记录与集成测试。
-- 尚未引入 Playwright Windows 桌面端到端测试。
-- DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
-- 大文本 DB04～DB07、质量报告事务、跨重启任务恢复和锁定内容尚未纳入本版本自动化门槛。
+- Node 安全原语、React 组件 / Hash Router / close adapter 和 SQLite 故障注入已有动态覆盖，但尚未引入真实 Windows WebView 的 Playwright / WebDriver 桌面 E2E。
+- `operationId` 的数据库级重放与提交后清理故障已由 service 测试证明；真实 IPC 进程被强制终止时的端到端恢复仍需发布态手工验证。
+- 质量报告跨表事务、在途 AI 任务跨重启恢复和正文范围锁定不属于 v2.2.0 自动化门槛。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 
 发布结论必须准确区分“已由自动化证明”“仅手动验证”和“尚未覆盖”。

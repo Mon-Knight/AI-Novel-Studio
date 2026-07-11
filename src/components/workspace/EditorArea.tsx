@@ -10,6 +10,10 @@ import { runWithLoading } from '../../lib/runWithLoading';
 import { countTextWords, hashTextContent } from '../../utils/contentHash';
 import { confirmInfo } from '../../utils/nativeDialog';
 import type { AiTextApplyRequest } from '../../types/workspaceSafety';
+import type { DraftContentState } from '../../types/draftContentState';
+import ContentUnavailableState from './ContentUnavailableState';
+import { logWorkspaceWarning } from '../../services/workspace/workspaceErrorService';
+import { getAppErrorUserMessage, normalizeAppError } from '../../types/appError';
 
 export type { AiTextApplyMode, AiTextApplyPayload, AiTextApplyRequest } from '../../types/workspaceSafety';
 
@@ -21,6 +25,9 @@ export interface EditorContentSnapshot {
   wordCount: number;
   isDirty: boolean;
   contentHash: string;
+  contentAvailable: boolean;
+  persistedContentHash?: string;
+  contentState?: DraftContentState;
   /** v1.0.45: 选中文本起止位置 */
   selectionStart?: number;
   selectionEnd?: number;
@@ -38,9 +45,10 @@ interface EditorAreaProps {
   novelTitle?: string;
   novelId?: string;
   currentDraft?: ChapterDraft | null;
+  contentStateOverride?: DraftContentState;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
   onEditorContentChange?: (snapshot: EditorContentSnapshot) => void;
-  onDraftSaved?: (draft: ChapterDraft) => void;
+  onDraftSaved?: (draft: ChapterDraft) => void | Promise<void>;
   applyTextRequest?: AiTextApplyRequest | null;
   onApplyTextConsumed?: (request: AiTextApplyRequest) => void;
   onApplyTextRejected?: (request: AiTextApplyRequest, reason: string) => void;
@@ -49,16 +57,22 @@ interface EditorAreaProps {
   /** 定位目标：设置后自动在正文中搜索并高亮指定文本 */
   locateTarget?: { startOffset: number; endOffset: number; quote?: string; paragraphIndex?: number } | null;
   onLocateDone?: (result?: { found: boolean; message?: string }) => void;
+  onRetryContent?: () => void;
+  retryingContent?: boolean;
+  onOpenDraftHistory?: () => void;
+  onBackToChapters?: () => void;
 }
 
 export interface EditorAreaHandle {
   save: () => Promise<ChapterDraft | null>;
+  restoreRecovery: (content: string, selectionStart?: number, selectionEnd?: number) => boolean;
 }
 
 const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function EditorArea({
   chapter,
   novelId,
   currentDraft,
+  contentStateOverride,
   onDraftChange,
   onEditorContentChange,
   onDraftSaved,
@@ -69,6 +83,10 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   onChapterUpdated,
   locateTarget,
   onLocateDone,
+  onRetryContent,
+  retryingContent,
+  onOpenDraftHistory,
+  onBackToChapters,
 }: EditorAreaProps, ref) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -80,10 +98,12 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   const liveDocumentRef = useRef({ novelId, chapterId: chapter?.id });
   const liveDraftIdRef = useRef(currentDraft?.id);
   const liveContentRef = useRef(content);
+  const saveInFlightRef = useRef<Promise<ChapterDraft | null> | null>(null);
 
   liveDocumentRef.current = { novelId, chapterId: chapter?.id };
   liveDraftIdRef.current = currentDraft?.id;
   liveContentRef.current = content;
+  const effectiveContentState = contentStateOverride ?? currentDraft?.contentState;
 
   // v1.0.35 章节大纲行内编辑状态
   const [isEditingOutline, setIsEditingOutline] = useState(false);
@@ -91,22 +111,30 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   const [outlineSaveMsg, setOutlineSaveMsg] = useState('');
 
   const emitContentSnapshot = useCallback((value: string, dirty: boolean, draft: ChapterDraft | null | undefined = currentDraft) => {
-    const wc = countTextWords(value);
+    const draftContentState = contentStateOverride ?? draft?.contentState;
+    const unavailable = draftContentState?.status === 'unavailable';
+    const safeValue = unavailable ? '' : value;
+    const wc = countTextWords(safeValue);
     const ta = textareaRef.current;
     onDraftChange?.(wc, dirty);
     onEditorContentChange?.({
       chapterId: chapter?.id,
       draftId: draft?.id,
       draftVersion: draft?.versionNo,
-      content: value,
+      content: safeValue,
       wordCount: wc,
-      isDirty: dirty,
-      contentHash: hashTextContent(value),
+      isDirty: unavailable ? false : dirty,
+      contentHash: hashTextContent(safeValue),
+      contentAvailable: !unavailable,
+      persistedContentHash: draftContentState?.status === 'ready'
+        ? draftContentState.contentHash
+        : undefined,
+      contentState: draftContentState,
       // v1.0.45: 传递选中文本位置
       selectionStart: ta?.selectionStart ?? 0,
       selectionEnd: ta?.selectionEnd ?? 0,
     });
-  }, [chapter?.id, currentDraft, onDraftChange, onEditorContentChange]);
+  }, [chapter?.id, contentStateOverride, currentDraft, onDraftChange, onEditorContentChange]);
 
   // 加载当前草稿
   useEffect(() => {
@@ -117,10 +145,12 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
         setSaveMsg('草稿与当前章节不一致，已阻止载入');
         return;
       }
-      setContent(currentDraft.content);
+      const unavailable = effectiveContentState?.status === 'unavailable';
+      const safeContent = unavailable ? '' : currentDraft.content;
+      setContent(safeContent);
       setIsDirty(false);
       setLastSaved(formatDateTime(currentDraft.updatedAt));
-      emitContentSnapshot(currentDraft.content, false, currentDraft);
+      emitContentSnapshot(safeContent, false, currentDraft);
     } else if (chapter?.id) {
       setContent('');
       setIsDirty(false);
@@ -131,7 +161,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     setIsEditingOutline(false);
     setOutlineDraft('');
     setOutlineSaveMsg('');
-  }, [currentDraft, chapter?.id, novelId, emitContentSnapshot]);
+  }, [currentDraft, chapter?.id, novelId, effectiveContentState, emitContentSnapshot]);
 
   // 定位正文功能 (v1.7.16: 多级策略 + 明显高亮)
   const [_highlightRange, setHighlightRange] = useState<{ start: number; end: number } | null>(null);
@@ -274,10 +304,15 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       wordCount: countTextWords(content),
       isDirty,
       contentHash: hashTextContent(content),
+      contentAvailable: effectiveContentState?.status !== 'unavailable',
+      persistedContentHash: effectiveContentState?.status === 'ready'
+        ? effectiveContentState.contentHash
+        : undefined,
+      contentState: effectiveContentState,
       selectionStart: ta.selectionStart,
       selectionEnd: ta.selectionEnd,
     });
-  }, [chapter?.id, currentDraft, content, isDirty, onEditorContentChange]);
+  }, [chapter?.id, currentDraft, content, effectiveContentState, isDirty, onEditorContentChange]);
 
   useEffect(() => {
     if (!applyTextRequest) return;
@@ -285,6 +320,12 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     lastApplyRequestId.current = applyTextRequest.id;
     const incoming = applyTextRequest.text.trim();
     if (!incoming) return;
+    if (effectiveContentState?.status === 'unavailable') {
+      const reason = '完整正文不可用，已阻止应用 AI 输出';
+      setSaveMsg(reason);
+      onApplyTextRejected?.(applyTextRequest, reason);
+      return;
+    }
     if (!chapter || !novelId
       || applyTextRequest.novelId !== novelId
       || applyTextRequest.chapterId !== chapter.id) {
@@ -323,10 +364,14 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     setSaveMsg('未保存');
     onApplyTextConsumed?.(applyTextRequest);
     textareaRef.current?.focus();
-  }, [applyTextRequest, chapter, novelId, content, currentDraft, emitContentSnapshot, onApplyTextConsumed, onApplyTextRejected]);
+  }, [applyTextRequest, chapter, novelId, content, currentDraft, effectiveContentState, emitContentSnapshot, onApplyTextConsumed, onApplyTextRejected]);
 
-  const handleSave = useCallback(async (): Promise<ChapterDraft | null> => {
+  const performSave = useCallback(async (): Promise<ChapterDraft | null> => {
     if (!chapter || !novelId) return null;
+    if (effectiveContentState?.status === 'unavailable') {
+      setSaveMsg('正文不可用，已阻止保存');
+      return null;
+    }
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     const requestDraftId = currentDraft?.id;
@@ -343,7 +388,14 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
         async ({ setMessage }) => {
           if (currentDraft && !currentDraft.isAdopted) {
             setMessage('正在更新草稿……');
-            return await draftVersionService.update(currentDraft.id, requestChapterId, requestContent, 'user_edited');
+            return await draftVersionService.update(
+              currentDraft.id,
+              requestChapterId,
+              requestContent,
+              'user_edited',
+              undefined,
+              currentDraft,
+            );
           }
           setMessage('正在创建草稿……');
           return await draftVersionService.create({
@@ -377,21 +429,67 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       setIsDirty(false);
       setSaveMsg('已保存');
       setLastSaved(formatDateTime(new Date()));
-      onDraftSaved?.(savedDraft);
+      try {
+        await onDraftSaved?.(savedDraft);
+      } catch (error) {
+        // The authoritative draft is already committed. Recovery cleanup and
+        // UI refresh are post-commit maintenance and must not report a false
+        // save failure that would encourage a duplicate submission.
+        logWorkspaceWarning('post_save_callback_failed', {
+          novelId: requestNovelId,
+          chapterId: requestChapterId,
+          draftId: savedDraft.id,
+          errorCode: error && typeof error === 'object' && 'code' in error
+            ? String((error as { code?: unknown }).code)
+            : 'UNKNOWN_ERROR',
+        });
+      }
       emitContentSnapshot(savedDraft.content, false, savedDraft);
       setTimeout(() => setSaveMsg(''), 2000);
       return savedDraft;
-    } catch {
+    } catch (error) {
       const liveDocument = liveDocumentRef.current;
       if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
-        setSaveMsg('保存失败');
+        const appError = normalizeAppError(error, '正文保存失败。');
+        setSaveMsg(`❌ ${getAppErrorUserMessage(appError)}`);
         setTimeout(() => setSaveMsg(''), 3000);
       }
       return null;
     }
-  }, [chapter, novelId, content, currentDraft, onDraftSaved, emitContentSnapshot]);
+  }, [chapter, novelId, content, currentDraft, effectiveContentState, onDraftSaved, emitContentSnapshot]);
 
-  useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
+  const handleSave = useCallback((): Promise<ChapterDraft | null> => {
+    if (saveInFlightRef.current) return saveInFlightRef.current;
+    const save = performSave();
+    saveInFlightRef.current = save;
+    void save.finally(() => {
+      if (saveInFlightRef.current === save) saveInFlightRef.current = null;
+    });
+    return save;
+  }, [performSave]);
+
+  const restoreRecovery = useCallback((
+    recoveryContent: string,
+    selectionStart = 0,
+    selectionEnd = selectionStart,
+  ): boolean => {
+    if (!chapter || effectiveContentState?.status === 'unavailable') return false;
+    setContent(recoveryContent);
+    setIsDirty(true);
+    setSaveMsg('未保存（已恢复）');
+    emitContentSnapshot(recoveryContent, true);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = Math.max(0, Math.min(selectionStart, recoveryContent.length));
+      const end = Math.max(start, Math.min(selectionEnd, recoveryContent.length));
+      textarea.focus();
+      textarea.setSelectionRange(start, end);
+    });
+    return true;
+  }, [chapter, effectiveContentState, emitContentSnapshot]);
+
+  useImperativeHandle(ref, () => ({ save: handleSave, restoreRecovery }), [handleSave, restoreRecovery]);
 
   const handleFormat = useCallback(() => {
     handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim());
@@ -401,6 +499,10 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
 
   const handleAdoptCurrent = useCallback(async () => {
     if (!chapter || !novelId) return;
+    if (effectiveContentState?.status === 'unavailable') {
+      setSaveMsg('正文不可用，已阻止采用');
+      return;
+    }
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     let draftToAdopt = currentDraft;
@@ -470,7 +572,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
         setTimeout(() => setSaveMsg(''), 3000);
       }
     }
-  }, [chapter, novelId, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved]);
+  }, [chapter, novelId, content, currentDraft, effectiveContentState, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -527,7 +629,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
           <span>来源：{draftSourceLabel[currentDraft.source] || currentDraft.source}</span>
           <span>字数：{formatNumber(currentDraft.wordCount)}</span>
           {currentDraft.isAdopted && <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>✅ 已采用</span>}
-          {saveMsg && <span style={{ color: saveMsg.includes('失败') ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 600 }}>{saveMsg}</span>}
+          {saveMsg && <span style={{ color: saveMsg.startsWith('❌') || saveMsg.includes('失败') ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 600 }}>{saveMsg}</span>}
         </div>
       )}
 
@@ -622,15 +724,25 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
         </div>
       )}
 
-      <div className="editor-paper">
-        <textarea ref={textareaRef} className="editor-textarea" value={content}
-          onChange={(e) => handleContentChange(e.target.value)}
-          onSelect={handleSelectionChange}
-          placeholder="在这里输入或粘贴正文内容...&#10;&#10;点击右侧 AI 生成面板，AI 将根据章节大纲生成正文。"
-          spellCheck={false} />
-      </div>
+      {effectiveContentState?.status === 'unavailable' ? (
+        <ContentUnavailableState
+          state={effectiveContentState}
+          retrying={retryingContent}
+          onRetry={() => onRetryContent?.()}
+          onOpenHistory={onOpenDraftHistory}
+          onBackToChapters={onBackToChapters}
+        />
+      ) : (
+        <div className="editor-paper">
+          <textarea ref={textareaRef} className="editor-textarea" value={content}
+            onChange={(e) => handleContentChange(e.target.value)}
+            onSelect={handleSelectionChange}
+            placeholder="在这里输入或粘贴正文内容...&#10;&#10;点击右侧 AI 生成面板，AI 将根据章节大纲生成正文。"
+            spellCheck={false} />
+        </div>
+      )}
 
-      {!content && (
+      {!content && effectiveContentState?.status !== 'unavailable' && (
         <div className="editor-empty-state">
           <div className="editor-empty-icon">✍️</div>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>当前章节还没有正文</div>
