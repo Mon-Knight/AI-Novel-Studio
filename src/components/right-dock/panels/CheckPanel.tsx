@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
 import type {
@@ -21,10 +21,11 @@ import { contextRecordService } from '../../../services/context/contextRecordSer
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
+import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 
 interface CheckPanelProps {
   novelId?: string; chapter?: Chapter;
-  onGenerated?: (draft: ChapterDraft) => void; onAdopted?: () => void;
+  onGenerated?: (draft: ChapterDraft, metadata?: DraftResultMetadata) => void; onAdopted?: () => void;
   /** 定位到正文指定位置的回调 (v1.7.16 支持 paragraphIndex) */
   onLocateText?: (startOffset: number, endOffset: number, quote?: string, paragraphIndex?: number) => void;
   /** v1.7.19 质量检查状态持久化 */
@@ -37,11 +38,7 @@ interface CheckPanelProps {
   currentContentHash?: string;
   currentDraftId?: string;
   currentDraftVersion?: number;
-  onApplyAiText?: (payload: {
-    mode: 'replace_all' | 'append';
-    text: string;
-    source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
-  }) => Promise<boolean>;
+  onApplyAiText?: (payload: AiTextApplyPayload) => Promise<boolean>;
   /** v1.7.19 全局 AI 弹窗 */
   showAiModal?: (title: string, subtitle?: string) => void;
   updateAiModal?: (stage: string, progress: number) => void;
@@ -63,11 +60,17 @@ function CheckPanel({
   currentEditorDirty,
   currentContentHash,
   currentDraftId,
+  currentDraftVersion,
   onApplyAiText,
   showAiModal,
   updateAiModal,
   hideAiModal,
 }: CheckPanelProps) {
+  const liveChapterIdRef = useRef(chapter?.id || '');
+  liveChapterIdRef.current = chapter?.id || '';
+  const liveNovelIdRef = useRef(novelId || '');
+  liveNovelIdRef.current = novelId || '';
+  const loadEpochRef = useRef(0);
   const [report, setReport] = useState<QualityCheckReport | null>(qcReport ?? null);
   const [items, setItems] = useState<QualityCheckItem[]>(qcItems ?? []);
   const [loading, setLoading] = useState(false);
@@ -95,39 +98,76 @@ function CheckPanel({
   const [lastFixRunId, setLastFixRunId] = useState<string>('');
   const [sourceDraftId, setSourceDraftId] = useState<string>('');
 
+  useEffect(() => {
+    setFixLoading(false);
+    setFixStage('');
+    setFixProgress(0);
+    setFixComparison(null);
+    setFixScopeValidation(null);
+    setFixError('');
+    setLastFixRunId('');
+    setSourceDraftId('');
+    hideAiModal?.();
+  }, [novelId, chapter?.id, hideAiModal]);
+
   const activeReport = report?.chapterId === chapter?.id ? report : null;
   const activeItems = activeReport ? items.filter((item) => item.chapterId === chapter?.id) : [];
   const effectiveContent = currentEditorContent ?? currentDraft?.content ?? '';
   const effectiveContentHash = currentContentHash || hashTextContent(effectiveContent);
   const reportOutdated = !!activeReport && (
-    activeReport.contentHash
-      ? activeReport.contentHash !== effectiveContentHash
-      : Boolean(currentEditorDirty || (currentDraftId && activeReport.draftId !== currentDraftId))
+    !activeReport.contentHash
+    || activeReport.contentHash !== effectiveContentHash
+    || !currentDraftId
+    || activeReport.draftId !== currentDraftId
+    || activeReport.draftVersion === undefined
+    || currentDraftVersion === undefined
+    || activeReport.draftVersion !== currentDraftVersion
+    || Boolean(currentEditorDirty)
   );
   const statistics = computeStatistics(activeItems);
   const filteredItems = filter === 'all' ? activeItems : activeItems.filter((i) => i.status === filter);
 
   const loadLatest = useCallback(async () => {
-    if (!chapter?.id) return;
+    if (!novelId || !chapter?.id) return;
+    const requestEpoch = ++loadEpochRef.current;
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
+    setCurrentDraft(null);
     try {
       const d = await draftVersionService.getLatestByChapterId(chapter.id);
+      if (loadEpochRef.current !== requestEpoch
+        || liveNovelIdRef.current !== requestNovelId
+        || liveChapterIdRef.current !== requestChapterId) return;
+      if (d && (d.novelId !== requestNovelId || d.chapterId !== requestChapterId)) {
+        throw new Error('草稿与质量检查目标不一致');
+      }
       setCurrentDraft(d);
       if (qcReport?.chapterId === chapter.id) return;
       const result = await qualityCheckService.getChapterIssues(chapter.id);
+      if (loadEpochRef.current !== requestEpoch
+        || liveNovelIdRef.current !== requestNovelId
+        || liveChapterIdRef.current !== requestChapterId) return;
       syncUp(result.report, result.items);
     } catch (error) {
+      if (loadEpochRef.current !== requestEpoch
+        || liveNovelIdRef.current !== requestNovelId
+        || liveChapterIdRef.current !== requestChapterId) return;
       console.error('[QualityCheck] failed to load latest report', error);
       setError(error instanceof Error ? error.message : '加载质量检查报告失败');
     }
-  }, [chapter?.id, qcReport?.chapterId, syncUp]);
+  }, [novelId, chapter?.id, qcReport?.chapterId, syncUp]);
 
   useEffect(() => { loadLatest(); }, [loadLatest]);
 
   const handleRunCheck = async () => {
     if (!novelId || !chapter) return;
-    const sourceContent = (currentEditorContent ?? currentDraft?.content ?? '').trim();
+    const requestChapterId = chapter.id;
+    const sourceContent = currentEditorContent ?? currentDraft?.content ?? '';
+    const requestBaseHash = currentContentHash || hashTextContent(sourceContent);
+    const requestSourceDraftId = currentDraftId || currentDraft?.id;
+    const requestSourceRevision = currentDraftVersion || currentDraft?.versionNo;
     const sourceWordCount = currentEditorWordCount ?? countTextWords(sourceContent);
-    if (sourceContent.length < 10 || sourceWordCount < 10) {
+    if (sourceContent.trim().length < 10 || sourceWordCount < 10) {
       setError('正文过短，请先生成或编辑正文');
       return;
     }
@@ -143,7 +183,9 @@ function CheckPanel({
     showAiModal?.('AI 正在质量检查', 'AI 正在检查逻辑、设定和文笔……');
     try {
       updateAiModal?.('正在准备检查参数……', 10);
-      let sourceDraft = currentDraft;
+      let sourceDraft = currentDraft?.novelId === novelId && currentDraft.chapterId === requestChapterId
+        ? currentDraft
+        : null;
       const needsSnapshotDraft = !sourceDraft || sourceDraft.content !== sourceContent || currentEditorDirty;
       if (needsSnapshotDraft) {
         updateAiModal?.('正在保存当前正文快照……', 18);
@@ -155,8 +197,18 @@ function CheckPanel({
           source: 'user_edited',
           note: '质量检查正文快照',
         });
-        setCurrentDraft(sourceDraft);
-        onGenerated?.(sourceDraft);
+        if (liveNovelIdRef.current === novelId && liveChapterIdRef.current === requestChapterId) {
+          setCurrentDraft(sourceDraft);
+          onGenerated?.(sourceDraft, {
+            resultId: sourceDraft.id,
+            novelId,
+            chapterId: requestChapterId,
+            sourceDraftId: requestSourceDraftId,
+            sourceRevision: requestSourceRevision,
+            baseContentHash: requestBaseHash,
+            source: 'quality_check',
+          });
+        }
       }
       if (!sourceDraft) {
         throw new Error('无法创建质量检查正文快照。');
@@ -194,6 +246,11 @@ function CheckPanel({
         contentLength: sourceContent.length,
         checkedAt,
       });
+
+      if (liveNovelIdRef.current !== novelId || liveChapterIdRef.current !== requestChapterId) {
+        hideAiModal?.();
+        return;
+      }
 
       updateAiModal?.('正在加载最新结果……', 95);
       syncUp(saved.report ? {
@@ -244,6 +301,11 @@ function CheckPanel({
   /** AI 修稿并复检 (v1.7.16) */
   const handleAIFix = async () => {
     if (!novelId || !chapter || !currentDraft || !activeReport) return;
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
+    const requestBaseHash = effectiveContentHash;
+    const requestSourceDraftId = currentDraftId || currentDraft.id;
+    const requestSourceRevision = currentDraftVersion || currentDraft.versionNo;
     if (reportOutdated) {
       setFixError('当前正文已修改，请先重新进行质量检测后再使用 AI 修复。');
       return;
@@ -290,7 +352,9 @@ function CheckPanel({
         beforeSeriousCount: statistics.critical,
         chapterContext,
       });
-      setFixScopeValidation(scopeValidation);
+      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+        setFixScopeValidation(scopeValidation);
+      }
 
       // v1.7.19 修稿范围门控：范围越界 → 拒绝，不创建候选草稿
       if (!scopeValidation.passed) {
@@ -306,11 +370,15 @@ function CheckPanel({
       (fixRun as any).skippedContextIds = skippedCtxIds;
       (fixRun as any).warnings = ctxWarnings;
       await fixRunStore.save(fixRun);
-      setLastFixRunId(fixRun.id);
+      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+        setLastFixRunId(fixRun.id);
+      }
 
       if (fixRun.status === 'failed') {
-        setFixError(fixRun.failureReason || 'AI 修稿失败');
-        setFixLoading(false);
+        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+          setFixError(fixRun.failureReason || 'AI 修稿失败');
+          setFixLoading(false);
+        }
         return;
       }
 
@@ -370,7 +438,9 @@ function CheckPanel({
         statistics.high, afterStats.high,
         fixResult.fixedIssueKeys.length,
       );
-      setFixComparison(comparison);
+      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+        setFixComparison(comparison);
+      }
       fixRun.targetContentHash = fixedContentHash;
       fixRun.afterScore = checkResult.overallScore;
       fixRun.afterPendingCount = afterStats.pending;
@@ -408,22 +478,44 @@ function CheckPanel({
         const refreshed = await qualityCheckService.getChapterIssues(chapter.id).catch(() => saved2);
 
         // 复检确认更好后，才同步新草稿到当前写作工作台。
-        setCurrentDraft(newDraft);
-        if (onGenerated) {
-          onGenerated(newDraft);
-        } else {
-          await onApplyAiText?.({ mode: 'replace_all', text: fixResult.revisedContent, source: 'quality_check' });
+        const resultMetadata: DraftResultMetadata = {
+          resultId: newDraft.id,
+          novelId,
+          chapterId: requestChapterId,
+          sourceDraftId: requestSourceDraftId,
+          sourceRevision: requestSourceRevision,
+          baseContentHash: requestBaseHash,
+          source: 'quality_check',
+        };
+        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+          setCurrentDraft(newDraft);
+        }
+        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+          if (onGenerated) {
+            onGenerated(newDraft, resultMetadata);
+          } else {
+            await onApplyAiText?.({
+              ...resultMetadata,
+              mode: 'replace_all',
+              text: fixResult.revisedContent,
+              source: 'quality_check',
+            });
+          }
         }
 
-        syncUp(refreshed.report ? {
-          ...refreshed.report,
-          contentHash: fixedContentHash,
-          contentLength: fixResult.revisedContent.length,
-          checkedAt: candidateCheckedAt,
-        } : null, refreshed.items);
+        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+          syncUp(refreshed.report ? {
+            ...refreshed.report,
+            contentHash: fixedContentHash,
+            contentLength: fixResult.revisedContent.length,
+            checkedAt: candidateCheckedAt,
+          } : null, refreshed.items);
+        }
       } else {
         fixRun.status = 'success';
-        setFixStage('修复候选已保存为草稿，因复检未明显变好，当前正文保持不变');
+        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+          setFixStage('修复候选已保存为草稿，因复检未明显变好，当前正文保持不变');
+        }
       }
       await fixRunStore.save(fixRun).catch(() => {});
 
@@ -438,10 +530,17 @@ function CheckPanel({
         }
       }
 
-      hideAiModal?.();
-      setFixLoading(false);
-      setTimeout(() => setFixStage(''), 3000);
+      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+        hideAiModal?.();
+        setFixLoading(false);
+        setTimeout(() => {
+          if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+            setFixStage('');
+          }
+        }, 3000);
+      }
     } catch (e: any) {
+      if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
       const msg = e.message || 'AI 修稿失败';
       setFixError(msg);
       updateAiModal?.(`失败: ${msg}`, 0);

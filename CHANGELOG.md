@@ -1,5 +1,44 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.1.1 (2026-07-11) - 正文变更安全门
+
+> 状态：实施完成。Node / Rust 安全测试与静态契约检查已通过；当前工作区未安装 `node_modules`，前端类型检查、Vite 构建和 Tauri 完整打包待在依赖齐备环境复验。
+
+### 新增
+
+- 为 AI 生成、润色、质量修复和历史草稿等正文结果建立统一变更请求，固定记录作品、章节、来源草稿、基础版本、基础正文哈希与结果 ID。
+- 新增正文变更冲突检查：目标章节已经切换、基础正文已经变化或同一结果已经应用时，拒绝静默覆盖当前编辑内容。
+- 补充 Node 动态安全原语测试，使用可控延迟验证章节切换后的迟到加载 token 会在 commit 前被 guard 拒绝。
+- 补充 Rust / SQLite 安全测试，覆盖不存在草稿、跨章节草稿、零行更新、正式采用事务回滚等故障路径。
+
+### 修改
+
+- 统一章节加载和 AI 结果回调的目标校验，隔离快速切换章节时的乱序异步响应。
+- 工作台按钮导航、章节切换、草稿恢复 / 采用和新建章节共用未保存正文保护；保存失败时保持 dirty，不继续切换。
+- 草稿更新在零行受影响时返回明确冲突；正式采用在单一 SQLite 事务中验证草稿归属并原子切换正式版本。
+- 使用结果 ID、目标章节和基础版本 / 哈希提供当前工作区会话内的最小幂等保护，避免重复点击重复写入正文。
+- 修复 AI 任务删除运行时测试的临时 Schema 和退出码传播，使 Rust 测试失败能够正确阻断 npm / CI。
+- 质量修复只在 report 的 draft ID、draft version 和 content hash 同时匹配时放行；旧报告缺少 hash / version 时要求重新检查。
+- 应用版本号、前端常量、Tauri / Cargo 和包元数据统一为 `v2.1.1`，Node.js 最低版本调整为 22.6。
+
+### 本版本边界
+
+- 不实现流式输出、通用多目标自动放置、正文锁定模型、任务队列全面重构或状态管理库替换。
+- 大文本端到端事务、面板结果跨重启恢复、人物知识图谱和完整桌面 E2E 继续作为后续专项。
+
+### 验证结果
+
+- `npm run test`：通过，5 / 5。
+- `npm run test:workspace-safety`：通过，5 / 5。
+- `cargo test`：通过，11 / 11（验证时用临时 `TAURI_CONFIG` 指向现有 `src/`，仅绕过未生成的 `dist/`）。
+- `cargo test commands::tests -- --nocapture`：通过，9 / 9。
+- `npm run test:ai-tasks-delete`：通过，静态契约和 1 个完整临时 SQLite 运行时用例均通过。
+- `npm run test:setting-suggestions` / `npm run test:quality-workspace`：通过。
+- `cargo check`：通过，保留 10 条既有 warning。
+- `npm run lint`：未进入检查，当前环境缺少 `node_modules` / `eslint`。
+- `npm run build`：未进入编译，当前环境缺少 `node_modules` / `tsc` / `vite`。
+- `npm run tauri build`：未进入打包，当前环境缺少前端依赖与 Tauri CLI。
+
 ## v2.1.0 (2026-06-27) - 单章质量闭环稳定版
 
 ### 新增

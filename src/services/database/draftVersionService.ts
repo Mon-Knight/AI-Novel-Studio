@@ -243,7 +243,7 @@ export const draftVersionService = {
     return normalized;
   },
 
-  async update(id: string, chapterId: string, content: string, source?: DraftSource, onProgress?: (p: LargeTextSaveProgress) => void): Promise<ChapterDraft | null> {
+  async update(id: string, chapterId: string, content: string, source?: DraftSource, onProgress?: (p: LargeTextSaveProgress) => void): Promise<ChapterDraft> {
     // 如果内容较大，先通过大文本管道保存
     let largeTextRefId: string | undefined;
     let contentForDb = content;
@@ -277,7 +277,9 @@ export const draftVersionService = {
       () => {
         const drafts = getLocalDrafts(chapterId);
         const idx = drafts.findIndex((d) => d.id === id);
-        if (idx === -1) return null;
+        if (idx === -1) {
+          throw new Error('draft_update_conflict: 草稿不存在或不属于当前章节');
+        }
 
         drafts[idx] = {
           ...drafts[idx],
@@ -293,6 +295,9 @@ export const draftVersionService = {
     );
 
     const normalized = normalizeDraft(draft);
+    if (!normalized || normalized.id !== id || normalized.chapterId !== chapterId) {
+      throw new Error('draft_update_conflict: 草稿更新结果与目标章节不一致');
+    }
 
     // 如果是大文本且有 largeTextRefId，加载完整内容
     if (normalized?.largeTextRefId) {
@@ -309,12 +314,16 @@ export const draftVersionService = {
     return normalized;
   },
 
-  async adopt(draftId: string, chapterId: string): Promise<ChapterDraft | null> {
+  async adopt(draftId: string, chapterId: string): Promise<ChapterDraft> {
     const draft = await dbCall<unknown | null>(
       'adopt_chapter_draft',
       { draftId, chapterId },
       () => {
         const drafts = getLocalDrafts(chapterId);
+        const target = drafts.find((draft) => draft.id === draftId);
+        if (!target) {
+          throw new Error('draft_adopt_target_mismatch: 草稿不存在或不属于当前章节');
+        }
         let adopted: ChapterDraft | null = null;
 
         const updated = drafts.map((d) => {
@@ -329,7 +338,11 @@ export const draftVersionService = {
         return adopted;
       },
     );
-    return normalizeDraft(draft);
+    const normalized = normalizeDraft(draft);
+    if (!normalized || normalized.id !== draftId || normalized.chapterId !== chapterId || !normalized.isAdopted) {
+      throw new Error('draft_adopt_conflict: 正文采用结果无效');
+    }
+    return normalized;
   },
 
   async delete(id: string, chapterId: string): Promise<void> {

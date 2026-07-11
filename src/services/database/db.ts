@@ -93,12 +93,11 @@ export async function dbCall<T>(
       });
     }
     try {
-      const result = await Promise.race([
-        tauriInvoke<T>(command, args),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('tauri_timeout')), 3000)
-        ),
-      ]);
+      // Tauri invoke cannot be cancelled by rejecting a JavaScript timer.  The
+      // former three-second Promise.race could therefore report a failed write
+      // while Rust/SQLite committed it moments later, encouraging a duplicate
+      // retry.  Wait for the authoritative command result instead.
+      const result = await tauriInvoke<T>(command, args);
       if (shouldLogDbCommand(command)) {
         console.log('[DB_CALL] invoke success', {
           command,

@@ -1060,6 +1060,18 @@ fn get_draft_by_id_internal(
         .map_err(|e| e.to_string())
 }
 
+fn get_draft_by_id_and_chapter_internal(
+    conn: &rusqlite::Connection,
+    id: &str,
+    chapter_id: &str,
+) -> Result<ChapterDraftDto, String> {
+    let mut stmt = conn
+        .prepare("SELECT d.id, d.novel_id, d.chapter_id, d.title, d.content, d.source, d.version_no, d.word_count, d.is_adopted, d.ai_task_id, d.note, d.large_text_ref_id, d.created_at, d.updated_at FROM chapter_drafts AS d INNER JOIN chapters AS c ON c.id = d.chapter_id AND c.novel_id = d.novel_id WHERE d.id = ?1 AND d.chapter_id = ?2 AND c.deleted_at IS NULL")
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![id, chapter_id], map_draft_row)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_drafts_by_chapter_id(chapter_id: String) -> Result<Vec<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
@@ -1141,6 +1153,33 @@ pub fn create_chapter_draft(input: CreateChapterDraftInput) -> Result<ChapterDra
     get_draft_by_id_internal(&conn, &id)
 }
 
+fn update_chapter_draft_internal(
+    conn: &Connection,
+    id: &str,
+    chapter_id: &str,
+    content: &str,
+    source: Option<&str>,
+    large_text_ref_id: Option<&str>,
+) -> Result<ChapterDraftDto, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let source = source.unwrap_or("user_edited");
+    let word_count = count_words(content);
+    let affected_rows = conn.execute(
+        "UPDATE chapter_drafts SET content = ?1, source = ?2, word_count = ?3, large_text_ref_id = ?4, updated_at = ?5 WHERE id = ?6 AND chapter_id = ?7 AND EXISTS (SELECT 1 FROM chapters AS c WHERE c.id = chapter_drafts.chapter_id AND c.novel_id = chapter_drafts.novel_id AND c.deleted_at IS NULL)",
+        params![content, source, word_count, large_text_ref_id, now, id, chapter_id],
+    ).map_err(|e| format!("draft_update_failed: {}", e))?;
+
+    if affected_rows != 1 {
+        return Err(format!(
+            "draft_update_conflict: expected one draft for id={} chapter_id={}, affected_rows={}",
+            id, chapter_id, affected_rows
+        ));
+    }
+
+    get_draft_by_id_and_chapter_internal(conn, id, chapter_id)
+        .map_err(|e| format!("draft_update_readback_failed: {}", e))
+}
+
 #[tauri::command]
 pub fn update_chapter_draft(
     id: String,
@@ -1148,45 +1187,152 @@ pub fn update_chapter_draft(
     content: String,
     source: Option<String>,
     large_text_ref_id: Option<String>,
-) -> Result<Option<ChapterDraftDto>, String> {
+) -> Result<ChapterDraftDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let source = source.unwrap_or_else(|| "user_edited".to_string());
-    let word_count = count_words(&content);
-    conn.execute(
-        "UPDATE chapter_drafts SET content = ?1, source = ?2, word_count = ?3, large_text_ref_id = ?4, updated_at = ?5 WHERE id = ?6 AND chapter_id = ?7",
-        params![content, source, word_count, large_text_ref_id, now, &id, chapter_id],
-    ).map_err(|e| e.to_string())?;
+    update_chapter_draft_internal(
+        &conn,
+        &id,
+        &chapter_id,
+        &content,
+        source.as_deref(),
+        large_text_ref_id.as_deref(),
+    )
+}
 
-    match get_draft_by_id_internal(&conn, &id) {
-        Ok(draft) => Ok(Some(draft)),
-        Err(err) if err.contains("Query returned no rows") => Ok(None),
-        Err(err) => Err(err),
+fn validate_live_draft_target_internal(
+    conn: &Connection,
+    draft_id: &str,
+    chapter_id: &str,
+) -> Result<i64, String> {
+    let target = conn.query_row(
+        "SELECT d.chapter_id, d.novel_id, d.word_count, c.id, c.novel_id, c.deleted_at FROM chapter_drafts AS d LEFT JOIN chapters AS c ON c.id = ?2 WHERE d.id = ?1",
+        params![draft_id, chapter_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        },
+    );
+
+    let (
+        actual_chapter_id,
+        draft_novel_id,
+        word_count,
+        target_chapter_id,
+        chapter_novel_id,
+        deleted_at,
+    ) = match target {
+        Ok(target) => target,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(format!(
+                "target_not_found: chapter draft '{}' does not exist",
+                draft_id
+            ));
+        }
+        Err(e) => return Err(format!("adopt_target_lookup_failed: {}", e)),
+    };
+
+    if actual_chapter_id != chapter_id {
+        return Err(format!(
+            "target_mismatch: chapter draft '{}' belongs to chapter '{}', not '{}'",
+            draft_id, actual_chapter_id, chapter_id
+        ));
     }
+
+    if target_chapter_id.is_none() {
+        return Err(format!(
+            "target_not_found: chapter '{}' does not exist",
+            chapter_id
+        ));
+    }
+
+    if deleted_at.is_some() {
+        return Err(format!(
+            "target_deleted: chapter '{}' has been deleted",
+            chapter_id
+        ));
+    }
+
+    if chapter_novel_id.as_deref() != Some(draft_novel_id.as_str()) {
+        return Err(format!(
+            "target_mismatch: chapter draft '{}' belongs to novel '{}', but chapter '{}' belongs to novel '{}'",
+            draft_id,
+            draft_novel_id,
+            chapter_id,
+            chapter_novel_id.as_deref().unwrap_or("<missing>")
+        ));
+    }
+
+    Ok(word_count)
+}
+
+fn adopt_chapter_draft_internal(
+    conn: &mut Connection,
+    draft_id: &str,
+    chapter_id: &str,
+) -> Result<ChapterDraftDto, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
+
+    let word_count = validate_live_draft_target_internal(&transaction, draft_id, chapter_id)?;
+
+    transaction.execute(
+        "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
+        params![&now, chapter_id],
+    )
+    .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
+
+    let adopted_rows = transaction.execute(
+        "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3 AND EXISTS (SELECT 1 FROM chapters AS c WHERE c.id = chapter_drafts.chapter_id AND c.novel_id = chapter_drafts.novel_id AND c.deleted_at IS NULL)",
+        params![&now, draft_id, chapter_id],
+    ).map_err(|e| format!("adopt_target_update_failed: {}", e))?;
+    if adopted_rows != 1 {
+        return Err(format!(
+            "adopt_conflict: expected one target draft for id={} chapter_id={}, affected_rows={}",
+            draft_id, chapter_id, adopted_rows
+        ));
+    }
+
+    let chapter_rows = transaction.execute(
+        "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3 WHERE id = ?4 AND deleted_at IS NULL AND novel_id = (SELECT novel_id FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?4)",
+        params![draft_id, word_count, &now, chapter_id],
+    ).map_err(|e| format!("adopt_chapter_update_failed: {}", e))?;
+    if chapter_rows != 1 {
+        return Err(format!(
+            "adopt_chapter_conflict: expected one chapter for id={}, affected_rows={}",
+            chapter_id, chapter_rows
+        ));
+    }
+
+    let adopted = get_draft_by_id_and_chapter_internal(&transaction, draft_id, chapter_id)
+        .map_err(|e| format!("adopt_readback_failed: {}", e))?;
+    if !adopted.is_adopted {
+        return Err(format!(
+            "adopt_readback_conflict: draft '{}' is not marked adopted",
+            draft_id
+        ));
+    }
+
+    transaction
+        .commit()
+        .map_err(|e| format!("adopt_transaction_commit_failed: {}", e))?;
+    Ok(adopted)
 }
 
 #[tauri::command]
 pub fn adopt_chapter_draft(
     draft_id: String,
     chapter_id: String,
-) -> Result<Option<ChapterDraftDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
-        params![&now, &chapter_id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3",
-        params![&now, &draft_id, &chapter_id],
-    ).map_err(|e| e.to_string())?;
-
-    match get_draft_by_id_internal(&conn, &draft_id) {
-        Ok(draft) => Ok(Some(draft)),
-        Err(err) if err.contains("Query returned no rows") => Ok(None),
-        Err(err) => Err(err),
-    }
+) -> Result<ChapterDraftDto, String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    adopt_chapter_draft_internal(&mut conn, &draft_id, &chapter_id)
 }
 
 #[tauri::command]
@@ -4386,17 +4532,456 @@ mod tests {
     use super::*;
     use std::fs;
 
+    const RUNTIME_AI_TASK_CHILD_TABLES: [&str; 5] = [
+        "chapter_drafts",
+        "quality_check_reports",
+        "polish_records",
+        "chapter_events",
+        "chapter_summaries",
+    ];
+
     fn create_runtime_ai_task_table(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             "
+            PRAGMA foreign_keys = ON;
+
             CREATE TABLE ai_task_records (
                 id TEXT PRIMARY KEY,
                 task_type TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT,
+                FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+            );
+
+            CREATE TABLE quality_check_reports (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT,
+                FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+            );
+
+            CREATE TABLE polish_records (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT,
+                FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+            );
+
+            CREATE TABLE chapter_events (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT
+            );
+
+            CREATE TABLE chapter_summaries (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT
+            );
             ",
         )
+    }
+
+    fn create_chapter_draft_test_schema(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "
+            CREATE TABLE chapters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'not_started',
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+
+            CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                title TEXT,
+                content TEXT NOT NULL,
+                source TEXT NOT NULL,
+                version_no INTEGER NOT NULL,
+                word_count INTEGER NOT NULL,
+                is_adopted INTEGER NOT NULL DEFAULT 0,
+                ai_task_id TEXT,
+                note TEXT,
+                large_text_ref_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            ",
+        )
+    }
+
+    fn insert_test_chapter(
+        conn: &Connection,
+        id: &str,
+        adopted_draft_id: Option<&str>,
+        word_count: i64,
+        status: &str,
+    ) -> rusqlite::Result<()> {
+        insert_test_chapter_for_novel(
+            conn,
+            id,
+            "novel-1",
+            adopted_draft_id,
+            word_count,
+            status,
+            None,
+        )
+    }
+
+    fn insert_test_chapter_for_novel(
+        conn: &Connection,
+        id: &str,
+        novel_id: &str,
+        adopted_draft_id: Option<&str>,
+        word_count: i64,
+        status: &str,
+        deleted_at: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO chapters (id, novel_id, adopted_draft_id, word_count, status, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, novel_id, adopted_draft_id, word_count, status, "before", deleted_at],
+        )?;
+        Ok(())
+    }
+
+    fn insert_test_draft(
+        conn: &Connection,
+        id: &str,
+        chapter_id: &str,
+        content: &str,
+        is_adopted: bool,
+    ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, created_at, updated_at) VALUES (?1, 'novel-1', ?2, NULL, ?3, 'user_edited', 1, ?4, ?5, 'before', 'before')",
+            params![id, chapter_id, content, count_words(content), i64::from(is_adopted)],
+        )?;
+        Ok(())
+    }
+
+    fn get_test_draft_adopted(conn: &Connection, id: &str) -> rusqlite::Result<i64> {
+        conn.query_row(
+            "SELECT is_adopted FROM chapter_drafts WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+    }
+
+    fn get_test_chapter_state(
+        conn: &Connection,
+        id: &str,
+    ) -> rusqlite::Result<(Option<String>, i64, String, String)> {
+        conn.query_row(
+            "SELECT adopted_draft_id, word_count, status, updated_at FROM chapters WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+    }
+
+    #[test]
+    fn db01_adopt_missing_draft_preserves_existing_adoption(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-a-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-a-old", "chapter-a", "旧正文", true)?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "missing-draft", "chapter-a")
+            .expect_err("missing draft must be rejected");
+
+        assert!(error.starts_with("target_not_found:"), "{error}");
+        assert_eq!(get_test_draft_adopted(&conn, "draft-a-old")?, 1);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-a-old")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn db02_adopt_cross_chapter_draft_preserves_both_chapters(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-a"), 3, "adopted")?;
+        insert_test_chapter(&conn, "chapter-b", Some("draft-b"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-a", "chapter-a", "甲正文", true)?;
+        insert_test_draft(&conn, "draft-b", "chapter-b", "乙正文", true)?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-b", "chapter-a")
+            .expect_err("cross-chapter draft must be rejected");
+
+        assert!(error.starts_with("target_mismatch:"), "{error}");
+        assert_eq!(get_test_draft_adopted(&conn, "draft-a")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-b")?, 1);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-a")
+        );
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-b")?.0.as_deref(),
+            Some("draft-b")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn db03_update_zero_rows_returns_conflict_and_preserves_content(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", None, 0, "editing")?;
+        insert_test_chapter(&conn, "chapter-b", None, 0, "editing")?;
+        insert_test_draft(&conn, "draft-b", "chapter-b", "原正文", false)?;
+
+        let error = update_chapter_draft_internal(
+            &conn,
+            "draft-b",
+            "chapter-a",
+            "错误覆盖",
+            Some("user_edited"),
+            None,
+        )
+        .expect_err("zero-row update must be rejected");
+
+        assert!(error.starts_with("draft_update_conflict:"), "{error}");
+        let missing_error = update_chapter_draft_internal(
+            &conn,
+            "missing-draft",
+            "chapter-a",
+            "错误覆盖",
+            Some("user_edited"),
+            None,
+        )
+        .expect_err("missing draft update must be rejected");
+        assert!(
+            missing_error.starts_with("draft_update_conflict:"),
+            "{missing_error}"
+        );
+        let content: String = conn.query_row(
+            "SELECT content FROM chapter_drafts WHERE id = 'draft-b'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(content, "原正文");
+        Ok(())
+    }
+
+    #[test]
+    fn update_rejects_cross_novel_and_soft_deleted_chapters(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter_for_novel(
+            &conn,
+            "chapter-cross-novel",
+            "novel-2",
+            None,
+            0,
+            "editing",
+            None,
+        )?;
+        insert_test_draft(
+            &conn,
+            "draft-cross-novel",
+            "chapter-cross-novel",
+            "跨小说原文",
+            false,
+        )?;
+        insert_test_chapter_for_novel(
+            &conn,
+            "chapter-deleted",
+            "novel-1",
+            None,
+            0,
+            "editing",
+            Some("2026-07-11T00:00:00Z"),
+        )?;
+        insert_test_draft(
+            &conn,
+            "draft-deleted",
+            "chapter-deleted",
+            "已删除章节原文",
+            false,
+        )?;
+
+        let cross_novel_error = update_chapter_draft_internal(
+            &conn,
+            "draft-cross-novel",
+            "chapter-cross-novel",
+            "不应写入",
+            Some("user_edited"),
+            None,
+        )
+        .expect_err("cross-novel draft/chapter pair must be rejected");
+        assert!(
+            cross_novel_error.starts_with("draft_update_conflict:"),
+            "{cross_novel_error}"
+        );
+
+        let deleted_error = update_chapter_draft_internal(
+            &conn,
+            "draft-deleted",
+            "chapter-deleted",
+            "不应写入",
+            Some("user_edited"),
+            None,
+        )
+        .expect_err("soft-deleted chapter must be rejected");
+        assert!(
+            deleted_error.starts_with("draft_update_conflict:"),
+            "{deleted_error}"
+        );
+
+        let cross_novel_content: String = conn.query_row(
+            "SELECT content FROM chapter_drafts WHERE id = 'draft-cross-novel'",
+            [],
+            |row| row.get(0),
+        )?;
+        let deleted_content: String = conn.query_row(
+            "SELECT content FROM chapter_drafts WHERE id = 'draft-deleted'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cross_novel_content, "跨小说原文");
+        assert_eq!(deleted_content, "已删除章节原文");
+        Ok(())
+    }
+
+    #[test]
+    fn adopt_rejects_cross_novel_target_without_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter_for_novel(
+            &conn,
+            "chapter-cross-novel",
+            "novel-2",
+            Some("draft-old"),
+            3,
+            "adopted",
+            None,
+        )?;
+        insert_test_draft(&conn, "draft-old", "chapter-cross-novel", "旧正文", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-cross-novel", "新正文", false)?;
+
+        let error = adopt_chapter_draft_internal(
+            &mut conn,
+            "draft-new",
+            "chapter-cross-novel",
+        )
+        .expect_err("cross-novel draft/chapter pair must be rejected");
+
+        assert!(error.starts_with("target_mismatch:"), "{error}");
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-cross-novel")?.0.as_deref(),
+            Some("draft-old")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn adopt_rejects_soft_deleted_chapter_without_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter_for_novel(
+            &conn,
+            "chapter-deleted",
+            "novel-1",
+            Some("draft-old"),
+            3,
+            "adopted",
+            Some("2026-07-11T00:00:00Z"),
+        )?;
+        insert_test_draft(&conn, "draft-old", "chapter-deleted", "旧正文", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-deleted", "新正文", false)?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-deleted")
+            .expect_err("soft-deleted chapter must be rejected");
+
+        assert!(error.starts_with("target_deleted:"), "{error}");
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-deleted")?.0.as_deref(),
+            Some("draft-old")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn adopt_chapter_draft_updates_pointer_and_chapter_metadata(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "editing")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "旧正文", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "新的正式正文", false)?;
+
+        let adopted = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")?;
+
+        assert_eq!(adopted.id, "draft-new");
+        assert_eq!(adopted.chapter_id, "chapter-a");
+        assert!(adopted.is_adopted);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 0);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 1);
+        let adopted_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM chapter_drafts WHERE chapter_id = 'chapter-a' AND is_adopted = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(adopted_count, 1);
+        let chapter = get_test_chapter_state(&conn, "chapter-a")?;
+        assert_eq!(chapter.0.as_deref(), Some("draft-new"));
+        assert_eq!(chapter.1, count_words("新的正式正文"));
+        assert_eq!(chapter.2, "adopted");
+        assert_ne!(chapter.3, "before");
+        Ok(())
+    }
+
+    #[test]
+    fn adopt_chapter_draft_rolls_back_when_chapter_update_fails(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(
+            &conn,
+            "chapter-a",
+            Some("draft-old"),
+            count_words("旧正文"),
+            "adopted",
+        )?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "旧正文", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "新正文", false)?;
+        conn.execute_batch(
+            "
+            CREATE TRIGGER fail_chapter_adoption
+            BEFORE UPDATE OF adopted_draft_id ON chapters
+            BEGIN
+                SELECT RAISE(ABORT, 'forced chapter update failure');
+            END;
+            ",
+        )?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")
+            .expect_err("chapter update failure must roll back the draft updates");
+
+        assert!(error.starts_with("adopt_chapter_update_failed:"), "{error}");
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-old")
+        );
+        Ok(())
     }
 
     fn insert_runtime_ai_task(conn: &Connection, id: &str) -> rusqlite::Result<()> {
@@ -4405,6 +4990,54 @@ mod tests {
             params![id, chrono::Utc::now().to_rfc3339()],
         )?;
         Ok(())
+    }
+
+    fn insert_runtime_ai_task_children(
+        conn: &Connection,
+        task_id: &str,
+        row_prefix: &str,
+    ) -> rusqlite::Result<()> {
+        for table in RUNTIME_AI_TASK_CHILD_TABLES {
+            let sql = format!("INSERT INTO {} (id, ai_task_id) VALUES (?1, ?2)", table);
+            let row_id = format!("{}-{}", row_prefix, table);
+            conn.execute(&sql, params![row_id, task_id])?;
+        }
+        Ok(())
+    }
+
+    fn count_runtime_ai_task_child_refs(
+        conn: &Connection,
+        task_id: &str,
+    ) -> rusqlite::Result<i64> {
+        let mut count = 0;
+        for table in RUNTIME_AI_TASK_CHILD_TABLES {
+            let sql = format!("SELECT COUNT(*) FROM {} WHERE ai_task_id = ?1", table);
+            count += conn.query_row(&sql, params![task_id], |row| row.get::<_, i64>(0))?;
+        }
+        Ok(count)
+    }
+
+    fn count_runtime_ai_task_child_rows(conn: &Connection) -> rusqlite::Result<i64> {
+        let mut count = 0;
+        for table in RUNTIME_AI_TASK_CHILD_TABLES {
+            let sql = format!("SELECT COUNT(*) FROM {}", table);
+            count += conn.query_row(&sql, [], |row| row.get::<_, i64>(0))?;
+        }
+        Ok(count)
+    }
+
+    fn assert_runtime_child_cleanup(
+        result: &DeleteAiTaskRecordsResult,
+        expected_rows_per_table: i64,
+    ) {
+        for table in RUNTIME_AI_TASK_CHILD_TABLES {
+            assert_eq!(
+                result.deleted_child_rows.get(table),
+                Some(&expected_rows_per_table),
+                "child cleanup count must be reported for {}",
+                table
+            );
+        }
     }
 
     #[test]
@@ -4422,6 +5055,8 @@ mod tests {
         let second_id = format!("runtime-clear-{}", uuid::Uuid::new_v4());
         insert_runtime_ai_task(&conn, &first_id)?;
         insert_runtime_ai_task(&conn, &second_id)?;
+        insert_runtime_ai_task_children(&conn, &first_id, "delete-child")?;
+        insert_runtime_ai_task_children(&conn, &second_id, "clear-child")?;
 
         let before_count = count_ai_task_records_in_conn(&conn)?;
         println!(
@@ -4429,6 +5064,9 @@ mod tests {
             db_path_text, first_id, second_id, before_count
         );
         assert_eq!(before_count, 2);
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, &first_id)?, 5);
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, &second_id)?, 5);
+        assert_eq!(count_runtime_ai_task_child_rows(&conn)?, 10);
 
         let delete_result = delete_ai_task_records_by_ids_internal(
             &conn,
@@ -4445,12 +5083,17 @@ mod tests {
         assert_eq!(delete_result.deleted_count, 1);
         assert_eq!(delete_result.after_match_count, 0);
         assert_eq!(delete_result.after_count, 1);
+        assert_eq!(delete_result.affected_rows, 1);
+        assert_runtime_child_cleanup(&delete_result, 1);
 
         assert_eq!(count_ai_task_records_by_ids(&conn, &[first_id.clone()])?, 0);
         assert_eq!(
             count_ai_task_records_by_ids(&conn, &[second_id.clone()])?,
             1
         );
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, &first_id)?, 0);
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, &second_id)?, 5);
+        assert_eq!(count_runtime_ai_task_child_rows(&conn)?, 10);
 
         let clear_result = clear_ai_task_records_internal(&conn, db_path_text.clone())?;
         println!(
@@ -4460,7 +5103,11 @@ mod tests {
         assert_eq!(clear_result.before_count, 1);
         assert_eq!(clear_result.deleted_count, 1);
         assert_eq!(clear_result.after_count, 0);
+        assert_eq!(clear_result.affected_rows, 1);
+        assert_runtime_child_cleanup(&clear_result, 1);
         assert_eq!(count_ai_task_records_in_conn(&conn)?, 0);
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, &second_id)?, 0);
+        assert_eq!(count_runtime_ai_task_child_rows(&conn)?, 10);
 
         drop(conn);
         let _ = fs::remove_file(db_path);

@@ -1,8 +1,11 @@
 {
   "name": "ai-novel-studio",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -11,6 +14,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
+    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
+    "test:workspace-safety": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",
     "test:quality-workspace": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_quality_workspace.ps1",

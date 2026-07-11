@@ -10,8 +10,12 @@ if (-not (Test-Path -LiteralPath $tauriRoot)) {
 }
 
 Push-Location $tauriRoot
+$cargoExitCode = 1
 try {
   cargo test ai_task_delete_runtime_insert_list_delete_clear -- --nocapture
+  $cargoExitCode = $LASTEXITCODE
 } finally {
   Pop-Location
 }
+
+exit $cargoExitCode

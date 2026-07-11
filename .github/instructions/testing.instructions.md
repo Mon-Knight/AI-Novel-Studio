@@ -114,14 +114,19 @@ npm run tauri dev
 
 ---
 
-## 6. 自动化验证（未来）
+## 6. 自动化验证
 
-后续版本将引入：
+当前已有：
+
+- Node 原生 `node:test` 正文安全原语测试（`npm run test`）
+- Rust / SQLite 动态测试（`cargo test`）
+- PowerShell 静态契约检查（不得冒充运行时行为测试）
+
+后续仍需引入：
 
 - 自动化 CI/CD（GitHub Actions）
-- 单元测试（Vitest / Jest）
+- React 组件级单元 / 集成测试（Vitest / Jest）
 - E2E 测试（Playwright）
-- Rust 测试（`cargo test`）
 
 ---
 

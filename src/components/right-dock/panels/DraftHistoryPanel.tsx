@@ -12,6 +12,7 @@ interface DraftHistoryPanelProps {
   currentDraftId?: string;
   onLoadDraft: (draft: ChapterDraft) => void;
   onDraftAdopted?: (draft: ChapterDraft) => void;
+  onBeforeDocumentChange?: () => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -24,24 +25,42 @@ const sourceLabels: Record<string, string> = {
   manual_placeholder: '手动占位',
 };
 
-function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdopted, onClose }: DraftHistoryPanelProps) {
+function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdopted, onBeforeDocumentChange, onClose }: DraftHistoryPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const liveChapterIdRef = useRef(chapterId);
+  const loadEpochRef = useRef(0);
+  liveChapterIdRef.current = chapterId;
   const [drafts, setDrafts] = useState<ChapterDraft[]>([]);
   const [latestReport, setLatestReport] = useState<QualityCheckReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
-    if (!chapterId) { setLoading(false); return; }
+    const requestEpoch = ++loadEpochRef.current;
+    const requestChapterId = chapterId;
+    if (!requestChapterId) { setLoading(false); return; }
+    setLoading(true);
     try {
       const [list, report] = await Promise.all([
-        draftVersionService.getByChapterId(chapterId),
-        qualityCheckService.getLatestReport(chapterId).catch(() => null),
+        draftVersionService.getByChapterId(requestChapterId),
+        qualityCheckService.getLatestReport(requestChapterId).catch(() => null),
       ]);
+      if (loadEpochRef.current !== requestEpoch || liveChapterIdRef.current !== requestChapterId) return;
+      if (list.some((draft) => draft.chapterId !== requestChapterId)
+        || (report && report.chapterId !== requestChapterId)) {
+        throw new Error('草稿历史与目标章节不一致');
+      }
       setDrafts(list.sort((a, b) => b.versionNo - a.versionNo));
       setLatestReport(report);
-    } catch { /* ignore */ }
-    setLoading(false);
+    } catch (error) {
+      if (loadEpochRef.current === requestEpoch && liveChapterIdRef.current === requestChapterId) {
+        console.error('[DraftHistory] failed to load chapter drafts', error);
+        setMsg('草稿历史加载失败');
+      }
+    }
+    if (loadEpochRef.current === requestEpoch && liveChapterIdRef.current === requestChapterId) {
+      setLoading(false);
+    }
   }, [chapterId]);
 
   useEffect(() => { load(); }, [load]);
@@ -59,13 +78,34 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
   }, [onClose]);
 
   const handleAdopt = async (draft: ChapterDraft) => {
+    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
     if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
-    const adoptedDraft = await draftVersionService.adopt(draft.id, chapterId);
-    const syncedDraft = await draftVersionService.getAdoptedByChapterId(chapterId);
-    onDraftAdopted?.(syncedDraft ?? adoptedDraft ?? { ...draft, isAdopted: true });
-    setMsg(`v${draft.versionNo} 已采用`);
+    try {
+      const adoptedDraft = await draftVersionService.adopt(draft.id, chapterId);
+      const syncedDraft = await draftVersionService.getAdoptedByChapterId(chapterId);
+      const verifiedDraft = syncedDraft ?? adoptedDraft;
+      if (verifiedDraft.id !== draft.id || verifiedDraft.chapterId !== chapterId || !verifiedDraft.isAdopted) {
+        throw new Error('正文采用结果与目标章节不一致');
+      }
+      if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) {
+        setMsg(`v${draft.versionNo} 已采用，当前未保存正文已保留`);
+        await load();
+        setTimeout(() => setMsg(''), 3000);
+        return;
+      }
+      onDraftAdopted?.(verifiedDraft);
+      setMsg(`v${draft.versionNo} 已采用`);
+      await load();
+    } catch (error) {
+      console.error('[DraftHistory] failed to adopt draft', error);
+      setMsg('采用失败，原正式正文未改变');
+    }
     setTimeout(() => setMsg(''), 2000);
-    await load();
+  };
+
+  const handleLoad = async (draft: ChapterDraft) => {
+    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
+    onLoadDraft(draft);
   };
 
   const handleDelete = async (draft: ChapterDraft) => {
@@ -130,7 +170,7 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => onLoadDraft(draft)}
+                    <button className="btn btn-secondary btn-sm" onClick={() => { void handleLoad(draft); }}
                       style={{ fontSize: 12 }}>📖 恢复</button>
                     {!draft.isAdopted && (
                       <button className="btn btn-primary btn-sm" onClick={() => handleAdopt(draft)}

@@ -1,11 +1,11 @@
-# 版本路线图
+# v1.7.x 版本路线历史摘要
 
-> 当前版本：v1.7.11
-> 完整历史参见根目录 [../version-roadmap.md](../version-roadmap.md)。
+> 本文档基线：v1.7.11（历史摘要）
+> 当前权威版本与完整历史参见 [../version-roadmap.md](../version-roadmap.md)。
 
 ---
 
-## 当前阶段：v1.7.x 应用化优化
+## 历史阶段：v1.7.x 应用化优化
 
 ```text
 v1.7.6  阶段性整理、文档体系重整与 EXE 验证 ✅

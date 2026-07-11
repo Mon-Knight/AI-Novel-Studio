@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { chapterEngineeringService, createDefaultChapterCard, createDefaultGenerationConstraints, createDefaultQualityRules, createDefaultScenePlan } from '../../../services/engineering/chapterEngineeringService';
 import { generationContextCompiler } from '../../../services/generation/generationContextCompiler';
 import { generationJobService } from '../../../services/generation/generationJobService';
@@ -18,12 +18,17 @@ import type {
 import type { ChapterGenerationSnapshot } from '../../../types/generationContext';
 import type { GenerationJob, GenerationStepName, GenerationStepResult } from '../../../types/generationJob';
 import type { GetQualityCheckIssuesResult, QualityCheckItem } from '../../../types/qualityCheck';
+import { hashTextContent } from '../../../utils/contentHash';
+import type { DraftResultMetadata } from '../../../types/workspaceSafety';
 
 interface ChapterEngineeringPanelProps {
   novelId?: string;
   chapter?: Chapter;
   currentEditorContent?: string;
-  onGenerated?: (draft: ChapterDraft) => void;
+  currentContentHash?: string;
+  currentDraftId?: string;
+  currentDraftVersion?: number;
+  onGenerated?: (draft: ChapterDraft, metadata?: DraftResultMetadata) => void;
 }
 
 type TabId = 'card' | 'scenes' | 'constraints' | 'quality' | 'snapshot' | 'jobs' | 'versions';
@@ -231,8 +236,14 @@ function createEmptyScene(sceneNo: number): ScenePlanItem {
   };
 }
 
-function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGenerated }: ChapterEngineeringPanelProps) {
+function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, currentContentHash, currentDraftId, currentDraftVersion, onGenerated }: ChapterEngineeringPanelProps) {
+  const liveChapterIdRef = useRef(chapter?.id || '');
+  liveChapterIdRef.current = chapter?.id || '';
   const effectiveNovelId = novelId ?? chapter?.novelId;
+  const liveNovelIdRef = useRef(effectiveNovelId || '');
+  liveNovelIdRef.current = effectiveNovelId || '';
+  const jobRunEpochRef = useRef(0);
+  const draftRunEpochRef = useRef(0);
   const [activeTab, setActiveTab] = useState<TabId>('card');
   const [bundle, setBundle] = useState<ChapterEngineeringBundle | null>(null);
   const [latestSnapshot, setLatestSnapshot] = useState<ChapterGenerationSnapshot | null>(null);
@@ -254,6 +265,10 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
 
   useEffect(() => {
     let alive = true;
+    jobRunEpochRef.current += 1;
+    draftRunEpochRef.current += 1;
+    setJobRunning(false);
+    setDraftRunning(false);
     setMessage('');
     setError('');
 
@@ -516,24 +531,43 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
     setJobRunning(true);
     setError('');
     setMessage('正在运行 Mock 生成任务...');
+    const requestNovelId = effectiveNovelId;
+    const requestChapterId = chapter.id;
+    const requestEpoch = ++jobRunEpochRef.current;
     try {
       const finalJob = await generationJobService.runMockChapterJob({
-        novelId: effectiveNovelId,
+        novelId: requestNovelId,
         volumeId: chapter.volumeId,
         chapterId: chapter.id,
         currentEditorContent,
       }, (job, steps) => {
-        setLatestJob(job);
-        setJobSteps(steps);
+        if (jobRunEpochRef.current === requestEpoch
+          && liveNovelIdRef.current === requestNovelId
+          && liveChapterIdRef.current === requestChapterId) {
+          setLatestJob(job);
+          setJobSteps(steps);
+        }
       });
+      const steps = await generationJobService.getSteps(finalJob.id);
+      if (jobRunEpochRef.current !== requestEpoch
+        || liveNovelIdRef.current !== requestNovelId
+        || liveChapterIdRef.current !== requestChapterId) return;
       setLatestJob(finalJob);
-      setJobSteps(await generationJobService.getSteps(finalJob.id));
+      setJobSteps(steps);
       setMessage(`Mock 任务已${finalJob.status === 'completed' ? '完成' : finalJob.status}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Mock 生成任务失败');
-      setMessage('');
+      if (jobRunEpochRef.current === requestEpoch
+        && liveNovelIdRef.current === requestNovelId
+        && liveChapterIdRef.current === requestChapterId) {
+        setError(e instanceof Error ? e.message : 'Mock 生成任务失败');
+        setMessage('');
+      }
     } finally {
-      setJobRunning(false);
+      if (jobRunEpochRef.current === requestEpoch
+        && liveNovelIdRef.current === requestNovelId
+        && liveChapterIdRef.current === requestChapterId) {
+        setJobRunning(false);
+      }
     }
   };
 
@@ -549,31 +583,61 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, onGen
     setDraftRunning(true);
     setError('');
     setMessage('正在生成本章初稿...');
+    const requestNovelId = effectiveNovelId;
+    const requestChapterId = chapter.id;
+    const requestEpoch = ++draftRunEpochRef.current;
+    const resultBase: Omit<DraftResultMetadata, 'resultId'> = {
+      novelId: requestNovelId,
+      chapterId: requestChapterId,
+      sourceDraftId: currentDraftId,
+      sourceRevision: currentDraftVersion,
+      baseContentHash: currentContentHash || hashTextContent(currentEditorContent || ''),
+      source: 'chapter_engineering',
+    };
     try {
       const result = await generationJobService.runChapterDraftJob({
-        novelId: effectiveNovelId,
+        novelId: requestNovelId,
         volumeId: chapter.volumeId,
         chapterId: chapter.id,
         title: `${chapter.title || '章节'} - AI 初稿`,
         currentEditorContent,
       }, (job, steps) => {
-        setLatestJob(job);
-        setJobSteps(steps);
+        if (draftRunEpochRef.current === requestEpoch
+          && liveNovelIdRef.current === requestNovelId
+          && liveChapterIdRef.current === requestChapterId) {
+          setLatestJob(job);
+          setJobSteps(steps);
+        }
       });
+      const [steps, quality] = await Promise.all([
+        generationJobService.getSteps(result.job.id),
+        qualityCheckService.getChapterIssues(requestChapterId).catch(() => EMPTY_QUALITY_RESULT),
+      ]);
+      if (draftRunEpochRef.current !== requestEpoch
+        || liveNovelIdRef.current !== requestNovelId
+        || liveChapterIdRef.current !== requestChapterId) return;
       setLatestJob(result.job);
-      setJobSteps(await generationJobService.getSteps(result.job.id));
-      setQualityResult(await qualityCheckService.getChapterIssues(chapter.id).catch(() => EMPTY_QUALITY_RESULT));
+      setJobSteps(steps);
+      setQualityResult(quality);
       if (result.draft) {
-        onGenerated?.(result.draft);
+        onGenerated?.(result.draft, { ...resultBase, resultId: result.draft.id });
         setMessage(`已生成并保存正文草稿 v${result.draft.versionNo}`);
       } else {
         setMessage(`正文生成任务已${result.job.status}`);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '正文生成任务失败');
-      setMessage('');
+      if (draftRunEpochRef.current === requestEpoch
+        && liveNovelIdRef.current === requestNovelId
+        && liveChapterIdRef.current === requestChapterId) {
+        setError(e instanceof Error ? e.message : '正文生成任务失败');
+        setMessage('');
+      }
     } finally {
-      setDraftRunning(false);
+      if (draftRunEpochRef.current === requestEpoch
+        && liveNovelIdRef.current === requestNovelId
+        && liveChapterIdRef.current === requestChapterId) {
+        setDraftRunning(false);
+      }
     }
   };
 

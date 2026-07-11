@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { forwardRef, useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import { draftVersionService } from '../../services/database/draftVersionService';
@@ -9,15 +9,9 @@ import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
 import { countTextWords, hashTextContent } from '../../utils/contentHash';
 import { confirmInfo } from '../../utils/nativeDialog';
+import type { AiTextApplyRequest } from '../../types/workspaceSafety';
 
-export type AiTextApplyMode = 'replace_all' | 'append';
-
-export interface AiTextApplyRequest {
-  id: string;
-  mode: AiTextApplyMode;
-  text: string;
-  source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
-}
+export type { AiTextApplyMode, AiTextApplyPayload, AiTextApplyRequest } from '../../types/workspaceSafety';
 
 export interface EditorContentSnapshot {
   chapterId?: string;
@@ -48,6 +42,8 @@ interface EditorAreaProps {
   onEditorContentChange?: (snapshot: EditorContentSnapshot) => void;
   onDraftSaved?: (draft: ChapterDraft) => void;
   applyTextRequest?: AiTextApplyRequest | null;
+  onApplyTextConsumed?: (request: AiTextApplyRequest) => void;
+  onApplyTextRejected?: (request: AiTextApplyRequest, reason: string) => void;
   commandRequest?: EditorCommandRequest | null;
   onChapterUpdated?: (chapterId: string) => void;
   /** 定位目标：设置后自动在正文中搜索并高亮指定文本 */
@@ -55,7 +51,11 @@ interface EditorAreaProps {
   onLocateDone?: (result?: { found: boolean; message?: string }) => void;
 }
 
-function EditorArea({
+export interface EditorAreaHandle {
+  save: () => Promise<ChapterDraft | null>;
+}
+
+const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function EditorArea({
   chapter,
   novelId,
   currentDraft,
@@ -63,11 +63,13 @@ function EditorArea({
   onEditorContentChange,
   onDraftSaved,
   applyTextRequest,
+  onApplyTextConsumed,
+  onApplyTextRejected,
   commandRequest,
   onChapterUpdated,
   locateTarget,
   onLocateDone,
-}: EditorAreaProps) {
+}: EditorAreaProps, ref) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -75,6 +77,13 @@ function EditorArea({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastApplyRequestId = useRef('');
   const lastCommandRequestId = useRef('');
+  const liveDocumentRef = useRef({ novelId, chapterId: chapter?.id });
+  const liveDraftIdRef = useRef(currentDraft?.id);
+  const liveContentRef = useRef(content);
+
+  liveDocumentRef.current = { novelId, chapterId: chapter?.id };
+  liveDraftIdRef.current = currentDraft?.id;
+  liveContentRef.current = content;
 
   // v1.0.35 章节大纲行内编辑状态
   const [isEditingOutline, setIsEditingOutline] = useState(false);
@@ -102,11 +111,17 @@ function EditorArea({
   // 加载当前草稿
   useEffect(() => {
     if (currentDraft) {
+      if (!chapter?.id || !novelId
+        || currentDraft.novelId !== novelId
+        || currentDraft.chapterId !== chapter.id) {
+        setSaveMsg('草稿与当前章节不一致，已阻止载入');
+        return;
+      }
       setContent(currentDraft.content);
       setIsDirty(false);
       setLastSaved(formatDateTime(currentDraft.updatedAt));
       emitContentSnapshot(currentDraft.content, false, currentDraft);
-    } else if (chapter) {
+    } else if (chapter?.id) {
       setContent('');
       setIsDirty(false);
       setLastSaved('');
@@ -116,7 +131,7 @@ function EditorArea({
     setIsEditingOutline(false);
     setOutlineDraft('');
     setOutlineSaveMsg('');
-  }, [currentDraft, chapter, emitContentSnapshot]);
+  }, [currentDraft, chapter?.id, novelId, emitContentSnapshot]);
 
   // 定位正文功能 (v1.7.16: 多级策略 + 明显高亮)
   const [_highlightRange, setHighlightRange] = useState<{ start: number; end: number } | null>(null);
@@ -270,6 +285,33 @@ function EditorArea({
     lastApplyRequestId.current = applyTextRequest.id;
     const incoming = applyTextRequest.text.trim();
     if (!incoming) return;
+    if (!chapter || !novelId
+      || applyTextRequest.novelId !== novelId
+      || applyTextRequest.chapterId !== chapter.id) {
+      const reason = 'AI 输出目标不是当前作品章节，已阻止应用';
+      setSaveMsg(reason);
+      onApplyTextRejected?.(applyTextRequest, reason);
+      return;
+    }
+    if (hashTextContent(content) !== applyTextRequest.baseContentHash) {
+      const reason = '正文已在 AI 结果生成后发生变化，已阻止覆盖';
+      setSaveMsg(reason);
+      onApplyTextRejected?.(applyTextRequest, reason);
+      return;
+    }
+    if (applyTextRequest.sourceDraftId && currentDraft?.id !== applyTextRequest.sourceDraftId) {
+      const reason = '基础草稿已切换，已阻止应用旧结果';
+      setSaveMsg(reason);
+      onApplyTextRejected?.(applyTextRequest, reason);
+      return;
+    }
+    if (applyTextRequest.sourceRevision !== undefined
+      && currentDraft?.versionNo !== applyTextRequest.sourceRevision) {
+      const reason = '基础草稿版本已变化，已阻止应用旧结果';
+      setSaveMsg(reason);
+      onApplyTextRejected?.(applyTextRequest, reason);
+      return;
+    }
     setContent((prev) => {
       const nextContent = applyTextRequest.mode === 'append'
         ? [prev.trimEnd(), incoming].filter(Boolean).join('\n\n')
@@ -279,11 +321,16 @@ function EditorArea({
       return nextContent;
     });
     setSaveMsg('未保存');
+    onApplyTextConsumed?.(applyTextRequest);
     textareaRef.current?.focus();
-  }, [applyTextRequest, emitContentSnapshot]);
+  }, [applyTextRequest, chapter, novelId, content, currentDraft, emitContentSnapshot, onApplyTextConsumed, onApplyTextRejected]);
 
   const handleSave = useCallback(async (): Promise<ChapterDraft | null> => {
     if (!chapter || !novelId) return null;
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
+    const requestDraftId = currentDraft?.id;
+    const requestContent = content;
     try {
       const savedDraft = await runWithLoading(
         {
@@ -296,31 +343,55 @@ function EditorArea({
         async ({ setMessage }) => {
           if (currentDraft && !currentDraft.isAdopted) {
             setMessage('正在更新草稿……');
-            return await draftVersionService.update(currentDraft.id, chapter.id, content, 'user_edited');
+            return await draftVersionService.update(currentDraft.id, requestChapterId, requestContent, 'user_edited');
           }
           setMessage('正在创建草稿……');
           return await draftVersionService.create({
-            novelId, chapterId: chapter.id, content, source: 'user_edited',
+            novelId: requestNovelId,
+            chapterId: requestChapterId,
+            content: requestContent,
+            source: 'user_edited',
           });
         },
       );
+      const expectedUpdatedDraftId = currentDraft && !currentDraft.isAdopted
+        ? currentDraft.id
+        : undefined;
+      if (!savedDraft
+        || savedDraft.novelId !== requestNovelId
+        || savedDraft.chapterId !== requestChapterId
+        || (expectedUpdatedDraftId && savedDraft.id !== expectedUpdatedDraftId)) {
+        throw new Error('草稿保存结果与当前章节不一致');
+      }
+      const liveDocument = liveDocumentRef.current;
+      if (liveDocument.novelId !== requestNovelId
+        || liveDocument.chapterId !== requestChapterId
+        || liveDraftIdRef.current !== requestDraftId) {
+        return null;
+      }
+      if (liveContentRef.current !== requestContent) {
+        setSaveMsg('正文已变化，请再次保存');
+        setTimeout(() => setSaveMsg(''), 3000);
+        return null;
+      }
       setIsDirty(false);
       setSaveMsg('已保存');
       setLastSaved(formatDateTime(new Date()));
-      if (savedDraft) {
-        onDraftSaved?.(savedDraft);
-        emitContentSnapshot(savedDraft.content, false, savedDraft);
-      } else {
-        emitContentSnapshot(content, false, currentDraft);
-      }
+      onDraftSaved?.(savedDraft);
+      emitContentSnapshot(savedDraft.content, false, savedDraft);
       setTimeout(() => setSaveMsg(''), 2000);
-      return savedDraft ?? currentDraft ?? null;
+      return savedDraft;
     } catch {
-      setSaveMsg('保存失败');
-      setTimeout(() => setSaveMsg(''), 3000);
+      const liveDocument = liveDocumentRef.current;
+      if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
+        setSaveMsg('保存失败');
+        setTimeout(() => setSaveMsg(''), 3000);
+      }
       return null;
     }
   }, [chapter, novelId, content, currentDraft, onDraftSaved, emitContentSnapshot]);
+
+  useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
 
   const handleFormat = useCallback(() => {
     handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim());
@@ -329,7 +400,9 @@ function EditorArea({
   }, [content, handleContentChange]);
 
   const handleAdoptCurrent = useCallback(async () => {
-    if (!chapter) return;
+    if (!chapter || !novelId) return;
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
     let draftToAdopt = currentDraft;
 
     if (!draftToAdopt || draftToAdopt.content !== content || isDirty) {
@@ -370,19 +443,34 @@ function EditorArea({
           errorMessage: '采用失败',
           successAutoCloseMs: 800,
         },
-        async () => await draftVersionService.adopt(draftForAdoption.id, chapter.id),
+        async () => await draftVersionService.adopt(draftForAdoption.id, requestChapterId),
       );
-      const nextDraft = adopted ?? { ...draftForAdoption, isAdopted: true };
+      if (adopted.id !== draftForAdoption.id
+        || adopted.novelId !== requestNovelId
+        || adopted.chapterId !== requestChapterId
+        || !adopted.isAdopted) {
+        throw new Error('正文采用结果与当前章节不一致');
+      }
+      const liveDocument = liveDocumentRef.current;
+      if (liveDocument.novelId !== requestNovelId
+        || liveDocument.chapterId !== requestChapterId
+        || liveContentRef.current !== draftForAdoption.content) {
+        return;
+      }
+      const nextDraft = adopted;
       setSaveMsg('已采用');
       onDraftSaved?.(nextDraft);
       emitContentSnapshot(nextDraft.content, false, nextDraft);
-      onChapterUpdated?.(chapter.id);
+      onChapterUpdated?.(requestChapterId);
       setTimeout(() => setSaveMsg(''), 2000);
     } catch {
-      setSaveMsg('采用失败');
-      setTimeout(() => setSaveMsg(''), 3000);
+      const liveDocument = liveDocumentRef.current;
+      if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
+        setSaveMsg('采用失败');
+        setTimeout(() => setSaveMsg(''), 3000);
+      }
     }
-  }, [chapter, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved]);
+  }, [chapter, novelId, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -553,6 +641,6 @@ function EditorArea({
       )}
     </div>
   );
-}
+});
 
 export default EditorArea;

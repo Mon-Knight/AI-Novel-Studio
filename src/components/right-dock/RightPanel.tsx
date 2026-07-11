@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from 'react';
 import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePage';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
-import type { AiTextApplyMode, AiTextApplyRequest } from '../workspace/EditorArea';
+import type { AiTextApplyPayload, DraftResultMetadata } from '../../types/workspaceSafety';
 import type { WritingContext } from '../../utils/writingContext';
 import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
 import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
@@ -23,7 +23,7 @@ interface RightPanelProps {
   onClose: () => void;
   novelId?: string;
   chapter?: Chapter;
-  onGenerated?: (draft: ChapterDraft) => void;
+  onGenerated?: (draft: ChapterDraft, metadata?: DraftResultMetadata) => void;
   onAdopted?: () => void;
   onChapterOutlineApplied?: (chapterId: string) => void;
   onChapterGoalDirtyChange?: (dirty: boolean) => void;
@@ -41,11 +41,8 @@ interface RightPanelProps {
   currentContentHash?: string;
   currentDraftId?: string;
   currentDraftVersion?: number;
-  onApplyAiText?: (payload: {
-    mode: AiTextApplyMode;
-    text: string;
-    source: AiTextApplyRequest['source'];
-  }) => Promise<boolean>;
+  onApplyAiText?: (payload: AiTextApplyPayload) => Promise<boolean>;
+  onBeforeDocumentChange?: () => Promise<boolean>;
   showAiModal?: (title: string, subtitle?: string) => void;
   updateAiModal?: (stage: string, progress: number) => void;
   hideAiModal?: () => void;
@@ -93,6 +90,7 @@ function RightPanel({
   currentDraftId,
   currentDraftVersion,
   onApplyAiText,
+  onBeforeDocumentChange,
   showAiModal,
   updateAiModal,
   hideAiModal,
@@ -188,6 +186,7 @@ function RightPanel({
             currentDraftId={currentDraftId}
             currentDraftVersion={currentDraftVersion}
             onApplyAiText={onApplyAiText}
+            onBeforeDocumentChange={onBeforeDocumentChange}
             showAiModal={showAiModal}
             updateAiModal={updateAiModal}
             hideAiModal={hideAiModal}

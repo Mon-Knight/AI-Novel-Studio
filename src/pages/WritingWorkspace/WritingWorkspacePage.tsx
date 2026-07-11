@@ -1,11 +1,10 @@
-import { useState, useCallback, useEffect, type MouseEvent } from 'react';
-import { confirmInfo } from '../../utils/nativeDialog';
+import { useState, useCallback, useEffect, useRef, type MouseEvent } from 'react';
+import { confirmDanger, confirmInfo, showError, showInfo } from '../../utils/nativeDialog';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import VolumeTree from '../../components/workspace/VolumeTree';
 import EditorArea, {
-  type AiTextApplyMode,
-  type AiTextApplyRequest,
+  type EditorAreaHandle,
   type EditorCommandRequest,
   type EditorCommandType,
   type EditorContentSnapshot,
@@ -31,6 +30,18 @@ import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
 import type { ChapterDraft } from '../../types/ai';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
+import type {
+  AiTextApplyPayload,
+  AiTextApplyRequest,
+  DraftResultMetadata,
+} from '../../types/workspaceSafety';
+import {
+  DocumentApplyIdempotencyGuard,
+  MonotonicDocumentLoadGuard,
+  resolveGuardedDocumentLoad,
+  validateDocumentApplication,
+  validateDraftDocumentTarget,
+} from '../../features/workspace/documentSafety';
 import { hashTextContent } from '../../utils/contentHash';
 import { getCurrentWritingContext, type WritingContext } from '../../utils/writingContext';
 import {
@@ -105,6 +116,21 @@ function WritingWorkspacePage() {
   const [draftWordCount, setDraftWordCount] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
   const [chapterGoalDirty, setChapterGoalDirty] = useState(false);
+  const chapterGoalDirtyRef = useRef(chapterGoalDirty);
+  const editorRef = useRef<EditorAreaHandle>(null);
+  const activeNovelIdRef = useRef(novelId || '');
+  const activeChapterIdRef = useRef(activeChapterId);
+  const editorSnapshotRef = useRef(editorSnapshot);
+  const currentDraftRef = useRef(currentDraft);
+  const documentLoadGuardRef = useRef(new MonotonicDocumentLoadGuard());
+  const applyIdempotencyGuardRef = useRef(new DocumentApplyIdempotencyGuard());
+  const pendingApplyKeysRef = useRef(new Map<string, AiTextApplyPayload>());
+
+  activeNovelIdRef.current = novelId || '';
+  activeChapterIdRef.current = activeChapterId;
+  editorSnapshotRef.current = editorSnapshot;
+  currentDraftRef.current = currentDraft;
+  chapterGoalDirtyRef.current = chapterGoalDirty;
 
   // v1.0.42 上下文版本号（角色变更/字数变更时递增，触发 AiGeneratePanel 刷新摘要）
   const [contextVersion, setContextVersion] = useState(0);
@@ -143,12 +169,13 @@ function WritingWorkspacePage() {
   const [summaryExists, setSummaryExists] = useState(false);
 
   const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
+  const activeDraft = currentDraft?.chapterId === activeChapterId ? currentDraft : null;
 
   // v1.0.45 统一写作上下文（派生状态，面板通过此获取全文/选中文本/章节等）
   const writingContext: WritingContext = getCurrentWritingContext({
-    fullText: editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : currentDraft?.content || '',
+    fullText: editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : activeDraft?.content || '',
     chapter: activeChapter,
-    currentDraft,
+    currentDraft: activeDraft,
     novelId,
     isDirty: editorSnapshot.chapterId === activeChapterId ? editorSnapshot.isDirty : false,
   });
@@ -163,42 +190,42 @@ function WritingWorkspacePage() {
   type WorkspaceLoadState = 'loading' | 'ready' | 'novel_not_found' | 'error';
   const [loadState, setLoadState] = useState<WorkspaceLoadState>('loading');
 
-  const loadChapterDraft = useCallback(async (chapterId: string) => {
-    try {
-      const draft = await draftVersionService.getLatestByChapterId(chapterId);
-      setCurrentDraft(draft);
-      setDraftWordCount(draft?.wordCount || 0);
-      setIsDirty(false);
-    } catch { /* 草稿加载失败不影响页面 */ }
+  const commitActiveChapter = useCallback((chapterId: string) => {
+    documentLoadGuardRef.current.invalidate();
+    activeChapterIdRef.current = chapterId;
+    setActiveChapterId(chapterId);
+    setCurrentDraft(null);
+    currentDraftRef.current = null;
   }, []);
 
-  // v1.0.19 工作台单一数据源：统一从 service 重新读取所有数据
-  const reloadWorkspaceData = useCallback(async (selectChapterId?: string) => {
-    if (!novelId) return;
-    console.info('[Workspace] reloadWorkspaceData start, novelId=', novelId);
-    const [v, c] = await Promise.all([
-      volumeRepository.getByNovelId(novelId),
-      chapterRepository.getByNovelId(novelId),
-    ]);
-    setVolumes(v);
-    setChapters(c);
-    console.info('[Workspace] reloadWorkspaceData done, volumes=', v.length, 'chapters=', c.length);
-
-    // 解析当前章节
-    const resolvedChapterId = selectChapterId
-      || (activeChapterId && c.find((ch) => ch.id === activeChapterId) ? activeChapterId : '')
-      || c[0]?.id
-      || '';
-    if (resolvedChapterId) {
-      setActiveChapterId(resolvedChapterId);
-      setLoadState('ready');
-      loadChapterDraft(resolvedChapterId);
-    } else if (c.length === 0) {
-      setLoadState('ready');
-      setCurrentDraft(null);
-      setDraftWordCount(0);
+  const loadChapterDraft = useCallback(async (chapterId: string) => {
+    const requestNovelId = activeNovelIdRef.current;
+    if (!requestNovelId) return false;
+    const target = { novelId: requestNovelId, chapterId };
+    const token = documentLoadGuardRef.current.issue(target);
+    try {
+      const resolved = await resolveGuardedDocumentLoad(
+        documentLoadGuardRef.current,
+        token,
+        draftVersionService.getLatestByChapterId(chapterId),
+        () => ({ novelId: activeNovelIdRef.current, chapterId: activeChapterIdRef.current }),
+      );
+      if (!resolved.accepted) return false;
+      const draft = resolved.value;
+      if (draft) {
+        const draftDecision = validateDraftDocumentTarget(draft, target);
+        if (!draftDecision.ok) throw new Error(draftDecision.message);
+      }
+      setCurrentDraft(draft);
+      currentDraftRef.current = draft;
+      setDraftWordCount(draft?.wordCount || 0);
+      setIsDirty(false);
+      return true;
+    } catch (error) {
+      console.error('[Workspace] failed to load chapter draft', { chapterId, error });
+      return false;
     }
-  }, [novelId, activeChapterId, loadChapterDraft]);
+  }, []);
 
   useEffect(() => {
     if (!novelId) return;
@@ -227,7 +254,7 @@ function WritingWorkspacePage() {
         const targetId = (urlChapterId && list.find((c) => c.id === urlChapterId))
           ? urlChapterId : list[0]?.id;
         if (targetId) {
-          setActiveChapterId(targetId);
+          commitActiveChapter(targetId);
           loadChapterDraft(targetId);
         }
       }
@@ -236,20 +263,52 @@ function WritingWorkspacePage() {
     });
 
     return () => { cancelled = true; };
-  }, [novelId, searchParams, loadChapterDraft]);
+  }, [novelId, searchParams, commitActiveChapter, loadChapterDraft]);
 
   const confirmDiscardChapterGoal = useCallback(async () => {
-    if (!chapterGoalDirty) return true;
+    if (!chapterGoalDirtyRef.current) return true;
     return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？' });
-  }, [chapterGoalDirty]);
+  }, []);
+
+  const confirmEditorLeave = useCallback(async () => {
+    const snapshot = editorSnapshotRef.current;
+    if (!snapshot.isDirty || snapshot.chapterId !== activeChapterIdRef.current) return true;
+
+    const saveFirst = await confirmInfo({
+      title: '正文尚未保存',
+      message: '当前正文存在未保存修改。\n\n选择“确定”将先保存草稿再继续；选择“取消”可进一步选择放弃修改或留在当前章节。',
+    });
+    if (saveFirst) {
+      const saved = await editorRef.current?.save();
+      if (!saved) {
+        await showError({ title: '无法离开当前章节', message: '正文保存失败，已保留当前编辑内容。' });
+        return false;
+      }
+      return true;
+    }
+
+    return await confirmDanger({
+      title: '放弃未保存正文',
+      message: '确认放弃当前未保存正文并继续吗？该操作无法恢复。选择“取消”将留在当前章节。',
+    });
+  }, []);
+
+  const confirmWorkspaceLeave = useCallback(async () => {
+    if (!(await confirmDiscardChapterGoal())) return false;
+    if (!(await confirmEditorLeave())) return false;
+    setChapterGoalDirty(false);
+    chapterGoalDirtyRef.current = false;
+    return true;
+  }, [confirmDiscardChapterGoal, confirmEditorLeave]);
 
   const handleSelectChapter = useCallback(async (chapterId: string) => {
-    if (!(await confirmDiscardChapterGoal())) return;
+    if (chapterId === activeChapterIdRef.current) return;
+    if (!(await confirmWorkspaceLeave())) return;
     setChapterGoalDirty(false);
-    setActiveChapterId(chapterId);
+    commitActiveChapter(chapterId);
     // v1.0.44: 切换章节时不再强制关闭面板，面板会通过 props 更新感知新章节
     loadChapterDraft(chapterId);
-  }, [confirmDiscardChapterGoal, loadChapterDraft]);
+  }, [commitActiveChapter, confirmWorkspaceLeave, loadChapterDraft]);
 
   const handleTogglePanel = useCallback(async (panel: PanelType) => {
     if (activePanel === 'outline' && !(await confirmDiscardChapterGoal())) return;
@@ -269,6 +328,16 @@ function WritingWorkspacePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleClosePanel]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editorSnapshotRef.current.isDirty && !chapterGoalDirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [chapterGoalDirty]);
+
   const handleEditorClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (
@@ -285,16 +354,80 @@ function WritingWorkspacePage() {
   }, []);
 
   const handleEditorContentChange = useCallback((snapshot: EditorContentSnapshot) => {
+    editorSnapshotRef.current = snapshot;
     setEditorSnapshot(snapshot);
     setDraftWordCount(snapshot.wordCount);
     setIsDirty(snapshot.isDirty);
   }, []);
 
-  const handleDraftApplied = useCallback((draft: ChapterDraft) => {
+  const handleDraftApplied = useCallback((draft: ChapterDraft, metadata?: DraftResultMetadata) => {
+    const liveTarget = {
+      novelId: activeNovelIdRef.current,
+      chapterId: activeChapterIdRef.current,
+    };
+    const draftDecision = validateDraftDocumentTarget(draft, liveTarget);
+    if (!draftDecision.ok) {
+      if (metadata) {
+        void showInfo({
+          title: 'AI 候选已保存到原章节',
+          message: `${draftDecision.message}\n当前编辑器未被切换。`,
+        });
+      }
+      return false;
+    }
+    if (metadata) {
+      if (metadata.resultId !== draft.id) {
+        void showInfo({
+          title: 'AI 候选已保存',
+          message: '结果标识与草稿不一致，当前编辑器未被切换。',
+        });
+        return false;
+      }
+      if (editorSnapshotRef.current.isDirty
+        && hashTextContent(draft.content) !== editorSnapshotRef.current.contentHash) {
+        void showInfo({
+          title: 'AI 候选已保存',
+          message: '当前正文存在未保存修改，候选结果仍可在草稿历史中查看，编辑器内容未被覆盖。',
+        });
+        return false;
+      }
+      const applicationDecision = validateDocumentApplication({
+        resultId: metadata.resultId,
+        target: { novelId: metadata.novelId, chapterId: metadata.chapterId },
+        baseContentHash: metadata.baseContentHash,
+        mode: 'replace_all',
+      }, {
+        ...liveTarget,
+        contentHash: editorSnapshotRef.current.contentHash,
+      });
+      if (!applicationDecision.ok) {
+        void showInfo({
+          title: 'AI 候选已保存',
+          message: `${applicationDecision.message}\n结果仍可在原章节草稿历史中查看，当前正文未被覆盖。`,
+        });
+        return false;
+      }
+      const liveDraft = currentDraftRef.current;
+      if (metadata.sourceDraftId && liveDraft?.id !== metadata.sourceDraftId) {
+        void showInfo({
+          title: 'AI 候选已保存',
+          message: '基础草稿已切换，结果仍可在原章节草稿历史中查看，当前正文未被覆盖。',
+        });
+        return false;
+      }
+      if (metadata.sourceRevision !== undefined && liveDraft?.versionNo !== metadata.sourceRevision) {
+        void showInfo({
+          title: 'AI 候选已保存',
+          message: '基础草稿版本已变化，结果仍可在原章节草稿历史中查看，当前正文未被覆盖。',
+        });
+        return false;
+      }
+    }
     setCurrentDraft(draft);
+    currentDraftRef.current = draft;
     setDraftWordCount(draft.wordCount);
     setIsDirty(false);
-    setEditorSnapshot({
+    const nextSnapshot: EditorContentSnapshot = {
       chapterId: draft.chapterId,
       draftId: draft.id,
       draftVersion: draft.versionNo,
@@ -302,31 +435,79 @@ function WritingWorkspacePage() {
       wordCount: draft.wordCount,
       isDirty: false,
       contentHash: hashTextContent(draft.content),
-    });
+    };
+    editorSnapshotRef.current = nextSnapshot;
+    setEditorSnapshot(nextSnapshot);
+    return true;
   }, []);
 
-  const applyAiTextToEditor = useCallback(async (payload: {
-    mode: AiTextApplyMode;
-    text: string;
-    source: AiTextApplyRequest['source'];
-  }) => {
+  const applyAiTextToEditor = useCallback(async (payload: AiTextApplyPayload) => {
     const text = payload.text.trim();
     if (!text) return false;
+    const liveTarget = {
+      novelId: activeNovelIdRef.current,
+      chapterId: activeChapterIdRef.current,
+      contentHash: editorSnapshotRef.current.contentHash,
+    };
+    const identity = {
+      resultId: payload.resultId,
+      target: { novelId: payload.novelId, chapterId: payload.chapterId },
+      baseContentHash: payload.baseContentHash,
+      mode: payload.mode,
+    } as const;
+    const decision = validateDocumentApplication(identity, liveTarget);
+    if (!decision.ok) {
+      await showError({ title: '无法应用 AI 输出', message: decision.message });
+      return false;
+    }
+    const liveDraft = currentDraftRef.current;
+    if (payload.sourceDraftId && liveDraft?.id !== payload.sourceDraftId) {
+      await showError({ title: '无法应用 AI 输出', message: '基础草稿已切换，请重新生成结果。' });
+      return false;
+    }
+    if (payload.sourceRevision !== undefined && liveDraft?.versionNo !== payload.sourceRevision) {
+      await showError({ title: '无法应用 AI 输出', message: '基础草稿版本已变化，请重新生成结果。' });
+      return false;
+    }
     if (payload.mode === 'replace_all') {
       const ok = await confirmInfo({
         title: '应用 AI 输出',
-        message: `${editorSnapshot.isDirty ? '当前正文存在未保存修改，建议先保存草稿。\n\n' : ''}将用 AI 输出替换当前正文，是否继续？`,
+        message: `${editorSnapshotRef.current.isDirty ? '当前正文存在未保存修改。\n\n' : ''}将用 AI 输出替换当前正文，是否继续？`,
       });
       if (!ok) return false;
     }
-    setApplyTextRequest({
+    const claim = applyIdempotencyGuardRef.current.claim(identity);
+    if (!claim.accepted) {
+      await showInfo({ title: '结果已应用', message: '同一 AI 结果已经应用到这个正文版本，已阻止重复操作。' });
+      return false;
+    }
+    const request: AiTextApplyRequest = {
+      ...payload,
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      mode: payload.mode,
       text,
-      source: payload.source,
-    });
+    };
+    pendingApplyKeysRef.current.set(request.id, payload);
+    setApplyTextRequest(request);
     return true;
-  }, [editorSnapshot.isDirty]);
+  }, []);
+
+  const handleApplyTextConsumed = useCallback((request: AiTextApplyRequest) => {
+    pendingApplyKeysRef.current.delete(request.id);
+  }, []);
+
+  const handleApplyTextRejected = useCallback((request: AiTextApplyRequest, reason: string) => {
+    const payload = pendingApplyKeysRef.current.get(request.id);
+    if (payload) {
+      applyIdempotencyGuardRef.current.release({
+        resultId: payload.resultId,
+        target: { novelId: payload.novelId, chapterId: payload.chapterId },
+        baseContentHash: payload.baseContentHash,
+        mode: payload.mode,
+      });
+    }
+    pendingApplyKeysRef.current.delete(request.id);
+    void showError({ title: 'AI 输出未应用', message: reason });
+  }, []);
 
   const runEditorCommand = useCallback((type: EditorCommandType) => {
     setEditorCommandRequest({
@@ -444,9 +625,10 @@ function WritingWorkspacePage() {
       const chsAfter = await chapterRepository.getByNovelId(novelId);
       setVolumes(volsAfter);
       setChapters(chsAfter);
-      setActiveChapterId(result.chapter.id);
+      commitActiveChapter(result.chapter.id);
       setLoadState('ready');
       setCurrentDraft(result.draft);
+      currentDraftRef.current = result.draft;
       setDraftWordCount(0);
       setIsDirty(false);
       console.info('[Workspace] UI updated: volumes=', volsAfter.length, 'chapters=', chsAfter.length);
@@ -456,19 +638,22 @@ function WritingWorkspacePage() {
     } finally {
       setCreating(false);
     }
-  }, [novelId, creating]);
+  }, [novelId, creating, commitActiveChapter]);
 
   // v1.0.19 VolumeTree 回调：创建分卷（父组件执行写入+重载）
   const handleCreateVolume = useCallback(async (title: string) => {
     if (!novelId) throw new Error('novelId 缺失');
     console.info('[Workspace] handleCreateVolume, title=', title);
     await createVolumeForNovel(novelId, title);
-    await reloadWorkspaceData();
-  }, [novelId, reloadWorkspaceData]);
+    setVolumes(await volumeRepository.getByNovelId(novelId));
+  }, [novelId]);
 
   // v1.0.20 VolumeTree 回调：创建章节（统一服务 + 反查 + 刷新）
   const handleCreateChapter = useCallback(async (volumeId: string, title: string) => {
     if (!novelId) throw new Error('novelId 缺失');
+    if (!(await confirmWorkspaceLeave())) return;
+    const guardedChapterId = activeChapterIdRef.current;
+    const guardedSnapshot = { ...editorSnapshotRef.current };
     console.info('[Workspace] handleCreateChapter, volumeId=', volumeId, 'title=', title);
     const result = volumeId
       ? await createChapterInVolume(novelId, volumeId, title)
@@ -476,13 +661,22 @@ function WritingWorkspacePage() {
     // 重载并选中新章节
     setVolumes(await volumeRepository.getByNovelId(novelId));
     setChapters(await chapterRepository.getByNovelId(novelId));
-    setActiveChapterId(result.chapter.id);
+    if (activeChapterIdRef.current !== guardedChapterId) return;
+    const liveSnapshot = editorSnapshotRef.current;
+    const editorChangedSinceGuard = liveSnapshot.chapterId !== guardedSnapshot.chapterId
+      || liveSnapshot.draftId !== guardedSnapshot.draftId
+      || liveSnapshot.draftVersion !== guardedSnapshot.draftVersion
+      || liveSnapshot.contentHash !== guardedSnapshot.contentHash
+      || liveSnapshot.isDirty !== guardedSnapshot.isDirty;
+    if ((editorChangedSinceGuard || chapterGoalDirtyRef.current) && !(await confirmWorkspaceLeave())) return;
+    commitActiveChapter(result.chapter.id);
     setLoadState('ready');
     setCurrentDraft(result.draft);
+    currentDraftRef.current = result.draft;
     setDraftWordCount(0);
     setIsDirty(false);
     console.info('[Workspace] handleCreateChapter done, chapterId=', result.chapter.id);
-  }, [novelId]);
+  }, [novelId, commitActiveChapter, confirmWorkspaceLeave]);
 
   return (
     <div
@@ -549,11 +743,7 @@ function WritingWorkspacePage() {
           <BackButton
             label="返回作品详情"
             to={`/novels/${novelId}`}
-            onBeforeBack={async () => {
-              if (chapterGoalDirty) return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，直接返回会丢失这些修改。是否继续？' });
-              if (isDirty) return await confirmInfo({ title: '未保存修改', message: '当前正文有未保存修改，直接返回可能丢失修改。是否继续？' });
-              return true;
-            }}
+            onBeforeBack={confirmWorkspaceLeave}
           />
         </div>
         {novel && (
@@ -586,11 +776,7 @@ function WritingWorkspacePage() {
             <BackButton
               label="返回作品"
               to={`/novels/${novelId}`}
-              onBeforeBack={async () => {
-                if (chapterGoalDirty) return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，直接返回会丢失这些修改。是否继续？' });
-                if (isDirty) return await confirmInfo({ title: '未保存修改', message: '当前正文有未保存修改，直接返回可能丢失修改。是否继续？' });
-                return true;
-              }}
+              onBeforeBack={confirmWorkspaceLeave}
             />
             <span style={{ fontWeight: 600, fontSize: 14 }}>{novel?.title || '未选择作品'}</span>
           </div>
@@ -603,14 +789,17 @@ function WritingWorkspacePage() {
         </div>
 
         <EditorArea
+          ref={editorRef}
           chapter={activeChapter}
           novelTitle={novel?.title}
           novelId={novelId}
-          currentDraft={currentDraft}
+          currentDraft={activeDraft}
           onDraftChange={handleDraftChange}
           onEditorContentChange={handleEditorContentChange}
           onDraftSaved={handleDraftApplied}
           applyTextRequest={applyTextRequest}
+          onApplyTextConsumed={handleApplyTextConsumed}
+          onApplyTextRejected={handleApplyTextRejected}
           commandRequest={editorCommandRequest}
           onChapterUpdated={handleChapterOutlineApplied}
           locateTarget={locateTarget}
@@ -620,7 +809,7 @@ function WritingWorkspacePage() {
           chapter={activeChapter}
           draftWordCount={draftWordCount}
           isDirty={isDirty}
-          draftVersion={currentDraft ? `v${currentDraft.versionNo}` : 'v0 占位'}
+          draftVersion={activeDraft ? `v${activeDraft.versionNo}` : 'v0 占位'}
         />
       </div>
 
@@ -631,7 +820,8 @@ function WritingWorkspacePage() {
       {activePanel === 'draft-history' && (
         <DraftHistoryPanel
           chapterId={activeChapterId}
-          currentDraftId={currentDraft?.id}
+          currentDraftId={activeDraft?.id}
+          onBeforeDocumentChange={confirmEditorLeave}
           onLoadDraft={(draft) => { handleDraftApplied(draft); setSidebarState((prev) => closePanel(prev)); }}
           onDraftAdopted={(draft) => {
             handleDraftApplied(draft);
@@ -648,7 +838,19 @@ function WritingWorkspacePage() {
         novelId={novelId}
         chapter={activeChapter}
         onGenerated={handleDraftApplied}
-        onAdopted={() => { if (activeChapterId) loadChapterDraft(activeChapterId); }}
+        onAdopted={() => {
+          const chapterId = activeChapterIdRef.current;
+          if (!chapterId) return;
+          if (editorSnapshotRef.current.chapterId === chapterId && editorSnapshotRef.current.isDirty) {
+            void showInfo({
+              title: '正文已在原章节采用',
+              message: '采用期间编辑器已有新修改，已保留未保存内容，未自动重载正文。',
+            });
+            return;
+          }
+          loadChapterDraft(chapterId);
+        }}
+        onBeforeDocumentChange={confirmEditorLeave}
         onChapterOutlineApplied={handleChapterOutlineApplied}
         onChapterGoalDirtyChange={setChapterGoalDirty}
         onChapterCharactersChanged={bumpContextVersion}
@@ -658,12 +860,12 @@ function WritingWorkspacePage() {
         qcReport={activeQcReport}
         qcItems={activeQcItems}
         onQcChange={(report: any, items: any[]) => { setQcReport(report); setQcItems(items); }}
-        currentEditorContent={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : currentDraft?.content || ''}
-        currentEditorWordCount={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.wordCount : currentDraft?.wordCount || 0}
+        currentEditorContent={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : activeDraft?.content || ''}
+        currentEditorWordCount={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.wordCount : activeDraft?.wordCount || 0}
         currentEditorDirty={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.isDirty : false}
-        currentContentHash={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.contentHash : hashTextContent(currentDraft?.content || '')}
-        currentDraftId={currentDraft?.id}
-        currentDraftVersion={currentDraft?.versionNo}
+        currentContentHash={editorSnapshot.chapterId === activeChapterId ? editorSnapshot.contentHash : hashTextContent(activeDraft?.content || '')}
+        currentDraftId={activeDraft?.id}
+        currentDraftVersion={activeDraft?.versionNo}
         onApplyAiText={applyAiTextToEditor}
         // v1.7.19 全局 AI 弹窗
         showAiModal={showAiModal}

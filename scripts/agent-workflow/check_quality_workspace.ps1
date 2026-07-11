@@ -96,7 +96,7 @@ Assert-Contains $checkPanel "contentHash" "check panel binds content hash"
 Assert-Contains $checkPanel "qualityCheckService\.saveResult\(\{" "check panel saves result"
 Assert-Contains $checkPanel "setFixError\(" "AI fix blocks stale reports"
 Assert-Contains $checkPanel "comparison\.isBetter" "AI fix gates adoption by comparison"
-Assert-Contains $checkPanel "onGenerated\(newDraft\)" "AI fix applies better draft to workspace"
+Assert-Contains $checkPanel "onGenerated\(newDraft,\s*resultMetadata\)" "AI fix applies target-bound better draft to workspace"
 
 Assert-Contains $qualityTypes "contentHash\?: string" "quality type content hash"
 Assert-Contains $qualityTypes "contentLength\?: number" "quality type content length"

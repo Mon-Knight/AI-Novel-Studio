@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft, ChapterGenerationContext, ChapterPromptDebugInfo, OutlineComplianceResult, OutlineKeyPoint } from '../../../types/ai';
 import type { StyleProfile } from '../../../types/style';
@@ -18,6 +18,8 @@ import { outputProfileService } from '../../../services/styles/outputProfileServ
 import { runWithLoading } from '../../../lib/runWithLoading';
 import { checkOutlineCompliance } from '../../../services/ai/outlineComplianceChecker';
 import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionService';
+import { hashTextContent } from '../../../utils/contentHash';
+import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 
 function namesText(names: string[]): string {
   return names.length > 0 ? names.join('、') : '无';
@@ -106,19 +108,22 @@ function draftHasAdoptionRisk(draft: ChapterDraft, validationState: GenerationVa
 interface AiGeneratePanelProps {
   novelId?: string;
   chapter?: Chapter;
-  onGenerated?: (draft: ChapterDraft) => void;
+  onGenerated?: (draft: ChapterDraft, metadata?: DraftResultMetadata) => void;
   onAdopted?: () => void;
   contextVersion?: number;
   currentDraftId?: string;
+  currentDraftVersion?: number;
   currentEditorContent?: string;
-  onApplyAiText?: (payload: {
-    mode: 'replace_all' | 'append';
-    text: string;
-    source: 'ai_generate' | 'quality_check' | 'polish' | 'layout';
-  }) => Promise<boolean>;
+  currentContentHash?: string;
+  onApplyAiText?: (payload: AiTextApplyPayload) => Promise<boolean>;
+  onBeforeDocumentChange?: () => Promise<boolean>;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentEditorContent, onApplyAiText }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent, currentContentHash, onApplyAiText, onBeforeDocumentChange }: AiGeneratePanelProps) {
+  const liveChapterIdRef = useRef(chapter?.id || '');
+  liveChapterIdRef.current = chapter?.id || '';
+  const liveNovelIdRef = useRef(novelId || '');
+  liveNovelIdRef.current = novelId || '';
   const [userInstruction, setUserInstruction] = useState('');
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -127,6 +132,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [validationState, setValidationState] = useState<GenerationValidationState | null>(null);
   const [revising, setRevising] = useState(false);
   const [latestGeneratedDraft, setLatestGeneratedDraft] = useState<ChapterDraft | null>(null);
+  const [latestGeneratedTarget, setLatestGeneratedTarget] = useState<DraftResultMetadata | null>(null);
 
   // v1.0.26 风格方案与输出控制选择
   const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
@@ -142,6 +148,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   useEffect(() => {
     setValidationState(null);
     setLatestGeneratedDraft(null);
+    setLatestGeneratedTarget(null);
   }, [chapter?.id]);
 
   // 初始化/更新目标字数草稿
@@ -252,6 +259,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   const handleGenerate = async (options?: { retryMissingPoints?: OutlineKeyPoint[] }) => {
     if (!novelId || !chapter) return;
+    const requestTarget = {
+      novelId,
+      chapterId: chapter.id,
+      sourceDraftId: currentDraftId,
+      sourceRevision: currentDraftVersion,
+      baseContentHash: currentContentHash || hashTextContent(currentEditorContent || ''),
+    };
 
     let preflightContext: ChapterGenerationContext;
     try {
@@ -383,7 +397,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             note: validation.note,
           });
           const validationWithDraft: GenerationValidationState = { draftId: draft.id, ...validation };
-          setValidationState(validationWithDraft);
+          const resultMetadata: DraftResultMetadata = {
+            ...requestTarget,
+            resultId: draft.id,
+            source: 'ai_generate',
+          };
+          if (liveNovelIdRef.current === requestTarget.novelId && liveChapterIdRef.current === requestTarget.chapterId) {
+            setValidationState(validationWithDraft);
+          }
 
           setPercent(95);
 
@@ -427,8 +448,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             promptLength: request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0,
           });
 
-          onGenerated?.(draft);
+          if (liveNovelIdRef.current !== requestTarget.novelId || liveChapterIdRef.current !== requestTarget.chapterId) {
+            notifyNative({ kind: 'success', body: `原章节正文已生成并保存（${draft.wordCount} 字）` });
+            return;
+          }
+          onGenerated?.(draft, resultMetadata);
           setLatestGeneratedDraft(draft);
+          setLatestGeneratedTarget(resultMetadata);
 
           // 校验警告提示
           if (validationWarning) {
@@ -462,6 +488,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   const handleReviseByOutline = async () => {
     if (!novelId || !chapter) return;
+    const requestChapterId = chapter.id;
     setRevising(true);
     setGenerating(true);
     setErrorMsg('');
@@ -472,6 +499,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         setErrorMsg('没有可修正的草稿');
         return;
       }
+      const requestTarget = {
+        novelId,
+        chapterId: requestChapterId,
+        sourceDraftId: latest.id,
+        sourceRevision: latest.versionNo,
+        baseContentHash: hashTextContent(latest.content),
+      };
 
       const ctx = await buildFreshChapterGenerationContext({
         novelId,
@@ -541,7 +575,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             note: validation.note,
           });
           const validationWithDraft: GenerationValidationState = { draftId: draft.id, ...validation };
-          setValidationState(validationWithDraft);
+          const resultMetadata: DraftResultMetadata = {
+            ...requestTarget,
+            resultId: draft.id,
+            source: 'ai_generate',
+          };
+          if (liveNovelIdRef.current === novelId && liveChapterIdRef.current === requestChapterId) {
+            setValidationState(validationWithDraft);
+          }
 
           if (task) {
             await aiTaskService.markSucceeded(task.id, {
@@ -555,8 +596,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
           setPercent(100);
           setStage('修正完成');
-          onGenerated?.(draft);
+          if (liveNovelIdRef.current !== novelId || liveChapterIdRef.current !== requestChapterId) return;
+          onGenerated?.(draft, resultMetadata);
           setLatestGeneratedDraft(draft);
+          setLatestGeneratedTarget(resultMetadata);
 
           if (validationWarning) {
             setErrorMsg(validationWarning);
@@ -578,10 +621,17 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   };
 
   const handleAdopt = async () => {
-    if (!chapter) return;
-    const latest = await draftVersionService.getLatestByChapterId(chapter.id);
+    if (!chapter || !novelId) return;
+    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
+    const latest = await draftVersionService.getLatestByChapterId(requestChapterId);
     if (!latest) {
       setErrorMsg('没有可采用的草稿');
+      return;
+    }
+    if (latest.novelId !== requestNovelId || latest.chapterId !== requestChapterId) {
+      setErrorMsg('草稿与当前作品章节不一致，已阻止采用');
       return;
     }
     if (draftHasAdoptionRisk(latest, validationState)) {
@@ -593,7 +643,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       return;
     }
 
-    await draftVersionService.adopt(latest.id, chapter.id);
+    await draftVersionService.adopt(latest.id, requestChapterId);
+    if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
     setStatusMsg('已采用为正式正文！');
     setTimeout(() => setStatusMsg(''), 3000);
     onAdopted?.();
@@ -958,11 +1009,12 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             <button
               className="btn btn-sm btn-secondary"
               onClick={() => onApplyAiText?.({
+                ...(latestGeneratedTarget as DraftResultMetadata),
                 mode: 'append',
                 text: latestGeneratedDraft.content,
                 source: 'ai_generate',
               })}
-              disabled={!onApplyAiText || latestGeneratedDraft.id === currentDraftId}
+              disabled={!onApplyAiText || !latestGeneratedTarget || latestGeneratedDraft.id === currentDraftId}
               style={{ flex: 1 }}
               title={latestGeneratedDraft.id === currentDraftId ? '当前编辑器已显示该草稿，避免重复追加' : '追加到当前正文末尾'}
             >
@@ -971,12 +1023,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             <button
               className="btn btn-sm btn-primary"
               onClick={() => onApplyAiText?.({
+                ...(latestGeneratedTarget as DraftResultMetadata),
                 mode: 'replace_all',
                 text: latestGeneratedDraft.content,
                 source: 'ai_generate',
               })}
-              disabled={!onApplyAiText}
+              disabled={!onApplyAiText || !latestGeneratedTarget || latestGeneratedDraft.id === currentDraftId}
               style={{ flex: 1 }}
+              title={latestGeneratedDraft.id === currentDraftId ? '当前编辑器已显示该草稿' : '替换当前全文'}
             >
               替换全文
             </button>

@@ -1,5 +1,6 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
+import { APP_VERSION } from '../../constants/version';
 import '../../styles/coming-soon.css';
 
 const moduleInfo: Record<string, { title: string; desc: string }> = {
@@ -34,9 +35,9 @@ function ComingSoonPage() {
         <div className="coming-soon-title">{info.title}</div>
         <div className="coming-soon-desc">
           {info.desc}<br />
-          当前版本为 v0.1.0，重点实现作品管理首页、写作工作台 UI 原型和 AI 章节生成基础流程。
+          当前版本为 {APP_VERSION}，该模块尚未在本版本开放。
         </div>
-        <div className="coming-soon-version">v0.1.0 · 即将开放</div>
+        <div className="coming-soon-version">{APP_VERSION} · 即将开放</div>
         <div style={{ marginTop: 24 }}>
           <button className="btn btn-secondary" onClick={() => navigate('/')}>
             ← 返回首页
