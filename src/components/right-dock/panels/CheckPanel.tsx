@@ -23,6 +23,19 @@ import { confirmInfo } from '../../../utils/nativeDialog';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 
+interface FixCandidate {
+  draft: ChapterDraft;
+  novelId: string;
+  chapterId: string;
+  contentHash: string;
+  sourceDraftId: string;
+  sourceDraftVersion: number;
+  baseContentHash: string;
+  fixRunId: string;
+  fixedIssueIds: string[];
+  afterReportId: string;
+}
+
 interface CheckPanelProps {
   novelId?: string; chapter?: Chapter;
   onGenerated?: (draft: ChapterDraft, metadata?: DraftResultMetadata) => void; onAdopted?: () => void;
@@ -97,6 +110,7 @@ function CheckPanel({
   const [fixError, setFixError] = useState('');
   const [lastFixRunId, setLastFixRunId] = useState<string>('');
   const [sourceDraftId, setSourceDraftId] = useState<string>('');
+  const [fixCandidate, setFixCandidate] = useState<FixCandidate | null>(null);
 
   useEffect(() => {
     setFixLoading(false);
@@ -107,6 +121,7 @@ function CheckPanel({
     setFixError('');
     setLastFixRunId('');
     setSourceDraftId('');
+    setFixCandidate(null);
     hideAiModal?.();
   }, [novelId, chapter?.id, hideAiModal]);
 
@@ -230,6 +245,8 @@ function CheckPanel({
         draftContent: sourceContent, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, chapterGoal: chapter.goal,
         contentHash,
+        draftVersion: sourceDraft.versionNo,
+        useUnifiedPipeline: true,
         wordCount: sourceWordCount,
       });
 
@@ -450,85 +467,45 @@ function CheckPanel({
         .map((i) => i.id);
       fixRun.newIssueIds = afterItemsForStats.map((i) => i.issueKey);
 
-      if (comparison.isBetter) {
-        updateAiModal?.('正在保存通过复检的质量结果...', 95);
-        const rpt2 = await qualityCheckService.createReport({
-          novelId, chapterId: chapter.id, draftId: newDraft.id,
-          contentHash: fixedContentHash,
-          contentLength: fixResult.revisedContent.length,
-          checkedAt: candidateCheckedAt,
-        });
-        const saved2 = await qualityCheckService.saveResult({
-          reportId: rpt2.id, novelId, chapterId: chapter.id,
-          draftId: newDraft.id, result: checkResult,
-          draftVersion: newDraft.versionNo,
-          contentHash: fixedContentHash,
-          contentLength: fixResult.revisedContent.length,
-          checkedAt: candidateCheckedAt,
-        });
-        fixRun.afterReportId = saved2.report?.id || rpt2.id;
-        fixRun.status = 'adopted';
-
-        updateAiModal?.('正在更新问题状态...', 98);
-        for (const key of fixResult.fixedIssueKeys) {
-          const item = activeItems.find((i) => i.issueKey === key);
-          if (item) await qualityCheckService.updateIssueStatus(item.id, 'resolved').catch(() => {});
-        }
-
-        const refreshed = await qualityCheckService.getChapterIssues(chapter.id).catch(() => saved2);
-
-        // 复检确认更好后，才同步新草稿到当前写作工作台。
-        const resultMetadata: DraftResultMetadata = {
-          resultId: newDraft.id,
-          novelId,
+      updateAiModal?.('正在保存候选复检结果...', 95);
+      const rpt2 = await qualityCheckService.createReport({
+        novelId, chapterId: requestChapterId, draftId: newDraft.id,
+        contentHash: fixedContentHash,
+        contentLength: fixResult.revisedContent.length,
+        checkedAt: candidateCheckedAt,
+      });
+      const saved2 = await qualityCheckService.saveResult({
+        reportId: rpt2.id, novelId, chapterId: requestChapterId,
+        draftId: newDraft.id, result: checkResult,
+        draftVersion: newDraft.versionNo,
+        contentHash: fixedContentHash,
+        contentLength: fixResult.revisedContent.length,
+        checkedAt: candidateCheckedAt,
+      });
+      fixRun.afterReportId = saved2.report?.id || rpt2.id;
+      fixRun.status = 'validated';
+      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+        setFixCandidate({
+          draft: newDraft,
+          novelId: requestNovelId,
           chapterId: requestChapterId,
+          contentHash: newDraft.contentState?.status === 'ready'
+            ? newDraft.contentState.contentHash
+            : fixedContentHash,
           sourceDraftId: requestSourceDraftId,
-          sourceRevision: requestSourceRevision,
+          sourceDraftVersion: requestSourceRevision,
           baseContentHash: requestBaseHash,
-          source: 'quality_check',
-        };
-        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-          setCurrentDraft(newDraft);
-        }
-        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-          if (onGenerated) {
-            onGenerated(newDraft, resultMetadata);
-          } else {
-            await onApplyAiText?.({
-              ...resultMetadata,
-              mode: 'replace_all',
-              text: fixResult.revisedContent,
-              source: 'quality_check',
-            });
-          }
-        }
-
-        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-          syncUp(refreshed.report ? {
-            ...refreshed.report,
-            contentHash: fixedContentHash,
-            contentLength: fixResult.revisedContent.length,
-            checkedAt: candidateCheckedAt,
-          } : null, refreshed.items);
-        }
-      } else {
-        fixRun.status = 'success';
-        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-          setFixStage('修复候选已保存为草稿，因复检未明显变好，当前正文保持不变');
-        }
+          fixRunId: fixRun.id,
+          fixedIssueIds: activeItems
+            .filter((item) => fixResult.fixedIssueKeys.includes(item.issueKey))
+            .map((item) => item.id),
+          afterReportId: fixRun.afterReportId,
+        });
+        setFixStage(comparison.isBetter
+          ? '修复候选已通过复检，等待确认采用'
+          : '修复候选已保存，可查看后决定是否采用');
       }
       await fixRunStore.save(fixRun).catch(() => {});
-
-      // 标记旧章节上下文和卷上下文过期
-      if (comparison.isBetter) {
-        await chapterSummaryService.markExpired(chapter.id).catch(() => {});
-        const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
-        for (const r of allRecords) {
-          if (r.contextType === 'volume_summary' && r.volumeId === chapter.volumeId && !r.isExpired) {
-            await contextRecordService.update(r.id, { isExpired: true }).catch(() => {});
-          }
-        }
-      }
 
       if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
         hideAiModal?.();
@@ -549,6 +526,108 @@ function CheckPanel({
       setFixLoading(false);
     }
   };
+
+  const handleConfirmFix = async () => {
+    if (!chapter || !novelId || !fixCandidate) return;
+    if (fixCandidate.novelId !== novelId || fixCandidate.chapterId !== chapter.id) {
+      setFixError('目标已变化：该修稿候选不能应用到当前章节');
+      return;
+    }
+    setFixLoading(true);
+    setFixError('');
+    let adoptionSucceeded = false;
+    try {
+      const adopted = await draftVersionService.adoptExact({
+        novelId: fixCandidate.novelId,
+        chapterId: fixCandidate.chapterId,
+        draftId: fixCandidate.draft.id,
+        draftVersion: fixCandidate.draft.versionNo,
+        contentHash: fixCandidate.contentHash,
+      });
+      adoptionSucceeded = true;
+
+      const sideEffectErrors: string[] = [];
+      try {
+        await qualityFixService.adoptFixRun(fixCandidate.fixRunId);
+      } catch {
+        sideEffectErrors.push('修稿记录状态');
+      }
+      for (const issueId of fixCandidate.fixedIssueIds) {
+        try {
+          await qualityCheckService.updateIssueStatus(issueId, 'resolved');
+        } catch {
+          sideEffectErrors.push(`问题 ${issueId}`);
+        }
+      }
+      try {
+        await chapterSummaryService.markExpired(fixCandidate.chapterId);
+      } catch {
+        sideEffectErrors.push('章节上下文过期状态');
+      }
+      try {
+        const allRecords = await contextRecordService.getByNovelId(fixCandidate.novelId);
+        for (const record of allRecords) {
+          if (record.contextType === 'volume_summary'
+            && record.volumeId === chapter.volumeId
+            && !record.isExpired) {
+            await contextRecordService.update(record.id, { isExpired: true });
+          }
+        }
+      } catch {
+        sideEffectErrors.push('分卷上下文过期状态');
+      }
+
+      const resultMetadata: DraftResultMetadata = {
+        resultId: adopted.id,
+        novelId: fixCandidate.novelId,
+        chapterId: fixCandidate.chapterId,
+        sourceDraftId: fixCandidate.sourceDraftId,
+        sourceRevision: fixCandidate.sourceDraftVersion,
+        baseContentHash: fixCandidate.baseContentHash,
+        draftVersion: adopted.versionNo,
+        contentHash: fixCandidate.contentHash,
+        source: 'quality_check',
+      };
+      setCurrentDraft(adopted);
+      try {
+        if (onGenerated) {
+          onGenerated(adopted, resultMetadata);
+        } else {
+          await onApplyAiText?.({
+            ...resultMetadata,
+            mode: 'replace_all',
+            text: adopted.content,
+            source: 'quality_check',
+          });
+        }
+      } catch {
+        sideEffectErrors.push('工作台正文同步');
+      }
+      try {
+        const refreshed = await qualityCheckService.getChapterIssues(fixCandidate.chapterId);
+        syncUp(refreshed.report, refreshed.items);
+      } catch {
+        sideEffectErrors.push('质量报告刷新');
+      }
+
+      if (sideEffectErrors.length > 0) {
+        setFixError(`候选正文已采用，但以下状态未完成：${sideEffectErrors.join('、')}。请重试或重新检查。`);
+        setFixStage('正文已采用，部分质量状态待处理');
+      } else {
+        setFixStage('已确认采用修复后版本');
+        setFixCandidate(null);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      setFixError(adoptionSucceeded
+        ? `候选正文已采用，但后续状态处理失败${message ? `：${message}` : ''}。请重试或重新检查。`
+        : (message || '采用修稿候选失败，正式状态未变更'));
+      if (adoptionSucceeded) setFixStage('正文已采用，部分质量状态待处理');
+    } finally {
+      setFixLoading(false);
+    }
+  };
+
   const handleLocate = (item: QualityCheckItem) => {
     if (!onLocateText) {
       setLocateMessage('定位功能需要正文编辑器支持');
@@ -685,7 +764,7 @@ function CheckPanel({
           borderRadius: 6, padding: 10,
         }}>
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: fixComparison.isBetter ? '#16a34a' : fixComparison.isWorse ? '#dc2626' : '#d97706' }}>
-            {fixComparison.isBetter ? '✅ 修复成功（已自动采用）' : fixComparison.isWorse ? '⚠️ 修复效果不佳（保留原版）' : '📊 修复效果一般（保留原版）'}
+            {fixComparison.isBetter ? '✅ 修复候选通过复检' : fixComparison.isWorse ? '⚠️ 修复效果不佳' : '📊 修复效果一般'}
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.8 }}>
             <div>修复前：{fixComparison.beforeScore} 分，待处理 {fixComparison.beforePendingCount}，严重 {fixComparison.beforeSeriousCount}</div>
@@ -703,7 +782,7 @@ function CheckPanel({
           )}
           {fixComparison.isBetter && (
             <div style={{ fontSize: 11, color: '#16a34a', marginTop: 4, fontWeight: 500 }}>
-              已自动采用修复后版本。
+              候选尚未采用；确认后才会修改正式正文和质量状态。
             </div>
           )}
           {!fixComparison.isBetter && (
@@ -720,10 +799,10 @@ function CheckPanel({
                 const drafts = await draftVersionService.getByChapterId(chapter.id);
                 const source = drafts.find((d: any) => d.id === sourceDraftId);
                 if (source) {
-                  setCurrentDraft(source);
                   await qualityFixService.revertFixRun(lastFixRunId);
+                  setFixCandidate(null);
                   setFixComparison(null);
-                  setFixStage('已回退到修稿前版本');
+                  setFixStage('已放弃修稿候选，原版本保持不变');
                   setTimeout(() => setFixStage(''), 3000);
                 }
               }}
@@ -733,11 +812,8 @@ function CheckPanel({
             </button>
             <button
               className="btn btn-sm btn-primary"
-              onClick={async () => {
-                await qualityFixService.adoptFixRun(lastFixRunId);
-                setFixStage('已确认采用修复后版本');
-                setTimeout(() => setFixStage(''), 3000);
-              }}
+              onClick={handleConfirmFix}
+              disabled={!fixCandidate || fixLoading}
               style={{ flex: 1, fontSize: 11 }}
             >
               ✅ 确认采用

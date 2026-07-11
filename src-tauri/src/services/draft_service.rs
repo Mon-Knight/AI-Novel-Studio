@@ -28,6 +28,22 @@ pub struct SaveChapterDraftAtomicInput {
     pub title: Option<String>,
     #[serde(default)]
     pub staging_session_id: Option<String>,
+    #[serde(default)]
+    pub ai_task_id: Option<String>,
+    #[serde(default)]
+    pub artifact_id: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub source_type: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub source_draft_id: Option<String>,
+    #[serde(default)]
+    pub source_draft_version: Option<i64>,
+    #[serde(default)]
+    pub request_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,6 +58,14 @@ pub struct AtomicDraftDto {
     pub version_no: i64,
     pub word_count: i64,
     pub is_adopted: bool,
+    pub ai_task_id: Option<String>,
+    pub artifact_id: Option<String>,
+    pub note: Option<String>,
+    pub source_type: Option<String>,
+    pub source_id: Option<String>,
+    pub source_draft_id: Option<String>,
+    pub source_draft_version: Option<i64>,
+    pub base_content_hash: Option<String>,
     pub large_text_ref_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -56,6 +80,31 @@ pub struct SaveChapterDraftAtomicOutput {
     pub content_hash: String,
     pub content_length: usize,
     pub storage_mode: String,
+    pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptChapterDraftAtomicInput {
+    pub operation_id: String,
+    #[serde(default)]
+    pub request_hash: Option<String>,
+    #[serde(default)]
+    pub trace_id: Option<String>,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub draft_id: String,
+    pub draft_version: i64,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptChapterDraftAtomicOutput {
+    pub operation_id: String,
+    pub trace_id: String,
+    pub draft: AtomicDraftDto,
+    pub content_hash: String,
     pub idempotent_replay: bool,
 }
 
@@ -122,6 +171,13 @@ fn request_hash(input: &SaveChapterDraftAtomicInput) -> String {
         "contentLength": input.content.len(),
         "source": input.source,
         "title": input.title,
+        "aiTaskId": input.ai_task_id,
+        "artifactId": input.artifact_id,
+        "note": input.note,
+        "sourceType": input.source_type,
+        "sourceId": input.source_id,
+        "sourceDraftId": input.source_draft_id,
+        "sourceDraftVersion": input.source_draft_version,
     });
     large_text_repository::sha256(&canonical.to_string())
 }
@@ -171,6 +227,14 @@ fn map_draft(record: draft_repository::DraftRecord, content: String) -> AtomicDr
         version_no: record.version_no,
         word_count: record.word_count,
         is_adopted: record.is_adopted,
+        ai_task_id: record.ai_task_id,
+        artifact_id: record.artifact_id,
+        note: record.note,
+        source_type: record.source_type,
+        source_id: record.source_id,
+        source_draft_id: record.source_draft_id,
+        source_draft_version: record.source_draft_version,
+        base_content_hash: record.base_content_hash,
         large_text_ref_id: record.large_text_ref_id,
         created_at: record.created_at,
         updated_at: record.updated_at,
@@ -228,6 +292,17 @@ where
     }
 
     let operation_request_hash = request_hash(&input);
+    if input
+        .request_hash
+        .as_deref()
+        .is_some_and(|hash| hash != operation_request_hash)
+    {
+        return Err(add_context(AppError::new(
+            codes::OPERATION_PAYLOAD_CONFLICT,
+            "requestHash 与保存请求不一致",
+            false,
+        )));
+    }
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| add_context(error.into()))?;
@@ -410,6 +485,14 @@ where
             &stored_content,
             &input.source,
             calculated_word_count,
+            input.ai_task_id.as_deref(),
+            input.artifact_id.as_deref(),
+            input.note.as_deref(),
+            input.source_type.as_deref(),
+            input.source_id.as_deref(),
+            input.source_draft_id.as_deref(),
+            input.source_draft_version,
+            input.base_content_hash.as_deref(),
             document_id.as_deref(),
             &actual_hash,
             &now,
@@ -435,6 +518,14 @@ where
             &input.source,
             version,
             calculated_word_count,
+            input.ai_task_id.as_deref(),
+            input.artifact_id.as_deref(),
+            input.note.as_deref(),
+            input.source_type.as_deref(),
+            input.source_id.as_deref(),
+            input.source_draft_id.as_deref(),
+            input.source_draft_version,
+            input.base_content_hash.as_deref(),
             document_id.as_deref(),
             &actual_hash,
             &now,
@@ -556,6 +647,208 @@ pub fn read_chapter_draft_content(
     })
 }
 
+pub fn adopt_chapter_draft_atomic(
+    connection: &mut Connection,
+    input: AdoptChapterDraftAtomicInput,
+) -> Result<AdoptChapterDraftAtomicOutput, AppError> {
+    let trace_id = input
+        .trace_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let operation_id = input.operation_id.clone();
+    let add_context = |error: AppError| error.with_context(Some(&trace_id), Some(&operation_id));
+    if operation_id.trim().is_empty() {
+        return Err(add_context(AppError::new(
+            codes::OPERATION_PAYLOAD_CONFLICT,
+            "operationId 不能为空",
+            false,
+        )));
+    }
+
+    let canonical = serde_json::json!({
+        "kind": "adopt_chapter_draft",
+        "novelId": input.novel_id,
+        "chapterId": input.chapter_id,
+        "draftId": input.draft_id,
+        "draftVersion": input.draft_version,
+        "contentHash": input.content_hash.to_ascii_lowercase(),
+    });
+    let operation_request_hash = large_text_repository::sha256(&canonical.to_string());
+    if input
+        .request_hash
+        .as_deref()
+        .is_some_and(|hash| hash != operation_request_hash)
+    {
+        return Err(add_context(AppError::new(
+            codes::OPERATION_PAYLOAD_CONFLICT,
+            "requestHash 与采用请求不一致",
+            false,
+        )));
+    }
+
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| add_context(error.into()))?;
+    let existing_operation = transaction
+        .query_row(
+            "SELECT request_hash, status, result_json FROM draft_save_operations WHERE operation_id = ?1",
+            params![operation_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
+        )
+        .optional()
+        .map_err(|error| add_context(error.into()))?;
+    if let Some((stored_hash, status, result_json)) = existing_operation {
+        if stored_hash != operation_request_hash {
+            return Err(add_context(AppError::new(
+                codes::OPERATION_PAYLOAD_CONFLICT,
+                "同一 operationId 对应了不同采用请求",
+                false,
+            )));
+        }
+        if status == "completed" {
+            let mut output: AdoptChapterDraftAtomicOutput =
+                serde_json::from_str(result_json.as_deref().unwrap_or("")).map_err(|_| {
+                    add_context(AppError::new(
+                        codes::DATABASE_TRANSACTION_FAILED,
+                        "已完成采用操作的结果无法读取",
+                        false,
+                    ))
+                })?;
+            output.idempotent_replay = true;
+            transaction.commit().map_err(AppError::database)?;
+            return Ok(output);
+        }
+        return Err(add_context(AppError::new(
+            codes::OPERATION_IN_PROGRESS,
+            "采用操作正在进行",
+            true,
+        )));
+    }
+
+    transaction
+        .execute(
+            "INSERT INTO draft_save_operations
+                (operation_id, trace_id, novel_id, chapter_id, draft_id, request_hash, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'started', ?7)",
+            params![
+                operation_id,
+                trace_id,
+                input.novel_id,
+                input.chapter_id,
+                input.draft_id,
+                operation_request_hash,
+                Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|error| add_context(error.into()))?;
+
+    draft_repository::validate_target(&transaction, &input.novel_id, &input.chapter_id)
+        .map_err(add_context)?;
+    let draft = draft_repository::find_draft(&transaction, &input.draft_id)
+        .map_err(add_context)?
+        .ok_or_else(|| {
+            add_context(AppError::new(
+                codes::TARGET_DRAFT_NOT_FOUND,
+                "目标草稿不存在",
+                false,
+            ))
+        })?;
+    if draft.novel_id != input.novel_id || draft.chapter_id != input.chapter_id {
+        return Err(add_context(AppError::new(
+            codes::TARGET_DRAFT_NOT_FOUND,
+            "目标草稿不属于指定作品章节",
+            false,
+        )));
+    }
+    if draft.version_no != input.draft_version {
+        return Err(add_context(AppError::new(
+            codes::DOCUMENT_VERSION_CONFLICT,
+            "草稿版本已发生变化",
+            false,
+        )));
+    }
+    let full_content = load_full_content(&transaction, &draft).map_err(add_context)?;
+    if !full_content
+        .content_hash
+        .eq_ignore_ascii_case(&input.content_hash)
+    {
+        return Err(add_context(AppError::new(
+            codes::DOCUMENT_HASH_MISMATCH,
+            "草稿正文已发生变化",
+            false,
+        )));
+    }
+
+    let now = Utc::now().to_rfc3339();
+    transaction
+        .execute(
+            "UPDATE chapter_drafts SET is_adopted = CASE WHEN id = ?1 THEN 1 ELSE 0 END,
+                    updated_at = ?2 WHERE chapter_id = ?3 AND novel_id = ?4",
+            params![input.draft_id, now, input.chapter_id, input.novel_id],
+        )
+        .map_err(|error| add_context(error.into()))?;
+    let chapter_rows = transaction
+        .execute(
+            "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3
+             WHERE id = ?4 AND novel_id = ?5 AND deleted_at IS NULL",
+            params![input.draft_id, draft.word_count, now, input.chapter_id, input.novel_id],
+        )
+        .map_err(|error| add_context(error.into()))?;
+    if chapter_rows != 1 {
+        return Err(add_context(AppError::new(
+            codes::DOCUMENT_VERSION_CONFLICT,
+            "章节采用目标已变化",
+            false,
+        )));
+    }
+
+    let adopted = draft_repository::find_draft(&transaction, &input.draft_id)
+        .map_err(add_context)?
+        .ok_or_else(|| {
+            add_context(AppError::new(
+                codes::TARGET_DRAFT_NOT_FOUND,
+                "采用结果不存在",
+                false,
+            ))
+        })?;
+    if !adopted.is_adopted {
+        return Err(add_context(AppError::new(
+            codes::DATABASE_TRANSACTION_FAILED,
+            "采用结果校验失败",
+            false,
+        )));
+    }
+    let output = AdoptChapterDraftAtomicOutput {
+        operation_id: operation_id.clone(),
+        trace_id: trace_id.clone(),
+        draft: map_draft(adopted, full_content.content),
+        content_hash: full_content.content_hash,
+        idempotent_replay: false,
+    };
+    let result_json = serde_json::to_string(&output).map_err(|_| {
+        add_context(AppError::new(
+            codes::DATABASE_TRANSACTION_FAILED,
+            "采用结果序列化失败",
+            false,
+        ))
+    })?;
+    transaction
+        .execute(
+            "UPDATE draft_save_operations SET status = 'completed', result_json = ?1, completed_at = ?2
+             WHERE operation_id = ?3 AND status = 'started'",
+            params![result_json, Utc::now().to_rfc3339(), operation_id],
+        )
+        .map_err(|error| add_context(error.into()))?;
+    transaction.commit().map_err(|error| {
+        add_context(
+            AppError::new(codes::DATABASE_COMMIT_UNKNOWN, "数据库提交状态未知", true)
+                .with_details(serde_json::json!({ "sqliteError": error.to_string() })),
+        )
+    })?;
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,6 +870,8 @@ mod tests {
              );
              CREATE TABLE chapters (
                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL,
+                 adopted_draft_id TEXT, word_count INTEGER NOT NULL DEFAULT 0,
+                 status TEXT NOT NULL DEFAULT 'not_started',
                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
              );
              CREATE TABLE chapter_drafts (
@@ -612,6 +907,14 @@ mod tests {
             source: "user_edited".to_string(),
             title: Some("Draft".to_string()),
             staging_session_id: None,
+            ai_task_id: None,
+            artifact_id: None,
+            note: None,
+            source_type: None,
+            source_id: None,
+            source_draft_id: None,
+            source_draft_version: None,
+            request_hash: None,
         }
     }
 
@@ -619,6 +922,23 @@ mod tests {
         connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
             row.get(0)
         })
+    }
+
+    fn adopt_input(
+        operation_id: &str,
+        draft: &AtomicDraftDto,
+        content_hash: &str,
+    ) -> AdoptChapterDraftAtomicInput {
+        AdoptChapterDraftAtomicInput {
+            operation_id: operation_id.to_string(),
+            request_hash: None,
+            trace_id: Some(format!("trace-{operation_id}")),
+            novel_id: draft.novel_id.clone(),
+            chapter_id: draft.chapter_id.clone(),
+            draft_id: draft.id.clone(),
+            draft_version: draft.version_no,
+            content_hash: content_hash.to_string(),
+        }
     }
 
     #[test]
@@ -785,6 +1105,92 @@ mod tests {
             }
             DraftContentState::Ready { .. } => panic!("corrupt body must not be editable"),
         }
+        Ok(())
+    }
+
+    #[test]
+    fn p001_adopts_the_displayed_draft_instead_of_latest() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut connection = test_connection()?;
+        let displayed = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("p0-save-a", "草稿 A".to_string()),
+            || Ok(()),
+        )?;
+        let latest = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("p0-save-b", "草稿 B".to_string()),
+            || Ok(()),
+        )?;
+        let adopted = adopt_chapter_draft_atomic(
+            &mut connection,
+            adopt_input("p0-adopt-a", &displayed.draft, &displayed.content_hash),
+        )?;
+        assert_eq!(adopted.draft.id, displayed.draft.id);
+        let latest_adopted: i64 = connection.query_row(
+            "SELECT is_adopted FROM chapter_drafts WHERE id = ?1",
+            params![latest.draft.id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(latest_adopted, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn p002_adopt_rejects_changed_hash_and_replays_same_operation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let saved = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("p0-save", "候选正文".to_string()),
+            || Ok(()),
+        )?;
+        let request = adopt_input("p0-adopt", &saved.draft, &saved.content_hash);
+        let first = adopt_chapter_draft_atomic(&mut connection, request.clone())?;
+        let replay = adopt_chapter_draft_atomic(&mut connection, request)?;
+        assert_eq!(first.draft.id, replay.draft.id);
+        assert!(replay.idempotent_replay);
+
+        let changed = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("p0-save-changed", "将被篡改".to_string()),
+            || Ok(()),
+        )?;
+        connection.execute(
+            "UPDATE chapter_drafts SET content = 'changed' WHERE id = ?1",
+            params![changed.draft.id],
+        )?;
+        let error = adopt_chapter_draft_atomic(
+            &mut connection,
+            adopt_input("p0-adopt-changed", &changed.draft, &changed.content_hash),
+        )
+        .expect_err("changed hash must be rejected");
+        assert!(matches!(
+            error.code.as_str(),
+            codes::LARGE_TEXT_CONTENT_UNAVAILABLE | codes::DOCUMENT_HASH_MISMATCH
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn p003_tauri_draft_preserves_task_artifact_note_and_source(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let mut request = input("p0-source", "来源完整正文".to_string());
+        request.ai_task_id = Some("task-new".to_string());
+        request.artifact_id = Some("artifact-new".to_string());
+        request.note = Some("校验通过".to_string());
+        request.source_type = Some("ai_task_artifact".to_string());
+        request.source_id = Some("artifact-new".to_string());
+        request.source_draft_id = Some("source-draft".to_string());
+        request.source_draft_version = Some(3);
+        request.base_content_hash = Some("base-hash".to_string());
+        let saved = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+        assert_eq!(saved.draft.ai_task_id.as_deref(), Some("task-new"));
+        assert_eq!(saved.draft.artifact_id.as_deref(), Some("artifact-new"));
+        assert_eq!(saved.draft.note.as_deref(), Some("校验通过"));
+        assert_eq!(saved.draft.source_draft_version, Some(3));
+        assert_eq!(saved.draft.base_content_hash.as_deref(), Some("base-hash"));
         Ok(())
     }
 

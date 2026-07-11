@@ -9,6 +9,7 @@ import { chapterEventService } from '../../../services/characters/chapterEventSe
 import { eventSuggestService } from '../../../services/ai/eventSuggestService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import type { EventSuggestion } from '../../../services/ai/eventSuggestService';
+import type { ChapterCandidateTarget } from '../../../types/workspaceSafety';
 
 interface EventsPanelProps {
   novelId?: string;
@@ -22,6 +23,7 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [chapterChars, setChapterChars] = useState<ChapterCharacter[]>([]);
   const [suggestions, setSuggestions] = useState<EventSuggestion[]>([]);
+  const [suggestionTarget, setSuggestionTarget] = useState<ChapterCandidateTarget | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -41,6 +43,13 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
 
   const handleSuggestEvents = async () => {
     if (!novelId || !chapter) return;
+    const requestTarget: ChapterCandidateTarget = {
+      resultId: crypto.randomUUID(),
+      novelId,
+      chapterId: chapter.id,
+      volumeId: chapter.volumeId,
+      createdAt: new Date().toISOString(),
+    };
     setLoading(true); setError('');
     try {
       const chapterCharacters = chapterChars
@@ -54,12 +63,17 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
         characters: chapterCharacters,
       });
       setSuggestions(list);
+      setSuggestionTarget(requestTarget);
     } catch (e: any) { setError(e.message || '生成失败'); }
     finally { setLoading(false); }
   };
 
   const handleAdoptSuggestion = async (s: EventSuggestion) => {
-    if (!novelId || !chapter?.id) return;
+    if (!novelId || !chapter?.id || !suggestionTarget) return;
+    if (suggestionTarget.novelId !== novelId || suggestionTarget.chapterId !== chapter.id) {
+      setError('目标已变化：该事件候选属于生成时的原章节，已阻止写入当前章节');
+      return;
+    }
     const ev = await chapterEventService.create({
       novelId, chapterId: chapter.id, title: s.title, description: s.description,
       involvedCharacterIds: s.involvedCharacterIds, impact: s.impact, risk: s.risk,
@@ -88,6 +102,9 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
   if (!novelId) return <div style={{ padding: 16, color: 'var(--color-text-muted)' }}>请先选择作品</div>;
 
   const aiSettings = aiSettingsService.getSettings();
+  const suggestionsStale = !!suggestionTarget && (
+    suggestionTarget.novelId !== novelId || suggestionTarget.chapterId !== chapter?.id
+  );
 
   return (
     <div>
@@ -147,6 +164,11 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
           {loading ? '⏳  分析中...' : '💡 生成本章事件建议'}
         </button>
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 8 }}>{error}</div>}
+        {suggestionsStale && suggestions.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>
+            目标已变化：候选仍可查看，但不能写入当前章节。
+          </div>
+        )}
         {suggestions.map((s, i) => (
           <div key={i} className="event-item" style={{ borderColor: 'var(--color-primary-light)' }}>
             <strong>{s.title}</strong>
@@ -157,6 +179,7 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => handleAdoptSuggestion(s)}
+                disabled={suggestionsStale}
                 style={{ marginTop: 4 }}
               >
                 ✅ 采用建议

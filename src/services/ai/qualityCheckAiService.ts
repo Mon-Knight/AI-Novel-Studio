@@ -4,6 +4,8 @@
 import { createAiClient, aiSettingsService } from './aiClient';
 import { buildQualityCheckPrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
+import { unifiedAiPipeline } from '../ai-tasks/unifiedAiPipeline';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { getContextForChapterTask, buildContextPromptSection } from '../prompt/contextReaderService';
@@ -51,7 +53,7 @@ export const qualityCheckAiService = {
       contextSummary,
     });
 
-    const task = await aiTaskService.create('quality_check', {
+    const task = input.useUnifiedPipeline ? null : await aiTaskService.create('quality_check', {
       novelId: input.novelId,
       chapterId: input.chapterId,
       runtimeMode: settings.runtimeMode,
@@ -62,7 +64,59 @@ export const qualityCheckAiService = {
 
     try {
       const client = createAiClient(settings);
-      const response = await client.generate(request);
+      const pipeline = input.useUnifiedPipeline ? await unifiedAiPipeline.run({
+        taskType: 'quality_check',
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        draftId: input.draftId,
+        scopeType: 'draft',
+        targetHintJson: { chapterId: input.chapterId, draftId: input.draftId },
+        inputSnapshot: {
+          schemaVersion: 1,
+          inputType: 'quality_check_input',
+          payloadJson: {
+            chapterTitle: input.chapterTitle,
+            wordCount: input.wordCount,
+          },
+          body: input.draftContent,
+          sourceDraftId: input.draftId,
+          sourceDraftVersion: input.draftVersion,
+          baseContentHash: input.contentHash,
+        },
+        contextSnapshot: {
+          schemaVersion: 1,
+          sourceManifestJson: {
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            volumeId: input.volumeId || null,
+          },
+          compiledContext: request.messages.map((message) => `${message.role}:\n${message.content}`).join('\n\n'),
+          budgetJson: { maxTokens: request.maxTokens || settings.maxTokens },
+          compilerVersion: 'quality-context-reader-v1',
+        },
+        constraintSnapshot: {
+          schemaVersion: 1,
+          payloadJson: { artifactType: 'quality_report', readOnly: true },
+          promptTemplateId: 'quality_check',
+          promptTemplateVersion: '1',
+          promptTemplateHash: await computeContentSha256(
+            request.messages.map((message) => message.content).join('\n'),
+          ),
+          providerOptionsJson: {
+            provider: settings.provider,
+            model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+            temperature: request.temperature ?? settings.temperature,
+            maxTokens: request.maxTokens ?? settings.maxTokens,
+            timeoutSeconds: settings.timeoutSeconds,
+          },
+        },
+        artifactType: 'quality_report',
+        providerId: settings.provider,
+        timeoutMs: (settings.timeoutSeconds ?? 120) * 1000,
+        client,
+        request,
+      }) : null;
+      const response = pipeline?.response ?? await client.generate(request);
       const text = response.text || '';
 
       const parsed = safeJsonParse<QualityCheckResult>(text, {
@@ -70,13 +124,19 @@ export const qualityCheckAiService = {
         summary: '模型返回格式不规范，无法解析检查结果。原始返回：' + text.slice(0, 500),
         items: [],
       });
+      if (pipeline) {
+        parsed.aiTaskId = pipeline.task.taskId;
+        parsed.artifactId = pipeline.artifact.artifactId;
+      }
 
-      await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: `评分 ${parsed.overallScore}，发现 ${parsed.items?.length || 0} 个问题`,
-        tokenInput: response.tokenInput,
-        tokenOutput: response.tokenOutput,
-        tokenTotal: response.tokenTotal,
-      });
+      if (task) {
+        await aiTaskService.markSucceeded(task.id, {
+          resultText: `评分 ${parsed.overallScore}，发现 ${parsed.items?.length || 0} 个问题`,
+          tokenInput: response.tokenInput,
+          tokenOutput: response.tokenOutput,
+          tokenTotal: response.tokenTotal,
+        });
+      }
 
       return parsed;
     } catch (err: any) {

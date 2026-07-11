@@ -34,7 +34,7 @@ export interface QualityFixRun {
   fixedIssueIds: string[];
   newIssueIds: string[];
   mode: FixMode;
-  status: 'pending' | 'running' | 'success' | 'failed' | 'adopted' | 'reverted';
+  status: 'pending' | 'running' | 'success' | 'candidate_ready' | 'validated' | 'failed' | 'adopted' | 'reverted';
   model?: string;
   revisionSummary?: string;
   changedRangesJson?: string;

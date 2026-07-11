@@ -159,6 +159,8 @@ export class RealAiClient implements AiClient {
   private async generateViaFetch(request: AiGenerateRequest): Promise<AiGenerateResponse> {
     const url = buildChatCompletionsUrl(this.config.baseUrl);
     const controller = new AbortController();
+    const onExternalAbort = () => controller.abort();
+    request.signal?.addEventListener('abort', onExternalAbort, { once: true });
     const timeoutSeconds = this.config.timeoutSeconds ?? 120;
     const timeout = window.setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
@@ -202,6 +204,7 @@ export class RealAiClient implements AiClient {
       throw err;
     } finally {
       window.clearTimeout(timeout);
+      request.signal?.removeEventListener('abort', onExternalAbort);
     }
   }
 }

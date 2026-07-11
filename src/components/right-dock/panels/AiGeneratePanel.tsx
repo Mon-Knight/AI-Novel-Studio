@@ -5,6 +5,8 @@ import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient';
+import { unifiedAiPipeline } from '../../../services/ai-tasks/unifiedAiPipeline';
+import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { buildFreshChapterGenerationContext } from '../../../services/prompt/contextBuilder';
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
@@ -133,6 +135,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [revising, setRevising] = useState(false);
   const [latestGeneratedDraft, setLatestGeneratedDraft] = useState<ChapterDraft | null>(null);
   const [latestGeneratedTarget, setLatestGeneratedTarget] = useState<DraftResultMetadata | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState('');
 
   // v1.0.26 风格方案与输出控制选择
   const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
@@ -259,11 +262,21 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   const handleGenerate = async (options?: { retryMissingPoints?: OutlineKeyPoint[] }) => {
     if (!novelId || !chapter) return;
+    const persistedDrafts = await draftVersionService.getByChapterId(chapter.id).catch(() => []);
+    const sourceDraft = currentDraftId
+      ? persistedDrafts.find((draft) => draft.id === currentDraftId)
+      : persistedDrafts[persistedDrafts.length - 1];
+    const sourceDraftId = currentDraftId || sourceDraft?.id;
+    const sourceDraftVersion = currentDraftVersion || sourceDraft?.versionNo;
+    if (!sourceDraftId || !sourceDraftVersion) {
+      setErrorMsg('当前章节缺少可验证的草稿基线，无法启动安全生成任务');
+      return;
+    }
     const requestTarget = {
       novelId,
       chapterId: chapter.id,
-      sourceDraftId: currentDraftId,
-      sourceRevision: currentDraftVersion,
+      sourceDraftId,
+      sourceRevision: sourceDraftVersion,
       baseContentHash: currentContentHash || hashTextContent(currentEditorContent || ''),
     };
 
@@ -355,16 +368,6 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             `字数：${ctx.targetWordCount || wordCountDraft}`,
           ].join('，');
 
-          // 创建 AI 任务记录
-          const task = await aiTaskService.create('chapter_generate', {
-            novelId,
-            chapterId: chapter.id,
-            runtimeMode: settings.runtimeMode,
-            provider: settings.provider,
-            modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-            inputSummary,
-          }).catch(() => null);
-
           setStage('正在组装提示词……');
           setPercent(15);
 
@@ -379,7 +382,72 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setMessage('AI 正在输出章节内容，请稍候……');
           setPercent(40);
           const client = createAiClient(settings);
-          const response = await client.generate(request);
+          const compiledPrompt = request.messages
+            .map((message) => `${message.role}:\n${message.content}`)
+            .join('\n\n');
+          const pipeline = await unifiedAiPipeline.run({
+            taskType: 'chapter_generate',
+            novelId: requestTarget.novelId,
+            chapterId: requestTarget.chapterId,
+            draftId: requestTarget.sourceDraftId,
+            scopeType: 'chapter',
+            targetHintJson: { chapterId: requestTarget.chapterId },
+            inputSnapshot: {
+              schemaVersion: 1,
+              inputType: 'chapter_generate_input',
+              payloadJson: {
+                mode: genMode,
+                userInstruction: userInstruction.trim() || undefined,
+                inputSummary,
+              },
+              body: genMode === 'rewrite' ? currentEditorContent : undefined,
+              sourceDraftId: requestTarget.sourceDraftId,
+              sourceDraftVersion: requestTarget.sourceRevision,
+              baseContentHash: requestTarget.baseContentHash,
+            },
+            contextSnapshot: {
+              schemaVersion: 1,
+              sourceManifestJson: {
+                novelId: requestTarget.novelId,
+                chapterId: requestTarget.chapterId,
+                volumeId: chapter.volumeId,
+                styleId: selectedStyleId || null,
+                outputId: selectedOutputId || null,
+              },
+              compiledContext: compiledPrompt,
+              budgetJson: {
+                promptChars: Array.from(compiledPrompt).length,
+                targetWordCount: ctx.targetWordCount || wordCountDraft,
+                maxTokens: request.maxTokens || settings.maxTokens,
+              },
+              compilerVersion: 'chapter-context-builder-v1',
+            },
+            constraintSnapshot: {
+              schemaVersion: 1,
+              payloadJson: {
+                artifactType: 'chapter_text',
+                targetChapterId: requestTarget.chapterId,
+                requiredCharacters: ctx.requiredCharacters?.map((item) => item.name) || [],
+              },
+              promptTemplateId: request.promptTemplateSource || 'chapter_generate',
+              promptTemplateVersion: '1',
+              promptTemplateHash: await computeContentSha256(compiledPrompt),
+              providerOptionsJson: {
+                provider: settings.provider,
+                model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+                temperature: request.temperature ?? settings.temperature,
+                maxTokens: request.maxTokens ?? settings.maxTokens,
+                timeoutSeconds: settings.timeoutSeconds,
+              },
+            },
+            artifactType: 'chapter_text',
+            providerId: settings.provider,
+            timeoutMs: (settings.timeoutSeconds ?? 120) * 1000,
+            client,
+            request,
+            onTaskCreated: (task) => setActiveTaskId(task.taskId),
+          });
+          const response = pipeline.response;
 
           setPercent(80);
           setStage('正在校验生成结果……');
@@ -393,13 +461,25 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             chapterId: chapter.id,
             content: response.text,
             source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
-            aiTaskId: task?.id,
+            aiTaskId: pipeline.task.taskId,
+            artifactId: pipeline.artifact.artifactId,
             note: validation.note,
+            sourceType: 'ai_task_artifact',
+            sourceId: pipeline.artifact.artifactId,
+            sourceDraftId: requestTarget.sourceDraftId,
+            sourceDraftVersion: requestTarget.sourceRevision,
+            baseContentHash: requestTarget.baseContentHash,
           });
           const validationWithDraft: GenerationValidationState = { draftId: draft.id, ...validation };
           const resultMetadata: DraftResultMetadata = {
             ...requestTarget,
             resultId: draft.id,
+            draftVersion: draft.versionNo,
+            contentHash: draft.contentState?.status === 'ready'
+              ? draft.contentState.contentHash
+              : undefined,
+            taskId: pipeline.task.taskId,
+            artifactId: pipeline.artifact.artifactId,
             source: 'ai_generate',
           };
           if (liveNovelIdRef.current === requestTarget.novelId && liveChapterIdRef.current === requestTarget.chapterId) {
@@ -407,17 +487,6 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           }
 
           setPercent(95);
-
-          // 5. 更新 AI 任务记录
-          if (task) {
-            await aiTaskService.markSucceeded(task.id, {
-              resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}${validationWarning ? ' ' + validationWarning : ''}`,
-              promptSnapshot: `template=${request.promptTemplateSource || 'unknown'} length=${request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0} chapterOutline=${request.promptDebug?.includesChapterOutlineText ? 'yes' : 'no'} outlineChecklist=${request.promptDebug?.includesOutlineChecklistText ? 'yes' : 'no'} outlineScore=${validation.outlineCompliance.score} volumeOutline=${request.promptDebug?.includesVolumeOutlineText ? 'yes' : 'no'} masterOutline=${request.promptDebug?.includesMasterOutlineText ? 'yes' : 'no'} requiredCharacters=${request.promptDebug?.requiredCharactersCount || 0}:${request.promptDebug?.requiredCharacterNames.join('、') || ''}`,
-              tokenInput: response.tokenInput,
-              tokenOutput: response.tokenOutput,
-              tokenTotal: response.tokenTotal,
-            });
-          }
 
           setPercent(100);
           setStage('生成完成');
@@ -471,11 +540,13 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       );
 
       setGenerating(false);
+      setActiveTaskId('');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '生成失败';
       setErrorMsg(msg);
       setStatusMsg('');
       setGenerating(false);
+      setActiveTaskId('');
 
       // Native Feel P2.2: 生成失败通知
       notifyNative({ kind: 'error', body: `正文生成失败：${msg}` });
@@ -578,6 +649,11 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           const resultMetadata: DraftResultMetadata = {
             ...requestTarget,
             resultId: draft.id,
+            draftVersion: draft.versionNo,
+            contentHash: draft.contentState?.status === 'ready'
+              ? draft.contentState.contentHash
+              : undefined,
+            taskId: task?.id,
             source: 'ai_generate',
           };
           if (liveNovelIdRef.current === novelId && liveChapterIdRef.current === requestChapterId) {
@@ -622,28 +698,44 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   const handleAdopt = async () => {
     if (!chapter || !novelId) return;
-    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
-    const latest = await draftVersionService.getLatestByChapterId(requestChapterId);
-    if (!latest) {
-      setErrorMsg('没有可采用的草稿');
+    const candidate = latestGeneratedDraft;
+    const candidateTarget = latestGeneratedTarget;
+    if (!candidate || !candidateTarget) {
+      setErrorMsg('没有当前展示的生成结果可采用');
       return;
     }
-    if (latest.novelId !== requestNovelId || latest.chapterId !== requestChapterId) {
-      setErrorMsg('草稿与当前作品章节不一致，已阻止采用');
+    if (candidateTarget.novelId !== requestNovelId
+      || candidateTarget.chapterId !== requestChapterId
+      || candidate.novelId !== requestNovelId
+      || candidate.chapterId !== requestChapterId) {
+      setErrorMsg('当前展示结果的目标已变化，已阻止采用');
       return;
     }
-    if (draftHasAdoptionRisk(latest, validationState)) {
-      const riskText = validationState?.draftId === latest.id
+    const contentHash = candidateTarget.contentHash
+      || (candidate.contentState?.status === 'ready' ? candidate.contentState.contentHash : '');
+    if (!candidateTarget.draftVersion || !contentHash) {
+      setErrorMsg('当前展示结果缺少版本或正文哈希，无法安全采用');
+      return;
+    }
+    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
+    if (draftHasAdoptionRisk(candidate, validationState)) {
+      const riskText = validationState?.draftId === candidate.id
         ? validationState.note
-        : latest.note || '该正文可能偏离章节大纲。';
+        : candidate.note || '该正文可能偏离章节大纲。';
       if (!(await confirmDanger({ title: '采用确认', message: `该正文可能偏离章节大纲，仍要采用吗？\n\n${riskText}` }))) return;
-    } else if (!(await confirmInfo({ title: '采用草稿', message: `确认采用草稿 v${latest.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。` }))) {
+    } else if (!(await confirmInfo({ title: '采用草稿', message: `确认采用当前展示的草稿 v${candidate.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。` }))) {
       return;
     }
 
-    await draftVersionService.adopt(latest.id, requestChapterId);
+    await draftVersionService.adoptExact({
+      novelId: requestNovelId,
+      chapterId: requestChapterId,
+      draftId: candidate.id,
+      draftVersion: candidateTarget.draftVersion,
+      contentHash,
+    });
     if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
     setStatusMsg('已采用为正式正文！');
     setTimeout(() => setStatusMsg(''), 3000);
@@ -1053,10 +1145,18 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         <button
           className="panel-btn panel-btn-secondary"
           onClick={handleAdopt}
-          disabled={generating || revising}
+          disabled={generating || revising || !latestGeneratedDraft || !latestGeneratedTarget}
         >
           ✅ 确认采用
         </button>
+        {generating && activeTaskId && !revising && (
+          <button
+            className="panel-btn panel-btn-secondary"
+            onClick={() => void unifiedAiPipeline.cancel(activeTaskId)}
+          >
+            取消生成
+          </button>
+        )}
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 6 }}>
           AI 生成结果将保存为草稿版本，需手动确认采用
         </div>

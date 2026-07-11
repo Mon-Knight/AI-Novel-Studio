@@ -1,5 +1,31 @@
 # AI Novel Studio - CHANGELOG
 
+## 未发布 - v2.3.0 / v2.4.0 第一阶段架构冻结（2026-07-12）
+
+### 新增
+
+- 新增 Phase 3 基线审计文档，形成 27 个生产 AI 触发入口、17 个业务任务族及其 Provider、状态、Prompt、结果落位和迁移优先级清单。
+- 新增 AI 状态所有权、Prompt/上下文、结果应用、SQLite 数据模型和 legacy 兼容审计，明确 P0/P1/P2 风险与可复用的 v2.2.0 原子保存/大文本/迁移账本边界。
+- 冻结 AiTask、AiTaskAttempt、三类不可变 Snapshot、ResultArtifact、PlacementProposal、ApplyPlan 和 TextRangeLock 的字段语义与职责。
+- 冻结后端权威状态机、单目标/多目标事务边界、commit unknown 对账、持久化幂等、UTF-16 正文范围锁及 005～016 拟新增迁移职责。
+- 新增 v2.3.0 / v2.4.0 测试矩阵，覆盖 Task/Attempt、Artifact、Placement、Apply、范围锁、迁移和 browser/Tauri 兼容。
+
+### 本阶段边界
+
+- 本阶段只新增审计与架构文档，不修改生产 AI 行为、数据库 schema、版本号、Provider、路由或正式正文写入方式。
+- v2.3.0 冻结为统一 Task/Artifact 与单目标安全应用；v2.4.0 冻结为 Context/Constraint/Target Builder、正文范围锁和多目标原子事务。
+- 未执行 commit、push、tag、发布或正式 Tauri 安装包构建。
+
+### v2.3.0-M1：AI 结果目标安全收口与统一管线基础设施
+
+- 修复正文采用误取 latest 草稿、章节候选跨章写入、质量修稿确认前产生正式副作用，以及章节总结多表部分成功四项 P0 风险。
+- 扩展浏览器与 Tauri 原子草稿保存来源字段，并新增按 novel/chapter/version/hash 校验、operationId/requestHash 幂等的精确采用命令。
+- 落地 005～011 migration：AiTask、Attempt、三类不可变 Snapshot、ResultArtifact、Artifact Validation Issue，以及必要索引、外键和不可变 trigger。
+- 新增 Rust 权威 Task 状态机、Attempt 重试/取消/迟到响应隔离、Provider Adapter 错误归一与可控中止，并区分可重试超时和用户取消。
+- 新增 ResultArtifact raw/display 分离、大文本完整保存、结构化校验、来源基线校验和浏览器/Tauri 一致的 invalid Artifact 保留策略。
+- 将设置连接测试、章节正文生成和手动质量检查迁移到统一管线；未迁移 AI 入口继续使用原有链路。
+- 新增 `test:ai-task-pipeline`、`test:ai-artifacts`、`test:ai-p0-safety` 专项脚本；正式应用版本仍保持 2.2.0。
+
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 
 ### 新增

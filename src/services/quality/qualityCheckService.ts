@@ -182,6 +182,8 @@ export const qualityCheckService = {
         ...reports[rIdx], status: 'completed',
         overallScore: input.result.overallScore,
         summary: input.result.summary,
+        aiTaskId: input.result.aiTaskId,
+        artifactId: input.result.artifactId,
         draftVersion: input.draftVersion,
         model: input.model,
         contentHash: input.contentHash ?? reports[rIdx].contentHash,

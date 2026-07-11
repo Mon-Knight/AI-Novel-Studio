@@ -4,7 +4,9 @@
 import { lsGet, lsSet } from '../database/db';
 import type { AiSettings } from '../../types/ai';
 import { RealAiClient, validateRealAiConfig } from './realAiClient';
-import { aiTaskService } from './aiTaskService';
+import { unifiedAiPipeline } from '../ai-tasks/unifiedAiPipeline';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { normalizeAppError } from '../../types/appError';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 
@@ -78,13 +80,6 @@ export const aiSettingsService = {
 
   async testConnection(settings: AiSettings): Promise<{ ok: boolean; message: string }> {
     const normalized = migrateSettings({ ...settings, runtimeMode: 'api' });
-    const task = await aiTaskService.create('connection_test', {
-      runtimeMode: 'api',
-      provider: normalized.provider,
-      modelName: normalized.modelName,
-      inputSummary: '测试设置中心 API 连接',
-    }).catch(() => null);
-
     const start = Date.now();
     try {
       validateApiSettings(normalized);
@@ -97,25 +92,55 @@ export const aiSettingsService = {
         timeoutSeconds: normalized.timeoutSeconds,
       });
 
-      const response = await client.generate({
-        taskType: 'connection_test',
-        messages: [{ role: 'user', content: '请只回复 OK，用于测试连接。' }],
+      const prompt = '请只回复 OK，用于测试连接。';
+      const request = {
+        taskType: 'connection_test' as const,
+        messages: [{ role: 'user' as const, content: prompt }],
         temperature: 0.1,
         maxTokens: 100,
+      };
+      const result = await unifiedAiPipeline.run({
+        taskType: 'connection_test',
+        novelId: 'system',
+        scopeType: 'system',
+        inputSnapshot: {
+          schemaVersion: 1,
+          inputType: 'connection_test_input',
+          payloadJson: { expectedResponse: 'OK' },
+        },
+        contextSnapshot: {
+          schemaVersion: 1,
+          sourceManifestJson: [],
+          budgetJson: { maxTokens: 100 },
+          compilerVersion: 'connection-test-v1',
+        },
+        constraintSnapshot: {
+          schemaVersion: 1,
+          payloadJson: { responseMode: 'exact_text', expectedResponse: 'OK' },
+          promptTemplateId: 'connection-test',
+          promptTemplateVersion: '1',
+          promptTemplateHash: await computeContentSha256(prompt),
+          promptTemplateBody: prompt,
+          providerOptionsJson: {
+            provider: normalized.provider,
+            model: normalized.modelName,
+            temperature: 0.1,
+            maxTokens: 100,
+            timeoutSeconds: normalized.timeoutSeconds,
+          },
+        },
+        artifactType: 'generic_text',
+        expectedOk: true,
+        providerId: normalized.provider,
+        timeoutMs: (normalized.timeoutSeconds ?? 120) * 1000,
+        client,
+        request,
       });
 
       const latencyMs = Date.now() - start;
-      await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: response.text,
-        tokenInput: response.tokenInput,
-        tokenOutput: response.tokenOutput,
-        tokenTotal: response.tokenTotal,
-      });
-
-      return { ok: true, message: `连接成功，模型返回：${response.text.slice(0, 40).trim()}（${latencyMs}ms）` };
+      return { ok: true, message: `连接成功，模型返回：${result.response.text.slice(0, 40).trim()}（${latencyMs}ms）` };
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e || '连接失败');
-      if (task) await aiTaskService.markFailed(task.id, message);
+      const message = normalizeAppError(e, '连接失败').message;
       return { ok: false, message };
     }
   },

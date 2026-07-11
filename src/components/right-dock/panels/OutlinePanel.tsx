@@ -5,6 +5,7 @@ import { outlineGenerateService, type VolumeOutlineCandidate, type ChapterOutlin
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { clearCachedChapterOutlineDraft, setCachedChapterOutlineDraft } from '../../../services/prompt/chapterOutlineDraftCache';
 import type { Chapter } from '../../../types/chapter';
+import type { ChapterCandidateTarget } from '../../../types/workspaceSafety';
 import type { Volume } from '../../../types/volume';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { formatNumber } from '../../../utils/format';
@@ -41,6 +42,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
   const [volumeOutline, setVolumeOutline] = useState<VolumeOutlineCandidate | null>(null);
   // 章节大纲结果
   const [chapterOutlines, setChapterOutlines] = useState<ChapterOutlineCandidate[]>([]);
+  const [chapterOutlineTarget, setChapterOutlineTarget] = useState<ChapterCandidateTarget | null>(null);
 
   useEffect(() => {
     if (chapter?.volumeId) {
@@ -66,6 +68,9 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
   }, [onChapterGoalDirtyChange]);
 
   const aiSettings = aiSettingsService.getSettings();
+  const chapterOutlineStale = !!chapterOutlineTarget && (
+    chapterOutlineTarget.novelId !== novelId || chapterOutlineTarget.chapterId !== chapter?.id
+  );
 
   // 生成作品总大纲
   const handleGenerateNovelOutline = useCallback(async () => {
@@ -125,6 +130,13 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
       setError('请先在左侧目录树中选择一个章节');
       return;
     }
+    const requestTarget: ChapterCandidateTarget = {
+      resultId: crypto.randomUUID(),
+      novelId,
+      chapterId: chapter.id,
+      volumeId: chapter.volumeId,
+      createdAt: new Date().toISOString(),
+    };
     setLoading(true); setGenMode('chapter'); setError('');
     try {
       await runWithLoading({
@@ -143,6 +155,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
           chapterCount: 3,
         });
         setChapterOutlines(result);
+        setChapterOutlineTarget(requestTarget);
         setMessage(`已生成 ${result.length} 个章节大纲候选（基于上级大纲）`);
         setStage('生成完成');
       });
@@ -155,8 +168,12 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
 
   // 采用章节大纲候选（保存到当前章节）
   const handleAdoptChapterOutline = useCallback(async (candidate: ChapterOutlineCandidate) => {
-    if (!chapter) {
+    if (!chapter || !novelId || !chapterOutlineTarget) {
       setApplyError('请先在左侧目录树中选择一个章节');
+      return;
+    }
+    if (chapterOutlineTarget.novelId !== novelId || chapterOutlineTarget.chapterId !== chapter.id) {
+      setApplyError('目标已变化：该候选属于生成时的原章节，已阻止写入当前章节');
       return;
     }
     // 使用编辑后的内容（用户可能在 textarea 中修改过）
@@ -182,7 +199,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
       setApplyError(e.message || '保存章节大纲失败');
       setApplyMsg('');
     }
-  }, [chapter, onChapterOutlineApplied]);
+  }, [chapter, novelId, chapterOutlineTarget, onChapterOutlineApplied]);
 
   // v1.0.35 当前章节大纲行内编辑
   const handleStartEditChapterOutline = useCallback(() => {
@@ -256,10 +273,16 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
 
   const handleApplyGeneratedGoal = useCallback((goal?: string) => {
     if (!goal?.trim()) return;
+    if (!chapter || !novelId || !chapterOutlineTarget
+      || chapterOutlineTarget.novelId !== novelId
+      || chapterOutlineTarget.chapterId !== chapter.id) {
+      setApplyError('目标已变化：不能把旧章节候选应用到当前章节');
+      return;
+    }
     setChapterGoalDraft(goal);
     updateChapterGoalDirty(goal !== (chapter?.goal || ''));
     setChapterGoalSaveMsg('已应用生成目标，保存后生效');
-  }, [chapter?.goal, updateChapterGoalDirty]);
+  }, [chapter, novelId, chapterOutlineTarget, updateChapterGoalDirty]);
 
   // 采用作品总大纲（显示确认）
   const handleAdoptNovelOutline = useCallback(() => {
@@ -399,6 +422,11 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
       {chapterOutlines.length > 0 && (
         <div className="panel-section">
           <div className="panel-section-title">📝 AI 章节大纲候选（{chapterOutlines.length}）</div>
+          {chapterOutlineStale && (
+            <div style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>
+              目标已变化：候选仍可查看，但不能写入当前章节。
+            </div>
+          )}
           {chapterOutlines.map((cand, i) => (
             <div key={i} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
               <div className="panel-field-label">{cand.title}</div>
@@ -423,6 +451,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
                     <button
                       className="btn btn-text btn-sm"
                       onClick={() => handleApplyGeneratedGoal(cand.goal)}
+                      disabled={chapterOutlineStale}
                       style={{ fontSize: 11, marginLeft: 6 }}
                     >
                       应用到本章目标
@@ -436,7 +465,7 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
                   <button
                     className="btn btn-primary btn-sm"
                     onClick={() => handleAdoptChapterOutline(cand)}
-                    disabled={loading || !(cand.rawText || cand.outline)?.trim()}
+                      disabled={loading || chapterOutlineStale || !(cand.rawText || cand.outline)?.trim()}
                   >
                     ✅ 应用到当前章节
                   </button>

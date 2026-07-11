@@ -43,6 +43,7 @@ export interface AiGenerateRequest {
   maxTokens?: number;
   promptTemplateSource?: string;
   promptDebug?: ChapterPromptDebugInfo;
+  signal?: AbortSignal;
 }
 
 export interface AiGenerateResponse {
@@ -153,7 +154,13 @@ export interface ChapterDraft {
   wordCount: number;
   isAdopted: boolean;
   aiTaskId?: string;
+  artifactId?: string;
   note?: string;
+  sourceType?: string;
+  sourceId?: string;
+  sourceDraftId?: string;
+  sourceDraftVersion?: number;
+  baseContentHash?: string;
   largeTextRefId?: string;
   /** Full-content availability. `content` is always empty when unavailable. */
   contentState?: import('./draftContentState').DraftContentState;
@@ -168,8 +175,26 @@ export interface CreateChapterDraftInput {
   source: DraftSource;
   title?: string;
   aiTaskId?: string;
+  artifactId?: string;
   note?: string;
+  sourceType?: string;
+  sourceId?: string;
+  sourceDraftId?: string;
+  sourceDraftVersion?: number;
+  baseContentHash?: string;
+  operationId?: string;
+  requestHash?: string;
   largeTextRefId?: string;
+}
+
+export interface AdoptChapterDraftInput {
+  operationId?: string;
+  requestHash?: string;
+  novelId: string;
+  chapterId: string;
+  draftId: string;
+  draftVersion: number;
+  contentHash: string;
 }
 
 // ==================== 生成上下文 ====================

@@ -7,7 +7,7 @@
  */
 import { dbCall, generateId, lsGet, lsSet, nowISO } from './db';
 import { isTauriRuntime } from '../tauri/runtime';
-import type { ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
+import type { AdoptChapterDraftInput, ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
 import type { DraftContentState } from '../../types/draftContentState';
 import type { LargeTextSaveProgress } from '../../types/largeTextSave';
 import { normalizeAppError } from '../../types/appError';
@@ -28,6 +28,12 @@ type DraftRecord = Partial<ChapterDraft> & {
   word_count?: number;
   is_adopted?: boolean | number;
   ai_task_id?: string | null;
+  artifact_id?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
+  source_draft_id?: string | null;
+  source_draft_version?: number | null;
+  base_content_hash?: string | null;
   large_text_ref_id?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -49,6 +55,10 @@ type AtomicSaveRecord = {
   idempotent_replay?: boolean;
 };
 
+type AtomicAdoptRecord = AtomicSaveRecord & {
+  draft?: unknown;
+};
+
 type UpdateDraftBase = Pick<ChapterDraft,
   'id' | 'novelId' | 'chapterId' | 'title' | 'versionNo' | 'isAdopted' | 'contentState'>;
 
@@ -56,6 +66,7 @@ type UpdateDraftBase = Pick<ChapterDraft,
 // removed only after an authoritative success; changed content/base identity
 // naturally produces a different key.
 const pendingOperationIds = new Map<string, string>();
+const pendingAdoptions = new Map<string, Promise<ChapterDraft>>();
 
 function unicodeScalarLength(content: string): number {
   return Array.from(content).length;
@@ -108,7 +119,13 @@ function normalizeDraft(raw: unknown): ChapterDraft | null {
     wordCount: toNumber(item.wordCount ?? item.word_count, countTextWords(content)),
     isAdopted: toBoolean(item.isAdopted ?? item.is_adopted),
     aiTaskId: item.aiTaskId ?? item.ai_task_id ?? undefined,
+    artifactId: item.artifactId ?? item.artifact_id ?? undefined,
     note: item.note,
+    sourceType: item.sourceType ?? item.source_type ?? undefined,
+    sourceId: item.sourceId ?? item.source_id ?? undefined,
+    sourceDraftId: item.sourceDraftId ?? item.source_draft_id ?? undefined,
+    sourceDraftVersion: item.sourceDraftVersion ?? item.source_draft_version ?? undefined,
+    baseContentHash: item.baseContentHash ?? item.base_content_hash ?? undefined,
     largeTextRefId: item.largeTextRefId ?? item.large_text_ref_id ?? undefined,
     contentState: item.contentState,
     createdAt: item.createdAt ?? item.created_at ?? now,
@@ -358,7 +375,13 @@ export const draftVersionService = {
         wordCount: countTextWords(input.content),
         isAdopted: false,
         aiTaskId: input.aiTaskId,
+        artifactId: input.artifactId,
         note: input.note,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        sourceDraftId: input.sourceDraftId,
+        sourceDraftVersion: input.sourceDraftVersion,
+        baseContentHash: input.baseContentHash,
         contentState,
         createdAt: now,
         updatedAt: now,
@@ -373,7 +396,7 @@ export const draftVersionService = {
     const operationKey = JSON.stringify([
       'create', input.novelId, input.chapterId, currentContentHash, input.source, input.title ?? '',
     ]);
-    const operationId = operationIdFor(operationKey);
+    const operationId = input.operationId || operationIdFor(operationKey);
     onProgress?.({ stage: 'finalizing', percent: 20, message: '正在原子保存正文…' });
     try {
       const raw = await dbCall<unknown>('save_chapter_draft_atomic', {
@@ -387,6 +410,15 @@ export const draftVersionService = {
           wordCount: countTextWords(input.content),
           source: input.source,
           title: input.title,
+          aiTaskId: input.aiTaskId,
+          artifactId: input.artifactId,
+          note: input.note,
+          sourceType: input.sourceType,
+          sourceId: input.sourceId,
+          sourceDraftId: input.sourceDraftId,
+          sourceDraftVersion: input.sourceDraftVersion,
+          baseContentHash: input.baseContentHash,
+          requestHash: input.requestHash,
         },
       });
       const draft = await normalizeAtomicSave(raw, {
@@ -559,6 +591,74 @@ export const draftVersionService = {
       };
     }
     return { ...adopted, content: target.content, contentState: target.contentState };
+  },
+
+  async adoptExact(input: AdoptChapterDraftInput): Promise<ChapterDraft> {
+    const operationKey = JSON.stringify([
+      'adopt', input.novelId, input.chapterId, input.draftId, input.draftVersion, input.contentHash,
+    ]);
+    const inFlight = pendingAdoptions.get(operationKey);
+    if (inFlight) return inFlight;
+
+    const operationId = input.operationId || operationIdFor(operationKey);
+    const run = (async () => {
+      const target = (await this.getByChapterId(input.chapterId)).find((draft) => draft.id === input.draftId);
+      if (!target || target.novelId !== input.novelId || target.chapterId !== input.chapterId) {
+        throw { code: 'TARGET_DRAFT_NOT_FOUND', message: '目标草稿不存在或不属于当前章节。', retryable: false };
+      }
+      if (target.versionNo !== input.draftVersion) {
+        throw { code: 'DOCUMENT_VERSION_CONFLICT', message: '草稿版本已发生变化。', retryable: false };
+      }
+      const targetHash = target.contentState?.status === 'ready'
+        ? target.contentState.contentHash
+        : await computeContentSha256(target.content);
+      if (targetHash !== input.contentHash) {
+        throw { code: 'DOCUMENT_HASH_MISMATCH', message: '草稿正文已发生变化。', retryable: false };
+      }
+
+      if (!isTauriRuntime()) {
+        const drafts = getLocalDrafts(input.chapterId).map((draft) => ({
+          ...draft,
+          isAdopted: draft.id === input.draftId,
+          updatedAt: nowISO(),
+        }));
+        saveLocalDrafts(input.chapterId, drafts);
+        const adopted = drafts.find((draft) => draft.id === input.draftId);
+        if (!adopted) throw { code: 'TARGET_DRAFT_NOT_FOUND', message: '目标草稿不存在。', retryable: false };
+        pendingOperationIds.delete(operationKey);
+        return { ...adopted, content: target.content, contentState: target.contentState };
+      }
+
+      const traceId = createTraceId('draft-adopt');
+      const raw = await dbCall<unknown>('adopt_chapter_draft_safe', {
+        input: { ...input, operationId, traceId },
+      });
+      if (!raw || typeof raw !== 'object') {
+        throw { code: 'DATABASE_TRANSACTION_FAILED', message: '采用操作未返回结果。', retryable: true, traceId, operationId };
+      }
+      const record = raw as AtomicAdoptRecord;
+      const returnedOperationId = record.operationId ?? record.operation_id;
+      const returnedHash = record.contentHash ?? record.content_hash;
+      const adopted = normalizeDraft(record.draft);
+      if (returnedOperationId !== operationId
+        || returnedHash !== input.contentHash
+        || !adopted
+        || adopted.id !== input.draftId
+        || adopted.novelId !== input.novelId
+        || adopted.chapterId !== input.chapterId
+        || adopted.versionNo !== input.draftVersion
+        || !adopted.isAdopted) {
+        throw { code: 'DOCUMENT_VERSION_CONFLICT', message: '正文采用结果身份校验失败。', retryable: false, traceId, operationId };
+      }
+      pendingOperationIds.delete(operationKey);
+      return { ...adopted, content: target.content, contentState: target.contentState };
+    })();
+    pendingAdoptions.set(operationKey, run);
+    try {
+      return await run;
+    } finally {
+      pendingAdoptions.delete(operationKey);
+    }
   },
 
   async delete(id: string, chapterId: string): Promise<void> {

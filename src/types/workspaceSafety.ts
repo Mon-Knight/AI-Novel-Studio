@@ -10,10 +10,26 @@ export interface WorkspaceResultTarget {
   sourceDraftId?: string;
   sourceRevision?: number;
   baseContentHash: string;
+  draftVersion?: number;
+  contentHash?: string;
+  taskId?: string;
+  artifactId?: string;
 }
 
 export interface DraftResultMetadata extends WorkspaceResultTarget {
   source: AiTextApplySource | 'chapter_engineering';
+}
+
+export interface ChapterCandidateTarget {
+  resultId: string;
+  novelId: string;
+  chapterId: string;
+  volumeId?: string;
+  sourceDraftId?: string;
+  sourceDraftVersion?: number;
+  baseContentHash?: string;
+  artifactId?: string;
+  createdAt: string;
 }
 
 export interface AiTextApplyPayload extends WorkspaceResultTarget {
@@ -25,4 +41,3 @@ export interface AiTextApplyPayload extends WorkspaceResultTarget {
 export interface AiTextApplyRequest extends AiTextApplyPayload {
   id: string;
 }
-

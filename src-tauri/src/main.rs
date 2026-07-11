@@ -6,6 +6,7 @@
 mod ai;
 mod commands;
 mod db;
+mod domain;
 mod errors;
 mod large_text_save;
 mod migrations;
@@ -94,6 +95,16 @@ fn main() {
             commands::get_latest_draft_by_chapter_id,
             commands::drafts::save_chapter_draft_atomic,
             commands::drafts::read_chapter_draft_content,
+            commands::drafts::adopt_chapter_draft_safe,
+            commands::ai_tasks::create_ai_task,
+            commands::ai_tasks::get_ai_task,
+            commands::ai_tasks::transition_ai_task,
+            commands::ai_tasks::start_ai_task_attempt,
+            commands::ai_tasks::mark_ai_task_attempt_succeeded,
+            commands::ai_tasks::fail_ai_task_attempt,
+            commands::ai_tasks::cancel_ai_task,
+            commands::ai_tasks::record_ai_task_late_response,
+            commands::artifacts::create_result_artifact,
             commands::recovery::get_workspace_recovery_snapshot,
             commands::recovery::upsert_workspace_recovery_snapshot,
             commands::recovery::delete_workspace_recovery_snapshot,

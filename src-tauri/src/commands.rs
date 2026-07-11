@@ -2,6 +2,8 @@ use crate::db::{get_connection, get_database_path};
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
+pub mod ai_tasks;
+pub mod artifacts;
 pub mod drafts;
 pub mod recovery;
 
@@ -3533,6 +3535,7 @@ pub struct QualityCheckReportDto {
     pub overall_score: Option<i64>,
     pub summary: Option<String>,
     pub ai_task_id: Option<String>,
+    pub artifact_id: Option<String>,
     pub draft_version: Option<i64>,
     pub model: Option<String>,
     pub content_hash: Option<String>,
@@ -3623,6 +3626,8 @@ pub struct QualityCheckResultDto {
     pub overall_score: Option<i64>,
     pub summary: Option<String>,
     pub items: Vec<QualityCheckResultItemDto>,
+    pub ai_task_id: Option<String>,
+    pub artifact_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3653,13 +3658,14 @@ fn map_quality_report_row(row: &rusqlite::Row) -> rusqlite::Result<QualityCheckR
         overall_score: row.get(6)?,
         summary: row.get(7)?,
         ai_task_id: row.get(8)?,
-        draft_version: row.get(9)?,
-        model: row.get(10)?,
-        content_hash: row.get(11)?,
-        content_length: row.get(12)?,
-        checked_at: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        artifact_id: row.get(9)?,
+        draft_version: row.get(10)?,
+        model: row.get(11)?,
+        content_hash: row.get(12)?,
+        content_length: row.get(13)?,
+        checked_at: row.get(14)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
     })
 }
 
@@ -3695,7 +3701,7 @@ fn quality_item_select_sql() -> &'static str {
 }
 
 fn quality_report_select_sql() -> &'static str {
-    "SELECT id, novel_id, chapter_id, draft_id, scope, status, overall_score, summary, ai_task_id, draft_version, model, content_hash, content_length, checked_at, created_at, updated_at FROM quality_check_reports"
+    "SELECT id, novel_id, chapter_id, draft_id, scope, status, overall_score, summary, COALESCE(source_task_id, ai_task_id), artifact_id, draft_version, model, content_hash, content_length, checked_at, created_at, updated_at FROM quality_check_reports"
 }
 
 /// 创建质量检查报告占位记录
@@ -3889,7 +3895,7 @@ pub fn save_quality_check_result(
     // 1. 更新报告状态
     let affected = conn
         .execute(
-            "UPDATE quality_check_reports SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3, model = ?4, content_hash = COALESCE(?5, content_hash), content_length = COALESCE(?6, content_length), checked_at = COALESCE(?7, checked_at), updated_at = ?8 WHERE id = ?9",
+            "UPDATE quality_check_reports SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3, model = ?4, content_hash = COALESCE(?5, content_hash), content_length = COALESCE(?6, content_length), checked_at = COALESCE(?7, checked_at), source_task_id = COALESCE(?8, source_task_id), artifact_id = COALESCE(?9, artifact_id), updated_at = ?10 WHERE id = ?11",
             params![
                 &input.result.overall_score,
                 &input.result.summary,
@@ -3898,6 +3904,8 @@ pub fn save_quality_check_result(
                 &input.content_hash,
                 &input.content_length,
                 &input.checked_at,
+                &input.result.ai_task_id,
+                &input.result.artifact_id,
                 &now,
                 &input.report_id,
             ],

@@ -54,7 +54,7 @@ export interface QualityCheckStatistics {
 export interface QualityCheckReport {
   id: string; novelId: string; chapterId: string; draftId: string;
   scope: QualityCheckScope; status: QualityCheckStatus;
-  overallScore?: number; summary?: string; aiTaskId?: string;
+  overallScore?: number; summary?: string; aiTaskId?: string; artifactId?: string;
   draftVersion?: number; model?: string;
   contentHash?: string;
   contentLength?: number;
@@ -97,6 +97,8 @@ export interface QualityCheckResult {
     startOffset?: number; endOffset?: number;
     paragraphIndex?: number;
   }>;
+  aiTaskId?: string;
+  artifactId?: string;
 }
 
 export interface RunQualityCheckInput {
@@ -105,6 +107,8 @@ export interface RunQualityCheckInput {
   volumeId?: string;
   draftContent: string; chapterTitle: string; chapterOutline?: string;
   contentHash?: string; wordCount?: number;
+  draftVersion?: number;
+  useUnifiedPipeline?: boolean;
   chapterGoal?: string; worldBackground?: string; ruleSystems?: string;
   protagonist?: string; specialAbility?: string; abilityLimits?: string;
   chapterCharacters?: string; chapterEvents?: string; previousContext?: string;

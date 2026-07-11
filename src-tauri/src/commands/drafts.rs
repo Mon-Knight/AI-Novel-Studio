@@ -1,7 +1,8 @@
 use crate::db::get_connection;
 use crate::errors::AppError;
 use crate::services::draft_service::{
-    self, ReadChapterDraftContentOutput, SaveChapterDraftAtomicInput, SaveChapterDraftAtomicOutput,
+    self, AdoptChapterDraftAtomicInput, AdoptChapterDraftAtomicOutput,
+    ReadChapterDraftContentOutput, SaveChapterDraftAtomicInput, SaveChapterDraftAtomicOutput,
 };
 use serde::Deserialize;
 
@@ -20,6 +21,16 @@ pub fn save_chapter_draft_atomic(
             Ok(())
         }
     })
+}
+
+#[tauri::command]
+pub fn adopt_chapter_draft_safe(
+    input: AdoptChapterDraftAtomicInput,
+) -> Result<AdoptChapterDraftAtomicOutput, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    draft_service::adopt_chapter_draft_atomic(&mut connection, input)
 }
 
 #[derive(Debug, Deserialize)]
