@@ -1176,10 +1176,10 @@ mod tests {
     use super::*;
 
     fn test_connection() -> Connection {
-        let conn = Connection::open_in_memory().expect("open in-memory database");
+        let mut conn = Connection::open_in_memory().expect("open in-memory database");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("enable foreign keys");
-        crate::db::create_tables(&conn).expect("create schema");
+        crate::db::create_tables(&mut conn).expect("create schema");
         conn
     }
 

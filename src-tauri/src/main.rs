@@ -6,10 +6,14 @@
 mod ai;
 mod commands;
 mod db;
+mod errors;
 mod large_text_save;
+mod migrations;
 mod outline_commands;
 mod project_backup;
+mod repositories;
 mod runtime;
+mod services;
 mod system_accent;
 mod window_state;
 
@@ -118,8 +122,11 @@ fn main() {
             commands::delete_chapter,
             commands::get_drafts_by_chapter_id,
             commands::get_latest_draft_by_chapter_id,
-            commands::create_chapter_draft,
-            commands::update_chapter_draft,
+            commands::drafts::save_chapter_draft_atomic,
+            commands::drafts::read_chapter_draft_content,
+            commands::recovery::get_workspace_recovery_snapshot,
+            commands::recovery::upsert_workspace_recovery_snapshot,
+            commands::recovery::delete_workspace_recovery_snapshot,
             commands::adopt_chapter_draft,
             commands::delete_chapter_draft,
             commands::get_chapter_engineering_states,

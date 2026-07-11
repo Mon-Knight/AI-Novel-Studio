@@ -1,7 +1,7 @@
 import './services/tauri/e2eBridge';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { HashRouter } from 'react-router-dom';
+import { createHashRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
 import { generationJobService } from './services/generation/generationJobService';
@@ -111,17 +111,27 @@ async function bootstrapApplication() {
     };
   }
 
-  markStartup('react-before-render');
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <HashRouter>
+  // Keep hash-based desktop URLs while opting into React Router's data-router
+  // transition coordinator. The workspace Leave Guard relies on its blocker to
+  // cover Link, navigate(), browser history and direct hash transitions.
+  const router = createHashRouter([
+    {
+      path: '*',
+      element: (
         <ToastProvider>
           <App
             startupRecovery={startupRecovery}
             startupContextMigration={startupContextMigration}
           />
         </ToastProvider>
-      </HashRouter>
+      ),
+    },
+  ]);
+
+  markStartup('react-before-render');
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <RouterProvider router={router} />
     </React.StrictMode>,
   );
 

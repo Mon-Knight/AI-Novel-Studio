@@ -49,13 +49,13 @@ pub fn init_database() {
     fs::create_dir_all(&data_dir).expect("Failed to create data directory");
 
     let db_path = get_database_path();
-    let connection = Connection::open(&db_path).expect("Failed to open database");
+    let mut connection = Connection::open(&db_path).expect("Failed to open database");
 
     connection
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .expect("Failed to set pragmas");
 
-    create_tables(&connection).expect("Failed to create tables");
+    create_tables(&mut connection).expect("Failed to create tables");
 
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");
@@ -70,21 +70,21 @@ pub fn get_connection() -> &'static Mutex<Connection> {
 #[cfg(test)]
 pub(crate) fn init_test_database() {
     DB.get_or_init(|| {
-        let connection = Connection::open_in_memory().expect("Failed to open test database");
+        let mut connection = Connection::open_in_memory().expect("Failed to open test database");
         connection
             .execute_batch("PRAGMA foreign_keys=ON;")
             .expect("Failed to set test database pragmas");
-        create_tables(&connection).expect("Failed to create test database tables");
+        create_tables(&mut connection).expect("Failed to create test database tables");
         Mutex::new(connection)
     });
 }
 
-pub(crate) fn create_tables(conn: &Connection) -> SqliteResult<()> {
+pub(crate) fn create_tables(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
     create_base_tables(conn)?;
     run_migrations(conn)?;
     create_indexes(conn)?;
-    crate::large_text_save::create_large_text_tables(conn)?;
     crate::outline_commands::create_outline_tables(conn)?;
+    crate::migrations::run_migrations(conn)?;
     Ok(())
 }
 
@@ -1494,8 +1494,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrates_legacy_characters_table_before_protagonist_index() -> SqliteResult<()> {
-        let conn = Connection::open_in_memory()?;
+    fn migrates_legacy_characters_table_before_protagonist_index(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
         conn.execute_batch(
             "
             CREATE TABLE characters (
@@ -1509,7 +1510,7 @@ mod tests {
             ",
         )?;
 
-        create_tables(&conn)?;
+        create_tables(&mut conn)?;
 
         for column in [
             "is_protagonist",
@@ -1554,13 +1555,14 @@ mod tests {
         assert!(!timestamps.0.is_empty());
         assert!(!timestamps.1.is_empty());
 
-        create_tables(&conn)?;
+        create_tables(&mut conn)?;
         Ok(())
     }
 
     #[test]
-    fn migrates_legacy_style_profiles_description_column() -> SqliteResult<()> {
-        let conn = Connection::open_in_memory()?;
+    fn migrates_legacy_style_profiles_description_column(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
         conn.execute_batch(
             "CREATE TABLE style_profiles (
                 id TEXT PRIMARY KEY,
@@ -1572,10 +1574,10 @@ mod tests {
             );",
         )?;
 
-        create_tables(&conn)?;
+        create_tables(&mut conn)?;
 
         assert!(column_exists(&conn, "style_profiles", "description")?);
-        create_tables(&conn)?;
+        create_tables(&mut conn)?;
         Ok(())
     }
 

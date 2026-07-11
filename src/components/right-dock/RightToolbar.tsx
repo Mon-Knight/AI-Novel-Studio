@@ -39,13 +39,27 @@ interface RightToolbarProps {
   activePanel: PanelType;
   onTogglePanel: (panel: PanelType) => void;
   onRunCommand?: (command: EditorCommandType) => void;
+  documentAvailable?: boolean;
 }
 
-function RightToolbar({ activePanel, onTogglePanel, onRunCommand }: RightToolbarProps) {
+const DOCUMENT_REQUIRED_PANELS = new Set<Exclude<PanelType, null>>([
+  'ai-generate',
+  'engineering',
+  'check',
+  'polish',
+  'chapter-summary',
+]);
+
+function RightToolbar({ activePanel, onTogglePanel, onRunCommand, documentAvailable = true }: RightToolbarProps) {
   return (
     <div className="right-toolbar">
-      {toolbarButtons.map((btn) => (
-        <button
+      {toolbarButtons.map((btn) => {
+        const disabled = !documentAvailable && (
+          (btn.kind === 'panel' && DOCUMENT_REQUIRED_PANELS.has(btn.id))
+          || btn.kind === 'command'
+        );
+        return (
+          <button
           type="button"
           key={btn.kind === 'panel' ? btn.id : btn.command}
           data-testid={btn.kind === 'command' && btn.command === 'save'
@@ -68,12 +82,15 @@ function RightToolbar({ activePanel, onTogglePanel, onRunCommand }: RightToolbar
             if (btn.kind === 'panel') onTogglePanel(btn.id);
             else onRunCommand?.(btn.command);
           }}
-          title={btn.label}
+          title={disabled ? `${btn.label}：完整正文不可用` : btn.label}
+          disabled={disabled}
+          aria-disabled={disabled}
         >
           <span className="tb-icon">{btn.icon}</span>
           <span className="tb-label">{btn.label}</span>
-        </button>
-      ))}
+          </button>
+        );
+      })}
     </div>
   );
 }

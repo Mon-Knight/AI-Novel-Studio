@@ -518,6 +518,11 @@ pub fn finalize_large_text_save(
     input: FinalizeLargeTextSaveInput,
 ) -> Result<FinalizeLargeTextSaveOutput, String> {
     let prepared = prepare_large_text_from_cache(&input.session_id)?;
+    if prepared.target_type == "draft" || prepared.target_type == "chapter_draft" {
+        return Err(
+            "WORKSPACE_SAVE_FAILED: 草稿正文必须通过 save_chapter_draft_atomic 提交".to_string(),
+        );
+    }
     let document_id = prepared.session_id.clone();
     let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
     let transaction = conn
@@ -840,118 +845,9 @@ pub(crate) fn read_large_text_document_internal(
     connection: &Connection,
     document_id: &str,
 ) -> Result<String, String> {
-    let metadata = connection
-        .query_row(
-            "SELECT total_chars, total_bytes, chunk_count, content_sha256 FROM large_text_documents WHERE id = ?1",
-            params![document_id],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|error| format!("large_text_metadata_read_failed: {}", error))?
-        .ok_or_else(|| format!("large_text_document_not_found: {}", document_id))?;
-    let (expected_chars, expected_bytes, expected_chunks, expected_hash) = metadata;
-    if expected_chars < 0 || expected_bytes < 0 || expected_chunks <= 0 {
-        return Err(format!(
-            "large_text_metadata_invalid: document_id={}, chars={}, bytes={}, chunks={}",
-            document_id, expected_chars, expected_bytes, expected_chunks
-        ));
-    }
-    let expected_hash = expected_hash.ok_or_else(|| {
-        format!(
-            "large_text_content_hash_missing: document_id={}",
-            document_id
-        )
-    })?;
-
-    let mut stmt = connection
-        .prepare(
-            "SELECT chunk_index, content, char_count, byte_count, chunk_sha256 FROM large_text_chunks WHERE document_id = ?1 ORDER BY chunk_index ASC",
-        )
-        .map_err(|error| format!("large_text_chunk_query_prepare_failed: {}", error))?;
-
-    let chunks = stmt
-        .query_map(params![document_id], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })
-        .map_err(|error| format!("large_text_chunk_query_failed: {}", error))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("large_text_chunk_read_failed: {}", error))?;
-    if chunks.len() != expected_chunks as usize {
-        return Err(format!(
-            "large_text_chunk_count_mismatch: document_id={}, expected={}, actual={}",
-            document_id,
-            expected_chunks,
-            chunks.len()
-        ));
-    }
-
-    let mut full_content = String::new();
-    for (expected_index, (chunk_index, content, char_count, byte_count, chunk_hash)) in
-        chunks.into_iter().enumerate()
-    {
-        if chunk_index != expected_index as i64 {
-            return Err(format!(
-                "large_text_chunk_index_mismatch: document_id={}, expected={}, actual={}",
-                document_id, expected_index, chunk_index
-            ));
-        }
-        let actual_chars = content.chars().count() as i64;
-        let actual_bytes = content.len() as i64;
-        if char_count != actual_chars || byte_count != actual_bytes {
-            return Err(format!(
-                "large_text_chunk_metadata_mismatch: document_id={}, chunk={}, expected_chars={}, actual_chars={}, expected_bytes={}, actual_bytes={}",
-                document_id,
-                expected_index,
-                char_count,
-                actual_chars,
-                byte_count,
-                actual_bytes
-            ));
-        }
-        let chunk_hash = chunk_hash.ok_or_else(|| {
-            format!(
-                "large_text_chunk_hash_missing: document_id={}, chunk={}",
-                document_id, expected_index
-            )
-        })?;
-        let actual_chunk_hash = compute_sha256(&content);
-        if chunk_hash != actual_chunk_hash {
-            return Err(format!(
-                "large_text_chunk_hash_mismatch: document_id={}, chunk={}, expected={}, actual={}",
-                document_id, expected_index, chunk_hash, actual_chunk_hash
-            ));
-        }
-        full_content.push_str(&content);
-    }
-    let actual_chars = full_content.chars().count() as i64;
-    let actual_bytes = full_content.len() as i64;
-    if expected_chars != actual_chars || expected_bytes != actual_bytes {
-        return Err(format!(
-            "large_text_total_metadata_mismatch: document_id={}, expected_chars={}, actual_chars={}, expected_bytes={}, actual_bytes={}",
-            document_id, expected_chars, actual_chars, expected_bytes, actual_bytes
-        ));
-    }
-    let actual_hash = compute_sha256(&full_content);
-    if expected_hash != actual_hash {
-        return Err(format!(
-            "large_text_content_hash_mismatch: document_id={}, expected={}, actual={}",
-            document_id, expected_hash, actual_hash
-        ));
-    }
-    Ok(full_content)
+    crate::repositories::large_text_repository::read_verified_document(connection, document_id)
+        .map(|verified| verified.content)
+        .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
 }
 
 /// Check if content is stored as chunked large text (returns document_id if so)
@@ -1034,6 +930,12 @@ pub fn update_large_text_ref(input: UpdateLargeTextRefInput) -> Result<(), Strin
     if !allowed_tables.contains(&input.table_name.as_str()) {
         return Err(format!("不允许的表名: {}", input.table_name));
     }
+    if input.table_name == "chapter_drafts" {
+        return Err(
+            "WORKSPACE_SAVE_FAILED: 草稿大文本引用只能通过 save_chapter_draft_atomic 更新"
+                .to_string(),
+        );
+    }
 
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
 
@@ -1079,7 +981,7 @@ fn count_saved_chunks(cache_dir: &PathBuf) -> Result<usize, String> {
     Ok(count)
 }
 
-fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
+pub(crate) fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
     let cache_dir = session_cache_dir(session_id)?;
     if cache_dir.exists() {
         fs::remove_dir_all(&cache_dir).map_err(|e| format!("清理缓存目录失败: {}", e))?;
@@ -1135,9 +1037,9 @@ mod tests {
     use super::*;
 
     fn open_test_connection() -> Connection {
-        let connection = Connection::open_in_memory().unwrap();
+        let mut connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        crate::db::create_tables(&connection).unwrap();
+        crate::db::create_tables(&mut connection).unwrap();
         connection
             .execute_batch(
                 "
@@ -1425,7 +1327,7 @@ mod tests {
         let error =
             read_large_text_document_internal(&connection, &prepared.session_id).unwrap_err();
 
-        assert!(error.contains("large_text_chunk_metadata_mismatch"));
+        assert!(error.contains("LARGE_TEXT_HASH_MISMATCH"), "{error}");
     }
 
     #[test]

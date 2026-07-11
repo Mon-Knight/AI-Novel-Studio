@@ -1,17 +1,18 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.8（章节上下文持久化一致性闭环）
-> 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
+> 当前版本：v2.2.0（工作区可靠性与基础设施收口）
+> 适用范围：正文变更动态回归、Vitest / React 组件测试、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.1.8，测试体系在既有正文安全、备份恢复、请求取消和质量历史基础上，增加章节上下文 SQLite 单一事实源、稳定 ID、原子 bundle、旧缓存幂等迁移、浏览器补偿回滚与真实应用重启验证：
+截至 v2.2.0，测试体系在既有正文安全、备份恢复、请求取消、质量历史和章节上下文一致性基础上，增加工作区恢复、统一离开保护、正式迁移账本与 React 动态故障验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
-→ Rust / SQLite command 测试（完整临时 Schema + 事务故障路径）
+→ Vitest / React Testing Library（jsdom、fake timer、Hash Router、关闭适配器）
+→ Rust / SQLite 测试（临时 Schema、正式迁移、事务与故障注入）
 → WebdriverIO Windows 桌面 E2E（真实 Tauri / Rust IPC / SQLite）
 → TypeScript / ESLint / Rust 编译与 Tauri 构建
 → Windows 桌面手动回归
@@ -26,9 +27,29 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. 动态测试入口
+## 2. v2.2.0 动态测试入口
 
-### 2.1 全部现有前端安全原语动态测试
+### 2.1 工作区可靠性专项
+
+```powershell
+npm run test:components
+npm run test:workspace-reliability
+npm run test:workspace-recovery
+npm run test:large-text-integrity
+npm run test:migrations
+```
+
+专项脚本必须运行动态测试并原样传播退出码：
+
+- `components`：正文不可用状态与恢复对话框。
+- `workspace-reliability`：T01～T07、T12，覆盖快速切章、保存/取消、Hash 路由与 Tauri 关闭防重入。
+- `workspace-recovery`：T09～T11，覆盖 debounce、StrictMode、恢复冲突、内存恢复和精确清理。
+- `large-text-integrity`：前端 fail-closed / operation 重试与 Rust DB04～DB11。
+- `migrations`：AppError 契约与 Rust DB01～DB03、DB15～DB16。
+
+PowerShell 聚合脚本会先检查完整 Rust 测试名是否真实存在，再运行 Cargo；Cargo 过滤命中 0 个测试不得被当作通过。
+
+### 2.2 全部现有前端安全原语动态测试
 
 ```powershell
 npm run test
@@ -36,7 +57,7 @@ npm run test
 
 该命令要求 Node.js >= 22.6，使用原生 `node:test` 和 `--experimental-strip-types` 直接执行生产安全模块，不新增测试依赖。类型剔除不代替 `tsc` 类型检查。
 
-### 2.2 正文变更安全门定向测试
+### 2.3 正文变更安全门定向测试
 
 ```powershell
 npm run test:workspace-safety
@@ -57,7 +78,7 @@ src/features/workspace/documentSafety.test.mjs
 
 测试必须使用可控 Promise 顺序验证行为，不得退化为读取源码字符串。
 
-### 2.3 Rust / SQLite 命令安全测试
+### 2.4 Rust / SQLite 全量测试
 
 ```powershell
 cd src-tauri
@@ -73,7 +94,7 @@ cargo test commands::tests -- --nocapture
 cd ..
 ```
 
-最低动态覆盖：
+v2.2.0 新增 DB01～DB16 覆盖迁移账本、checksum 冲突、长正文事务回滚、operation 幂等、提交后清理、fail-closed 读取、恢复隔离、旧库升级和错误序列化。以下 v2.1.1 用例继续作为回归保留：
 
 | 编号 | 场景 | 预期 |
 |------|------|------|
@@ -317,7 +338,7 @@ scripts/agent-workflow/check_ai_task_delete.ps1
 - SQLite 多步写入失败时会整体回滚。
 - 取消、超时、进程重启和桌面 WebView 生命周期行为正确。
 
-因此，静态检查通过只能作为补充证据，不能单独满足任何版本的发布验收。
+因此，静态检查通过只能作为补充证据，不能单独满足 v2.2.0 发布验收。
 
 ---
 
@@ -355,7 +376,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ---
 
-## 5. v2.1.1 手动安全回归
+## 5. v2.2.0 手动安全回归
 
 ### 5.1 迟到响应与章节切换
 
@@ -386,6 +407,13 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 2. 尝试采用其他章节草稿，确认两章均不变化。
 3. 在事务中途注入失败，确认采用状态整体回滚。
 
+### 5.5 长正文、恢复与桌面关闭
+
+1. 保存超过 100 KB 的正文，重启后确认全文、字数和哈希一致；破坏测试库分片后确认编辑器进入不可用状态。
+2. 输入未保存正文并等待恢复快照更新，模拟异常退出；重新打开后分别验证匹配恢复和旧基线冲突。
+3. 对章节切换、侧栏导航、浏览器式前进后退和 Tauri 窗口关闭分别选择保存、放弃、取消。
+4. 保存期间重复触发关闭，确认只出现一个决策、一次保存和一次最终关闭。
+
 ---
 
 ## 6. 其他功能手动抽查
@@ -414,13 +442,13 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ## 7. 当前测试限制
 
-- v2.1.1 已引入 Node 原生安全原语动态测试，v2.1.4 增加编辑器失败关闭模块测试；更广泛的 React 组件级并发集成覆盖仍需继续补齐。
-- 章节切换的 Leave Guard 已纳入桌面 E2E；HashRouter 其他非按钮导航与 Tauri 原生窗口 close-request 尚未纳入可恢复离开保护的自动化闭环。
+- Node 安全原语、React 组件 / Hash Router / close adapter、SQLite 故障注入与真实 Windows Tauri E2E 已形成分层动态覆盖；更广泛的页面级并发场景仍需继续补齐。
+- v2.2.0 已统一章节操作、HashRouter 导航与 Tauri 原生窗口 close-request 的可恢复离开保护；其他非正文工作流尚未全部接入。
 - 当前动态测试已证明会话级幂等 claim / release、`generation_jobs` 重启后的安全终结，以及其中正文生成和质量检查请求的真实取消；跨重启自动续跑和其他 AI 工具仍需要各自的取消、attempt / operation 记录与副作用幂等协议。
 - Windows 桌面自动化采用 WebdriverIO + Tauri Driver，不计划用 Playwright 浏览器页面或截图式 Computer Use 替代真实 Tauri E2E。
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
-- DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
+- `operationId` 的数据库级重放与提交后清理故障已由 service 测试证明；真实 IPC 进程在提交边界被强制终止时的端到端对账仍需继续补充。
 - 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消与质量历史不可变重放已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - v2.1.8 已把章节总结、上下文和角色状态的桌面事实源收敛到 SQLite；旧缓存清理仍发生在 SQLite 提交之后，因此只能通过明确 ID 映射、warning 和幂等重试保证安全，不宣称跨存储 ACID。

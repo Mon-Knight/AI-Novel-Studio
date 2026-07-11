@@ -1,15 +1,25 @@
 import { formatNumber } from '../../utils/format';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
+import type { WorkspaceRecoverySaveStatus } from '../../types/workspaceRecovery';
 
 interface StatusBarProps {
   chapter?: Chapter;
   draftWordCount?: number;
   isDirty?: boolean;
   draftVersion?: string;
+  contentAvailable?: boolean;
+  recoverySaveStatus?: WorkspaceRecoverySaveStatus;
 }
 
-function StatusBar({ chapter, draftWordCount, isDirty, draftVersion }: StatusBarProps) {
+function StatusBar({
+  chapter,
+  draftWordCount,
+  isDirty,
+  draftVersion,
+  contentAvailable = true,
+  recoverySaveStatus = 'idle',
+}: StatusBarProps) {
   const wordCount = draftWordCount ?? chapter?.wordCount ?? 0;
   const targetWords = chapter?.targetWordCount ?? 0;
   const status = chapter?.status || 'not_started';
@@ -50,8 +60,20 @@ function StatusBar({ chapter, draftWordCount, isDirty, draftVersion }: StatusBar
       </div>
       <span className="statusbar-separator" />
       <div className="statusbar-item">
-        <span className={`status-dot ${isDirty ? 'unsaved' : 'saved'}`} />
-        <span>{isDirty ? '未保存' : '已保存'}</span>
+        <span className={`status-dot ${isDirty || !contentAvailable ? 'unsaved' : 'saved'}`} />
+        <span>
+          {!contentAvailable
+            ? '正文不可用'
+            : isDirty && recoverySaveStatus === 'saving'
+              ? '正在更新恢复快照'
+              : isDirty && recoverySaveStatus === 'saved'
+                ? '未保存 · 恢复快照已更新'
+                : isDirty && recoverySaveStatus === 'failed'
+                  ? '未保存 · 恢复快照失败'
+                  : isDirty
+                    ? '未保存'
+                    : '已保存'}
+        </span>
       </div>
     </div>
   );
