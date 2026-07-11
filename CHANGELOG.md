@@ -25,6 +25,10 @@
 - 新增 ResultArtifact raw/display 分离、大文本完整保存、结构化校验、来源基线校验和浏览器/Tauri 一致的 invalid Artifact 保留策略。
 - 将设置连接测试、章节正文生成和手动质量检查迁移到统一管线；未迁移 AI 入口继续使用原有链路。
 - 新增 `test:ai-task-pipeline`、`test:ai-artifacts`、`test:ai-p0-safety` 专项脚本；正式应用版本仍保持 2.2.0。
+- 完成 M1 验收收口：逐项审查 44 个非文档改动文件，确认 `commands.rs` 实际语义差异仅为命令注册与模块接入，并清理换行/编码噪声。
+- 补齐 Attempt 跨 Task 身份校验、取消与成功响应竞态、三类 Snapshot/ResultArtifact 删除保护，以及日志与外部取消路径的隐私和状态约束。
+- 建立冻结测试编号到实际测试函数的映射，固定 001～011 精确 checksum，并补充真空库、v2.2 升级、重启幂等、三个迁移入口和四项 P0 的动态回归测试。
+- 新增 `docs/audit/phase-3/08-v2.3.0-m1-acceptance.md`，集中记录文件必要性、迁移约束、动态证据、最终验证与 M2 准入结论。
 
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 

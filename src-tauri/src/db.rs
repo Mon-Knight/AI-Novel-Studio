@@ -1280,6 +1280,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn db20_empty_database_initializes_complete_m1_ledger(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        create_tables(&mut conn)?;
+        let migration_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(migration_count, 11);
+        let last_migration: String = conn.query_row(
+            "SELECT migration_id FROM schema_migrations ORDER BY migration_id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(last_migration, "011_artifact_validation_issues");
+        Ok(())
+    }
+
+    #[test]
     fn migrates_legacy_characters_table_before_protagonist_index(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = Connection::open_in_memory()?;

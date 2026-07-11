@@ -441,8 +441,40 @@ pub fn mark_attempt_succeeded(
         .map_err(AppError::database)?;
     let now = Utc::now().to_rfc3339();
     let metadata = response_metadata_json.to_string();
+    let current_task = ai_task_repository::find(&transaction, task_id)?
+        .ok_or_else(|| AppError::new(codes::AI_TASK_NOT_FOUND, "AI Task 不存在", false))?;
+    if current_task.status == "cancel_requested" {
+        ai_task_repository::set_attempt_status(
+            &transaction,
+            task_id,
+            attempt_id,
+            &["running", "cancel_requested"],
+            "late_response_ignored",
+            Some(&metadata),
+            None,
+            &now,
+        )?;
+        ai_task_repository::cas_status(
+            &transaction,
+            task_id,
+            "cancel_requested",
+            "cancelled",
+            &now,
+        )?;
+        let task = ai_task_repository::find(&transaction, task_id)?.expect("task exists");
+        transaction.commit().map_err(AppError::database)?;
+        return Ok(task);
+    }
+    if current_task.status != "running" {
+        return Err(AppError::new(
+            codes::AI_TASK_ILLEGAL_TRANSITION,
+            "Task 当前不能接收 Provider 成功响应",
+            false,
+        ));
+    }
     ai_task_repository::set_attempt_status(
         &transaction,
+        task_id,
         attempt_id,
         &["running", "cancel_requested"],
         "succeeded",
@@ -469,6 +501,7 @@ pub fn fail_attempt(
     let error_json = serde_json::to_string(&error).unwrap_or_else(|_| "{}".to_string());
     ai_task_repository::set_attempt_status(
         &transaction,
+        task_id,
         attempt_id,
         &["running", "cancel_requested"],
         "failed",
@@ -517,6 +550,7 @@ pub fn cancel_task(
             if let Some(attempt_id) = task.current_attempt_id.as_deref() {
                 ai_task_repository::set_attempt_status(
                     &transaction,
+                    task_id,
                     attempt_id,
                     &["running"],
                     "cancel_requested",
@@ -531,6 +565,7 @@ pub fn cancel_task(
             if let Some(attempt_id) = task.current_attempt_id.as_deref() {
                 ai_task_repository::set_attempt_status(
                     &transaction,
+                    task_id,
                     attempt_id,
                     &["cancel_requested"],
                     "cancelled",
@@ -582,6 +617,7 @@ pub fn record_late_response(
     let metadata = response_metadata_json.to_string();
     ai_task_repository::set_attempt_status(
         &transaction,
+        task_id,
         attempt_id,
         &["running", "cancel_requested"],
         "late_response_ignored",
@@ -894,6 +930,67 @@ pub(crate) mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(attempt_status, "cancelled");
+        Ok(())
+    }
+
+    #[test]
+    fn task16_cross_task_attempt_identity_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+        let task_a = create_task(&mut connection, task_input("operation-task-a"))?;
+        let task_b = create_task(&mut connection, task_input("operation-task-b"))?;
+        let attempt_a = start_attempt(&mut connection, &task_a.task_id, Some("mock"))?;
+        let attempt_b = start_attempt(&mut connection, &task_b.task_id, Some("mock"))?;
+
+        let error = mark_attempt_succeeded(
+            &mut connection,
+            &task_a.task_id,
+            &attempt_b.attempt_id,
+            serde_json::json!({"responseHash": "hash"}),
+        )
+        .expect_err("attempt from another task must not be accepted");
+        assert_eq!(error.code, codes::AI_TASK_CONCURRENT_UPDATE);
+        assert_eq!(
+            ai_task_repository::find(&connection, &task_a.task_id)?
+                .expect("task a")
+                .status,
+            "running"
+        );
+        let attempt_a_status: String = connection.query_row(
+            "SELECT status FROM ai_task_attempts WHERE attempt_id = ?1",
+            params![attempt_a.attempt_id],
+            |row| row.get(0),
+        )?;
+        let attempt_b_status: String = connection.query_row(
+            "SELECT status FROM ai_task_attempts WHERE attempt_id = ?1",
+            params![attempt_b.attempt_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(attempt_a_status, "running");
+        assert_eq!(attempt_b_status, "running");
+        Ok(())
+    }
+
+    #[test]
+    fn task17_cancel_race_marks_provider_success_as_late_response(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+        let task = create_task(&mut connection, task_input("operation-cancel-race"))?;
+        let attempt = start_attempt(&mut connection, &task.task_id, Some("mock"))?;
+        assert_eq!(cancel_task(&mut connection, &task.task_id)?.status, "cancel_requested");
+
+        let cancelled = mark_attempt_succeeded(
+            &mut connection,
+            &task.task_id,
+            &attempt.attempt_id,
+            serde_json::json!({"responseHash": "late-hash", "responseLength": 9}),
+        )?;
+        assert_eq!(cancelled.status, "cancelled");
+        let attempt_status: String = connection.query_row(
+            "SELECT status FROM ai_task_attempts WHERE attempt_id = ?1",
+            params![attempt.attempt_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(attempt_status, "late_response_ignored");
         Ok(())
     }
 }

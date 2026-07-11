@@ -279,7 +279,10 @@ async function executePipeline(input: UnifiedAiPipelineInput, intentHash: string
       }, () => browserSetStatus(task.taskId, 'cancelled'));
       throw { code: 'AI_PROVIDER_CANCELLED', message: '取消后的迟到响应已忽略', retryable: false };
     }
-    await markSucceeded(task.taskId, attempt.attemptId, providerResult.metadata);
+    const marked = await markSucceeded(task.taskId, attempt.attemptId, providerResult.metadata);
+    if (marked.status === 'cancel_requested' || marked.status === 'cancelled') {
+      throw { code: 'AI_PROVIDER_CANCELLED', message: '取消后的迟到响应已忽略', retryable: false };
+    }
     aiTaskStore.upsert({ taskId: task.taskId, status: 'validating', progress: 'artifact_validation' });
     let structuredPayload: unknown;
     try {

@@ -99,7 +99,6 @@ export async function dbCall<T>(
     if (shouldLogDbCommand(command)) {
       console.log('[DB_CALL] invoke start', {
         command,
-        args: sanitizeForDbLog(args),
         isTauri: true,
       });
     }
@@ -121,7 +120,6 @@ export async function dbCall<T>(
       const appError = normalizeAppError(e, errorMessage);
       console.error('[DB_CALL_FAILED]', {
         command,
-        args: sanitizeForDbLog(args),
         code: appError.code,
         retryable: appError.retryable,
         traceId: appError.traceId,
@@ -133,7 +131,6 @@ export async function dbCall<T>(
       const normalizedError = new Error(errorMessage);
       Object.assign(normalizedError, {
         command,
-        args: sanitizeForDbLog(args),
         rawError: e,
       });
       throw normalizedError;
@@ -143,7 +140,6 @@ export async function dbCall<T>(
     if (shouldLogDbCommand(command)) {
       console.log('[DB_CALL] localStorage fallback', {
         command,
-        args: sanitizeForDbLog(args),
         isTauri: false,
       });
     }

@@ -216,6 +216,7 @@ pub fn insert_attempt(
 
 pub fn set_attempt_status(
     connection: &Connection,
+    task_id: &str,
     attempt_id: &str,
     expected: &[&str],
     next: &str,
@@ -230,7 +231,7 @@ pub fn set_attempt_status(
     let sql = format!(
         "UPDATE ai_task_attempts SET status = ?1, response_metadata_json = COALESCE(?2, response_metadata_json),
          error_json = COALESCE(?3, error_json), finished_at = ?4
-         WHERE attempt_id = ?5 AND status IN ({placeholders})"
+         WHERE attempt_id = ?5 AND task_id = ?6 AND status IN ({placeholders})"
     );
     let mut values: Vec<rusqlite::types::Value> = vec![
         next.to_owned().into(),
@@ -238,6 +239,7 @@ pub fn set_attempt_status(
         error_json.map(str::to_owned).into(),
         finished_at.to_owned().into(),
         attempt_id.to_owned().into(),
+        task_id.to_owned().into(),
     ];
     values.extend(expected.iter().map(|value| (*value).to_owned().into()));
     let affected = connection

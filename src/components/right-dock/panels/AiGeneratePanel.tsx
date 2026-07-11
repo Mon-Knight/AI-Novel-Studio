@@ -23,10 +23,6 @@ import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionServ
 import { hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 
-function namesText(names: string[]): string {
-  return names.length > 0 ? names.join('、') : '无';
-}
-
 function getChapterCharacterNames(ctx: ChapterGenerationContext | null | undefined): string[] {
   return ctx?.chapterCharacterList?.map((item) => item.name).filter(Boolean) ?? [];
 }
@@ -490,32 +486,6 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
           setPercent(100);
           setStage('生成完成');
-
-          // v1.0.43: 增强调试日志（确认大纲和角色已进入 prompt）
-          console.info('[AiGenerate] 生成完成:', {
-            chapterId: chapter.id,
-            novelId,
-            styleProfileId: selectedStyleId || '(未选择)',
-            outputControlId: selectedOutputId || '(未选择)',
-            hasOutline: !!ctx.chapterOutline,
-            outlineLength: ctx.chapterOutline?.length || 0,
-            hasVolumeOutline: !!ctx.volumeOutline,
-            hasMasterOutline: !!(ctx.masterOutline || ctx.novelOutline),
-            chapterGoal: ctx.chapterGoal ? '有' : '无',
-            targetWordCount: ctx.targetWordCount,
-            chapterCharacters: namesText(getChapterCharacterNames(ctx)),
-            requiredCharacters: namesText(validation.requiredNames),
-            protagonistNames: ctx.protagonistNames,
-            wordCount: draft.wordCount,
-            outlineKeyPoints: ctx.outlineKeyPoints?.length || 0,
-            outlineComplianceScore: validation.outlineCompliance.score,
-            missingOutlinePoints: validation.outlineCompliance.missingPoints.map((point) => point.text),
-            missingRequiredCharacters: validation.missingRequiredNames,
-            model: settings.modelName,
-            provider: settings.provider,
-            promptTemplateSource: request.promptTemplateSource,
-            promptLength: request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0,
-          });
 
           if (liveNovelIdRef.current !== requestTarget.novelId || liveChapterIdRef.current !== requestTarget.chapterId) {
             notifyNative({ kind: 'success', body: `原章节正文已生成并保存（${draft.wordCount} 字）` });

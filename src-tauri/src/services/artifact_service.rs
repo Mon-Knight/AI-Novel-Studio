@@ -434,6 +434,11 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(stored_hash, artifact.content_hash);
+        let delete = connection.execute(
+            "DELETE FROM result_artifacts WHERE artifact_id = ?1",
+            rusqlite::params![artifact.artifact_id],
+        );
+        assert!(delete.is_err());
         Ok(())
     }
 

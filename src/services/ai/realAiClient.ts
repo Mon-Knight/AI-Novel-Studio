@@ -159,8 +159,13 @@ export class RealAiClient implements AiClient {
   private async generateViaFetch(request: AiGenerateRequest): Promise<AiGenerateResponse> {
     const url = buildChatCompletionsUrl(this.config.baseUrl);
     const controller = new AbortController();
-    const onExternalAbort = () => controller.abort();
+    let externallyAborted = request.signal?.aborted ?? false;
+    const onExternalAbort = () => {
+      externallyAborted = true;
+      controller.abort();
+    };
     request.signal?.addEventListener('abort', onExternalAbort, { once: true });
+    if (externallyAborted) controller.abort();
     const timeoutSeconds = this.config.timeoutSeconds ?? 120;
     const timeout = window.setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
@@ -196,6 +201,9 @@ export class RealAiClient implements AiClient {
       };
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') {
+        if (externallyAborted) {
+          throw new DOMException('AI 请求已取消', 'AbortError');
+        }
         throw new Error(`AI 调用失败：请求超时（${timeoutSeconds} 秒），请检查网络或增加超时时间。`);
       }
       if (err instanceof TypeError && String(err.message).includes('fetch')) {

@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { providerAdapter, normalizeProviderError } from '../../services/ai-tasks/providerAdapter';
 import { unifiedAiPipeline } from '../../services/ai-tasks/unifiedAiPipeline';
 import { aiTaskStore } from '../../store/aiTaskStore';
+import { RealAiClient } from '../../services/ai/realAiClient';
 import type { AiClient, AiGenerateResponse } from '../../types/ai';
 
 describe('provider adapter', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('returns only response metadata hashes and lengths', async () => {
     const client: AiClient = { generate: vi.fn().mockResolvedValue({ text: 'OK', tokenTotal: 3 }) };
     const result = await providerAdapter.execute(
@@ -92,5 +95,73 @@ describe('provider adapter', () => {
     await unifiedAiPipeline.cancel(taskId);
     await expect(run).rejects.toEqual(expect.objectContaining({ code: 'AI_PROVIDER_CANCELLED' }));
     expect(aiTaskStore.get(taskId)).toEqual(expect.objectContaining({ status: 'cancelled' }));
+  });
+
+  it('classifies an externally aborted real browser client as cancellation instead of timeout', async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new RealAiClient({
+      baseUrl: 'https://example.invalid/v1',
+      apiKey: 'test-key',
+      modelName: 'test-model',
+      timeoutSeconds: 30,
+    });
+    const pending = providerAdapter.execute(
+      'attempt-real-client-cancel',
+      client,
+      { messages: [{ role: 'user', content: 'test' }] },
+      30_000,
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(providerAdapter.cancel('attempt-real-client-cancel')).toBe(true);
+    await expect(pending).rejects.toEqual(expect.objectContaining({
+      code: 'AI_PROVIDER_CANCELLED', retryable: false,
+    }));
+  });
+
+  it('never writes snapshot bodies or prompts into DB call logs', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const secrets = {
+      body: 'PRIVATE-DRAFT-BODY-6f8454',
+      context: 'PRIVATE-COMPILED-CONTEXT-12ab90',
+      prompt: 'PRIVATE-PROMPT-TEMPLATE-903c2d',
+      instruction: 'PRIVATE-USER-INSTRUCTION-3310ef',
+    };
+    await unifiedAiPipeline.run({
+      taskType: 'connection_test',
+      novelId: 'system',
+      scopeType: 'system',
+      inputSnapshot: {
+        schemaVersion: 1,
+        inputType: 'privacy-test',
+        payloadJson: { userInstruction: secrets.instruction },
+        body: secrets.body,
+      },
+      contextSnapshot: {
+        schemaVersion: 1,
+        sourceManifestJson: {},
+        compiledContext: secrets.context,
+        budgetJson: {},
+        compilerVersion: 'test',
+      },
+      constraintSnapshot: {
+        schemaVersion: 1,
+        payloadJson: {},
+        promptTemplateId: 'privacy-test',
+        promptTemplateVersion: '1',
+        promptTemplateHash: 'hash',
+        promptTemplateBody: secrets.prompt,
+        providerOptionsJson: {},
+      },
+      artifactType: 'generic_text',
+      timeoutMs: 1000,
+      client: { generate: async () => ({ text: 'OK' }) },
+      request: { messages: [{ role: 'user', content: secrets.prompt }] },
+    });
+    const logged = JSON.stringify(log.mock.calls);
+    for (const secret of Object.values(secrets)) expect(logged).not.toContain(secret);
+    log.mockRestore();
   });
 });

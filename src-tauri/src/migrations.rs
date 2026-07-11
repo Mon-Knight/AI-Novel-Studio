@@ -56,22 +56,22 @@ fn migrations() -> [Migration; 11] {
         },
         Migration {
             id: "007_ai_input_snapshots",
-            definition: "ai_input_snapshots_v1(task,schema,input,payload,body_ref,source_draft,base_hash,content_hash,created,immutable_update)",
+            definition: "ai_input_snapshots_v1(task,schema,input,payload,body_ref,source_draft,base_hash,content_hash,created,immutable_update_delete)",
             apply: apply_ai_input_snapshots,
         },
         Migration {
             id: "008_ai_context_snapshots",
-            definition: "ai_context_snapshots_v1(task,schema,manifest,compiled_ref,budget,compiler,content_hash,created,immutable_update)",
+            definition: "ai_context_snapshots_v1(task,schema,manifest,compiled_ref,budget,compiler,content_hash,created,immutable_update_delete)",
             apply: apply_ai_context_snapshots,
         },
         Migration {
             id: "009_ai_constraint_snapshots",
-            definition: "ai_constraint_snapshots_v1(task,schema,payload,template_identity,template_ref,provider_options,content_hash,created,immutable_update)",
+            definition: "ai_constraint_snapshots_v1(task,schema,payload,template_identity,template_ref,provider_options,content_hash,created,immutable_update_delete)",
             apply: apply_ai_constraint_snapshots,
         },
         Migration {
             id: "010_result_artifacts",
-            definition: "result_artifacts_v1(task,attempt,type,schema,raw_ref,display_ref,payload,source_identity,content_hash,status,parent,derivation,created,immutable_content,draft_and_quality_source_columns)",
+            definition: "result_artifacts_v1(task,attempt,type,schema,raw_ref,display_ref,payload,source_identity,content_hash,status,parent,derivation,created,immutable_content_delete,draft_and_quality_source_columns)",
             apply: apply_result_artifacts,
         },
         Migration {
@@ -401,7 +401,9 @@ fn apply_ai_input_snapshots(transaction: &Transaction<'_>) -> Result<(), AppErro
             CREATE INDEX IF NOT EXISTS idx_ai_input_snapshots_source
                 ON ai_input_snapshots(source_draft_id, source_draft_version, base_content_hash);
             CREATE TRIGGER IF NOT EXISTS trg_ai_input_snapshots_immutable_update
-                BEFORE UPDATE ON ai_input_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;",
+                BEFORE UPDATE ON ai_input_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_input_snapshots_immutable_delete
+                BEFORE DELETE ON ai_input_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;",
         )
         .map_err(AppError::database)
 }
@@ -425,7 +427,9 @@ fn apply_ai_context_snapshots(transaction: &Transaction<'_>) -> Result<(), AppEr
             CREATE INDEX IF NOT EXISTS idx_ai_context_snapshots_hash
                 ON ai_context_snapshots(content_hash, compiler_version);
             CREATE TRIGGER IF NOT EXISTS trg_ai_context_snapshots_immutable_update
-                BEFORE UPDATE ON ai_context_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;",
+                BEFORE UPDATE ON ai_context_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_context_snapshots_immutable_delete
+                BEFORE DELETE ON ai_context_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;",
         )
         .map_err(AppError::database)
 }
@@ -451,7 +455,9 @@ fn apply_ai_constraint_snapshots(transaction: &Transaction<'_>) -> Result<(), Ap
             CREATE INDEX IF NOT EXISTS idx_ai_constraint_snapshots_template
                 ON ai_constraint_snapshots(prompt_template_id, prompt_template_version, prompt_template_hash);
             CREATE TRIGGER IF NOT EXISTS trg_ai_constraint_snapshots_immutable_update
-                BEFORE UPDATE ON ai_constraint_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;",
+                BEFORE UPDATE ON ai_constraint_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_constraint_snapshots_immutable_delete
+                BEFORE DELETE ON ai_constraint_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;",
         )
         .map_err(AppError::database)
 }
@@ -495,7 +501,9 @@ fn apply_result_artifacts(transaction: &Transaction<'_>) -> Result<(), AppError>
                 BEFORE UPDATE OF raw_content_ref_id, display_content_ref_id, structured_payload_json,
                     source_novel_id, source_chapter_id, source_draft_id, source_draft_version,
                     source_base_content_hash, content_hash, schema_version
-                ON result_artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;",
+                ON result_artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_result_artifacts_immutable_delete
+                BEFORE DELETE ON result_artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;",
         )
         .map_err(AppError::database)?;
 
@@ -585,6 +593,20 @@ fn apply_artifact_validation_issues(transaction: &Transaction<'_>) -> Result<(),
 mod tests {
     use super::*;
 
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 11] = [
+        ("001_schema_migrations", "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1"),
+        ("002_workspace_recovery_snapshots", "7b3d51eb4fedcdac62b04d427746c8990a43d1ce98a1e80ea2f4b3e2429ee739"),
+        ("003_draft_save_operations", "62d442e75b5bdf0fb1e1149d454cce9611f42221185bb7b5e16eab762c77e1ec"),
+        ("004_large_text_integrity", "6397a9245892ad2b77472f203055f9e1f13ceb90f30b60d4062f4fb007d2d15b"),
+        ("005_ai_tasks", "6aa9f1131e702cafef46a727b971fcab64c16b840e93999916785dbef870bced"),
+        ("006_ai_task_attempts", "06f06ca020e390f81d040f5b00b0496eeb8decd15242f9dc9d251b88d40ca361"),
+        ("007_ai_input_snapshots", "61350e555e936d8d4d3071a3ac289355c531a93bb944bcb3294af7b5ddd34736"),
+        ("008_ai_context_snapshots", "6b79604e14bb1969ccde53e40a3e3629e4b5ccc4c4041154ded3cf1ffc0ac5fe"),
+        ("009_ai_constraint_snapshots", "6517b0d1cb2605f35d192bb35be4c7aab02e11f5f50fe78f841b2ef13d03494a"),
+        ("010_result_artifacts", "567e8c1463762029bb8393da6eb94c7b4f68c4ec0bc6fcf349fe465d80c94fb6"),
+        ("011_artifact_validation_issues", "3f8e5d59f40bb3722fd6799267e168ec4855321b3049ce68206fe0f62a74fa85"),
+    ];
+
     fn legacy_schema(connection: &Connection) -> rusqlite::Result<()> {
         connection.execute_batch(
             "CREATE TABLE chapter_drafts (
@@ -608,12 +630,12 @@ mod tests {
         run_migrations(&mut connection)?;
         let migrations = list_applied(&connection)?;
         assert_eq!(migrations.len(), 11);
-        assert_eq!(migrations[0].migration_id, "001_schema_migrations");
-        assert_eq!(
-            migrations[10].migration_id,
-            "011_artifact_validation_issues"
-        );
-        assert!(migrations.iter().all(|item| item.checksum.len() == 64));
+        for (applied, (expected_id, expected_checksum)) in
+            migrations.iter().zip(EXPECTED_MIGRATION_CHECKSUMS)
+        {
+            assert_eq!(applied.migration_id, expected_id);
+            assert_eq!(applied.checksum, expected_checksum);
+        }
         Ok(())
     }
 
@@ -710,6 +732,25 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(indexes, 4);
+        for trigger in [
+            "trg_ai_input_snapshots_immutable_update",
+            "trg_ai_input_snapshots_immutable_delete",
+            "trg_ai_context_snapshots_immutable_update",
+            "trg_ai_context_snapshots_immutable_delete",
+            "trg_ai_constraint_snapshots_immutable_update",
+            "trg_ai_constraint_snapshots_immutable_delete",
+            "trg_result_artifacts_immutable_content",
+            "trg_result_artifacts_immutable_delete",
+            "trg_artifact_validation_issues_append_only_update",
+            "trg_artifact_validation_issues_append_only_delete",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+                params![trigger],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing trigger {trigger}");
+        }
         Ok(())
     }
 
@@ -771,6 +812,87 @@ mod tests {
         assert_eq!(adopted, "draft-a");
         assert_eq!(checksum(&body), before_hash);
         assert_eq!(legacy_result, "legacy result");
+        Ok(())
+    }
+
+    #[test]
+    fn db21_snapshots_reject_update_and_delete() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        connection.execute_batch(
+            "INSERT INTO ai_tasks
+                (task_id, task_type, novel_id, scope_type, status, trace_id, operation_id,
+                 request_hash, created_at)
+             VALUES ('task-immutable', 'quality_check', 'novel-a', 'draft', 'ready',
+                     'trace-a', 'operation-a', 'request-a', 'now');
+             INSERT INTO ai_input_snapshots
+                (snapshot_id, task_id, schema_version, input_type, payload_json, content_hash, created_at)
+             VALUES ('input-a', 'task-immutable', 1, 'input', '{}', 'input-hash', 'now');
+             INSERT INTO ai_context_snapshots
+                (snapshot_id, task_id, schema_version, source_manifest_json, budget_json,
+                 compiler_version, content_hash, created_at)
+             VALUES ('context-a', 'task-immutable', 1, '{}', '{}', 'v1', 'context-hash', 'now');
+             INSERT INTO ai_constraint_snapshots
+                (snapshot_id, task_id, schema_version, payload_json, prompt_template_id,
+                 prompt_template_version, prompt_template_hash, provider_options_json,
+                 content_hash, created_at)
+             VALUES ('constraint-a', 'task-immutable', 1, '{}', 'template', '1',
+                     'template-hash', '{}', 'constraint-hash', 'now');",
+        )?;
+
+        for (table, id) in [
+            ("ai_input_snapshots", "input-a"),
+            ("ai_context_snapshots", "context-a"),
+            ("ai_constraint_snapshots", "constraint-a"),
+        ] {
+            assert!(connection
+                .execute(
+                    &format!("UPDATE {table} SET content_hash = 'changed' WHERE snapshot_id = ?1"),
+                    params![id],
+                )
+                .is_err());
+            assert!(connection
+                .execute(
+                    &format!("DELETE FROM {table} WHERE snapshot_id = ?1"),
+                    params![id],
+                )
+                .is_err());
+            let count: i64 = connection.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE snapshot_id = ?1"),
+                params![id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(count, 1);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn db22_v220_ledger_upgrades_from_005_and_restarts_idempotently(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        let original = list_applied(&connection)?;
+        connection.execute_batch(
+            "DELETE FROM schema_migrations WHERE migration_id >= '005';
+             DROP TABLE artifact_validation_issues;
+             DROP TABLE result_artifacts;
+             DROP TABLE ai_constraint_snapshots;
+             DROP TABLE ai_context_snapshots;
+             DROP TABLE ai_input_snapshots;
+             DROP TABLE ai_task_attempts;
+             DROP TABLE ai_tasks;",
+        )?;
+
+        run_migrations(&mut connection)?;
+        let upgraded = list_applied(&connection)?;
+        assert_eq!(upgraded.len(), 11);
+        assert_eq!(&upgraded[..4], &original[..4]);
+        let once = upgraded.clone();
+        run_migrations(&mut connection)?;
+        assert_eq!(list_applied(&connection)?, once);
         Ok(())
     }
 }

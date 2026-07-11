@@ -58,6 +58,9 @@ $suiteConfig = @{
             'migrations::tests::db17_m1_schema_has_all_tables_indexes_and_foreign_keys',
             'migrations::tests::db18_failed_migration_rolls_back_only_the_current_item',
             'migrations::tests::db19_upgrade_preserves_adopted_pointer_and_legacy_ai_rows',
+            'db::tests::db20_empty_database_initializes_complete_m1_ledger',
+            'migrations::tests::db21_snapshots_reject_update_and_delete',
+            'migrations::tests::db22_v220_ledger_upgrades_from_005_and_restarts_idempotently',
             'errors::tests::db16_app_error_serializes_as_stable_object'
         )
     }
@@ -78,7 +81,9 @@ $suiteConfig = @{
             'services::ai_task_service::tests::task12_snapshot_update_is_rejected_by_immutable_boundary',
             'services::ai_task_service::tests::task13_completed_task_cannot_be_restarted',
             'services::ai_task_service::tests::task14_client_request_hash_mismatch_fails_closed',
-            'services::ai_task_service::tests::task15_abort_acknowledgement_finalizes_cancellation'
+            'services::ai_task_service::tests::task15_abort_acknowledgement_finalizes_cancellation',
+            'services::ai_task_service::tests::task16_cross_task_attempt_identity_is_rejected',
+            'services::ai_task_service::tests::task17_cancel_race_marks_provider_success_as_late_response'
         )
     }
     'ai-artifacts' = @{
