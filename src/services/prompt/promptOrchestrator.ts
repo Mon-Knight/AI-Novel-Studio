@@ -6,6 +6,18 @@ import chapterGenerateTemplate from '../../../prompts/chapter_generate.md?raw';
 import type { AiGenerateRequest, ChapterPromptDebugInfo } from '../../types/ai';
 import type { ChapterGenerationContext } from '../../types/ai';
 
+export interface ChapterGenerateRequestOptions {
+  /** Deterministic Context/Constraint compiler output for this one task. */
+  compiledConstraints?: string;
+}
+
+export interface ChapterGeneratePromptTemplate {
+  id: string;
+  version: string;
+  body: string;
+  source: ChapterPromptDebugInfo['templateSource'];
+}
+
 // 简单模板引擎：替换 {{variable}} 和处理 {{#variable}}块{{/variable}}
 function renderTemplate(template: string, context: Record<string, string | undefined>): string {
   let result = template;
@@ -60,7 +72,10 @@ function buildPromptDebug(
   };
 }
 
-function buildUserGenerationPrompt(context: ChapterGenerationContext): string {
+function buildUserGenerationPrompt(
+  context: ChapterGenerationContext,
+  compiledConstraints?: string,
+): string {
   const parts = [
     `请开始写《${context.chapterTitle}》的正文。`,
     '',
@@ -75,6 +90,9 @@ function buildUserGenerationPrompt(context: ChapterGenerationContext): string {
     '【本章必须直接出场角色】',
     context.requiredCharactersSummary?.trim() || context.requiredCharacterNames || '无',
     '',
+    ...(compiledConstraints?.trim()
+      ? ['【本次编译约束】', compiledConstraints.trim(), '']
+      : []),
     '请直接输出小说正文，不要输出说明、分析或 Markdown 标记。',
   ];
 
@@ -85,7 +103,7 @@ function buildUserGenerationPrompt(context: ChapterGenerationContext): string {
 const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根据已确认的大纲、设定、角色、事件和风格生成章节正文，不得脱离规划另起剧情。
 
 【优先级】
-用户本次额外要求 > 本章目标 > 当前章节大纲 > 当前采用分卷大纲 > 当前采用总纲 > 世界背景 / 主角 / 角色 / 风格方案。
+本次编译约束中的“必须满足”和“禁止违反” > 用户本次额外要求 > 本章目标 > 当前章节大纲 > 当前采用分卷大纲 > 当前采用总纲 > 世界背景 / 主角 / 角色 / 风格方案。
 
 {{#protagonist_names}}
 【硬性角色约束（最高优先级）】
@@ -146,7 +164,12 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 5. 如果因篇幅无法完全展开，也必须至少覆盖每个关键点的核心动作。
 6. 结尾必须服务于章节大纲中的结尾安排或下一章钩子。
 7. 如果当前章节大纲为空，必须优先依据【本章目标】、【当前采用分卷大纲】和【当前采用总纲】推进。
-8. 如用户额外要求与大纲冲突，以用户额外要求为最高优先级，但不得完全抛弃大纲主线。
+8. 用户额外要求不得与【本次编译约束】中的“必须满足”和“禁止违反”冲突；其余情况下仍应尽量满足用户额外要求，但不得完全抛弃大纲主线。
+
+{{#compiledConstraints}}
+【本次编译约束（优先执行）】
+{{compiledConstraints}}
+{{/compiledConstraints}}
 
 目标字数：约 {{targetWordCount}} 字
 
@@ -202,6 +225,10 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 【前文上下文摘要】
 {{previousContext}}
 {{/previousContext}}
+{{#currentAdoptedContent}}
+【当前章节已采用正文（仅作连续性与安全重生成参考）】
+{{currentAdoptedContent}}
+{{/currentAdoptedContent}}
 {{#outputProfile}}
 【输出控制（必须遵守）】
 {{outputProfile}}
@@ -217,13 +244,23 @@ const DEFAULT_TEMPLATE = `你是一位专业的小说作家。你必须严格根
 {{/draftContent}}
 请直接输出小说正文，不要写“以下是正文”等引导语，不要输出 Markdown 标记。字数尽量接近目标字数 {{targetWordCount}} 字。`;
 
+export function getChapterGeneratePromptTemplate(): ChapterGeneratePromptTemplate {
+  const body = chapterGenerateTemplate?.trim() || DEFAULT_TEMPLATE.trim();
+  return {
+    id: 'chapter_generate',
+    version: '1',
+    body,
+    source: chapterGenerateTemplate?.trim() ? 'chapter_generate.md' : 'DEFAULT_TEMPLATE',
+  };
+}
+
 export async function buildGenerateRequest(
   context: ChapterGenerationContext,
+  options: ChapterGenerateRequestOptions = {},
 ): Promise<AiGenerateRequest> {
-  const template = chapterGenerateTemplate?.trim() ? chapterGenerateTemplate : DEFAULT_TEMPLATE;
-  const templateSource: ChapterPromptDebugInfo['templateSource'] = chapterGenerateTemplate?.trim()
-    ? 'chapter_generate.md'
-    : 'DEFAULT_TEMPLATE';
+  const promptTemplate = getChapterGeneratePromptTemplate();
+  const template = promptTemplate.body;
+  const templateSource = promptTemplate.source;
 
   const ctx: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(context)) {
@@ -233,9 +270,11 @@ export async function buildGenerateRequest(
     if (snakeKey !== k) ctx[snakeKey] = v != null ? String(v) : undefined;
   }
   ctx.outline_checklist = context.outlineChecklistText || context.chapterOutline;
+  ctx.compiledConstraints = options.compiledConstraints?.trim() || undefined;
+  ctx.compiled_constraints = ctx.compiledConstraints;
 
   const systemPrompt = renderTemplate(template, ctx);
-  const userPromptContent = buildUserGenerationPrompt(context);
+  const userPromptContent = buildUserGenerationPrompt(context, options.compiledConstraints);
   const promptDebug = buildPromptDebug(`${systemPrompt}\n${userPromptContent}`, context, templateSource);
 
   // 开发态只输出摘要，不输出完整 prompt 或 API Key。

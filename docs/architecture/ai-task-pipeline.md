@@ -4,7 +4,7 @@
 >
 > 适用版本：v2.3.0（实现）、v2.4.0（扩展）
 >
-> 状态：架构契约；本文件不代表生产链路已经接入
+> 状态：架构契约；章节正文生成已接入第一阶段 Context / Constraint Compiler，其余入口仍按各自迁移计划推进。
 
 ## 1. 目标与唯一管线
 
@@ -211,6 +211,19 @@ interface AiConstraintSnapshot {
 | providerOptionsJson | temperature、maxTokens 等非密钥参数；绝不保存 API Key。 |
 
 项目后续变化不得修改旧 Snapshot。缺少来源版本/hash 的 legacy 数据只能标记 unknown，不得推断或回填。
+
+### 4.4 章节生成 Context / Constraint Compiler（第一阶段）
+
+章节正文生成在创建 `AiTask`、`AiTaskAttempt` 和调用 Provider 之前，必须由
+`src/services/prompt/chapterGenerationCompiler.ts` 生成一对可复现合约：
+
+- Context：当前作品、分卷、章节、章节大纲与关键点、当前采用正文、当前草稿基线、最近三个章节状态、前两章摘要、未解决线索、相关角色、世界规则、质量问题和当前章节工程状态。
+- Constraint：按固定顺序输出 `must`、`should`、`forbid` 三类约束，覆盖本章大纲事件、角色身份/行为、工程中的时间线/地点/视角限制、世界规则、禁止提前发生剧情、目标字数、质量问题规避和“仅生成当前章节候选”的范围限制。
+- 预算：Context 上限为 24,000 Unicode 字符，Constraint 上限为 12,000 Unicode 字符。关键章节目标与大纲优先保留；软背景按 `critical → high → normal → background` 顺序裁剪，硬约束超预算时 fail-closed。
+- 隔离：编译器校验 `novelId → volumeId → chapterId → sourceDraftId/version/hash`，只读取当前作品的记录，只读取当前章节之前的摘要，禁止把后续章节或其他作品的内容带入快照。
+- 隐私：编译前递归拒绝疑似 API Key、Authorization、credential 或 secret；Snapshot 和诊断日志不写入 Provider 凭据或完整 Prompt/正文日志。
+
+Context Snapshot 持久化 `sourceManifest`、稳定 Context hash、裁剪统计和受预算的编译文本；Constraint Snapshot 持久化三类约束、稳定 Constraint hash、模板身份/正文 hash 和非密钥 Provider 选项。Provider 调用只能使用这一次已经冻结的合约。编译或 Snapshot 创建失败时不得创建 Attempt，也不得调用 Provider。
 
 ## 5. 权威状态机
 

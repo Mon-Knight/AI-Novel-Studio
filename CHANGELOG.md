@@ -56,6 +56,14 @@
 - 修复 Tauri 质量修稿记录参数封装和异步落库：`quality_fix_runs` 在候选展示前必须写入 SQLite 并进入 `validated`，持久化失败不再静默降级到 LocalStorage，ApplyPlan 因而能原子更新唯一修稿记录。
 - 两次响应仍不满足质量报告结构时继续生成 invalid Artifact 并 fail-closed，不创建伪造 issue，也不进入质量修复 ApplyPlan。
 
+### 章节生成 Context / Constraint Compiler 第一阶段
+
+- 新增确定性章节生成编译器，在 Provider 调用前收集并验证当前 novel / volume / chapter / draft 基线、采用正文、近期章节状态、前文摘要、未解决线索、角色、世界规则、章节事件、质量问题和工程约束。
+- Context Snapshot 现在保存有来源 hash、章节隔离身份、编译版本、24,000 Unicode 字符预算和裁剪统计的受预算上下文；Constraint Snapshot 保存固定顺序的 `must` / `should` / `forbid` 约束、12,000 Unicode 字符预算、稳定 hash 和实际模板 hash。
+- 章节生成预览与正式生成共用同一编译链路；编译失败、基线不一致、跨作品/跨章节请求或疑似凭据都会在创建 Provider 客户端和 Attempt 前 fail-closed。
+- Prompt 模板增加已编译约束和当前采用正文的受控区块；未改变 Provider、模型、温度、Token、应用版本或任何 migration。
+- 新增编译稳定性、章节/作品隔离、预算裁剪、缺失数据降级、凭据排除、入口 Snapshot 绑定、Provider fail-closed 与 Snapshot 事务回滚测试；`task18` 确认 Context Snapshot 写入失败时 Task、三类 Snapshot 和 Attempt 全部回滚。
+
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 
 ### 新增

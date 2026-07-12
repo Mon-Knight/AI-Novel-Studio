@@ -97,7 +97,8 @@ $suiteConfig = @{
             'services::ai_task_service::tests::task14_client_request_hash_mismatch_fails_closed',
             'services::ai_task_service::tests::task15_abort_acknowledgement_finalizes_cancellation',
             'services::ai_task_service::tests::task16_cross_task_attempt_identity_is_rejected',
-            'services::ai_task_service::tests::task17_cancel_race_marks_provider_success_as_late_response'
+            'services::ai_task_service::tests::task17_cancel_race_marks_provider_success_as_late_response',
+            'services::ai_task_service::tests::task18_snapshot_insert_failure_rolls_back_task_and_creates_no_attempt'
         )
     }
     'ai-artifacts' = @{

@@ -298,6 +298,8 @@ export interface ChapterGenerationContext {
   chapterEvents?: string;
   chapterSettings?: string;
   previousContext?: string;
+  /** 当前章节已采用正文的受预算片段，用于安全重生成和连续性保持。 */
+  currentAdoptedContent?: string;
   userInstruction?: string;
   /** 当前草稿正文（重新生成/改写模式时传入） */
   draftContent?: string;

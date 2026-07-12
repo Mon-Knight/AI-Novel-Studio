@@ -739,6 +739,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn task18_snapshot_insert_failure_rolls_back_task_and_creates_no_attempt(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+        connection.execute_batch(
+            "CREATE TRIGGER fail_context_snapshot_insert
+             BEFORE INSERT ON ai_context_snapshots
+             BEGIN
+               SELECT RAISE(ABORT, 'injected context snapshot failure');
+             END;",
+        )?;
+
+        assert!(create_task(&mut connection, task_input("operation-snapshot-failure")).is_err());
+        let count: i64 = connection.query_row(
+            "SELECT (SELECT COUNT(*) FROM ai_tasks) +
+                    (SELECT COUNT(*) FROM ai_input_snapshots) +
+                    (SELECT COUNT(*) FROM ai_context_snapshots) +
+                    (SELECT COUNT(*) FROM ai_constraint_snapshots) +
+                    (SELECT COUNT(*) FROM ai_task_attempts)",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
+
+    #[test]
     fn task05_cas_rejects_stale_worker_and_illegal_transition(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut connection = connection()?;

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   directGenerate: vi.fn(),
   buildContext: vi.fn(),
   buildRequest: vi.fn(),
+  compileGeneration: vi.fn(),
   getDrafts: vi.fn(),
   createDraft: vi.fn(),
   getNovel: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getStyles: vi.fn(),
   getOutputs: vi.fn(),
   confirmInfo: vi.fn(),
+  checkCompliance: vi.fn(),
 }));
 
 vi.mock('../../services/ai-tasks/unifiedAiPipeline', () => ({
@@ -33,6 +35,10 @@ vi.mock('../../services/prompt/contextBuilder', () => ({
 }));
 vi.mock('../../services/prompt/promptOrchestrator', () => ({
   buildGenerateRequest: mocks.buildRequest,
+}));
+vi.mock('../../services/prompt/chapterGenerationCompiler', () => ({
+  CHAPTER_GENERATION_COMPILER_VERSION: 'chapter-context-constraint-v1',
+  compileChapterGeneration: mocks.compileGeneration,
 }));
 vi.mock('../../services/database/draftVersionService', () => ({
   draftVersionService: {
@@ -54,7 +60,7 @@ vi.mock('../../services/styles/outputProfileService', () => ({
   outputProfileService: { getAll: mocks.getOutputs },
 }));
 vi.mock('../../services/ai/outlineComplianceChecker', () => ({
-  checkOutlineCompliance: () => ({ score: 100, coveredPoints: [], missingPoints: [], evidence: [] }),
+  checkOutlineCompliance: mocks.checkCompliance,
 }));
 vi.mock('../../services/ai/chapterRevisionService', () => ({ reviseChapterByOutline: vi.fn() }));
 vi.mock('../../services/ai/aiTaskService', () => ({ aiTaskService: {} }));
@@ -110,10 +116,54 @@ function pipelineResult(text: string) {
   } as any;
 }
 
+function compiledGeneration(context: Record<string, unknown>) {
+  const request = {
+    taskType: 'chapter_generate' as const,
+    messages: [{ role: 'user' as const, content: 'Generate chapter with compiled constraints' }],
+    maxTokens: 1000,
+    promptTemplateSource: 'chapter_generate.md' as const,
+  };
+  return {
+    contextContract: {
+      context,
+      text: 'bounded compiled context',
+      sourceManifest: {
+        schemaVersion: 1,
+        novelId: 'novel-a',
+        volumeId: 'volume-a',
+        chapterId: 'chapter-a',
+        sourceDraft: { id: 'draft-source', versionNo: 3, contentHash: 'source-hash' },
+        sources: [],
+        contextHash: 'context-hash',
+      },
+      budget: { maxChars: 24000, usedChars: 100, truncatedChars: 0, omittedSections: [], trimmedSections: [], promptChars: 200 },
+      hash: 'context-hash',
+      sections: [],
+      warnings: [],
+    },
+    constraints: {
+      must: [{ id: 'must-01', kind: 'must', text: '必须完成当前章节大纲', sourceRefs: [] }],
+      should: [],
+      forbid: [{ id: 'forbid-01', kind: 'forbid', text: '不得写入其他章节', sourceRefs: [] }],
+      text: '【必须满足】\n1. 必须完成当前章节大纲\n\n【禁止违反】\n1. 不得写入其他章节',
+      hash: 'constraint-hash',
+      budget: { maxChars: 12000, usedChars: 40, omittedShouldCount: 0 },
+    },
+    promptTemplate: {
+      id: 'chapter_generate', version: '1', body: 'prompt template body', hash: 'template-hash',
+    },
+    request,
+    compiledPrompt: 'system:\ncompiled prompt',
+  };
+}
+
 describe('M1/M2 migrated production entrypoints', () => {
   beforeEach(() => {
     mocks.runPipeline.mockReset();
     mocks.directGenerate.mockReset();
+    mocks.compileGeneration.mockReset();
+    mocks.checkCompliance.mockReset();
+    mocks.checkCompliance.mockReturnValue({ score: 100, coveredPoints: [], missingPoints: [], evidence: [] });
     mocks.getGenerationContexts.mockResolvedValue([]);
     mocks.getStyles.mockResolvedValue([]);
     mocks.getOutputs.mockResolvedValue([]);
@@ -173,6 +223,10 @@ describe('M1/M2 migrated production entrypoints', () => {
       taskType: 'chapter_generate', messages: [{ role: 'user', content: 'Generate chapter' }],
       maxTokens: 1000, promptTemplateSource: 'chapter-generate-test',
     });
+    mocks.compileGeneration.mockResolvedValue(compiledGeneration({
+      novelId: 'novel-a', chapterId: 'chapter-a', chapterTitle: 'Chapter A', targetWordCount: 1000,
+      outlineKeyPoints: [], requiredCharacters: [], chapterCharacterList: [],
+    }));
     mocks.runPipeline.mockResolvedValue(pipelineResult(candidate.content));
 
     render(
@@ -192,7 +246,94 @@ describe('M1/M2 migrated production entrypoints', () => {
       taskType: 'chapter_generate', chapterId: 'chapter-a', draftId: 'draft-source',
       artifactType: 'chapter_text',
     }));
+    expect(mocks.compileGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      novelId: 'novel-a', chapterId: 'chapter-a', sourceDraftId: 'draft-source', sourceDraftVersion: 3,
+    }));
+    expect(mocks.runPipeline.mock.calls[0][0].contextSnapshot).toEqual(expect.objectContaining({
+      compiledContext: 'bounded compiled context',
+      compilerVersion: 'chapter-context-constraint-v1',
+      sourceManifestJson: expect.objectContaining({ contextHash: 'context-hash', chapterId: 'chapter-a' }),
+    }));
+    expect(mocks.runPipeline.mock.calls[0][0].constraintSnapshot).toEqual(expect.objectContaining({
+      promptTemplateHash: 'template-hash',
+      payloadJson: expect.objectContaining({ constraintHash: 'constraint-hash', targetChapterId: 'chapter-a' }),
+    }));
     expect(mocks.createDraft).not.toHaveBeenCalled();
     expect(mocks.directGenerate).not.toHaveBeenCalled();
+  });
+
+  it('stops before unified pipeline and Provider when Context or Constraint compilation fails', async () => {
+    const source = {
+      id: 'draft-source', novelId: 'novel-a', chapterId: 'chapter-a', content: 'Source',
+      source: 'user_edit', versionNo: 3, wordCount: 20, isAdopted: false,
+      createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z',
+    };
+    mocks.getDrafts.mockResolvedValue([source]);
+    mocks.buildContext.mockResolvedValue({ chapterTitle: 'Chapter A', outlineKeyPoints: [] });
+    mocks.compileGeneration.mockRejectedValue(new Error('章节不属于当前作品，已阻止构建上下文。'));
+
+    render(
+      <AiGeneratePanel
+        novelId="novel-a"
+        chapter={chapter()}
+        currentDraftId="draft-source"
+        currentDraftVersion={3}
+        currentEditorContent="Source"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /生成本章/ }));
+    await waitFor(() => expect(mocks.compileGeneration).toHaveBeenCalledOnce());
+
+    expect(mocks.runPipeline).not.toHaveBeenCalled();
+    expect(mocks.directGenerate).not.toHaveBeenCalled();
+  });
+
+  it('retries with a new compiled contract while retaining the original chapter and draft baseline', async () => {
+    const source = {
+      id: 'draft-source', novelId: 'novel-a', chapterId: 'chapter-a', content: 'Source',
+      source: 'user_edit', versionNo: 3, wordCount: 20, isAdopted: false,
+      createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z',
+    };
+    const missingPoint = { id: 'point-a', text: '让守卫接受钥匙线索', type: 'event', required: true };
+    const context = {
+      novelId: 'novel-a', chapterId: 'chapter-a', chapterTitle: 'Chapter A', targetWordCount: 1000,
+      outlineKeyPoints: [missingPoint], requiredCharacters: [], chapterCharacterList: [],
+    };
+    mocks.getDrafts.mockResolvedValue([source]);
+    mocks.buildContext.mockResolvedValue(context);
+    mocks.compileGeneration.mockResolvedValue(compiledGeneration(context));
+    const retryResult = pipelineResult('Generated retry body');
+    retryResult.task.taskId = 'task-b';
+    retryResult.artifact.artifactId = 'artifact-b';
+    mocks.runPipeline.mockResolvedValueOnce(pipelineResult('Generated first body')).mockResolvedValueOnce(retryResult);
+    mocks.checkCompliance.mockReturnValue({ score: 0, coveredPoints: [], missingPoints: [missingPoint], evidence: [] });
+
+    render(
+      <AiGeneratePanel
+        novelId="novel-a"
+        chapter={chapter()}
+        currentDraftId="draft-source"
+        currentDraftVersion={3}
+        currentEditorContent="Source"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /生成本章/ }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '重新生成' }).length).toBeGreaterThan(1));
+    const retryButton = screen.getAllByRole('button', { name: '重新生成' })
+      .find((button) => button.classList.contains('btn-secondary') && button.classList.contains('btn-sm'));
+    expect(retryButton).toBeDefined();
+    fireEvent.click(retryButton!);
+    await waitFor(() => expect(mocks.compileGeneration).toHaveBeenCalledTimes(2));
+
+    const firstInput = mocks.compileGeneration.mock.calls[0][0];
+    const retryInput = mocks.compileGeneration.mock.calls[1][0];
+    expect(retryInput).toEqual(expect.objectContaining({
+      novelId: firstInput.novelId,
+      chapterId: firstInput.chapterId,
+      sourceDraftId: firstInput.sourceDraftId,
+      sourceDraftVersion: firstInput.sourceDraftVersion,
+      baseContentHash: firstInput.baseContentHash,
+    }));
+    expect(retryInput.userInstruction).toContain(missingPoint.text);
   });
 });

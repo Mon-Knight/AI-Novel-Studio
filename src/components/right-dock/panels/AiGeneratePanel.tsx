@@ -8,7 +8,11 @@ import { createAiClient, aiSettingsService } from '../../../services/ai/aiClient
 import { unifiedAiPipeline } from '../../../services/ai-tasks/unifiedAiPipeline';
 import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { buildFreshChapterGenerationContext } from '../../../services/prompt/contextBuilder';
-import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
+import {
+  CHAPTER_GENERATION_COMPILER_VERSION,
+  compileChapterGeneration,
+} from '../../../services/prompt/chapterGenerationCompiler';
+import type { CompiledChapterGeneration } from '../../../types/chapterGenerationCompilation';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { notifyNative } from '../../../utils/nativeNotification';
 import { confirmInfo, confirmDanger } from '../../../utils/nativeDialog';
@@ -235,20 +239,39 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const handlePreviewContext = useCallback(async () => {
     if (!novelId || !chapter) return;
     try {
-      const ctx = await buildFreshChapterGenerationContext({
+      const persistedDrafts = await draftVersionService.getByChapterId(chapter.id);
+      const sourceDraft = currentDraftId
+        ? persistedDrafts.find((draft) => draft.id === currentDraftId)
+        : persistedDrafts[persistedDrafts.length - 1];
+      const sourceDraftId = currentDraftId || sourceDraft?.id;
+      const sourceDraftVersion = currentDraftVersion || sourceDraft?.versionNo;
+      if (!sourceDraftId || !sourceDraftVersion) {
+        setErrorMsg('当前章节缺少可验证的草稿基线，无法预览本次生成上下文');
+        return;
+      }
+      const baseContentHash = sourceDraft?.contentState?.status === 'ready'
+        ? sourceDraft.contentState.contentHash
+        : await computeContentSha256(sourceDraft?.content ?? currentEditorContent ?? '');
+      const compilation = await compileChapterGeneration({
         novelId,
         volumeId: chapter.volumeId,
         chapterId: chapter.id,
+        sourceDraftId,
+        sourceDraftVersion,
+        baseContentHash,
+        userInstruction: userInstruction.trim() || undefined,
         styleId: selectedStyleId || undefined,
         outputId: selectedOutputId || undefined,
         targetWordCount: wordCountDraft || undefined,
+        draftContent: genMode === 'rewrite' ? (currentEditorContent?.trim() || undefined) : undefined,
       });
-      const request = await buildGenerateRequest(ctx);
-      setContextSummary(ctx);
-      setPromptDebug(request.promptDebug ?? null);
+      setContextSummary(compilation.contextContract.context);
+      setPromptDebug(compilation.request.promptDebug ?? null);
       setShowContext(true);
-    } catch { /* ignore */ }
-  }, [novelId, chapter, selectedStyleId, selectedOutputId, wordCountDraft]);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : '预览生成上下文失败');
+    }
+  }, [novelId, chapter, currentDraftId, currentDraftVersion, currentEditorContent, userInstruction, selectedStyleId, selectedOutputId, wordCountDraft, genMode]);
 
   const handleGenerate = async (options?: { retryMissingPoints?: OutlineKeyPoint[] }) => {
     if (!novelId || !chapter) return;
@@ -273,30 +296,35 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       baseContentHash,
     };
 
+    const retryInstruction = options?.retryMissingPoints?.length
+      ? [
+          '上一次生成未遵循章节大纲，本次必须严格覆盖以下缺失点：',
+          ...options.retryMissingPoints.map((point, index) => `${index + 1}. ${point.text}`),
+        ].join('\n')
+      : '';
+    const mergedInstruction = [
+      userInstruction.trim(),
+      retryInstruction,
+    ].filter(Boolean).join('\n\n') || undefined;
+    let compilation: CompiledChapterGeneration;
     let preflightContext: ChapterGenerationContext;
     try {
-      const retryInstruction = options?.retryMissingPoints?.length
-        ? [
-            '上一次生成未遵循章节大纲，本次必须严格覆盖以下缺失点：',
-            ...options.retryMissingPoints.map((point, index) => `${index + 1}. ${point.text}`),
-          ].join('\n')
-        : '';
-      const mergedInstruction = [
-        userInstruction.trim(),
-        retryInstruction,
-      ].filter(Boolean).join('\n\n') || undefined;
-      preflightContext = await buildFreshChapterGenerationContext({
+      compilation = await compileChapterGeneration({
         novelId,
         volumeId: chapter.volumeId,
         chapterId: chapter.id,
+        sourceDraftId,
+        sourceDraftVersion,
+        baseContentHash,
         userInstruction: mergedInstruction,
         styleId: selectedStyleId || undefined,
         outputId: selectedOutputId || undefined,
         targetWordCount: wordCountDraft || undefined,
         draftContent: genMode === 'rewrite' ? (currentEditorContent?.trim() || undefined) : undefined,
       });
+      preflightContext = compilation.contextContract.context;
       setContextSummary(preflightContext);
-      setPromptDebug(null);
+      setPromptDebug(compilation.request.promptDebug ?? null);
     } catch (e: any) {
       setErrorMsg(e?.message || '生成前读取最新上下文失败');
       return;
@@ -337,7 +365,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           cancelable: false,
         },
         async ({ setMessage, setStage, setPercent }) => {
-          // 点击生成前已经强制构建 fresh context；这里沿用同一份上下文进入最终 prompt。
+          // Provider 之前已完成并冻结当前章节的 Context / Constraint 编译。
           const ctx: ChapterGenerationContext = preflightContext;
 
           const hasOutline = ctx?.chapterOutline ? '有' : '无';
@@ -364,10 +392,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setStage('正在组装提示词……');
           setPercent(15);
 
-          // 2. 组装提示词
+          // 2. 使用已冻结的 Prompt / Constraint 合约
           setStage('正在分析角色、事件和风格方案……');
           setPercent(25);
-          const request = await buildGenerateRequest(ctx);
+          const request = compilation.request;
           setPromptDebug(request.promptDebug ?? null);
 
           // 3. 调用 AI
@@ -375,9 +403,6 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setMessage('AI 正在输出章节内容，请稍候……');
           setPercent(40);
           const client = createAiClient(settings);
-          const compiledPrompt = request.messages
-            .map((message) => `${message.role}:\n${message.content}`)
-            .join('\n\n');
           const pipeline = await unifiedAiPipeline.run({
             taskType: 'chapter_generate',
             novelId: requestTarget.novelId,
@@ -390,7 +415,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
               inputType: 'chapter_generate_input',
               payloadJson: {
                 mode: genMode,
-                userInstruction: userInstruction.trim() || undefined,
+                userInstruction: mergedInstruction,
                 inputSummary,
               },
               body: genMode === 'rewrite' ? currentEditorContent : undefined,
@@ -401,30 +426,34 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             contextSnapshot: {
               schemaVersion: 1,
               sourceManifestJson: {
-                novelId: requestTarget.novelId,
-                chapterId: requestTarget.chapterId,
-                volumeId: chapter.volumeId,
+                ...compilation.contextContract.sourceManifest,
                 styleId: selectedStyleId || null,
                 outputId: selectedOutputId || null,
               },
-              compiledContext: compiledPrompt,
+              compiledContext: compilation.contextContract.text,
               budgetJson: {
-                promptChars: Array.from(compiledPrompt).length,
+                ...compilation.contextContract.budget,
                 targetWordCount: ctx.targetWordCount || wordCountDraft,
-                maxTokens: request.maxTokens || settings.maxTokens,
               },
-              compilerVersion: 'chapter-context-builder-v1',
+              compilerVersion: CHAPTER_GENERATION_COMPILER_VERSION,
             },
             constraintSnapshot: {
               schemaVersion: 1,
               payloadJson: {
+                compilerVersion: CHAPTER_GENERATION_COMPILER_VERSION,
                 artifactType: 'chapter_text',
                 targetChapterId: requestTarget.chapterId,
-                requiredCharacters: ctx.requiredCharacters?.map((item) => item.name) || [],
+                contextHash: compilation.contextContract.hash,
+                constraintHash: compilation.constraints.hash,
+                must: compilation.constraints.must,
+                should: compilation.constraints.should,
+                forbid: compilation.constraints.forbid,
+                budget: compilation.constraints.budget,
               },
-              promptTemplateId: request.promptTemplateSource || 'chapter_generate',
-              promptTemplateVersion: '1',
-              promptTemplateHash: await computeContentSha256(compiledPrompt),
+              promptTemplateId: compilation.promptTemplate.id,
+              promptTemplateVersion: compilation.promptTemplate.version,
+              promptTemplateHash: compilation.promptTemplate.hash,
+              promptTemplateBody: compilation.promptTemplate.body,
               providerOptionsJson: {
                 provider: settings.provider,
                 model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
