@@ -2,7 +2,7 @@
  * AI Novel Studio - 质量修稿记录持久化（Tauri SQLite + localStorage 回退）
  * v1.7.17: 升级为 Tauri SQLite 持久化
  */
-import { lsGet, lsSet, nowISO, dbCall } from '../database/db';
+import { lsGet, lsSet, nowISO, dbCall, isTauri } from '../database/db';
 import type { QualityFixRun } from '../ai/qualityFixService';
 
 const KEY = 'ai_novel_studio_fix_runs';
@@ -45,10 +45,10 @@ function toTauriInput(fixRun: QualityFixRun): Record<string, unknown> {
 
 export const fixRunStore = {
   async getByChapterId(chapterId: string): Promise<QualityFixRun[]> {
-    try {
+    if (isTauri()) {
       const dtos = await dbCall<any[]>('get_quality_fix_runs', { chapterId });
-      if (Array.isArray(dtos)) return dtos.map(fromTauriDto);
-    } catch { /* fallback */ }
+      return Array.isArray(dtos) ? dtos.map(fromTauriDto) : [];
+    }
     return getAllLocal().filter((r) => r.chapterId === chapterId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
@@ -64,10 +64,11 @@ export const fixRunStore = {
 
   async save(fixRun: QualityFixRun): Promise<QualityFixRun> {
     const r = { ...fixRun, updatedAt: nowISO() };
-    try {
-      await dbCall('save_quality_fix_run', toTauriInput(r));
-    } catch { /* fallback */ }
-    // localStorage fallback
+    if (isTauri()) {
+      const dto = await dbCall<any>('save_quality_fix_run', { input: toTauriInput(r) });
+      return fromTauriDto(dto);
+    }
+
     const list = getAllLocal();
     const idx = list.findIndex((x) => x.id === r.id);
     if (idx >= 0) { list[idx] = r; } else { list.push(r); }
@@ -76,7 +77,10 @@ export const fixRunStore = {
   },
 
   async updateStatus(id: string, status: QualityFixRun['status']): Promise<QualityFixRun | null> {
-    try { await dbCall('update_quality_fix_run_status', { id, status }); } catch { /* fallback */ }
+    if (isTauri()) {
+      await dbCall('update_quality_fix_run_status', { id, status });
+      return null;
+    }
     const list = getAllLocal();
     const idx = list.findIndex((r) => r.id === id);
     if (idx === -1) return null;

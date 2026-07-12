@@ -467,6 +467,7 @@ function CheckPanel({
         browserExpectedHash: requestBaseHash,
       });
       fixRun.status = 'validated';
+      await fixRunStore.save(fixRun);
       if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
         setFixCandidate({
           artifactId,
@@ -488,7 +489,6 @@ function CheckPanel({
           ? '修复候选已通过复检，等待确认采用'
           : '修复候选已保存，可查看后决定是否采用');
       }
-      await fixRunStore.save(fixRun).catch(() => {});
 
       if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
         hideAiModal?.();

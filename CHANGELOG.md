@@ -49,6 +49,13 @@
 - 数据库启动初始化改为显式错误传播，移除目录创建、连接、PRAGMA、建表/迁移和全局连接注册阶段的未处理 panic；继续保持初始化失败即停止启动的 fail-closed 行为。
 - 开发构建输出仅含白名单诊断字段；Release/安装版使用原生错误对话框区分 checksum、历史兼容、数据库损坏、migration、占用和一般初始化故障，不展示作品内容、SQL、数据库路径或实际 checksum。
 
+### 真实 Provider 质量检查兼容修复
+
+- 质量检查统一管线现在解析 fenced JSON、snake_case 字段和受限中文枚举；首次请求即附加 JSON-only 合约，普通正文响应最多再纠正一次，保持兼容服务要求的原消息角色顺序，并完整保留原有 Provider、模型、温度和 Token 参数。
+- 修复后复检会将字符串型 Provider 失败归一为脱敏、可理解的错误，不再退化成无原因的“AI 修稿失败”。
+- 修复 Tauri 质量修稿记录参数封装和异步落库：`quality_fix_runs` 在候选展示前必须写入 SQLite 并进入 `validated`，持久化失败不再静默降级到 LocalStorage，ApplyPlan 因而能原子更新唯一修稿记录。
+- 两次响应仍不满足质量报告结构时继续生成 invalid Artifact 并 fail-closed，不创建伪造 issue，也不进入质量修复 ApplyPlan。
+
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 
 ### 新增

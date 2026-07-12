@@ -380,7 +380,7 @@ export const qualityFixService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    fixRunStore.save(fixRun);
+    await fixRunStore.save(fixRun);
 
     try {
       const client = createAiClient(settings);
@@ -478,7 +478,7 @@ export const qualityFixService = {
       fixRun.fixedIssueIds = params.pendingIssues
         .filter((i) => safeFixResult.fixedIssueKeys.includes(i.issueKey))
         .map((i) => i.id);
-      fixRunStore.save(fixRun);
+      await fixRunStore.save(fixRun);
 
       // v1.7.19 修稿范围校验
       const scopeValidation = validateFixScope(
@@ -495,7 +495,7 @@ export const qualityFixService = {
       const message = e instanceof Error ? e.message : 'AI 修稿失败';
       fixRun.status = 'failed';
       fixRun.failureReason = message;
-      fixRunStore.save(fixRun);
+      await fixRunStore.save(fixRun);
       throw e;
     }
   },

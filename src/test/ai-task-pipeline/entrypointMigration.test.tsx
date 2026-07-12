@@ -149,6 +149,9 @@ describe('M1/M2 migrated production entrypoints', () => {
       taskType: 'quality_check', chapterId: 'chapter-a', draftId: 'draft-a',
       artifactType: 'quality_report',
     }));
+    const parseStructuredPayload = mocks.runPipeline.mock.calls[0][0].parseStructuredPayload;
+    expect(parseStructuredPayload('```json\n{"overall_score":88,"summary":"Good","issues":[]}\n```'))
+      .toEqual({ overallScore: 88, summary: 'Good', items: [] });
     expect(result.aiTaskId).toBe('task-a');
     expect(result.artifactId).toBe('artifact-a');
     expect(mocks.directGenerate).not.toHaveBeenCalled();

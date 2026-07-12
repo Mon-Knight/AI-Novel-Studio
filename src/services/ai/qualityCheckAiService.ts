@@ -5,12 +5,16 @@ import { createAiClient, aiSettingsService } from './aiClient';
 import { buildQualityCheckPrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
 import { unifiedAiPipeline } from '../ai-tasks/unifiedAiPipeline';
+import { normalizeProviderError } from '../ai-tasks/providerAdapter';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { getContextForChapterTask, buildContextPromptSection } from '../prompt/contextReaderService';
 import type { QualityCheckResult, RunQualityCheckInput } from '../../types/qualityCheck';
-import { safeJsonParse } from './jsonUtils';
+import {
+  parseQualityCheckResult,
+  withQualityCheckStructuredRetry,
+} from './qualityCheckOutput';
 
 export const qualityCheckAiService = {
   async runCheck(input: RunQualityCheckInput): Promise<QualityCheckResult> {
@@ -63,7 +67,7 @@ export const qualityCheckAiService = {
     }).catch(() => null);
 
     try {
-      const client = createAiClient(settings);
+      const client = withQualityCheckStructuredRetry(createAiClient(settings));
       const pipeline = input.useUnifiedPipeline ? await unifiedAiPipeline.run({
         taskType: 'quality_check',
         novelId: input.novelId,
@@ -115,15 +119,19 @@ export const qualityCheckAiService = {
         timeoutMs: (settings.timeoutSeconds ?? 120) * 1000,
         client,
         request,
+        parseStructuredPayload: (text) => parseQualityCheckResult(text) ?? undefined,
       }) : null;
       const response = pipeline?.response ?? await client.generate(request);
       const text = response.text || '';
 
-      const parsed = safeJsonParse<QualityCheckResult>(text, {
-        overallScore: 0,
-        summary: '模型返回格式不规范，无法解析检查结果。原始返回：' + text.slice(0, 500),
-        items: [],
-      });
+      const parsed = parseQualityCheckResult(text);
+      if (!parsed) {
+        throw {
+          code: 'AI_PROVIDER_MALFORMED_RESPONSE',
+          message: 'AI 返回结果未通过校验',
+          retryable: false,
+        };
+      }
       if (pipeline) {
         parsed.aiTaskId = pipeline.task.taskId;
         parsed.artifactId = pipeline.artifact.artifactId;
@@ -139,10 +147,15 @@ export const qualityCheckAiService = {
       }
 
       return parsed;
-    } catch (err: any) {
-      const msg = err instanceof Error ? err.message : '质量检查失败';
+    } catch (err: unknown) {
+      const normalizedError = typeof err === 'string' ? normalizeProviderError(err) : err;
+      const msg = normalizedError instanceof Error
+        ? normalizedError.message
+        : normalizedError && typeof normalizedError === 'object' && 'message' in normalizedError
+          ? String(normalizedError.message)
+          : '质量检查失败';
       if (task) await aiTaskService.markFailed(task.id, msg);
-      throw err;
+      throw normalizedError;
     }
   },
 };
