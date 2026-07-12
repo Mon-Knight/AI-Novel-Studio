@@ -620,7 +620,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       {/* 草稿版本信息 */}
       {currentDraft && (
         <div style={{
-          width: 'min(100%, 1180px)', maxWidth: 1180, margin: '0 auto 10px', padding: '7px 12px',
+          width: 'min(100%, 920px)', maxWidth: 920, margin: '0 auto 10px', padding: '7px 12px',
           background: currentDraft.isAdopted ? '#e8f5e9' : 'var(--color-bg-hover)',
           borderRadius: 6, fontSize: 13, display: 'flex', alignItems: 'center', gap: 16,
           border: currentDraft.isAdopted ? '1px solid #c8e6c9' : '1px solid var(--color-border-light)',

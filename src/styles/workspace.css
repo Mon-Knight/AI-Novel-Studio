@@ -150,6 +150,21 @@
   transition: margin-right var(--transition-normal);
 }
 
+.workspace-document-layer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.workspace-document-layer.is-hidden {
+  display: none;
+}
+
+.workspace-document-layer > .editor-content {
+  width: 100%;
+}
+
 .workspace-page.has-right-panel .workspace-editor {
   margin-right: var(--right-panel-width);
 }
@@ -360,10 +375,17 @@
   flex: 0 0 1px;
 }
 
+.workspace-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* === v0.4.0 新增：纸张风格正文编辑区 === */
 .editor-paper {
-  width: min(100%, 1180px);
-  max-width: 1180px;
+  width: min(100%, 920px);
+  max-width: 920px;
   margin: 0 auto 16px;
   background: var(--color-bg-card, #ffffff);
   border: 1px solid var(--color-border, #e5eaf0);
@@ -393,14 +415,224 @@
 
 /* === v0.4.0 新增：章节信息卡片 === */
 .editor-info-card {
-  width: min(100%, 1180px);
-  max-width: 1180px;
+  width: min(100%, 920px);
+  max-width: 920px;
   margin: 0 auto 12px;
   padding: 10px 14px;
   background: var(--color-primary-light);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   font-size: 13px;
+}
+
+/* === 8B：AI 候选全文审查 === */
+.candidate-review {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-editor);
+}
+
+.candidate-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+}
+
+.candidate-review-kicker {
+  margin-bottom: 3px;
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.candidate-review-header h2 {
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.candidate-review-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.candidate-review-status {
+  min-width: 190px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.candidate-review-status strong { font-size: 13px; }
+.candidate-review-status.ready { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+.candidate-review-status.warning { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.candidate-review-status.blocked { color: #991b1b; background: #fef2f2; border-color: #fecaca; }
+.candidate-review-status.neutral { color: #475569; background: #f8fafc; border-color: #cbd5e1; }
+.candidate-review-status.working { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+
+.candidate-review-activity,
+.candidate-baseline-warning {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 24px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.candidate-review-activity.generating,
+.candidate-review-activity.validating { color: #1d4ed8; background: #eff6ff; }
+.candidate-review-activity.failed { color: #991b1b; background: #fef2f2; }
+.candidate-review-activity.cancelled { color: #475569; background: #f8fafc; }
+.candidate-baseline-warning { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; margin: 0 auto 14px; width: min(100%, 920px); }
+
+.candidate-review-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 24px 0;
+  background: var(--color-bg-card);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.candidate-review-tabs button {
+  padding: 8px 14px;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.candidate-review-tabs button.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.candidate-review-tabs button:disabled { opacity: .45; cursor: not-allowed; }
+
+.candidate-review-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+
+.candidate-review-paper {
+  width: min(100%, 920px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 30px 42px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-family-editor);
+  font-size: 18px;
+  line-height: 1.9;
+  color: var(--color-text-primary);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
+
+.candidate-diff-list {
+  width: min(100%, 980px);
+  margin: 0 auto;
+}
+
+.candidate-diff-baseline {
+  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.candidate-diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-card);
+  font-size: 12px;
+}
+
+.candidate-diff-block {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--color-bg-card);
+}
+
+.candidate-diff-block.added { border-left-color: var(--color-success); }
+.candidate-diff-block.removed { border-left-color: var(--color-error); }
+.candidate-diff-block.modified { border-left-color: var(--color-warning); }
+.candidate-diff-before,
+.candidate-diff-after {
+  margin-top: 8px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  font-family: var(--font-family-editor);
+  line-height: 1.7;
+  border-radius: 6px;
+}
+.candidate-diff-before { background: #fef2f2; }
+.candidate-diff-after { background: #f0fdf4; }
+.candidate-diff-before span,
+.candidate-diff-after span { display: block; margin-bottom: 4px; font: 600 11px var(--font-family); color: var(--color-text-muted); }
+
+.candidate-review-issues {
+  width: min(100%, 920px);
+  margin: 14px auto 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-card);
+  font-size: 12px;
+}
+.candidate-review-issues summary { cursor: pointer; font-weight: 600; }
+.candidate-review-issues ul { margin: 8px 0 0 18px; line-height: 1.7; }
+.candidate-review-empty { padding: 32px; text-align: center; color: var(--color-text-muted); }
+.candidate-review-state { display: grid; place-content: center; text-align: center; color: var(--color-text-secondary); }
+.candidate-review-state strong { font-size: 18px; color: var(--color-text-primary); }
+
+.candidate-review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+}
+
+.candidate-review-action-note {
+  margin-right: auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workspace-page.focus-mode .workspace-sidebar,
+.workspace-page.focus-mode .right-toolbar {
+  display: none;
+}
+
+.workspace-page.focus-mode.has-right-panel .workspace-editor {
+  margin-right: 0;
 }
 
 .editor-info-section {
@@ -474,4 +706,8 @@
   .editor-textarea {
     padding: 24px 28px;
   }
+
+  .candidate-review-header { align-items: flex-start; }
+  .candidate-review-status { min-width: 170px; }
+  .candidate-review-paper { padding: 26px 30px; }
 }

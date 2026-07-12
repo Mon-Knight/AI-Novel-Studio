@@ -270,6 +270,7 @@ fn main() {
             commands::artifacts::create_result_artifact,
             commands::artifacts::record_chapter_constraint_validation,
             commands::artifacts::get_latest_chapter_constraint_validation,
+            commands::artifacts::recover_chapter_candidate,
             commands::apply::create_placement_proposal,
             commands::apply::get_placement_proposal,
             commands::apply::validate_placement_proposal,

@@ -14,11 +14,13 @@
   align-items: center;
   padding: var(--spacing-sm) 0;
   gap: 2px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: visible;
   z-index: var(--z-right-toolbar);
   user-select: none;
+  position: relative;
 }
+
+.right-toolbar-spacer { flex: 1; min-height: 8px; }
 
 .right-toolbar-btn {
   width: 40px;
@@ -64,6 +66,52 @@
   font-weight: var(--font-weight-medium);
   line-height: 1;
 }
+
+.right-toolbar-more {
+  position: absolute;
+  right: calc(100% + 8px);
+  bottom: 8px;
+  width: 224px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-panel);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, .16);
+  z-index: calc(var(--z-right-toolbar) + 1);
+}
+
+.right-toolbar-more-title {
+  grid-column: 1 / -1;
+  padding: 4px 6px 7px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.right-toolbar-more-btn {
+  min-height: 38px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 7px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.right-toolbar-more-btn:hover,
+.right-toolbar-more-btn.active {
+  color: var(--color-primary);
+  background: var(--color-bg-active);
+}
+
+.right-toolbar-more-btn .tb-icon { width: 20px; text-align: center; font-size: 16px; }
+.right-toolbar-more-btn .tb-label { font-size: 12px; line-height: 1.25; }
 
 /* === 右侧弹出面板 === */
 .right-panel-overlay {
@@ -141,6 +189,56 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-lg);
+}
+
+.generation-progress-card {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.generation-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.generation-progress-track {
+  height: 5px;
+  margin: 8px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.generation-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width .25s ease;
+}
+
+.generation-progress-card p { margin: 0 0 8px; font-size: 11px; line-height: 1.5; }
+.generation-progress-card small { display: block; margin-top: 7px; color: #64748b; line-height: 1.4; }
+
+.ai-generate-actions {
+  position: sticky;
+  bottom: calc(var(--spacing-lg) * -1);
+  z-index: 3;
+  margin: 0 calc(var(--spacing-lg) * -1) calc(var(--spacing-lg) * -1);
+  padding: 12px var(--spacing-lg) var(--spacing-lg);
+  border-top: 1px solid var(--color-border);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--color-bg-panel) 92%, transparent), var(--color-bg-panel) 24%);
+}
+
+@media (max-width: 1280px) {
+  .right-panel { width: 320px; }
 }
 
 /* === 面板内通用样式 === */

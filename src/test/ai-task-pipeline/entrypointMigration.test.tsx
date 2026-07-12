@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Chapter } from '../../types/chapter';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 
 const mocks = vi.hoisted(() => ({
   runPipeline: vi.fn(),
@@ -16,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   getOutputs: vi.fn(),
   confirmInfo: vi.fn(),
   checkCompliance: vi.fn(),
+  validateConstraints: vi.fn(),
+  getLatestConstraint: vi.fn(),
 }));
 
 vi.mock('../../services/ai-tasks/unifiedAiPipeline', () => ({
@@ -61,6 +64,12 @@ vi.mock('../../services/styles/outputProfileService', () => ({
 }));
 vi.mock('../../services/ai/outlineComplianceChecker', () => ({
   checkOutlineCompliance: mocks.checkCompliance,
+}));
+vi.mock('../../services/ai-tasks/chapterConstraintValidationService', () => ({
+  chapterConstraintValidationService: {
+    validateAndPersist: mocks.validateConstraints,
+    getLatest: mocks.getLatestConstraint,
+  },
 }));
 vi.mock('../../services/ai/chapterRevisionService', () => ({ reviseChapterByOutline: vi.fn() }));
 vi.mock('../../services/ai/aiTaskService', () => ({ aiTaskService: {} }));
@@ -132,7 +141,7 @@ function compiledGeneration(context: Record<string, unknown>) {
         novelId: 'novel-a',
         volumeId: 'volume-a',
         chapterId: 'chapter-a',
-        sourceDraft: { id: 'draft-source', versionNo: 3, contentHash: 'source-hash' },
+        sourceDraft: { id: 'draft-source', versionNo: 3, contentHash: context.baseContentHash || 'source-hash' },
         sources: [],
         contextHash: 'context-hash',
       },
@@ -164,6 +173,14 @@ describe('M1/M2 migrated production entrypoints', () => {
     mocks.compileGeneration.mockReset();
     mocks.checkCompliance.mockReset();
     mocks.checkCompliance.mockReturnValue({ score: 100, coveredPoints: [], missingPoints: [], evidence: [] });
+    mocks.validateConstraints.mockReset();
+    mocks.validateConstraints.mockImplementation(async (input: any) => ({
+      artifactId: input.artifactId, taskId: input.taskId, novelId: input.novelId, chapterId: input.chapterId,
+      sourceDraftId: input.sourceDraftId, sourceDraftVersion: input.sourceDraftVersion, baseContentHash: input.baseContentHash,
+      validationRunId: 'validation-a', status: 'passed', must: [], should: [], forbid: [], blockingCount: 0,
+      warningCount: 0, validatorVersion: 'test', validatedAt: 'now',
+    }));
+    mocks.getLatestConstraint.mockReset().mockResolvedValue(null);
     mocks.getGenerationContexts.mockResolvedValue([]);
     mocks.getStyles.mockResolvedValue([]);
     mocks.getOutputs.mockResolvedValue([]);
@@ -208,10 +225,12 @@ describe('M1/M2 migrated production entrypoints', () => {
   });
 
   it('routes chapter generation through Artifact and Placement without creating a draft before confirmation', async () => {
+    const sourceHash = await computeContentSha256('Source');
     const source = {
       id: 'draft-source', novelId: 'novel-a', chapterId: 'chapter-a', content: 'Source',
       source: 'user_edit', versionNo: 3, wordCount: 20, isAdopted: false,
       createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z',
+      contentState: { status: 'ready' as const, contentHash: sourceHash, contentLength: 6 },
     };
     const candidate = { ...source, id: 'artifact-candidate', content: 'Generated chapter body', versionNo: 4 };
     mocks.getDrafts.mockResolvedValue([source]);
@@ -225,7 +244,7 @@ describe('M1/M2 migrated production entrypoints', () => {
     });
     mocks.compileGeneration.mockResolvedValue(compiledGeneration({
       novelId: 'novel-a', chapterId: 'chapter-a', chapterTitle: 'Chapter A', targetWordCount: 1000,
-      outlineKeyPoints: [], requiredCharacters: [], chapterCharacterList: [],
+      outlineKeyPoints: [], requiredCharacters: [], chapterCharacterList: [], baseContentHash: sourceHash,
     }));
     mocks.runPipeline.mockResolvedValue(pipelineResult(candidate.content));
 
@@ -241,7 +260,9 @@ describe('M1/M2 migrated production entrypoints', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /生成本章/ }));
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce());
-    await screen.findByText(/候选已保存为 Artifact 与 PlacementProposal/);
+    await screen.findByText(/候选已安全保存/);
+    expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .some((key) => key?.startsWith('ai_novel_studio_placement_'))).toBe(true);
     expect(mocks.runPipeline.mock.calls[0][0]).toEqual(expect.objectContaining({
       taskType: 'chapter_generate', chapterId: 'chapter-a', draftId: 'draft-source',
       artifactType: 'chapter_text',

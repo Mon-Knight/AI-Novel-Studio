@@ -96,12 +96,74 @@ export interface ApplyExecutionResult {
 }
 
 export interface PlacementCandidate {
+  /** Stable lifecycle identity. For persisted chapter candidates this equals artifactId. */
+  candidateId?: string;
   artifactId: string;
   proposal?: PlacementProposal;
   content: string;
   contentHash: string;
   wordCount: number;
   taskId: string;
+  baseContent?: string;
+  createdAt?: string;
   constraintValidation?: ConstraintValidationResult;
   diff?: ChapterDiffResult;
+}
+
+export type CandidateGenerationStatus = 'idle' | 'generating' | 'validating' | 'cancelled' | 'failed';
+
+export interface CandidateGenerationActivity {
+  requestId: string;
+  taskId?: string;
+  candidateId?: string;
+  novelId: string;
+  chapterId: string;
+  status: CandidateGenerationStatus;
+  message?: string;
+}
+
+export interface CandidateReviewRecord {
+  candidate: PlacementCandidate;
+  target: import('./workspaceSafety').DraftResultMetadata;
+  source?: 'ai_generated' | 'ai_regenerated';
+  validationNote?: string;
+  adopted?: boolean;
+  invalidated?: boolean;
+  invalidatedReason?: string;
+}
+
+export type CandidateLifecycleStatus =
+  | 'empty'
+  | 'generating'
+  | 'validating'
+  | 'ready'
+  | 'blocked'
+  | 'baseline_changed'
+  | 'adopted'
+  | 'invalidated'
+  | 'cancelled'
+  | 'failed'
+  | 'read_failed'
+  | 'diff_failed'
+  | 'empty_content'
+  | 'identity_mismatch';
+
+export interface CandidateLifecycleContext {
+  record: CandidateReviewRecord | null;
+  candidate: PlacementCandidate | null;
+  candidateId?: string;
+  candidateChapterId?: string;
+  targetChapterId?: string;
+  content: string;
+  baseContent?: string;
+  baseDraftId?: string;
+  baseDraftVersion?: number;
+  baseContentHash?: string;
+  constraintStatus?: ConstraintValidationResult['status'];
+  generation: CandidateGenerationActivity | null;
+  status: CandidateLifecycleStatus;
+  canAdopt: boolean;
+  cannotAdoptReason?: string;
+  baselineChanged: boolean;
+  diffUsesFrozenBaseline: boolean;
 }

@@ -237,14 +237,22 @@ async function createArtifact(
       issues,
       createdAt: nowISO(),
     };
+    const task = browserTasks.get(taskId);
     lsSet(`ai_novel_studio_result_artifact_${artifact.artifactId}`, {
       ...artifact,
       rawContent,
       displayContent: response.text,
       structuredPayloadJson: browserStructuredPayload,
+      source: {
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        draftId: input.inputSnapshot.sourceDraftId,
+        draftVersion: input.inputSnapshot.sourceDraftVersion,
+        baseContentHash: input.inputSnapshot.baseContentHash,
+      },
+      taskCreatedAt: task?.createdAt,
       requiresChapterConstraintValidation: input.taskType === 'chapter_generate',
     });
-    const task = browserTasks.get(taskId);
     if (task) browserTasks.set(taskId, {
       ...task,
       status: artifact.processingStatus === 'invalid' ? 'failed' : 'completed',

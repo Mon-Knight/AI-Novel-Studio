@@ -166,6 +166,20 @@ export function switchTool(
   };
 }
 
+/** 确保指定工具面板处于展开状态，不执行同项再次点击的收起语义。 */
+export function openTool(
+  state: RightSidebarState,
+  toolKey: PanelType,
+): RightSidebarState {
+  if (state.activeTool === toolKey && !state.collapsed) return state;
+  return {
+    ...state,
+    collapsed: false,
+    lastActiveTool: state.activeTool,
+    activeTool: toolKey,
+  };
+}
+
 /** 关闭面板（同收起） */
 export function closePanel(state: RightSidebarState): RightSidebarState {
   if (state.collapsed) return state;

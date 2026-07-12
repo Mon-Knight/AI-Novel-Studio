@@ -28,6 +28,7 @@
     "test:apply-plan": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite apply-plan",
     "test:constraint-validation": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite constraint-validation",
     "test:chapter-diff": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite chapter-diff",
+    "test:candidate-lifecycle": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite candidate-lifecycle",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",
     "test:quality-workspace": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_quality_workspace.ps1",

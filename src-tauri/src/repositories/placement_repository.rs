@@ -245,3 +245,22 @@ pub fn get_proposal(
         targets,
     }))
 }
+
+pub fn get_latest_proposal_for_artifact(
+    connection: &Connection,
+    artifact_id: &str,
+) -> Result<Option<PlacementProposal>, AppError> {
+    let proposal_id = connection
+        .query_row(
+            "SELECT proposal_id FROM artifact_placement_proposals
+             WHERE artifact_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            params![artifact_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    match proposal_id {
+        Some(proposal_id) => get_proposal(connection, &proposal_id),
+        None => Ok(None),
+    }
+}

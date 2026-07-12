@@ -12,7 +12,8 @@ param(
         'placement',
         'apply-plan',
         'constraint-validation',
-        'chapter-diff'
+        'chapter-diff',
+        'candidate-lifecycle'
     )]
     [string]$Suite
 )
@@ -167,6 +168,13 @@ $suiteConfig = @{
     'chapter-diff' = @{
         TestPath = 'src/test/chapter-diff'
         CargoTests = @()
+    }
+    'candidate-lifecycle' = @{
+        TestPath = 'src/test/candidate-lifecycle'
+        CargoTests = @(
+            'services::artifact_service::tests::art12_recovers_latest_completed_chapter_candidate_without_new_schema',
+            'services::artifact_service::tests::art13_running_task_is_exposed_for_interrupted_recovery_without_a_candidate'
+        )
     }
 }
 

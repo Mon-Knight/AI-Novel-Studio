@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, type MouseEvent } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, type MouseEvent } from 'react';
 import { confirmInfo, showError, showInfo } from '../../utils/nativeDialog';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
@@ -16,6 +16,7 @@ import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPa
 import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
 import GlobalAiTaskModal from '../../components/workspace/GlobalAiTaskModal';
 import RecoveryDialog from '../../components/workspace/RecoveryDialog';
+import CandidateReviewPane from '../../components/workspace/CandidateReviewPane';
 import type { AiTaskModalState } from '../../components/workspace/GlobalAiTaskModal';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
@@ -30,6 +31,7 @@ import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
 import type { ChapterDraft } from '../../types/ai';
+import type { CandidateGenerationActivity, CandidateReviewRecord } from '../../types/placement';
 import type { DraftContentState } from '../../types/draftContentState';
 import { normalizeAppError } from '../../types/appError';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
@@ -45,6 +47,12 @@ import {
   validateDocumentApplication,
   validateDraftDocumentTarget,
 } from '../../features/workspace/documentSafety';
+import {
+  canPromoteCandidateRecord,
+  deriveCandidateLifecycle,
+  mergeCandidateActivity,
+} from '../../features/workspace/candidateLifecycle';
+import { chapterCandidateService } from '../../services/ai-tasks/chapterCandidateService';
 import { hashTextContent } from '../../utils/contentHash';
 import { useWorkspaceRecovery } from '../../hooks/useWorkspaceRecovery';
 import { useWorkspaceLeaveGuard } from '../../hooks/useWorkspaceLeaveGuard';
@@ -54,6 +62,7 @@ import {
   createInitialSidebarState,
   updateToolState,
   switchTool,
+  openTool,
   closePanel,
   type RightSidebarState,
   type PanelToolState,
@@ -67,6 +76,10 @@ export type PanelType =
   | 'draft-history' | 'chapter-summary' | 'context-view' | null;
 
 const NOVEL_LOAD_RETRY_DELAYS_MS = [120, 240, 480];
+
+function candidateScopeKey(novelId: string | undefined, chapterId: string | undefined): string {
+  return novelId && chapterId ? `${novelId}:${chapterId}` : '';
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -157,6 +170,14 @@ function WritingWorkspacePage() {
   const [aiModal, setAiModal] = useState<AiTaskModalState>({
     running: false, title: '', stage: '', progress: 0,
   });
+  const [candidateRecords, setCandidateRecords] = useState<Map<string, CandidateReviewRecord>>(() => new Map());
+  const [candidateActivities, setCandidateActivities] = useState<Map<string, CandidateGenerationActivity>>(() => new Map());
+  const [candidateReadErrors, setCandidateReadErrors] = useState<Map<string, string>>(() => new Map());
+  const [candidateReviewOpen, setCandidateReviewOpen] = useState(false);
+  const candidateActivitiesRef = useRef(candidateActivities);
+  const candidateRecoveryTokensRef = useRef(new Map<string, number>());
+  candidateActivitiesRef.current = candidateActivities;
+  const [focusMode, setFocusMode] = useState(false);
   const showAiModal = useCallback((title: string, subtitle?: string) => {
     setAiModal({ running: true, title, subtitle, stage: '', progress: 0 });
   }, []);
@@ -182,6 +203,22 @@ function WritingWorkspacePage() {
   const activeDraft = currentDraft?.chapterId === activeChapterId ? currentDraft : null;
   const activeContentState = contentLoadError ?? activeDraft?.contentState;
   const contentAvailable = activeContentState?.status !== 'unavailable';
+  const activeCandidateKey = candidateScopeKey(novelId, activeChapterId);
+  const activeCandidateRecord = activeCandidateKey ? candidateRecords.get(activeCandidateKey) ?? null : null;
+  const activeCandidateActivity = activeCandidateKey ? candidateActivities.get(activeCandidateKey) ?? null : null;
+  const activeCandidateReadError = activeCandidateKey ? candidateReadErrors.get(activeCandidateKey) : undefined;
+  const activeEditorContent = contentAvailable
+    ? (editorSnapshot.chapterId === activeChapterId ? editorSnapshot.content : activeDraft?.content || '')
+    : '';
+  const candidateLifecycle = useMemo(() => deriveCandidateLifecycle({
+    record: activeCandidateRecord,
+    generation: activeCandidateActivity,
+    currentNovelId: novelId,
+    currentChapterId: activeChapterId,
+    currentDraft: activeDraft,
+    currentEditorContent: activeEditorContent,
+    readError: activeCandidateReadError,
+  }), [activeCandidateActivity, activeCandidateReadError, activeCandidateRecord, activeChapterId, activeDraft, activeEditorContent, novelId]);
 
   // v1.0.45 统一写作上下文（派生状态，面板通过此获取全文/选中文本/章节等）
   const writingContext: WritingContext = getCurrentWritingContext({
@@ -266,6 +303,50 @@ function WritingWorkspacePage() {
     currentDraftRef.current = null;
   }, []);
 
+  const handleCandidateReviewChange = useCallback((record: CandidateReviewRecord | null) => {
+    if (!record) {
+      setCandidateReviewOpen(false);
+      return;
+    }
+    const key = candidateScopeKey(record.target.novelId, record.target.chapterId);
+    if (!key) return;
+    const activity = candidateActivitiesRef.current.get(key);
+    if (!canPromoteCandidateRecord(activity, record)) return;
+    setCandidateRecords((previous) => {
+      const next = new Map(previous);
+      next.set(key, record);
+      return next;
+    });
+    if (activeNovelIdRef.current === record.target.novelId
+      && activeChapterIdRef.current === record.target.chapterId) {
+      setCandidateReviewOpen(true);
+    }
+  }, []);
+
+  const handleCandidateGenerationChange = useCallback((activity: CandidateGenerationActivity) => {
+    const key = candidateScopeKey(activity.novelId, activity.chapterId);
+    if (!key) return;
+    if (activity.status === 'generating') {
+      candidateRecoveryTokensRef.current.set(key, (candidateRecoveryTokensRef.current.get(key) || 0) + 1);
+      setCandidateReadErrors((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Map(previous);
+        next.delete(key);
+        return next;
+      });
+    }
+    setCandidateActivities((previous) => {
+      const next = new Map(previous);
+      next.set(key, mergeCandidateActivity(previous.get(key), activity));
+      return next;
+    });
+  }, []);
+
+  const handleToggleFocusMode = useCallback(() => {
+    if (!focusMode) setSidebarState((previous) => closePanel(previous));
+    setFocusMode((current) => !current);
+  }, [focusMode]);
+
   const loadChapterDraft = useCallback(async (chapterId: string) => {
     const requestNovelId = activeNovelIdRef.current;
     if (!requestNovelId) return false;
@@ -314,6 +395,58 @@ function WritingWorkspacePage() {
       return false;
     }
   }, []);
+
+  const recoverChapterCandidate = useCallback(async (requestNovelId: string, chapterId: string) => {
+    const key = candidateScopeKey(requestNovelId, chapterId);
+    if (!key) return;
+    const token = (candidateRecoveryTokensRef.current.get(key) || 0) + 1;
+    candidateRecoveryTokensRef.current.set(key, token);
+    try {
+      const recovered = await chapterCandidateService.recover(requestNovelId, chapterId);
+      if (candidateRecoveryTokensRef.current.get(key) !== token) return;
+      if (recovered.record
+        && recovered.record.target.novelId === requestNovelId
+        && recovered.record.target.chapterId === chapterId
+        && recovered.record.target.taskId === recovered.record.candidate.taskId
+        && recovered.record.target.artifactId === recovered.record.candidate.artifactId) {
+        setCandidateRecords((previous) => {
+          const existing = previous.get(key);
+          const existingCreatedAt = existing?.candidate.createdAt || '';
+          const recoveredCreatedAt = recovered.record?.candidate.createdAt || '';
+          if (existing && existingCreatedAt >= recoveredCreatedAt) return previous;
+          const next = new Map(previous);
+          next.set(key, recovered.record!);
+          return next;
+        });
+      }
+      if (recovered.activity) {
+        setCandidateActivities((previous) => {
+          const existing = previous.get(key);
+          if (existing && existing.requestId !== recovered.activity!.requestId) return previous;
+          const next = new Map(previous);
+          next.set(key, recovered.activity!);
+          return next;
+        });
+      }
+      setCandidateReadErrors((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Map(previous);
+        next.delete(key);
+        return next;
+      });
+    } catch (error) {
+      if (candidateRecoveryTokensRef.current.get(key) !== token) return;
+      setCandidateReadErrors((previous) => new Map(previous).set(
+        key,
+        error instanceof Error ? error.message : '候选读取失败，请重试。',
+      ));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!novelId || !activeChapterId) return;
+    void recoverChapterCandidate(novelId, activeChapterId);
+  }, [activeChapterId, novelId, recoverChapterCandidate]);
 
   const retryActiveChapterContent = useCallback(async () => {
     const chapterId = activeChapterIdRef.current;
@@ -373,6 +506,63 @@ function WritingWorkspacePage() {
     const decision = await requestWorkspaceLeave({ reason: 'draft_adopt' });
     return decision === 'proceed';
   }, [requestWorkspaceLeave]);
+
+  const handleCandidateAdopt = useCallback(async (record: CandidateReviewRecord) => {
+    const requestNovelId = activeNovelIdRef.current;
+    const requestChapterId = activeChapterIdRef.current;
+    const before = deriveCandidateLifecycle({
+      record,
+      generation: candidateActivitiesRef.current.get(candidateScopeKey(requestNovelId, requestChapterId)),
+      currentNovelId: requestNovelId,
+      currentChapterId: requestChapterId,
+      currentDraft: currentDraftRef.current,
+      currentEditorContent: editorSnapshotRef.current.chapterId === requestChapterId
+        ? editorSnapshotRef.current.content
+        : currentDraftRef.current?.content || '',
+    });
+    if (!before.canAdopt) {
+      await showError({ title: '无法采用正文候选', message: before.cannotAdoptReason || '当前候选不可采用。' });
+      return;
+    }
+    if (!(await confirmEditorLeave())) return;
+    const warningCount = record.candidate.constraintValidation?.warningCount || 0;
+    const confirmed = await confirmInfo({
+      title: warningCount > 0 ? '采用带提醒的正文候选' : '采用正文候选',
+      message: warningCount > 0
+        ? `该候选有 ${warningCount} 项建议性提醒。确认采用后将保存为新草稿并设为本章正式正文。`
+        : `确认将这份 ${record.candidate.wordCount} 字的 AI 候选保存为新草稿，并设为本章正式正文？`,
+    });
+    if (!confirmed) return;
+    try {
+      const adopted = await chapterCandidateService.adopt({
+        record,
+        currentNovelId: requestNovelId,
+        currentChapterId: requestChapterId,
+        currentEditorContent: editorSnapshotRef.current.chapterId === requestChapterId
+          ? editorSnapshotRef.current.content
+          : currentDraftRef.current?.content || '',
+        source: record.source || 'ai_generated',
+        note: record.validationNote,
+      });
+      const key = candidateScopeKey(requestNovelId, requestChapterId);
+      setCandidateRecords((previous) => {
+        const next = new Map(previous);
+        next.set(key, { ...record, adopted: true });
+        return next;
+      });
+      setChapters((previous) => previous.map((item) => item.id === requestChapterId
+        ? { ...item, status: 'adopted', adoptedDraftId: adopted.id, wordCount: adopted.wordCount, currentWords: adopted.wordCount }
+        : item));
+      if (activeNovelIdRef.current === requestNovelId && activeChapterIdRef.current === requestChapterId) {
+        await loadChapterDraft(requestChapterId);
+      }
+    } catch (error) {
+      await showError({
+        title: '采用失败',
+        message: error instanceof Error ? error.message : '正文和候选状态保持不变，请重试。',
+      });
+    }
+  }, [confirmEditorLeave, loadChapterDraft]);
 
   const handleSelectChapter = useCallback(async (chapterId: string) => {
     if (chapterId === activeChapterIdRef.current) return;
@@ -872,7 +1062,7 @@ function WritingWorkspacePage() {
 
   return (
     <div
-      className={`workspace-page${activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}
+      className={`workspace-page${activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}${focusMode ? ' focus-mode' : ''}`}
       data-summary-exists={summaryExists ? 'true' : 'false'}
     >
       {pageLoading && (
@@ -975,31 +1165,61 @@ function WritingWorkspacePage() {
               当前：第{activeChapter.chapterNumber}章 {activeChapter.title}
             </div>
           )}
-          <div className="workspace-topbar-spacer" aria-hidden="true" />
+          <div className="workspace-topbar-actions">
+            {candidateReviewOpen && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setCandidateReviewOpen(false)}>
+                返回当前正文
+              </button>
+            )}
+            {!candidateReviewOpen && (activeCandidateRecord || (activeCandidateActivity && activeCandidateActivity.status !== 'idle')) && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCandidateReviewOpen(true)}>
+                查看候选审查
+              </button>
+            )}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleToggleFocusMode}>
+              {focusMode ? '退出专注' : '专注写作'}
+            </button>
+          </div>
         </div>
 
-        <EditorArea
-          ref={editorRef}
-          chapter={activeChapter}
-          novelTitle={novel?.title}
-          novelId={novelId}
-          currentDraft={activeDraft}
-          contentStateOverride={activeContentState}
-          onDraftChange={handleDraftChange}
-          onEditorContentChange={handleEditorContentChange}
-          onDraftSaved={handlePersistentDraftSaved}
-          applyTextRequest={applyTextRequest}
-          onApplyTextConsumed={handleApplyTextConsumed}
-          onApplyTextRejected={handleApplyTextRejected}
-          commandRequest={editorCommandRequest}
-          onChapterUpdated={handleChapterOutlineApplied}
-          locateTarget={locateTarget}
-          onLocateDone={handleLocateDone}
-          onRetryContent={() => void retryActiveChapterContent()}
-          retryingContent={retryingContent}
-          onOpenDraftHistory={() => setSidebarState((previous) => switchTool(previous, 'draft-history'))}
-          onBackToChapters={() => navigate(`/novels/${novelId}`)}
-        />
+        <div className={`workspace-document-layer${candidateReviewOpen ? ' is-hidden' : ''}`}>
+          <EditorArea
+            ref={editorRef}
+            chapter={activeChapter}
+            novelTitle={novel?.title}
+            novelId={novelId}
+            currentDraft={activeDraft}
+            contentStateOverride={activeContentState}
+            onDraftChange={handleDraftChange}
+            onEditorContentChange={handleEditorContentChange}
+            onDraftSaved={handlePersistentDraftSaved}
+            applyTextRequest={applyTextRequest}
+            onApplyTextConsumed={handleApplyTextConsumed}
+            onApplyTextRejected={handleApplyTextRejected}
+            commandRequest={editorCommandRequest}
+            onChapterUpdated={handleChapterOutlineApplied}
+            locateTarget={locateTarget}
+            onLocateDone={handleLocateDone}
+            onRetryContent={() => void retryActiveChapterContent()}
+            retryingContent={retryingContent}
+            onOpenDraftHistory={() => setSidebarState((previous) => switchTool(previous, 'draft-history'))}
+            onBackToChapters={() => navigate(`/novels/${novelId}`)}
+          />
+        </div>
+        {candidateReviewOpen && activeChapter && (
+          <CandidateReviewPane
+            chapter={activeChapter}
+            context={candidateLifecycle}
+            onAdopt={handleCandidateAdopt}
+            onClose={() => setCandidateReviewOpen(false)}
+            onOpenGenerator={() => {
+              if (novelId && activeChapterId && candidateLifecycle.status === 'read_failed') {
+                void recoverChapterCandidate(novelId, activeChapterId);
+              }
+              setSidebarState((previous) => openTool(previous, 'ai-generate'));
+            }}
+          />
+        )}
         <StatusBar
           chapter={activeChapter}
           draftWordCount={draftWordCount}
@@ -1053,6 +1273,8 @@ function WritingWorkspacePage() {
           loadChapterDraft(chapterId);
         }}
         onBeforeDocumentChange={confirmEditorLeave}
+        onCandidateReviewChange={handleCandidateReviewChange}
+        onCandidateGenerationChange={handleCandidateGenerationChange}
         onChapterOutlineApplied={handleChapterOutlineApplied}
         onChapterGoalDirtyChange={setChapterGoalDirty}
         onChapterCharactersChanged={bumpContextVersion}

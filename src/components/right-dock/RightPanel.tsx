@@ -4,6 +4,7 @@ import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../types/workspaceSafety';
 import type { WritingContext } from '../../utils/writingContext';
+import type { CandidateGenerationActivity, CandidateReviewRecord } from '../../types/placement';
 import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
 import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
 import AiGeneratePanel from './panels/AiGeneratePanel';
@@ -43,6 +44,8 @@ interface RightPanelProps {
   currentDraftVersion?: number;
   onApplyAiText?: (payload: AiTextApplyPayload) => Promise<boolean>;
   onBeforeDocumentChange?: () => Promise<boolean>;
+  onCandidateReviewChange?: (record: CandidateReviewRecord | null) => void;
+  onCandidateGenerationChange?: (activity: CandidateGenerationActivity) => void;
   showAiModal?: (title: string, subtitle?: string) => void;
   updateAiModal?: (stage: string, progress: number) => void;
   hideAiModal?: () => void;
@@ -92,6 +95,8 @@ function RightPanel({
   currentDraftVersion,
   onApplyAiText,
   onBeforeDocumentChange,
+  onCandidateReviewChange,
+  onCandidateGenerationChange,
   showAiModal,
   updateAiModal,
   hideAiModal,
@@ -196,6 +201,8 @@ function RightPanel({
             currentDraftVersion={currentDraftVersion}
             onApplyAiText={onApplyAiText}
             onBeforeDocumentChange={onBeforeDocumentChange}
+            onCandidateReviewChange={onCandidateReviewChange}
+            onCandidateGenerationChange={onCandidateGenerationChange}
             showAiModal={showAiModal}
             updateAiModal={updateAiModal}
             hideAiModal={hideAiModal}

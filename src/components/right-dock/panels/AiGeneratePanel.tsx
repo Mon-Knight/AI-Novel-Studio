@@ -26,8 +26,9 @@ import { checkOutlineCompliance } from '../../../services/ai/outlineComplianceCh
 import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionService';
 import { hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
-import type { PlacementCandidate } from '../../../types/placement';
+import type { CandidateGenerationActivity, CandidateReviewRecord, PlacementCandidate } from '../../../types/placement';
 import { placementApplyService } from '../../../services/ai-tasks/placementApplyService';
+import { chapterCandidateService } from '../../../services/ai-tasks/chapterCandidateService';
 import { chapterConstraintValidationService } from '../../../services/ai-tasks/chapterConstraintValidationService';
 import { calculateChapterDiff } from '../../../services/ai-tasks/chapterDiffService';
 import type { ConstraintValidationResult } from '../../../types/chapterConstraintValidation';
@@ -115,9 +116,11 @@ interface AiGeneratePanelProps {
   currentContentHash?: string;
   onApplyAiText?: (payload: AiTextApplyPayload) => Promise<boolean>;
   onBeforeDocumentChange?: () => Promise<boolean>;
+  onCandidateReviewChange?: (record: CandidateReviewRecord | null) => void;
+  onCandidateGenerationChange?: (activity: CandidateGenerationActivity) => void;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent, onBeforeDocumentChange }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent = '', onBeforeDocumentChange, onCandidateReviewChange, onCandidateGenerationChange }: AiGeneratePanelProps) {
   const liveChapterIdRef = useRef(chapter?.id || '');
   liveChapterIdRef.current = chapter?.id || '';
   const liveNovelIdRef = useRef(novelId || '');
@@ -136,6 +139,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [chapterDiff, setChapterDiff] = useState<ChapterDiffResult | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState('');
+  const [generationProgress, setGenerationProgress] = useState({ stage: '', message: '', percent: 0 });
+  const generationStartLockRef = useRef(false);
+  const activeGenerationRef = useRef<{
+    requestId: string;
+    taskId?: string;
+    candidateId?: string;
+    novelId: string;
+    chapterId: string;
+  } | null>(null);
 
   // v1.0.26 风格方案与输出控制选择
   const [availableStyles, setAvailableStyles] = useState<StyleProfile[]>([]);
@@ -156,6 +168,11 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     setConstraintValidation(null);
     setChapterDiff(null);
     setShowDiff(false);
+    if (activeGenerationRef.current?.chapterId !== chapter?.id) {
+      generationStartLockRef.current = false;
+      setGenerating(false);
+      setActiveTaskId('');
+    }
   }, [chapter?.id]);
 
   // 初始化/更新目标字数草稿
@@ -285,7 +302,24 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   const handleGenerate = async (options?: { retryMissingPoints?: OutlineKeyPoint[] }) => {
     if (!novelId || !chapter) return;
+    if (generationStartLockRef.current) return;
+    generationStartLockRef.current = true;
+    const requestId = crypto.randomUUID();
+    const requestScope = { requestId, novelId, chapterId: chapter.id };
+    activeGenerationRef.current = requestScope;
+    const ownsRequest = () => activeGenerationRef.current?.requestId === requestId;
+    const publishActivity = (
+      status: CandidateGenerationActivity['status'],
+      message?: string,
+      identity?: { taskId?: string; candidateId?: string },
+    ) => {
+      if (!ownsRequest()) return;
+      activeGenerationRef.current = { ...requestScope, ...activeGenerationRef.current, ...identity };
+      onCandidateGenerationChange?.({ ...activeGenerationRef.current, status, message });
+    };
+    publishActivity('generating', '正在冻结章节上下文与正文基线。');
     const persistedDrafts = await draftVersionService.getByChapterId(chapter.id).catch(() => []);
+    if (!ownsRequest()) return;
     const sourceDraft = currentDraftId
       ? persistedDrafts.find((draft) => draft.id === currentDraftId)
       : persistedDrafts[persistedDrafts.length - 1];
@@ -293,6 +327,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     const sourceDraftVersion = currentDraftVersion || sourceDraft?.versionNo;
     if (!sourceDraftId || !sourceDraftVersion) {
       setErrorMsg('当前章节缺少可验证的草稿基线，无法启动安全生成任务');
+      publishActivity('failed', '当前章节缺少可验证的草稿基线。');
+      generationStartLockRef.current = false;
       return;
     }
     const baseContentHash = sourceDraft?.contentState?.status === 'ready'
@@ -332,11 +368,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         targetWordCount: wordCountDraft || undefined,
         draftContent: genMode === 'rewrite' ? (currentEditorContent?.trim() || undefined) : undefined,
       });
+      if (!ownsRequest()) return;
       preflightContext = compilation.contextContract.context;
       setContextSummary(preflightContext);
       setPromptDebug(compilation.request.promptDebug ?? null);
     } catch (e: any) {
+      if (!ownsRequest()) return;
       setErrorMsg(e?.message || '生成前读取最新上下文失败');
+      publishActivity('failed', e?.message || '生成前读取最新上下文失败。');
+      generationStartLockRef.current = false;
       return;
     }
 
@@ -358,26 +398,34 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         title: '生成前提示',
         message: `⚠️ ${preflightWarnings.join('\n')}\n\n本次生成将尽量使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n建议先在大纲面板中补充或保存章节大纲。\n\n是否仍然继续生成？`,
       });
-      if (!ok) return;
+      if (!ownsRequest()) return;
+      if (!ok) {
+        publishActivity('cancelled', '用户取消了本次生成。');
+        generationStartLockRef.current = false;
+        return;
+      }
     }
 
+    if (!ownsRequest()) return;
     setGenerating(true);
     setErrorMsg('');
     setValidationState(null);
     setConstraintValidation(null);
     setChapterDiff(null);
     setShowDiff(false);
+    setGenerationProgress({ stage: '准备生成', message: '正在冻结本章上下文与约束…', percent: 5 });
 
     try {
-      await runWithLoading(
-        {
-          title: genMode === 'rewrite' ? 'AI 正在重新生成正文' : 'AI 正在生成正文',
-          initialMessage: '正在构建上下文……',
-          successMessage: '正文已生成，校验结果已显示',
-          errorMessage: 'AI 生成失败',
-          cancelable: false,
-        },
-        async ({ setMessage, setStage, setPercent }) => {
+      await (async () => {
+          const setMessage = (message: string) => {
+            if (ownsRequest()) setGenerationProgress((previous) => ({ ...previous, message }));
+          };
+          const setStage = (stage: string) => {
+            if (ownsRequest()) setGenerationProgress((previous) => ({ ...previous, stage }));
+          };
+          const setPercent = (percent: number) => {
+            if (ownsRequest()) setGenerationProgress((previous) => ({ ...previous, percent }));
+          };
           // Provider 之前已完成并冻结当前章节的 Context / Constraint 编译。
           const ctx: ChapterGenerationContext = preflightContext;
 
@@ -476,9 +524,30 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             timeoutMs: (settings.timeoutSeconds ?? 120) * 1000,
             client,
             request,
-            onTaskCreated: (task) => setActiveTaskId(task.taskId),
+            onTaskCreated: (task) => {
+              if (!ownsRequest()) return;
+              setActiveTaskId(task.taskId);
+              publishActivity('generating', 'AI 正在输出章节内容。', { taskId: task.taskId });
+            },
           });
           const response = pipeline.response;
+          const asyncIdentity = {
+            requestId,
+            taskId: pipeline.task.taskId,
+            candidateId: pipeline.artifact.artifactId,
+            novelId: requestTarget.novelId,
+            chapterId: requestTarget.chapterId,
+          };
+          publishActivity('validating', '正在执行约束和差异检查。', {
+            taskId: asyncIdentity.taskId,
+            candidateId: asyncIdentity.candidateId,
+          });
+          const ownsAsyncIdentity = () => activeGenerationRef.current?.requestId === asyncIdentity.requestId
+            && activeGenerationRef.current?.taskId === asyncIdentity.taskId
+            && activeGenerationRef.current?.candidateId === asyncIdentity.candidateId
+            && activeGenerationRef.current?.novelId === asyncIdentity.novelId
+            && activeGenerationRef.current?.chapterId === asyncIdentity.chapterId;
+          if (!ownsAsyncIdentity()) return;
 
           setPercent(80);
           setStage('正在校验生成结果……');
@@ -501,6 +570,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             constraintSnapshot,
             artifactBody: response.text,
           });
+          if (!ownsAsyncIdentity()) return;
           const diff = await calculateChapterDiff({
             novelId: requestTarget.novelId,
             chapterId: requestTarget.chapterId,
@@ -516,6 +586,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             baseContent: sourceDraft?.content || '',
             candidateContent: response.text,
           });
+          if (!ownsAsyncIdentity()) return;
           const proposal = constraintResult.status !== 'blocked' && diff.status === 'ready'
             ? await placementApplyService.createProposal({
               artifactId: pipeline.artifact.artifactId,
@@ -528,7 +599,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
               browserExpectedHash: requestTarget.baseContentHash,
             })
             : undefined;
-          const candidateHash = pipeline.artifact.contentHash;
+          if (!ownsAsyncIdentity()) return;
+          const candidateHash = await computeContentSha256(response.text);
+          if (!ownsAsyncIdentity()) return;
           const validationWithDraft: GenerationValidationState = { draftId: pipeline.artifact.artifactId, ...validation };
           const resultMetadata: DraftResultMetadata = {
             ...requestTarget,
@@ -538,6 +611,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             artifactId: pipeline.artifact.artifactId,
             source: 'ai_generate',
           };
+          if (!ownsAsyncIdentity()) return;
           if (liveNovelIdRef.current === requestTarget.novelId && liveChapterIdRef.current === requestTarget.chapterId) {
             setValidationState(validationWithDraft);
             setConstraintValidation(constraintResult);
@@ -549,30 +623,45 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setPercent(100);
           setStage('生成完成');
 
-          if (liveNovelIdRef.current !== requestTarget.novelId || liveChapterIdRef.current !== requestTarget.chapterId) {
-            notifyNative({ kind: 'success', body: '原章节正文候选已生成，等待回到原章节确认采用' });
-            return;
-          }
-          setLatestGeneratedDraft(null);
-          setLatestGeneratedTarget(resultMetadata);
-          setLatestPlacementCandidate({
+          const nextCandidate: PlacementCandidate = {
+            candidateId: pipeline.artifact.artifactId,
             artifactId: pipeline.artifact.artifactId,
             proposal,
             content: response.text,
             contentHash: candidateHash,
             wordCount: response.text.length,
             taskId: pipeline.task.taskId,
+            baseContent: sourceDraft?.content || '',
+            createdAt: pipeline.artifact.createdAt,
             constraintValidation: constraintResult,
             diff,
+          };
+          const nextRecord: CandidateReviewRecord = {
+            candidate: nextCandidate,
+            target: resultMetadata,
+            source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
+            validationNote: validationWithDraft.note,
+          };
+          if (liveNovelIdRef.current === requestTarget.novelId && liveChapterIdRef.current === requestTarget.chapterId) {
+            setLatestGeneratedDraft(null);
+            setLatestGeneratedTarget(resultMetadata);
+            setLatestPlacementCandidate(nextCandidate);
+          } else {
+            notifyNative({ kind: 'success', body: '原章节正文候选已生成，等待回到原章节确认采用' });
+          }
+          onCandidateReviewChange?.(nextRecord);
+          publishActivity('idle', '候选已完成约束和差异检查。', {
+            taskId: asyncIdentity.taskId,
+            candidateId: asyncIdentity.candidateId,
           });
 
           // 校验警告提示
           if (constraintResult.status === 'blocked') {
-            setErrorMsg('Constraint validation blocked this candidate. Resolve the listed hard failures before generating a new candidate.');
-            setStatusMsg('Candidate Artifact was retained, but no PlacementProposal was created.');
+            setErrorMsg('当前候选未通过硬性约束验证，请处理下方问题后重新生成。');
+            setStatusMsg('候选结果已保留，但当前不可采用。');
           } else if (diff.status !== 'ready') {
-            setErrorMsg(diff.reason || 'The chapter diff could not be calculated from the frozen baseline.');
-            setStatusMsg('Candidate Artifact was retained, but adoption is blocked until a new candidate is generated.');
+            setErrorMsg(diff.reason || '无法根据冻结的草稿基线计算正文差异。');
+            setStatusMsg('候选结果已保留，但需要重新生成后才能采用。');
           } else if (validationWarning) {
             setErrorMsg(validationWarning);
             setStatusMsg('正文已生成，但存在校验警告。建议重新生成或按大纲修正后再确认采用。');
@@ -583,23 +672,31 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
           // Native Feel P2.2: 生成完成通知
           notifyNative({ kind: 'success', body: `正文候选生成完成（${response.text.length} 字），确认后才写入正式正文` });
-        },
-      );
+      })();
 
-      setGenerating(false);
-      setActiveTaskId('');
+      if (ownsRequest()) {
+        setGenerating(false);
+        setActiveTaskId('');
+        generationStartLockRef.current = false;
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '生成失败';
+      if (!ownsRequest()) return;
       setErrorMsg(msg);
       setStatusMsg('');
       setGenerating(false);
       setActiveTaskId('');
+      generationStartLockRef.current = false;
+      setGenerationProgress((previous) => ({ ...previous, stage: '生成失败' }));
 
       // Native Feel P2.2: 生成失败通知
       notifyNative({ kind: 'error', body: `正文生成失败：${msg}` });
 
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        // 错误已由 runWithLoading 显示弹窗，这里只做本地状态清理
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setErrorMsg('生成已取消');
+        publishActivity('cancelled', '本次生成已取消。');
+      } else {
+        publishActivity('failed', msg);
       }
     }
   };
@@ -743,72 +840,67 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     }
   };
 
-  const handleAdopt = async () => {
+  async function handleAdoptCandidate(candidate: PlacementCandidate, candidateTarget: DraftResultMetadata, candidateValidation?: GenerationValidationState) {
     if (!chapter || !novelId) return;
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
-    const candidate = latestPlacementCandidate;
-    const candidateTarget = latestGeneratedTarget;
-    if (!candidate || !candidateTarget || !candidate.proposal) {
+    const record: CandidateReviewRecord = {
+      candidate,
+      target: candidateTarget,
+      source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
+      validationNote: candidateValidation?.draftId === candidate.artifactId ? candidateValidation.note : undefined,
+    };
+    try {
+      if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
+      if (candidateValidation?.draftId === candidate.artifactId
+        && (candidateValidation.outlineCompliance.score < 80 || candidateValidation.missingRequiredNames.length > 0)) {
+        if (!(await confirmDanger({ title: '采用确认', message: `该正文可能偏离章节大纲，仍要采用吗？\n\n${candidateValidation.note}` }))) return;
+      } else if (!(await confirmInfo({ title: '采用正文候选', message: `确认将这份 ${candidate.wordCount} 字的 AI 候选保存为新草稿，并设为本章正式正文？` }))) {
+        return;
+      }
+      const adopted = await chapterCandidateService.adopt({
+        record,
+        currentNovelId: requestNovelId,
+        currentChapterId: requestChapterId,
+        currentEditorContent,
+        source: record.source || 'ai_generated',
+        note: record.validationNote,
+      });
+      onCandidateReviewChange?.({ ...record, adopted: true });
+      if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
+      onGenerated?.(adopted, {
+        ...candidateTarget,
+        resultId: adopted.id,
+        draftVersion: adopted.versionNo,
+        contentHash: adopted.contentState?.status === 'ready' ? adopted.contentState.contentHash : candidate.contentHash,
+      });
+      setLatestGeneratedDraft(adopted);
+      setStatusMsg('已采用为正式正文！');
+      setTimeout(() => setStatusMsg(''), 3000);
+      onAdopted?.();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : '采用失败，正文和候选状态保持不变。');
+    }
+  }
+
+  const handleAdopt = async () => {
+    if (!latestPlacementCandidate || !latestGeneratedTarget) {
       setErrorMsg('没有当前展示的生成结果可采用');
       return;
     }
-    if (candidateTarget.novelId !== requestNovelId
-      || candidateTarget.chapterId !== requestChapterId
-      || candidate.proposal.targets.every((target) => target.targetId !== requestChapterId || !target.isReady)) {
-      setErrorMsg('当前展示结果的目标已变化，已阻止采用');
-      return;
-    }
-    const contentHash = candidateTarget.contentHash || candidate.contentHash;
-    if (!contentHash) {
-      setErrorMsg('当前展示结果缺少正文哈希，无法安全采用');
-      return;
-    }
-    if (candidate.constraintValidation?.status === 'blocked' || candidate.diff?.status !== 'ready') {
-      setErrorMsg('The candidate has a blocking constraint result or an unavailable baseline diff.');
-      return;
-    }
-    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
-    if (validationState?.draftId === candidate.artifactId
-      && (validationState.outlineCompliance.score < 80 || validationState.missingRequiredNames.length > 0)) {
-      const riskText = validationState.note;
-      if (!(await confirmDanger({ title: '采用确认', message: `该正文可能偏离章节大纲，仍要采用吗？\n\n${riskText}` }))) return;
-    } else if (!(await confirmInfo({ title: '采用正文候选', message: '确认将当前 Artifact 候选写入新草稿并采用为正式正文？' }))) {
-      return;
-    }
-    const proposalValidation = await placementApplyService.validateProposal(candidate.proposal.proposalId);
-    if (proposalValidation.stale) {
-      setErrorMsg(proposalValidation.reason || 'PlacementProposal 已过期，请重新生成');
-      return;
-    }
-    const plan = await placementApplyService.createPlan({
-      proposalId: candidate.proposal.proposalId,
+    await handleAdoptCandidate(latestPlacementCandidate, latestGeneratedTarget, validationState ?? undefined);
+  };
+
+  const openCandidateReview = () => {
+    if (!latestPlacementCandidate || !latestGeneratedTarget) return;
+    const candidate = latestPlacementCandidate;
+    const target = latestGeneratedTarget;
+    onCandidateReviewChange?.({
+      candidate,
+      target,
       source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
-      note: validationState?.draftId === candidate.artifactId ? validationState.note : undefined,
+      validationNote: validationState?.draftId === candidate.artifactId ? validationState.note : undefined,
     });
-    const execution = await placementApplyService.executePlan(plan);
-    if (execution.status !== 'completed' || execution.targetLinks.length !== 1) {
-      setErrorMsg('ApplyPlan 未完整提交，正式正文保持不变');
-      return;
-    }
-    const applied = execution.result as { draft?: ChapterDraft; contentHash?: string };
-    const adopted = applied.draft;
-    if (!adopted?.isAdopted) {
-      setErrorMsg('ApplyPlan 返回的正文身份校验失败');
-      return;
-    }
-    if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
-    onGenerated?.(adopted, {
-      ...candidateTarget,
-      resultId: adopted.id,
-      draftVersion: adopted.versionNo,
-      contentHash: applied.contentHash || contentHash,
-    });
-    setLatestGeneratedDraft(adopted);
-    setLatestPlacementCandidate(null);
-    setStatusMsg('已采用为正式正文！');
-    setTimeout(() => setStatusMsg(''), 3000);
-    onAdopted?.();
   };
 
   if (!chapter) {
@@ -1096,6 +1188,25 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         </div>
       )}
 
+      {generating && (
+        <div className="generation-progress-card" role="status" aria-live="polite">
+          <div className="generation-progress-heading">
+            <strong>{generationProgress.stage || '正在生成正文'}</strong>
+            <span>{Math.max(0, Math.min(100, generationProgress.percent))}%</span>
+          </div>
+          <div className="generation-progress-track">
+            <span style={{ width: `${Math.max(4, Math.min(100, generationProgress.percent))}%` }} />
+          </div>
+          {generationProgress.message && <p>{generationProgress.message}</p>}
+          {activeTaskId && !revising && (
+            <button className="btn btn-secondary btn-sm" onClick={() => void unifiedAiPipeline.cancel(activeTaskId)}>
+              取消本次生成
+            </button>
+          )}
+          <small>生成会在后台继续，你可以关闭面板并阅读当前正文。</small>
+        </div>
+      )}
+
       {validationState && (
         <div className="panel-section" style={{
           border: `1px solid ${validationState.outlineCompliance.score < 60 || validationState.missingRequiredNames.length > 0 ? 'var(--color-error)' : validationState.outlineCompliance.score < 80 ? 'var(--color-warning)' : 'var(--color-border)'}`,
@@ -1165,12 +1276,12 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
       {constraintValidation && (
         <div className="panel-section" style={{ border: `1px solid ${constraintValidation.status === 'blocked' ? 'var(--color-error)' : constraintValidation.status === 'passed_with_warnings' ? 'var(--color-warning)' : 'var(--color-border)'}`, padding: 10 }}>
-          <div className="panel-section-title">Constraint validation</div>
+          <div className="panel-section-title">约束验证</div>
           <div style={{ fontSize: 12, lineHeight: 1.7 }}>
-            <div>Status: <strong>{constraintValidation.status}</strong></div>
-            <div>Must: {constraintValidation.must.filter((item) => item.status === 'passed').length} passed / {constraintValidation.must.filter((item) => item.status === 'failed').length} failed / {constraintValidation.must.filter((item) => item.status === 'unknown').length} unknown</div>
-            <div>Should warnings: {constraintValidation.warningCount}</div>
-            <div>Forbid matches: {constraintValidation.forbid.filter((item) => item.status !== 'passed').length}</div>
+            <div>结论：<strong>{constraintValidation.status === 'passed' ? '通过' : constraintValidation.status === 'passed_with_warnings' ? '需要复核' : '已阻止采用'}</strong></div>
+            <div>必须满足：{constraintValidation.must.filter((item) => item.status === 'passed').length} 项通过，{constraintValidation.must.filter((item) => item.status === 'failed').length} 项失败，{constraintValidation.must.filter((item) => item.status === 'unknown').length} 项待确认</div>
+            <div>建议提醒：{constraintValidation.warningCount} 项</div>
+            <div>禁止内容命中：{constraintValidation.forbid.filter((item) => item.status !== 'passed').length} 项</div>
           </div>
           {constraintValidation.status !== 'passed' && (
             <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
@@ -1184,30 +1295,30 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
       {chapterDiff && (
         <div className="panel-section" style={{ border: `1px solid ${chapterDiff.status === 'ready' ? 'var(--color-border)' : 'var(--color-error)'}`, padding: 10 }}>
-          <div className="panel-section-title">Chapter diff</div>
+          <div className="panel-section-title">正文差异</div>
           {chapterDiff.status === 'ready' && chapterDiff.summary ? (
             <>
               <div style={{ fontSize: 12, lineHeight: 1.7 }}>
-                <div>Baseline: draft v{chapterDiff.summary.baseDraftVersion}</div>
-                <div>Characters: {chapterDiff.summary.baseCharacterCount} to {chapterDiff.summary.candidateCharacterCount} ({chapterDiff.summary.characterDelta >= 0 ? '+' : ''}{chapterDiff.summary.characterDelta})</div>
-                <div>Paragraphs: +{chapterDiff.summary.addedBlocks} / -{chapterDiff.summary.removedBlocks} / ~{chapterDiff.summary.modifiedBlocks} / ={chapterDiff.summary.unchangedBlocks}</div>
+                <div>对比基线：草稿 v{chapterDiff.summary.baseDraftVersion}</div>
+                <div>字数：{chapterDiff.summary.baseCharacterCount} → {chapterDiff.summary.candidateCharacterCount}（{chapterDiff.summary.characterDelta >= 0 ? '+' : ''}{chapterDiff.summary.characterDelta}）</div>
+                <div>段落：新增 {chapterDiff.summary.addedBlocks} / 删除 {chapterDiff.summary.removedBlocks} / 修改 {chapterDiff.summary.modifiedBlocks} / 未变化 {chapterDiff.summary.unchangedBlocks}</div>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowDiff((value) => !value)} style={{ marginTop: 8 }}>
-                {showDiff ? 'Hide changed paragraphs' : 'Show changed paragraphs'}
+                {showDiff ? '收起变更段落' : '在侧栏查看变更段落'}
               </button>
               {showDiff && (
                 <div style={{ marginTop: 8, maxHeight: 260, overflow: 'auto', fontSize: 11, lineHeight: 1.55 }}>
                   {chapterDiff.blocks.filter((block) => block.kind !== 'unchanged').map((block, index) => (
                     <div key={`${block.kind}-${block.baseIndex}-${block.candidateIndex}-${index}`} style={{ borderTop: '1px solid var(--color-border)', padding: '6px 0' }}>
-                      <strong>{block.kind}</strong>
-                      {block.baseText !== undefined && <div style={{ whiteSpace: 'pre-wrap', color: 'var(--color-text-secondary)' }}>Base: {block.baseText.slice(0, 800)}</div>}
-                      {block.candidateText !== undefined && <div style={{ whiteSpace: 'pre-wrap' }}>Candidate: {block.candidateText.slice(0, 800)}</div>}
+                      <strong>{block.kind === 'added' ? '新增' : block.kind === 'removed' ? '删除' : '修改'}</strong>
+                      {block.baseText !== undefined && <div style={{ whiteSpace: 'pre-wrap', color: 'var(--color-text-secondary)' }}>原稿：{block.baseText.slice(0, 800)}</div>}
+                      {block.candidateText !== undefined && <div style={{ whiteSpace: 'pre-wrap' }}>候选：{block.candidateText.slice(0, 800)}</div>}
                     </div>
                   ))}
                 </div>
               )}
             </>
-          ) : <div style={{ fontSize: 12, color: 'var(--color-error)' }}>{chapterDiff.reason || 'Diff is unavailable.'}</div>}
+          ) : <div style={{ fontSize: 12, color: 'var(--color-error)' }}>{chapterDiff.reason || '正文差异不可用。'}</div>}
         </div>
       )}
 
@@ -1219,13 +1330,16 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             {latestPlacementCandidate.content.length > 500 ? '…' : ''}
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>
-            候选已保存为 Artifact 与 PlacementProposal；确认前不会写入正文草稿。
+            候选已安全保存；确认前不会写入正文草稿。
           </div>
+          <button className="btn btn-primary btn-sm" onClick={openCandidateReview} style={{ width: '100%', marginTop: 8 }}>
+            在正文区审查完整候选
+          </button>
         </div>
       )}
 
       {/* 操作按钮 */}
-      <div className="panel-section">
+      <div className="panel-section ai-generate-actions">
         <button
           className="panel-btn panel-btn-primary"
           onClick={() => handleGenerate()}
@@ -1236,22 +1350,12 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         <button
           className="panel-btn panel-btn-secondary"
           onClick={handleAdopt}
-          disabled={generating || revising || !latestPlacementCandidate || !latestPlacementCandidate.proposal || !latestGeneratedTarget
-            || latestPlacementCandidate.constraintValidation?.status === 'blocked'
-            || latestPlacementCandidate.diff?.status !== 'ready'}
+          disabled={generating || revising || !latestPlacementCandidate || !latestGeneratedTarget}
         >
           ✅ 确认采用
         </button>
-        {generating && activeTaskId && !revising && (
-          <button
-            className="panel-btn panel-btn-secondary"
-            onClick={() => void unifiedAiPipeline.cancel(activeTaskId)}
-          >
-            取消生成
-          </button>
-        )}
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 6 }}>
-          AI 生成结果先保存为 Artifact 候选，确认后才写入并采用正文
+          AI 生成结果会先进入候选审查，确认后才写入并采用正文
         </div>
       </div>
     </div>

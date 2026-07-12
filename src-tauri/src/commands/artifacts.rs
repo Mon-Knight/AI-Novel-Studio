@@ -34,3 +34,14 @@ pub fn get_latest_chapter_constraint_validation(
         .map_err(|_| AppError::poisoned_lock())?;
     constraint_validation_service::latest(&connection, &artifact_id)
 }
+
+#[tauri::command]
+pub fn recover_chapter_candidate(
+    novel_id: String,
+    chapter_id: String,
+) -> Result<artifact_service::ChapterCandidateRecoveryDto, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    artifact_service::recover_chapter_candidate(&connection, &novel_id, &chapter_id)
+}
