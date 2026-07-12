@@ -95,6 +95,7 @@ impl AppError {
     }
 
     pub fn database(error: rusqlite::Error) -> Self {
+        let sqlite_error_code = error.sqlite_error_code().map(|code| format!("{code:?}"));
         let retryable = matches!(
             error.sqlite_error_code(),
             Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
@@ -104,8 +105,10 @@ impl AppError {
         } else {
             codes::DATABASE_TRANSACTION_FAILED
         };
-        Self::new(code, "数据库操作失败", retryable)
-            .with_details(json!({ "sqliteError": error.to_string() }))
+        Self::new(code, "数据库操作失败", retryable).with_details(json!({
+            "sqliteError": error.to_string(),
+            "sqliteErrorCode": sqlite_error_code,
+        }))
     }
 
     pub fn poisoned_lock() -> Self {

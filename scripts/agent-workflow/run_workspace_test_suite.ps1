@@ -65,6 +65,16 @@ $suiteConfig = @{
             'migrations::tests::db22_v220_ledger_upgrades_from_005_and_restarts_idempotently',
             'migrations::tests::db23_m2_schema_has_tables_indexes_and_triggers',
             'migrations::tests::db24_m2_proposal_plan_and_link_reject_delete',
+            'migrations::tests::db25_exact_legacy_snapshot_baseline_upgrades_through_015',
+            'migrations::tests::db26_unknown_legacy_snapshot_checksums_fail_closed',
+            'migrations::tests::db27_mixed_legacy_snapshot_checksums_fail_closed',
+            'migrations::tests::db28_fake_legacy_snapshot_schema_fails_closed',
+            'migrations::tests::db29_incomplete_legacy_ledger_fails_before_forward_writes',
+            'migrations::tests::db30_fake_existing_delete_guard_blocks_015',
+            'db::tests::db31_database_initialization_failure_returns_error',
+            'tests::db32_database_startup_errors_are_classified',
+            'tests::db33_database_startup_notice_redacts_internal_details',
+            'db::tests::db34_malformed_database_returns_sqlite_diagnostics',
             'errors::tests::db16_app_error_serializes_as_stable_object'
         )
     }

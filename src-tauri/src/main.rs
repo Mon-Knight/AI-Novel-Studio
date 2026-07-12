@@ -16,7 +16,167 @@ mod services;
 mod system_accent;
 mod window_state;
 
+use errors::{codes, AppError};
+use tauri::api::dialog::{blocking::MessageDialogBuilder, MessageDialogButtons, MessageDialogKind};
 use tauri::Manager;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DatabaseStartupErrorKind {
+    Checksum,
+    Compatibility,
+    Corruption,
+    Migration,
+    Busy,
+    Initialization,
+}
+
+impl DatabaseStartupErrorKind {
+    fn support_code(self) -> &'static str {
+        match self {
+            Self::Checksum => "DB-CHECKSUM",
+            Self::Compatibility => "DB-COMPATIBILITY",
+            Self::Corruption => "DB-CORRUPT",
+            Self::Migration => "DB-MIGRATION",
+            Self::Busy => "DB-BUSY",
+            Self::Initialization => "DB-STARTUP",
+        }
+    }
+}
+
+struct DatabaseStartupNotice {
+    title: &'static str,
+    message: &'static str,
+}
+
+fn startup_detail<'a>(error: &'a AppError, key: &str) -> Option<&'a str> {
+    error
+        .details
+        .as_ref()
+        .and_then(|details| details.as_object())
+        .and_then(|details| details.get(key))
+        .and_then(|value| value.as_str())
+}
+
+fn classify_database_startup_error(error: &AppError) -> DatabaseStartupErrorKind {
+    if startup_detail(error, "migrationId").is_some()
+        && startup_detail(error, "expectedChecksum").is_some()
+        && startup_detail(error, "actualChecksum").is_some()
+    {
+        return DatabaseStartupErrorKind::Checksum;
+    }
+
+    if startup_detail(error, "stage") == Some("legacy_snapshot_compatibility") {
+        return DatabaseStartupErrorKind::Compatibility;
+    }
+
+    let sqlite_error_code = startup_detail(error, "sqliteErrorCode");
+    let sqlite_error = startup_detail(error, "sqliteError")
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(sqlite_error_code, Some("DatabaseCorrupt" | "NotADatabase"))
+        || sqlite_error.contains("database disk image is malformed")
+        || sqlite_error.contains("file is not a database")
+    {
+        return DatabaseStartupErrorKind::Corruption;
+    }
+
+    if error.code == codes::DATABASE_BUSY {
+        return DatabaseStartupErrorKind::Busy;
+    }
+
+    if startup_detail(error, "startupStage") == Some("create_schema")
+        || startup_detail(error, "stage") == Some("snapshot_delete_guards")
+        || startup_detail(error, "migrationId").is_some()
+    {
+        return DatabaseStartupErrorKind::Migration;
+    }
+
+    DatabaseStartupErrorKind::Initialization
+}
+
+fn database_startup_notice(error: &AppError) -> DatabaseStartupNotice {
+    let title = "AI Novel Studio 无法启动";
+    let message = match classify_database_startup_error(error) {
+        DatabaseStartupErrorKind::Checksum => {
+            "检测到数据库迁移账本校验失败。为保护作品数据，应用已停止启动。\n\n请不要修改或删除数据库文件，并向维护者提供错误编号：DB-CHECKSUM。"
+        }
+        DatabaseStartupErrorKind::Compatibility => {
+            "检测到旧版数据库结构不符合已知兼容基线。为避免错误写入，应用已停止启动。\n\n请保留原数据库文件，并向维护者提供错误编号：DB-COMPATIBILITY。"
+        }
+        DatabaseStartupErrorKind::Corruption => {
+            "数据库文件损坏或格式无法识别。应用未继续写入。\n\n请保留原文件及备份，并向维护者提供错误编号：DB-CORRUPT。"
+        }
+        DatabaseStartupErrorKind::Migration => {
+            "数据库结构升级未能安全完成。应用已停止启动，未绕过校验。\n\n请保留原数据库文件，并向维护者提供错误编号：DB-MIGRATION。"
+        }
+        DatabaseStartupErrorKind::Busy => {
+            "数据库当前被其他程序或另一个 AI Novel Studio 实例占用。应用未继续启动。\n\n请关闭相关实例后重试。错误编号：DB-BUSY。"
+        }
+        DatabaseStartupErrorKind::Initialization => {
+            "无法打开或配置本地数据库。应用未继续启动。\n\n请检查磁盘空间与目录权限，并保留原数据库文件。错误编号：DB-STARTUP。"
+        }
+    };
+    DatabaseStartupNotice { title, message }
+}
+
+#[cfg(any(debug_assertions, test))]
+fn database_startup_diagnostic(error: &AppError) -> serde_json::Value {
+    const SAFE_DETAIL_KEYS: [&str; 12] = [
+        "startupStage",
+        "databasePath",
+        "migrationId",
+        "expectedChecksum",
+        "actualChecksum",
+        "stage",
+        "reason",
+        "sqliteErrorCode",
+        "sqliteError",
+        "ioErrorKind",
+        "ioError",
+        "migrationVersion",
+    ];
+
+    let mut safe_details = serde_json::Map::new();
+    if let Some(details) = error.details.as_ref().and_then(|value| value.as_object()) {
+        for key in SAFE_DETAIL_KEYS {
+            if let Some(value) = details.get(key) {
+                safe_details.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+
+    serde_json::json!({
+        "category": classify_database_startup_error(error).support_code(),
+        "code": error.code,
+        "retryable": error.retryable,
+        "details": safe_details,
+    })
+}
+
+fn report_database_startup_error(error: &AppError) {
+    #[cfg(debug_assertions)]
+    match serde_json::to_string_pretty(&database_startup_diagnostic(error)) {
+        Ok(diagnostic) => eprintln!("[Startup] database initialization failed:\n{diagnostic}"),
+        Err(_) => eprintln!(
+            "[Startup] database initialization failed: category={}, code={}",
+            classify_database_startup_error(error).support_code(),
+            error.code
+        ),
+    }
+
+    #[cfg(not(debug_assertions))]
+    eprintln!(
+        "[Startup] database initialization failed: category={}, code={}",
+        classify_database_startup_error(error).support_code(),
+        error.code
+    );
+
+    let notice = database_startup_notice(error);
+    let _ = MessageDialogBuilder::new(notice.title, notice.message)
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::Ok)
+        .show();
+}
 
 /// Native Feel P1: 获取应用数据目录
 fn get_app_data_dir() -> std::path::PathBuf {
@@ -45,7 +205,10 @@ fn get_app_data_dir() -> std::path::PathBuf {
 fn main() {
     let startup_at = std::time::Instant::now();
     println!("[Startup] tauri main start");
-    db::init_database();
+    if let Err(error) = db::init_database() {
+        report_database_startup_error(&error);
+        std::process::exit(1);
+    }
     println!(
         "[Startup] database initialized: {} ms",
         startup_at.elapsed().as_millis()
@@ -237,4 +400,99 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db32_database_startup_errors_are_classified() {
+        let checksum = AppError::new(codes::DATABASE_TRANSACTION_FAILED, "migration", false)
+            .with_details(serde_json::json!({
+                "startupStage": "create_schema",
+                "migrationId": "007_ai_input_snapshots",
+                "expectedChecksum": "expected",
+                "actualChecksum": "actual",
+            }));
+        assert_eq!(
+            classify_database_startup_error(&checksum),
+            DatabaseStartupErrorKind::Checksum
+        );
+
+        let compatibility = AppError::new(codes::DATABASE_TRANSACTION_FAILED, "migration", false)
+            .with_details(serde_json::json!({
+                "startupStage": "create_schema",
+                "stage": "legacy_snapshot_compatibility",
+                "reason": "audited structure mismatch",
+            }));
+        assert_eq!(
+            classify_database_startup_error(&compatibility),
+            DatabaseStartupErrorKind::Compatibility
+        );
+
+        let corruption = AppError::new(codes::DATABASE_TRANSACTION_FAILED, "database", false)
+            .with_details(serde_json::json!({
+                "startupStage": "open_database",
+                "sqliteErrorCode": "DatabaseCorrupt",
+                "sqliteError": "database disk image is malformed",
+            }));
+        assert_eq!(
+            classify_database_startup_error(&corruption),
+            DatabaseStartupErrorKind::Corruption
+        );
+
+        let migration = AppError::new(codes::DATABASE_TRANSACTION_FAILED, "migration", false)
+            .with_details(serde_json::json!({ "startupStage": "create_schema" }));
+        assert_eq!(
+            classify_database_startup_error(&migration),
+            DatabaseStartupErrorKind::Migration
+        );
+
+        let busy = AppError::new(codes::DATABASE_BUSY, "database", true)
+            .with_details(serde_json::json!({ "startupStage": "open_database" }));
+        assert_eq!(
+            classify_database_startup_error(&busy),
+            DatabaseStartupErrorKind::Busy
+        );
+
+        let initialization = AppError::new(codes::DATABASE_TRANSACTION_FAILED, "database", false)
+            .with_details(serde_json::json!({ "startupStage": "configure_database" }));
+        assert_eq!(
+            classify_database_startup_error(&initialization),
+            DatabaseStartupErrorKind::Initialization
+        );
+    }
+
+    #[test]
+    fn db33_database_startup_notice_redacts_internal_details() {
+        let work_content = "NOVEL_BODY_MUST_NOT_APPEAR";
+        let raw_sql = "SELECT secret_body FROM chapter_drafts";
+        let error = AppError::new(codes::DATABASE_TRANSACTION_FAILED, work_content, false)
+            .with_details(serde_json::json!({
+                "startupStage": "create_schema",
+                "databasePath": "C:\\Users\\developer\\ai-novel-studio.db",
+                "migrationId": "007_ai_input_snapshots",
+                "expectedChecksum": "expected-checksum",
+                "actualChecksum": "actual-checksum",
+                "payload": work_content,
+                "sql": raw_sql,
+            }));
+
+        let notice = database_startup_notice(&error);
+        let release_text = format!("{} {}", notice.title, notice.message);
+        assert!(!release_text.contains(work_content));
+        assert!(!release_text.contains(raw_sql));
+        assert!(!release_text.contains("expected-checksum"));
+        assert!(!release_text.contains("actual-checksum"));
+        assert!(!release_text.contains("developer"));
+        assert!(release_text.contains("DB-CHECKSUM"));
+
+        let diagnostic = serde_json::to_string(&database_startup_diagnostic(&error))
+            .expect("safe diagnostic should serialize");
+        assert!(!diagnostic.contains(work_content));
+        assert!(!diagnostic.contains(raw_sql));
+        assert!(diagnostic.contains("expected-checksum"));
+        assert!(diagnostic.contains("actual-checksum"));
+    }
 }

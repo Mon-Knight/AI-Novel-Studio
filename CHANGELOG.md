@@ -41,6 +41,14 @@
 - 新增 `test:placement`（10 个 Vitest 用例）与 `test:apply-plan`（12 个 Vitest 用例）防零专项；Rust 新增 24 个 M2 迁移/Placement/Apply/回滚/重放动态用例。
 - 正式应用版本继续保持 2.2.0；未迁移入口、Task Center UI、TextRangeLock、多目标事务与 Legacy 清理仍不在本阶段范围。
 
+### v2.3.0-M2 数据库兼容修复
+
+- 为 pre-acceptance M1 数据库增加 007～010 已知历史 checksum 的受限兼容：仅在四条账本记录、001～006/011 前置账本和已审计历史结构完整匹配时放行，未知、伪造、不完整或新旧混合状态继续 fail-closed。
+- 新增 `015_snapshot_delete_guards` 前向 migration，在保留历史 checksum 的前提下补齐三类 Snapshot 与 ResultArtifact 的四个 DELETE 不可变触发器，并继续执行 012～014。
+- 增加旧库升级、迁移幂等、DELETE 保护、未知 checksum、混合账本、缺失前置账本和伪造结构的 Rust / SQLite 回归测试。
+- 数据库启动初始化改为显式错误传播，移除目录创建、连接、PRAGMA、建表/迁移和全局连接注册阶段的未处理 panic；继续保持初始化失败即停止启动的 fail-closed 行为。
+- 开发构建输出仅含白名单诊断字段；Release/安装版使用原生错误对话框区分 checksum、历史兼容、数据库损坏、migration、占用和一般初始化故障，不展示作品内容、SQL、数据库路径或实际 checksum。
+
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 
 ### 新增

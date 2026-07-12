@@ -1,7 +1,8 @@
+use crate::errors::{codes, AppError};
 use once_cell::sync::OnceCell;
 use rusqlite::{Connection, Result as SqliteResult};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
@@ -38,30 +39,86 @@ fn dirs_next() -> Option<PathBuf> {
     }
 }
 
-pub fn init_database() {
-    let data_dir = get_data_dir();
-    fs::create_dir_all(&data_dir).expect("Failed to create data directory");
+fn with_startup_context(
+    mut error: AppError,
+    startup_stage: &str,
+    database_path: &Path,
+) -> AppError {
+    let mut details = match error.details.take() {
+        Some(serde_json::Value::Object(details)) => details,
+        _ => serde_json::Map::new(),
+    };
+    details.insert(
+        "startupStage".to_string(),
+        serde_json::Value::String(startup_stage.to_string()),
+    );
+    details.insert(
+        "databasePath".to_string(),
+        serde_json::Value::String(database_path.display().to_string()),
+    );
+    error.details = Some(serde_json::Value::Object(details));
+    error
+}
 
-    let db_path = get_database_path();
-    let mut connection = Connection::open(&db_path).expect("Failed to open database");
+fn initialize_database_at(data_dir: &Path) -> Result<(PathBuf, Connection), AppError> {
+    let database_path = data_dir.join("ai-novel-studio.db");
+    fs::create_dir_all(data_dir).map_err(|error| {
+        AppError::new(
+            codes::DATABASE_TRANSACTION_FAILED,
+            "无法创建数据库目录",
+            false,
+        )
+        .with_details(serde_json::json!({
+            "startupStage": "create_data_directory",
+            "databasePath": database_path.display().to_string(),
+            "ioErrorKind": format!("{:?}", error.kind()),
+            "ioError": error.to_string(),
+        }))
+    })?;
+
+    let mut connection = Connection::open(&database_path).map_err(|error| {
+        with_startup_context(AppError::database(error), "open_database", &database_path)
+    })?;
 
     connection
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
-        .expect("Failed to set pragmas");
+        .map_err(|error| {
+            with_startup_context(
+                AppError::database(error),
+                "configure_database",
+                &database_path,
+            )
+        })?;
 
-    create_tables(&mut connection).expect("Failed to create tables");
+    create_tables(&mut connection)
+        .map_err(|error| with_startup_context(error, "create_schema", &database_path))?;
 
-    DB.set(Mutex::new(connection))
-        .expect("Database already initialized");
+    Ok((database_path, connection))
+}
 
-    println!("Database initialized at: {:?}", db_path);
+pub fn init_database() -> Result<(), AppError> {
+    let (database_path, connection) = initialize_database_at(&get_data_dir())?;
+    DB.set(Mutex::new(connection)).map_err(|_| {
+        AppError::new(
+            codes::DATABASE_TRANSACTION_FAILED,
+            "数据库连接已初始化",
+            false,
+        )
+        .with_details(serde_json::json!({
+            "startupStage": "register_connection",
+            "databasePath": database_path.display().to_string(),
+        }))
+    })?;
+
+    println!("Database initialized at: {:?}", database_path);
+    Ok(())
 }
 
 pub fn get_connection() -> &'static Mutex<Connection> {
     DB.get().expect("Database not initialized")
 }
 
-fn create_tables(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
+fn create_tables(conn: &mut Connection) -> Result<(), AppError> {
     create_base_tables(conn)?;
     run_migrations(conn)?;
     create_indexes(conn)?;
@@ -1000,7 +1057,12 @@ fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
 
     // quality_check_items: migrate from is_resolved boolean to status enum
     // Step 1: add new columns
-    ensure_column(conn, "quality_check_items", "status", "TEXT NOT NULL DEFAULT 'pending'")?;
+    ensure_column(
+        conn,
+        "quality_check_items",
+        "status",
+        "TEXT NOT NULL DEFAULT 'pending'",
+    )?;
     ensure_column(conn, "quality_check_items", "issue_key", "TEXT")?;
     ensure_column(conn, "quality_check_items", "resolution_note", "TEXT")?;
     ensure_column(conn, "quality_check_items", "resolved_at", "TEXT")?;
@@ -1036,15 +1098,35 @@ fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
 
 fn migrate_chapter_summaries_table(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "chapter_summaries", "volume_id", "TEXT")?;
-    ensure_column(conn, "chapter_summaries", "enabled", "INTEGER NOT NULL DEFAULT 1")?;
+    ensure_column(
+        conn,
+        "chapter_summaries",
+        "enabled",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
     ensure_column(conn, "chapter_summaries", "content_hash", "TEXT")?;
     ensure_column(conn, "chapter_summaries", "draft_version", "INTEGER")?;
-    ensure_column(conn, "chapter_summaries", "is_expired", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "chapter_summaries",
+        "is_expired",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(conn, "chapter_summaries", "validation_status", "TEXT")?;
     ensure_column(conn, "chapter_summaries", "validation_result", "TEXT")?;
     ensure_column(conn, "chapter_summaries", "core_events", "TEXT")?;
-    ensure_column(conn, "chapter_summaries", "protagonist_state_change", "TEXT")?;
-    ensure_column(conn, "chapter_summaries", "important_character_changes", "TEXT")?;
+    ensure_column(
+        conn,
+        "chapter_summaries",
+        "protagonist_state_change",
+        "TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_summaries",
+        "important_character_changes",
+        "TEXT",
+    )?;
     ensure_column(conn, "chapter_summaries", "setting_changes", "TEXT")?;
     ensure_column(conn, "chapter_summaries", "new_locations", "TEXT")?;
     ensure_column(conn, "chapter_summaries", "new_items_or_abilities", "TEXT")?;
@@ -1066,7 +1148,12 @@ fn migrate_chapter_summaries_table(conn: &Connection) -> SqliteResult<()> {
 
 fn migrate_context_records_table(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "context_records", "volume_id", "TEXT")?;
-    ensure_column(conn, "context_records", "is_expired", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "context_records",
+        "is_expired",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(conn, "context_records", "content_hash", "TEXT")?;
     ensure_column(conn, "context_records", "draft_version", "INTEGER")?;
     conn.execute(
@@ -1123,9 +1210,19 @@ fn ensure_large_text_ref_columns(conn: &Connection) -> SqliteResult<()> {
 }
 
 fn migrate_chapter_engineering_states_table(conn: &Connection) -> SqliteResult<()> {
-    ensure_column(conn, "chapter_engineering_states", "novel_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "novel_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
     ensure_column(conn, "chapter_engineering_states", "volume_id", "TEXT")?;
-    ensure_column(conn, "chapter_engineering_states", "chapter_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "chapter_engineering_states",
+        "chapter_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
     ensure_column(
         conn,
         "chapter_engineering_states",
@@ -1183,12 +1280,37 @@ fn migrate_chapter_engineering_states_table(conn: &Connection) -> SqliteResult<(
 }
 
 fn migrate_chapter_generation_snapshots_table(conn: &Connection) -> SqliteResult<()> {
-    ensure_column(conn, "chapter_generation_snapshots", "novel_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "novel_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
     ensure_column(conn, "chapter_generation_snapshots", "volume_id", "TEXT")?;
-    ensure_column(conn, "chapter_generation_snapshots", "chapter_id", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(conn, "chapter_generation_snapshots", "engineering_state_id", "TEXT")?;
-    ensure_column(conn, "chapter_generation_snapshots", "style_profile_id", "TEXT")?;
-    ensure_column(conn, "chapter_generation_snapshots", "output_profile_id", "TEXT")?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "chapter_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "engineering_state_id",
+        "TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "style_profile_id",
+        "TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "chapter_generation_snapshots",
+        "output_profile_id",
+        "TEXT",
+    )?;
     ensure_column(
         conn,
         "chapter_generation_snapshots",
@@ -1233,13 +1355,38 @@ fn migrate_chapter_generation_snapshots_table(conn: &Connection) -> SqliteResult
 
 fn migrate_generation_jobs_table(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "generation_jobs", "world_id", "TEXT")?;
-    ensure_column(conn, "generation_jobs", "novel_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_column(
+        conn,
+        "generation_jobs",
+        "novel_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
     ensure_column(conn, "generation_jobs", "volume_id", "TEXT")?;
-    ensure_column(conn, "generation_jobs", "chapter_id", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(conn, "generation_jobs", "job_type", "TEXT NOT NULL DEFAULT 'chapter_generation_mock'")?;
-    ensure_column(conn, "generation_jobs", "status", "TEXT NOT NULL DEFAULT 'pending'")?;
+    ensure_column(
+        conn,
+        "generation_jobs",
+        "chapter_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "generation_jobs",
+        "job_type",
+        "TEXT NOT NULL DEFAULT 'chapter_generation_mock'",
+    )?;
+    ensure_column(
+        conn,
+        "generation_jobs",
+        "status",
+        "TEXT NOT NULL DEFAULT 'pending'",
+    )?;
     ensure_column(conn, "generation_jobs", "current_step", "TEXT")?;
-    ensure_column(conn, "generation_jobs", "progress_percent", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "generation_jobs",
+        "progress_percent",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(conn, "generation_jobs", "provider", "TEXT")?;
     ensure_column(conn, "generation_jobs", "model_name", "TEXT")?;
     ensure_column(conn, "generation_jobs", "input_token_estimate", "INTEGER")?;
@@ -1249,15 +1396,40 @@ fn migrate_generation_jobs_table(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "generation_jobs", "cost_estimate", "REAL")?;
     ensure_column(conn, "generation_jobs", "error_code", "TEXT")?;
     ensure_column(conn, "generation_jobs", "error_message", "TEXT")?;
-    ensure_column(conn, "generation_jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "generation_jobs",
+        "retry_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_column(conn, "generation_jobs", "created_at", "TEXT")?;
     ensure_column(conn, "generation_jobs", "started_at", "TEXT")?;
     ensure_column(conn, "generation_jobs", "finished_at", "TEXT")?;
 
-    ensure_column(conn, "generation_step_results", "job_id", "TEXT NOT NULL DEFAULT ''")?;
-    ensure_column(conn, "generation_step_results", "step_name", "TEXT NOT NULL DEFAULT 'preflight'")?;
-    ensure_column(conn, "generation_step_results", "status", "TEXT NOT NULL DEFAULT 'pending'")?;
-    ensure_column(conn, "generation_step_results", "input_snapshot_json", "TEXT")?;
+    ensure_column(
+        conn,
+        "generation_step_results",
+        "job_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        conn,
+        "generation_step_results",
+        "step_name",
+        "TEXT NOT NULL DEFAULT 'preflight'",
+    )?;
+    ensure_column(
+        conn,
+        "generation_step_results",
+        "status",
+        "TEXT NOT NULL DEFAULT 'pending'",
+    )?;
+    ensure_column(
+        conn,
+        "generation_step_results",
+        "input_snapshot_json",
+        "TEXT",
+    )?;
     ensure_column(conn, "generation_step_results", "output_json", "TEXT")?;
     ensure_column(conn, "generation_step_results", "output_text", "TEXT")?;
     ensure_column(conn, "generation_step_results", "error_message", "TEXT")?;
@@ -1280,23 +1452,99 @@ mod tests {
     use super::*;
 
     #[test]
-    fn db20_empty_database_initializes_complete_m2_ledger(
+    fn db31_database_initialization_failure_returns_error() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let occupied_path = std::env::temp_dir().join(format!(
+            "ai-novel-studio-db-init-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::write(&occupied_path, b"occupied")?;
+
+        let error = match initialize_database_at(&occupied_path) {
+            Ok((_, connection)) => {
+                drop(connection);
+                return Err("database initialization unexpectedly succeeded".into());
+            }
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, codes::DATABASE_TRANSACTION_FAILED);
+        assert_eq!(
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details["startupStage"].as_str()),
+            Some("create_data_directory")
+        );
+        fs::remove_file(occupied_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn db34_malformed_database_returns_sqlite_diagnostics(
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let data_dir = std::env::temp_dir().join(format!(
+            "ai-novel-studio-malformed-db-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&data_dir)?;
+        let database_path = data_dir.join("ai-novel-studio.db");
+        fs::write(&database_path, b"not a sqlite database")?;
+
+        let error = match initialize_database_at(&data_dir) {
+            Ok((_, connection)) => {
+                drop(connection);
+                return Err("malformed database unexpectedly initialized".into());
+            }
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, codes::DATABASE_TRANSACTION_FAILED);
+        assert_eq!(
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details["sqliteErrorCode"].as_str()),
+            Some("NotADatabase")
+        );
+        assert_eq!(
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details["startupStage"].as_str()),
+            Some("configure_database")
+        );
+
+        for path in [
+            database_path.clone(),
+            PathBuf::from(format!("{}-wal", database_path.display())),
+            PathBuf::from(format!("{}-shm", database_path.display())),
+        ] {
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+        }
+        fs::remove_dir(data_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn db20_empty_database_initializes_complete_m2_ledger() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         create_tables(&mut conn)?;
-        let migration_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM schema_migrations",
-            [],
-            |row| row.get(0),
-        )?;
-        assert_eq!(migration_count, 14);
+        let migration_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(migration_count, 15);
         let last_migration: String = conn.query_row(
             "SELECT migration_id FROM schema_migrations ORDER BY migration_id DESC LIMIT 1",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(last_migration, "014_artifact_target_links");
+        assert_eq!(last_migration, "015_snapshot_delete_guards");
         Ok(())
     }
 
