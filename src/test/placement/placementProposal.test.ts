@@ -7,6 +7,16 @@ function seedArtifact(artifactId: string, content = 'candidate text') {
   }));
 }
 
+function seedChapterConstraintValidation(artifactId: string, status: 'passed' | 'blocked') {
+  localStorage.setItem(`ai_novel_studio_chapter_constraint_validation_${artifactId}`, JSON.stringify([{ status }]));
+}
+
+function requireChapterConstraintValidation(artifactId: string) {
+  const stored = JSON.parse(localStorage.getItem(`ai_novel_studio_result_artifact_${artifactId}`) || '{}');
+  stored.requiresChapterConstraintValidation = true;
+  localStorage.setItem(`ai_novel_studio_result_artifact_${artifactId}`, JSON.stringify(stored));
+}
+
 function input(artifactId: string, chapterId = 'chapter-a') {
   return {
     artifactId,
@@ -90,5 +100,39 @@ describe('PlacementProposal browser contract', () => {
       ...input('artifact-10'), browserExpectedVersion: 4, browserExpectedHash: 'hash-b',
     });
     expect(second.projectRevisionHash).not.toBe(first.projectRevisionHash);
+  });
+
+  it('PLC-TS-11 refuses a chapter-generation Artifact without a persisted constraint result', async () => {
+    seedArtifact('artifact-11');
+    requireChapterConstraintValidation('artifact-11');
+    await expect(placementApplyService.createProposal(input('artifact-11'))).rejects.toMatchObject({
+      code: 'ARTIFACT_VALIDATION_FAILED',
+    });
+  });
+
+  it('PLC-TS-12 rechecks the latest constraint result before rebuilding or planning', async () => {
+    seedArtifact('artifact-12');
+    requireChapterConstraintValidation('artifact-12');
+    seedChapterConstraintValidation('artifact-12', 'passed');
+    const proposal = await placementApplyService.createProposal(input('artifact-12'));
+    seedChapterConstraintValidation('artifact-12', 'blocked');
+    await expect(placementApplyService.rebuildProposal(proposal.proposalId, input('artifact-12').target)).rejects.toMatchObject({
+      code: 'ARTIFACT_VALIDATION_FAILED',
+    });
+    await expect(placementApplyService.createPlan({ proposalId: proposal.proposalId })).rejects.toMatchObject({
+      code: 'ARTIFACT_VALIDATION_FAILED',
+    });
+  });
+
+  it('PLC-TS-13 rechecks the latest constraint result before the first browser apply', async () => {
+    seedArtifact('artifact-13');
+    requireChapterConstraintValidation('artifact-13');
+    seedChapterConstraintValidation('artifact-13', 'passed');
+    const proposal = await placementApplyService.createProposal(input('artifact-13'));
+    const plan = await placementApplyService.createPlan({ proposalId: proposal.proposalId });
+    seedChapterConstraintValidation('artifact-13', 'blocked');
+    await expect(placementApplyService.executePlan(plan)).rejects.toMatchObject({
+      code: 'ARTIFACT_VALIDATION_FAILED',
+    });
   });
 });

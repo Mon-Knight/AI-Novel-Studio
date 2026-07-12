@@ -64,6 +64,15 @@
 - Prompt 模板增加已编译约束和当前采用正文的受控区块；未改变 Provider、模型、温度、Token、应用版本或任何 migration。
 - 新增编译稳定性、章节/作品隔离、预算裁剪、缺失数据降级、凭据排除、入口 Snapshot 绑定、Provider fail-closed 与 Snapshot 事务回滚测试；`task18` 确认 Context Snapshot 写入失败时 Task、三类 Snapshot 和 Attempt 全部回滚。
 
+### 章节约束验证与正文差异预览
+
+- 新增确定性章节 Artifact 约束验证器，完全使用冻结的 Task、Input/Context/Constraint Snapshot 和 Artifact 正文；不发起额外 Provider 调用。
+- 按 `must`、`should`、`forbid` 输出稳定验证结果。`must`/`forbid` 的失败或未知会阻止 PlacementProposal/ApplyPlan，`should` 保留为用户可见的确认前警告。
+- 验证结果追加写入现有 `artifact_validation_issues`：每次运行具有独立 `validationRunId`，保留原始 Artifact，不保存正文、Prompt 或凭据到问题消息或诊断。
+- 新增 Rust 权威 gate 与浏览器回退服务复检：章节生成 Artifact 必须具有最新可用验证结果；Proposal 校验、创建 ApplyPlan 和首次 Apply 均会拒绝已阻断或缺少验证的候选，已完成结果仍按原 operation 幂等重放。
+- 新增冻结 source draft 与 Artifact 正文之间的段落级差异摘要与可展开预览；差异不写入数据库或 LocalStorage，基线 ID、版本、hash、作品或章节不一致时 fail-closed。
+- 新增 `test:constraint-validation` 与 `test:chapter-diff`，覆盖验证规则、隔离、敏感信息脱敏、差异稳定性、长正文及 Rust 追加账本/authority gate；未修改 migration、应用版本或 Provider 参数。
+
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 
 ### 新增

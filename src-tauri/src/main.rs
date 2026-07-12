@@ -268,6 +268,8 @@ fn main() {
             commands::ai_tasks::cancel_ai_task,
             commands::ai_tasks::record_ai_task_late_response,
             commands::artifacts::create_result_artifact,
+            commands::artifacts::record_chapter_constraint_validation,
+            commands::artifacts::get_latest_chapter_constraint_validation,
             commands::apply::create_placement_proposal,
             commands::apply::get_placement_proposal,
             commands::apply::validate_placement_proposal,

@@ -8,6 +8,7 @@ import type {
 import { dbCall, lsGet, lsSet, nowISO } from '../database/db';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { draftVersionService } from '../database/draftVersionService';
+import { chapterConstraintValidationService } from './chapterConstraintValidationService';
 import type { ChapterDraft } from '../../types/ai';
 
 interface PlacementInput {
@@ -63,8 +64,20 @@ function browserContent(artifactId: string): string {
     || artifact?.displayContent || artifact?.rawContent || '';
 }
 
+async function ensureBrowserConstraintValidationAllowsApply(artifactId: string): Promise<void> {
+  const validation = await chapterConstraintValidationService.getLatest(artifactId);
+  if (validation?.status === 'blocked') {
+    throw { code: 'ARTIFACT_VALIDATION_FAILED', message: 'Chapter constraint validation blocked this Artifact.', retryable: false };
+  }
+  const artifact = loadBrowserArtifact(artifactId);
+  if (artifact?.requiresChapterConstraintValidation && !validation) {
+    throw { code: 'ARTIFACT_VALIDATION_FAILED', message: 'Chapter constraint validation is required before placement.', retryable: false };
+  }
+}
+
 export const placementApplyService = {
   async createProposal(input: PlacementInput): Promise<PlacementProposal> {
+    await ensureBrowserConstraintValidationAllowsApply(input.artifactId);
     return dbCall('create_placement_proposal', { input }, () => browserProposal(input));
   },
 
@@ -81,6 +94,7 @@ export const placementApplyService = {
       const previous = browserProposals.get(proposalId)
         || lsGet<PlacementProposal>(`ai_novel_studio_placement_${proposalId}`);
       if (!previous) throw { code: 'PLACEMENT_PROPOSAL_NOT_FOUND', message: 'Proposal 不存在', retryable: false };
+      await ensureBrowserConstraintValidationAllowsApply(previous.artifactId);
       return browserProposal({ artifactId: previous.artifactId, target }, proposalId);
     });
   },
@@ -90,6 +104,7 @@ export const placementApplyService = {
       const proposal = browserProposals.get(input.proposalId)
         || lsGet<PlacementProposal>(`ai_novel_studio_placement_${input.proposalId}`);
       if (!proposal) throw { code: 'PLACEMENT_PROPOSAL_NOT_FOUND', message: 'Proposal 不存在', retryable: false };
+      await ensureBrowserConstraintValidationAllowsApply(proposal.artifactId);
       const target = proposal.targets.find((item) => item.isReady);
       if (!target) throw { code: 'PLACEMENT_TARGET_UNRESOLVED', message: 'Ready Target 不存在', retryable: false };
       const operationId = id();
@@ -123,6 +138,7 @@ export const placementApplyService = {
         return { planId: stored.planId, operationId: stored.operationId, status: 'completed',
           targetLinks: replay, result: stored.result, idempotentReplay: true };
       }
+      await ensureBrowserConstraintValidationAllowsApply(stored.artifactId);
       const target = browserProposals.get(stored.proposalId)?.targets.find((item) => item.isReady);
       if (!target) throw { code: 'APPLY_PLAN_STALE', message: '目标已失效', retryable: false };
       const content = browserContent(stored.artifactId);

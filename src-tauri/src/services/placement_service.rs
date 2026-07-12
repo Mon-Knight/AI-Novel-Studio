@@ -4,6 +4,7 @@ use crate::domain::placement::{
 };
 use crate::errors::{codes, AppError};
 use crate::repositories::{large_text_repository, placement_repository};
+use crate::services::constraint_validation_service;
 use chrono::Utc;
 use rusqlite::{Connection, TransactionBehavior};
 
@@ -67,6 +68,7 @@ pub fn create_proposal(
             false,
         ));
     }
+    constraint_validation_service::ensure_latest_allows_apply(&transaction, &input.artifact_id)?;
     if artifact.artifact_type != "chapter_text" {
         return Err(AppError::new(
             codes::PLACEMENT_TARGET_UNRESOLVED,
@@ -203,6 +205,16 @@ pub fn validate_proposal(
     proposal_id: &str,
 ) -> Result<ProposalValidation, AppError> {
     let proposal = get_proposal(connection, proposal_id)?;
+    if let Err(error) =
+        constraint_validation_service::ensure_latest_allows_apply(connection, &proposal.artifact_id)
+    {
+        return Ok(ProposalValidation {
+            proposal_id: proposal.proposal_id,
+            stale: true,
+            reason: Some(error.message),
+            current_project_revision_hash: String::new(),
+        });
+    }
     let ready_targets: Vec<_> = proposal
         .targets
         .iter()

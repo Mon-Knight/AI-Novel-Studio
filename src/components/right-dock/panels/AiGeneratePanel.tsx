@@ -28,6 +28,10 @@ import { hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 import type { PlacementCandidate } from '../../../types/placement';
 import { placementApplyService } from '../../../services/ai-tasks/placementApplyService';
+import { chapterConstraintValidationService } from '../../../services/ai-tasks/chapterConstraintValidationService';
+import { calculateChapterDiff } from '../../../services/ai-tasks/chapterDiffService';
+import type { ConstraintValidationResult } from '../../../types/chapterConstraintValidation';
+import type { ChapterDiffResult } from '../../../types/chapterDiff';
 
 function getChapterCharacterNames(ctx: ChapterGenerationContext | null | undefined): string[] {
   return ctx?.chapterCharacterList?.map((item) => item.name).filter(Boolean) ?? [];
@@ -128,6 +132,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [, setLatestGeneratedDraft] = useState<ChapterDraft | null>(null);
   const [latestGeneratedTarget, setLatestGeneratedTarget] = useState<DraftResultMetadata | null>(null);
   const [latestPlacementCandidate, setLatestPlacementCandidate] = useState<PlacementCandidate | null>(null);
+  const [constraintValidation, setConstraintValidation] = useState<ConstraintValidationResult | null>(null);
+  const [chapterDiff, setChapterDiff] = useState<ChapterDiffResult | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState('');
 
   // v1.0.26 风格方案与输出控制选择
@@ -146,6 +153,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     setLatestGeneratedDraft(null);
     setLatestGeneratedTarget(null);
     setLatestPlacementCandidate(null);
+    setConstraintValidation(null);
+    setChapterDiff(null);
+    setShowDiff(false);
   }, [chapter?.id]);
 
   // 初始化/更新目标字数草稿
@@ -354,6 +364,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     setGenerating(true);
     setErrorMsg('');
     setValidationState(null);
+    setConstraintValidation(null);
+    setChapterDiff(null);
+    setShowDiff(false);
 
     try {
       await runWithLoading(
@@ -395,8 +408,53 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           // 2. 使用已冻结的 Prompt / Constraint 合约
           setStage('正在分析角色、事件和风格方案……');
           setPercent(25);
-          const request = compilation.request;
-          setPromptDebug(request.promptDebug ?? null);
+           const request = compilation.request;
+           setPromptDebug(request.promptDebug ?? null);
+           const inputSnapshot = {
+             schemaVersion: 1,
+             inputType: 'chapter_generate_input',
+             payloadJson: { mode: genMode, userInstruction: mergedInstruction, inputSummary },
+             body: genMode === 'rewrite' ? currentEditorContent : undefined,
+             sourceDraftId: requestTarget.sourceDraftId,
+             sourceDraftVersion: requestTarget.sourceRevision,
+             baseContentHash: requestTarget.baseContentHash,
+           };
+           const contextSnapshot = {
+             schemaVersion: 1,
+             sourceManifestJson: {
+               ...compilation.contextContract.sourceManifest,
+               styleId: selectedStyleId || null,
+               outputId: selectedOutputId || null,
+             },
+             compiledContext: compilation.contextContract.text,
+             budgetJson: { ...compilation.contextContract.budget, targetWordCount: ctx.targetWordCount || wordCountDraft },
+             compilerVersion: CHAPTER_GENERATION_COMPILER_VERSION,
+           };
+           const constraintSnapshot = {
+             schemaVersion: 1,
+             payloadJson: {
+               compilerVersion: CHAPTER_GENERATION_COMPILER_VERSION,
+               artifactType: 'chapter_text',
+               targetChapterId: requestTarget.chapterId,
+               contextHash: compilation.contextContract.hash,
+               constraintHash: compilation.constraints.hash,
+               must: compilation.constraints.must,
+               should: compilation.constraints.should,
+               forbid: compilation.constraints.forbid,
+               budget: compilation.constraints.budget,
+             },
+             promptTemplateId: compilation.promptTemplate.id,
+             promptTemplateVersion: compilation.promptTemplate.version,
+             promptTemplateHash: compilation.promptTemplate.hash,
+             promptTemplateBody: compilation.promptTemplate.body,
+             providerOptionsJson: {
+               provider: settings.provider,
+               model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+               temperature: request.temperature ?? settings.temperature,
+               maxTokens: request.maxTokens ?? settings.maxTokens,
+               timeoutSeconds: settings.timeoutSeconds,
+             },
+           };
 
           // 3. 调用 AI
           setStage('正在请求 AI 生成正文……');
@@ -410,58 +468,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             draftId: requestTarget.sourceDraftId,
             scopeType: 'chapter',
             targetHintJson: { chapterId: requestTarget.chapterId },
-            inputSnapshot: {
-              schemaVersion: 1,
-              inputType: 'chapter_generate_input',
-              payloadJson: {
-                mode: genMode,
-                userInstruction: mergedInstruction,
-                inputSummary,
-              },
-              body: genMode === 'rewrite' ? currentEditorContent : undefined,
-              sourceDraftId: requestTarget.sourceDraftId,
-              sourceDraftVersion: requestTarget.sourceRevision,
-              baseContentHash: requestTarget.baseContentHash,
-            },
-            contextSnapshot: {
-              schemaVersion: 1,
-              sourceManifestJson: {
-                ...compilation.contextContract.sourceManifest,
-                styleId: selectedStyleId || null,
-                outputId: selectedOutputId || null,
-              },
-              compiledContext: compilation.contextContract.text,
-              budgetJson: {
-                ...compilation.contextContract.budget,
-                targetWordCount: ctx.targetWordCount || wordCountDraft,
-              },
-              compilerVersion: CHAPTER_GENERATION_COMPILER_VERSION,
-            },
-            constraintSnapshot: {
-              schemaVersion: 1,
-              payloadJson: {
-                compilerVersion: CHAPTER_GENERATION_COMPILER_VERSION,
-                artifactType: 'chapter_text',
-                targetChapterId: requestTarget.chapterId,
-                contextHash: compilation.contextContract.hash,
-                constraintHash: compilation.constraints.hash,
-                must: compilation.constraints.must,
-                should: compilation.constraints.should,
-                forbid: compilation.constraints.forbid,
-                budget: compilation.constraints.budget,
-              },
-              promptTemplateId: compilation.promptTemplate.id,
-              promptTemplateVersion: compilation.promptTemplate.version,
-              promptTemplateHash: compilation.promptTemplate.hash,
-              promptTemplateBody: compilation.promptTemplate.body,
-              providerOptionsJson: {
-                provider: settings.provider,
-                model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-                temperature: request.temperature ?? settings.temperature,
-                maxTokens: request.maxTokens ?? settings.maxTokens,
-                timeoutSeconds: settings.timeoutSeconds,
-              },
-            },
+            inputSnapshot,
+            contextSnapshot,
+            constraintSnapshot,
             artifactType: 'chapter_text',
             providerId: settings.provider,
             timeoutMs: (settings.timeoutSeconds ?? 120) * 1000,
@@ -478,17 +487,48 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setMessage('正在保存生成结果……');
 
           // M2: Provider 结果只进入 Artifact/Proposal；确认前不写 chapter_drafts。
-          const proposal = await placementApplyService.createProposal({
+          const constraintResult = await chapterConstraintValidationService.validateAndPersist({
             artifactId: pipeline.artifact.artifactId,
-            target: {
-              novelId: requestTarget.novelId,
-              chapterId: requestTarget.chapterId,
-              draftId: requestTarget.sourceDraftId,
-            },
-            browserExpectedVersion: requestTarget.sourceRevision,
-            browserExpectedHash: requestTarget.baseContentHash,
+            taskId: pipeline.task.taskId,
+            novelId: requestTarget.novelId,
+            volumeId: chapter.volumeId,
+            chapterId: requestTarget.chapterId,
+            sourceDraftId: requestTarget.sourceDraftId,
+            sourceDraftVersion: requestTarget.sourceRevision,
+            baseContentHash: requestTarget.baseContentHash,
+            inputSnapshot,
+            contextSnapshot,
+            constraintSnapshot,
+            artifactBody: response.text,
           });
-          const candidateHash = await computeContentSha256(response.text);
+          const diff = await calculateChapterDiff({
+            novelId: requestTarget.novelId,
+            chapterId: requestTarget.chapterId,
+            baseDraftId: requestTarget.sourceDraftId,
+            baseDraftVersion: requestTarget.sourceRevision,
+            baseContentHash: requestTarget.baseContentHash,
+            candidateArtifactId: pipeline.artifact.artifactId,
+            candidateNovelId: requestTarget.novelId,
+            candidateChapterId: requestTarget.chapterId,
+            candidateSourceDraftId: requestTarget.sourceDraftId,
+            candidateSourceDraftVersion: requestTarget.sourceRevision,
+            candidateBaseContentHash: requestTarget.baseContentHash,
+            baseContent: sourceDraft?.content || '',
+            candidateContent: response.text,
+          });
+          const proposal = constraintResult.status !== 'blocked' && diff.status === 'ready'
+            ? await placementApplyService.createProposal({
+              artifactId: pipeline.artifact.artifactId,
+              target: {
+                novelId: requestTarget.novelId,
+                chapterId: requestTarget.chapterId,
+                draftId: requestTarget.sourceDraftId,
+              },
+              browserExpectedVersion: requestTarget.sourceRevision,
+              browserExpectedHash: requestTarget.baseContentHash,
+            })
+            : undefined;
+          const candidateHash = pipeline.artifact.contentHash;
           const validationWithDraft: GenerationValidationState = { draftId: pipeline.artifact.artifactId, ...validation };
           const resultMetadata: DraftResultMetadata = {
             ...requestTarget,
@@ -500,6 +540,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           };
           if (liveNovelIdRef.current === requestTarget.novelId && liveChapterIdRef.current === requestTarget.chapterId) {
             setValidationState(validationWithDraft);
+            setConstraintValidation(constraintResult);
+            setChapterDiff(diff);
           }
 
           setPercent(95);
@@ -520,10 +562,18 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             contentHash: candidateHash,
             wordCount: response.text.length,
             taskId: pipeline.task.taskId,
+            constraintValidation: constraintResult,
+            diff,
           });
 
           // 校验警告提示
-          if (validationWarning) {
+          if (constraintResult.status === 'blocked') {
+            setErrorMsg('Constraint validation blocked this candidate. Resolve the listed hard failures before generating a new candidate.');
+            setStatusMsg('Candidate Artifact was retained, but no PlacementProposal was created.');
+          } else if (diff.status !== 'ready') {
+            setErrorMsg(diff.reason || 'The chapter diff could not be calculated from the frozen baseline.');
+            setStatusMsg('Candidate Artifact was retained, but adoption is blocked until a new candidate is generated.');
+          } else if (validationWarning) {
             setErrorMsg(validationWarning);
             setStatusMsg('正文已生成，但存在校验警告。建议重新生成或按大纲修正后再确认采用。');
           } else {
@@ -699,7 +749,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     const requestChapterId = chapter.id;
     const candidate = latestPlacementCandidate;
     const candidateTarget = latestGeneratedTarget;
-    if (!candidate || !candidateTarget) {
+    if (!candidate || !candidateTarget || !candidate.proposal) {
       setErrorMsg('没有当前展示的生成结果可采用');
       return;
     }
@@ -714,6 +764,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setErrorMsg('当前展示结果缺少正文哈希，无法安全采用');
       return;
     }
+    if (candidate.constraintValidation?.status === 'blocked' || candidate.diff?.status !== 'ready') {
+      setErrorMsg('The candidate has a blocking constraint result or an unavailable baseline diff.');
+      return;
+    }
     if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
     if (validationState?.draftId === candidate.artifactId
       && (validationState.outlineCompliance.score < 80 || validationState.missingRequiredNames.length > 0)) {
@@ -722,7 +776,6 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     } else if (!(await confirmInfo({ title: '采用正文候选', message: '确认将当前 Artifact 候选写入新草稿并采用为正式正文？' }))) {
       return;
     }
-
     const proposalValidation = await placementApplyService.validateProposal(candidate.proposal.proposalId);
     if (proposalValidation.stale) {
       setErrorMsg(proposalValidation.reason || 'PlacementProposal 已过期，请重新生成');
@@ -1110,6 +1163,54 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         </div>
       )}
 
+      {constraintValidation && (
+        <div className="panel-section" style={{ border: `1px solid ${constraintValidation.status === 'blocked' ? 'var(--color-error)' : constraintValidation.status === 'passed_with_warnings' ? 'var(--color-warning)' : 'var(--color-border)'}`, padding: 10 }}>
+          <div className="panel-section-title">Constraint validation</div>
+          <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+            <div>Status: <strong>{constraintValidation.status}</strong></div>
+            <div>Must: {constraintValidation.must.filter((item) => item.status === 'passed').length} passed / {constraintValidation.must.filter((item) => item.status === 'failed').length} failed / {constraintValidation.must.filter((item) => item.status === 'unknown').length} unknown</div>
+            <div>Should warnings: {constraintValidation.warningCount}</div>
+            <div>Forbid matches: {constraintValidation.forbid.filter((item) => item.status !== 'passed').length}</div>
+          </div>
+          {constraintValidation.status !== 'passed' && (
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
+              {[...constraintValidation.must, ...constraintValidation.should, ...constraintValidation.forbid]
+                .filter((item) => item.status !== 'passed')
+                .map((item) => <li key={`${item.severity}-${item.constraintId}`}>{item.message}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {chapterDiff && (
+        <div className="panel-section" style={{ border: `1px solid ${chapterDiff.status === 'ready' ? 'var(--color-border)' : 'var(--color-error)'}`, padding: 10 }}>
+          <div className="panel-section-title">Chapter diff</div>
+          {chapterDiff.status === 'ready' && chapterDiff.summary ? (
+            <>
+              <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                <div>Baseline: draft v{chapterDiff.summary.baseDraftVersion}</div>
+                <div>Characters: {chapterDiff.summary.baseCharacterCount} to {chapterDiff.summary.candidateCharacterCount} ({chapterDiff.summary.characterDelta >= 0 ? '+' : ''}{chapterDiff.summary.characterDelta})</div>
+                <div>Paragraphs: +{chapterDiff.summary.addedBlocks} / -{chapterDiff.summary.removedBlocks} / ~{chapterDiff.summary.modifiedBlocks} / ={chapterDiff.summary.unchangedBlocks}</div>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowDiff((value) => !value)} style={{ marginTop: 8 }}>
+                {showDiff ? 'Hide changed paragraphs' : 'Show changed paragraphs'}
+              </button>
+              {showDiff && (
+                <div style={{ marginTop: 8, maxHeight: 260, overflow: 'auto', fontSize: 11, lineHeight: 1.55 }}>
+                  {chapterDiff.blocks.filter((block) => block.kind !== 'unchanged').map((block, index) => (
+                    <div key={`${block.kind}-${block.baseIndex}-${block.candidateIndex}-${index}`} style={{ borderTop: '1px solid var(--color-border)', padding: '6px 0' }}>
+                      <strong>{block.kind}</strong>
+                      {block.baseText !== undefined && <div style={{ whiteSpace: 'pre-wrap', color: 'var(--color-text-secondary)' }}>Base: {block.baseText.slice(0, 800)}</div>}
+                      {block.candidateText !== undefined && <div style={{ whiteSpace: 'pre-wrap' }}>Candidate: {block.candidateText.slice(0, 800)}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : <div style={{ fontSize: 12, color: 'var(--color-error)' }}>{chapterDiff.reason || 'Diff is unavailable.'}</div>}
+        </div>
+      )}
+
       {latestPlacementCandidate && (
         <div className="panel-section">
           <div className="panel-section-title">最近生成候选</div>
@@ -1135,7 +1236,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         <button
           className="panel-btn panel-btn-secondary"
           onClick={handleAdopt}
-          disabled={generating || revising || !latestPlacementCandidate || !latestGeneratedTarget}
+          disabled={generating || revising || !latestPlacementCandidate || !latestPlacementCandidate.proposal || !latestGeneratedTarget
+            || latestPlacementCandidate.constraintValidation?.status === 'blocked'
+            || latestPlacementCandidate.diff?.status !== 'ready'}
         >
           ✅ 确认采用
         </button>

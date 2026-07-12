@@ -225,6 +225,27 @@ interface AiConstraintSnapshot {
 
 Context Snapshot 持久化 `sourceManifest`、稳定 Context hash、裁剪统计和受预算的编译文本；Constraint Snapshot 持久化三类约束、稳定 Constraint hash、模板身份/正文 hash 和非密钥 Provider 选项。Provider 调用只能使用这一次已经冻结的合约。编译或 Snapshot 创建失败时不得创建 Attempt，也不得调用 Provider。
 
+### 4.5 Chapter Constraint Validation and Diff Preview
+
+For `chapter_generate`, the persisted Artifact is validated before any PlacementProposal is
+created. The validator reads only the frozen task identity, Input/Context/Constraint Snapshots,
+and Artifact body. It never reads the currently selected React chapter and never invokes a
+Provider.
+
+- `must` and `forbid` failures or unknown results produce `blocked`; `should` failures remain
+  explicit warnings and require the normal user confirmation.
+- Every run writes append-only rows to `artifact_validation_issues` under a unique
+  `validationRunId`. Existing table severities remain compatible (`error` for hard constraints,
+  `warning` for recommendations); the original constraint category and status are stored in the
+  issue details. Messages contain short summaries only.
+- The Rust authority checks the latest validation result when creating or validating a Proposal;
+  ApplyPlan creation and execution re-enter that Proposal validation path. A missing or blocked
+  result makes the Proposal stale or rejects its creation, so UI button state is not the authority.
+- The preview compares only `sourceDraftId/sourceDraftVersion/baseContentHash` with the candidate
+  Artifact. Paragraph diff data is computed in memory, never persisted or logged. Novel/chapter
+  identity, source draft identity, version, or hash mismatch blocks adoption rather than falling
+  back to a latest draft.
+
 ## 5. 权威状态机
 
 非法转换统一返回 AI_TASK_ILLEGAL_TRANSITION，并在 details 中携带 taskId、from、to。并发更新使用 expected_status（或状态版本）进行 compare-and-swap；affected rows 必须为 1。

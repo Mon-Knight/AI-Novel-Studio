@@ -1,4 +1,6 @@
 import type { ChapterDraft } from './ai';
+import type { ConstraintValidationResult } from './chapterConstraintValidation';
+import type { ChapterDiffResult } from './chapterDiff';
 
 export interface PlacementTarget {
   targetType: string;
@@ -95,9 +97,11 @@ export interface ApplyExecutionResult {
 
 export interface PlacementCandidate {
   artifactId: string;
-  proposal: PlacementProposal;
+  proposal?: PlacementProposal;
   content: string;
   contentHash: string;
   wordCount: number;
   taskId: string;
+  constraintValidation?: ConstraintValidationResult;
+  diff?: ChapterDiffResult;
 }

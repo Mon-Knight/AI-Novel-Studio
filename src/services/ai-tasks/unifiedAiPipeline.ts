@@ -242,6 +242,7 @@ async function createArtifact(
       rawContent,
       displayContent: response.text,
       structuredPayloadJson: browserStructuredPayload,
+      requiresChapterConstraintValidation: input.taskType === 'chapter_generate',
     });
     const task = browserTasks.get(taskId);
     if (task) browserTasks.set(taskId, {

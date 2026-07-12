@@ -10,7 +10,9 @@ param(
         'ai-artifacts',
         'ai-p0-safety',
         'placement',
-        'apply-plan'
+        'apply-plan',
+        'constraint-validation',
+        'chapter-diff'
     )]
     [string]$Suite
 )
@@ -155,6 +157,16 @@ $suiteConfig = @{
             'services::apply_service::tests::apply11_quality_fix_side_effects_commit_together',
             'services::apply_service::tests::apply12_missing_quality_issue_rolls_back_everything'
         )
+    }
+    'constraint-validation' = @{
+        TestPath = 'src/test/constraint-validation'
+        CargoTests = @(
+            'services::constraint_validation_service::tests::cv01_runs_are_append_only_and_latest_block_controls_authority_gate'
+        )
+    }
+    'chapter-diff' = @{
+        TestPath = 'src/test/chapter-diff'
+        CargoTests = @()
     }
 }
 
