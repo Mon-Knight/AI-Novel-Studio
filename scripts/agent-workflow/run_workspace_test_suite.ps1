@@ -8,7 +8,9 @@ param(
         'migrations',
         'ai-task-pipeline',
         'ai-artifacts',
-        'ai-p0-safety'
+        'ai-p0-safety',
+        'placement',
+        'apply-plan'
     )]
     [string]$Suite
 )
@@ -58,9 +60,11 @@ $suiteConfig = @{
             'migrations::tests::db17_m1_schema_has_all_tables_indexes_and_foreign_keys',
             'migrations::tests::db18_failed_migration_rolls_back_only_the_current_item',
             'migrations::tests::db19_upgrade_preserves_adopted_pointer_and_legacy_ai_rows',
-            'db::tests::db20_empty_database_initializes_complete_m1_ledger',
+            'db::tests::db20_empty_database_initializes_complete_m2_ledger',
             'migrations::tests::db21_snapshots_reject_update_and_delete',
             'migrations::tests::db22_v220_ledger_upgrades_from_005_and_restarts_idempotently',
+            'migrations::tests::db23_m2_schema_has_tables_indexes_and_triggers',
+            'migrations::tests::db24_m2_proposal_plan_and_link_reject_delete',
             'errors::tests::db16_app_error_serializes_as_stable_object'
         )
     }
@@ -107,6 +111,38 @@ $suiteConfig = @{
             'services::draft_service::tests::p001_adopts_the_displayed_draft_instead_of_latest',
             'services::draft_service::tests::p002_adopt_rejects_changed_hash_and_replays_same_operation',
             'services::draft_service::tests::p003_tauri_draft_preserves_task_artifact_note_and_source'
+        )
+    }
+    'placement' = @{
+        TestPath = 'src/test/placement'
+        CargoTests = @(
+            'services::apply_service::tests::plc01_creates_one_ready_task_scope_target',
+            'services::apply_service::tests::plc02_user_target_has_priority_and_keeps_scope_candidate',
+            'services::apply_service::tests::plc03_invalid_artifact_is_rejected',
+            'services::apply_service::tests::plc04_cross_novel_user_target_is_rejected',
+            'services::apply_service::tests::plc05_chapter_revision_change_makes_proposal_stale',
+            'services::apply_service::tests::plc06_draft_hash_change_makes_proposal_stale',
+            'services::apply_service::tests::plc07_rebuild_creates_new_immutable_child',
+            'services::apply_service::tests::plc08_proposal_delete_is_protected',
+            'services::apply_service::tests::plc09_target_delete_is_protected',
+            'services::apply_service::tests::plc10_deleted_target_is_stale'
+        )
+    }
+    'apply-plan' = @{
+        TestPath = 'src/test/apply-plan'
+        CargoTests = @(
+            'services::apply_service::tests::apply01_plan_is_ready_and_single_target',
+            'services::apply_service::tests::apply02_plan_request_is_immutable',
+            'services::apply_service::tests::apply03_plan_delete_is_protected',
+            'services::apply_service::tests::apply04_request_hash_mismatch_fails_closed',
+            'services::apply_service::tests::apply05_operation_id_mismatch_fails_closed',
+            'services::apply_service::tests::apply06_stale_version_prevents_business_write',
+            'services::apply_service::tests::apply07_execute_creates_adopted_draft_and_link',
+            'services::apply_service::tests::apply08_replay_returns_first_result_without_second_write',
+            'services::apply_service::tests::apply09_target_link_delete_is_protected',
+            'services::apply_service::tests::apply10_link_failure_rolls_back_draft_and_adoption',
+            'services::apply_service::tests::apply11_quality_fix_side_effects_commit_together',
+            'services::apply_service::tests::apply12_missing_quality_issue_rolls_back_everything'
         )
     }
 }

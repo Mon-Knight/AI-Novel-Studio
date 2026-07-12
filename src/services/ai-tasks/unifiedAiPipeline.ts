@@ -240,6 +240,7 @@ async function createArtifact(
     lsSet(`ai_novel_studio_result_artifact_${artifact.artifactId}`, {
       ...artifact,
       rawContent,
+      displayContent: response.text,
       structuredPayloadJson: browserStructuredPayload,
     });
     const task = browserTasks.get(taskId);

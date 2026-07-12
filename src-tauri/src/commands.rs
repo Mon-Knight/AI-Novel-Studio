@@ -3,6 +3,7 @@ use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
 pub mod ai_tasks;
+pub mod apply;
 pub mod artifacts;
 pub mod drafts;
 pub mod recovery;

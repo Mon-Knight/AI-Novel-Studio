@@ -27,9 +27,9 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 **当前版本：v2.2.0**
 
-**阶段：工作区可靠性 — 原子正文、恢复快照、全局离开保护与正式迁移账本**
+**阶段：v2.3.0-M2 内部里程碑 — AI 结果单目标安全落位（正式版本仍为 2.2.0）**
 
-v2.2.0 在 v2.1.1 正文安全门上补齐持久化和桌面生命周期：长正文分片、草稿引用与幂等操作在同一 SQLite 事务中提交；完整正文读取失败时进入不可编辑状态；未保存正文持久为独立恢复快照；Hash 路由、程序导航和 Tauri 窗口关闭共用一个 Leave Guard。
+当前内部里程碑在 v2.2.0 可靠性基础上增加 `ResultArtifact → PlacementProposal → ApplyPlan → Rust ApplyExecutor → ArtifactTargetLink` 链路。已迁移的正文生成和 AI 修稿结果在用户确认前不写入正式正文；确认时由 SQLite `BEGIN IMMEDIATE` 事务完成再次校验、正文保存与采用、来源链接和幂等结果。
 
 本版本不增加新的 AI 自动写入范围，也不引入未来 Agent 功能；重点是让现有写作工作台在并发、异常退出、数据库故障和长正文损坏场景下保持可恢复、可验证。
 
@@ -50,6 +50,7 @@ v2.2.0 在 v2.1.1 正文安全门上补齐持久化和桌面生命周期：长�
 - **异常恢复快照**：dirty 正文按章节 debounce 持久化，恢复内容不占草稿版本，基线冲突时只能对比、复制、导出或另存候选。
 - **统一离开保护**：章节操作、Hash 路由、历史导航、程序导航和 Tauri 关闭统一提供保存、放弃、取消决策并防重入。
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
+- **AI 结果安全落位**：PlacementProposal 支持目标审计/stale/rebuild，ApplyPlan 固化版本/hash 与 operationId/requestHash，ArtifactTargetLink 永久追踪正式正文来源。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。

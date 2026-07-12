@@ -1280,7 +1280,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn db20_empty_database_initializes_complete_m1_ledger(
+    fn db20_empty_database_initializes_complete_m2_ledger(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
@@ -1290,13 +1290,13 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(migration_count, 11);
+        assert_eq!(migration_count, 14);
         let last_migration: String = conn.query_row(
             "SELECT migration_id FROM schema_migrations ORDER BY migration_id DESC LIMIT 1",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(last_migration, "011_artifact_validation_issues");
+        assert_eq!(last_migration, "014_artifact_target_links");
         Ok(())
     }
 

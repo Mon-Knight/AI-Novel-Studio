@@ -3,9 +3,10 @@
  * v1.7.16: AI 根据质量检查问题自动修稿 + 复检闭环
  */
 import { createAiClient, aiSettingsService } from './aiClient';
-import { aiTaskService } from './aiTaskService';
 import { extractJsonObject, safeJsonParse } from './jsonUtils';
 import { fixRunStore } from './fixRunStore';
+import { unifiedAiPipeline } from '../ai-tasks/unifiedAiPipeline';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 import type { QualityCheckItem } from '../../types/qualityCheck';
 import type { ChapterDraft } from '../../types/ai';
 
@@ -355,7 +356,7 @@ export const qualityFixService = {
     chapterContext?: string;
     volumeContext?: string;
     styleSummary?: string;
-  }): Promise<{ fixResult: FixResult; fixRun: QualityFixRun; scopeValidation: FixScopeValidation }> {
+  }): Promise<{ fixResult: FixResult; fixRun: QualityFixRun; scopeValidation: FixScopeValidation; taskId: string; artifactId: string }> {
     const settings = aiSettingsService.getSettings();
     const sourceHash = hashContent(params.currentDraft.content);
 
@@ -381,16 +382,6 @@ export const qualityFixService = {
     };
     fixRunStore.save(fixRun);
 
-    // 创建 AI 任务
-    const task = await aiTaskService.create('quality_fix', {
-      novelId: params.novelId,
-      chapterId: params.chapterId,
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `修复章节「${params.chapterTitle}」${params.pendingIssues.length} 个问题`,
-    }).catch(() => null);
-
     try {
       const client = createAiClient(settings);
       const request = buildFixPrompt({
@@ -404,11 +395,66 @@ export const qualityFixService = {
         styleSummary: params.styleSummary,
       });
 
-      const response = await client.generate({
+      const sourceContentHash = await computeContentSha256(params.currentDraft.content);
+      const pipeline = await unifiedAiPipeline.run({
+        taskType: 'quality_fix',
+        novelId: params.novelId,
+        chapterId: params.chapterId,
+        draftId: params.currentDraft.id,
+        scopeType: 'draft',
+        targetHintJson: { chapterId: params.chapterId, draftId: params.currentDraft.id },
+        inputSnapshot: {
+          schemaVersion: 1,
+          inputType: 'quality_fix_input',
+          payloadJson: {
+            chapterTitle: params.chapterTitle,
+            beforeReportId: params.beforeReportId,
+            pendingIssueIds: params.pendingIssues.map((item) => item.id),
+          },
+          body: params.currentDraft.content,
+          sourceDraftId: params.currentDraft.id,
+          sourceDraftVersion: params.currentDraft.versionNo,
+          baseContentHash: sourceContentHash,
+        },
+        contextSnapshot: {
+          schemaVersion: 1,
+          sourceManifestJson: { novelId: params.novelId, chapterId: params.chapterId },
+          compiledContext: request.messages.map((message) => `${message.role}:\n${message.content}`).join('\n\n'),
+          budgetJson: { maxTokens: request.maxTokens },
+          compilerVersion: 'quality-fix-context-v1',
+        },
+        constraintSnapshot: {
+          schemaVersion: 1,
+          payloadJson: { artifactType: 'chapter_text', mode: 'quality_fix', readOnlyUntilApply: true },
+          promptTemplateId: 'quality_fix',
+          promptTemplateVersion: '1',
+          promptTemplateHash: await computeContentSha256(request.messages.map((message) => message.content).join('\n')),
+          providerOptionsJson: {
+            provider: settings.provider,
+            model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+            maxTokens: request.maxTokens,
+            timeoutSeconds: settings.timeoutSeconds,
+          },
+        },
+        artifactType: 'chapter_text',
+        providerId: settings.provider,
+        timeoutMs: (settings.timeoutSeconds ?? 120) * 1000,
+        client,
+        request: {
         taskType: 'quality_fix' as any,
         messages: request.messages as any,
         maxTokens: request.maxTokens,
+        },
+        parseStructuredPayload: (text) => {
+          const parsed = safeJsonParse<RawFixResult>(text, {
+            mode: 'conservative', fixedIssueKeys: [], revisionSummary: '', changedRanges: [],
+            revisedContent: params.currentDraft.content,
+          });
+          const normalized = normalizeFixResult(parsed, text, params.currentDraft.content);
+          return { ...parsed, chapterText: normalized.revisedContent, revisedContent: normalized.revisedContent };
+        },
       });
+      const response = pipeline.response;
 
       const fixResult = safeJsonParse<RawFixResult>(response.text, {
         mode: 'conservative',
@@ -443,20 +489,13 @@ export const qualityFixService = {
         params.pendingIssues.map((i) => i.issueKey),
       );
 
-      await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: safeFixResult.revisionSummary,
-        tokenInput: response.tokenInput,
-        tokenOutput: response.tokenOutput,
-        tokenTotal: response.tokenTotal,
-      });
-
-      return { fixResult: safeFixResult, fixRun, scopeValidation };
+      return { fixResult: safeFixResult, fixRun, scopeValidation,
+        taskId: pipeline.task.taskId, artifactId: pipeline.artifact.artifactId };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'AI 修稿失败';
       fixRun.status = 'failed';
       fixRun.failureReason = message;
       fixRunStore.save(fixRun);
-      if (task) await aiTaskService.markFailed(task.id, message);
       throw e;
     }
   },

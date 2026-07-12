@@ -30,6 +30,17 @@
 - 建立冻结测试编号到实际测试函数的映射，固定 001～011 精确 checksum，并补充真空库、v2.2 升级、重启幂等、三个迁移入口和四项 P0 的动态回归测试。
 - 新增 `docs/audit/phase-3/08-v2.3.0-m1-acceptance.md`，集中记录文件必要性、迁移约束、动态证据、最终验证与 M2 准入结论。
 
+### v2.3.0-M2 第一阶段：PlacementProposal、ApplyPlan 与单目标安全应用
+
+- 新增 012～014 migration，持久化不可变 PlacementProposal/Target、ApplyPlan/Operation/Dependency 和 ArtifactTargetLink；固定 checksum、外键、索引及更新/删除保护 trigger。
+- 新增 Proposal 创建、用户目标优先级、stale 校验与 rebuild；章节、草稿版本/hash、目标删除或项目 revision 变化后旧 Proposal 不再可应用。
+- 新增不可变单目标 ApplyPlan、规范化 `requestHash`、持久 `operationId`、状态 CAS、幂等重放和 payload 冲突校验。
+- 抽取 `save_chapter_draft_in_transaction` 与 `adopt_chapter_draft_in_transaction`，原子草稿门面和 ApplyExecutor 共用唯一正文 INSERT/采用核心。
+- 新增 Rust `ApplyExecutor`：`BEGIN IMMEDIATE` 内再次校验目标和 Artifact，写正文、采用状态、修稿质量状态/上下文失效、ArtifactTargetLink 与 operation result 后统一提交；任一 affected rows 不符整体回滚。
+- 正文生成候选在确认前只持久化为 Artifact/PlacementProposal；AI 修稿确认前不再创建候选草稿或候选质量报告，正式副作用只在 ApplyPlan 事务成功后发生。
+- 新增 `test:placement`（10 个 Vitest 用例）与 `test:apply-plan`（12 个 Vitest 用例）防零专项；Rust 新增 24 个 M2 迁移/Placement/Apply/回滚/重放动态用例。
+- 正式应用版本继续保持 2.2.0；未迁移入口、Task Center UI、TextRangeLock、多目标事务与 Legacy 清理仍不在本阶段范围。
+
 ## v2.2.0 (2026-07-11) - 工作区可靠性与基础设施收口
 
 ### 新增

@@ -154,7 +154,7 @@ pub fn insert_draft(
     content_hash: &str,
     now: &str,
 ) -> Result<(), AppError> {
-    connection
+    let affected = connection
         .execute(
             "INSERT INTO chapter_drafts
                 (id, novel_id, chapter_id, title, content, source, version_no, word_count,
@@ -186,6 +186,13 @@ pub fn insert_draft(
             ],
         )
         .map_err(AppError::database)?;
+    if affected != 1 {
+        return Err(AppError::new(
+            codes::DRAFT_UPDATE_ZERO_ROWS,
+            "草稿创建未写入唯一目标",
+            false,
+        ));
+    }
     Ok(())
 }
 

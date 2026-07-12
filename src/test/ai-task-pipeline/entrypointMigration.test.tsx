@@ -110,7 +110,7 @@ function pipelineResult(text: string) {
   } as any;
 }
 
-describe('M1 migrated production entrypoints', () => {
+describe('M1/M2 migrated production entrypoints', () => {
   beforeEach(() => {
     mocks.runPipeline.mockReset();
     mocks.directGenerate.mockReset();
@@ -118,6 +118,7 @@ describe('M1 migrated production entrypoints', () => {
     mocks.getStyles.mockResolvedValue([]);
     mocks.getOutputs.mockResolvedValue([]);
     mocks.confirmInfo.mockResolvedValue(true);
+    localStorage.clear();
   });
 
   it('routes settings connection test through the unified pipeline', async () => {
@@ -153,13 +154,13 @@ describe('M1 migrated production entrypoints', () => {
     expect(mocks.directGenerate).not.toHaveBeenCalled();
   });
 
-  it('routes chapter generation through the unified pipeline before creating a candidate draft', async () => {
+  it('routes chapter generation through Artifact and Placement without creating a draft before confirmation', async () => {
     const source = {
       id: 'draft-source', novelId: 'novel-a', chapterId: 'chapter-a', content: 'Source',
       source: 'user_edit', versionNo: 3, wordCount: 20, isAdopted: false,
       createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z',
     };
-    const candidate = { ...source, id: 'draft-candidate', content: 'Generated chapter body', versionNo: 4 };
+    const candidate = { ...source, id: 'artifact-candidate', content: 'Generated chapter body', versionNo: 4 };
     mocks.getDrafts.mockResolvedValue([source]);
     mocks.buildContext.mockResolvedValue({
       novelId: 'novel-a', chapterId: 'chapter-a', chapterTitle: 'Chapter A',
@@ -170,7 +171,6 @@ describe('M1 migrated production entrypoints', () => {
       maxTokens: 1000, promptTemplateSource: 'chapter-generate-test',
     });
     mocks.runPipeline.mockResolvedValue(pipelineResult(candidate.content));
-    mocks.createDraft.mockResolvedValue(candidate);
 
     render(
       <AiGeneratePanel
@@ -184,15 +184,12 @@ describe('M1 migrated production entrypoints', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /生成本章/ }));
     await waitFor(() => expect(mocks.runPipeline).toHaveBeenCalledOnce());
-    await waitFor(() => expect(mocks.createDraft).toHaveBeenCalledOnce());
+    await screen.findByText(/候选已保存为 Artifact 与 PlacementProposal/);
     expect(mocks.runPipeline.mock.calls[0][0]).toEqual(expect.objectContaining({
       taskType: 'chapter_generate', chapterId: 'chapter-a', draftId: 'draft-source',
       artifactType: 'chapter_text',
     }));
-    expect(mocks.createDraft.mock.calls[0][0]).toEqual(expect.objectContaining({
-      aiTaskId: 'task-a', artifactId: 'artifact-a', sourceDraftId: 'draft-source',
-      sourceDraftVersion: 3, baseContentHash: 'base-hash',
-    }));
+    expect(mocks.createDraft).not.toHaveBeenCalled();
     expect(mocks.directGenerate).not.toHaveBeenCalled();
   });
 });

@@ -22,6 +22,8 @@ import { checkOutlineCompliance } from '../../../services/ai/outlineComplianceCh
 import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionService';
 import { hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
+import type { PlacementCandidate } from '../../../types/placement';
+import { placementApplyService } from '../../../services/ai-tasks/placementApplyService';
 
 function getChapterCharacterNames(ctx: ChapterGenerationContext | null | undefined): string[] {
   return ctx?.chapterCharacterList?.map((item) => item.name).filter(Boolean) ?? [];
@@ -93,16 +95,6 @@ function buildValidationWarningText(validation: Omit<GenerationValidationState, 
   return messages.join('\n') || undefined;
 }
 
-function draftHasAdoptionRisk(draft: ChapterDraft, validationState: GenerationValidationState | null): boolean {
-  if (validationState?.draftId === draft.id) {
-    return validationState.outlineCompliance.score < 80 || validationState.missingRequiredNames.length > 0;
-  }
-  const note = draft.note || '';
-  return note.includes('大纲遵循检查：未通过')
-    || note.includes('大纲遵循检查：警告')
-    || note.includes('角色出场检查：缺失');
-}
-
 interface AiGeneratePanelProps {
   novelId?: string;
   chapter?: Chapter;
@@ -117,7 +109,7 @@ interface AiGeneratePanelProps {
   onBeforeDocumentChange?: () => Promise<boolean>;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent, currentContentHash, onApplyAiText, onBeforeDocumentChange }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent, onBeforeDocumentChange }: AiGeneratePanelProps) {
   const liveChapterIdRef = useRef(chapter?.id || '');
   liveChapterIdRef.current = chapter?.id || '';
   const liveNovelIdRef = useRef(novelId || '');
@@ -129,8 +121,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [genMode, setGenMode] = useState<'new' | 'rewrite'>('new');
   const [validationState, setValidationState] = useState<GenerationValidationState | null>(null);
   const [revising, setRevising] = useState(false);
-  const [latestGeneratedDraft, setLatestGeneratedDraft] = useState<ChapterDraft | null>(null);
+  const [, setLatestGeneratedDraft] = useState<ChapterDraft | null>(null);
   const [latestGeneratedTarget, setLatestGeneratedTarget] = useState<DraftResultMetadata | null>(null);
+  const [latestPlacementCandidate, setLatestPlacementCandidate] = useState<PlacementCandidate | null>(null);
   const [activeTaskId, setActiveTaskId] = useState('');
 
   // v1.0.26 风格方案与输出控制选择
@@ -148,6 +141,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     setValidationState(null);
     setLatestGeneratedDraft(null);
     setLatestGeneratedTarget(null);
+    setLatestPlacementCandidate(null);
   }, [chapter?.id]);
 
   // 初始化/更新目标字数草稿
@@ -268,12 +262,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setErrorMsg('当前章节缺少可验证的草稿基线，无法启动安全生成任务');
       return;
     }
+    const baseContentHash = sourceDraft?.contentState?.status === 'ready'
+      ? sourceDraft.contentState.contentHash
+      : await computeContentSha256(sourceDraft?.content ?? currentEditorContent ?? '');
     const requestTarget = {
       novelId,
       chapterId: chapter.id,
       sourceDraftId,
       sourceRevision: sourceDraftVersion,
-      baseContentHash: currentContentHash || hashTextContent(currentEditorContent || ''),
+      baseContentHash,
     };
 
     let preflightContext: ChapterGenerationContext;
@@ -451,29 +448,23 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           const validationWarning = buildValidationWarningText(validation);
           setMessage('正在保存生成结果……');
 
-          // 4. 保存为草稿
-          const draft = await draftVersionService.create({
-            novelId,
-            chapterId: chapter.id,
-            content: response.text,
-            source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
-            aiTaskId: pipeline.task.taskId,
+          // M2: Provider 结果只进入 Artifact/Proposal；确认前不写 chapter_drafts。
+          const proposal = await placementApplyService.createProposal({
             artifactId: pipeline.artifact.artifactId,
-            note: validation.note,
-            sourceType: 'ai_task_artifact',
-            sourceId: pipeline.artifact.artifactId,
-            sourceDraftId: requestTarget.sourceDraftId,
-            sourceDraftVersion: requestTarget.sourceRevision,
-            baseContentHash: requestTarget.baseContentHash,
+            target: {
+              novelId: requestTarget.novelId,
+              chapterId: requestTarget.chapterId,
+              draftId: requestTarget.sourceDraftId,
+            },
+            browserExpectedVersion: requestTarget.sourceRevision,
+            browserExpectedHash: requestTarget.baseContentHash,
           });
-          const validationWithDraft: GenerationValidationState = { draftId: draft.id, ...validation };
+          const candidateHash = await computeContentSha256(response.text);
+          const validationWithDraft: GenerationValidationState = { draftId: pipeline.artifact.artifactId, ...validation };
           const resultMetadata: DraftResultMetadata = {
             ...requestTarget,
-            resultId: draft.id,
-            draftVersion: draft.versionNo,
-            contentHash: draft.contentState?.status === 'ready'
-              ? draft.contentState.contentHash
-              : undefined,
+            resultId: pipeline.artifact.artifactId,
+            contentHash: candidateHash,
             taskId: pipeline.task.taskId,
             artifactId: pipeline.artifact.artifactId,
             source: 'ai_generate',
@@ -488,12 +479,19 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           setStage('生成完成');
 
           if (liveNovelIdRef.current !== requestTarget.novelId || liveChapterIdRef.current !== requestTarget.chapterId) {
-            notifyNative({ kind: 'success', body: `原章节正文已生成并保存（${draft.wordCount} 字）` });
+            notifyNative({ kind: 'success', body: '原章节正文候选已生成，等待回到原章节确认采用' });
             return;
           }
-          onGenerated?.(draft, resultMetadata);
-          setLatestGeneratedDraft(draft);
+          setLatestGeneratedDraft(null);
           setLatestGeneratedTarget(resultMetadata);
+          setLatestPlacementCandidate({
+            artifactId: pipeline.artifact.artifactId,
+            proposal,
+            content: response.text,
+            contentHash: candidateHash,
+            wordCount: response.text.length,
+            taskId: pipeline.task.taskId,
+          });
 
           // 校验警告提示
           if (validationWarning) {
@@ -505,7 +503,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           }
 
           // Native Feel P2.2: 生成完成通知
-          notifyNative({ kind: 'success', body: `正文生成完成（${draft.wordCount} 字）` });
+          notifyNative({ kind: 'success', body: `正文候选生成完成（${response.text.length} 字），确认后才写入正式正文` });
         },
       );
 
@@ -670,7 +668,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     if (!chapter || !novelId) return;
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
-    const candidate = latestGeneratedDraft;
+    const candidate = latestPlacementCandidate;
     const candidateTarget = latestGeneratedTarget;
     if (!candidate || !candidateTarget) {
       setErrorMsg('没有当前展示的生成结果可采用');
@@ -678,35 +676,54 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     }
     if (candidateTarget.novelId !== requestNovelId
       || candidateTarget.chapterId !== requestChapterId
-      || candidate.novelId !== requestNovelId
-      || candidate.chapterId !== requestChapterId) {
+      || candidate.proposal.targets.every((target) => target.targetId !== requestChapterId || !target.isReady)) {
       setErrorMsg('当前展示结果的目标已变化，已阻止采用');
       return;
     }
-    const contentHash = candidateTarget.contentHash
-      || (candidate.contentState?.status === 'ready' ? candidate.contentState.contentHash : '');
-    if (!candidateTarget.draftVersion || !contentHash) {
-      setErrorMsg('当前展示结果缺少版本或正文哈希，无法安全采用');
+    const contentHash = candidateTarget.contentHash || candidate.contentHash;
+    if (!contentHash) {
+      setErrorMsg('当前展示结果缺少正文哈希，无法安全采用');
       return;
     }
     if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
-    if (draftHasAdoptionRisk(candidate, validationState)) {
-      const riskText = validationState?.draftId === candidate.id
-        ? validationState.note
-        : candidate.note || '该正文可能偏离章节大纲。';
+    if (validationState?.draftId === candidate.artifactId
+      && (validationState.outlineCompliance.score < 80 || validationState.missingRequiredNames.length > 0)) {
+      const riskText = validationState.note;
       if (!(await confirmDanger({ title: '采用确认', message: `该正文可能偏离章节大纲，仍要采用吗？\n\n${riskText}` }))) return;
-    } else if (!(await confirmInfo({ title: '采用草稿', message: `确认采用当前展示的草稿 v${candidate.versionNo} 作为正式正文？\n\n采用后该版本将成为当前章节的正式正文。` }))) {
+    } else if (!(await confirmInfo({ title: '采用正文候选', message: '确认将当前 Artifact 候选写入新草稿并采用为正式正文？' }))) {
       return;
     }
 
-    await draftVersionService.adoptExact({
-      novelId: requestNovelId,
-      chapterId: requestChapterId,
-      draftId: candidate.id,
-      draftVersion: candidateTarget.draftVersion,
-      contentHash,
+    const proposalValidation = await placementApplyService.validateProposal(candidate.proposal.proposalId);
+    if (proposalValidation.stale) {
+      setErrorMsg(proposalValidation.reason || 'PlacementProposal 已过期，请重新生成');
+      return;
+    }
+    const plan = await placementApplyService.createPlan({
+      proposalId: candidate.proposal.proposalId,
+      source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
+      note: validationState?.draftId === candidate.artifactId ? validationState.note : undefined,
     });
+    const execution = await placementApplyService.executePlan(plan);
+    if (execution.status !== 'completed' || execution.targetLinks.length !== 1) {
+      setErrorMsg('ApplyPlan 未完整提交，正式正文保持不变');
+      return;
+    }
+    const applied = execution.result as { draft?: ChapterDraft; contentHash?: string };
+    const adopted = applied.draft;
+    if (!adopted?.isAdopted) {
+      setErrorMsg('ApplyPlan 返回的正文身份校验失败');
+      return;
+    }
     if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
+    onGenerated?.(adopted, {
+      ...candidateTarget,
+      resultId: adopted.id,
+      draftVersion: adopted.versionNo,
+      contentHash: applied.contentHash || contentHash,
+    });
+    setLatestGeneratedDraft(adopted);
+    setLatestPlacementCandidate(null);
     setStatusMsg('已采用为正式正文！');
     setTimeout(() => setStatusMsg(''), 3000);
     onAdopted?.();
@@ -1064,41 +1081,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         </div>
       )}
 
-      {latestGeneratedDraft && (
+      {latestPlacementCandidate && (
         <div className="panel-section">
-          <div className="panel-section-title">应用最近生成结果</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              className="btn btn-sm btn-secondary"
-              onClick={() => onApplyAiText?.({
-                ...(latestGeneratedTarget as DraftResultMetadata),
-                mode: 'append',
-                text: latestGeneratedDraft.content,
-                source: 'ai_generate',
-              })}
-              disabled={!onApplyAiText || !latestGeneratedTarget || latestGeneratedDraft.id === currentDraftId}
-              style={{ flex: 1 }}
-              title={latestGeneratedDraft.id === currentDraftId ? '当前编辑器已显示该草稿，避免重复追加' : '追加到当前正文末尾'}
-            >
-              追加到正文
-            </button>
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={() => onApplyAiText?.({
-                ...(latestGeneratedTarget as DraftResultMetadata),
-                mode: 'replace_all',
-                text: latestGeneratedDraft.content,
-                source: 'ai_generate',
-              })}
-              disabled={!onApplyAiText || !latestGeneratedTarget || latestGeneratedDraft.id === currentDraftId}
-              style={{ flex: 1 }}
-              title={latestGeneratedDraft.id === currentDraftId ? '当前编辑器已显示该草稿' : '替换当前全文'}
-            >
-              替换全文
-            </button>
+          <div className="panel-section-title">最近生成候选</div>
+          <div style={{ fontSize: 12, lineHeight: 1.6, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {latestPlacementCandidate.content.slice(0, 500)}
+            {latestPlacementCandidate.content.length > 500 ? '…' : ''}
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>
-            当前生成结果已保存为草稿 v{latestGeneratedDraft.versionNo}。
+            候选已保存为 Artifact 与 PlacementProposal；确认前不会写入正文草稿。
           </div>
         </div>
       )}
@@ -1115,7 +1106,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         <button
           className="panel-btn panel-btn-secondary"
           onClick={handleAdopt}
-          disabled={generating || revising || !latestGeneratedDraft || !latestGeneratedTarget}
+          disabled={generating || revising || !latestPlacementCandidate || !latestGeneratedTarget}
         >
           ✅ 确认采用
         </button>
@@ -1128,7 +1119,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           </button>
         )}
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 6 }}>
-          AI 生成结果将保存为草稿版本，需手动确认采用
+          AI 生成结果先保存为 Artifact 候选，确认后才写入并采用正文
         </div>
       </div>
     </div>

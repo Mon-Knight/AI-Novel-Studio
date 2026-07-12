@@ -241,6 +241,196 @@ fn map_draft(record: draft_repository::DraftRecord, content: String) -> AtomicDr
     }
 }
 
+/// The only transaction-owned chapter draft write core. Callers own BEGIN/COMMIT.
+/// `save_chapter_draft_atomic_with_cleanup` and ApplyExecutor both use this path.
+pub(crate) fn save_chapter_draft_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    input: &SaveChapterDraftAtomicInput,
+    trace_id: &str,
+    operation_id: &str,
+) -> Result<SaveChapterDraftAtomicOutput, AppError> {
+    let add_context =
+        |error: AppError| error.with_context(Some(trace_id), Some(operation_id));
+    draft_repository::validate_target(transaction, &input.novel_id, &input.chapter_id)
+        .map_err(add_context)?;
+    let existing_draft = if let Some(draft_id) = input.draft_id.as_deref() {
+        let draft = draft_repository::find_draft(transaction, draft_id)
+            .map_err(add_context)?
+            .ok_or_else(|| {
+                add_context(AppError::new(
+                    codes::DRAFT_UPDATE_ZERO_ROWS,
+                    "目标草稿不存在，更新未命中",
+                    false,
+                ))
+            })?;
+        if draft.novel_id != input.novel_id || draft.chapter_id != input.chapter_id {
+            return Err(add_context(AppError::new(
+                codes::DRAFT_UPDATE_ZERO_ROWS,
+                "目标草稿不属于当前章节",
+                false,
+            )));
+        }
+        if let Some(expected_version) = input.draft_version {
+            if draft.version_no != expected_version {
+                return Err(add_context(
+                    AppError::new(
+                        codes::DOCUMENT_VERSION_CONFLICT,
+                        "草稿版本已发生变化",
+                        false,
+                    )
+                    .with_details(serde_json::json!({
+                        "expectedVersion": expected_version,
+                        "actualVersion": draft.version_no,
+                    })),
+                ));
+            }
+        }
+        if let Some(expected_hash) = input.base_content_hash.as_deref() {
+            let persisted = load_full_content(transaction, &draft).map_err(add_context)?;
+            if !persisted.content_hash.eq_ignore_ascii_case(expected_hash) {
+                return Err(add_context(
+                    AppError::new(codes::DOCUMENT_HASH_MISMATCH, "草稿正文已发生变化", false)
+                        .with_details(serde_json::json!({
+                            "expectedHash": expected_hash,
+                            "actualHash": persisted.content_hash,
+                        })),
+                ));
+            }
+        }
+        Some(draft)
+    } else {
+        None
+    };
+
+    let actual_hash = large_text_repository::sha256(&input.content);
+    let create_new_version = existing_draft
+        .as_ref()
+        .map(|draft| draft.is_adopted)
+        .unwrap_or(true);
+    let draft_id = if create_new_version {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        existing_draft
+            .as_ref()
+            .map(|draft| draft.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    };
+    let now = Utc::now().to_rfc3339();
+    let use_large_text = input.content.len() > large_text_repository::LARGE_TEXT_THRESHOLD_BYTES;
+    let document_id = use_large_text.then(|| uuid::Uuid::new_v4().to_string());
+    if let Some(document_id) = document_id.as_deref() {
+        large_text_repository::insert_document(
+            transaction,
+            document_id,
+            &draft_id,
+            input.title.as_deref(),
+            &input.content,
+            &actual_hash,
+            &now,
+        )
+        .map_err(add_context)?;
+    }
+    let stored_content = if use_large_text {
+        input.content.chars().take(500).collect::<String>()
+    } else {
+        input.content.clone()
+    };
+    let server_word_count = word_count(&input.content);
+    let calculated_word_count = input
+        .word_count
+        .filter(|provided| *provided == server_word_count)
+        .unwrap_or(server_word_count);
+
+    if !create_new_version {
+        let affected = draft_repository::update_draft(
+            transaction,
+            &draft_id,
+            &input.novel_id,
+            &input.chapter_id,
+            input.draft_version,
+            input.title.as_deref(),
+            &stored_content,
+            &input.source,
+            calculated_word_count,
+            input.ai_task_id.as_deref(),
+            input.artifact_id.as_deref(),
+            input.note.as_deref(),
+            input.source_type.as_deref(),
+            input.source_id.as_deref(),
+            input.source_draft_id.as_deref(),
+            input.source_draft_version,
+            input.base_content_hash.as_deref(),
+            document_id.as_deref(),
+            &actual_hash,
+            &now,
+        )
+        .map_err(add_context)?;
+        if affected != 1 {
+            return Err(add_context(AppError::new(
+                codes::DRAFT_UPDATE_ZERO_ROWS,
+                "草稿更新未命中唯一目标",
+                false,
+            )));
+        }
+    } else {
+        let version =
+            draft_repository::next_version(transaction, &input.chapter_id).map_err(add_context)?;
+        draft_repository::insert_draft(
+            transaction,
+            &draft_id,
+            &input.novel_id,
+            &input.chapter_id,
+            input.title.as_deref(),
+            &stored_content,
+            &input.source,
+            version,
+            calculated_word_count,
+            input.ai_task_id.as_deref(),
+            input.artifact_id.as_deref(),
+            input.note.as_deref(),
+            input.source_type.as_deref(),
+            input.source_id.as_deref(),
+            input.source_draft_id.as_deref(),
+            input.source_draft_version,
+            input.base_content_hash.as_deref(),
+            document_id.as_deref(),
+            &actual_hash,
+            &now,
+        )
+        .map_err(add_context)?;
+    }
+
+    if !create_new_version {
+        if let Some(old_document_id) = existing_draft
+            .as_ref()
+            .and_then(|draft| draft.large_text_ref_id.as_deref())
+        {
+            if Some(old_document_id) != document_id.as_deref() {
+                large_text_repository::delete_if_unreferenced(transaction, old_document_id)
+                    .map_err(add_context)?;
+            }
+        }
+    }
+    let saved_record = draft_repository::find_draft(transaction, &draft_id)
+        .map_err(add_context)?
+        .ok_or_else(|| {
+            add_context(AppError::new(
+                codes::DRAFT_UPDATE_ZERO_ROWS,
+                "保存后的草稿无法读取",
+                false,
+            ))
+        })?;
+    Ok(SaveChapterDraftAtomicOutput {
+        operation_id: operation_id.to_string(),
+        trace_id: trace_id.to_string(),
+        draft: map_draft(saved_record, input.content.clone()),
+        content_hash: actual_hash,
+        content_length: input.content.chars().count(),
+        storage_mode: if use_large_text { "chunked" } else { "inline" }.to_string(),
+        idempotent_replay: false,
+    })
+}
+
 pub fn save_chapter_draft_atomic_with_cleanup<F>(
     connection: &mut Connection,
     input: SaveChapterDraftAtomicInput,
@@ -384,184 +574,13 @@ where
             .map_err(|error| add_context(error.into()))?;
     }
 
-    draft_repository::validate_target(&transaction, &input.novel_id, &input.chapter_id)
-        .map_err(add_context)?;
-    let existing_draft = if let Some(draft_id) = input.draft_id.as_deref() {
-        let draft = draft_repository::find_draft(&transaction, draft_id)
-            .map_err(add_context)?
-            .ok_or_else(|| {
-                add_context(AppError::new(
-                    codes::DRAFT_UPDATE_ZERO_ROWS,
-                    "目标草稿不存在，更新未命中",
-                    false,
-                ))
-            })?;
-        if draft.novel_id != input.novel_id || draft.chapter_id != input.chapter_id {
-            return Err(add_context(AppError::new(
-                codes::DRAFT_UPDATE_ZERO_ROWS,
-                "目标草稿不属于当前章节",
-                false,
-            )));
-        }
-        if let Some(expected_version) = input.draft_version {
-            if draft.version_no != expected_version {
-                return Err(add_context(
-                    AppError::new(
-                        codes::DOCUMENT_VERSION_CONFLICT,
-                        "草稿版本已发生变化",
-                        false,
-                    )
-                    .with_details(serde_json::json!({
-                        "expectedVersion": expected_version,
-                        "actualVersion": draft.version_no,
-                    })),
-                ));
-            }
-        }
-        if let Some(expected_hash) = input.base_content_hash.as_deref() {
-            let persisted = load_full_content(&transaction, &draft).map_err(add_context)?;
-            if !persisted.content_hash.eq_ignore_ascii_case(expected_hash) {
-                return Err(add_context(
-                    AppError::new(codes::DOCUMENT_HASH_MISMATCH, "草稿正文已发生变化", false)
-                        .with_details(serde_json::json!({
-                            "expectedHash": expected_hash,
-                            "actualHash": persisted.content_hash,
-                        })),
-                ));
-            }
-        }
-        Some(draft)
-    } else {
-        None
-    };
-
-    // Adopted versions are immutable history. Editing one creates a new candidate version.
-    let create_new_version = existing_draft
-        .as_ref()
-        .map(|draft| draft.is_adopted)
-        .unwrap_or(true);
-    let draft_id = if create_new_version {
-        uuid::Uuid::new_v4().to_string()
-    } else {
-        existing_draft
-            .as_ref()
-            .map(|draft| draft.id.clone())
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
-    };
-    let now = Utc::now().to_rfc3339();
-    let use_large_text = input.content.len() > large_text_repository::LARGE_TEXT_THRESHOLD_BYTES;
-    let document_id = use_large_text.then(|| uuid::Uuid::new_v4().to_string());
-    if let Some(document_id) = document_id.as_deref() {
-        large_text_repository::insert_document(
-            &transaction,
-            document_id,
-            &draft_id,
-            input.title.as_deref(),
-            &input.content,
-            &actual_hash,
-            &now,
-        )
-        .map_err(add_context)?;
-    }
-    let stored_content = if use_large_text {
-        input.content.chars().take(500).collect::<String>()
-    } else {
-        input.content.clone()
-    };
-    let server_word_count = word_count(&input.content);
-    let calculated_word_count = input
-        .word_count
-        .filter(|provided| *provided == server_word_count)
-        .unwrap_or(server_word_count);
-
-    if !create_new_version {
-        let affected = draft_repository::update_draft(
-            &transaction,
-            &draft_id,
-            &input.novel_id,
-            &input.chapter_id,
-            input.draft_version,
-            input.title.as_deref(),
-            &stored_content,
-            &input.source,
-            calculated_word_count,
-            input.ai_task_id.as_deref(),
-            input.artifact_id.as_deref(),
-            input.note.as_deref(),
-            input.source_type.as_deref(),
-            input.source_id.as_deref(),
-            input.source_draft_id.as_deref(),
-            input.source_draft_version,
-            input.base_content_hash.as_deref(),
-            document_id.as_deref(),
-            &actual_hash,
-            &now,
-        )
-        .map_err(add_context)?;
-        if affected != 1 {
-            return Err(add_context(AppError::new(
-                codes::DRAFT_UPDATE_ZERO_ROWS,
-                "草稿更新未命中唯一目标",
-                false,
-            )));
-        }
-    } else {
-        let version =
-            draft_repository::next_version(&transaction, &input.chapter_id).map_err(add_context)?;
-        draft_repository::insert_draft(
-            &transaction,
-            &draft_id,
-            &input.novel_id,
-            &input.chapter_id,
-            input.title.as_deref(),
-            &stored_content,
-            &input.source,
-            version,
-            calculated_word_count,
-            input.ai_task_id.as_deref(),
-            input.artifact_id.as_deref(),
-            input.note.as_deref(),
-            input.source_type.as_deref(),
-            input.source_id.as_deref(),
-            input.source_draft_id.as_deref(),
-            input.source_draft_version,
-            input.base_content_hash.as_deref(),
-            document_id.as_deref(),
-            &actual_hash,
-            &now,
-        )
-        .map_err(add_context)?;
-    }
-
-    if !create_new_version {
-        if let Some(old_document_id) = existing_draft
-            .as_ref()
-            .and_then(|draft| draft.large_text_ref_id.as_deref())
-        {
-            if Some(old_document_id) != document_id.as_deref() {
-                large_text_repository::delete_if_unreferenced(&transaction, old_document_id)
-                    .map_err(add_context)?;
-            }
-        }
-    }
-    let saved_record = draft_repository::find_draft(&transaction, &draft_id)
-        .map_err(add_context)?
-        .ok_or_else(|| {
-            add_context(AppError::new(
-                codes::DRAFT_UPDATE_ZERO_ROWS,
-                "保存后的草稿无法读取",
-                false,
-            ))
-        })?;
-    let output = SaveChapterDraftAtomicOutput {
-        operation_id: operation_id.clone(),
-        trace_id: trace_id.clone(),
-        draft: map_draft(saved_record, input.content.clone()),
-        content_hash: actual_hash,
-        content_length: input.content.chars().count(),
-        storage_mode: if use_large_text { "chunked" } else { "inline" }.to_string(),
-        idempotent_replay: false,
-    };
+    let output = save_chapter_draft_in_transaction(
+        &transaction,
+        &input,
+        &trace_id,
+        &operation_id,
+    )?;
+    let draft_id = output.draft.id.clone();
     let result_json = serde_json::to_string(&output).map_err(|_| {
         add_context(AppError::new(
             codes::DATABASE_TRANSACTION_FAILED,
@@ -644,6 +663,80 @@ pub fn read_chapter_draft_content(
         draft_id: draft.id,
         draft_version: draft.version_no,
         content_state: state,
+    })
+}
+
+pub(crate) fn adopt_chapter_draft_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    input: &AdoptChapterDraftAtomicInput,
+    trace_id: &str,
+    operation_id: &str,
+) -> Result<AdoptChapterDraftAtomicOutput, AppError> {
+    let add_context =
+        |error: AppError| error.with_context(Some(trace_id), Some(operation_id));
+    draft_repository::validate_target(transaction, &input.novel_id, &input.chapter_id)
+        .map_err(add_context)?;
+    let draft = draft_repository::find_draft(transaction, &input.draft_id)
+        .map_err(add_context)?
+        .ok_or_else(|| add_context(AppError::new(codes::TARGET_DRAFT_NOT_FOUND, "目标草稿不存在", false)))?;
+    if draft.novel_id != input.novel_id || draft.chapter_id != input.chapter_id {
+        return Err(add_context(AppError::new(
+            codes::TARGET_DRAFT_NOT_FOUND,
+            "目标草稿不属于指定作品章节",
+            false,
+        )));
+    }
+    if draft.version_no != input.draft_version {
+        return Err(add_context(AppError::new(
+            codes::DOCUMENT_VERSION_CONFLICT,
+            "草稿版本已发生变化",
+            false,
+        )));
+    }
+    let full_content = load_full_content(transaction, &draft).map_err(add_context)?;
+    if !full_content.content_hash.eq_ignore_ascii_case(&input.content_hash) {
+        return Err(add_context(AppError::new(
+            codes::DOCUMENT_HASH_MISMATCH,
+            "草稿正文已发生变化",
+            false,
+        )));
+    }
+    let now = Utc::now().to_rfc3339();
+    let expected_draft_rows: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM chapter_drafts WHERE chapter_id = ?1 AND novel_id = ?2",
+            params![input.chapter_id, input.novel_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| add_context(error.into()))?;
+    let draft_rows = transaction.execute(
+        "UPDATE chapter_drafts SET is_adopted = CASE WHEN id = ?1 THEN 1 ELSE 0 END,
+                updated_at = ?2 WHERE chapter_id = ?3 AND novel_id = ?4",
+        params![input.draft_id, now, input.chapter_id, input.novel_id],
+    ).map_err(|error| add_context(error.into()))?;
+    if expected_draft_rows < 1 || draft_rows as i64 != expected_draft_rows {
+        return Err(add_context(AppError::new(codes::DRAFT_UPDATE_ZERO_ROWS, "章节草稿采用更新数量不一致", false)));
+    }
+    let chapter_rows = transaction.execute(
+        "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3
+         WHERE id = ?4 AND novel_id = ?5 AND deleted_at IS NULL",
+        params![input.draft_id, draft.word_count, now, input.chapter_id, input.novel_id],
+    ).map_err(|error| add_context(error.into()))?;
+    if chapter_rows != 1 {
+        return Err(add_context(AppError::new(codes::DOCUMENT_VERSION_CONFLICT, "章节采用目标已变化", false)));
+    }
+    let adopted = draft_repository::find_draft(transaction, &input.draft_id)
+        .map_err(add_context)?
+        .ok_or_else(|| add_context(AppError::new(codes::TARGET_DRAFT_NOT_FOUND, "采用结果不存在", false)))?;
+    if !adopted.is_adopted {
+        return Err(add_context(AppError::new(codes::DATABASE_TRANSACTION_FAILED, "采用结果校验失败", false)));
+    }
+    Ok(AdoptChapterDraftAtomicOutput {
+        operation_id: operation_id.to_string(),
+        trace_id: trace_id.to_string(),
+        draft: map_draft(adopted, full_content.content),
+        content_hash: full_content.content_hash,
+        idempotent_replay: false,
     })
 }
 
@@ -743,89 +836,12 @@ pub fn adopt_chapter_draft_atomic(
         )
         .map_err(|error| add_context(error.into()))?;
 
-    draft_repository::validate_target(&transaction, &input.novel_id, &input.chapter_id)
-        .map_err(add_context)?;
-    let draft = draft_repository::find_draft(&transaction, &input.draft_id)
-        .map_err(add_context)?
-        .ok_or_else(|| {
-            add_context(AppError::new(
-                codes::TARGET_DRAFT_NOT_FOUND,
-                "目标草稿不存在",
-                false,
-            ))
-        })?;
-    if draft.novel_id != input.novel_id || draft.chapter_id != input.chapter_id {
-        return Err(add_context(AppError::new(
-            codes::TARGET_DRAFT_NOT_FOUND,
-            "目标草稿不属于指定作品章节",
-            false,
-        )));
-    }
-    if draft.version_no != input.draft_version {
-        return Err(add_context(AppError::new(
-            codes::DOCUMENT_VERSION_CONFLICT,
-            "草稿版本已发生变化",
-            false,
-        )));
-    }
-    let full_content = load_full_content(&transaction, &draft).map_err(add_context)?;
-    if !full_content
-        .content_hash
-        .eq_ignore_ascii_case(&input.content_hash)
-    {
-        return Err(add_context(AppError::new(
-            codes::DOCUMENT_HASH_MISMATCH,
-            "草稿正文已发生变化",
-            false,
-        )));
-    }
-
-    let now = Utc::now().to_rfc3339();
-    transaction
-        .execute(
-            "UPDATE chapter_drafts SET is_adopted = CASE WHEN id = ?1 THEN 1 ELSE 0 END,
-                    updated_at = ?2 WHERE chapter_id = ?3 AND novel_id = ?4",
-            params![input.draft_id, now, input.chapter_id, input.novel_id],
-        )
-        .map_err(|error| add_context(error.into()))?;
-    let chapter_rows = transaction
-        .execute(
-            "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3
-             WHERE id = ?4 AND novel_id = ?5 AND deleted_at IS NULL",
-            params![input.draft_id, draft.word_count, now, input.chapter_id, input.novel_id],
-        )
-        .map_err(|error| add_context(error.into()))?;
-    if chapter_rows != 1 {
-        return Err(add_context(AppError::new(
-            codes::DOCUMENT_VERSION_CONFLICT,
-            "章节采用目标已变化",
-            false,
-        )));
-    }
-
-    let adopted = draft_repository::find_draft(&transaction, &input.draft_id)
-        .map_err(add_context)?
-        .ok_or_else(|| {
-            add_context(AppError::new(
-                codes::TARGET_DRAFT_NOT_FOUND,
-                "采用结果不存在",
-                false,
-            ))
-        })?;
-    if !adopted.is_adopted {
-        return Err(add_context(AppError::new(
-            codes::DATABASE_TRANSACTION_FAILED,
-            "采用结果校验失败",
-            false,
-        )));
-    }
-    let output = AdoptChapterDraftAtomicOutput {
-        operation_id: operation_id.clone(),
-        trace_id: trace_id.clone(),
-        draft: map_draft(adopted, full_content.content),
-        content_hash: full_content.content_hash,
-        idempotent_replay: false,
-    };
+    let output = adopt_chapter_draft_in_transaction(
+        &transaction,
+        &input,
+        &trace_id,
+        &operation_id,
+    )?;
     let result_json = serde_json::to_string(&output).map_err(|_| {
         add_context(AppError::new(
             codes::DATABASE_TRANSACTION_FAILED,

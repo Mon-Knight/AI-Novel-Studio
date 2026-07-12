@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "2.3.0-M1";
+const MIGRATION_VERSION: &str = "2.3.0-M2";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 11] {
+fn migrations() -> [Migration; 14] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -78,6 +78,21 @@ fn migrations() -> [Migration; 11] {
             id: "011_artifact_validation_issues",
             definition: "artifact_validation_issues_v1(artifact,run,severity,code,message,path,details,validator,created,indexes,append_only)",
             apply: apply_artifact_validation_issues,
+        },
+        Migration {
+            id: "012_artifact_placement_proposals",
+            definition: "artifact_placement_proposals_v1(artifact,parent,schema,confidence,reasons,warnings,unresolved,project_revision,created,targets_identity_priority_expected_ready,immutable_restrict)",
+            apply: apply_artifact_placement_proposals,
+        },
+        Migration {
+            id: "013_artifact_apply_plans",
+            definition: "artifact_apply_plans_v1(proposal,artifact,parent,schema,expected,conflicts,operation,request,status,result,timestamps,operations,dependencies,immutable_request_restrict)",
+            apply: apply_artifact_apply_plans,
+        },
+        Migration {
+            id: "014_artifact_target_links",
+            definition: "artifact_target_links_v1(artifact,plan,apply_operation,target,version,hash,operation,result,created,unique,immutable_restrict)",
+            apply: apply_artifact_target_links,
         },
     ]
 }
@@ -589,11 +604,174 @@ fn apply_artifact_validation_issues(transaction: &Transaction<'_>) -> Result<(),
         .map_err(AppError::database)
 }
 
+fn apply_artifact_placement_proposals(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS artifact_placement_proposals (
+                proposal_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                parent_proposal_id TEXT,
+                schema_version INTEGER NOT NULL,
+                confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+                reasons_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                unresolved_items_json TEXT NOT NULL,
+                project_revision_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                FOREIGN KEY (parent_proposal_id) REFERENCES artifact_placement_proposals(proposal_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS artifact_placement_targets (
+                target_row_id TEXT PRIMARY KEY,
+                proposal_id TEXT NOT NULL,
+                target_index INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT,
+                draft_id TEXT,
+                action TEXT NOT NULL,
+                expected_version INTEGER,
+                expected_hash TEXT,
+                source_priority INTEGER NOT NULL CHECK (source_priority BETWEEN 1 AND 4),
+                confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+                reason TEXT NOT NULL,
+                is_ready INTEGER NOT NULL CHECK (is_ready IN (0,1)),
+                created_at TEXT NOT NULL,
+                UNIQUE (proposal_id, target_index),
+                FOREIGN KEY (proposal_id) REFERENCES artifact_placement_proposals(proposal_id) ON DELETE RESTRICT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_placement_one_ready_target
+                ON artifact_placement_targets(proposal_id) WHERE is_ready = 1;
+            CREATE INDEX IF NOT EXISTS idx_placement_proposals_artifact_created
+                ON artifact_placement_proposals(artifact_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_placement_targets_identity
+                ON artifact_placement_targets(target_type, target_id);
+            CREATE TRIGGER IF NOT EXISTS trg_placement_proposals_immutable_update
+                BEFORE UPDATE ON artifact_placement_proposals BEGIN SELECT RAISE(ABORT, 'immutable placement proposal'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_placement_proposals_immutable_delete
+                BEFORE DELETE ON artifact_placement_proposals BEGIN SELECT RAISE(ABORT, 'immutable placement proposal'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_placement_targets_immutable_update
+                BEFORE UPDATE ON artifact_placement_targets BEGIN SELECT RAISE(ABORT, 'immutable placement target'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_placement_targets_immutable_delete
+                BEFORE DELETE ON artifact_placement_targets BEGIN SELECT RAISE(ABORT, 'immutable placement target'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_artifact_apply_plans(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS artifact_apply_plans (
+                plan_id TEXT PRIMARY KEY,
+                proposal_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                parent_plan_id TEXT,
+                schema_version INTEGER NOT NULL,
+                expected_versions_json TEXT NOT NULL,
+                expected_hashes_json TEXT NOT NULL,
+                conflicts_json TEXT NOT NULL,
+                operation_id TEXT NOT NULL UNIQUE,
+                request_hash TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('draft','validated','blocked','ready','applying','completed','failed','commit_unknown','cancelled')),
+                result_json TEXT,
+                error_json TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY (proposal_id) REFERENCES artifact_placement_proposals(proposal_id) ON DELETE RESTRICT,
+                FOREIGN KEY (artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                FOREIGN KEY (parent_plan_id) REFERENCES artifact_apply_plans(plan_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS artifact_apply_operations (
+                apply_operation_id TEXT PRIMARY KEY,
+                plan_id TEXT NOT NULL,
+                operation_index INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                expected_version INTEGER,
+                expected_hash TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (plan_id, operation_index),
+                FOREIGN KEY (plan_id) REFERENCES artifact_apply_plans(plan_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS artifact_apply_dependencies (
+                dependency_id TEXT PRIMARY KEY,
+                plan_id TEXT NOT NULL,
+                operation_id TEXT NOT NULL,
+                depends_on_operation_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (plan_id, operation_id, depends_on_operation_id),
+                FOREIGN KEY (plan_id) REFERENCES artifact_apply_plans(plan_id) ON DELETE RESTRICT,
+                FOREIGN KEY (operation_id) REFERENCES artifact_apply_operations(apply_operation_id) ON DELETE RESTRICT,
+                FOREIGN KEY (depends_on_operation_id) REFERENCES artifact_apply_operations(apply_operation_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_apply_plans_artifact_created
+                ON artifact_apply_plans(artifact_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_apply_plans_proposal_created
+                ON artifact_apply_plans(proposal_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_apply_operations_plan
+                ON artifact_apply_operations(plan_id, operation_index);
+            CREATE TRIGGER IF NOT EXISTS trg_apply_plans_immutable_request
+                BEFORE UPDATE OF proposal_id, artifact_id, parent_plan_id, schema_version,
+                    expected_versions_json, expected_hashes_json, conflicts_json,
+                    operation_id, request_hash, created_at
+                ON artifact_apply_plans BEGIN SELECT RAISE(ABORT, 'immutable apply plan request'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_apply_plans_immutable_delete
+                BEFORE DELETE ON artifact_apply_plans BEGIN SELECT RAISE(ABORT, 'immutable apply plan'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_apply_operations_immutable_update
+                BEFORE UPDATE ON artifact_apply_operations BEGIN SELECT RAISE(ABORT, 'immutable apply operation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_apply_operations_immutable_delete
+                BEFORE DELETE ON artifact_apply_operations BEGIN SELECT RAISE(ABORT, 'immutable apply operation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_apply_dependencies_immutable_update
+                BEFORE UPDATE ON artifact_apply_dependencies BEGIN SELECT RAISE(ABORT, 'immutable apply dependency'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_apply_dependencies_immutable_delete
+                BEFORE DELETE ON artifact_apply_dependencies BEGIN SELECT RAISE(ABORT, 'immutable apply dependency'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_artifact_target_links(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS artifact_target_links (
+                link_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                plan_id TEXT NOT NULL,
+                apply_operation_id TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                target_version INTEGER,
+                target_hash TEXT,
+                operation_id TEXT NOT NULL,
+                result_metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (apply_operation_id, target_type, target_id),
+                FOREIGN KEY (artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                FOREIGN KEY (plan_id) REFERENCES artifact_apply_plans(plan_id) ON DELETE RESTRICT,
+                FOREIGN KEY (apply_operation_id) REFERENCES artifact_apply_operations(apply_operation_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifact_target_links_artifact
+                ON artifact_target_links(artifact_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_artifact_target_links_target
+                ON artifact_target_links(target_type, target_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_artifact_target_links_operation
+                ON artifact_target_links(operation_id);
+            CREATE TRIGGER IF NOT EXISTS trg_artifact_target_links_immutable_update
+                BEFORE UPDATE ON artifact_target_links BEGIN SELECT RAISE(ABORT, 'immutable artifact target link'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_artifact_target_links_immutable_delete
+                BEFORE DELETE ON artifact_target_links BEGIN SELECT RAISE(ABORT, 'immutable artifact target link'); END;",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 11] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 14] = [
         ("001_schema_migrations", "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1"),
         ("002_workspace_recovery_snapshots", "7b3d51eb4fedcdac62b04d427746c8990a43d1ce98a1e80ea2f4b3e2429ee739"),
         ("003_draft_save_operations", "62d442e75b5bdf0fb1e1149d454cce9611f42221185bb7b5e16eab762c77e1ec"),
@@ -605,6 +783,9 @@ mod tests {
         ("009_ai_constraint_snapshots", "6517b0d1cb2605f35d192bb35be4c7aab02e11f5f50fe78f841b2ef13d03494a"),
         ("010_result_artifacts", "567e8c1463762029bb8393da6eb94c7b4f68c4ec0bc6fcf349fe465d80c94fb6"),
         ("011_artifact_validation_issues", "3f8e5d59f40bb3722fd6799267e168ec4855321b3049ce68206fe0f62a74fa85"),
+        ("012_artifact_placement_proposals", "2c0261eb1bb9c813dcc9002cd98b40e85c18b6c084035df453825890de748b1e"),
+        ("013_artifact_apply_plans", "d7d61ac2f4e9bd3828959e3e87ab06c3689dba4bae02c061db3304c20bf261af"),
+        ("014_artifact_target_links", "4a4b7d14faeca7f830454d91e0cd71fce62c2128064eadd15e44cd2009e88de8"),
     ];
 
     fn legacy_schema(connection: &Connection) -> rusqlite::Result<()> {
@@ -629,7 +810,7 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let migrations = list_applied(&connection)?;
-        assert_eq!(migrations.len(), 11);
+        assert_eq!(migrations.len(), 14);
         for (applied, (expected_id, expected_checksum)) in
             migrations.iter().zip(EXPECTED_MIGRATION_CHECKSUMS)
         {
@@ -888,11 +1069,73 @@ mod tests {
 
         run_migrations(&mut connection)?;
         let upgraded = list_applied(&connection)?;
-        assert_eq!(upgraded.len(), 11);
+        assert_eq!(upgraded.len(), 14);
         assert_eq!(&upgraded[..4], &original[..4]);
         let once = upgraded.clone();
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, once);
+        Ok(())
+    }
+
+    #[test]
+    fn db23_m2_schema_has_tables_indexes_and_triggers() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        for table in [
+            "artifact_placement_proposals", "artifact_placement_targets",
+            "artifact_apply_plans", "artifact_apply_operations",
+            "artifact_apply_dependencies", "artifact_target_links",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table], |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing table {table}");
+        }
+        let trigger_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND
+             (name LIKE 'trg_placement_%' OR name LIKE 'trg_apply_%' OR name LIKE 'trg_artifact_target_links_%')",
+            [], |row| row.get(0),
+        )?;
+        assert_eq!(trigger_count, 12);
+        Ok(())
+    }
+
+    #[test]
+    fn db24_m2_proposal_plan_and_link_reject_delete() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        connection.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        connection.execute_batch(
+            "INSERT INTO artifact_placement_proposals
+                (proposal_id,artifact_id,schema_version,confidence,reasons_json,warnings_json,
+                 unresolved_items_json,project_revision_hash,created_at)
+             VALUES ('proposal-a','artifact-a',1,1,'[]','[]','[]','revision','now');
+             INSERT INTO artifact_placement_targets
+                (target_row_id,proposal_id,target_index,target_type,target_id,novel_id,action,
+                 source_priority,confidence,reason,is_ready,created_at)
+             VALUES ('target-a','proposal-a',0,'chapter','chapter-a','novel-a','save',1,1,'user',1,'now');
+             INSERT INTO artifact_apply_plans
+                (plan_id,proposal_id,artifact_id,schema_version,expected_versions_json,
+                 expected_hashes_json,conflicts_json,operation_id,request_hash,status,created_at)
+             VALUES ('plan-a','proposal-a','artifact-a',1,'{}','{}','[]','operation-a','request-a','ready','now');
+             INSERT INTO artifact_apply_operations
+                (apply_operation_id,plan_id,operation_index,target_type,target_id,action,
+                 payload_json,payload_hash,created_at)
+             VALUES ('apply-operation-a','plan-a',0,'chapter','chapter-a','save','{}','payload','now');
+             INSERT INTO artifact_target_links
+                (link_id,artifact_id,plan_id,apply_operation_id,target_type,target_id,operation_id,created_at)
+             VALUES ('link-a','artifact-a','plan-a','apply-operation-a','chapter_draft','draft-a','operation-a','now');",
+        )?;
+        for (table, column, id) in [
+            ("artifact_placement_proposals", "proposal_id", "proposal-a"),
+            ("artifact_apply_plans", "plan_id", "plan-a"),
+            ("artifact_target_links", "link_id", "link-a"),
+        ] {
+            assert!(connection.execute(&format!("DELETE FROM {table} WHERE {column}=?1"), params![id]).is_err());
+        }
         Ok(())
     }
 }

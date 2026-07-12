@@ -73,7 +73,7 @@ pub fn insert_document_for_target(
     now: &str,
 ) -> Result<(), AppError> {
     let parts = chunks(content);
-    connection
+    let document_rows = connection
         .execute(
             "INSERT INTO large_text_documents
                 (id, target_type, target_id, field_name, title, total_chars, total_bytes,
@@ -93,9 +93,16 @@ pub fn insert_document_for_target(
             ],
         )
         .map_err(AppError::database)?;
+    if document_rows != 1 {
+        return Err(AppError::new(
+            codes::DATABASE_TRANSACTION_FAILED,
+            "大文本主记录未写入唯一目标",
+            false,
+        ));
+    }
 
     for (index, part) in parts.into_iter().enumerate() {
-        connection
+        let chunk_rows = connection
             .execute(
                 "INSERT INTO large_text_chunks
                     (document_id, chunk_index, content, char_count, byte_count, chunk_sha256, created_at)
@@ -111,6 +118,13 @@ pub fn insert_document_for_target(
                 ],
             )
             .map_err(AppError::database)?;
+        if chunk_rows != 1 {
+            return Err(AppError::new(
+                codes::DATABASE_TRANSACTION_FAILED,
+                "大文本分片未写入唯一目标",
+                false,
+            ));
+        }
     }
     Ok(())
 }

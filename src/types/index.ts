@@ -23,3 +23,4 @@ export * from './settingSuggestion';
 export * from './chapterEngineering';
 export * from './generationContext';
 export * from './generationJob';
+export * from './placement';
