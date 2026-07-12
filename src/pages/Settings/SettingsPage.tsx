@@ -47,7 +47,6 @@ function SettingsPage() {
       const result = await aiSettingsService.testConnection(settings);
       const latency = Date.now() - start;
       const updated = { ...settings, lastTestAt: new Date().toISOString(), lastTestOk: result.ok, lastTestMessage: result.message };
-      aiSettingsService.saveSettings(updated);
       setSettings(updated);
       setMessage(result.ok ? `✅ 连接成功！（${latency}ms）` : `❌ 连接失败：${result.message}`);
     } catch (e: any) { setMessage(`❌ 连接失败：${e.message || '未知错误'}`); }

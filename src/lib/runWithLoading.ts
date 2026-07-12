@@ -5,6 +5,7 @@
  * 无需在每个组件中引入 LoadingModal，降低耦合。
  */
 import type { LoadingTaskHelpers } from '../hooks/useLoadingTask';
+import { describeUnknownError } from '../utils/errorMessage';
 
 // ==================== 类型 ====================
 
@@ -219,7 +220,7 @@ export async function runWithLoading<T>(
     emit({ type: 'success', message: successMessage, autoCloseMs: successAutoCloseMs });
     return result;
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = describeUnknownError(error, '操作失败');
     const isAborted = error instanceof DOMException && error.name === 'AbortError';
     emit({
       type: 'error',
