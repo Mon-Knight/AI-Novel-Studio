@@ -102,6 +102,10 @@ export interface CoCreationFieldSuggestionV1 {
   sourceMessageId?: string;
   sourceTaskId?: string;
   sourceArtifactId?: string;
+  conflictsAcknowledged?: boolean;
+  confirmedReplacement?: boolean;
+  formalApplyPlanId?: string;
+  formalAppliedAt?: string;
 }
 
 export interface CoCreationQuestionV1 {

@@ -2192,3 +2192,61 @@ field_name  = body
 浏览器模式按 novel 使用独立 LocalStorage key，提供当前上下文内的作品级串行锁、相同 CAS/operation 语义、写后回读和损坏数据失败关闭。它只用于开发兼容，不提供 SQLite 的跨进程事务和外键保证，也不是桌面正式数据来源。
 
 完整协议、数据流、命令与验收门禁见 `docs/audit/phase-3/16-stage-3b-co-creation-acceptance.md`。
+# 29. v2.3.0-M5 AI 共创正式采用模型
+
+M5 不增加第二套 Canon 或应用表。作者在共创草案中确认的字段仍先保存在 `co_creation_draft_revisions`；正式写入必须继续经过既有 `result_artifacts → artifact_placement_proposals/targets → artifact_apply_plans/operations → artifact_target_links`。
+
+## 29.1 准备契约
+
+`PrepareCoCreationApplyInput` 固定携带：
+
+- `operationId`
+- `novelId / sessionId`
+- `draftRevisionId / expectedDraftContentHash`
+- 去重后的 `suggestionIds`
+- 可选 `parentPlanId`
+
+Rust 只接受 `decision=accepted_to_draft`、来源 Artifact 唯一且有效、candidate hash 可由 Artifact 权威重算、字段状态为 `user_confirmed` 的建议。覆盖已有值需要 `confirmedReplacement=true`；阻断冲突需要 `conflictsAcknowledged=true`。
+
+Artifact 中的原始建议必须先按 `CoCreationTurnOutputV1` 的白名单形状规范化：target、source reference、conflict 的字符串 trim，未知键不进入 hash，`baseDataRevision` 由轮次权威值覆盖。前端在候选中拒绝超出 JavaScript safe integer 的整数，避免 Rust/TypeScript 对同一 JSON 产生不同 candidate hash。
+
+准备成功后创建：
+
+1. 引用原 Artifact 的不可变 PlacementProposal；若 Artifact 已有人工审查 Proposal，新 Proposal 通过 `parentProposalId` 连接来源链。
+2. 一个 `co_creation_canon_apply_v1` ApplyPlan；每个正式对象对应一条 ApplyOperation。
+3. `co_creation_operations` 中的持久化准备回执，使同一 operationId/requestHash 在重启后返回同一 Proposal 和 Plan。
+
+## 29.2 Canon 目标与版本
+
+支持目标：
+
+- `creative_intent`：调用既有冻结服务，在同一事务内追加不可变创作意图 revision。
+- `world_setting`：创建或更新正式世界设定；共创字段保存在 `structured_json.coCreationFields`，同时生成可读 content，并保留原结构化页面内容。
+- `rule_system`：创建或更新正式规则体系，处理 category、forbiddenRules 和结构化共创字段。
+- `character`：创建或更新主角角色；同一事务同步 `novels.protagonists_json/main_character/protagonist_ability` 投影。
+
+既有对象的 `updated_at` 经稳定 SHA-256 token 映射为 ApplyPlan `expectedVersion`，业务字段的规范 JSON hash 写入 `expectedHash`。创作意图直接使用其 revision 与 contentHash。执行前和 SQLite Immediate transaction 内各复核一次；版本或 hash 任一变化即 stale。
+
+## 29.3 原子写入、来源与过期
+
+批量 Apply 的 Canon 写入、TargetLink 插入和 ApplyPlan 完成状态位于同一事务。任何目标 affected rows、唯一约束、payload hash、版本/hash 或 Link 写入失败，整批 Canon 写入回滚，Plan 再记录 failed/blocked 状态。
+
+TargetLink metadata 保留 session、draft revision、suggestionIds、原 Artifact、作者确认和动作类型。正式数据变化后，同作品当前及历史 `co_creation_turn` Artifact 都写入 append-only stale event；当前 Artifact 中尚未采用的建议也必须基于最新 Canon 重新生成或 rebase，不能继续直接采用。
+
+## 29.4 反向撤销
+
+`PrepareCoCreationUndoInput` 引用已完成的正向 Plan。系统先比较当前正式对象与原 TargetLink 的版本/hash，再创建：
+
+- `parentProposalId` 指向正向 Proposal 的反向 PlacementProposal；
+- `parentPlanId` 指向正向 Plan 的 `co_creation_canon_undo_v1` ApplyPlan；
+- create 的反向 delete、update 的反向 restore，以及创作意图的追加式语义撤销 revision。
+
+撤销也是显式、可审查、事务化和幂等的正式写入，不删除任何历史审计证据。
+
+世界/规则的 `structured_json` 记录 `coCreationBaseContent`、`coCreationFields` 和 `coCreationRenderedContentHash`。下一次采用发现当前 `content` 已不是上次共创渲染结果时，必须保留工作台正文并将其作为新 base。
+
+主角 ApplyOperation 的 before/after 除完整 character 快照外，还包含 `protagonist_mode + protagonists_json + main_character + protagonist_ability` 组成的完整 novel projection。该 projection 参与目标 hash 和撤销快照；profile 按精确 character ID 匹配，仅新建单主角允许回退 primary。
+
+## 29.5 Migration
+
+M5 无新增 migration。使用既有 012 PlacementProposal、013 ApplyPlan/TargetLink 和 020 共创会话/operation 表；001～020 checksum 保持不变。

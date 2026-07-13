@@ -159,6 +159,30 @@ describe('co-creation context builder', () => {
     expect(context.knownFields['ruleSystem.boundary']?.value).toContain('死亡不可逆');
   });
 
+  it('keeps a semantic undo tombstone out of the active AI context', async () => {
+    vi.mocked(creativeIntentService.getLatest).mockResolvedValue({
+      taskId: 'undo-intent-task', idempotentReplay: false,
+      intent: {
+        schemaVersion: 1, intentId: 'undo-intent', novelId: 'novel-a', revision: 2,
+        status: 'frozen', createdAt: '2026-01-02', frozenAt: '2026-01-02', contentHash: 'undo-hash',
+        statements: [{
+          statementId: 'co-creation-undo-plan-a', kind: 'constraint',
+          knowledgeClass: 'requires_confirmation',
+          value: { reverted: true, forwardPlanId: 'plan-a' }, confidence: 1,
+          evidence: [{ evidenceId: 'evidence-undo', sourceType: 'project_document' }],
+          confirmation: { status: 'rejected', confirmedBy: 'author', confirmedAt: '2026-01-02' },
+          statementHash: 'undo-statement-hash',
+        }],
+      },
+    } as never);
+
+    const context = await buildCoCreationContext({ session, messages: [] });
+
+    expect(context.canonical.creativeIntent).toBeNull();
+    expect(context.sourceManifest.some((item) => item.sourceType === 'creative_intent')).toBe(false);
+    expect(context.knownFields['creativeIntent.primaryGoal']).toBeUndefined();
+  });
+
   it('rejects a forged chapter scope', async () => {
     await expect(buildCoCreationContext({
       session: { ...session, objectContext: { novelId: 'novel-a', chapterId: 'other-chapter' } },

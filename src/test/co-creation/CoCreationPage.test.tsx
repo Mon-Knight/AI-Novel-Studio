@@ -13,9 +13,11 @@ const controller = {
     messages: [],
     draftRevisions: [],
   },
-  loading: false, sending: false, error: '', notice: '', novelTitle: '记忆之城',
+  loading: false, sending: false, applying: false, error: '', notice: '', novelTitle: '记忆之城',
   refresh: vi.fn(), sendMessage: vi.fn(), acceptSuggestion: vi.fn(), acceptAllSuggestions: vi.fn(),
   rejectSuggestion: vi.fn(), editField: vi.fn(), changeStage: vi.fn(), clearError: vi.fn(),
+  applyPreparation: null, lastApplyResult: null, prepareFormalApply: vi.fn(),
+  confirmFormalApply: vi.fn(), prepareFormalUndo: vi.fn(), cancelFormalApply: vi.fn(),
 };
 
 vi.mock('../../features/co-creation/useCoCreationController', () => ({

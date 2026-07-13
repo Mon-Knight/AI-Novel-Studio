@@ -306,6 +306,8 @@ fn main() {
             commands::apply::rebuild_placement_proposal,
             commands::apply::create_apply_plan,
             commands::apply::create_initialization_apply_plan,
+            commands::apply::prepare_co_creation_apply,
+            commands::apply::prepare_co_creation_undo,
             commands::apply::get_apply_plan,
             commands::apply::execute_apply_plan,
             commands::apply::get_artifact_target_links,

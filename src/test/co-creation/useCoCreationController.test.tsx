@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   getNovel: vi.fn(),
   buildContext: vi.fn(),
   computeDataHash: vi.fn(),
+  prepareApply: vi.fn(),
+  executeApply: vi.fn(),
+  prepareUndo: vi.fn(),
 }));
 
 vi.mock('../../services/co-creation/coCreationSessionService', () => ({
@@ -48,6 +51,14 @@ vi.mock('../../services/database/novelRepository', () => ({
 vi.mock('../../features/co-creation/contextBuilder', () => ({
   buildCoCreationContext: mocks.buildContext,
   computeCoCreationDataHash: mocks.computeDataHash,
+}));
+
+vi.mock('../../services/co-creation/coCreationApplyService', () => ({
+  coCreationApplyService: {
+    prepare: mocks.prepareApply,
+    execute: mocks.executeApply,
+    prepareUndo: mocks.prepareUndo,
+  },
 }));
 
 import { useCoCreationController } from '../../features/co-creation/useCoCreationController';
@@ -492,5 +503,91 @@ describe('AI co-creation controller recovery and stale safety', () => {
 
     expect(result.current.error).toContain('建议基于旧的数据版本');
     expect(mocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('blocks a formal ApplyPlan that mixes accepted suggestions from different Artifacts', async () => {
+    const acceptedSuggestion = (id: string, artifactId: string, fieldPath: string) => ({
+      suggestionId: id,
+      target: { objectType: 'world_setting' as const, fieldPath },
+      originalValue: null,
+      suggestedValue: id,
+      fieldState: 'ai_suggested' as const,
+      sourceType: 'ai_inference' as const,
+      sourceReferences: [],
+      confidence: 0.9,
+      conflicts: [],
+      baseDataRevision: 7,
+      baseContextHash: 'frozen-hash',
+      decision: 'accepted_to_draft' as const,
+      candidateHash: `hash-${id}`,
+      sourceMessageId: `message-${artifactId}`,
+      sourceTaskId: `task-${artifactId}`,
+      sourceArtifactId: artifactId,
+    });
+    const activeDraft = draft({
+      payload: {
+        currentStage: 'world_background',
+        fields: {
+          'worldSetting.era': { value: '蒸汽纪元', state: 'user_confirmed' },
+          'worldSetting.society': { value: '浮空城邦', state: 'user_confirmed' },
+        },
+        suggestions: [
+          acceptedSuggestion('suggestion-a', 'artifact-a', 'worldSetting.era'),
+          acceptedSuggestion('suggestion-b', 'artifact-b', 'worldSetting.society'),
+        ],
+      },
+    });
+    mocks.open.mockResolvedValue(workspace({ drafts: [activeDraft] }));
+
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.prepareFormalApply(['suggestion-a', 'suggestion-b']);
+    });
+
+    expect(result.current.error).toContain('同一轮 AI Artifact');
+    expect(mocks.prepareApply).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the full formal context before preparing an ApplyPlan', async () => {
+    const accepted = {
+      suggestionId: 'suggestion-a',
+      target: { objectType: 'world_setting' as const, fieldPath: 'worldSetting.era' },
+      originalValue: null,
+      suggestedValue: '蒸汽纪元',
+      fieldState: 'ai_suggested' as const,
+      sourceType: 'ai_inference' as const,
+      sourceReferences: [],
+      confidence: 0.9,
+      conflicts: [],
+      baseDataRevision: 7,
+      baseContextHash: 'frozen-hash',
+      decision: 'accepted_to_draft' as const,
+      candidateHash: 'candidate-hash',
+      sourceMessageId: 'message-a',
+      sourceTaskId: 'task-a',
+      sourceArtifactId: 'artifact-a',
+    };
+    mocks.open.mockResolvedValue(workspace({
+      drafts: [draft({
+        payload: {
+          currentStage: 'world_background',
+          fields: { 'worldSetting.era': { value: '蒸汽纪元', state: 'user_confirmed' } },
+          suggestions: [accepted],
+        },
+      })],
+    }));
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    mocks.buildContext.mockResolvedValue({ canonicalDataHash: 'changed-formal-hash', canonical: {} });
+    mocks.prepareApply.mockClear();
+
+    await act(async () => {
+      await result.current.prepareFormalApply(['suggestion-a']);
+    });
+
+    expect(result.current.error).toContain('正式作品数据已在建议生成后变化');
+    expect(mocks.prepareApply).not.toHaveBeenCalled();
   });
 });

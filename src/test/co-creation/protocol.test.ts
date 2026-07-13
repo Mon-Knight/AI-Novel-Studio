@@ -110,4 +110,21 @@ describe('co-creation turn protocol', () => {
       naturalLanguageReply: 'Authorization: Bearer abcdefghijklmnop',
     })), 3)).rejects.toThrow('凭据');
   });
+
+  it('rejects unsafe integers before computing a cross-language candidate hash', async () => {
+    const changed = payload({
+      changeSuggestions: [{
+        target: { objectType: 'world_setting', fieldPath: 'worldSetting.era' },
+        originalValue: null,
+        suggestedValue: { year: 9_007_199_254_740_992 },
+        fieldState: 'ai_suggested',
+        sourceType: 'ai_inference',
+        sourceReferences: [],
+        confidence: 0.5,
+        conflicts: [],
+      }],
+    });
+    await expect(parseCoCreationTurnOutput(JSON.stringify(changed), 3))
+      .rejects.toThrow('无法跨语言精确表示');
+  });
 });

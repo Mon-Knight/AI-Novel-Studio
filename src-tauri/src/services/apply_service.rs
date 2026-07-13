@@ -7,7 +7,9 @@ use crate::errors::{codes, AppError};
 use crate::repositories::{
     apply_plan_repository, artifact_target_link_repository, large_text_repository,
 };
-use crate::services::{draft_service, initialization_apply_service, placement_service};
+use crate::services::{
+    co_creation_apply_service, draft_service, initialization_apply_service, placement_service,
+};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
@@ -568,29 +570,60 @@ pub fn execute_plan(
             false,
         ));
     }
-    let validation = placement_service::validate_proposal(connection, &existing.proposal_id)?;
-    if validation.stale {
-        let stale_reason = validation
-            .reason
-            .unwrap_or_else(|| "Proposal 已过期".to_string());
-        let affected = connection
-            .execute(
-                "UPDATE artifact_apply_plans SET status = 'blocked', error_json = ?1
-             WHERE plan_id = ?2 AND status = 'ready'",
-                params![
-                    json!({ "code": codes::APPLY_PLAN_STALE, "reason": stale_reason }).to_string(),
-                    input.plan_id
-                ],
-            )
-            .map_err(AppError::database)?;
-        if affected != 1 {
-            return Err(AppError::new(
-                codes::APPLY_PLAN_ILLEGAL_TRANSITION,
-                "过期 ApplyPlan 状态已变化",
-                false,
-            ));
+    if co_creation_apply_service::is_co_creation_plan(&existing) {
+        if let Err(error) = co_creation_apply_service::validate_plan(connection, &existing) {
+            if error.retryable {
+                return Err(error);
+            }
+            let is_stale = error.code == codes::APPLY_PLAN_STALE;
+            let status = if is_stale { "blocked" } else { "failed" };
+            let affected = connection
+                .execute(
+                    "UPDATE artifact_apply_plans SET status = ?1, error_json = ?2
+                     WHERE plan_id = ?3 AND status = 'ready'",
+                    params![
+                        status,
+                        serde_json::to_string(&error).unwrap_or_else(|_| "{}".to_string()),
+                        input.plan_id
+                    ],
+                )
+                .map_err(AppError::database)?;
+            if affected != 1 {
+                return Err(AppError::new(
+                    codes::APPLY_PLAN_ILLEGAL_TRANSITION,
+                    "共创 ApplyPlan 过期状态已变化",
+                    false,
+                ));
+            }
+            return Err(error);
         }
-        return Err(AppError::new(codes::APPLY_PLAN_STALE, stale_reason, false));
+    }
+    if !co_creation_apply_service::is_co_creation_plan(&existing) {
+        let validation = placement_service::validate_proposal(connection, &existing.proposal_id)?;
+        if validation.stale {
+            let stale_reason = validation
+                .reason
+                .unwrap_or_else(|| "Proposal 已过期".to_string());
+            let affected = connection
+                .execute(
+                    "UPDATE artifact_apply_plans SET status = 'blocked', error_json = ?1
+             WHERE plan_id = ?2 AND status = 'ready'",
+                    params![
+                        json!({ "code": codes::APPLY_PLAN_STALE, "reason": stale_reason })
+                            .to_string(),
+                        input.plan_id
+                    ],
+                )
+                .map_err(AppError::database)?;
+            if affected != 1 {
+                return Err(AppError::new(
+                    codes::APPLY_PLAN_ILLEGAL_TRANSITION,
+                    "过期 ApplyPlan 状态已变化",
+                    false,
+                ));
+            }
+            return Err(AppError::new(codes::APPLY_PLAN_STALE, stale_reason, false));
+        }
     }
 
     let transaction = connection
@@ -605,6 +638,10 @@ pub fn execute_plan(
                 "事务内 requestHash 校验失败",
                 false,
             ));
+        }
+        if co_creation_apply_service::is_co_creation_plan(&plan) {
+            co_creation_apply_service::validate_plan(&transaction, &plan)?;
+            return co_creation_apply_service::execute_in_transaction(&transaction, plan);
         }
         if placement_service::validate_proposal(&transaction, &plan.proposal_id)?.stale {
             return Err(AppError::new(
@@ -811,11 +848,17 @@ pub fn execute_plan(
         }
         Err(error) => {
             drop(transaction);
+            let failure_status = if error.code == codes::APPLY_PLAN_STALE {
+                "blocked"
+            } else {
+                "failed"
+            };
             let failure_rows = connection
                 .execute(
-                    "UPDATE artifact_apply_plans SET status = 'failed', error_json = ?1
-                 WHERE plan_id = ?2 AND status = 'ready'",
+                    "UPDATE artifact_apply_plans SET status = ?1, error_json = ?2
+                 WHERE plan_id = ?3 AND status = 'ready'",
                     params![
+                        failure_status,
                         serde_json::to_string(&error).unwrap_or_else(|_| "{}".to_string()),
                         input.plan_id
                     ],

@@ -45,5 +45,20 @@ describe('co-creation working draft safety', () => {
       value: '流亡的边城医师', state: 'user_confirmed',
     });
     expect(result.suggestions[0].decision).toBe('accepted_to_draft');
+    expect(result.suggestions[0].confirmedReplacement).toBe(true);
+  });
+
+  it('persists explicit blocking-impact acknowledgement for the formal ApplyPlan gate', () => {
+    const conflicted = {
+      ...suggestion,
+      conflicts: [{
+        code: 'IDENTITY_IMPACT', severity: 'blocking' as const, message: '会影响角色身份', sourceReferences: [],
+      }],
+    };
+    const result = acceptSuggestionToDraft({ fields: {}, suggestions: [conflicted] }, suggestion.suggestionId, {
+      expectedDataRevision: 2,
+      acknowledgeConflicts: true,
+    });
+    expect(result.suggestions[0].conflictsAcknowledged).toBe(true);
   });
 });

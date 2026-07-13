@@ -1,5 +1,18 @@
 # AI Novel Studio - CHANGELOG
 
+### v2.3.0-M5：AI 共创正式采用、冲突保护与反向撤销
+
+- AI 共创右栏新增“准备正式写入 → 审查影响 → 确认执行 ApplyPlan”交互；只有已经逐项采用到草案的建议才能进入正式管线，覆盖作者字段和阻断冲突仍需分别明确确认。
+- 新增 `co_creation_canon_apply_v1` 契约与两条 Tauri 准备命令；正式建议继续引用原 `ResultArtifact`，创建不可变子 `PlacementProposal` 和现有 `ApplyPlan/ApplyOperation/ArtifactTargetLink`，没有引入第二套生成或应用系统。
+- 支持创作意图、世界背景、规则体系和主角的创建或更新；主角写入在同一事务内同步角色库与作品主角投影，结构化页面和下一轮共创上下文读取同一份正式数据。
+- 准备与执行阶段均复核 Artifact、候选 hash、作者确认状态、草案 revision/hash、目标版本和内容 hash；过期建议或并发修改会阻断，批量写入任一目标失败时整体回滚。
+- ApplyPlan 执行保持 operationId/requestHash 幂等；完成后记录逐目标来源链，并将同作品全部既有共创 Artifact（含本次来源的剩余建议）标记过期，后续采用必须重新生成或 rebase。正式采用状态写回不可变共创草案 revision，重启后仍可定位已写入批次。
+- 新增 `co_creation_canon_undo_v1` 反向 Proposal/ApplyPlan；撤销前再次校验当前 TargetLink 版本/hash，创建项删除、更新项恢复、创作意图追加语义撤销 revision，历史 Proposal、Plan 和 Link 全部保留。
+- 补齐二次采用安全：结构化工作台修改过的世界/规则正文不会被旧共创 base 覆盖；主角快照包含全部作品投影列并按精确 ID 同步；更新已有角色不再改写手工来源。
+- Artifact 建议在 Rust 侧按与 TypeScript 相同的 trim/白名单形状重算 candidate hash，并拒绝跨语言无法精确表示的整数；正式准备前再次比对完整 `baseContextHash`。
+- 本里程碑不新增数据库 migration，复用 012/013/020 既有表；浏览器开发模式继续允许讨论和草案审查，跨 Canon 原子事务仅以 Tauri/SQLite 桌面端为权威实现。
+- M5 验收通过：共创专项 Vitest 60/60、全量 Vitest 253/253、Rust 共创 Apply 15/15、Rust 全量 194/194；TypeScript、ESLint、cargo fmt/check、生产构建与 Tauri MSI/NSIS 构建全部通过。保留基线已有 1 条 ESLint warning、10 条 Rust warning 与 Vite 动静态导入提示，未新增 warning。
+
 ### v2.3.0-M4：AI 共创工作区、结构化协议与可恢复会话
 
 - 新增作品级 AI 共创工作区 `/novels/:novelId/co-creation`，采用左侧十阶段导航、中部对话、右侧工作草案与待确认建议的桌面三栏布局；可从作品详情进入，也可从写作工作台携带当前章节上下文进入。

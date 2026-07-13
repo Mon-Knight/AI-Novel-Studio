@@ -130,6 +130,15 @@ function confirmedIntentStatements(
   )) ?? [];
 }
 
+function isCoCreationUndoTombstone(intent: CreativeIntentSnapshotV1): boolean {
+  return intent.statements.length === 1
+    && intent.statements[0].confirmation.status === 'rejected'
+    && intent.statements[0].value !== null
+    && typeof intent.statements[0].value === 'object'
+    && !Array.isArray(intent.statements[0].value)
+    && (intent.statements[0].value as Record<string, unknown>).reverted === true;
+}
+
 function statementValues(
   statements: readonly CreativeIntentStatementV1[],
   kind: CreativeIntentStatementV1['kind'],
@@ -298,6 +307,8 @@ export async function buildCoCreationContext(input: {
   const volumeId = session.objectContext.volumeId ?? selectedChapter?.volumeId;
   const selectedVolume = volumeId ? volumes.find((volume) => volume.id === volumeId) : undefined;
   if (volumeId && !selectedVolume) throw new Error('当前分卷不属于该作品，已阻止构建上下文');
+  const activeCreativeIntent = creativeIntent && !isCoCreationUndoTombstone(creativeIntent.intent)
+    ? creativeIntent : null;
 
   const canonical: CoCreationCanonicalContext = {
     novel: {
@@ -310,7 +321,7 @@ export async function buildCoCreationContext(input: {
       worldBackground: novel.worldBackground,
       updatedAt: novel.updatedAt,
     },
-    creativeIntent: creativeIntent?.intent ?? null,
+    creativeIntent: activeCreativeIntent?.intent ?? null,
     worldSettings,
     ruleSystems,
     protagonists: novel.protagonists,
@@ -329,11 +340,11 @@ export async function buildCoCreationContext(input: {
     { sourceType: 'novel', sourceId: novel.id, version: novel.updatedAt },
     ...worldSettings.map((item) => ({ sourceType: 'world_setting', sourceId: item.id, version: item.updatedAt })),
     ...ruleSystems.map((item) => ({ sourceType: 'rule_system', sourceId: item.id, version: item.updatedAt })),
-    ...(creativeIntent ? [{
+    ...(activeCreativeIntent ? [{
       sourceType: 'creative_intent',
-      sourceId: creativeIntent.intent.intentId,
-      version: creativeIntent.intent.revision,
-      contentHash: creativeIntent.intent.contentHash,
+      sourceId: activeCreativeIntent.intent.intentId,
+      version: activeCreativeIntent.intent.revision,
+      contentHash: activeCreativeIntent.intent.contentHash,
     }] : []),
     ...novel.protagonists
       .filter((item) => typeof item.id === 'string' && item.id)

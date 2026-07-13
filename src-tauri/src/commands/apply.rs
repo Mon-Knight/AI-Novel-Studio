@@ -3,12 +3,17 @@ use crate::domain::apply_plan::{
     ApplyExecutionResult, ApplyPlan, ArtifactTargetLink, CreateApplyPlanInput,
     CreateInitializationApplyPlanInput, ExecuteApplyPlanInput,
 };
+use crate::domain::co_creation_apply::{
+    CoCreationApplyPreparationV1, PrepareCoCreationApplyInput, PrepareCoCreationUndoInput,
+};
 use crate::domain::placement::{
     CreatePlacementProposalInput, PlacementProposal, PlacementTargetOverride, ProposalValidation,
 };
 use crate::errors::AppError;
 use crate::repositories::artifact_target_link_repository;
-use crate::services::{apply_service, initialization_apply_service, placement_service};
+use crate::services::{
+    apply_service, co_creation_apply_service, initialization_apply_service, placement_service,
+};
 
 #[tauri::command]
 pub fn create_placement_proposal(
@@ -63,6 +68,26 @@ pub fn create_initialization_apply_plan(
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
     initialization_apply_service::create_plan(&mut connection, input)
+}
+
+#[tauri::command]
+pub fn prepare_co_creation_apply(
+    input: PrepareCoCreationApplyInput,
+) -> Result<CoCreationApplyPreparationV1, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    co_creation_apply_service::prepare_apply(&mut connection, input)
+}
+
+#[tauri::command]
+pub fn prepare_co_creation_undo(
+    input: PrepareCoCreationUndoInput,
+) -> Result<CoCreationApplyPreparationV1, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    co_creation_apply_service::prepare_undo(&mut connection, input)
 }
 
 #[tauri::command]

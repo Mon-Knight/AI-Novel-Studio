@@ -75,6 +75,23 @@ function containsCredential(value: unknown): boolean {
   ));
 }
 
+function assertSafeJsonNumbers(value: unknown, label: string): void {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      protocolError(`${label} 包含无法跨语言精确表示的数字`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertSafeJsonNumbers(item, `${label}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  Object.entries(value as Record<string, unknown>).forEach(([key, child]) => (
+    assertSafeJsonNumbers(child, `${label}.${key}`)
+  ));
+}
+
 function parseJson(textValue: string): unknown {
   const trimmed = textValue.trim();
   const unfenced = trimmed.startsWith('```')
@@ -160,17 +177,25 @@ async function suggestion(
       ),
     };
   });
+  const originalValue = input.originalValue ?? null;
+  const suggestedValue = input.suggestedValue ?? null;
+  assertSafeJsonNumbers(originalValue, `changeSuggestions[${index}].originalValue`);
+  assertSafeJsonNumbers(suggestedValue, `changeSuggestions[${index}].suggestedValue`);
+  if (input.baseTargetVersion !== undefined
+      && (typeof input.baseTargetVersion !== 'number' || !Number.isSafeInteger(input.baseTargetVersion))) {
+    protocolError(`changeSuggestions[${index}].baseTargetVersion 必须是安全整数`);
+  }
   const body = {
     target: target(input.target, `changeSuggestions[${index}].target`),
-    originalValue: input.originalValue ?? null,
-    suggestedValue: input.suggestedValue ?? null,
+    originalValue,
+    suggestedValue,
     fieldState,
     sourceType,
     sourceReferences: refs,
     confidence: confidence(input.confidence, `changeSuggestions[${index}].confidence`),
     conflicts,
     baseDataRevision: dataRevision,
-    ...(typeof input.baseTargetVersion === 'number' && Number.isInteger(input.baseTargetVersion)
+    ...(typeof input.baseTargetVersion === 'number' && Number.isSafeInteger(input.baseTargetVersion)
       ? { baseTargetVersion: input.baseTargetVersion } : {}),
     ...(typeof input.baseTargetHash === 'string' && input.baseTargetHash.trim()
       ? { baseTargetHash: input.baseTargetHash.trim() } : {}),

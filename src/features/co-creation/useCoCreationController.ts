@@ -18,10 +18,23 @@ import { compressCoCreationMessages } from './sessionSummary';
 import { buildCoCreationContext, computeCoCreationDataHash } from './contextBuilder';
 import { parseCoCreationTurnOutput } from './protocol';
 import { novelRepository } from '../../services/database/novelRepository';
+import { coCreationApplyService } from '../../services/co-creation/coCreationApplyService';
+import type {
+  CoCreationApplyPreparationV1,
+  CoCreationApplyResultV1,
+} from '../../types/coCreationApply';
 
 const POLL_INTERVAL_MS = 700;
 const MAX_POLL_ATTEMPTS = 260;
 const MAX_FAILURE_MESSAGE_CHARS = 900;
+
+function hasCoCreationValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
+}
 
 interface PendingTurnMetadata {
   userMessageId: string;
@@ -311,6 +324,9 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [novelTitle, setNovelTitle] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [applyPreparation, setApplyPreparation] = useState<CoCreationApplyPreparationV1 | null>(null);
+  const [lastApplyResult, setLastApplyResult] = useState<CoCreationApplyResultV1 | null>(null);
   const snapshotRef = useRef<CoCreationWorkspaceSnapshot | null>(null);
   const generationRef = useRef(0);
   const sendLockRef = useRef(false);
@@ -586,6 +602,9 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
       if (!current) return;
       let state = deserializeWorkingDraft(current.activeDraft?.payload);
       const pendingSuggestions = state.suggestions.filter((item) => item.decision === 'pending');
+      if (pendingSuggestions.some((item) => hasCoCreationValue(item.originalValue))) {
+        throw new Error('批量采用不能覆盖已有正式字段，请逐项确认替换影响');
+      }
       const latestContext = await buildCoCreationContext(current);
       if (pendingSuggestions.some((item) => !item.baseContextHash
         || item.baseContextHash !== latestContext.canonicalDataHash)) {
@@ -657,10 +676,144 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
     }
   }, [replaceSnapshot]);
 
+  const stableApplyOperationId = useCallback((key: string, prefix: string) => {
+    return `${prefix}:${key}`;
+  }, []);
+
+  const prepareFormalApply = useCallback(async (suggestionIds: string[]) => {
+    const current = snapshotRef.current;
+    if (!current?.activeDraft || applying || suggestionIds.length === 0) return;
+    setApplying(true);
+    setError('');
+    setNotice('');
+    try {
+      const state = deserializeWorkingDraft(current.activeDraft.payload);
+      const uniqueIds = [...new Set(suggestionIds)].sort();
+      const selectedSuggestions = uniqueIds.map((id) => state.suggestions.find((item) => (
+        item.suggestionId === id && item.decision === 'accepted_to_draft'
+      )));
+      if (selectedSuggestions.some((item) => !item)) {
+        throw new Error('只能将已经采用到草案的建议写入正式数据');
+      }
+      const sourceKeys = new Set(selectedSuggestions.map((item) => {
+        if (!item?.sourceMessageId || !item.sourceTaskId || !item.sourceArtifactId) {
+          throw new Error('建议缺少可追溯的 Message/Task/Artifact 来源');
+        }
+        return `${item.sourceMessageId}:${item.sourceTaskId}:${item.sourceArtifactId}`;
+      }));
+      if (sourceKeys.size !== 1) {
+        throw new Error('一次正式采用只能处理同一轮 AI Artifact 的建议');
+      }
+      const latestContext = await buildCoCreationContext(current);
+      if (selectedSuggestions.some((item) => !item?.baseContextHash
+        || item.baseContextHash !== latestContext.canonicalDataHash)) {
+        throw new Error('正式作品数据已在建议生成后变化，必须重新生成或差异合并');
+      }
+      const key = `${current.activeDraft.draftRevisionId}:${uniqueIds.join(',')}`;
+      const preparation = await coCreationApplyService.prepare({
+        operationId: stableApplyOperationId(key, 'co-creation-formal-apply'),
+        novelId: current.session.novelId,
+        sessionId: current.session.sessionId,
+        draftRevisionId: current.activeDraft.draftRevisionId,
+        expectedDraftContentHash: current.activeDraft.contentHash,
+        suggestionIds: uniqueIds,
+      });
+      setApplyPreparation(preparation);
+      if (preparation.plan.status === 'completed') {
+        setNotice('这些共创建议已经写入正式作品数据。');
+      }
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '准备正式采用失败');
+    } finally {
+      setApplying(false);
+    }
+  }, [applying, stableApplyOperationId]);
+
+  const confirmFormalApply = useCallback(async () => {
+    if (!applyPreparation || applying) return;
+    setApplying(true);
+    setError('');
+    try {
+      const execution = await coCreationApplyService.execute(applyPreparation);
+      const contract = applyPreparation.plan.operations[0]?.payload.contract;
+      const isUndo = contract === 'co_creation_canon_undo_v1';
+      const suggestionIds = applyPreparation.plan.operations.flatMap((operation) => (
+        Array.isArray(operation.payload.suggestionIds)
+          ? operation.payload.suggestionIds.filter((value): value is string => typeof value === 'string')
+          : []
+      ));
+      const forwardPlanId = applyPreparation.plan.operations
+        .map((operation) => operation.payload.forwardPlanId)
+        .find((value): value is string => typeof value === 'string');
+      const current = snapshotRef.current;
+      if (current) {
+        try {
+          const state = deserializeWorkingDraft(current.activeDraft?.payload);
+          state.suggestions = state.suggestions.map((suggestion) => {
+            if (!isUndo && suggestionIds.includes(suggestion.suggestionId)) {
+              return {
+                ...suggestion,
+                formalApplyPlanId: execution.planId,
+                formalAppliedAt: new Date().toISOString(),
+              };
+            }
+            if (isUndo && forwardPlanId && suggestion.formalApplyPlanId === forwardPlanId) {
+              const { formalApplyPlanId: _planId, formalAppliedAt: _appliedAt, ...rest } = suggestion;
+              return rest;
+            }
+            return suggestion;
+          });
+          await saveState(state, `${isUndo ? 'formal-undo' : 'formal-applied'}:${execution.planId}`);
+        } catch {
+          setNotice('正式事务已完成，但共创草案的状态标记未能保存；重新打开页面可读取最新正式数据。');
+        }
+      }
+      setLastApplyResult(isUndo ? null : { preparation: applyPreparation, execution });
+      setApplyPreparation(null);
+      if (!isUndo) {
+        setNotice(execution.idempotentReplay
+          ? '正式采用已完成；本次返回原有幂等结果。'
+          : '已通过 ApplyPlan 原子写入正式作品数据。');
+      } else {
+        setNotice(execution.idempotentReplay
+          ? '撤销已完成；本次返回原有幂等结果。'
+          : '已通过反向 Proposal 与 ApplyPlan 撤销正式变更。');
+      }
+      await refresh();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '正式采用失败，作品数据未修改');
+    } finally {
+      setApplying(false);
+    }
+  }, [applyPreparation, applying, refresh, saveState]);
+
+  const prepareFormalUndo = useCallback(async (planId?: string) => {
+    const current = snapshotRef.current;
+    const completedPlanId = planId ?? lastApplyResult?.execution.planId;
+    if (!current || !completedPlanId || applying) return;
+    setApplying(true);
+    setError('');
+    try {
+      const key = `undo:${completedPlanId}`;
+      const preparation = await coCreationApplyService.prepareUndo({
+        operationId: stableApplyOperationId(key, 'co-creation-formal-undo'),
+        novelId: current.session.novelId,
+        completedPlanId,
+      });
+      setApplyPreparation(preparation);
+      setNotice('撤销也会通过新的 ApplyPlan 执行，请核对影响后再次确认。');
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '准备撤销失败');
+    } finally {
+      setApplying(false);
+    }
+  }, [applying, lastApplyResult, stableApplyOperationId]);
+
   return {
     snapshot,
     loading,
     sending,
+    applying,
     error,
     notice,
     novelTitle,
@@ -671,6 +824,12 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
     rejectSuggestion: rejectDraftSuggestion,
     editField,
     changeStage,
+    applyPreparation,
+    lastApplyResult,
+    prepareFormalApply,
+    confirmFormalApply,
+    prepareFormalUndo,
+    cancelFormalApply: () => setApplyPreparation(null),
     clearError: () => setError(''),
   };
 }

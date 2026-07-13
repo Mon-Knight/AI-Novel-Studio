@@ -118,7 +118,7 @@ fn canonical_json(value: &Value) -> String {
     }
 }
 
-fn canonical_hash(value: &Value) -> String {
+pub(crate) fn canonical_hash(value: &Value) -> String {
     large_text_repository::sha256(&canonical_json(value))
 }
 
@@ -152,7 +152,7 @@ fn text_contains_secret(value: &str) -> bool {
     false
 }
 
-fn contains_secret(value: &Value) -> bool {
+pub(crate) fn contains_secret(value: &Value) -> bool {
     match value {
         Value::Object(values) => values.iter().any(|(key, value)| {
             matches!(

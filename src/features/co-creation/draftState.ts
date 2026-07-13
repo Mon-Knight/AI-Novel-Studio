@@ -56,7 +56,12 @@ export function acceptSuggestionToDraft(
     },
   };
   const suggestions = previous.suggestions.map((item) => item.suggestionId === suggestionId
-    ? { ...item, decision: 'accepted_to_draft' as const }
+    ? {
+        ...item,
+        decision: 'accepted_to_draft' as const,
+        conflictsAcknowledged: options.acknowledgeConflicts === true,
+        confirmedReplacement: options.allowReplaceConfirmed === true,
+      }
     : item);
   return { fields, suggestions };
 }

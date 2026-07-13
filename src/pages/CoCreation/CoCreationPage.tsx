@@ -68,22 +68,28 @@ export default function CoCreationPage() {
         <CoCreationStageRail
           currentStage={snapshot.session.currentStage}
           progress={snapshot.session.stageProgress}
-          disabled={controller.sending}
+          disabled={controller.sending || controller.applying}
           onSelect={(stage) => void controller.changeStage(stage)}
         />
         <CoCreationChat
           messages={snapshot.messages}
           lastTurn={turn}
-          sending={controller.sending}
+          sending={controller.sending || controller.applying}
           onSend={controller.sendMessage}
         />
         <CoCreationDraftPanel
           payload={snapshot.activeDraft?.payload}
-          busy={controller.sending}
+          busy={controller.sending || controller.applying}
           onEditField={controller.editField}
           onAccept={controller.acceptSuggestion}
           onReject={controller.rejectSuggestion}
           onAcceptAll={controller.acceptAllSuggestions}
+          applyPreparation={controller.applyPreparation}
+          lastApplyResult={controller.lastApplyResult}
+          onPrepareApply={controller.prepareFormalApply}
+          onConfirmApply={controller.confirmFormalApply}
+          onCancelApply={controller.cancelFormalApply}
+          onPrepareUndo={controller.prepareFormalUndo}
         />
       </main>
     </div>

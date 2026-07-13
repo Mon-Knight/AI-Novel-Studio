@@ -142,6 +142,67 @@
 .co-creation-source-details p { margin: 8px 0 0; line-height: 1.5; }
 .co-creation-safety-ack { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; color: #7c2d12; font-size: 11px; line-height: 1.4; }
 .co-creation-safety-ack input { margin-top: 2px; }
+
+.co-creation-formal-apply {
+  border-top: 1px solid var(--color-border-light, #e5eaf0);
+  padding: 14px;
+}
+
+.co-creation-formal-choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--color-border-light, #e5eaf0);
+  border-radius: 6px;
+  background: var(--color-bg-primary, #fff);
+}
+
+.co-creation-formal-source {
+  display: grid;
+  gap: 6px;
+  color: #6b6258;
+  font-size: 12px;
+}
+
+.co-creation-formal-source select {
+  min-width: 0;
+  border: 1px solid #d8d0c5;
+  border-radius: 7px;
+  background: #fffdf9;
+  color: #3d372f;
+  padding: 7px 9px;
+}
+
+.co-creation-formal-choice span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.co-creation-formal-choice em {
+  color: var(--color-text-secondary, #4b5563);
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.co-creation-apply-review,
+.co-creation-apply-result {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d4b164;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.co-creation-apply-review ul { margin: 0; padding-left: 18px; }
+.co-creation-apply-review li { margin-bottom: 6px; }
+.co-creation-apply-review li span,
+.co-creation-apply-review li small { display: block; }
+.co-creation-apply-review footer { display: flex; justify-content: flex-end; gap: 8px; }
+.co-creation-impact-warning { margin: 0; color: #8a4b12; }
 .co-creation-suggestion footer { display: flex; justify-content: flex-end; gap: 6px; margin-top: 9px; }
 .co-creation-conflict { margin-top: 7px; padding: 6px 7px; border-radius: 5px; background: #fffbeb; color: #92400e; font-size: 10px; line-height: 1.5; }
 .co-creation-conflict.is-blocking { background: #fef2f2; color: #b91c1c; }

@@ -120,7 +120,7 @@ fn canonical_json(value: &Value) -> String {
     }
 }
 
-fn canonical_hash(value: &Value) -> String {
+pub(crate) fn canonical_hash(value: &Value) -> String {
     large_text_repository::sha256(&canonical_json(value))
 }
 
@@ -655,8 +655,8 @@ fn conflict(
     }))
 }
 
-pub fn freeze(
-    connection: &mut Connection,
+pub(crate) fn freeze_in_transaction(
+    transaction: &Transaction<'_>,
     mut input: FreezeCreativeIntentInput,
 ) -> Result<CreativeIntentRecordV1, AppError> {
     input.novel_id = input.novel_id.trim().to_string();
@@ -702,10 +702,6 @@ pub fn freeze(
         "creative-intent:{}:revision:{}",
         input.novel_id, target_revision
     );
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(AppError::database)?;
-
     if let Some(existing) = ai_task_repository::find_by_operation(&transaction, &operation_id)? {
         if existing.request_hash != request_hash {
             return Err(AppError::new(
@@ -715,7 +711,6 @@ pub fn freeze(
             ));
         }
         let replay = get_for_task(&transaction, &existing.task_id, &input.novel_id, true)?;
-        transaction.commit().map_err(AppError::database)?;
         return Ok(replay);
     }
 
@@ -862,6 +857,17 @@ pub fn freeze(
         intent,
         idempotent_replay: false,
     };
+    Ok(record)
+}
+
+pub fn freeze(
+    connection: &mut Connection,
+    input: FreezeCreativeIntentInput,
+) -> Result<CreativeIntentRecordV1, AppError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(AppError::database)?;
+    let record = freeze_in_transaction(&transaction, input)?;
     transaction.commit().map_err(AppError::database)?;
     Ok(record)
 }
