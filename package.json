@@ -34,6 +34,7 @@
     "test:ai-workflow": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite ai-workflow",
     "test:stage3-prerequisites": "vitest run src/test/stage3-prerequisites/contracts.test.ts",
     "test:creative-intent": "vitest run src/test/creative-intent src/test/stage3-prerequisites/contracts.test.ts",
+    "test:co-creation": "vitest run src/test/co-creation",
     "test:import-export": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite import-export",
     "test:novel-detail": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite novel-detail",
     "test:startup": "vitest run src/test/startup",

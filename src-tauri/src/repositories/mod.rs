@@ -3,6 +3,7 @@ pub mod ai_task_view_repository;
 pub mod apply_plan_repository;
 pub mod artifact_repository;
 pub mod artifact_target_link_repository;
+pub mod co_creation_repository;
 pub mod draft_repository;
 pub mod large_text_repository;
 pub mod placement_repository;

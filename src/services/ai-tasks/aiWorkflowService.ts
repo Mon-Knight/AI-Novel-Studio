@@ -12,7 +12,8 @@ export interface BackgroundWorkflowStep {
   stepKey: string;
   taskType: 'workflow_freeze_chapter' | 'quality_check' | 'quality_fix' | 'quality_recheck'
     | 'workflow_quality_review_bundle' | 'chapter_polish' | 'chapter_summary' | 'volume_summary'
-    | 'outline_generate' | 'volume_outline_generate' | 'chapter_outline_generate';
+    | 'outline_generate' | 'volume_outline_generate' | 'chapter_outline_generate'
+    | 'co_creation_turn';
   agentRole: string;
   artifactType: 'chapter_text' | 'quality_report' | 'chapter_summary' | 'volume_summary'
     | 'generic_json' | 'outline_text' | 'volume_outline' | 'chapter_outlines';
@@ -23,6 +24,7 @@ export interface BackgroundWorkflowStep {
 }
 
 export interface CreateBackgroundWorkflowInput {
+  operationId?: string;
   workflowName: string;
   taskType: BackgroundWorkflowStep['taskType'] | 'quality_revision';
   novelId: string;
@@ -46,7 +48,7 @@ export const aiWorkflowService = {
     return dbCall<WorkflowCreated>('create_background_ai_workflow', {
       input: {
         ...input,
-        operationId: `background:${input.taskType}:${crypto.randomUUID()}`,
+        operationId: input.operationId ?? `background:${input.taskType}:${crypto.randomUUID()}`,
         providerOptionsJson: {
           provider: settings.provider,
           model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,

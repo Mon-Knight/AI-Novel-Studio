@@ -19,6 +19,7 @@ const ImportExportPage = lazy(() => import('./pages/ImportExport/ImportExportPag
 const OutlineEditorPage = lazy(() => import('./pages/OutlineEditor/OutlineEditorPage'));
 const SettingSuggestionsPage = lazy(() => import('./pages/SettingSuggestions/SettingSuggestionsPage'));
 const CreativeIntentPage = lazy(() => import('./pages/CreativeIntent/CreativeIntentPage'));
+const CoCreationPage = lazy(() => import('./pages/CoCreation/CoCreationPage'));
 
 function RouteLoadingState() {
   return (
@@ -49,6 +50,7 @@ function App() {
             <Route path="/novels/:novelId/outline" element={<OutlineEditorPage />} />
             <Route path="/novels/:novelId/setting-suggestions" element={<SettingSuggestionsPage />} />
             <Route path="/novels/:novelId/creative-intent" element={<CreativeIntentPage />} />
+            <Route path="/novels/:novelId/co-creation" element={<CoCreationPage />} />
             <Route path="/worlds/:worldId/lore/suggestions" element={<SettingSuggestionsPage />} />
             <Route path="/coming-soon" element={<ComingSoonPage />} />
             <Route path="*" element={<NotFoundPage />} />

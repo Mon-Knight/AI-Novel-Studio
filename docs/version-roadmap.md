@@ -4,7 +4,7 @@
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
 > 当前正式版本：v2.2.0（工作区可靠性与基础设施收口）
-> 当前内部里程碑：v2.3.0-M3（创作意图作者审校与冻结闭环）
+> 当前内部里程碑：v2.3.0-M4（AI 共创工作区、结构化协议与可恢复会话）
 
 ---
 
@@ -138,6 +138,7 @@ v2.1.0  单章质量闭环稳定版
 v2.1.1  正文变更安全门
 v2.2.0  工作区可靠性与基础设施收口（当前）
 v2.3.0-M3 创作意图作者审校与冻结闭环（内部里程碑；正式版本仍为 2.2.0）
+v2.3.0-M4 AI 共创工作区、结构化协议与可恢复会话（内部里程碑；正式版本仍为 2.2.0）
 ```
 
 ---
@@ -224,6 +225,7 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 | v2.1.1 | 已完成 | 正文变更安全门 | 固定目标与基础版本、隔离迟到响应、冲突拒绝、原子采用、会话级幂等应用 |
 | v2.2.0 | **当前** | **工作区可靠性与基础设施收口** | 迁移账本、结构化错误、长正文原子保存与完整性读取、恢复快照、全局 Leave Guard、React/SQLite 故障测试 |
 | v2.3.0-M3 | 内部里程碑 | 创作意图作者审校与冻结闭环 | 作者逐项审校、不可变 revision、Rust CAS/事务、三类 Snapshot；正式版本仍为 2.2.0 |
+| v2.3.0-M4 | **当前内部里程碑** | **AI 共创工作区、结构化协议与可恢复会话** | 十阶段桌面共创工作区、V1 输出协议、Task→Artifact→审查 Proposal、migration 020 与 SQLite/浏览器恢复；正式版本仍为 2.2.0 |
 
 ### v2.1.1 单一版本目标
 
@@ -267,6 +269,24 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 3. `expectedRevision + expectedContentHash` CAS、确定性 operation 和单一 Immediate transaction 保证并发安全、幂等与失败无残留。
 4. 桌面端只复用现有 Task、Attempt 和三类 Snapshot；浏览器开发模式提供带作品级锁和严格版本链校验的 LocalStorage 恢复。
 5. 本里程碑不新增 migration/schema，不调用 Provider/Worker，不创建 Artifact/Proposal/ApplyPlan/TargetLink，不写 Canon，也不扩展到初始化候选、导演或 Story State。
+
+### v2.3.0-M4 AI 共创工作区、结构化协议与可恢复会话
+
+1. 作品详情和章节写作工作台提供 AI 共创入口，以左阶段、中对话、右草案的三栏桌面布局承载十个固定创作阶段。
+2. 上下文编译顺序固定为正式作品数据、待确认草案、会话摘要和最近消息；作品、分卷和章节范围不一致时失败关闭。
+3. 每轮通过 `co_creation_turn_v1` 输入契约提交到现有后台 Task/DAG，结果保存为 schema 1 的 `generic_json` Artifact，并生成只用于人工审查的 PlacementProposal。
+4. `CoCreationTurnOutputV1` 固定自然语言回复、意图、字段来源、建议、冲突、下一问题、阶段完成度和数据 revision；AI 建议不能覆盖作者已确认字段，也不能直接写 Canon。
+5. migration `020_co_creation_workspace` 保存会话、消息、阶段草案 revision 和幂等 operation；消息大文本、session CAS、stage CAS、来源链和凭据排除均由 Rust/SQLite 权威校验。
+6. 桌面重启后从 SQLite 恢复；浏览器开发模式提供 LocalStorage 兼容回退。正式应用版本、Provider 配置和既有 001～019 migration checksum 保持不变。
+
+### v2.3.0-M5 / M6 后续边界
+
+M4 只完成“讨论、生成可审查建议、保存共创草案和恢复会话”。以下能力必须由 M5/M6 的独立任务书、测试和 commit/tag 交付，不能回写成 M4 已完成：
+
+- 将作者确认的共创建议转换为正式、可验证的 PlacementProposal/ApplyPlan/TargetLink，并在明确目标与 CAS 下写入 Canon；
+- 把 `chapter_generation` 阶段安全交接给现有正文生成与候选审查闭环；
+- 将导演预算、权限、用量与跨阶段决策接入真实运行门禁，补齐失败恢复、冲突合并和跨窗口并发闭环；
+- 更高自主度的跨阶段编排、Story State、Multi-Agent 和自动推进；任何 Canon 变更仍必须保留作者确认，禁止静默自动 Apply。
 
 ---
 

@@ -439,6 +439,7 @@ fn validate_background_kind(task_type: &str, artifact_type: &str) -> Result<(), 
         "outline_generate",
         "volume_outline_generate",
         "chapter_outline_generate",
+        "co_creation_turn",
     ];
     const ARTIFACT_TYPES: &[&str] = &[
         "chapter_text",

@@ -7,6 +7,7 @@ pub mod ai_tasks;
 pub mod ai_worker;
 pub mod apply;
 pub mod artifacts;
+pub mod co_creation;
 pub mod creative_intent;
 pub mod drafts;
 pub mod imports;

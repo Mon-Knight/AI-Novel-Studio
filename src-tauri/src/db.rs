@@ -1538,13 +1538,13 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })?;
-        assert_eq!(migration_count, 18);
+        assert_eq!(migration_count, 19);
         let last_migration: String = conn.query_row(
             "SELECT migration_id FROM schema_migrations ORDER BY migration_id DESC LIMIT 1",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(last_migration, "019_ai_task_archival");
+        assert_eq!(last_migration, "020_co_creation_workspace");
         Ok(())
     }
 

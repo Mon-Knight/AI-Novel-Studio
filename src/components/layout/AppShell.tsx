@@ -11,7 +11,7 @@ interface AppShellProps {
 
 function AppShell({ children }: AppShellProps) {
   const location = useLocation();
-  const isWritingWorkspace = /^\/novels\/[^/]+\/workspace\/?$/.test(location.pathname);
+  const isWritingWorkspace = /^\/novels\/[^/]+\/(workspace|co-creation)\/?$/.test(location.pathname);
 
   return (
     <div className={`app-shell${isWritingWorkspace ? ' workspace-shell' : ''}`}>

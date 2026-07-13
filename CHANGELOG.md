@@ -1,5 +1,17 @@
 # AI Novel Studio - CHANGELOG
 
+### v2.3.0-M4：AI 共创工作区、结构化协议与可恢复会话
+
+- 新增作品级 AI 共创工作区 `/novels/:novelId/co-creation`，采用左侧十阶段导航、中部对话、右侧工作草案与待确认建议的桌面三栏布局；可从作品详情进入，也可从写作工作台携带当前章节上下文进入。
+- 固定 `story_seed` 到 `chapter_generation` 的十阶段最低完备字段与推进规则；正式作品数据优先于待确认草案、会话摘要和最近消息，AI 补全只能标记为建议、推断、临时假设或冲突，不能伪装成作者确认。
+- 新增 `CoCreationTurnOutputV1` 与独立 Markdown Prompt，要求 Provider 返回包含自然语言回复、意图、提取信息、来源引用、待确认项、下一高价值问题、快捷回答、变更建议、阶段完成度和 `dataRevision` 的结构化 JSON；非法字段路径、旧 revision、凭据文本和不匹配来源均失败关闭。
+- 共创轮次复用既有后台 `AiTask/DAG → generic_json ResultArtifact → artifact_review PlacementProposal` 管线；完整结构化响应由 Artifact 权威保存，界面只展示自然语言回复并将建议写入可审校草案。M4 不创建 ApplyPlan、TargetLink 或 Canon 写入，也不自动采用任何 AI 建议。
+- 新增前向 migration `020_co_creation_workspace`，建立 session、message、阶段草案 revision 和 operation 四张表；消息正文复用 `large_text_documents/chunks`，会话使用 revision/stateHash CAS，阶段草案增加独立 revision/contentHash CAS，operationId/requestHash 提供持久幂等。
+- 新增 Rust repository/service/command 闭环，支持打开或恢复会话、读取工作区、追加用户消息、绑定后台 Task、完成/失败/取消 turn 以及保存不可变阶段草案；Task、Artifact、Message 和 Draft 的作品范围及来源关系在事务内复检，凭据、跨作品来源、失效 Artifact 和损坏大文本均失败关闭。
+- 补齐 submitted、running 以及 assistant 已落库但草案尚未投影三类中断恢复；冻结 turnContext 允许重启后继续轮询，terminal operation 不受并行合法草案编辑的旧 CAS 阻塞，非法协议与 stale Artifact 会安全结束本轮而非永久卡住。
+- 浏览器开发模式提供按作品隔离的 LocalStorage 回退、作品级串行锁、写后回读与损坏数据失败关闭；桌面 SQLite 仍是正式权威来源。
+- 新增共创页面、阶段机、上下文优先级、结构化协议、草案采用、摘要窗口、浏览器恢复及 Rust 持久化/迁移测试；补齐 Task 创建/绑定/完成各崩溃窗口、非法协议、stale 跨 revision、正式数据变化阻断和失败消息脱敏回归。M4 专项前端 50/50、全量 Vitest 243/243、Rust 179/179、生产构建与 Tauri 安装包构建通过。正式应用版本继续保持 2.2.0；正式 Canon 采纳、章节生成交接和 Multi-Agent 留待 M5/M6。
+
 ### v2.3.0-M3：创作意图作者审校与冻结闭环
 
 - 作品详情新增创作意图入口与独立桌面编辑页，支持新增、编辑、删除、确认和拒绝陈述；知识分类保持只读，修改已确认或已拒绝内容会自动回到 pending。

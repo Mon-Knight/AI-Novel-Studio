@@ -15,6 +15,9 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/novels/') && pathname.endsWith('/creative-intent')) {
     return '创作意图';
   }
+  if (pathname.startsWith('/novels/') && pathname.endsWith('/co-creation')) {
+    return 'AI 共创工作区';
+  }
   if (
     (pathname.startsWith('/novels/') && pathname.endsWith('/setting-suggestions')) ||
     (pathname.startsWith('/worlds/') && pathname.endsWith('/lore/suggestions'))

@@ -1149,6 +1149,17 @@ function WritingWorkspacePage() {
             </div>
           )}
           <div className="workspace-topbar-actions">
+            {novelId && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => navigate(
+                  `/novels/${encodeURIComponent(novelId)}/co-creation${activeChapterId ? `?chapterId=${encodeURIComponent(activeChapterId)}` : ''}`,
+                )}
+              >
+                与 AI 讨论当前章节
+              </button>
+            )}
             {candidateReviewOpen && (
               <button type="button" className="btn btn-primary btn-sm" onClick={() => setCandidateReviewOpen(false)}>
                 返回当前正文

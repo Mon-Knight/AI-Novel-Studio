@@ -174,6 +174,9 @@ function NovelDetailPage() {
             <button className="btn btn-secondary" onClick={() => navigate(`/novels/${novel.id}/creative-intent`)}>
               创作意图
             </button>
+            <button className="btn btn-secondary" onClick={() => navigate(`/novels/${novel.id}/co-creation`)}>
+              ✦ AI 共创
+            </button>
           </div>
         </div>
       </div>

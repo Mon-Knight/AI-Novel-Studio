@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "2.3.0-M2";
+const MIGRATION_VERSION: &str = "2.3.0-M4";
 const LEGACY_SNAPSHOT_CHECKSUMS: [(&str, &str); 4] = [
     (
         "007_ai_input_snapshots",
@@ -41,7 +41,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 18] {
+fn migrations() -> [Migration; 19] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -132,6 +132,11 @@ fn migrations() -> [Migration; 18] {
             id: "019_ai_task_archival",
             definition: "ai_task_archival_v1(tasks.archived_at,index,audit_preserved)",
             apply: apply_ai_task_archival,
+        },
+        Migration {
+            id: "020_co_creation_workspace",
+            definition: "co_creation_workspace_v1(sessions.novel,ai_co_creation,status_archive_shape,revision,state_hash,timestamps,one_active;messages.session,one_pending_turn,turn,sequence,role,status,body_hash,reply,task,artifact,error,timestamps,operation;draft_revisions.session,stage,revision,parent,schema,payload,hash,origin,sources,operation,immutable;operations.session,type,request,result,immutable;scope_triggers,indexes)",
+            apply: apply_co_creation_workspace,
         },
     ]
 }
@@ -583,6 +588,263 @@ fn apply_ai_task_archival(transaction: &Transaction<'_>) -> Result<(), AppError>
         .execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_ai_tasks_visible_created
                 ON ai_tasks(archived_at, created_at DESC);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_co_creation_workspace(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS co_creation_sessions (
+                session_id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                workspace_type TEXT NOT NULL CHECK (workspace_type = 'ai_co_creation'),
+                status TEXT NOT NULL CHECK (status IN ('active','archived')),
+                revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+                state_hash TEXT NOT NULL CHECK (length(state_hash) = 64),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                CHECK ((status='active' AND archived_at IS NULL)
+                    OR (status='archived' AND archived_at IS NOT NULL)),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_co_creation_one_active_novel
+                ON co_creation_sessions(novel_id, workspace_type) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_co_creation_sessions_recent
+                ON co_creation_sessions(novel_id, status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS co_creation_messages (
+                message_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                sequence_no INTEGER NOT NULL CHECK (sequence_no >= 1),
+                role TEXT NOT NULL CHECK (role IN ('user','assistant')),
+                status TEXT NOT NULL CHECK (status IN (
+                    'submitted','running','completed','failed','cancelled'
+                )),
+                body_ref_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+                content_length INTEGER NOT NULL CHECK (content_length >= 0),
+                reply_to_message_id TEXT,
+                task_id TEXT,
+                artifact_id TEXT,
+                error_json TEXT,
+                append_operation_id TEXT NOT NULL UNIQUE,
+                append_request_hash TEXT NOT NULL CHECK (length(append_request_hash) = 64),
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY (session_id) REFERENCES co_creation_sessions(session_id) ON DELETE RESTRICT,
+                FOREIGN KEY (body_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT,
+                FOREIGN KEY (reply_to_message_id) REFERENCES co_creation_messages(message_id) ON DELETE RESTRICT,
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT,
+                FOREIGN KEY (artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                UNIQUE(session_id, sequence_no)
+            );
+            CREATE INDEX IF NOT EXISTS idx_co_creation_messages_session_sequence
+                ON co_creation_messages(session_id, sequence_no);
+            CREATE INDEX IF NOT EXISTS idx_co_creation_messages_turn
+                ON co_creation_messages(session_id, turn_id, role);
+            CREATE INDEX IF NOT EXISTS idx_co_creation_messages_task
+                ON co_creation_messages(task_id, artifact_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_co_creation_one_pending_turn
+                ON co_creation_messages(session_id)
+                WHERE role='user' AND status IN ('submitted','running');
+
+            CREATE TABLE IF NOT EXISTS co_creation_draft_revisions (
+                draft_revision_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                stage_key TEXT NOT NULL,
+                revision_no INTEGER NOT NULL CHECK (revision_no >= 1),
+                parent_revision_id TEXT,
+                schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+                payload_json TEXT NOT NULL,
+                content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+                origin TEXT NOT NULL CHECK (origin IN (
+                    'author_edit','assistant_proposal_accepted','assistant_turn'
+                )),
+                source_message_id TEXT,
+                source_task_id TEXT,
+                source_artifact_id TEXT,
+                operation_id TEXT NOT NULL UNIQUE,
+                request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES co_creation_sessions(session_id) ON DELETE RESTRICT,
+                FOREIGN KEY (parent_revision_id) REFERENCES co_creation_draft_revisions(draft_revision_id) ON DELETE RESTRICT,
+                FOREIGN KEY (source_message_id) REFERENCES co_creation_messages(message_id) ON DELETE RESTRICT,
+                FOREIGN KEY (source_task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT,
+                FOREIGN KEY (source_artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                UNIQUE(session_id, stage_key, revision_no)
+            );
+            CREATE INDEX IF NOT EXISTS idx_co_creation_drafts_stage_revision
+                ON co_creation_draft_revisions(session_id, stage_key, revision_no DESC);
+            CREATE INDEX IF NOT EXISTS idx_co_creation_drafts_sources
+                ON co_creation_draft_revisions(source_task_id, source_artifact_id);
+
+            CREATE TABLE IF NOT EXISTS co_creation_operations (
+                operation_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                operation_type TEXT NOT NULL,
+                request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+                result_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES co_creation_sessions(session_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_co_creation_operations_session
+                ON co_creation_operations(session_id, created_at);
+
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_sessions_delete_guard
+                BEFORE DELETE ON co_creation_sessions
+                BEGIN SELECT RAISE(ABORT, 'co-creation session is audit evidence'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_session_revision_cas
+                BEFORE UPDATE OF revision,state_hash ON co_creation_sessions
+                WHEN NEW.revision <> OLD.revision + 1 OR NEW.state_hash = OLD.state_hash
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation session revision'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_content_immutable
+                BEFORE UPDATE OF session_id,turn_id,sequence_no,role,body_ref_id,content_hash,
+                    content_length,reply_to_message_id,append_operation_id,append_request_hash,created_at
+                ON co_creation_messages
+                BEGIN SELECT RAISE(ABORT, 'co-creation message content is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_messages_delete_guard
+                BEFORE DELETE ON co_creation_messages
+                BEGIN SELECT RAISE(ABORT, 'co-creation message is audit evidence'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_drafts_immutable_update
+                BEFORE UPDATE ON co_creation_draft_revisions
+                BEGIN SELECT RAISE(ABORT, 'co-creation draft revision is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_drafts_immutable_delete
+                BEFORE DELETE ON co_creation_draft_revisions
+                BEGIN SELECT RAISE(ABORT, 'co-creation draft revision is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_operations_immutable_update
+                BEFORE UPDATE ON co_creation_operations
+                BEGIN SELECT RAISE(ABORT, 'co-creation operation is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_operations_immutable_delete
+                BEFORE DELETE ON co_creation_operations
+                BEGIN SELECT RAISE(ABORT, 'co-creation operation is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_body_integrity
+                BEFORE INSERT ON co_creation_messages
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM large_text_documents d
+                    WHERE d.id=NEW.body_ref_id
+                      AND d.target_type='co_creation_message'
+                      AND d.target_id=NEW.message_id
+                      AND d.field_name='body'
+                      AND d.status='ready'
+                      AND d.content_sha256=NEW.content_hash
+                      AND d.total_chars=NEW.content_length
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation message body'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_role_shape
+                BEFORE INSERT ON co_creation_messages
+                WHEN (NEW.role='user' AND (
+                        NEW.turn_id<>NEW.message_id OR NEW.status<>'submitted'
+                        OR NEW.reply_to_message_id IS NOT NULL OR NEW.task_id IS NOT NULL
+                        OR NEW.artifact_id IS NOT NULL OR NEW.error_json IS NOT NULL
+                        OR NEW.completed_at IS NOT NULL
+                    ))
+                  OR (NEW.role='assistant' AND (
+                        NEW.status<>'completed' OR NEW.reply_to_message_id IS NULL
+                        OR NEW.task_id IS NULL OR NEW.artifact_id IS NULL
+                        OR NEW.error_json IS NOT NULL OR NEW.completed_at IS NULL
+                        OR NOT EXISTS (
+                            SELECT 1 FROM co_creation_messages parent
+                            WHERE parent.message_id=NEW.reply_to_message_id
+                              AND parent.session_id=NEW.session_id
+                              AND parent.turn_id=NEW.turn_id
+                              AND parent.role='user'
+                              AND parent.sequence_no<NEW.sequence_no
+                        )
+                    ))
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation message role shape'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_status_transition
+                BEFORE UPDATE OF status,task_id,artifact_id,error_json,completed_at
+                ON co_creation_messages
+                WHEN OLD.role<>'user'
+                  OR NEW.artifact_id IS NOT OLD.artifact_id
+                  OR (OLD.status='submitted' AND NOT (
+                        NEW.status='running' AND OLD.task_id IS NULL AND NEW.task_id IS NOT NULL
+                        AND NEW.error_json IS NULL AND NEW.completed_at IS NULL
+                    ))
+                  OR (OLD.status='running' AND NOT (
+                        NEW.status IN ('completed','failed','cancelled')
+                        AND NEW.task_id=OLD.task_id AND NEW.completed_at IS NOT NULL
+                        AND ((NEW.status='completed' AND NEW.error_json IS NULL)
+                          OR (NEW.status IN ('failed','cancelled') AND NEW.error_json IS NOT NULL))
+                    ))
+                  OR OLD.status IN ('completed','failed','cancelled')
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation turn transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_task_scope_insert
+                BEFORE INSERT ON co_creation_messages
+                WHEN NEW.task_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM ai_tasks task
+                    JOIN co_creation_sessions session ON session.session_id=NEW.session_id
+                    WHERE task.task_id=NEW.task_id AND task.novel_id=session.novel_id
+                )
+                BEGIN SELECT RAISE(ABORT, 'cross novel co-creation task'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_task_scope_update
+                BEFORE UPDATE OF task_id ON co_creation_messages
+                WHEN NEW.task_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM ai_tasks task
+                    JOIN co_creation_sessions session ON session.session_id=NEW.session_id
+                    WHERE task.task_id=NEW.task_id AND task.novel_id=session.novel_id
+                )
+                BEGIN SELECT RAISE(ABORT, 'cross novel co-creation task'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_message_artifact_scope_insert
+                BEFORE INSERT ON co_creation_messages
+                WHEN NEW.artifact_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM result_artifacts artifact
+                    JOIN co_creation_sessions session ON session.session_id=NEW.session_id
+                    WHERE artifact.artifact_id=NEW.artifact_id
+                      AND artifact.source_novel_id=session.novel_id
+                      AND artifact.task_id=NEW.task_id
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation artifact scope'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_draft_parent_chain
+                BEFORE INSERT ON co_creation_draft_revisions
+                WHEN (NEW.revision_no=1 AND NEW.parent_revision_id IS NOT NULL)
+                  OR (NEW.revision_no>1 AND NOT EXISTS (
+                    SELECT 1 FROM co_creation_draft_revisions parent
+                    WHERE parent.draft_revision_id=NEW.parent_revision_id
+                      AND parent.session_id=NEW.session_id
+                      AND parent.stage_key=NEW.stage_key
+                      AND parent.revision_no=NEW.revision_no-1
+                  ))
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation draft parent'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_draft_origin_shape
+                BEFORE INSERT ON co_creation_draft_revisions
+                WHEN (NEW.origin='author_edit' AND (
+                        NEW.source_message_id IS NOT NULL OR NEW.source_task_id IS NOT NULL
+                        OR NEW.source_artifact_id IS NOT NULL
+                    ))
+                  OR (NEW.origin IN ('assistant_proposal_accepted','assistant_turn') AND (
+                        NEW.source_message_id IS NULL OR NEW.source_task_id IS NULL
+                        OR NEW.source_artifact_id IS NULL
+                    ))
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation draft origin'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_co_creation_draft_source_scope
+                BEFORE INSERT ON co_creation_draft_revisions
+                WHEN (NEW.source_task_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM ai_tasks task
+                    JOIN co_creation_sessions session ON session.session_id=NEW.session_id
+                    WHERE task.task_id=NEW.source_task_id AND task.novel_id=session.novel_id
+                ))
+                  OR (NEW.source_artifact_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM result_artifacts artifact
+                    JOIN co_creation_sessions session ON session.session_id=NEW.session_id
+                    WHERE artifact.artifact_id=NEW.source_artifact_id
+                      AND artifact.source_novel_id=session.novel_id
+                      AND artifact.task_id=NEW.source_task_id
+                  ))
+                  OR (NEW.source_message_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM co_creation_messages message
+                    WHERE message.message_id=NEW.source_message_id
+                      AND message.session_id=NEW.session_id
+                      AND message.role='assistant'
+                      AND message.status='completed'
+                      AND message.task_id=NEW.source_task_id
+                      AND message.artifact_id=NEW.source_artifact_id
+                  ))
+                BEGIN SELECT RAISE(ABORT, 'invalid co-creation draft source scope'); END;",
         )
         .map_err(AppError::database)
 }
@@ -1477,7 +1739,7 @@ fn apply_artifact_target_links(transaction: &Transaction<'_>) -> Result<(), AppE
 mod tests {
     use super::*;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 18] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 19] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -1549,6 +1811,10 @@ mod tests {
         (
             "019_ai_task_archival",
             "427f9c26eb3f1df819f9397032b50a851e25f1415dbdc1cab551b2c3daa6ef85",
+        ),
+        (
+            "020_co_creation_workspace",
+            "6fa0f47a817b5e4bdcdd34ec77dd419b023eb5a8325d35556a7cb4de1d7eaf62",
         ),
     ];
 
@@ -1625,7 +1891,7 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let migrations = list_applied(&connection)?;
-        assert_eq!(migrations.len(), 18);
+        assert_eq!(migrations.len(), 19);
         for (applied, (expected_id, expected_checksum)) in
             migrations.iter().zip(EXPECTED_MIGRATION_CHECKSUMS)
         {
@@ -1887,7 +2153,7 @@ mod tests {
 
         run_migrations(&mut connection)?;
         let upgraded = list_applied(&connection)?;
-        assert_eq!(upgraded.len(), 18);
+        assert_eq!(upgraded.len(), 19);
         assert_eq!(&upgraded[..4], &original[..4]);
         let once = upgraded.clone();
         run_migrations(&mut connection)?;

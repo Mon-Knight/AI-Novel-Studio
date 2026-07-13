@@ -2096,3 +2096,99 @@ AI Novel Studio 的数据模型应服务于以下目标：
 首个多 Canon Apply 仅允许创建 `world_setting`、`rule_system` 和 `character`。所有目标 ID 在 Plan 固化前由 Rust 预分配；依赖必须无环；同一作品范围、Artifact 有效性、候选确认和 payload hash 必须在事务内复检。业务写入、TargetLink 与 Plan 完成结果在同一个 `BEGIN IMMEDIATE` 事务中提交，任一失败整体回滚。
 
 完整协议与阶段边界见 `docs/architecture/stage3-prerequisites.md`。
+
+---
+
+# 28. v2.3.0-M4 AI 共创会话模型
+
+M4 在既有 Canon、AiTask/DAG、ResultArtifact、PlacementProposal 和大文本设施之上增加作品级共创会话。共创会话不是第二套正式作品数据，也不是第二套任务系统：正式 Canon 只作为高优先级上下文读取，AI 结果先进入 Artifact 和待确认工作草案，不能直接写入世界设定、规则、角色、大纲、章节或正文。
+
+## 28.1 权威数据流
+
+```text
+正式 Canon / 冻结创作意图 / 当前章节
+  ↓ 只读编译，固定来源清单与 canonicalDataHash
+co_creation_turn AiTask + Input/Context/Constraint Snapshot
+  ↓ Worker / Provider
+generic_json ResultArtifact（完整 CoCreationTurnOutputV1）
+  ↓ reviewOutput
+artifact_review PlacementProposal（只记录等待人工审查）
+  ↓ 作者接受、编辑或拒绝
+co_creation_draft_revisions（待确认工作草案）
+```
+
+M4 不创建 ApplyPlan，不写 ArtifactTargetLink，也不把草案字段写入 Canon。正式采纳属于 M5/M6 后续边界。
+
+## 28.2 migration 020
+
+`020_co_creation_workspace` 是单个前向 migration。001～019 的 definition 和 checksum 不得改变；migration ledger 升级为 19 项，最新项为 020。
+
+| 表 | 作用 | 关键约束 |
+|---|---|---|
+| `co_creation_sessions` | 作品级活跃/归档会话 | V1 `workspace_type=ai_co_creation`；每作品与 workspace type 只允许一个 active；status/archivedAt 形状受约束；`revision + state_hash` 形成全局 CAS 链 |
+| `co_creation_messages` | user/assistant turn 与来源关系 | `(session_id, sequence_no)` 唯一；每会话最多一个 submitted/running user turn；正文独立保存到 `large_text_documents`；Task/Artifact/reply 必须同作品、同 turn |
+| `co_creation_draft_revisions` | 每阶段不可变工作草案 | `(session_id, stage_key, revision_no)` 唯一；父 revision 必须来自同 session、同 stage；AI 来源必须绑定完成的 Message/Task/Artifact |
+| `co_creation_operations` | mutation 幂等回执 | `operation_id` 全局唯一；相同 requestHash 重放首次结果，不同 payload 冲突拒绝 |
+
+所有业务外键使用 `ON DELETE RESTRICT`。session、message、draft revision 和 operation 作为恢复或审计证据不得原地删除；draft revision 与 operation 不允许 UPDATE。消息内容字段不可变，只有 user turn 状态可以按 `submitted → running → completed/failed/cancelled` 合法迁移。
+
+## 28.3 持久化 DTO V1
+
+Rust DTO 是桌面 wire contract，TypeScript 通过 `PersistedCoCreation*V1` 映射为 UI 派生模型：
+
+| DTO | 必要字段 |
+|---|---|
+| `CoCreationSessionV1` | `sessionId`、`novelId`、`workspaceType`、`status`、`revision`、`stateHash`、时间戳 |
+| `CoCreationMessageV1` | `messageId`、`turnId`、`sequenceNo`、`role/status`、正文/hash/长度、reply、Task/Artifact、冻结的 `turnContext`、错误与时间戳 |
+| `CoCreationDraftRevisionV1` | `stageKey`、`revisionNo`、父 revision、schema/payload/hash、origin、Message/Task/Artifact 来源 |
+| `CoCreationWorkspaceV1` | `schemaVersion=1`、session、按序 messages、全部 draft revisions |
+| `CoCreationMutationReceiptV1` | session、operation、operation type、结果 revision/stateHash、可选 message/draft identity、是否幂等重放 |
+
+标题、当前阶段、阶段进度、对象上下文、摘要、活跃草案和 pending turn 是由最新持久草案与消息投影出的 UI 状态，不伪装成 session 表中的独立权威列。绑定 Task 时，消息的 `turnContext` 冻结 `currentStage + canonicalDataHash + dataRevision`，用于完成轮次和恢复时复检本轮基线。
+
+## 28.4 CAS 与幂等
+
+所有共创 mutation 在 SQLite `BEGIN IMMEDIATE` 中执行。append、bind 与草案保存提交：
+
+```text
+expectedRevision + expectedStateHash
+operationId + requestHash
+→ 业务 mutation
+→ revision + 1
+→ 新 stateHash
+→ 不可变 operation receipt
+```
+
+保存阶段草案还必须提交该 `stageKey` 的 `expectedDraftRevision + expectedDraftContentHash`，防止客户端刷新了全局 session token 后仍以旧阶段草案覆盖另一窗口的新 revision。
+
+complete/fail 不复用可能过期的页面 CAS token：它们以冻结的 Session/Message/Task/Artifact 身份和确定性 operation 为基线，在事务内读取当前 session revision/stateHash 后追加 terminal 状态。这样，Task 运行期间发生的合法草案编辑不会使已完成、失败或取消的 turn 永久停留在 running；非法结构化输出和 stale Artifact 也必须落为可恢复的 failed turn。
+
+## 28.5 大文本与完整性
+
+每条共创消息拥有独立 `large_text_documents` 文档，target 固定为：
+
+```text
+target_type = co_creation_message
+target_id   = message_id
+field_name  = body
+```
+
+读取工作区时重新验证文档目标、分片顺序、字符长度和 SHA-256；任何缺片、错序、hash/长度不一致都使读取失败关闭。Artifact 的完整结构化 JSON 继续由 `result_artifacts` 权威保存，不复用为 message document。
+
+## 28.6 结构化结果与草案来源
+
+`CoCreationTurnOutputV1` 的 `schemaVersion` 固定为 1，并至少包含自然语言回复、意图、当前阶段、提取信息、待确认项、快捷回答、变更建议、阶段完成度和 `dataRevision`。字段建议携带 source references、confidence、冲突、base revision/hash 与 candidate hash。
+
+草案来源分三类：
+
+- `author_edit`：不得携带 AI 来源；
+- `assistant_turn`：保存一轮 Artifact 合并后的工作草案，必须绑定完成的 assistant Message、Task 和 Artifact；
+- `assistant_proposal_accepted`：作者接受或编辑 AI 建议后的草案，必须保留同一来源链。
+
+以上两类 AI 来源只证明草案的来源，不代表已经写入 Canon。
+
+## 28.7 浏览器开发兼容
+
+浏览器模式按 novel 使用独立 LocalStorage key，提供当前上下文内的作品级串行锁、相同 CAS/operation 语义、写后回读和损坏数据失败关闭。它只用于开发兼容，不提供 SQLite 的跨进程事务和外键保证，也不是桌面正式数据来源。
+
+完整协议、数据流、命令与验收门禁见 `docs/audit/phase-3/16-stage-3b-co-creation-acceptance.md`。

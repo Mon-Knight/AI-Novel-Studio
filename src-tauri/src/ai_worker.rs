@@ -54,6 +54,7 @@ struct ClaimedJob {
     draft_id: Option<String>,
     draft_version: Option<i64>,
     base_content_hash: Option<String>,
+    input_payload: Value,
     messages: Vec<AiChatMessage>,
     provider_options: Value,
     task_type: String,
@@ -275,6 +276,7 @@ fn claim_next(connection: &mut Connection, owner_id: &str) -> Result<Option<Clai
         draft_id,
         max_attempts,
         body_ref_id,
+        input_payload_raw,
         draft_version,
         base_hash,
         context_ref_id,
@@ -288,6 +290,7 @@ fn claim_next(connection: &mut Connection, owner_id: &str) -> Result<Option<Clai
         Option<String>,
         i64,
         Option<String>,
+        String,
         Option<i64>,
         Option<String>,
         Option<String>,
@@ -298,7 +301,7 @@ fn claim_next(connection: &mut Connection, owner_id: &str) -> Result<Option<Clai
     ) = transaction
         .query_row(
             "SELECT t.novel_id,t.chapter_id,t.draft_id,t.max_attempts,
-                i.body_ref_id,i.source_draft_version,i.base_content_hash,
+                i.body_ref_id,i.payload_json,i.source_draft_version,i.base_content_hash,
                 c.compiled_context_ref_id,k.provider_options_json,t.task_type,t.step_key,t.target_hint_json
          FROM ai_tasks t
          JOIN ai_input_snapshots i ON i.task_id=t.task_id
@@ -320,6 +323,7 @@ fn claim_next(connection: &mut Connection, owner_id: &str) -> Result<Option<Clai
                     row.get(9)?,
                     row.get(10)?,
                     row.get(11)?,
+                    row.get(12)?,
                 ))
             },
         )
@@ -348,6 +352,13 @@ fn claim_next(connection: &mut Connection, owner_id: &str) -> Result<Option<Clai
         AppError::new(
             codes::AI_CONTEXT_BUILD_FAILED,
             "后台任务 Provider 参数快照无效",
+            false,
+        )
+    })?;
+    let input_payload = serde_json::from_str(&input_payload_raw).map_err(|_| {
+        AppError::new(
+            codes::AI_CONTEXT_BUILD_FAILED,
+            "后台任务输入快照格式无效",
             false,
         )
     })?;
@@ -390,6 +401,7 @@ fn claim_next(connection: &mut Connection, owner_id: &str) -> Result<Option<Clai
         draft_id,
         draft_version,
         base_content_hash: base_hash,
+        input_payload,
         messages,
         provider_options,
         task_type,
@@ -664,6 +676,103 @@ async fn call_provider(
             return Err(classify_provider_error("AI 请求已取消".into()));
         }
         let text = match job.task_type.as_str() {
+            "co_creation_turn" => {
+                let stage = job
+                    .input_payload
+                    .get("currentStage")
+                    .and_then(Value::as_str)
+                    .unwrap_or("story_seed");
+                let data_revision = job
+                    .input_payload
+                    .get("dataRevision")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1);
+                let (question, fields): (&str, Vec<&str>) = match stage {
+                    "creative_intent" => (
+                        "你希望读者读完这部作品后最强烈地感受到什么？",
+                        vec![
+                            "creativeIntent.primaryGoal",
+                            "creativeIntent.genre",
+                            "creativeIntent.readerExperience",
+                        ],
+                    ),
+                    "world_background" => (
+                        "这个故事发生在怎样的时代与主要地点？",
+                        vec![
+                            "worldSetting.era",
+                            "worldSetting.primaryLocation",
+                            "worldSetting.socialStructure",
+                        ],
+                    ),
+                    "rule_system" => (
+                        "这个世界最核心的力量如何运作，又要付出什么代价？",
+                        vec![
+                            "ruleSystem.coreMechanism",
+                            "ruleSystem.cost",
+                            "ruleSystem.boundary",
+                        ],
+                    ),
+                    "protagonist" => (
+                        "主角现在最想实现什么，又有什么致命缺陷？",
+                        vec![
+                            "protagonist.identity",
+                            "protagonist.currentGoal",
+                            "protagonist.mainStrength",
+                            "protagonist.coreFlaw",
+                            "protagonist.mainlineRelation",
+                        ],
+                    ),
+                    "core_conflict" => (
+                        "冲突双方争夺什么，失败会付出什么代价？",
+                        vec![
+                            "coreConflict.parties",
+                            "coreConflict.objective",
+                            "coreConflict.stakes",
+                        ],
+                    ),
+                    "story_arc" => (
+                        "哪一件事会迫使主角真正踏上主线？",
+                        vec![
+                            "storyArc.incitingIncident",
+                            "storyArc.midpointTurn",
+                            "storyArc.climaxDirection",
+                        ],
+                    ),
+                    "outline" => ("要先生成完整大纲，还是只展开第一卷？", vec!["outline.primaryBeats"]),
+                    "chapter_plan" => (
+                        "下一章必须推进什么目标，并以什么结果结束？",
+                        vec!["chapterPlan.goal", "chapterPlan.conflict", "chapterPlan.outcome"],
+                    ),
+                    "chapter_generation" => (
+                        "是否把当前章节计划提交到现有正文生成与审查管线？",
+                        vec!["chapterGeneration.chapterId", "chapterGeneration.planReady"],
+                    ),
+                    _ => ("请用一句话描述你最想写的故事。", vec!["storySeed.premise"]),
+                };
+                json!({
+                    "schemaVersion": 1,
+                    "naturalLanguageReply": "这是浏览器/桌面 Mock 模式的共创回复。现有正式数据不会被自动修改。",
+                    "intent": "answer_current_question",
+                    "currentStage": stage,
+                    "extractedInformation": [],
+                    "pendingConfirmations": [],
+                    "nextHighValueQuestion": {
+                        "question": question,
+                        "reason": "这是当前阶段仍缺少的最高价值信息。",
+                        "targetFieldPaths": fields.first().map(|value| vec![*value]).unwrap_or_default()
+                    },
+                    "quickReplies": [],
+                    "changeSuggestions": [],
+                    "stageCompletion": {
+                        "stage": stage,
+                        "status": "not_started",
+                        "completedRequiredFields": [],
+                        "missingRequiredFields": fields,
+                        "percentage": 0
+                    },
+                    "dataRevision": data_revision
+                }).to_string()
+            }
             "workflow_generate_summary" => json!({
                 "summary": "本章关键事件摘要候选",
                 "keyEvents": [],
@@ -1707,6 +1816,120 @@ mod tests {
             )?,
             "draft-a"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn worker13b_co_creation_turn_produces_structured_review_artifact_without_canon_write(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let before_novel: (String, String, Option<String>) = connection.query_row(
+            "SELECT title,updated_at,deleted_at FROM novels WHERE id='novel-a'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let canon_tables = [
+            "chapters",
+            "chapter_drafts",
+            "artifact_apply_plans",
+            "artifact_target_links",
+        ];
+        let before_canon_counts = canon_tables
+            .iter()
+            .map(|table| {
+                connection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .map(|count| ((*table).to_string(), count))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let created = workflow_service::create_background_workflow(
+            &mut connection,
+            workflow_service::CreateBackgroundWorkflowInput {
+                operation_id: "co-creation-turn-test".into(),
+                workflow_name: "AI 共创".into(),
+                task_type: "co_creation_turn".into(),
+                novel_id: "novel-a".into(),
+                chapter_id: None,
+                draft_id: None,
+                scope_type: "novel".into(),
+                target_hint_json: Some(json!({
+                    "sessionId":"session-a",
+                    "userMessageId":"message-a",
+                    "canonicalDataHash":"canonical-a",
+                    "automaticApply":false
+                })),
+                input_payload_json: json!({
+                    "contract":"co_creation_turn_v1",
+                    "sessionId":"session-a",
+                    "userMessageId":"message-a",
+                    "currentStage":"story_seed",
+                    "dataRevision":3,
+                    "canonicalDataHash":"canonical-a"
+                }),
+                input_body: Some("一个以记忆为代价的故事".into()),
+                source_manifest_json: json!([{"type":"novel","id":"novel-a"}]),
+                source_draft_version: None,
+                base_content_hash: None,
+                provider_options_json: json!({"provider":"mock","model":"Mock"}),
+                steps: vec![workflow_service::BackgroundWorkflowStepInput {
+                    step_key: "conversation_turn".into(),
+                    task_type: "co_creation_turn".into(),
+                    agent_role: "conversation_orchestrator".into(),
+                    artifact_type: "generic_json".into(),
+                    messages: json!([{"role":"user","content":"respond as json"}]),
+                    dependencies: vec![],
+                    priority: None,
+                    review_output: true,
+                }],
+            },
+        )?;
+        let job = claim_next(&mut connection, "owner-co-creation")?.expect("co-creation claim");
+        assert_eq!(job.task_id, created.child_task_ids[0]);
+        let config = WorkerProviderConfig {
+            runtime_mode: "mock".into(),
+            provider_id: "mock".into(),
+            base_url: None,
+            api_key: None,
+            model_name: "Mock".into(),
+            timeout_seconds: Some(2),
+        };
+        let response =
+            tauri::async_runtime::block_on(call_provider(&config, &job, CancellationToken::new()))
+                .map_err(|failure| failure.error)?;
+        let payload: Value = serde_json::from_str(&response.text)?;
+        assert_eq!(
+            payload.get("schemaVersion").and_then(Value::as_i64),
+            Some(1)
+        );
+        assert_eq!(payload.get("dataRevision").and_then(Value::as_i64), Some(3));
+        assert_eq!(
+            persist_success(&mut connection, &job, &response)?,
+            "completed"
+        );
+        let structured: String = connection.query_row(
+            "SELECT structured_payload_json FROM result_artifacts WHERE task_id=?1",
+            params![job.task_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(serde_json::from_str::<Value>(&structured)?, payload);
+        let after_novel: (String, String, Option<String>) = connection.query_row(
+            "SELECT title,updated_at,deleted_at FROM novels WHERE id='novel-a'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(after_novel, before_novel);
+        for (table, before_count) in before_canon_counts {
+            let after_count: i64 =
+                connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(
+                after_count, before_count,
+                "co-creation turn unexpectedly wrote {table}"
+            );
+        }
         Ok(())
     }
 
