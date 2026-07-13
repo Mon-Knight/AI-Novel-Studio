@@ -370,3 +370,25 @@
     padding: var(--spacing-sm);
   }
 }
+.route-loading-state {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.route-loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: route-loading-spin .8s linear infinite;
+}
+
+@keyframes route-loading-spin {
+  to { transform: rotate(360deg); }
+}

@@ -19,6 +19,8 @@ const quickActions = [
 function HomePage() {
   const navigate = useNavigate();
   const [novels, setNovels] = useState<Novel[]>([]);
+  const [novelsLoading, setNovelsLoading] = useState(true);
+  const [novelsError, setNovelsError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newGenre, setNewGenre] = useState('');
@@ -29,16 +31,21 @@ function HomePage() {
   const [showJsonImport, setShowJsonImport] = useState(false);
 
   const loadNovels = useCallback(async () => {
+    setNovelsLoading(true);
+    setNovelsError('');
     try {
       const list = await novelRepository.getAll();
       setNovels(list);
     } catch (e) {
       console.error('Failed to load novels:', e);
+      setNovelsError('作品暂时无法读取，请重试。');
+    } finally {
+      setNovelsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadNovels();
+    void loadNovels();
   }, [loadNovels]);
 
   const handleCreateNovel = async () => {
@@ -131,10 +138,24 @@ function HomePage() {
       {/* 作品列表 */}
       <div className="home-section-header">
         <span className="home-section-title">我的作品</span>
-        <span className="home-section-count">共 {novels.length} 部</span>
+        <span className="home-section-count">{novelsLoading ? '正在读取…' : `共 ${novels.length} 部`}</span>
       </div>
 
-      {novels.length === 0 ? (
+      {novelsLoading ? (
+        <div className="home-novel-loading" role="status" aria-live="polite">
+          <div className="home-novel-skeleton" />
+          <div className="home-novel-skeleton" />
+          <span>正在读取本地作品…</span>
+        </div>
+      ) : novelsError ? (
+        <div className="home-novel-load-error" role="alert">
+          <strong>作品列表加载失败</strong>
+          <span>{novelsError}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadNovels()}>
+            重新读取
+          </button>
+        </div>
+      ) : novels.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>
           <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📖</div>
           <div style={{ fontSize: 16, marginBottom: 16 }}>还没有作品，点击上方「新建作品」开始</div>

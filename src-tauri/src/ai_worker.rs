@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 const WORKER_KIND: &str = "quality_check";
 const MAX_PARALLEL_JOBS: usize = 2;
+const WORKER_STARTUP_GRACE_MS: u64 = 8_000;
 const LEASE_SECONDS: i64 = 12;
 const HEARTBEAT_SECONDS: u64 = 2;
 
@@ -117,6 +118,10 @@ impl AiWorkerManager {
             let app = app.clone();
             let owner_id = format!("{}-{slot}", manager.owner_id);
             tauri::async_runtime::spawn(async move {
+                // Give the first read-only UI hydration queries priority over worker
+                // lease recovery on a cold launch. The worker remains process-local
+                // and begins recovery immediately after this short grace period.
+                tokio::time::sleep(Duration::from_millis(WORKER_STARTUP_GRACE_MS)).await;
                 loop {
                     if let Err(error) = manager.tick(&app, &owner_id).await {
                         eprintln!("[AI_WORKER] tick failed code={}", error.code);

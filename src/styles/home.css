@@ -349,3 +349,48 @@
 .novel-card-action:hover {
   background: var(--color-primary-light);
 }
+.home-novel-loading {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: var(--spacing-lg);
+  min-height: 190px;
+}
+
+.home-novel-loading > span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.home-novel-skeleton {
+  min-height: 190px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(100deg, #f4f6fa 20%, #fff 40%, #f4f6fa 60%);
+  background-size: 220% 100%;
+  animation: home-novel-skeleton 1.2s ease-in-out infinite;
+}
+
+.home-novel-load-error {
+  display: flex;
+  min-height: 190px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: var(--spacing-xl);
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-lg);
+  background: #fff7f7;
+  color: var(--color-text-secondary);
+}
+
+@keyframes home-novel-skeleton {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
