@@ -61,6 +61,10 @@ pub mod codes {
     pub const WORKSPACE_LEAVE_CANCELLED: &str = "WORKSPACE_LEAVE_CANCELLED";
     pub const WORKSPACE_SAVE_FAILED: &str = "WORKSPACE_SAVE_FAILED";
     pub const WINDOW_CLOSE_BLOCKED: &str = "WINDOW_CLOSE_BLOCKED";
+    pub const IMPORT_FILE_INVALID: &str = "IMPORT_FILE_INVALID";
+    pub const IMPORT_FILE_TOO_LARGE: &str = "IMPORT_FILE_TOO_LARGE";
+    pub const IMPORT_FILE_READ_FAILED: &str = "IMPORT_FILE_READ_FAILED";
+    pub const IMPORT_FILE_ENCODING_INVALID: &str = "IMPORT_FILE_ENCODING_INVALID";
 }
 
 /// Stable, serializable error contract used by the v2.2 workspace commands.

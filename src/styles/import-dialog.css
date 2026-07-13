@@ -1,3 +1,27 @@
+.import-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 1000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.import-dialog-modal {
+  width: min(90vw, 560px);
+  max-height: min(82vh, 720px);
+  padding: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-lg, 12px);
+  background: var(--color-bg-card, #fff);
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.22);
+}
+
+.import-dialog-modal-txt { width: min(90vw, 620px); }
+
 .import-dialog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 18px; font-weight: 700; }
 .import-dialog-header button { border: 0; background: none; color: var(--color-text-secondary); font-size: 22px; line-height: 1; cursor: pointer; }
 .import-dialog-header button:disabled { cursor: not-allowed; opacity: .45; }

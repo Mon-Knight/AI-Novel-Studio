@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(),
-  readTextFile: vi.fn(),
+  invoke: vi.fn(),
 }));
 
 vi.mock('../../services/tauri/runtime', () => ({
   isTauriRuntime: () => true,
+  tauriInvoke: mocks.invoke,
 }));
 vi.mock('@tauri-apps/api/dialog', () => ({ open: mocks.open }));
-vi.mock('@tauri-apps/api/fs', () => ({ readTextFile: mocks.readTextFile }));
 
 import {
   readSelectedImportFile,
@@ -20,14 +20,14 @@ import {
 describe('system import file picker', () => {
   beforeEach(() => {
     mocks.open.mockReset();
-    mocks.readTextFile.mockReset();
+    mocks.invoke.mockReset();
   });
 
   it('treats cancelling the system picker as a normal no-selection result', async () => {
     mocks.open.mockResolvedValue(null);
 
     await expect(selectImportFile('txt')).resolves.toBeNull();
-    expect(mocks.readTextFile).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
   it('limits the system picker to the requested existing format', async () => {
@@ -52,7 +52,7 @@ describe('system import file picker', () => {
   });
 
   it('reads a selected desktop file only in the explicit parsing phase', async () => {
-    mocks.readTextFile.mockResolvedValue('第一章\n正文');
+    mocks.invoke.mockResolvedValue('第一章\n正文');
     const selected = {
       kind: 'txt' as const,
       name: 'novel.txt',
@@ -61,6 +61,9 @@ describe('system import file picker', () => {
     };
 
     await expect(readSelectedImportFile(selected)).resolves.toBe('第一章\n正文');
-    expect(mocks.readTextFile).toHaveBeenCalledWith(selected.path);
+    expect(mocks.invoke).toHaveBeenCalledWith('read_import_text_file', {
+      path: selected.path,
+      kind: selected.kind,
+    });
   });
 });

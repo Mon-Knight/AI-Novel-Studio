@@ -38,6 +38,10 @@ export const APP_ERROR_CODES = [
   'WORKSPACE_LEAVE_CANCELLED',
   'WORKSPACE_SAVE_FAILED',
   'WINDOW_CLOSE_BLOCKED',
+  'IMPORT_FILE_INVALID',
+  'IMPORT_FILE_TOO_LARGE',
+  'IMPORT_FILE_READ_FAILED',
+  'IMPORT_FILE_ENCODING_INVALID',
 ] as const;
 
 export type AppErrorCode = typeof APP_ERROR_CODES[number] | 'UNKNOWN_ERROR';
@@ -166,6 +170,10 @@ const USER_MESSAGES: Partial<Record<AppErrorCode, string>> = {
   WORKSPACE_LEAVE_CANCELLED: '已取消离开工作区。',
   WORKSPACE_SAVE_FAILED: '正文保存失败，已留在当前工作区。',
   WINDOW_CLOSE_BLOCKED: '窗口关闭已取消。',
+  IMPORT_FILE_INVALID: '所选文件格式无效。',
+  IMPORT_FILE_TOO_LARGE: '导入文件过大。',
+  IMPORT_FILE_READ_FAILED: '无法读取所选文件。',
+  IMPORT_FILE_ENCODING_INVALID: '文件不是有效的 UTF-8 文本。',
 };
 
 export function getAppErrorUserMessage(error: AppError): string {

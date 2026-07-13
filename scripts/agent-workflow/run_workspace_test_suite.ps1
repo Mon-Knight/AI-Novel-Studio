@@ -242,7 +242,10 @@ $suiteConfig = @{
         TestPath = 'src/test/import-export'
         CargoTests = @(
             'commands::imports::tests::import01_failed_import_cleanup_removes_all_new_rows_and_keeps_existing_project',
-            'commands::imports::tests::import02_cleanup_error_rolls_back_every_delete'
+            'commands::imports::tests::import02_cleanup_error_rolls_back_every_delete',
+            'commands::imports::tests::import03_reads_supported_utf8_file_outside_tauri_fs_scope',
+            'commands::imports::tests::import04_rejects_wrong_extension_and_non_utf8_content',
+            'commands::imports::tests::import05_rejects_file_larger_than_the_bounded_reader_limit'
         )
     }
     'novel-detail' = @{

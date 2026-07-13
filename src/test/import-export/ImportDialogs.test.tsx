@@ -63,6 +63,15 @@ describe('system file import dialogs', () => {
     mocks.executeJson.mockReset();
   });
 
+  it('keeps each dialog inside its fixed overlay so controls remain visible', () => {
+    const txtView = renderTxt();
+    expect(screen.getByRole('dialog', { name: '导入 TXT' }).closest('.import-dialog-overlay')).not.toBeNull();
+    txtView.unmount();
+
+    renderJson();
+    expect(screen.getByRole('dialog', { name: '导入 JSON' }).closest('.import-dialog-overlay')).not.toBeNull();
+  });
+
   it('does not report an error when the user cancels system file selection', async () => {
     mocks.select.mockResolvedValue(null);
     renderTxt();
@@ -135,6 +144,23 @@ describe('system file import dialogs', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('JSON 解析失败');
     expect(screen.getByText('解析失败')).toBeTruthy();
     expect(mocks.executeJson).not.toHaveBeenCalled();
+  });
+
+  it('shows the message from a structured Rust file-read error', async () => {
+    mocks.select.mockResolvedValue(txtFile);
+    mocks.readText.mockRejectedValue({
+      code: 'IMPORT_FILE_ENCODING_INVALID',
+      message: '文件不是有效的 UTF-8 文本，请转换编码后重试',
+      retryable: false,
+    });
+    renderTxt();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文件' }));
+    fireEvent.click(await screen.findByRole('button', { name: '解析并预览' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('文件不是有效的 UTF-8 文本');
+    expect(screen.getByText('解析失败')).toBeTruthy();
+    expect(mocks.importTxt).not.toHaveBeenCalled();
   });
 
   it('imports JSON only after preview confirmation and reports success', async () => {

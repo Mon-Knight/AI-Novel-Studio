@@ -1,4 +1,4 @@
-import { isTauriRuntime } from '../tauri/runtime';
+import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 
 export type ImportFileKind = 'txt' | 'json';
 
@@ -94,8 +94,10 @@ export async function readSelectedImportFile(file: SelectedImportFile): Promise<
     if (!file.browserFile) throw new Error('所选文件已失效，请重新选择');
     return file.browserFile.text();
   }
-  const { readTextFile } = await import('@tauri-apps/api/fs');
-  return readTextFile(file.path);
+  return tauriInvoke<string>('read_import_text_file', {
+    path: file.path,
+    kind: file.kind,
+  });
 }
 
 export const systemFilePickerService = {

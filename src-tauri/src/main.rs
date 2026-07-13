@@ -263,6 +263,7 @@ fn main() {
             commands::drafts::save_chapter_draft_atomic,
             commands::drafts::read_chapter_draft_content,
             commands::drafts::adopt_chapter_draft_safe,
+            commands::imports::read_import_text_file,
             commands::imports::rollback_imported_novel,
             commands::ai_tasks::create_ai_task,
             commands::ai_tasks::get_ai_task,

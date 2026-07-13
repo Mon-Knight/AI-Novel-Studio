@@ -13,16 +13,13 @@ import {
   systemFilePickerService,
   type SelectedImportFile,
 } from '../../services/import/systemFilePickerService';
+import { describeUnknownError } from '../../utils/errorMessage';
 import { formatNumber } from '../../utils/format';
 import ImportFileStatusCard, { type ImportParseStatus } from './ImportFileStatusCard';
 import '../../styles/import-dialog.css';
 
 interface ImportTxtDialogProps {
   onClose: () => void;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
@@ -60,7 +57,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
       setSelectedFile(file);
       setParseStatus('selected');
     } catch (selectionError) {
-      setError(errorMessage(selectionError, '选择文件失败'));
+      setError(describeUnknownError(selectionError, '选择文件失败'));
     } finally {
       setSelecting(false);
     }
@@ -79,7 +76,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
       setParseStatus('ready');
     } catch (parseError) {
       setParseStatus('error');
-      setError(errorMessage(parseError, 'TXT 解析失败'));
+      setError(describeUnknownError(parseError, 'TXT 解析失败'));
     }
   };
 
@@ -118,7 +115,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         navigate(`/novels/${result.novelId}`);
       }, 1500);
     } catch (importError) {
-      setError(errorMessage(importError, '导入失败，未写入不完整作品'));
+      setError(describeUnknownError(importError, '导入失败，未写入不完整作品'));
     } finally {
       importLock.current = false;
       setImporting(false);
@@ -130,11 +127,9 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   };
 
   return (
-    <>
-      <div className="modal-overlay" onClick={closeIfIdle} />
+    <div className="modal-overlay import-dialog-overlay" onClick={closeIfIdle} role="presentation">
       <div
-        className="modal-content"
-        style={{ maxWidth: 620, width: '90%', maxHeight: '82vh', overflowY: 'auto' }}
+        className="modal-dialog import-dialog-modal import-dialog-modal-txt"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -222,7 +217,7 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         )}
         {error && <div className="import-error" role="alert">{error}</div>}
       </div>
-    </>
+    </div>
   );
 }
 

@@ -17,14 +17,11 @@ import {
   type SelectedImportFile,
 } from '../../services/import/systemFilePickerService';
 import ImportFileStatusCard, { type ImportParseStatus } from './ImportFileStatusCard';
+import { describeUnknownError } from '../../utils/errorMessage';
 import '../../styles/import-dialog.css';
 
 interface ImportJsonDialogProps {
   onClose: () => void;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
@@ -56,7 +53,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
       setSelectedFile(file);
       setParseStatus('selected');
     } catch (selectionError) {
-      setError(errorMessage(selectionError, '选择文件失败'));
+      setError(describeUnknownError(selectionError, '选择文件失败'));
     } finally {
       setSelecting(false);
     }
@@ -74,7 +71,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
       setParseStatus('ready');
     } catch (parseError) {
       setParseStatus('error');
-      setError(errorMessage(parseError, 'JSON 解析失败'));
+      setError(describeUnknownError(parseError, 'JSON 解析失败'));
     }
   };
 
@@ -100,7 +97,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         navigate(result.destination);
       }, 1500);
     } catch (importError) {
-      setError(errorMessage(importError, '导入失败，未写入不完整数据'));
+      setError(describeUnknownError(importError, '导入失败，未写入不完整数据'));
     } finally {
       importLock.current = false;
       setImporting(false);
@@ -112,11 +109,9 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   };
 
   return (
-    <>
-      <div className="modal-overlay" onClick={closeIfIdle} />
+    <div className="modal-overlay import-dialog-overlay" onClick={closeIfIdle} role="presentation">
       <div
-        className="modal-content"
-        style={{ maxWidth: 560, width: '90%', maxHeight: '82vh', overflowY: 'auto' }}
+        className="modal-dialog import-dialog-modal import-dialog-modal-json"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -184,7 +179,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         )}
         {error && <div className="import-error" role="alert">{error}</div>}
       </div>
-    </>
+    </div>
   );
 }
 
