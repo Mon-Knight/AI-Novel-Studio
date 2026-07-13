@@ -1,5 +1,5 @@
 use crate::errors::AppError;
-use rusqlite::Connection;
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -158,11 +158,12 @@ fn list_unified(connection: &Connection) -> Result<Vec<AiTaskView>, AppError> {
                  SELECT proposal_id FROM artifact_placement_proposals px
                  WHERE px.artifact_id = r.artifact_id ORDER BY px.created_at DESC LIMIT 1
              )
-             LEFT JOIN artifact_apply_plans ap ON ap.plan_id = (
+              LEFT JOIN artifact_apply_plans ap ON ap.plan_id = (
                  SELECT plan_id FROM artifact_apply_plans apx
                  WHERE apx.artifact_id = r.artifact_id ORDER BY apx.created_at DESC LIMIT 1
-             )
-             ORDER BY t.created_at DESC",
+              )
+              WHERE t.archived_at IS NULL
+              ORDER BY t.created_at DESC",
         )
         .map_err(AppError::database)?;
     let rows = statement
@@ -440,6 +441,125 @@ pub fn list(connection: &Connection) -> Result<Vec<AiTaskView>, AppError> {
     Ok(combined)
 }
 
+fn terminal_status(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "applied" | "failed" | "cancelled" | "succeeded" | "interrupted" | "stale"
+    )
+}
+
+pub fn archive_unified(connection: &mut Connection, task_id: &str) -> Result<usize, AppError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(AppError::database)?;
+    let task = transaction
+        .query_row(
+            "SELECT workflow_id,status,archived_at FROM ai_tasks WHERE task_id=?1",
+            params![task_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| {
+            AppError::new(
+                crate::errors::codes::AI_TASK_NOT_FOUND,
+                "AI 任务记录不存在",
+                false,
+            )
+        })?;
+    if task.2.is_some() {
+        transaction.commit().map_err(AppError::database)?;
+        return Ok(0);
+    }
+    let active_count: i64 = if let Some(workflow_id) = task.0.as_deref() {
+        transaction
+            .query_row(
+                 "SELECT COUNT(*) FROM ai_tasks WHERE workflow_id=?1 AND archived_at IS NULL
+                 AND status NOT IN ('completed','applied','failed','cancelled','succeeded','interrupted','stale')",
+                params![workflow_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?
+    } else if terminal_status(&task.1) {
+        0
+    } else {
+        1
+    };
+    if active_count > 0 {
+        return Err(AppError::new(
+            crate::errors::codes::AI_TASK_TERMINAL_STATE,
+            "任务仍在运行，请先取消或等待完成后再删除记录",
+            false,
+        ));
+    }
+    let archived_at = chrono::Utc::now().to_rfc3339();
+    let changed = if let Some(workflow_id) = task.0 {
+        transaction
+            .execute(
+                "UPDATE ai_tasks SET archived_at=?1 WHERE workflow_id=?2 AND archived_at IS NULL",
+                params![archived_at, workflow_id],
+            )
+            .map_err(AppError::database)?
+    } else {
+        transaction
+            .execute(
+                "UPDATE ai_tasks SET archived_at=?1 WHERE task_id=?2 AND archived_at IS NULL",
+                params![archived_at, task_id],
+            )
+            .map_err(AppError::database)?
+    };
+    transaction.commit().map_err(AppError::database)?;
+    Ok(changed)
+}
+
+pub fn delete_legacy_generation(
+    connection: &mut Connection,
+    job_id: &str,
+) -> Result<usize, AppError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(AppError::database)?;
+    let status = transaction
+        .query_row(
+            "SELECT status FROM generation_jobs WHERE id=?1",
+            params![job_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| {
+            AppError::new(
+                crate::errors::codes::AI_TASK_NOT_FOUND,
+                "历史生成记录不存在",
+                false,
+            )
+        })?;
+    if !terminal_status(&status) {
+        return Err(AppError::new(
+            crate::errors::codes::AI_TASK_TERMINAL_STATE,
+            "生成任务仍在运行，请先取消后再删除记录",
+            false,
+        ));
+    }
+    transaction
+        .execute(
+            "DELETE FROM generation_step_results WHERE job_id=?1",
+            params![job_id],
+        )
+        .map_err(AppError::database)?;
+    let changed = transaction
+        .execute("DELETE FROM generation_jobs WHERE id=?1", params![job_id])
+        .map_err(AppError::database)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +583,9 @@ mod tests {
                 input_token_estimate INTEGER,output_token_estimate INTEGER,actual_input_tokens INTEGER,
                 actual_output_tokens INTEGER,cost_estimate REAL,error_code TEXT,error_message TEXT,retry_count INTEGER,
                 created_at TEXT NOT NULL,started_at TEXT,finished_at TEXT
+             );
+             CREATE TABLE generation_step_results (
+                id TEXT PRIMARY KEY,job_id TEXT NOT NULL,step_name TEXT,status TEXT,output_data TEXT,created_at TEXT
              );
              INSERT INTO novels VALUES ('novel-a','Novel','now','now',NULL);
              INSERT INTO chapters VALUES ('chapter-a','novel-a','Chapter','now','now',NULL);"
@@ -591,6 +714,108 @@ mod tests {
             .expect("persisted task");
         assert_eq!(item.source, "unified");
         assert_eq!(item.user_status, "preparing");
+        Ok(())
+    }
+
+    #[test]
+    fn task_center05_archive_hides_terminal_task_but_keeps_audit_row(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        connection.execute(
+            "INSERT INTO ai_tasks(task_id,task_type,novel_id,chapter_id,scope_type,status,trace_id,operation_id,request_hash,created_at)
+             VALUES ('archive-me','quality_check','novel-a','chapter-a','chapter','completed','trace','op','hash','2026-01-03')",
+            [],
+        )?;
+
+        assert_eq!(archive_unified(&mut connection, "archive-me")?, 1);
+        assert!(!list(&connection)?
+            .iter()
+            .any(|item| item.id == "archive-me"));
+        let archived_at: Option<String> = connection.query_row(
+            "SELECT archived_at FROM ai_tasks WHERE task_id='archive-me'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(archived_at.is_some());
+        assert_eq!(archive_unified(&mut connection, "archive-me")?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn task_center06_active_task_cannot_be_archived() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        connection.execute(
+            "INSERT INTO ai_tasks(task_id,task_type,novel_id,chapter_id,scope_type,status,trace_id,operation_id,request_hash,created_at)
+             VALUES ('still-running','quality_check','novel-a','chapter-a','chapter','running','trace','op','hash','2026-01-03')",
+            [],
+        )?;
+
+        assert!(archive_unified(&mut connection, "still-running").is_err());
+        assert!(list(&connection)?
+            .iter()
+            .any(|item| item.id == "still-running"));
+        Ok(())
+    }
+
+    #[test]
+    fn task_center07_archiving_workflow_hides_all_nodes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut connection = setup()?;
+        connection.execute(
+            "INSERT INTO ai_tasks(task_id,task_type,novel_id,scope_type,status,trace_id,operation_id,request_hash,workflow_id,root_task_id,created_at)
+             VALUES ('workflow-root','workflow','novel-a','novel','completed','trace-root','op-root','hash-root','workflow-a','workflow-root','2026-01-03')",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO ai_tasks(task_id,task_type,novel_id,chapter_id,scope_type,status,trace_id,operation_id,request_hash,workflow_id,root_task_id,parent_task_id,created_at)
+             VALUES ('workflow-child','quality_check','novel-a','chapter-a','chapter','completed','trace-child','op-child','hash-child','workflow-a','workflow-root','workflow-root','2026-01-03')",
+            [],
+        )?;
+
+        assert_eq!(archive_unified(&mut connection, "workflow-root")?, 2);
+        let visible = list(&connection)?;
+        assert!(!visible
+            .iter()
+            .any(|item| item.workflow_id.as_deref() == Some("workflow-a")));
+        let archived_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM ai_tasks WHERE workflow_id='workflow-a' AND archived_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(archived_count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn task_center08_deletes_terminal_legacy_generation_and_steps(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        connection.execute(
+            "INSERT INTO generation_jobs(id,novel_id,chapter_id,job_type,status,created_at)
+             VALUES ('legacy-delete','novel-a','chapter-a','chapter_generation','completed','2026-01-01')",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO generation_step_results(id,job_id,step_name,status,created_at)
+             VALUES ('legacy-step','legacy-delete','generate','completed','2026-01-01')",
+            [],
+        )?;
+
+        assert_eq!(
+            delete_legacy_generation(&mut connection, "legacy-delete")?,
+            1
+        );
+        let job_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM generation_jobs WHERE id='legacy-delete'",
+            [],
+            |row| row.get(0),
+        )?;
+        let step_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM generation_step_results WHERE job_id='legacy-delete'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!((job_count, step_count), (0, 0));
         Ok(())
     }
 }

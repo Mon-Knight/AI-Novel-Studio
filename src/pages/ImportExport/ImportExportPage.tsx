@@ -8,6 +8,7 @@ import ImportTxtDialog from '../../components/import/ImportTxtDialog';
 import ImportJsonDialog from '../../components/import/ImportJsonDialog';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
+import { draftVersionService } from '../../services/database/draftVersionService';
 import { exportService } from '../../services/export/exportService';
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
@@ -17,6 +18,7 @@ function ImportExportPage() {
   const [novels, setNovels] = useState<Novel[]>([]);
   const [selectedNovelId, setSelectedNovelId] = useState('');
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [exportableChapterIds, setExportableChapterIds] = useState<Set<string>>(new Set());
   const [selectedChapterId, setSelectedChapterId] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -32,6 +34,7 @@ function ImportExportPage() {
     });
     if (list.length === 0) {
       setChapters([]);
+      setExportableChapterIds(new Set());
       setSelectedChapterId('');
     }
   }, []);
@@ -43,38 +46,47 @@ function ImportExportPage() {
   useEffect(() => {
     if (!selectedNovelId) {
       setChapters([]);
+      setExportableChapterIds(new Set());
       setSelectedChapterId('');
       return;
     }
     let cancelled = false;
-    chapterRepository.getByNovelId(selectedNovelId).then((list) => {
+    setExportableChapterIds(new Set());
+    chapterRepository.getByNovelId(selectedNovelId).then(async (list) => {
+      const adoptedIds = new Set((await Promise.all(list.map(async (chapter) => ({
+        id: chapter.id,
+        draft: await draftVersionService.getAdoptedByChapterId(chapter.id),
+      })))).filter((entry) => !!entry.draft?.content).map((entry) => entry.id));
       if (cancelled) return;
       setChapters(list);
-      const adopted = list.filter((c) => c.status === 'adopted' || c.status === 'summarized');
+      setExportableChapterIds(adoptedIds);
+      const adopted = list.filter((chapter) => adoptedIds.has(chapter.id));
       setSelectedChapterId((current) => {
         if (current && adopted.some((chapter) => chapter.id === current)) return current;
         return adopted[0]?.id ?? '';
       });
+    }).catch((error: unknown) => {
+      if (!cancelled) setErr(error instanceof Error ? error.message : '章节读取失败');
     });
     return () => { cancelled = true; };
   }, [selectedNovelId]);
 
-  const handleExport = async (fn: () => Promise<string | void>) => {
+  const handleExport = async (fn: () => Promise<string | null | void>) => {
     setErr(''); setMsg('导出中...');
     try {
       const savedPath = await fn();
-      setMsg(savedPath ? `导出成功：${savedPath}` : '导出成功！');
+      setMsg(savedPath ? `导出成功：${savedPath}` : '已取消导出');
       setTimeout(() => setMsg(''), 4000);
     }
     catch (e: any) { setErr(e.message || '导出失败'); setMsg(''); }
   };
 
-  const adoptedChapters = chapters.filter((c) => c.status === 'adopted' || c.status === 'summarized');
+  const adoptedChapters = chapters.filter((chapter) => exportableChapterIds.has(chapter.id));
   return (
     <div className="page-container form-page" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>📥 导入导出中心</div>
-      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>导出已采用章节正文或完整 JSON 备份，导入作品、风格方案和输出控制</div>
+      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>导出已采用章节正文或可恢复的项目 JSON 备份，导入作品、风格方案和输出控制</div>
 
       {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: 'var(--color-primary)' }}>{msg}</div>}
       {err && <div style={{ padding: '8px 16px', marginBottom: 16, background: '#fee2e2', borderRadius: 6, fontSize: 13, color: 'var(--color-error)' }}>{err}</div>}
@@ -117,7 +129,7 @@ function ImportExportPage() {
           </button>
           <button className="btn btn-secondary btn-sm" disabled={!selectedNovelId}
             onClick={() => handleExport(() => exportService.exportNovelBackupJson(selectedNovelId))}>
-            💾 备份完整 JSON
+            💾 备份项目 JSON
           </button>
         </div>
       </div>

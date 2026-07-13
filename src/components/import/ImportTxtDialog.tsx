@@ -3,12 +3,9 @@
  */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { novelService } from '../../services/novels/novelService';
-import { volumeRepository } from '../../services/database/volumeRepository';
-import { chapterRepository } from '../../services/database/chapterRepository';
-import { draftVersionService } from '../../services/database/draftVersionService';
 import { readTextFile, analyzeTxtForChapters } from '../../services/import/txtImportService';
 import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
+import { importTxtNovel } from '../../services/import/projectImportService';
 import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
 
@@ -58,29 +55,22 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         },
         async ({ setMessage, setStage, setPercent }) => {
           setStage('创建作品……');
-          const novel = await novelService.createNovel({ title: novelTitle.trim(), genre: genre.trim() || undefined, description: desc.trim() || '由 TXT 导入' });
-          const volume = await volumeRepository.create({ novelId: novel.id, title: '第一卷', orderIndex: 1 });
-          let count = 0;
-          const totalCh = analyzeResult.chapters.length;
-          for (const ch of analyzeResult.chapters) {
-            setStage(`正在写入：${ch.title}`);
-            setMessage(`正在导入章节 ${count + 1} / ${totalCh}……`);
-            setPercent(Math.round(((count + 1) / totalCh) * 90));
-            const chapter = await chapterRepository.create({
-              novelId: novel.id, volumeId: volume.id, title: ch.title,
-              orderIndex: ch.orderIndex, targetWordCount: undefined, outline: '',
-            });
-            await draftVersionService.create({
-              novelId: novel.id, chapterId: chapter.id,
-              content: ch.content, source: 'imported',
-            });
-            count++;
-          }
+          const result = await importTxtNovel({
+            title: novelTitle,
+            genre,
+            description: desc,
+            analysis: analyzeResult,
+            onProgress: ({ stage, current, total }) => {
+              setStage(`正在写入：${stage}`);
+              setMessage(`正在导入并采用章节 ${current} / ${total}……`);
+              setPercent(Math.round((current / Math.max(total, 1)) * 90));
+            },
+          });
           setPercent(100);
           setImporting(false);
-          setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${count} 章。`);
+          setResultMsg(`导入成功！已创建作品《${result.novelTitle}》，共导入并采用 ${result.adoptedChapterCount} 章。`);
           setStep('done');
-          setTimeout(() => { onClose(); navigate(`/novels/${novel.id}`); }, 1500);
+          setTimeout(() => { onClose(); navigate(`/novels/${result.novelId}`); }, 1500);
         },
       );
     } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }

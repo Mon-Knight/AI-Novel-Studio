@@ -31,6 +31,8 @@
 .ai-task-legacy { background: #f1f5f9; color: #64748b; }
 .ai-task-review-callout { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #fffbeb; color: #785500; font-size: 12px; }
 .ai-task-card-actions { display: flex; gap: 7px; margin-top: 9px; }
+.ai-task-delete { margin-left: auto; color: var(--color-error); }
+.ai-task-delete:hover { background: #fff1f1; color: #991b1b; }
 .ai-task-audit { display: grid; gap: 5px; margin-top: 10px; padding: 10px; border-radius: 6px; background: #f8fafc; font-size: 11px; }
 .ai-task-audit > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
 .ai-task-audit span { color: var(--color-text-muted); }

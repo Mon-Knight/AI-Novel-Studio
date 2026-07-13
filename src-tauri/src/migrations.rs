@@ -41,7 +41,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 17] {
+fn migrations() -> [Migration; 18] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -127,6 +127,11 @@ fn migrations() -> [Migration; 17] {
             id: "018_ai_task_orchestration",
             definition: "ai_task_orchestration_v1(tasks.workflow,name,root,parent,agent_role,step,priority,concurrency,required,stale,dependencies.required,foreign_keys,cycle_guard,isolation,indexes,artifact_stale_events.append_only)",
             apply: apply_ai_task_orchestration,
+        },
+        Migration {
+            id: "019_ai_task_archival",
+            definition: "ai_task_archival_v1(tasks.archived_at,index,audit_preserved)",
+            apply: apply_ai_task_archival,
         },
     ]
 }
@@ -564,6 +569,20 @@ fn apply_ai_task_orchestration(transaction: &Transaction<'_>) -> Result<(), AppE
                 BEFORE UPDATE ON ai_artifact_stale_events BEGIN SELECT RAISE(ABORT, 'immutable artifact stale event'); END;
             CREATE TRIGGER IF NOT EXISTS trg_ai_artifact_stale_events_immutable_delete
                 BEFORE DELETE ON ai_artifact_stale_events BEGIN SELECT RAISE(ABORT, 'immutable artifact stale event'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_task_archival(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    if !table_has_column(transaction, "ai_tasks", "archived_at")? {
+        transaction
+            .execute("ALTER TABLE ai_tasks ADD COLUMN archived_at TEXT", [])
+            .map_err(AppError::database)?;
+    }
+    transaction
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_ai_tasks_visible_created
+                ON ai_tasks(archived_at, created_at DESC);",
         )
         .map_err(AppError::database)
 }
@@ -1458,7 +1477,7 @@ fn apply_artifact_target_links(transaction: &Transaction<'_>) -> Result<(), AppE
 mod tests {
     use super::*;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 17] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 18] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -1526,6 +1545,10 @@ mod tests {
         (
             "018_ai_task_orchestration",
             "51bba502603ff63184079f539354b97e80614563e6867ab3836591d75c801beb",
+        ),
+        (
+            "019_ai_task_archival",
+            "427f9c26eb3f1df819f9397032b50a851e25f1415dbdc1cab551b2c3daa6ef85",
         ),
     ];
 
@@ -1602,7 +1625,7 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let migrations = list_applied(&connection)?;
-        assert_eq!(migrations.len(), 17);
+        assert_eq!(migrations.len(), 18);
         for (applied, (expected_id, expected_checksum)) in
             migrations.iter().zip(EXPECTED_MIGRATION_CHECKSUMS)
         {
@@ -1864,7 +1887,7 @@ mod tests {
 
         run_migrations(&mut connection)?;
         let upgraded = list_applied(&connection)?;
-        assert_eq!(upgraded.len(), 17);
+        assert_eq!(upgraded.len(), 18);
         assert_eq!(&upgraded[..4], &original[..4]);
         let once = upgraded.clone();
         run_migrations(&mut connection)?;
@@ -2137,6 +2160,41 @@ mod tests {
         assert!(connection.execute("INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('missing','a','n')",[]).is_err());
         assert!(connection.execute("INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('a','c','n')",[]).is_err());
         assert!(connection.execute("INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('a','b','n')",[]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn db36_ai_task_archival_upgrade_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("CREATE TABLE chapter_drafts (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,chapter_id TEXT NOT NULL,content TEXT NOT NULL,version_no INTEGER NOT NULL,large_text_ref_id TEXT);")?;
+        run_migrations(&mut connection)?;
+        let columns = {
+            let mut statement = connection.prepare("PRAGMA table_info(ai_tasks)")?;
+            let collected = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            collected
+        };
+        assert!(columns.iter().any(|column| column == "archived_at"));
+        let index_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_ai_tasks_visible_created'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(index_count, 1);
+
+        connection.execute(
+            "DELETE FROM schema_migrations WHERE migration_id='019_ai_task_archival'",
+            [],
+        )?;
+        run_migrations(&mut connection)?;
+        assert_eq!(
+            list_applied(&connection)?
+                .iter()
+                .filter(|migration| migration.migration_id == "019_ai_task_archival")
+                .count(),
+            1
+        );
         Ok(())
     }
 }

@@ -25,3 +25,19 @@ pub fn list_ai_task_views() -> Result<Vec<AiTaskView>, AppError> {
     }
     Ok(views)
 }
+
+#[tauri::command]
+pub fn archive_ai_task_view(task_id: String) -> Result<usize, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    ai_task_view_repository::archive_unified(&mut connection, &task_id)
+}
+
+#[tauri::command]
+pub fn delete_legacy_generation_job_record(job_id: String) -> Result<usize, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    ai_task_view_repository::delete_legacy_generation(&mut connection, &job_id)
+}

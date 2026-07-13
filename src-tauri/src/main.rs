@@ -272,6 +272,8 @@ fn main() {
             commands::ai_tasks::cancel_ai_task,
             commands::ai_tasks::record_ai_task_late_response,
             commands::ai_task_views::list_ai_task_views,
+            commands::ai_task_views::archive_ai_task_view,
+            commands::ai_task_views::delete_legacy_generation_job_record,
             commands::ai_worker::configure_ai_worker_provider,
             commands::ai_worker::enqueue_ai_worker_task,
             commands::ai_worker::request_ai_worker_cancel,

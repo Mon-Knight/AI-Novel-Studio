@@ -1,11 +1,12 @@
 import type { AiTaskRecord } from '../../types/ai';
 import type { AiTaskCenterItem, AiTaskUserStatus } from '../../types/aiTaskCenter';
 import { aiTaskStore } from '../../store/aiTaskStore';
-import { dbCall, lsGet } from '../database/db';
+import { dbCall, lsGet, lsSet } from '../database/db';
 import { describeUnknownError } from '../../utils/errorMessage';
 import type { ConstraintValidationResult } from '../../types/chapterConstraintValidation';
 
 const LEGACY_KEYS = ['ai_novel_studio_ai_tasks', 'ai_novel_studio_ai_task_records'];
+const ARCHIVED_BROWSER_KEY = 'ai_novel_studio_archived_ai_task_ids';
 
 function legacyStatus(status: AiTaskRecord['status']): AiTaskUserStatus {
   if (status === 'running') return 'working';
@@ -17,7 +18,9 @@ function legacyStatus(status: AiTaskRecord['status']): AiTaskUserStatus {
 
 function browserFallback(): AiTaskCenterItem[] {
   const byId = new Map<string, AiTaskCenterItem>();
+  const archivedIds = new Set(lsGet<string[]>(ARCHIVED_BROWSER_KEY) || []);
   for (const summary of aiTaskStore.list()) {
+    if (archivedIds.has(summary.taskId)) continue;
     byId.set(summary.taskId, {
       source: 'unified', id: summary.taskId, taskType: summary.taskType || 'ai_task',
       status: summary.status,
@@ -51,6 +54,23 @@ function browserFallback(): AiTaskCenterItem[] {
     }
   }
   return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function hideBrowserTask(item: AiTaskCenterItem): void {
+  if (item.source === 'legacy_task') {
+    for (const key of LEGACY_KEYS) {
+      const rows = lsGet<AiTaskRecord[]>(key);
+      if (Array.isArray(rows)) lsSet(key, rows.filter((row) => row.id !== item.id));
+    }
+    return;
+  }
+  const archived = new Set(lsGet<string[]>(ARCHIVED_BROWSER_KEY) || []);
+  const snapshot = aiTaskStore.getSnapshot().items;
+  const relatedIds = item.workflowId
+    ? snapshot.filter((entry) => entry.workflowId === item.workflowId).map((entry) => entry.id)
+    : [item.id];
+  relatedIds.forEach((id) => archived.add(id));
+  lsSet(ARCHIVED_BROWSER_KEY, [...archived]);
 }
 
 let inFlight: Promise<AiTaskCenterItem[]> | null = null;
@@ -93,7 +113,7 @@ export const aiTaskCenterService = {
   async refresh(): Promise<AiTaskCenterItem[]> {
     if (inFlight) return inFlight;
     aiTaskStore.setLoading(true);
-    inFlight = this.list()
+    inFlight = aiTaskCenterService.list()
       .then((items) => {
         aiTaskStore.replace(items);
         return items;
@@ -109,12 +129,23 @@ export const aiTaskCenterService = {
 
   async cancel(taskId: string, workflow = false): Promise<void> {
     await dbCall(workflow ? 'cancel_ai_workflow_task' : 'request_ai_worker_cancel', { taskId });
-    await this.refresh();
+    await aiTaskCenterService.refresh();
   },
 
   async retry(taskId: string, workflow = false): Promise<void> {
     await dbCall(workflow ? 'retry_ai_workflow_step' : 'retry_ai_worker_task', { taskId });
-    await this.refresh();
+    await aiTaskCenterService.refresh();
+  },
+
+  async deleteRecord(item: AiTaskCenterItem): Promise<void> {
+    if (item.source === 'unified') {
+      await dbCall('archive_ai_task_view', { taskId: item.id }, () => hideBrowserTask(item));
+    } else if (item.source === 'legacy_task') {
+      await dbCall('delete_ai_task_record', { id: item.id }, () => hideBrowserTask(item));
+    } else {
+      await dbCall('delete_legacy_generation_job_record', { jobId: item.id }, () => hideBrowserTask(item));
+    }
+    await aiTaskCenterService.refresh();
   },
 
   async getArtifact(artifactId: string): Promise<TaskArtifactContent> {

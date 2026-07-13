@@ -3,11 +3,10 @@
  */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { novelService } from '../../services/novels/novelService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
 import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
-import { normalizeNovel } from '../../features/novels/novelNormalizer';
+import { importProjectBackup } from '../../services/import/projectImportService';
 import type { JsonDetectResult } from '../../services/import/jsonImportService';
 import { runWithLoading } from '../../lib/runWithLoading';
 
@@ -54,6 +53,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         },
         async ({ setMessage }) => {
           const obj = rawData as Record<string, unknown>;
+          let destination = '/';
           if (detectResult.type === 'style_profile') {
             setMessage('正在导入风格方案……');
             await styleProfileService.create({
@@ -76,39 +76,20 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         });
         setResultMsg('输出控制方案导入成功！');
       } else if (detectResult.type === 'ai_novel_studio_project') {
-        const novelData = obj.novel as Record<string, any>;
-        if (!novelData?.title) { setError('作品 JSON 缺少必要字段'); setImporting(false); return; }
-        const normalizedNovel = normalizeNovel(novelData);
-        const novel = await novelService.createNovel({
-          title: normalizedNovel?.title ?? novelData.title,
-          genre: normalizedNovel?.genre ?? novelData.genre,
-          description: normalizedNovel?.description ?? novelData.description,
-          outline: normalizedNovel?.outline ?? '',
-          targetWordCount: normalizedNovel?.targetWordCount,
+        const result = await importProjectBackup(rawData, ({ stage, current, total }) => {
+          setMessage(`${stage}（${current}/${Math.max(total, 1)}）`);
         });
-        if (normalizedNovel) {
-          await novelService.updateNovel(novel.id, {
-            title: normalizedNovel.title,
-            subtitle: normalizedNovel.subtitle,
-            genre: normalizedNovel.genre,
-            description: normalizedNovel.description,
-            outline: normalizedNovel.outline,
-            status: normalizedNovel.status,
-            targetWordCount: normalizedNovel.targetWordCount,
-            protagonistMode: normalizedNovel.protagonistMode,
-            protagonists: normalizedNovel.protagonists,
-            dualProtagonistRelation: normalizedNovel.dualProtagonistRelation,
-            mainCharacter: normalizedNovel.mainCharacter,
-            protagonistAbility: normalizedNovel.protagonistAbility,
-          });
-        }
-        setResultMsg(`作品「${novelData.title}」导入成功！`);
+        destination = `/novels/${result.novelId}`;
+        setResultMsg(
+          `作品「${result.novelTitle}」导入成功：${result.volumeCount} 卷、${result.chapterCount} 章，恢复正文 ${result.adoptedChapterCount} 章`
+          + (result.missingContentCount ? `；${result.missingContentCount} 章的旧备份不含正文` : ''),
+        );
       }
       setImporting(false); setStep('done');
       setTimeout(() => {
         onClose();
         if (detectResult.type === 'style_profile' || detectResult.type === 'output_profile') navigate('/styles');
-        else navigate('/');
+        else navigate(destination);
       }, 1500);
         },
       );

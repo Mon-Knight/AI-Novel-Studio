@@ -9,7 +9,7 @@ import { getAiTaskDisplayLabel } from '../../utils/aiTaskDisplay';
 import '../../styles/ai-tasks.css';
 import { aiTaskCenterService, type TaskArtifactContent } from '../../services/ai-tasks/aiTaskCenterService';
 import { placementApplyService } from '../../services/ai-tasks/placementApplyService';
-import { confirmInfo } from '../../utils/nativeDialog';
+import { confirmDanger, confirmInfo } from '../../utils/nativeDialog';
 import { normalizeCandidate } from '../../services/ai-tasks/normalizedCandidateService';
 import type { NormalizedCandidate } from '../../types/normalizedCandidate';
 
@@ -19,14 +19,17 @@ function scopeLabel(item: AiTaskCenterItem): string {
 }
 
 function TaskCard({
-  item, onOpenArtifact, onCancel, onRetry,
+  item, onOpenArtifact, onCancel, onRetry, onDelete, allowDelete = true,
 }: {
   item: AiTaskCenterItem;
   onOpenArtifact: (artifactId: string) => void;
   onCancel: (taskId: string) => void;
   onRetry: (taskId: string) => void;
+  onDelete: (item: AiTaskCenterItem) => void;
+  allowDelete?: boolean;
 }) {
   const [advanced, setAdvanced] = useState(false);
+  const canDelete = allowDelete && ['awaiting_confirmation', 'completed', 'failed', 'cancelled', 'expired'].includes(item.userStatus);
   return (
     <article className={`ai-task-card status-${item.userStatus}`}>
       <div className="ai-task-card-main">
@@ -57,8 +60,9 @@ function TaskCard({
       {item.userStatus === 'awaiting_confirmation' && (
         <div className="ai-task-review-callout">候选结果已经准备好，请核对后再决定是否采用。系统不会自动修改正文。</div>
       )}
-      {!item.isLegacy && (
-        <div className="ai-task-card-actions">
+      <div className="ai-task-card-actions">
+        {!item.isLegacy && (
+          <>
           {item.artifactId && <button type="button" className="btn btn-primary btn-xs" onClick={() => onOpenArtifact(item.artifactId!)}>查看结果</button>}
           {(item.taskType === 'quality_check' || item.workflowId) && ['preparing', 'working', 'checking'].includes(item.userStatus) && (
             <button type="button" className="btn btn-secondary btn-xs" onClick={() => onCancel(item.id)}>请求取消</button>
@@ -66,8 +70,10 @@ function TaskCard({
           {(item.taskType === 'quality_check' || item.parentTaskId) && item.userStatus === 'failed' && !item.artifactId && (
             <button type="button" className="btn btn-secondary btn-xs" onClick={() => onRetry(item.id)}>重试</button>
           )}
-        </div>
-      )}
+          </>
+        )}
+        {canDelete && <button type="button" className="btn btn-text btn-xs ai-task-delete" onClick={() => onDelete(item)}>删除记录</button>}
+      </div>
       {advanced && (
         <div className="ai-task-audit" data-testid="ai-task-audit">
           <div><span>来源</span><code>{item.source}</code></div>
@@ -95,12 +101,13 @@ function TaskCard({
   );
 }
 
-function WorkflowCard({ root, children, onOpenArtifact, onCancel, onRetry }: {
+function WorkflowCard({ root, children, onOpenArtifact, onCancel, onRetry, onDelete }: {
   root: AiTaskCenterItem;
   children: AiTaskCenterItem[];
   onOpenArtifact: (artifactId: string) => void;
   onCancel: (taskId: string) => void;
   onRetry: (taskId: string) => void;
+  onDelete: (item: AiTaskCenterItem) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const completed = children.filter((item) => ['completed', 'awaiting_confirmation'].includes(item.userStatus)).length;
@@ -126,26 +133,28 @@ function WorkflowCard({ root, children, onOpenArtifact, onCancel, onRetry }: {
       <div className="ai-task-card-actions">
         {root.artifactId && <button type="button" className="btn btn-primary btn-xs" onClick={() => onOpenArtifact(root.artifactId!)}>查看汇总候选</button>}
         {['preparing', 'working', 'checking'].includes(root.userStatus) && <button type="button" className="btn btn-secondary btn-xs" onClick={() => onCancel(root.id)}>取消工作流</button>}
+        {['awaiting_confirmation', 'completed', 'failed', 'cancelled', 'expired'].includes(root.userStatus) && <button type="button" className="btn btn-text btn-xs ai-task-delete" onClick={() => onDelete(root)}>删除工作流记录</button>}
       </div>
-      {expanded && <div className="ai-workflow-steps">{children.sort((a, b) => (a.priority || 0) - (b.priority || 0)).map((item) => <TaskCard key={item.id} item={item} onOpenArtifact={onOpenArtifact} onCancel={onCancel} onRetry={onRetry} />)}</div>}
+      {expanded && <div className="ai-workflow-steps">{children.sort((a, b) => (a.priority || 0) - (b.priority || 0)).map((item) => <TaskCard key={item.id} item={item} onOpenArtifact={onOpenArtifact} onCancel={onCancel} onRetry={onRetry} onDelete={onDelete} allowDelete={false} />)}</div>}
     </article>
   );
 }
 
-function Section({ title, items, emptyText, onOpenArtifact, onCancel, onRetry }: {
+function Section({ title, items, emptyText, onOpenArtifact, onCancel, onRetry, onDelete }: {
   title: string;
   items: AiTaskCenterItem[];
   emptyText: string;
   onOpenArtifact: (artifactId: string) => void;
   onCancel: (taskId: string) => void;
   onRetry: (taskId: string) => void;
+  onDelete: (item: AiTaskCenterItem) => void;
 }) {
   return (
     <section className="ai-task-section">
       <div className="ai-task-section-heading"><h2>{title}</h2><span>{items.length}</span></div>
       {items.length === 0
         ? <div className="ai-task-section-empty">{emptyText}</div>
-        : <div className="ai-task-list">{items.map((item) => <TaskCard key={`${item.source}:${item.id}`} item={item} onOpenArtifact={onOpenArtifact} onCancel={onCancel} onRetry={onRetry} />)}</div>}
+        : <div className="ai-task-list">{items.map((item) => <TaskCard key={`${item.source}:${item.id}`} item={item} onOpenArtifact={onOpenArtifact} onCancel={onCancel} onRetry={onRetry} onDelete={onDelete} />)}</div>}
     </section>
   );
 }
@@ -242,6 +251,24 @@ function AiTasksPage() {
     try { await aiTaskCenterService.retry(taskId, !!items.find((item) => item.id === taskId)?.workflowId); }
     catch (value) { setActionError(value instanceof Error ? value.message : '重试请求失败'); }
   };
+  const deleteTask = async (item: AiTaskCenterItem) => {
+    const workflow = !!item.workflowId && !item.parentTaskId;
+    if (!(await confirmDanger({
+      title: workflow ? '删除工作流记录' : '删除 AI 任务记录',
+      message: workflow
+        ? '该工作流及其全部步骤会从任务中心移除。已生成结果与审计证据仍会保留，正文不会受影响。是否继续？'
+        : item.source === 'unified'
+          ? '该记录会从任务中心移除，任务结果与审计证据仍会保留，正文不会受影响。是否继续？'
+          : '该历史记录将被删除，正文和已采用结果不会受影响。是否继续？',
+    }))) return;
+    setActionError('');
+    try {
+      await aiTaskCenterService.deleteRecord(item);
+      if (artifact?.taskId === item.id || (item.workflowId && artifactTask?.workflowId === item.workflowId)) setArtifact(null);
+    } catch (value) {
+      setActionError(value instanceof Error ? value.message : '删除任务记录失败');
+    }
+  };
   const confirmArtifact = async () => {
     if (!artifact) return;
     const task = items.find((item) => item.id === artifact.taskId);
@@ -316,14 +343,14 @@ function AiTasksPage() {
             <section className="ai-task-section">
               <div className="ai-task-section-heading"><h2>工作流</h2><span>{workflowRoots.length}</span></div>
               <div className="ai-task-list">{workflowRoots.map((root) => (
-                <WorkflowCard key={root.id} root={root} children={items.filter((item) => item.parentTaskId === root.id)} onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} />
+                <WorkflowCard key={root.id} root={root} children={items.filter((item) => item.parentTaskId === root.id)} onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} onDelete={deleteTask} />
               ))}</div>
             </section>
           )}
-          <Section title="正在运行" items={groups.active} emptyText="当前没有正在运行的任务" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} />
-          <Section title="等待确认" items={groups.review} emptyText="当前没有等待审查的结果" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} />
-          <Section title="最近完成" items={groups.completed} emptyText="还没有已完成任务" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} />
-          <Section title="失败任务" items={groups.failed} emptyText="当前没有失败任务" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} />
+          <Section title="正在运行" items={groups.active} emptyText="当前没有正在运行的任务" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} onDelete={deleteTask} />
+          <Section title="等待确认" items={groups.review} emptyText="当前没有等待审查的结果" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} onDelete={deleteTask} />
+          <Section title="最近完成" items={groups.completed} emptyText="还没有已完成任务" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} onDelete={deleteTask} />
+          <Section title="失败任务" items={groups.failed} emptyText="当前没有失败任务" onOpenArtifact={openArtifact} onCancel={cancelTask} onRetry={retryTask} onDelete={deleteTask} />
         </>
       )}
       {updatedAt && <div className="ai-task-updated">最近同步：{formatDateTime(updatedAt)}</div>}

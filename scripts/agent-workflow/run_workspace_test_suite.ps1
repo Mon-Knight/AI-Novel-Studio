@@ -16,7 +16,8 @@ param(
         'candidate-lifecycle',
         'ai-task-center',
         'ai-worker',
-        'ai-workflow'
+        'ai-workflow',
+        'import-export'
     )]
     [string]$Suite
 )
@@ -78,6 +79,7 @@ $suiteConfig = @{
             'migrations::tests::db29_incomplete_legacy_ledger_fails_before_forward_writes',
             'migrations::tests::db30_fake_existing_delete_guard_blocks_015',
             'migrations::tests::db35_orchestration_upgrade_is_idempotent_and_enforces_graph_integrity',
+            'migrations::tests::db36_ai_task_archival_upgrade_is_idempotent',
             'db::tests::db31_database_initialization_failure_returns_error',
             'tests::db32_database_startup_errors_are_classified',
             'tests::db33_database_startup_notice_redacts_internal_details',
@@ -186,7 +188,11 @@ $suiteConfig = @{
             'repositories::ai_task_view_repository::tests::task_center01_unified_source_wins_exact_id_dedup',
             'repositories::ai_task_view_repository::tests::task_center02_completed_candidate_waits_for_review',
             'repositories::ai_task_view_repository::tests::task_center03_query_failure_is_an_error_not_empty',
-            'repositories::ai_task_view_repository::tests::task_center04_reopens_sqlite_and_restores_persisted_task'
+            'repositories::ai_task_view_repository::tests::task_center04_reopens_sqlite_and_restores_persisted_task',
+            'repositories::ai_task_view_repository::tests::task_center05_archive_hides_terminal_task_but_keeps_audit_row',
+            'repositories::ai_task_view_repository::tests::task_center06_active_task_cannot_be_archived',
+            'repositories::ai_task_view_repository::tests::task_center07_archiving_workflow_hides_all_nodes',
+            'repositories::ai_task_view_repository::tests::task_center08_deletes_terminal_legacy_generation_and_steps'
         )
     }
     'ai-worker' = @{
@@ -230,6 +236,10 @@ $suiteConfig = @{
             'ai_worker::tests::worker17_stage_2e_local_retry_only_repeats_failed_child',
             'ai_worker::tests::worker18_stage_2e_stale_late_response_creates_no_artifact'
         )
+    }
+    'import-export' = @{
+        TestPath = 'src/test/import-export'
+        CargoTests = @()
     }
 }
 

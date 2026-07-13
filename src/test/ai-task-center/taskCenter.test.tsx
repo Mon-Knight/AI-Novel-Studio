@@ -11,13 +11,18 @@ vi.mock('../../hooks/useAiTaskCenter', () => ({
 }));
 vi.mock('../../services/ai-tasks/aiTaskCenterService', () => ({
   aiTaskCenterService: {
-    getArtifact: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
+    getArtifact: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), deleteRecord: vi.fn(),
   },
+}));
+vi.mock('../../utils/nativeDialog', () => ({
+  confirmDanger: vi.fn().mockResolvedValue(true),
+  confirmInfo: vi.fn().mockResolvedValue(true),
 }));
 
 import AiTaskBar from '../../components/ai-tasks/AiTaskBar';
 import AiTasksPage from '../../pages/AiTasks/AiTasksPage';
 import { aiTaskCenterService } from '../../services/ai-tasks/aiTaskCenterService';
+import { confirmDanger } from '../../utils/nativeDialog';
 
 const completedCandidate: AiTaskCenterItem = {
   source: 'unified', id: 'task-a', taskType: 'quality_check', status: 'completed',
@@ -47,6 +52,8 @@ describe('unified AI task center', () => {
   beforeEach(() => {
     hookState = baseState();
     vi.mocked(aiTaskCenterService.getArtifact).mockReset();
+    vi.mocked(aiTaskCenterService.deleteRecord).mockReset();
+    vi.mocked(confirmDanger).mockResolvedValue(true);
   });
 
   it('shows query failure instead of an empty-list success state', () => {
@@ -101,6 +108,17 @@ describe('unified AI task center', () => {
     await userEvent.click(screen.getByRole('button', { name: '高级详情' }));
     expect(screen.getByText('task-a')).toBeTruthy();
     expect(screen.getByText('attempt-a · #1')).toBeTruthy();
+  });
+
+  it('deletes a terminal record after confirmation but never offers deletion for active tasks', async () => {
+    hookState = baseState([
+      completedCandidate,
+      { ...completedCandidate, id: 'task-running', status: 'running', userStatus: 'working', artifactId: undefined },
+    ]);
+    render(<MemoryRouter><AiTasksPage /></MemoryRouter>);
+    expect(screen.getAllByRole('button', { name: '删除记录' })).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: '删除记录' }));
+    expect(aiTaskCenterService.deleteRecord).toHaveBeenCalledWith(completedCandidate);
   });
 
   it('shows workflow progress and expands child steps without exposing ids by default', async () => {

@@ -10,11 +10,11 @@ function ExportCard({ novelId }: ExportCardProps) {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
-  const handleExport = async (fn: () => Promise<string | void>) => {
+  const handleExport = async (fn: () => Promise<string | null | void>) => {
     setErr(''); setMsg('正在导出...');
     try {
       const savedPath = await fn();
-      setMsg(savedPath ? `导出成功：${savedPath}` : '导出成功！');
+      setMsg(savedPath ? `导出成功：${savedPath}` : '已取消导出');
       setTimeout(() => setMsg(''), 4000);
     }
     catch (e: any) { setErr(e.message || '导出失败'); setMsg(''); }
@@ -34,7 +34,7 @@ function ExportCard({ novelId }: ExportCardProps) {
           📝 导出整本 Markdown
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => handleExport(() => exportService.exportNovelBackupJson(novelId))}>
-          💾 备份完整 JSON
+          💾 备份项目 JSON
         </button>
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
