@@ -39,7 +39,12 @@ const VALID_NARRATIVE_WEIGHTS: DualProtagonistRelation['narrativeWeight'][] = [
 
 function normalizeDate(value: unknown): string | null {
   const date = toValidDate(value);
-  return date ? date.toISOString() : null;
+  if (!date) return null;
+  // Tauri/SQLite timestamps can carry sub-millisecond precision. Re-serializing a
+  // valid source string through Date truncates that precision and makes an
+  // unchanged source look stale to the Rust generation guard.
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return date.toISOString();
 }
 
 function resolveTitle(raw: Record<string, unknown>, mark: () => void): string {

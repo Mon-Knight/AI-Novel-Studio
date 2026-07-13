@@ -158,8 +158,8 @@ M6 无新 migration。请求、回执和讨论对象上下文写入 migration 02
 |---|---|
 | `npx tsc --noEmit` | 通过 |
 | `npm run lint` | 通过；0 error，保留既有 1 条 `react-hooks/exhaustive-deps` warning |
-| `npm run test:co-creation` | 19 files，102/102 |
-| `npx vitest run` | 63 files，297/297 |
+| `npm run test:co-creation` | 19 files，104/104 |
+| `npx vitest run` | 63 files，299/299 |
 | `npm test` | Node 正文安全 5/5 |
 | `cargo test` | 203/203 |
 | `cargo check` | 通过；保留既有 10 条 Rust warning |

@@ -305,4 +305,16 @@ describe('co-creation outline frozen compilation', () => {
     expect(first?.protagonists[0].id).toBe('novel-protagonist:novel-fallback:primary');
     expect(second?.protagonists[0].id).toBe(first?.protagonists[0].id);
   });
+
+  it('preserves authoritative sub-millisecond timestamps for source guards', () => {
+    const timestamp = '2026-07-13T10:21:47.955820100+00:00';
+    const normalized = normalizeNovel({
+      id: 'novel-precision', title: '精度测试', description: '', outline: '',
+      protagonists_json: '[]', protagonist_mode: 'single',
+      created_at: timestamp, updated_at: timestamp,
+    });
+
+    expect(normalized?.createdAt).toBe(timestamp);
+    expect(normalized?.updatedAt).toBe(timestamp);
+  });
 });

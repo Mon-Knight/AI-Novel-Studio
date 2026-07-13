@@ -52,6 +52,30 @@ function hasCoCreationValue(value: unknown): boolean {
   return true;
 }
 
+function sameSuggestionArtifact(
+  left: CoCreationWorkingDraftState['suggestions'][number],
+  right: CoCreationWorkingDraftState['suggestions'][number],
+): boolean {
+  return !!left.sourceMessageId && !!left.sourceTaskId && !!left.sourceArtifactId
+    && left.sourceMessageId === right.sourceMessageId
+    && left.sourceTaskId === right.sourceTaskId
+    && left.sourceArtifactId === right.sourceArtifactId;
+}
+
+async function rebaseSuggestionArtifact(
+  state: CoCreationWorkingDraftState,
+  source: CoCreationWorkingDraftState['suggestions'][number],
+  canonical: Awaited<ReturnType<typeof buildCoCreationContext>>['canonical'],
+): Promise<CoCreationWorkingDraftState> {
+  const baseContextHash = await computeCoCreationDataHash(canonical, state.fields);
+  return {
+    ...state,
+    suggestions: state.suggestions.map((item) => (
+      sameSuggestionArtifact(item, source) ? { ...item, baseContextHash } : item
+    )),
+  };
+}
+
 interface PendingTurnMetadata {
   userMessageId: string;
   sourceTaskId: string;
@@ -644,7 +668,7 @@ export function useCoCreationController(
       if (!suggestion.baseContextHash || suggestion.baseContextHash !== latestContext.canonicalDataHash) {
         throw new Error('建议基于旧的数据版本，必须重新生成或合并');
       }
-      const next = acceptSuggestionToDraft(state, suggestionId, {
+      const accepted = acceptSuggestionToDraft(state, suggestionId, {
         editedValue,
         allowReplaceConfirmed,
         acknowledgeConflicts,
@@ -653,6 +677,7 @@ export function useCoCreationController(
       if (!suggestion.sourceMessageId || !suggestion.sourceTaskId || !suggestion.sourceArtifactId) {
         throw new Error('建议缺少可追溯的 Task/Artifact 来源');
       }
+      const next = await rebaseSuggestionArtifact(accepted, suggestion, latestContext.canonical);
       await saveState(next, `accept:${suggestionId}`, 'assistant_proposal_accepted', {
         messageId: suggestion.sourceMessageId,
         taskId: suggestion.sourceTaskId,
@@ -692,6 +717,7 @@ export function useCoCreationController(
       if (!source?.sourceMessageId || !source.sourceTaskId || !source.sourceArtifactId) {
         throw new Error('建议缺少可追溯的 Task/Artifact 来源');
       }
+      state = await rebaseSuggestionArtifact(state, source, latestContext.canonical);
       await saveState(state, 'accept-all', 'assistant_proposal_accepted', {
         messageId: source.sourceMessageId,
         taskId: source.sourceTaskId,

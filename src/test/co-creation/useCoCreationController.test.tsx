@@ -622,6 +622,65 @@ describe('AI co-creation controller recovery and stale safety', () => {
     expect(mocks.saveDraft).not.toHaveBeenCalled();
   });
 
+  it('keeps sibling suggestions from the same Artifact adoptable after a draft decision', async () => {
+    const suggestion = (id: string, fieldPath: string) => ({
+      suggestionId: id,
+      target: { objectType: 'creative_intent' as const, fieldPath },
+      originalValue: null,
+      suggestedValue: id === 'suggestion-1' ? '悬疑' : '紧凑、沉浸',
+      fieldState: 'ai_suggested' as const,
+      sourceType: 'ai_inference' as const,
+      sourceReferences: [],
+      confidence: 0.9,
+      conflicts: [],
+      baseDataRevision: 7,
+      baseContextHash: 'frozen-hash',
+      decision: 'pending' as const,
+      candidateHash: `candidate-${id}`,
+      sourceMessageId: 'assistant-1',
+      sourceTaskId: 'task-1',
+      sourceArtifactId: 'artifact-1',
+    });
+    const activeDraft = draft({
+      origin: 'assistant_turn',
+      artifactId: 'artifact-1',
+      payload: {
+        currentStage: 'creative_intent',
+        fields: {},
+        suggestions: [
+          suggestion('suggestion-1', 'creativeIntent.genre'),
+          suggestion('suggestion-2', 'creativeIntent.readerExperience'),
+        ],
+      },
+    });
+    mocks.open.mockResolvedValue(workspace({ drafts: [activeDraft] }));
+    mocks.buildContext.mockImplementation(async (input) => ({
+      canonicalDataHash: input.activeDraft?.payload.fields
+        && Object.keys(input.activeDraft.payload.fields as object).length > 0
+        ? 'review-hash' : 'frozen-hash',
+      canonical: {},
+    }));
+    mocks.computeDataHash
+      .mockResolvedValueOnce('review-hash')
+      .mockResolvedValueOnce('review-hash-2');
+
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.acceptSuggestion('suggestion-1');
+      await result.current.acceptSuggestion('suggestion-2');
+    });
+
+    expect(result.current.error).toBe('');
+    const latestSave = mocks.saveDraft.mock.calls[mocks.saveDraft.mock.calls.length - 1];
+    const latestPayload = latestSave?.[0].payload;
+    expect(latestPayload.suggestions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ suggestionId: 'suggestion-1', decision: 'accepted_to_draft' }),
+      expect.objectContaining({ suggestionId: 'suggestion-2', decision: 'accepted_to_draft' }),
+    ]));
+  });
+
   it('preserves durable turn and generation metadata when an ordinary field is edited', async () => {
     const activeDraft = draft({
       payload: {

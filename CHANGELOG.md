@@ -1,5 +1,14 @@
 # AI Novel Studio - CHANGELOG
 
+### v2.3.0-M6：桌面实机验收修复
+
+- 使用 Windows 桌面发布构建实测 M4–M6 主链路，修复 Tauri/SQLite 纳秒级 `updated_at` 被前端 `Date` 截断为毫秒后，首次提交共创总纲即被 Rust 来源 guard 误判为版本变化的问题；作品日期规范化现在保留可验证的权威时间戳原文，真实并发变化仍会被精确阻断。
+- 修复同一 Artifact 的多条建议在逐项采用第一条后，因草案 revision/hash 合法推进而把兄弟建议误判为 stale 的问题；同源建议会在一次作者决策后共同 rebase 到新的审查上下文，手工编辑、正式数据变化和跨 Artifact 批量仍保持失败关闭。
+- 桌面 Mock 共创不再只返回空结构，而会生成带 `ai_inference` 来源、置信度和可编辑值的阶段建议，能够离线验收逐项采用、拒绝、批量采用和正式 ApplyPlan；Mock 仍不直接写入 Canon，也不自动生成或采用正文。
+- 共创 Prompt 明确限定 `stageCompletion.status` 的五个精确枚举，避免兼容模型把 `complete` 输出为 `completed` 后触发安全终止；协议解析器继续严格拒绝未声明状态。
+- 桌面复测已覆盖十阶段与会话恢复、只补空白、编辑/拒绝/逐项/批量采用、正式写入与结构化页同步、反向 ApplyPlan、真实 stale 阻断、总纲 Artifact、章节计划 handoff、精确章节预填和正文 Leave Guard；未进入 M7，未新增 migration，正式应用版本仍为 2.2.0。
+- 修复后共创专项 Vitest 104/104、全量 Vitest 299/299、Node 正文安全 5/5、Rust 203/203；TypeScript、ESLint、cargo fmt/check、生产构建与 Tauri MSI/NSIS 构建全部通过。保留基线已有 1 条 ESLint warning、10 条 Rust warning 与 Vite 动静态导入提示，未新增 warning。
+
 ### v2.3.0-M6：共创大纲任务、章节生成交接与双向深链
 
 - AI 共创右栏新增受限生成任务卡，只接受作品总纲、指定卷纲、章节大纲和章节正文工作台交接四类请求；请求记录固定 scope、作者附加要求、`baseContextHash/compiledInputHash`、来源草案、稳定 `operationId/requestHash` 和不可变回执，普通字段编辑不会丢失历史 turn 或任务回执。

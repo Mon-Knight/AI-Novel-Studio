@@ -749,20 +749,61 @@ async fn call_provider(
                     ),
                     _ => ("请用一句话描述你最想写的故事。", vec!["storySeed.premise"]),
                 };
+                let object_type = match stage {
+                    "creative_intent" => "creative_intent",
+                    "world_background" => "world_setting",
+                    "rule_system" => "rule_system",
+                    "protagonist" => "protagonist",
+                    "core_conflict" | "story_arc" | "outline" => "outline",
+                    "chapter_plan" | "chapter_generation" => "chapter",
+                    _ => "story_seed",
+                };
+                let user_message_id = job
+                    .input_payload
+                    .get("userMessageId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown-message");
+                let suggestions = fields
+                    .iter()
+                    .map(|field| {
+                        let suggested_value = match *field {
+                            "creativeIntent.genre" => "悬疑",
+                            "creativeIntent.readerExperience" => "紧凑、沉浸并保留回味",
+                            "chapterPlan.goal" => "推进当前主线目标",
+                            "chapterPlan.conflict" => "让主角在代价与目标之间作出选择",
+                            "chapterPlan.outcome" => "完成阶段推进并留下下一章钩子",
+                            _ => "本地 Mock 结构化补全建议",
+                        };
+                        json!({
+                            "target": { "objectType": object_type, "fieldPath": field },
+                            "originalValue": null,
+                            "suggestedValue": suggested_value,
+                            "fieldState": "ai_suggested",
+                            "sourceType": "ai_inference",
+                            "sourceReferences": [{
+                                "sourceType": "ai_inference",
+                                "sourceId": format!("mock-inference:{user_message_id}"),
+                                "excerpt": "本地 Mock 根据当前阶段生成的可拒绝建议"
+                            }],
+                            "confidence": 0.72,
+                            "conflicts": []
+                        })
+                    })
+                    .collect::<Vec<_>>();
                 json!({
                     "schemaVersion": 1,
-                    "naturalLanguageReply": "这是浏览器/桌面 Mock 模式的共创回复。现有正式数据不会被自动修改。",
+                    "naturalLanguageReply": "这是浏览器/桌面 Mock 模式的共创回复。已生成可逐项采用的结构化建议，现有正式数据不会被自动修改。",
                     "intent": "answer_current_question",
                     "currentStage": stage,
                     "extractedInformation": [],
-                    "pendingConfirmations": [],
+                    "pendingConfirmations": fields,
                     "nextHighValueQuestion": {
                         "question": question,
                         "reason": "这是当前阶段仍缺少的最高价值信息。",
                         "targetFieldPaths": fields.first().map(|value| vec![*value]).unwrap_or_default()
                     },
                     "quickReplies": [],
-                    "changeSuggestions": [],
+                    "changeSuggestions": suggestions,
                     "stageCompletion": {
                         "stage": stage,
                         "status": "not_started",
@@ -1904,6 +1945,19 @@ mod tests {
             Some(1)
         );
         assert_eq!(payload.get("dataRevision").and_then(Value::as_i64), Some(3));
+        assert_eq!(
+            payload
+                .get("changeSuggestions")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            payload
+                .pointer("/changeSuggestions/0/sourceReferences/0/sourceType")
+                .and_then(Value::as_str),
+            Some("ai_inference")
+        );
         assert_eq!(
             persist_success(&mut connection, &job, &response)?,
             "completed"

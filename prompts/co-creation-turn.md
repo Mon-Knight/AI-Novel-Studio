@@ -111,3 +111,5 @@
 ```
 
 `dataRevision` 必须原样返回输入上下文中的值。每轮最多给出四个快捷回答，只询问一个下一高价值问题。
+
+`stageCompletion.status` 只能使用以下五个精确值之一：`not_started`、`in_progress`、`minimum_complete`、`complete`、`skipped`。达到全部最低完备条件时必须使用 `complete`，禁止输出 `completed` 或其他近义词。
