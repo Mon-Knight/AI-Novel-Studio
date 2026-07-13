@@ -107,7 +107,7 @@ function compactContextForModel(context: Awaited<ReturnType<typeof buildCoCreati
   };
 }
 
-function validateOutputSources(
+export function validateCoCreationOutputSources(
   output: CoCreationTurnOutputV1,
   context: Awaited<ReturnType<typeof buildCoCreationContext>>,
   messages: CoCreationMessage[],
@@ -115,6 +115,7 @@ function validateOutputSources(
   expectedUserMessageId?: string,
 ): void {
   const messageIds = new Set(messages.map((message) => message.messageId));
+  if (expectedUserMessageId) messageIds.add(expectedUserMessageId);
   const formalIds = new Set(context.sourceManifest
     .map((source) => source.sourceId)
     .filter((sourceId): sourceId is string => typeof sourceId === 'string'));
@@ -279,7 +280,7 @@ export const conversationOrchestratorService = {
       if (latestContext.canonicalDataHash !== input.expectedCanonicalDataHash) {
         return { status: 'stale', artifactId: browser.artifactId, message: '正式作品数据或共创草案已变化，请重新生成' };
       }
-      validateOutputSources(
+      validateCoCreationOutputSources(
         browser.output, latestContext, input.messages, input.activeDraft, input.expectedUserMessageId,
       );
       return { status: 'completed', output: browser.output, artifactId: browser.artifactId };
@@ -302,7 +303,7 @@ export const conversationOrchestratorService = {
     const output = await parseCoCreationTurnOutput(
       raw, input.expectedDataRevision, input.expectedStage, input.expectedUserMessageId,
     );
-    validateOutputSources(
+    validateCoCreationOutputSources(
       output, latestContext, input.messages, input.activeDraft, input.expectedUserMessageId,
     );
     return { status: 'completed', output, artifactId: artifact.artifactId };

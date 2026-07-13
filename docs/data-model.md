@@ -2304,6 +2304,8 @@ submittedAt
 
 验证通过后只把章节计划预填到现有 AI 生成面板。它不创建正文、草稿、Artifact 或 ApplyPlan；只有作者在工作台手动生成后，现有 `chapter_generate` 管线才创建候选。
 
+`handoff_ready` 回执成功追加后，同一共创工作草案还会写入 `chapterGeneration.chapterId` 与 `chapterGeneration.planReady` 两个 `user_confirmed` 进度字段，使第 10 阶段达到最低完备。它们只表示作者选择的精确章节计划已经可由工作台消费，不是第二套章节数据，也不代表已经生成或采用正文；正文权威状态仍由既有 Task/Artifact/PlacementProposal/ApplyPlan 管线决定。
+
 ## 30.4 工作台讨论上下文
 
 工作台 → 共创使用路由 `location.state` 临时携带 `CoCreationWorkspaceDiscussionHandoffV1`，URL 只包含作品/章节 ID。可选选区固定保存：

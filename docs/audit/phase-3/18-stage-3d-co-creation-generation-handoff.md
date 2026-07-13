@@ -147,6 +147,15 @@ M6 无新 migration。请求、回执和讨论对象上下文写入 migration 02
 4. 章节交接卡显示“只预填、不自动生成/采用”；作者点击后进入精确章节的现有 AI 生成面板。
 5. 非 stale 失败请求保留记录，可使用相同 operationId 重试；正式数据变化导致的 stale 必须重新准备，不能直接重试旧请求。
 6. 正文候选继续在中央审查区查看完整正文、差异和约束；共创页只负责计划和快速导航。
+7. `handoff_ready` 成功持久化后，第 10 阶段的精确章节与计划就绪字段写入同一工作草案并显示 100%；不会写入 Canon，也不会自动生成或采用正文。
+
+### 7.1 真实 API 桌面验收
+
+- 使用发布构建和既有真实 API 配置完成故事种子、创作意图、世界背景、规则体系、主角、核心冲突、故事主线、大纲、章节计划和章节生成交接，左侧 1–10 最终均为 `已完成 · 100%`。
+- 真实总纲完成 Root Task，并生成可在任务中心查看的 `valid` Artifact；没有正式采用。
+- 首次真实章纲返回合法的 fenced JSON，暴露 Rust worker 只接受裸 JSON 的兼容缺口；修复后以同一章节重新生成，Root Task 完成并得到 `valid` 结构化 Artifact，原始 fenced 内容仍完整保留。
+- 正文 handoff 精确打开第一卷第一章与 4,000 字计划，工作台显示真实 API 模式；手动启动后生成 5,543 字正文候选并进入中央候选、差异与约束审查，未点击确认采用。
+- Leave Guard 与恢复快照多次触发时均选择稍后处理，未丢弃或覆盖未保存正文；API Key 全程未读取、修改或重新保存。
 
 ## 8. 验证门禁
 
@@ -158,10 +167,10 @@ M6 无新 migration。请求、回执和讨论对象上下文写入 migration 02
 |---|---|
 | `npx tsc --noEmit` | 通过 |
 | `npm run lint` | 通过；0 error，保留既有 1 条 `react-hooks/exhaustive-deps` warning |
-| `npm run test:co-creation` | 19 files，104/104 |
-| `npx vitest run` | 63 files，299/299 |
+| `npm run test:co-creation` | 19 files，106/106 |
+| `npx vitest run` | 63 files，301/301 |
 | `npm test` | Node 正文安全 5/5 |
-| `cargo test` | 203/203 |
+| `cargo test` | 204/204 |
 | `cargo check` | 通过；保留既有 10 条 Rust warning |
 | `cargo fmt --check` / `git diff --check` | 通过 |
 | `npm run build` | TypeScript + Vite 生产构建通过；保留既有动静态导入提示 |
@@ -180,6 +189,7 @@ M6 无新 migration。请求、回执和讨论对象上下文写入 migration 02
 - 浏览器开发模式不能创建后台大纲 Workflow；可使用 LocalStorage 验证共创草案与章节工作台 handoff。
 - 共创页不显示或编辑完整章节正文，不替代中央审查区。
 - 不自动连续生成多章，不自动采用正文，不自动批量修改关联对象。
+- 真实模型生成的正文仍可能触发长度或一致性问题；本次候选保留在中央审查区，必须由作者修订或重新生成后再决定是否采用。
 - 未实现导演治理、Story State、Memory Planner 或 Multi-Agent。
 
 ## 10. 后续可扩展项（不属于 M6）

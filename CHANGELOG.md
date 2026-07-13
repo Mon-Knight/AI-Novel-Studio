@@ -6,8 +6,10 @@
 - 修复同一 Artifact 的多条建议在逐项采用第一条后，因草案 revision/hash 合法推进而把兄弟建议误判为 stale 的问题；同源建议会在一次作者决策后共同 rebase 到新的审查上下文，手工编辑、正式数据变化和跨 Artifact 批量仍保持失败关闭。
 - 桌面 Mock 共创不再只返回空结构，而会生成带 `ai_inference` 来源、置信度和可编辑值的阶段建议，能够离线验收逐项采用、拒绝、批量采用和正式 ApplyPlan；Mock 仍不直接写入 Canon，也不自动生成或采用正文。
 - 共创 Prompt 明确限定 `stageCompletion.status` 的五个精确枚举，避免兼容模型把 `complete` 输出为 `completed` 后触发安全终止；协议解析器继续严格拒绝未声明状态。
-- 桌面复测已覆盖十阶段与会话恢复、只补空白、编辑/拒绝/逐项/批量采用、正式写入与结构化页同步、反向 ApplyPlan、真实 stale 阻断、总纲 Artifact、章节计划 handoff、精确章节预填和正文 Leave Guard；未进入 M7，未新增 migration，正式应用版本仍为 2.2.0。
-- 修复后共创专项 Vitest 104/104、全量 Vitest 299/299、Node 正文安全 5/5、Rust 203/203；TypeScript、ESLint、cargo fmt/check、生产构建与 Tauri MSI/NSIS 构建全部通过。保留基线已有 1 条 ESLint warning、10 条 Rust warning 与 Vite 动静态导入提示，未新增 warning。
+- 真实 API 返回的章纲 JSON 即使按 Prompt 包含 Markdown code fence，也会在 Rust 后台提取为结构化对象/数组后再进入既有 Artifact 校验；原始内容仍完整保留，标量、畸形 JSON 和 schema 无效结果继续失败关闭。
+- 成功持久化的章节 handoff 会把精确 `chapterGeneration.chapterId/planReady` 投影到同一共创工作草案，使第 10 阶段在可交接后完成到 100%；该投影不写 Canon，不表示正文已采用。
+- 桌面真实 API 复测已覆盖十阶段与会话恢复、只补空白、编辑/拒绝/逐项采用、总纲与章纲 Artifact、章节计划 handoff、精确章节预填、正文 Leave Guard 及 5,543 字正文候选中央审查；1–10 阶段全部 100%，正文候选未自动采用，API Key 未读取或修改。未进入 M7，未新增 migration，正式应用版本仍为 2.2.0。
+- 修复后共创专项 Vitest 106/106、全量 Vitest 301/301、Node 正文安全 5/5、Rust 204/204；TypeScript、ESLint、cargo fmt/check、生产构建与 Tauri MSI/NSIS 构建全部通过。保留基线已有 1 条 ESLint warning、10 条 Rust warning 与 Vite 动静态导入提示，未新增 warning。
 
 ### v2.3.0-M6：共创大纲任务、章节生成交接与双向深链
 

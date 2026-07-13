@@ -488,12 +488,14 @@ export function useCoCreationController(
         });
       } catch (value) {
         if (!terminalValidationFailure(value)) throw value;
-        setNotice('AI 返回的结构化结果未通过校验，本轮已安全终止。');
+        const reason = safeFailureMessage(value instanceof Error
+          ? value.message : 'AI 共创结构化结果未通过校验');
+        setNotice(`AI 返回的结构化结果未通过校验，本轮已安全终止：${reason}`);
         return terminalizeTurnFailure(
           current,
           pending,
           'CO_CREATION_OUTPUT_INVALID',
-          'AI 共创结构化结果未通过校验',
+          reason,
         );
       }
       if (result.status === 'pending') {
@@ -555,9 +557,11 @@ export function useCoCreationController(
         });
       } catch (value) {
         if (!terminalValidationFailure(value)) throw value;
-        setNotice('AI 结果已失效或未通过校验，本轮已安全终止。');
+        const reason = safeFailureMessage(value instanceof Error
+          ? value.message : 'AI 共创 Artifact 未通过校验');
+        setNotice(`AI 结果已失效或未通过校验，本轮已安全终止：${reason}`);
         return terminalizeTurnFailure(
-          current, pending, 'ARTIFACT_VALIDATION_FAILED', 'AI 共创 Artifact 未通过校验',
+          current, pending, 'ARTIFACT_VALIDATION_FAILED', reason,
         );
       }
       const projected = await projectAssistantTurn({ workspace: completed, pending, output: result.output });
@@ -908,6 +912,21 @@ export function useCoCreationController(
     objectContext = workspace.session.objectContext,
   ) => {
     const state = deserializeWorkingDraft(workspace.activeDraft?.payload);
+    if (record.status === 'handoff_ready'
+        && record.request.kind === 'chapter_generation_handoff'
+        && record.request.chapterId
+        && record.request.chapterPlan?.trim()
+        && record.receipt?.receiptType === 'chapter_generation_handoff'
+        && record.receipt.chapterId === record.request.chapterId) {
+      state.fields['chapterGeneration.chapterId'] = {
+        value: record.request.chapterId,
+        state: 'user_confirmed',
+      };
+      state.fields['chapterGeneration.planReady'] = {
+        value: true,
+        state: 'user_confirmed',
+      };
+    }
     const basePayload = draftPayload({
       snapshot: workspace,
       state,

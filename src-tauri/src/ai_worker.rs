@@ -537,17 +537,7 @@ fn classify_provider_error(message: String) -> WorkerFailure {
 }
 
 fn normalized_quality_payload(text: &str) -> Option<Value> {
-    let trimmed = text.trim();
-    let unfenced = if trimmed.starts_with("```") {
-        let first_line = trimmed.find('\n').map(|index| index + 1).unwrap_or(0);
-        let end = trimmed.rfind("```").unwrap_or(trimmed.len());
-        &trimmed[first_line..end]
-    } else {
-        trimmed
-    };
-    let start = unfenced.find('{')?;
-    let end = unfenced.rfind('}')? + 1;
-    let mut value: Value = serde_json::from_str(&unfenced[start..end]).ok()?;
+    let mut value = structured_json_payload(text)?;
     let object = value.as_object_mut()?;
     if !object.contains_key("overallScore") {
         if let Some(score) = object.remove("overall_score") {
@@ -560,6 +550,61 @@ fn normalized_quality_payload(text: &str) -> Option<Value> {
         return None;
     }
     Some(value)
+}
+
+fn structured_json_payload(text: &str) -> Option<Value> {
+    let trimmed = text.trim().trim_start_matches('\u{feff}').trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        if value.is_object() || value.is_array() {
+            return Some(value);
+        }
+    }
+
+    let unfenced = if trimmed.starts_with("```") {
+        let first_line = trimmed.find('\n').map(|index| index + 1).unwrap_or(0);
+        let end = trimmed.rfind("```").unwrap_or(trimmed.len());
+        trimmed[first_line..end].trim()
+    } else {
+        trimmed
+    };
+    if let Ok(value) = serde_json::from_str::<Value>(unfenced) {
+        if value.is_object() || value.is_array() {
+            return Some(value);
+        }
+    }
+
+    let object = unfenced
+        .find('{')
+        .zip(unfenced.rfind('}'))
+        .filter(|(start, end)| end > start)
+        .map(|(start, end)| (start, &unfenced[start..=end]));
+    let array = unfenced
+        .find('[')
+        .zip(unfenced.rfind(']'))
+        .filter(|(start, end)| end > start)
+        .map(|(start, end)| (start, &unfenced[start..=end]));
+    [object, array]
+        .into_iter()
+        .flatten()
+        .min_by_key(|(start, _)| *start)
+        .and_then(|(_, candidate)| serde_json::from_str::<Value>(candidate).ok())
+        .filter(|value| value.is_object() || value.is_array())
+}
+
+fn requires_structured_json(artifact_type: &str) -> bool {
+    matches!(
+        artifact_type,
+        "quality_report"
+            | "generic_json"
+            | "character_candidates"
+            | "event_candidates"
+            | "setting_candidates"
+            | "style_analysis"
+            | "chapter_summary"
+            | "volume_summary"
+            | "volume_outline"
+            | "chapter_outlines"
+    )
 }
 
 async fn call_provider(
@@ -1163,6 +1208,8 @@ fn persist_success(
     }
     let payload = if matches!(job.task_type.as_str(), "quality_check" | "quality_recheck") {
         normalized_quality_payload(&response.text)
+    } else if requires_structured_json(&job.artifact_type) {
+        structured_json_payload(&response.text)
     } else {
         serde_json::from_str::<Value>(&response.text).ok()
     };
@@ -2078,6 +2125,77 @@ mod tests {
             )?,
             "draft-a"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn worker14a_fenced_chapter_outline_json_remains_a_valid_review_candidate(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let created = workflow_service::create_background_workflow(
+            &mut connection,
+            workflow_service::CreateBackgroundWorkflowInput {
+                operation_id: "stage2d-fenced-chapter-outline".into(),
+                workflow_name: "Chapter outline".into(),
+                task_type: "chapter_outline_generate".into(),
+                novel_id: "novel-a".into(),
+                chapter_id: Some("chapter-a".into()),
+                draft_id: None,
+                scope_type: "chapter".into(),
+                target_hint_json: None,
+                input_payload_json: json!({}),
+                input_body: Some("source".into()),
+                source_manifest_json: json!([]),
+                source_draft_version: None,
+                base_content_hash: None,
+                provider_options_json: json!({"provider":"mock","model":"Mock"}),
+                steps: vec![workflow_service::BackgroundWorkflowStepInput {
+                    step_key: "chapter_outlines".into(),
+                    task_type: "chapter_outline_generate".into(),
+                    agent_role: "outline".into(),
+                    artifact_type: "chapter_outlines".into(),
+                    messages: json!([{"role":"user","content":"run"}]),
+                    dependencies: vec![],
+                    priority: None,
+                    review_output: true,
+                }],
+            },
+        )?;
+        let job =
+            claim_next(&mut connection, "owner-fenced-outline")?.expect("chapter outline claim");
+        let response = AiChatCompletionResponse {
+            text: "```json\n{\"chapters\":[{\"title\":\"代价初现\",\"outline\":\"推进调查\",\"goal\":\"揭示代价\",\"targetWordCount\":4000}]}\n```".into(),
+            raw: json!({}),
+            token_input: Some(1),
+            token_output: Some(1),
+            total_tokens: Some(2),
+        };
+
+        assert_eq!(
+            persist_success(&mut connection, &job, &response)?,
+            "completed"
+        );
+        let (processing_status, structured): (String, String) = connection.query_row(
+            "SELECT processing_status,structured_payload_json FROM result_artifacts WHERE task_id=?1",
+            params![job.task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(processing_status, "valid");
+        let structured: Value = serde_json::from_str(&structured)?;
+        assert_eq!(
+            structured
+                .pointer("/chapters/0/title")
+                .and_then(Value::as_str),
+            Some("代价初现")
+        );
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM artifact_placement_proposals p JOIN result_artifacts r ON r.artifact_id=p.artifact_id WHERE r.task_id=?1",params![job.task_id],|row| row.get::<_,i64>(0))?,1);
+        assert!(connection
+            .query_row(
+                "SELECT result_artifact_id FROM ai_tasks WHERE task_id=?1",
+                params![created.root_task_id],
+                |row| row.get::<_, Option<String>>(0)
+            )?
+            .is_some());
         Ok(())
     }
 

@@ -751,6 +751,16 @@ describe('AI co-creation controller recovery and stale safety', () => {
         }),
       }),
     }));
+    const completedCall = mocks.saveDraft.mock.calls.find((call) => (
+      call[0].payload.generationRequests?.[0]?.status === 'handoff_ready'
+    ));
+    expect(completedCall?.[0].payload.fields).toEqual(expect.objectContaining({
+      'chapterGeneration.chapterId': { value: 'chapter-1', state: 'user_confirmed' },
+      'chapterGeneration.planReady': { value: true, state: 'user_confirmed' },
+    }));
+    expect(completedCall?.[0].payload.stageProgress).toContainEqual(expect.objectContaining({
+      stage: 'chapter_generation', status: 'complete', percentage: 100,
+    }));
   });
 
   it('reconciles a committed generation record when its save response is lost', async () => {

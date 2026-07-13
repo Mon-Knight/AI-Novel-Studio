@@ -110,4 +110,44 @@ describe('conversation orchestrator recovery and stale boundary', () => {
     await expect(conversationOrchestratorService.pollTurn(pollInput))
       .rejects.toThrow('AI 共创结构化结果无效：currentStage 与冻结阶段不一致');
   });
+
+  it('trusts the exact user message frozen into the Task when the UI snapshot has not caught up', async () => {
+    mocks.buildContext.mockResolvedValue({
+      canonicalDataHash: 'frozen-hash', sourceManifest: [], objectContext: { novelId: 'novel-1' },
+    });
+    mocks.getArtifact.mockResolvedValue({
+      artifactId: 'artifact-1',
+      structuredPayload: {
+        schemaVersion: 1,
+        naturalLanguageReply: '故事种子已提取。',
+        intent: 'answer_current_question',
+        currentStage: 'story_seed',
+        extractedInformation: [{
+          target: { objectType: 'story_seed', fieldPath: 'storySeed.premise' },
+          value: '民国湘西的赶尸谜案', fieldState: 'user_confirmed',
+          sourceReferences: [{ sourceType: 'author_message', sourceId: 'user-1' }],
+          confidence: 1,
+        }],
+        pendingConfirmations: [],
+        nextHighValueQuestion: null,
+        quickReplies: [],
+        changeSuggestions: [{
+          target: { objectType: 'core_conflict', fieldPath: 'coreConflict.parties' },
+          originalValue: null, suggestedValue: '主角与神秘力量对抗', fieldState: 'ai_suggested',
+          sourceType: 'author_message',
+          sourceReferences: [{ sourceType: 'author_message', sourceId: 'user-1' }],
+          confidence: 0.8, conflicts: [], baseTargetVersion: null, baseTargetHash: null,
+        }],
+        stageCompletion: {
+          stage: 'story_seed', status: 'complete',
+          completedRequiredFields: ['storySeed.premise'], missingRequiredFields: [], percentage: 100,
+        },
+        dataRevision: 7,
+      },
+    });
+
+    await expect(conversationOrchestratorService.pollTurn(pollInput)).resolves.toEqual(expect.objectContaining({
+      status: 'completed', artifactId: 'artifact-1',
+    }));
+  });
 });

@@ -30,6 +30,8 @@ function payload(overrides: Record<string, unknown> = {}) {
       sourceReferences: [{ sourceType: 'author_message', sourceId: 'message-1' }],
       confidence: 0.8,
       conflicts: [],
+      baseTargetVersion: null,
+      baseTargetHash: null,
     }],
     stageCompletion: {
       stage: 'story_seed', status: 'complete',
@@ -47,6 +49,8 @@ describe('co-creation turn protocol', () => {
     expect(result.changeSuggestions[0].suggestionId).toBeTruthy();
     expect(result.changeSuggestions[0].candidateHash).toMatch(/^[a-f0-9]{64}$/);
     expect(result.changeSuggestions[0].baseDataRevision).toBe(3);
+    expect(result.changeSuggestions[0].baseTargetVersion).toBeUndefined();
+    expect(result.changeSuggestions[0].baseTargetHash).toBeUndefined();
   });
 
   it('rejects stale data revisions', async () => {
@@ -103,6 +107,22 @@ describe('co-creation turn protocol', () => {
     });
     await expect(parseCoCreationTurnOutput(JSON.stringify(changed), 3))
       .rejects.toThrow('与目标类型不匹配');
+  });
+
+  it('normalizes documented stage aliases to their canonical object types', async () => {
+    const changed = payload({
+      changeSuggestions: [{
+        target: { objectType: 'core_conflict', fieldPath: 'coreConflict.parties' },
+        originalValue: null, suggestedValue: '主角与神秘力量对抗', fieldState: 'ai_suggested',
+        sourceType: 'author_message',
+        sourceReferences: [{ sourceType: 'author_message', sourceId: 'message-1' }],
+        confidence: 0.8, conflicts: [], baseTargetVersion: null, baseTargetHash: null,
+      }],
+    });
+    const result = await parseCoCreationTurnOutput(JSON.stringify(changed), 3);
+    expect(result.changeSuggestions[0].target).toEqual({
+      objectType: 'outline', fieldPath: 'coreConflict.parties',
+    });
   });
 
   it('fails closed when the response contains credentials', async () => {

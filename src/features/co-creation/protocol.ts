@@ -35,6 +35,14 @@ const OBJECT_PREFIXES: Record<string, readonly string[]> = {
   chapter: ['chapterPlan.', 'chapterGeneration.'],
 };
 
+const OBJECT_TYPE_ALIASES: Record<string, keyof typeof OBJECT_PREFIXES> = {
+  world_background: 'world_setting',
+  core_conflict: 'outline',
+  story_arc: 'outline',
+  chapter_plan: 'chapter',
+  chapter_generation: 'chapter',
+};
+
 function protocolError(message: string): never {
   throw new Error(`AI 共创结构化结果无效：${message}`);
 }
@@ -129,7 +137,9 @@ function sourceReferences(value: unknown, label: string): CoCreationSourceRefere
 
 function target(value: unknown, label: string): CoCreationFieldSuggestionV1['target'] {
   const input = record(value, label);
-  const objectType = text(input.objectType, `${label}.objectType`) as CoCreationFieldSuggestionV1['target']['objectType'];
+  const rawObjectType = text(input.objectType, `${label}.objectType`);
+  const objectType = (OBJECT_TYPE_ALIASES[rawObjectType] ?? rawObjectType) as
+    CoCreationFieldSuggestionV1['target']['objectType'];
   const prefixes = OBJECT_PREFIXES[objectType];
   if (!prefixes) protocolError(`${label}.objectType 不受支持`);
   const fieldPath = text(input.fieldPath, `${label}.fieldPath`);
@@ -181,7 +191,7 @@ async function suggestion(
   const suggestedValue = input.suggestedValue ?? null;
   assertSafeJsonNumbers(originalValue, `changeSuggestions[${index}].originalValue`);
   assertSafeJsonNumbers(suggestedValue, `changeSuggestions[${index}].suggestedValue`);
-  if (input.baseTargetVersion !== undefined
+  if (input.baseTargetVersion !== undefined && input.baseTargetVersion !== null
       && (typeof input.baseTargetVersion !== 'number' || !Number.isSafeInteger(input.baseTargetVersion))) {
     protocolError(`changeSuggestions[${index}].baseTargetVersion 必须是安全整数`);
   }

@@ -35,7 +35,7 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 已经采用到草案的创作意图、世界背景、规则体系和主角建议，必须再次经过 PlacementProposal → ApplyPlan 审查确认，才会在 SQLite `BEGIN IMMEDIATE` 事务中写入唯一 Canon。目标 version/hash、候选来源、草案 revision/hash、幂等和 stale 均会复核；反向撤销也创建新的可审计 Proposal/ApplyPlan，不删除历史证据。
 
-总纲、卷纲和章纲可从共创任务卡提交到既有后台 Workflow；提交前会重开权威会话，以同一批来源严格编译最终 Prompt、来源清单、输入和非密钥 Provider 参数，通过 `baseContextHash + compiledInputHash` 复核后冻结提交，提交阶段不再二次读取作品数据。结果继续进入 Artifact 与任务中心人工审查。章节正文不在共创页生成：系统只把已确认章节计划安全交接到工作台现有 AI 生成面板，作者检查上下文后手动启动，候选仍经过约束、差异和中央审查区，不自动采用。
+总纲、卷纲和章纲可从共创任务卡提交到既有后台 Workflow；提交前会重开权威会话，以同一批来源严格编译最终 Prompt、来源清单、输入和非密钥 Provider 参数，通过 `baseContextHash + compiledInputHash` 复核后冻结提交，提交阶段不再二次读取作品数据。结果继续进入 Artifact 与任务中心人工审查。章节正文不在共创页生成：系统只把已确认章节计划安全交接到工作台现有 AI 生成面板，作者检查上下文后手动启动，候选仍经过约束、差异和中央审查区，不自动采用；交接回执持久化后，第 10 阶段只标记“计划已可交接”，不把正文候选冒充为正式正文。
 
 ---
 
