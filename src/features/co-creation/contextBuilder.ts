@@ -346,9 +346,22 @@ export async function buildCoCreationContext(input: {
       version: activeCreativeIntent.intent.revision,
       contentHash: activeCreativeIntent.intent.contentHash,
     }] : []),
+    {
+      sourceType: 'creative_intent_state',
+      sourceId: novel.id,
+      version: creativeIntent?.intent.revision ?? 0,
+      contentHash: creativeIntent?.intent.contentHash ?? 'missing',
+    },
     ...novel.protagonists
-      .filter((item) => typeof item.id === 'string' && item.id)
-      .map((item) => ({ sourceType: 'character', sourceId: item.id, version: novel.updatedAt })),
+      .filter((item) => (
+        typeof item.id === 'string' && item.id
+        && !item.id.startsWith(`novel-protagonist:${novel.id}:`)
+      ))
+      .map((item) => ({
+        sourceType: 'novel_protagonist',
+        sourceId: item.id,
+        version: novel.updatedAt,
+      })),
     ...(legacyProtagonist?.id
       ? [{
           sourceType: 'legacy_protagonist',

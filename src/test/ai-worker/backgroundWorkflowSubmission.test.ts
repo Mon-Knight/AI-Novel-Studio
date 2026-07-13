@@ -58,4 +58,18 @@ describe('stage 2D background workflow submission', () => {
       expect(args.input.providerOptionsJson).not.toHaveProperty('apiKey');
     },
   );
+
+  it('preserves provider options that were frozen during compilation', async () => {
+    const input = spec('outline_generate');
+    input.providerOptionsJson = {
+      provider: 'openai', model: 'frozen-model', temperature: 0.2,
+      maxTokens: 6_000, timeoutSeconds: 75,
+    };
+
+    await aiWorkflowService.createBackground(input);
+
+    const [, args] = mocks.dbCall.mock.calls[0];
+    expect(args.input.providerOptionsJson).toEqual(input.providerOptionsJson);
+    expect(args.input.providerOptionsJson).not.toHaveProperty('apiKey');
+  });
 });

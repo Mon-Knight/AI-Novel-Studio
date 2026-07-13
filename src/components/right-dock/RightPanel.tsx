@@ -6,6 +6,7 @@ import type { AiTextApplyPayload, DraftResultMetadata } from '../../types/worksp
 import type { WritingContext } from '../../utils/writingContext';
 import type { CandidateGenerationActivity, CandidateReviewRecord } from '../../types/placement';
 import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
+import type { CoCreationChapterGenerationHandoffV1 } from '../../types/coCreation';
 import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
 import AiGeneratePanel from './panels/AiGeneratePanel';
 import ChapterEngineeringPanel from './panels/ChapterEngineeringPanel';
@@ -56,6 +57,7 @@ interface RightPanelProps {
   /** v1.0.45 更新面板运行时状态 */
   onUpdateToolState?: (toolKey: string, patch: Partial<PanelToolState>) => void;
   documentAvailable?: boolean;
+  generationHandoff?: CoCreationChapterGenerationHandoffV1 | null;
 }
 
 const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
@@ -104,6 +106,7 @@ function RightPanel({
   sidebarState,
   onUpdateToolState,
   documentAvailable = true,
+  generationHandoff,
 }: RightPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   // v1.0.44: 记住上次活跃面板类型，收起时用 CSS 隐藏而非卸载，保留面板内部状态
@@ -203,6 +206,7 @@ function RightPanel({
             onBeforeDocumentChange={onBeforeDocumentChange}
             onCandidateReviewChange={onCandidateReviewChange}
             onCandidateGenerationChange={onCandidateGenerationChange}
+            generationHandoff={generationHandoff}
             showAiModal={showAiModal}
             updateAiModal={updateAiModal}
             hideAiModal={hideAiModal}

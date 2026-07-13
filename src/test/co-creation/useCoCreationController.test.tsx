@@ -4,8 +4,10 @@ import type {
   CoCreationDraftRevision,
   CoCreationMessage,
   CoCreationTurnOutputV1,
+  CoCreationWorkspaceDiscussionHandoffV1,
   CoCreationWorkspaceSnapshot,
 } from '../../types/coCreation';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(),
@@ -18,11 +20,15 @@ const mocks = vi.hoisted(() => ({
   submitTurn: vi.fn(),
   pollTurn: vi.fn(),
   getNovel: vi.fn(),
+  getChapter: vi.fn(),
+  getLatestDraft: vi.fn(),
   buildContext: vi.fn(),
   computeDataHash: vi.fn(),
   prepareApply: vi.fn(),
   executeApply: vi.fn(),
   prepareUndo: vi.fn(),
+  executeGeneration: vi.fn(),
+  compileGenerationContext: vi.fn(),
 }));
 
 vi.mock('../../services/co-creation/coCreationSessionService', () => ({
@@ -48,6 +54,14 @@ vi.mock('../../services/database/novelRepository', () => ({
   novelRepository: { getById: mocks.getNovel },
 }));
 
+vi.mock('../../services/database/chapterRepository', () => ({
+  chapterRepository: { getById: mocks.getChapter },
+}));
+
+vi.mock('../../services/database/draftVersionService', () => ({
+  draftVersionService: { getLatestByChapterId: mocks.getLatestDraft },
+}));
+
 vi.mock('../../features/co-creation/contextBuilder', () => ({
   buildCoCreationContext: mocks.buildContext,
   computeCoCreationDataHash: mocks.computeDataHash,
@@ -58,6 +72,13 @@ vi.mock('../../services/co-creation/coCreationApplyService', () => ({
     prepare: mocks.prepareApply,
     execute: mocks.executeApply,
     prepareUndo: mocks.prepareUndo,
+  },
+}));
+
+vi.mock('../../services/co-creation/coCreationGenerationService', () => ({
+  coCreationGenerationService: {
+    execute: mocks.executeGeneration,
+    compileBaseContext: mocks.compileGenerationContext,
   },
 }));
 
@@ -243,6 +264,10 @@ function completeWorkspace(
 describe('AI co-creation controller recovery and stale safety', () => {
   beforeEach(() => {
     mocks.getNovel.mockResolvedValue({ id: 'novel-1', title: '记忆之城' });
+    mocks.getChapter.mockResolvedValue({
+      id: 'chapter-1', novelId: 'novel-1', volumeId: 'volume-1', title: '第一章',
+    });
+    mocks.getLatestDraft.mockResolvedValue(null);
     mocks.buildContext.mockResolvedValue({ canonicalDataHash: 'frozen-hash', canonical: {} });
     mocks.computeDataHash.mockResolvedValue('review-hash');
     mocks.recoverTurnTask.mockResolvedValue(null);
@@ -255,6 +280,23 @@ describe('AI co-creation controller recovery and stale safety', () => {
     mocks.pollTurn.mockResolvedValue({
       status: 'completed', artifactId: 'artifact-1', output: output(),
     });
+    mocks.executeGeneration.mockResolvedValue({
+      receiptType: 'chapter_generation_handoff',
+      handoffId: 'co-creation-handoff:request-1',
+      requestId: 'request-1',
+      requestHash: 'request-hash',
+      novelId: 'novel-1',
+      volumeId: 'volume-1',
+      chapterId: 'chapter-1',
+      chapterPlan: '本章目标：找到线索',
+      baseContextHash: 'frozen-hash',
+      createdAt: '2026-07-13T00:00:00.000Z',
+    });
+    mocks.compileGenerationContext.mockImplementation(async (_workspace, input) => ({
+      baseContextHash: 'frozen-hash',
+      ...(input.kind === 'chapter_generation_handoff'
+        ? {} : { compiledInputHash: 'compiled-input-hash' }),
+    }));
     mocks.bindTurnTask.mockImplementation(async ({ workspace: current, taskId, turnContext: context }) => {
       const messages = current.messages.map((message: CoCreationMessage) => message.messageId === 'user-1'
         ? { ...message, sourceTaskId: taskId, turnContext: context }
@@ -271,6 +313,81 @@ describe('AI co-creation controller recovery and stale safety', () => {
       return workspace({ messages, drafts: current.draftRevisions });
     });
     mocks.saveDraft.mockImplementation(async (input) => withDraft(input.workspace, input));
+  });
+
+  it('persists a workspace selection only after the latest full draft passes hash and range verification', async () => {
+    const content = '开端\n被选中的段落\n结尾';
+    const selectionStart = content.indexOf('被选中');
+    const selectionEnd = selectionStart + '被选中的段落'.length;
+    const handoff: CoCreationWorkspaceDiscussionHandoffV1 = {
+      schemaVersion: 1,
+      handoffId: 'handoff-1',
+      novelId: 'novel-1',
+      volumeId: 'volume-1',
+      chapterId: 'chapter-1',
+      draftId: 'draft-old',
+      draftVersion: 2,
+      documentContentHash: await computeContentSha256(content),
+      selectionStart,
+      selectionEnd,
+      selectedText: '被选中的段落',
+      selectedTextHash: await computeContentSha256('被选中的段落'),
+      createdAt: '2026-07-14T00:00:00.000Z',
+    };
+    mocks.open.mockResolvedValue(workspace());
+    mocks.getLatestDraft.mockResolvedValue({
+      id: 'draft-saved', novelId: 'novel-1', chapterId: 'chapter-1', versionNo: 3,
+      content, contentState: { status: 'ready', content, contentHash: 'hash', contentLength: content.length },
+    });
+
+    const { result } = renderHook(() => useCoCreationController('novel-1', 'chapter-1', handoff));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mocks.saveDraft).toHaveBeenCalledWith(expect.objectContaining({
+      origin: 'author_edit',
+      payload: expect.objectContaining({
+        objectContext: expect.objectContaining({
+          novelId: 'novel-1', chapterId: 'chapter-1', volumeId: 'volume-1',
+          objectType: 'chapter', objectId: 'chapter-1', discussionHandoffId: 'handoff-1',
+          selectedText: '被选中的段落', draftId: 'draft-saved', draftVersion: 3,
+          selectionStart, selectionEnd,
+        }),
+      }),
+    }));
+    expect(result.current.notice).toContain('安全恢复');
+  });
+
+  it('drops a dirty-editor selection after the author discards it and the persisted body hash differs', async () => {
+    const dirtyContent = '未保存且最终放弃的正文';
+    const handoff: CoCreationWorkspaceDiscussionHandoffV1 = {
+      schemaVersion: 1,
+      handoffId: 'handoff-stale',
+      novelId: 'novel-1',
+      chapterId: 'chapter-1',
+      documentContentHash: await computeContentSha256(dirtyContent),
+      selectionStart: 0,
+      selectionEnd: dirtyContent.length,
+      selectedText: dirtyContent,
+      selectedTextHash: await computeContentSha256(dirtyContent),
+      createdAt: '2026-07-14T00:00:00.000Z',
+    };
+    mocks.open.mockResolvedValue(workspace());
+    mocks.getLatestDraft.mockResolvedValue({
+      id: 'draft-persisted', novelId: 'novel-1', chapterId: 'chapter-1', versionNo: 2,
+      content: '仍然是原正文',
+      contentState: { status: 'ready', content: '仍然是原正文', contentHash: 'hash', contentLength: 7 },
+    });
+
+    const { result } = renderHook(() => useCoCreationController('novel-1', 'chapter-1', handoff));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const lastSaveCall = mocks.saveDraft.mock.calls[mocks.saveDraft.mock.calls.length - 1];
+    const savedContext = lastSaveCall?.[0].payload.objectContext;
+    expect(savedContext).toEqual(expect.objectContaining({
+      novelId: 'novel-1', chapterId: 'chapter-1', objectType: 'chapter', objectId: 'chapter-1',
+    }));
+    expect(savedContext.selectedText).toBeUndefined();
+    expect(result.current.notice).toContain('正文已变化');
   });
 
   it('recovers a crash immediately after appending the user message', async () => {
@@ -503,6 +620,194 @@ describe('AI co-creation controller recovery and stale safety', () => {
 
     expect(result.current.error).toContain('建议基于旧的数据版本');
     expect(mocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('preserves durable turn and generation metadata when an ordinary field is edited', async () => {
+    const activeDraft = draft({
+      payload: {
+        currentStage: 'story_seed',
+        fields: {},
+        suggestions: [],
+        lastTurn: { intent: 'generate_outline', naturalLanguageReply: '可以开始生成总纲。' },
+        generationRequests: [{ request: { requestId: 'request-a' }, status: 'submitted' }],
+      },
+    });
+    mocks.open.mockResolvedValue(workspace({ drafts: [activeDraft] }));
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    mocks.saveDraft.mockClear();
+
+    await act(async () => {
+      await result.current.editField('storySeed.premise', '记忆可以被交易');
+    });
+
+    expect(mocks.saveDraft).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        lastTurn: expect.objectContaining({ intent: 'generate_outline' }),
+        generationRequests: [expect.objectContaining({ status: 'submitted' })],
+      }),
+    }));
+  });
+
+  it('preserves a verified selection when preparing generation for the same chapter', async () => {
+    const activeDraft = draft({
+      payload: {
+        currentStage: 'chapter_plan',
+        fields: {
+          'chapterPlan.goal': { value: '找到失落线索', state: 'user_confirmed' },
+        },
+        suggestions: [],
+      },
+    });
+    const initial = workspace({ drafts: [activeDraft] });
+    initial.session.objectContext = {
+      novelId: 'novel-1',
+      volumeId: 'volume-1',
+      chapterId: 'chapter-1',
+      selectedText: '被选中的段落',
+      selectedTextHash: 'selection-hash',
+      documentContentHash: 'document-hash',
+      selectionStart: 2,
+      selectionEnd: 9,
+    };
+    mocks.open.mockResolvedValue(initial);
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    mocks.saveDraft.mockClear();
+
+    await act(async () => {
+      await result.current.startGeneration({
+        kind: 'chapter_generation_handoff',
+        volumeId: 'volume-1',
+        chapterId: 'chapter-1',
+      });
+    });
+
+    expect(mocks.saveDraft).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        objectContext: expect.objectContaining({
+          chapterId: 'chapter-1',
+          selectedText: '被选中的段落',
+          selectedTextHash: 'selection-hash',
+        }),
+      }),
+    }));
+  });
+
+  it('reconciles a committed generation record when its save response is lost', async () => {
+    const activeDraft = draft({
+      payload: {
+        currentStage: 'chapter_plan',
+        fields: {
+          'chapterPlan.goal': { value: '找到失落线索', state: 'user_confirmed' },
+        },
+        suggestions: [],
+      },
+    });
+    let authoritative = workspace({ drafts: [activeDraft] });
+    mocks.open.mockImplementation(async () => authoritative);
+    let lostResponse = false;
+    mocks.saveDraft.mockImplementation(async (input) => {
+      const saved = withDraft(input.workspace, input);
+      authoritative = saved;
+      const statuses = (input.payload.generationRequests as Array<{ status?: string }> | undefined)
+        ?.map((record) => record.status) ?? [];
+      if (!lostResponse && statuses.includes('handoff_ready')) {
+        lostResponse = true;
+        throw new Error('commit response lost');
+      }
+      return saved;
+    });
+
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.startGeneration({
+        kind: 'chapter_generation_handoff',
+        volumeId: 'volume-1',
+        chapterId: 'chapter-1',
+      });
+    });
+
+    expect(lostResponse).toBe(true);
+    expect(result.current.error).toBe('');
+    expect(result.current.notice).toContain('安全交接');
+    const savedStatuses = mocks.saveDraft.mock.calls.map((call) => (
+      (call[0].payload.generationRequests as Array<{ status?: string }> | undefined)?.[0]?.status
+    ));
+    expect(savedStatuses).toEqual(['prepared', 'handoff_ready']);
+    expect(savedStatuses).not.toContain('failed');
+    const completedCall = mocks.saveDraft.mock.calls[1][0];
+    const completedRecord = completedCall.payload.generationRequests[0];
+    expect(completedCall.operationId).toMatch(
+      /^co-creation:session-1:generation:.+:handoff_ready$/,
+    );
+    expect(completedRecord.updatedAt).toBe(completedRecord.request.createdAt);
+    expect(mocks.open).toHaveBeenCalledTimes(2);
+    expect(result.current.snapshot?.activeDraft?.payload.generationRequests)
+      .toEqual([expect.objectContaining({ status: 'handoff_ready' })]);
+  });
+
+  it('drops the old selection when preparing generation for another chapter', async () => {
+    const activeDraft = draft({
+      payload: {
+        currentStage: 'chapter_plan',
+        fields: {
+          'chapterPlan.goal': { value: '找到失落线索', state: 'user_confirmed' },
+        },
+        suggestions: [],
+      },
+    });
+    const initial = workspace({ drafts: [activeDraft] });
+    initial.session.objectContext = {
+      novelId: 'novel-1', chapterId: 'chapter-1', selectedText: '旧章节选区',
+    };
+    mocks.open.mockResolvedValue(initial);
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    mocks.saveDraft.mockClear();
+
+    await act(async () => {
+      await result.current.startGeneration({
+        kind: 'chapter_generation_handoff',
+        volumeId: 'volume-2',
+        chapterId: 'chapter-2',
+      });
+    });
+
+    const preparedCall = mocks.saveDraft.mock.calls.find((call) => (
+      call[0].payload.generationRequests?.[0]?.status === 'prepared'
+    ));
+    expect(preparedCall?.[0].payload.objectContext).toEqual({
+      novelId: 'novel-1', volumeId: 'volume-2', chapterId: 'chapter-2',
+    });
+  });
+
+  it('blocks direct retry of a stale generation request', async () => {
+    const activeDraft = draft({
+      payload: {
+        currentStage: 'outline',
+        fields: {},
+        suggestions: [],
+        generationRequests: [{
+          request: { requestId: 'request-stale' },
+          status: 'failed',
+          errorCode: 'CO_CREATION_GENERATION_STALE',
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        }],
+      },
+    });
+    mocks.open.mockResolvedValue(workspace({ drafts: [activeDraft] }));
+    const { result } = renderHook(() => useCoCreationController('novel-1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    mocks.executeGeneration.mockClear();
+
+    await act(async () => {
+      await result.current.retryGeneration('request-stale');
+    });
+
+    expect(result.current.error).toContain('不能重试');
+    expect(mocks.executeGeneration).not.toHaveBeenCalled();
   });
 
   it('blocks a formal ApplyPlan that mixes accepted suggestions from different Artifacts', async () => {

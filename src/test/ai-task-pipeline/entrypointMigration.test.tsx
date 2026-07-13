@@ -357,4 +357,30 @@ describe('M1/M2 migrated production entrypoints', () => {
     }));
     expect(retryInput.userInstruction).toContain(missingPoint.text);
   });
+
+  it('clears an AI co-creation handoff instruction when the workspace changes chapters', async () => {
+    mocks.getDrafts.mockResolvedValue([]);
+    const generationHandoff = {
+      receiptType: 'chapter_generation_handoff' as const,
+      handoffId: 'handoff-a', requestId: 'request-a', requestHash: 'request-hash',
+      novelId: 'novel-a', volumeId: 'volume-a', chapterId: 'chapter-a',
+      chapterPlan: 'A 章专属计划', baseContextHash: 'context-hash',
+      createdAt: '2026-07-13T00:00:00.000Z',
+    };
+    const rendered = render(
+      <AiGeneratePanel novelId="novel-a" chapter={chapter()} generationHandoff={generationHandoff} />,
+    );
+    const instruction = screen.getByPlaceholderText(/本章开头要压抑一些/) as HTMLTextAreaElement;
+    await waitFor(() => expect(instruction.value).toBe('A 章专属计划'));
+
+    rendered.rerender(
+      <AiGeneratePanel
+        novelId="novel-a"
+        chapter={{ ...chapter(), id: 'chapter-b', title: 'Chapter B', chapterNumber: 2 }}
+        generationHandoff={generationHandoff}
+      />,
+    );
+    await waitFor(() => expect(instruction.value).toBe(''));
+    expect(mocks.compileGeneration).not.toHaveBeenCalled();
+  });
 });

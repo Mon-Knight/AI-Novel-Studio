@@ -208,6 +208,49 @@
 .co-creation-conflict.is-blocking { background: #fef2f2; color: #b91c1c; }
 .co-creation-empty-copy { margin: 8px 0 2px; color: #94a3b8; font-size: 11px; line-height: 1.6; }
 
+.co-creation-generation { border-bottom: 1px solid #e5eaf0; background: #f8fafc; }
+.co-creation-generation .co-creation-draft-heading { min-height: 50px; padding: 9px 14px; }
+.co-creation-generation .co-creation-draft-heading h3 { margin: 0; font-size: 12px; }
+.co-creation-generation-form { display: grid; gap: 9px; padding: 12px 14px 14px; }
+.co-creation-generation-form label { display: grid; gap: 5px; color: #475569; font-size: 11px; }
+.co-creation-generation-form select,
+.co-creation-generation-form input,
+.co-creation-generation-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+  font-size: 12px;
+}
+.co-creation-generation-form textarea { resize: vertical; line-height: 1.5; }
+.co-creation-generation-note { margin: 0; color: #64748b; font-size: 10px; line-height: 1.5; }
+.co-creation-generation-history { padding: 12px 14px 14px; border-top: 1px solid #e5eaf0; }
+.co-creation-generation-history > h3 { margin: 0 0 9px; color: #334155; font-size: 12px; }
+.co-creation-generation-history > h3 span { color: #2563eb; }
+.co-creation-generation-history article {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 9px;
+  border: 1px solid #dbe3ec;
+  border-radius: 7px;
+  background: #fff;
+}
+.co-creation-generation-history article.is-failed { border-color: #fecaca; }
+.co-creation-generation-history article header,
+.co-creation-generation-history article footer { display: flex; justify-content: space-between; gap: 7px; align-items: center; }
+.co-creation-generation-history article header strong { font-size: 11px; }
+.co-creation-generation-history article header em { color: #2563eb; font-size: 10px; font-style: normal; }
+.co-creation-generation-history article small { overflow-wrap: anywhere; color: #94a3b8; font-size: 9px; }
+.co-creation-generation-history article p { margin: 0; color: #64748b; font-size: 10px; line-height: 1.5; }
+.co-creation-generation-history article code { overflow-wrap: anywhere; }
+.co-creation-generation-history article footer { justify-content: flex-end; flex-wrap: wrap; }
+
 .co-creation-loading { height: 100%; display: grid; place-content: center; gap: 10px; justify-items: center; background: #f5f7fa; color: #64748b; }
 .co-creation-loading.is-error { color: #b91c1c; }
 

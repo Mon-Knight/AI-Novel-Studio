@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const useControllerMock = vi.hoisted(() => vi.fn());
+
 const controller = {
   snapshot: {
     session: {
@@ -21,7 +23,7 @@ const controller = {
 };
 
 vi.mock('../../features/co-creation/useCoCreationController', () => ({
-  useCoCreationController: () => controller,
+  useCoCreationController: useControllerMock,
 }));
 
 import CoCreationPage from '../../pages/CoCreation/CoCreationPage';
@@ -31,10 +33,10 @@ function Location() {
   return <div data-testid="location">{location.pathname}{location.search}</div>;
 }
 
-function renderPage() {
+function renderPage(initialEntry: string | { pathname: string; search?: string; state?: unknown } = '/novels/novel-a/co-creation?chapterId=chapter-a') {
   return render(
     <MemoryRouter
-      initialEntries={['/novels/novel-a/co-creation?chapterId=chapter-a']}
+      initialEntries={[initialEntry]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
@@ -46,7 +48,10 @@ function renderPage() {
 }
 
 describe('AI co-creation workspace page', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useControllerMock.mockReturnValue(controller);
+  });
 
   it('renders the fixed ten stages and three workspace regions', () => {
     renderPage();
@@ -72,5 +77,45 @@ describe('AI co-creation workspace page', () => {
     fireEvent.click(screen.getByRole('button', { name: '在工作台完整审查' }));
     expect(screen.getByTestId('location').textContent)
       .toContain('/novels/novel-a/workspace?chapterId=chapter-a');
+  });
+
+  it('passes a validated workspace discussion handoff to the controller', () => {
+    renderPage({
+      pathname: '/novels/novel-a/co-creation',
+      search: '?chapterId=chapter-a',
+      state: {
+        schemaVersion: 1,
+        source: 'writing_workspace',
+        discussionHandoff: {
+          schemaVersion: 1,
+          handoffId: 'handoff-a',
+          novelId: 'novel-a',
+          volumeId: 'volume-a',
+          chapterId: 'chapter-a',
+          draftId: 'draft-a',
+          draftVersion: 2,
+          documentContentHash: 'a'.repeat(64),
+          selectionStart: 0,
+          selectionEnd: 2,
+          selectedText: '正文',
+          selectedTextHash: 'b'.repeat(64),
+          createdAt: '2026-07-14T00:00:00.000Z',
+        },
+      },
+    });
+
+    expect(useControllerMock).toHaveBeenCalledWith(
+      'novel-a',
+      'chapter-a',
+      expect.objectContaining({ handoffId: 'handoff-a', selectedText: '正文' }),
+    );
+  });
+
+  it('preserves candidate Artifact and Task identity on the return deep link', () => {
+    renderPage('/novels/novel-a/co-creation?chapterId=chapter-a&review=candidate&artifactId=artifact-a&taskId=task-a');
+    fireEvent.click(screen.getByRole('button', { name: '在工作台完整审查' }));
+    expect(screen.getByTestId('location').textContent).toContain(
+      '/novels/novel-a/workspace?chapterId=chapter-a&review=candidate&artifactId=artifact-a&taskId=task-a',
+    );
   });
 });

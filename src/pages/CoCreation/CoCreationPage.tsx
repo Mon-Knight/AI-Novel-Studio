@@ -1,10 +1,20 @@
-import { useMemo } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import CoCreationStageRail from '../../components/co-creation/CoCreationStageRail';
 import CoCreationChat from '../../components/co-creation/CoCreationChat';
 import CoCreationDraftPanel from '../../components/co-creation/CoCreationDraftPanel';
 import { useCoCreationController } from '../../features/co-creation/useCoCreationController';
 import type { CoCreationTurnOutputV1 } from '../../types/coCreation';
+import type { CoCreationGenerationRecordV1 } from '../../types/coCreation';
+import type { Volume } from '../../types/volume';
+import type { Chapter } from '../../types/chapter';
+import { volumeRepository } from '../../services/database/volumeRepository';
+import { chapterRepository } from '../../services/database/chapterRepository';
+import { isTauri } from '../../services/database/db';
+import {
+  buildWorkspaceDeepLink,
+  parseCoCreationNavigationState,
+} from '../../features/co-creation/deepLink';
 import '../../styles/co-creation-workspace.css';
 
 function lastTurn(payload: Record<string, unknown> | undefined): CoCreationTurnOutputV1 | undefined {
@@ -16,11 +26,35 @@ function lastTurn(payload: Record<string, unknown> | undefined): CoCreationTurnO
 export default function CoCreationPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const chapterId = searchParams.get('chapterId') || undefined;
-  const controller = useCoCreationController(novelId, chapterId);
+  const discussionHandoff = useMemo(() => novelId
+    ? parseCoCreationNavigationState(location.state, novelId, chapterId)
+    : undefined, [chapterId, location.state, novelId]);
+  const controller = useCoCreationController(novelId, chapterId, discussionHandoff);
   const snapshot = controller.snapshot;
+  const [volumes, setVolumes] = useState<Volume[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const turn = useMemo(() => lastTurn(snapshot?.activeDraft?.payload), [snapshot?.activeDraft?.payload]);
+
+  useEffect(() => {
+    if (!novelId) return;
+    let cancelled = false;
+    void Promise.all([
+      volumeRepository.getByNovelId(novelId),
+      chapterRepository.getByNovelId(novelId),
+    ]).then(([nextVolumes, nextChapters]) => {
+      if (cancelled) return;
+      setVolumes(nextVolumes);
+      setChapters(nextChapters);
+    }).catch(() => {
+      if (cancelled) return;
+      setVolumes([]);
+      setChapters([]);
+    });
+    return () => { cancelled = true; };
+  }, [novelId]);
 
   if (controller.loading) {
     return <div className="co-creation-loading" role="status">正在恢复 AI 共创会话…</div>;
@@ -35,9 +69,23 @@ export default function CoCreationPage() {
     );
   }
 
-  const workspaceUrl = chapterId
-    ? `/novels/${encodeURIComponent(novelId)}/workspace?chapterId=${encodeURIComponent(chapterId)}`
-    : `/novels/${encodeURIComponent(novelId)}/workspace`;
+  const workspaceUrl = buildWorkspaceDeepLink({
+    novelId,
+    chapterId,
+    ...(searchParams.get('review') === 'candidate' ? {
+      review: 'candidate' as const,
+      artifactId: searchParams.get('artifactId') || undefined,
+      taskId: searchParams.get('taskId') || undefined,
+    } : {}),
+  });
+  const openHandoff = (record: CoCreationGenerationRecordV1) => {
+    const receipt = record.receipt;
+    if (receipt?.receiptType !== 'chapter_generation_handoff') return;
+    navigate(
+      `/novels/${encodeURIComponent(novelId)}/workspace?chapterId=${encodeURIComponent(receipt.chapterId)}`
+      + `&panel=ai-generate&handoffId=${encodeURIComponent(receipt.handoffId)}`,
+    );
+  };
 
   return (
     <div className="co-creation-workspace">
@@ -68,18 +116,18 @@ export default function CoCreationPage() {
         <CoCreationStageRail
           currentStage={snapshot.session.currentStage}
           progress={snapshot.session.stageProgress}
-          disabled={controller.sending || controller.applying}
+          disabled={controller.sending || controller.applying || controller.generationBusy}
           onSelect={(stage) => void controller.changeStage(stage)}
         />
         <CoCreationChat
           messages={snapshot.messages}
           lastTurn={turn}
-          sending={controller.sending || controller.applying}
+          sending={controller.sending || controller.applying || controller.generationBusy}
           onSend={controller.sendMessage}
         />
         <CoCreationDraftPanel
           payload={snapshot.activeDraft?.payload}
-          busy={controller.sending || controller.applying}
+          busy={controller.sending || controller.applying || controller.generationBusy}
           onEditField={controller.editField}
           onAccept={controller.acceptSuggestion}
           onReject={controller.rejectSuggestion}
@@ -90,6 +138,16 @@ export default function CoCreationPage() {
           onConfirmApply={controller.confirmFormalApply}
           onCancelApply={controller.cancelFormalApply}
           onPrepareUndo={controller.prepareFormalUndo}
+          currentStage={snapshot.session.currentStage}
+          objectContext={snapshot.session.objectContext}
+          volumes={volumes}
+          chapters={chapters}
+          generationRecords={controller.generationRecords}
+          desktopRuntime={isTauri()}
+          onStartGeneration={controller.startGeneration}
+          onRetryGeneration={controller.retryGeneration}
+          onOpenTasks={() => navigate('/ai-tasks')}
+          onOpenHandoff={openHandoff}
         />
       </main>
     </div>

@@ -31,6 +31,7 @@ import type { Volume } from '../../types/volume';
 import type { ChapterDraft } from '../../types/ai';
 import type { CandidateGenerationActivity, CandidateReviewRecord } from '../../types/placement';
 import type { DraftContentState } from '../../types/draftContentState';
+import type { CoCreationChapterGenerationHandoffV1 } from '../../types/coCreation';
 import { normalizeAppError } from '../../types/appError';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
 import type {
@@ -65,6 +66,14 @@ import {
   type RightSidebarState,
   type PanelToolState,
 } from '../../store/rightSidebarStore';
+import {
+  candidateRecoveryMatchesDeepLink,
+  createCoCreationNavigationState,
+  parseCandidateReviewDeepLink,
+  resolveWorkspaceChapterTarget,
+  type CandidateReviewDeepLink,
+} from '../../features/co-creation/deepLink';
+import { coCreationGenerationService } from '../../services/co-creation/coCreationGenerationService';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
 
@@ -113,6 +122,17 @@ function WritingWorkspacePage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const requestedChapterId = searchParams.get('chapterId') || undefined;
+  const requestedReview = searchParams.get('review') || undefined;
+  const requestedArtifactId = searchParams.get('artifactId') || undefined;
+  const requestedTaskId = searchParams.get('taskId') || undefined;
+  const requestedPanel = searchParams.get('panel') || undefined;
+  const requestedHandoffId = searchParams.get('handoffId') || undefined;
+  const candidateReviewRequest = useMemo(() => parseCandidateReviewDeepLink(new URLSearchParams([
+    ...(requestedReview ? [['review', requestedReview] as [string, string]] : []),
+    ...(requestedArtifactId ? [['artifactId', requestedArtifactId] as [string, string]] : []),
+    ...(requestedTaskId ? [['taskId', requestedTaskId] as [string, string]] : []),
+  ])), [requestedArtifactId, requestedReview, requestedTaskId]);
   // v1.0.45 统一右侧栏状态模型（必须在 activePanel 之前声明）
   const [sidebarState, setSidebarState] = useState<RightSidebarState>(createInitialSidebarState);
   // v1.0.45: activePanel 从统一 sidebarState 派生，不再独立管理
@@ -121,6 +141,7 @@ function WritingWorkspacePage() {
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [activeChapterId, setActiveChapterId] = useState<string>('');
+  const [generationHandoff, setGenerationHandoff] = useState<CoCreationChapterGenerationHandoffV1 | null>(null);
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
   const [editorSnapshot, setEditorSnapshot] = useState<EditorContentSnapshot>({
     content: '',
@@ -281,6 +302,7 @@ function WritingWorkspacePage() {
 
   const commitActiveChapter = useCallback((chapterId: string) => {
     documentLoadGuardRef.current.invalidate();
+    setGenerationHandoff((current) => current?.chapterId === chapterId ? current : null);
     activeChapterIdRef.current = chapterId;
     setActiveChapterId(chapterId);
     setCurrentDraft(null);
@@ -381,7 +403,11 @@ function WritingWorkspacePage() {
     }
   }, []);
 
-  const recoverChapterCandidate = useCallback(async (requestNovelId: string, chapterId: string) => {
+  const recoverChapterCandidate = useCallback(async (
+    requestNovelId: string,
+    chapterId: string,
+    reviewRequest?: CandidateReviewDeepLink,
+  ) => {
     const key = candidateScopeKey(requestNovelId, chapterId);
     if (!key) return;
     const token = (candidateRecoveryTokensRef.current.get(key) || 0) + 1;
@@ -389,6 +415,14 @@ function WritingWorkspacePage() {
     try {
       const recovered = await chapterCandidateService.recover(requestNovelId, chapterId);
       if (candidateRecoveryTokensRef.current.get(key) !== token) return;
+      if (reviewRequest) {
+        const identity = candidateRecoveryMatchesDeepLink({
+          request: reviewRequest,
+          record: recovered.record,
+          activity: recovered.activity,
+        });
+        if (!identity.ok) throw new Error(identity.reason || '候选审查身份不一致。');
+      }
       if (recovered.record
         && recovered.record.target.novelId === requestNovelId
         && recovered.record.target.chapterId === chapterId
@@ -419,19 +453,33 @@ function WritingWorkspacePage() {
         next.delete(key);
         return next;
       });
+      return recovered;
     } catch (error) {
       if (candidateRecoveryTokensRef.current.get(key) !== token) return;
       setCandidateReadErrors((previous) => new Map(previous).set(
         key,
         error instanceof Error ? error.message : '候选读取失败，请重试。',
       ));
+      return null;
     }
   }, []);
 
   useEffect(() => {
     if (!novelId || !activeChapterId) return;
-    void recoverChapterCandidate(novelId, activeChapterId);
-  }, [activeChapterId, novelId, recoverChapterCandidate]);
+    const reviewTargetsCurrentChapter = !!candidateReviewRequest
+      && (!requestedChapterId || requestedChapterId === activeChapterId);
+    void recoverChapterCandidate(
+      novelId,
+      activeChapterId,
+      reviewTargetsCurrentChapter ? candidateReviewRequest : undefined,
+    ).then((recovered) => {
+      if (recovered && reviewTargetsCurrentChapter
+        && activeNovelIdRef.current === novelId
+        && activeChapterIdRef.current === activeChapterId) {
+        setCandidateReviewOpen(true);
+      }
+    });
+  }, [activeChapterId, candidateReviewRequest, novelId, recoverChapterCandidate, requestedChapterId]);
 
   const retryActiveChapterContent = useCallback(async () => {
     const chapterId = activeChapterIdRef.current;
@@ -450,13 +498,14 @@ function WritingWorkspacePage() {
     setPageLoading(true);
     setPageError('');
     setLoadState('loading');
+    setGenerationHandoff(null);
 
     // 并行加载，任一失败不影响
     Promise.allSettled([
       getNovelForWorkspace(novelId),
       volumeRepository.getByNovelId(novelId),
       chapterRepository.getByNovelId(novelId),
-    ]).then(([nr, vr, cr]) => {
+    ]).then(async ([nr, vr, cr]) => {
       if (cancelled) return;
       if (nr.status === 'fulfilled') {
         if (nr.value) { setNovel(nr.value); }
@@ -467,12 +516,44 @@ function WritingWorkspacePage() {
       if (cr.status === 'fulfilled') {
         const list = cr.value;
         setChapters(list);
-        const urlChapterId = searchParams.get('chapterId');
-        const targetId = (urlChapterId && list.find((c) => c.id === urlChapterId))
-          ? urlChapterId : list[0]?.id;
-        if (targetId) {
-          commitActiveChapter(targetId);
-          loadChapterDraft(targetId);
+        const target = resolveWorkspaceChapterTarget(list, requestedChapterId);
+        if (target.invalidRequestedChapter) {
+          commitActiveChapter('');
+          setPageError('指定章节不存在或不属于当前作品，已阻止回退到其他章节。');
+          setLoadState('error');
+          setPageLoading(false);
+          return;
+        }
+        if (requestedHandoffId) {
+          if (!target.chapterId || requestedPanel !== 'ai-generate') {
+            commitActiveChapter('');
+            setPageError('AI 共创章节生成交接缺少精确章节或目标面板，已阻止打开。');
+            setLoadState('error');
+            setPageLoading(false);
+            return;
+          }
+          try {
+            const handoff = await coCreationGenerationService.getChapterGenerationHandoff(
+              novelId,
+              requestedHandoffId,
+            );
+            if (cancelled) return;
+            if (handoff.chapterId !== target.chapterId) {
+              throw new Error('AI 共创章节生成交接与请求章节不一致');
+            }
+            setGenerationHandoff(handoff);
+          } catch (value) {
+            if (cancelled) return;
+            commitActiveChapter('');
+            setPageError(value instanceof Error ? value.message : 'AI 共创章节生成交接读取失败');
+            setLoadState('error');
+            setPageLoading(false);
+            return;
+          }
+        }
+        if (target.chapterId) {
+          commitActiveChapter(target.chapterId);
+          void loadChapterDraft(target.chapterId);
         }
       }
       setLoadState('ready');
@@ -480,7 +561,13 @@ function WritingWorkspacePage() {
     });
 
     return () => { cancelled = true; };
-  }, [novelId, searchParams, commitActiveChapter, loadChapterDraft]);
+  }, [novelId, requestedChapterId, requestedHandoffId, requestedPanel, commitActiveChapter, loadChapterDraft]);
+
+  useEffect(() => {
+    if (requestedPanel !== 'ai-generate' || !activeChapterId) return;
+    if (requestedHandoffId && generationHandoff?.chapterId !== activeChapterId) return;
+    setSidebarState((previous) => openTool(previous, 'ai-generate'));
+  }, [activeChapterId, generationHandoff, requestedHandoffId, requestedPanel]);
 
   const confirmDiscardChapterGoal = useCallback(async () => {
     if (!chapterGoalDirtyRef.current) return true;
@@ -491,6 +578,38 @@ function WritingWorkspacePage() {
     const decision = await requestWorkspaceLeave({ reason: 'draft_adopt' });
     return decision === 'proceed';
   }, [requestWorkspaceLeave]);
+
+  const handleOpenCoCreation = useCallback(async () => {
+    if (!novelId) return;
+    if (!(await confirmDiscardChapterGoal())) return;
+    const targetUrl = `/novels/${encodeURIComponent(novelId)}/co-creation${activeChapterIdRef.current
+      ? `?chapterId=${encodeURIComponent(activeChapterIdRef.current)}`
+      : ''}`;
+    const chapter = chapters.find((item) => item.id === activeChapterIdRef.current);
+    if (!chapter) {
+      navigate(targetUrl);
+      return;
+    }
+
+    const snapshot = editorSnapshotRef.current;
+    const snapshotMatchesTarget = snapshot.chapterId === chapter.id && snapshot.contentAvailable;
+    const sourceDraft = snapshotMatchesTarget ? currentDraftRef.current : activeDraft;
+    const navigationState = await createCoCreationNavigationState({
+      novelId,
+      chapterId: chapter.id,
+      volumeId: chapter.volumeId,
+      draftId: sourceDraft?.id,
+      draftVersion: sourceDraft?.versionNo,
+      content: snapshotMatchesTarget ? snapshot.content : (sourceDraft?.content || ''),
+      contentAvailable: snapshotMatchesTarget,
+      selectionStart: snapshotMatchesTarget ? snapshot.selectionStart : undefined,
+      selectionEnd: snapshotMatchesTarget ? snapshot.selectionEnd : undefined,
+    });
+
+    // navigate() is intentionally used directly: the data-router transition is
+    // intercepted by useWorkspaceLeaveGuard, including the attached location.state.
+    navigate(targetUrl, { state: navigationState });
+  }, [activeDraft, chapters, confirmDiscardChapterGoal, navigate, novelId]);
 
   const handleCandidateAdopt = useCallback(async (record: CandidateReviewRecord) => {
     const requestNovelId = activeNovelIdRef.current;
@@ -1153,9 +1272,7 @@ function WritingWorkspacePage() {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => navigate(
-                  `/novels/${encodeURIComponent(novelId)}/co-creation${activeChapterId ? `?chapterId=${encodeURIComponent(activeChapterId)}` : ''}`,
-                )}
+                onClick={() => void handleOpenCoCreation()}
               >
                 与 AI 讨论当前章节
               </button>
@@ -1269,6 +1386,7 @@ function WritingWorkspacePage() {
         onBeforeDocumentChange={confirmEditorLeave}
         onCandidateReviewChange={handleCandidateReviewChange}
         onCandidateGenerationChange={handleCandidateGenerationChange}
+        generationHandoff={generationHandoff}
         onChapterOutlineApplied={handleChapterOutlineApplied}
         onChapterGoalDirtyChange={setChapterGoalDirty}
         onChapterCharactersChanged={bumpContextVersion}

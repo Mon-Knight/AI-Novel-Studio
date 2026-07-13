@@ -1,5 +1,18 @@
 # AI Novel Studio - CHANGELOG
 
+### v2.3.0-M6：共创大纲任务、章节生成交接与双向深链
+
+- AI 共创右栏新增受限生成任务卡，只接受作品总纲、指定卷纲、章节大纲和章节正文工作台交接四类请求；请求记录固定 scope、作者附加要求、`baseContextHash/compiledInputHash`、来源草案、稳定 `operationId/requestHash` 和不可变回执，普通字段编辑不会丢失历史 turn 或任务回执。
+- 总纲、卷纲和章纲先以最新权威会话严格编译最终 Prompt、input body/payload、排序来源 manifest、scope/steps 与非密钥 Provider 参数，再比较双 hash 并通过既有 `submitPrepared` 冻结提交；提交阶段不再读取作品业务数据。结果仍是待审查 Artifact/PlacementProposal，不直接写入大纲 Canon。
+- Rust 后台 Workflow 增加稳定 operationId 恢复、同 operation 不同冻结 payload 冲突拒绝、作品/分卷/章节范围校验和 `chapterCount=1..20` 上限；首次创建还会校验 session CAS、集合 hash、活动大纲/风格、来源版本/hash 与同 session 归属，未知、重复或非标量来源失败关闭。已存在 operation 的完整/部分图重放继续使用原冻结输入，不受后续 Canon 变化阻断，也不会重排 DAG、重新排队或复制 Task。
+- `chapter_generation` 只创建可追溯 handoff；工作台按精确作品/章节/分卷和最新 context hash 恢复，打开现有 `ai-generate` 面板并预填章节计划，仍由作者手动触发 `compileChapterGeneration → unifiedAiPipeline → chapter_text Artifact → 约束/差异/Proposal → CandidateReviewPane`，未新建正文 Worker，也不自动生成或采用正文。
+- 工作台 → AI 共创通过 `location.state` 交接当前章节、对象与可选选区；选区落入共创草案前按最新完整正文复核 SHA-256、UTF-16 offset 和选区 hash，dirty 正文被放弃或正文已变化时只保留章节定位，正文内容不进入 URL。
+- AI 共创 → 工作台支持精确章节、`panel=ai-generate&handoffId=...` 和 `review=candidate&artifactId=...&taskId=...` 深链；无效章节、跨作品 handoff 或候选身份不一致时失败关闭，不再静默回退第一章。
+- 跨界面跳转继续复用现有正文 Leave Guard 的保存/放弃/取消/保存失败门禁，并单独保护未保存章节目标；浏览器开发模式明确禁用后台大纲 Workflow，但仍可验证共创草案和安全工作台 handoff。
+- generation 状态写入使用按 request/status 稳定的 mutation identity 与请求创建时间；Task 已创建但状态回执丢失时先重开权威会话并幂等对账，不把成功 Workflow 误记为 failed。默认空主角使用作品级确定性身份，连续编译不会产生随机 stale。
+- M6 不新增 migration，不修改正式应用版本 2.2.0，不实现导演治理、Story State、Multi-Agent、连续多章或自动 Apply；大纲 Artifact 的正式大纲表采用仍由现有任务中心人工审查记录，未扩展为 Canon 写入。
+- M6 验收通过：共创专项 Vitest 102/102、全量 Vitest 297/297、Node 正文安全 5/5、Rust 203/203；TypeScript、ESLint、cargo fmt/check、生产构建与 Tauri MSI/NSIS 构建全部通过。保留基线已有 1 条 ESLint warning、10 条 Rust warning 与 Vite 动静态导入提示，未新增 warning。
+
 ### v2.3.0-M5：AI 共创正式采用、冲突保护与反向撤销
 
 - AI 共创右栏新增“准备正式写入 → 审查影响 → 确认执行 ApplyPlan”交互；只有已经逐项采用到草案的建议才能进入正式管线，覆盖作者字段和阻断冲突仍需分别明确确认。

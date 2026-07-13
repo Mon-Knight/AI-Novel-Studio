@@ -37,6 +37,13 @@ export interface CreateBackgroundWorkflowInput {
   sourceManifestJson: Array<Record<string, unknown>>;
   sourceDraftVersion?: number;
   baseContentHash?: string;
+  providerOptionsJson?: {
+    provider: string;
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    timeoutSeconds: number;
+  };
   steps: BackgroundWorkflowStep[];
 }
 
@@ -45,17 +52,18 @@ export const aiWorkflowService = {
     if (!isTauri()) throw new Error('后台 AI 工作流仅在桌面应用中可用。');
     await aiWorkerClientService.configureFromLocalSettings();
     const settings = aiSettingsService.getSettings();
+    const providerOptionsJson = input.providerOptionsJson ?? {
+      provider: settings.provider,
+      model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+      temperature: settings.temperature ?? 0.7,
+      maxTokens: settings.maxTokens ?? 8_000,
+      timeoutSeconds: settings.timeoutSeconds ?? 120,
+    };
     return dbCall<WorkflowCreated>('create_background_ai_workflow', {
       input: {
         ...input,
         operationId: input.operationId ?? `background:${input.taskType}:${crypto.randomUUID()}`,
-        providerOptionsJson: {
-          provider: settings.provider,
-          model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-          temperature: settings.temperature,
-          maxTokens: settings.maxTokens,
-          timeoutSeconds: settings.timeoutSeconds,
-        },
+        providerOptionsJson,
       },
     });
   },

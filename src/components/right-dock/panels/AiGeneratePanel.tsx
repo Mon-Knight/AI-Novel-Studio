@@ -34,6 +34,8 @@ import { calculateChapterDiff } from '../../../services/ai-tasks/chapterDiffServ
 import { normalizeCandidate } from '../../../services/ai-tasks/normalizedCandidateService';
 import type { ConstraintValidationResult } from '../../../types/chapterConstraintValidation';
 import type { ChapterDiffResult } from '../../../types/chapterDiff';
+import type { CoCreationChapterGenerationHandoffV1 } from '../../../types/coCreation';
+import { resolveChapterGenerationHandoffPrefill } from '../../../features/co-creation/generationProtocol';
 
 function getChapterCharacterNames(ctx: ChapterGenerationContext | null | undefined): string[] {
   return ctx?.chapterCharacterList?.map((item) => item.name).filter(Boolean) ?? [];
@@ -119,9 +121,10 @@ interface AiGeneratePanelProps {
   onBeforeDocumentChange?: () => Promise<boolean>;
   onCandidateReviewChange?: (record: CandidateReviewRecord | null) => void;
   onCandidateGenerationChange?: (activity: CandidateGenerationActivity) => void;
+  generationHandoff?: CoCreationChapterGenerationHandoffV1 | null;
 }
 
-function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent = '', onBeforeDocumentChange, onCandidateReviewChange, onCandidateGenerationChange }: AiGeneratePanelProps) {
+function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVersion = 0, currentDraftId, currentDraftVersion, currentEditorContent = '', onBeforeDocumentChange, onCandidateReviewChange, onCandidateGenerationChange, generationHandoff }: AiGeneratePanelProps) {
   const liveChapterIdRef = useRef(chapter?.id || '');
   liveChapterIdRef.current = chapter?.id || '';
   const liveNovelIdRef = useRef(novelId || '');
@@ -142,6 +145,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [activeTaskId, setActiveTaskId] = useState('');
   const [generationProgress, setGenerationProgress] = useState({ stage: '', message: '', percent: 0 });
   const generationStartLockRef = useRef(false);
+  const appliedHandoffIdRef = useRef('');
   const activeGenerationRef = useRef<{
     requestId: string;
     taskId?: string;
@@ -162,6 +166,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [wordCountSaved, setWordCountSaved] = useState(false);
 
   useEffect(() => {
+    setUserInstruction('');
+    appliedHandoffIdRef.current = '';
     setValidationState(null);
     setLatestGeneratedDraft(null);
     setLatestGeneratedTarget(null);
@@ -190,6 +196,34 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
     setWordCountDraft(resolved);
     setWordCountSaved(false);
   }, [chapter?.id, chapter?.targetWordCount, selectedOutputId, availableOutputs]);
+
+  useEffect(() => {
+    if (!generationHandoff) return;
+    if (!novelId || !chapter) return;
+    if (generationHandoff.novelId !== novelId || generationHandoff.chapterId !== chapter.id) {
+      if (appliedHandoffIdRef.current === generationHandoff.handoffId) {
+        appliedHandoffIdRef.current = '';
+        setUserInstruction('');
+      }
+      return;
+    }
+    if (appliedHandoffIdRef.current === generationHandoff.handoffId) return;
+    let prefill: ReturnType<typeof resolveChapterGenerationHandoffPrefill>;
+    try {
+      prefill = resolveChapterGenerationHandoffPrefill(generationHandoff, novelId, chapter);
+    } catch {
+      setErrorMsg('AI 共创章节计划与当前工作台目标不一致，已阻止预填。');
+      return;
+    }
+    appliedHandoffIdRef.current = generationHandoff.handoffId;
+    setGenMode('new');
+    setUserInstruction(prefill.instruction);
+    if (prefill.targetWordCount) {
+      setWordCountDraft(prefill.targetWordCount);
+      setWordCountSaved(false);
+    }
+    setStatusMsg('已从 AI 共创预填章节计划。请检查上下文后手动启动生成。');
+  }, [chapter, generationHandoff, novelId]);
 
   // 保存目标字数
   const handleSaveWordCount = async () => {
@@ -929,6 +963,12 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   return (
     <div>
+      {generationHandoff?.chapterId === chapter.id && appliedHandoffIdRef.current === generationHandoff.handoffId && (
+        <div className="panel-stale-warning" role="status">
+          <span className="panel-stale-warning-icon">↗</span>
+          <span>已载入 AI 共创章节计划；系统不会自动开始生成，也不会自动采用正文。</span>
+        </div>
+      )}
       {/* AI 设置状态 */}
       <div className="panel-section">
         <div className="panel-section-title">AI 状态</div>

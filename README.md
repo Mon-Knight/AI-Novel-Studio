@@ -29,11 +29,13 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 **当前版本：v2.2.0**
 
-**阶段：v2.3.0-M5 内部里程碑 — AI 共创正式采用、冲突保护与反向撤销（正式应用版本仍为 v2.2.0）**
+**阶段：v2.3.0-M6 内部里程碑 — 共创大纲任务、章节生成交接与双向深链（正式应用版本仍为 v2.2.0）**
 
 作品级“AI 共创”以十个固定阶段、三栏桌面布局和结构化对话协议引导作者逐步形成设定。AI 输出先进入现有 Task → Artifact → 草案审查链，作者可以逐项编辑、采用或拒绝；聊天草案不是第二套正式作品数据。
 
 已经采用到草案的创作意图、世界背景、规则体系和主角建议，必须再次经过 PlacementProposal → ApplyPlan 审查确认，才会在 SQLite `BEGIN IMMEDIATE` 事务中写入唯一 Canon。目标 version/hash、候选来源、草案 revision/hash、幂等和 stale 均会复核；反向撤销也创建新的可审计 Proposal/ApplyPlan，不删除历史证据。
+
+总纲、卷纲和章纲可从共创任务卡提交到既有后台 Workflow；提交前会重开权威会话，以同一批来源严格编译最终 Prompt、来源清单、输入和非密钥 Provider 参数，通过 `baseContextHash + compiledInputHash` 复核后冻结提交，提交阶段不再二次读取作品数据。结果继续进入 Artifact 与任务中心人工审查。章节正文不在共创页生成：系统只把已确认章节计划安全交接到工作台现有 AI 生成面板，作者检查上下文后手动启动，候选仍经过约束、差异和中央审查区，不自动采用。
 
 ---
 
@@ -54,6 +56,7 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
 - **创作意图审校与冻结**：作者逐项审校创作目标、事实、偏好和约束；显式输入必须确认，推断 pending 不冒充作者确认，冻结后形成可恢复、可校验的不可变 revision。
 - **AI 共创工作区**：十阶段三栏对话引导、最低完备推进、可编辑结构化草案、来源/冲突/置信度审查，以及世界、规则、主角和创作意图的安全正式采用与反向撤销。
+- **共创生成与双向交接**：总纲/卷纲/章纲以双 hash 冻结编译后复用后台 Task/DAG/Artifact，首次创建由 Rust 校验来源 CAS/集合/活动选择；章节计划按精确 scope 和 context hash 交接到工作台，支持候选审查深链、选区完整性复核与 Leave Guard。
 - **AI 结果安全落位**：PlacementProposal 支持目标审计/stale/rebuild，ApplyPlan 固化版本/hash 与 operationId/requestHash，ArtifactTargetLink 永久追踪正式正文来源。
 - **结构化候选审查**：定向修复和全文改写统一重建为完整小说正文，并提供修改摘要、逐项差异导航与格式/约束采用门禁；原始 AI 响应只在高级工程详情中可见。
 - **统一 AI 任务中心**：新 Task、最新执行、候选结果、应用计划和旧任务兼容记录统一可见；任务条不会遮挡正文或阻止导航。
@@ -129,7 +132,7 @@ AI 质量检查、修复复检、润色、章节/卷摘要以及主纲/卷纲/�
 | `/` | 作品管理首页 | 作品卡片列表与快捷入口 |
 | `/novels/:id` | 作品详情 | 基础设定、大纲、角色、风格、设定推演入口 |
 | `/novels/:id/creative-intent` | 创作意图 | 逐项审校并冻结作品级创作意图 revision |
-| `/novels/:id/co-creation` | AI 共创 | 十阶段对话引导、结构化草案审查与安全正式采用 |
+| `/novels/:id/co-creation` | AI 共创 | 十阶段对话、结构化草案、正式采用、大纲任务与章节工作台交接 |
 | `/novels/:id/workspace` | 写作工作台 | AI 逐章创作核心工作区 |
 | `/novels/:id/outline` | 大纲编辑器 | 分卷与章节大纲编辑 |
 | `/novels/:id/setting-suggestions` | 设定库 AI 推演 | 生成并采纳角色、势力、地点、规则候选 |
@@ -188,6 +191,7 @@ AI 质量检查、修复复检、润色、章节/卷摘要以及主纲/卷纲/�
 | v2.3.0-M3（内部） | 已完成：创作意图作者审校与冻结闭环；正式版本仍为 v2.2.0 |
 | v2.3.0-M4（内部） | 已完成：AI 共创十阶段工作区、结构化协议与可恢复会话 |
 | v2.3.0-M5（内部） | 已完成：共创建议正式采用、stale/事务保护与反向撤销 |
+| v2.3.0-M6（内部） | 已完成：共创大纲后台任务、章节生成安全交接与双向深链；完成后停止 |
 | v2.x | 后续：任务恢复、约束验证与 Agent 能力增强 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
@@ -229,6 +233,9 @@ npm run test:workspace-safety
 
 # 创作意图审校、冻结与前置契约专项
 npm run test:creative-intent
+
+# AI 共创会话、正式采用、冻结生成与双向交接专项
+npm run test:co-creation
 
 # Rust / SQLite 命令安全测试
 cd src-tauri

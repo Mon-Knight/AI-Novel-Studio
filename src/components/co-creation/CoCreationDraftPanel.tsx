@@ -1,10 +1,19 @@
 import { useMemo, useState } from 'react';
-import type { CoCreationFieldSuggestionV1 } from '../../types/coCreation';
+import type {
+  CoCreationFieldSuggestionV1,
+  CoCreationGenerationKind,
+  CoCreationGenerationRecordV1,
+  CoCreationObjectContext,
+  CoCreationStage,
+} from '../../types/coCreation';
+import type { Volume } from '../../types/volume';
+import type { Chapter } from '../../types/chapter';
 import type {
   CoCreationApplyPreparationV1,
   CoCreationApplyResultV1,
 } from '../../types/coCreationApply';
 import { deserializeWorkingDraft } from '../../features/co-creation/draftState';
+import CoCreationGenerationPanel from './CoCreationGenerationPanel';
 
 interface Props {
   payload?: Record<string, unknown>;
@@ -24,6 +33,23 @@ interface Props {
   onConfirmApply: () => void | Promise<void>;
   onCancelApply: () => void;
   onPrepareUndo: (planId?: string) => void | Promise<void>;
+  currentStage?: CoCreationStage;
+  objectContext?: CoCreationObjectContext;
+  volumes?: Volume[];
+  chapters?: Chapter[];
+  generationRecords?: CoCreationGenerationRecordV1[];
+  desktopRuntime?: boolean;
+  onStartGeneration?: (input: {
+    kind: CoCreationGenerationKind;
+    volumeId?: string;
+    chapterId?: string;
+    chapterCount?: number;
+    targetWordCount?: number;
+    additionalInstruction?: string;
+  }) => void | Promise<void>;
+  onRetryGeneration?: (requestId: string) => void | Promise<void>;
+  onOpenTasks?: () => void;
+  onOpenHandoff?: (record: CoCreationGenerationRecordV1) => void;
 }
 
 const stateLabels: Record<string, string> = {
@@ -139,6 +165,9 @@ function SuggestionCard({
 export default function CoCreationDraftPanel({
   payload, busy, onEditField, onAccept, onReject, onAcceptAll,
   applyPreparation, lastApplyResult, onPrepareApply, onConfirmApply, onCancelApply, onPrepareUndo,
+  currentStage = 'story_seed', objectContext = { novelId: '' }, volumes = [], chapters = [],
+  generationRecords = [], desktopRuntime = false,
+  onStartGeneration, onRetryGeneration, onOpenTasks, onOpenHandoff,
 }: Props) {
   const draft = useMemo(() => deserializeWorkingDraft(payload), [payload]);
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -183,6 +212,19 @@ export default function CoCreationDraftPanel({
           </button>
         )}
       </div>
+      <CoCreationGenerationPanel
+        stage={currentStage}
+        objectContext={objectContext}
+        volumes={volumes}
+        chapters={chapters}
+        records={generationRecords}
+        busy={busy}
+        desktopRuntime={desktopRuntime}
+        onStart={onStartGeneration ?? (() => undefined)}
+        onRetry={onRetryGeneration ?? (() => undefined)}
+        onOpenTasks={onOpenTasks ?? (() => undefined)}
+        onOpenHandoff={onOpenHandoff ?? (() => undefined)}
+      />
       <section className="co-creation-field-summary">
         <h3>当前设定摘要</h3>
         {Object.keys(draft.fields).length === 0 && <p className="co-creation-empty-copy">尚未形成结构化字段。</p>}

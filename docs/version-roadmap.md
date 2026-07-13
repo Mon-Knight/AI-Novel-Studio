@@ -4,7 +4,7 @@
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
 > 当前正式版本：v2.2.0（工作区可靠性与基础设施收口）
-> 当前内部里程碑：v2.3.0-M5（AI 共创正式采用、冲突保护与反向撤销）
+> 当前内部里程碑：v2.3.0-M6（共创大纲任务、章节生成交接与双向深链）
 
 ---
 
@@ -140,6 +140,7 @@ v2.2.0  工作区可靠性与基础设施收口（当前）
 v2.3.0-M3 创作意图作者审校与冻结闭环（内部里程碑；正式版本仍为 2.2.0）
 v2.3.0-M4 AI 共创工作区、结构化协议与可恢复会话（内部里程碑；正式版本仍为 2.2.0）
 v2.3.0-M5 AI 共创正式采用、冲突保护与反向撤销（内部里程碑；正式版本仍为 2.2.0）
+v2.3.0-M6 共创大纲任务、章节生成交接与双向深链（内部里程碑；正式版本仍为 2.2.0）
 ```
 
 ---
@@ -227,7 +228,8 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 | v2.2.0 | **当前** | **工作区可靠性与基础设施收口** | 迁移账本、结构化错误、长正文原子保存与完整性读取、恢复快照、全局 Leave Guard、React/SQLite 故障测试 |
 | v2.3.0-M3 | 内部里程碑 | 创作意图作者审校与冻结闭环 | 作者逐项审校、不可变 revision、Rust CAS/事务、三类 Snapshot；正式版本仍为 2.2.0 |
 | v2.3.0-M4 | 内部里程碑 | AI 共创工作区、结构化协议与可恢复会话 | 十阶段桌面共创工作区、V1 输出协议、Task→Artifact→审查 Proposal、migration 020 与 SQLite/浏览器恢复；正式版本仍为 2.2.0 |
-| v2.3.0-M5 | **当前内部里程碑** | **AI 共创正式采用、冲突保护与反向撤销** | 作者确认草案→Proposal→ApplyPlan→Canon、多目标事务、stale/hash 门禁、反向 Plan 撤销；正式版本仍为 2.2.0 |
+| v2.3.0-M5 | 内部里程碑 | AI 共创正式采用、冲突保护与反向撤销 | 作者确认草案→Proposal→ApplyPlan→Canon、多目标事务、stale/hash 门禁、反向 Plan 撤销；正式版本仍为 2.2.0 |
+| v2.3.0-M6 | **当前内部里程碑** | **共创大纲任务、章节生成交接与双向深链** | 受限生成请求/回执、总纲/卷纲/章纲后台复用、正文工作台 handoff、候选审查深链与 Leave Guard；正式版本仍为 2.2.0 |
 
 ### v2.1.1 单一版本目标
 
@@ -290,14 +292,15 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 5. 撤销通过 `co_creation_canon_undo_v1` 反向 Proposal/ApplyPlan 执行，不删除历史审计数据。
 6. 本里程碑无新 migration，正式应用版本仍保持 2.2.0；浏览器开发回退不提供跨 Canon 原子写入。
 
-### v2.3.0-M6 后续边界
+### v2.3.0-M6 共创大纲任务、章节生成交接与双向深链
 
-M4/M5 已完成讨论、可审查草案和安全正式采用。以下能力必须由 M6 的独立任务书、测试和 commit/tag 交付：
-
-- 通过对话提交作品总纲、指定卷纲、章纲与章节计划任务，复用既有后台 Task/DAG/Artifact/审查 Proposal；
-- 把共创 `chapter_generation` 阶段安全交接给工作台现有 `chapter_generate` 正文候选、差异、约束与人工采用闭环；
-- 完成 AI 共创↔工作台的章节/对象定位、候选审查深链与 Leave Guard 未保存正文保护；
-- M6 不实现导演治理、自动跨阶段推进、连续多章、Story State 或 Multi-Agent；完成 M6 后停止。
+1. 共创草案保存 `co_creation_generation_request_v1` 请求与回执，只允许 `master_outline / volume_outline / chapter_outlines / chapter_generation_handoff`；后台大纲请求必须携带 `compiledInputHash`，handoff 禁止携带。凭据、越界 scope、超过 20 章、旧 context/compiled hash 和请求 hash 损坏均失败关闭。
+2. 总纲、卷纲和章纲重开权威会话并严格重编译，同一冻结输入生成最终 Prompt、input body/payload、排序来源 manifest、scope/steps 与 Provider 参数，再通过 `submitPrepared` 复用现有后台 Workflow、Task/DAG、Snapshot、Artifact 与审查 Proposal；提交阶段无二次作品读取。
+3. `chapter_generation_handoff` 不创建正文 Worker。工作台精确恢复 handoff，打开现有 `ai-generate` 并预填计划，正文继续通过 `compileChapterGeneration + unifiedAiPipeline` 形成候选并由作者审查采用。
+4. 工作台到共创的选区通过全文 hash、UTF-16 offset 和选区 hash 校验后保存到共创对象上下文，正文不进入 URL；放弃 dirty 正文时选区自动失效。
+5. 共创返回工作台支持精确章节、候选 Artifact/Task 身份与中央审查区；无效章节、跨作品/分卷或 stale handoff 不回退其他目标。
+6. Rust 只在首次创建 root operation 前校验权威 session CAS、来源版本/hash、集合成员和活动大纲/风格；校验失败零 Task。相同 operation 的完整或部分图重放恢复原冻结图，不因后续 Canon 变化被阻断。
+7. 跨界面导航复用正文 Leave Guard，并独立保护未保存章节目标。M6 无新 migration，正式版本仍为 2.2.0；不实现导演治理、连续多章、Story State、Multi-Agent 或自动 Apply，完成后停止。
 
 ---
 

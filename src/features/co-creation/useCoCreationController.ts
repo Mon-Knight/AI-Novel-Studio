@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  CoCreationGenerationKind,
+  CoCreationGenerationRecordV1,
+  CoCreationObjectContext,
   CoCreationStage,
+  CoCreationWorkspaceDiscussionHandoffV1,
   CoCreationWorkspaceSnapshot,
 } from '../../types/coCreation';
 import { coCreationSessionService } from '../../services/co-creation/coCreationSessionService';
@@ -18,11 +22,23 @@ import { compressCoCreationMessages } from './sessionSummary';
 import { buildCoCreationContext, computeCoCreationDataHash } from './contextBuilder';
 import { parseCoCreationTurnOutput } from './protocol';
 import { novelRepository } from '../../services/database/novelRepository';
+import { chapterRepository } from '../../services/database/chapterRepository';
+import { draftVersionService } from '../../services/database/draftVersionService';
 import { coCreationApplyService } from '../../services/co-creation/coCreationApplyService';
 import type {
   CoCreationApplyPreparationV1,
   CoCreationApplyResultV1,
 } from '../../types/coCreationApply';
+import {
+  buildChapterPlanFromDraft,
+  createCoCreationGenerationRequest,
+  readCoCreationGenerationRecords,
+  writeCoCreationGenerationRecord,
+} from './generationProtocol';
+import { coCreationGenerationService } from '../../services/co-creation/coCreationGenerationService';
+import { validateDiscussionHandoff } from './deepLink';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { stableCanonicalStringify } from '../../services/ai-tasks/stage3PrerequisiteService';
 
 const POLL_INTERVAL_MS = 700;
 const MAX_POLL_ATTEMPTS = 260;
@@ -84,13 +100,15 @@ function draftPayload(input: {
   currentStage: CoCreationStage;
   pendingTurn?: PendingTurnMetadata | null;
   summary?: Awaited<ReturnType<typeof compressCoCreationMessages>>;
+  objectContext?: CoCreationWorkspaceSnapshot['session']['objectContext'];
 }): Record<string, unknown> {
   const progress = deriveAllStageProgress(input.state.fields);
   return {
+    ...(input.snapshot.activeDraft?.payload ?? {}),
     ...serializeWorkingDraft(input.state),
     currentStage: input.currentStage,
     stageProgress: progress,
-    objectContext: input.snapshot.session.objectContext,
+    objectContext: input.objectContext ?? input.snapshot.session.objectContext,
     sessionSummary: input.summary?.summary ?? input.snapshot.session.summary ?? null,
     sessionSummaryHash: input.summary?.summaryHash ?? input.snapshot.session.summaryHash ?? null,
     summarizedThroughSequence: input.summary?.summarizedThroughSequence ?? null,
@@ -317,7 +335,11 @@ async function recoverCompletedAssistantTurns(
   return { workspace, ...(notice ? { notice } : {}) };
 }
 
-export function useCoCreationController(novelId: string | undefined, chapterId?: string) {
+export function useCoCreationController(
+  novelId: string | undefined,
+  chapterId?: string,
+  discussionHandoff?: CoCreationWorkspaceDiscussionHandoffV1,
+) {
   const [snapshot, setSnapshot] = useState<CoCreationWorkspaceSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -327,9 +349,11 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
   const [applying, setApplying] = useState(false);
   const [applyPreparation, setApplyPreparation] = useState<CoCreationApplyPreparationV1 | null>(null);
   const [lastApplyResult, setLastApplyResult] = useState<CoCreationApplyResultV1 | null>(null);
+  const [generationBusy, setGenerationBusy] = useState(false);
   const snapshotRef = useRef<CoCreationWorkspaceSnapshot | null>(null);
   const generationRef = useRef(0);
   const sendLockRef = useRef(false);
+  const generationLockRef = useRef(false);
   snapshotRef.current = snapshot;
 
   const replaceSnapshot = useCallback((next: CoCreationWorkspaceSnapshot) => {
@@ -342,6 +366,7 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
     const generation = ++generationRef.current;
     setLoading(true);
     setError('');
+    setNotice('');
     try {
       const [openedWorkspace, novel] = await Promise.all([
         coCreationSessionService.open(novelId),
@@ -349,23 +374,65 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
       ]);
       if (!novel) throw new Error('作品不存在');
       let opened = openedWorkspace;
+      let discussionNotice = '';
       if (generation !== generationRef.current) return;
-      if (chapterId && opened.session.objectContext.chapterId !== chapterId) {
+      let nextObjectContext: CoCreationObjectContext | undefined;
+      if (discussionHandoff) {
+        const chapter = await chapterRepository.getById(discussionHandoff.chapterId);
+        if (!chapter || chapter.novelId !== novelId) {
+          throw new Error('讨论交接的章节不存在或不属于当前作品。');
+        }
+        const hasSelection = discussionHandoff.selectionStart !== undefined
+          || discussionHandoff.selectionEnd !== undefined
+          || discussionHandoff.selectedText !== undefined
+          || discussionHandoff.selectedTextHash !== undefined;
+        const latestDraft = hasSelection
+          ? await draftVersionService.getLatestByChapterId(chapter.id)
+          : null;
+        const validated = await validateDiscussionHandoff({
+          handoff: discussionHandoff,
+          novelId,
+          chapter,
+          latestDraft,
+        });
+        nextObjectContext = validated.objectContext;
+        discussionNotice = validated.warning || (validated.selectionAccepted
+          ? '已安全恢复工作台选中段落，可继续与 AI 讨论。'
+          : '已定位工作台当前章节。');
+      } else if (chapterId && opened.session.objectContext.chapterId !== chapterId) {
+        const chapter = await chapterRepository.getById(chapterId);
+        if (!chapter || chapter.novelId !== novelId) {
+          throw new Error('当前章节不属于该作品，已阻止更新共创对象上下文。');
+        }
+        nextObjectContext = {
+          novelId,
+          chapterId,
+          ...(chapter.volumeId ? { volumeId: chapter.volumeId } : {}),
+          objectType: 'chapter',
+          objectId: chapterId,
+        };
+      }
+      if (nextObjectContext
+        && JSON.stringify(nextObjectContext) !== JSON.stringify(opened.session.objectContext)) {
         const state = deserializeWorkingDraft(opened.activeDraft?.payload);
+        const contextHash = await computeContentSha256(JSON.stringify(nextObjectContext));
         opened = await coCreationSessionService.saveDraft({
           workspace: opened,
           stage: opened.session.currentStage,
-          payload: {
-            ...draftPayload({ snapshot: opened, state, currentStage: opened.session.currentStage }),
-            objectContext: { ...opened.session.objectContext, novelId, chapterId },
-          },
+          payload: draftPayload({
+            snapshot: opened,
+            state,
+            currentStage: opened.session.currentStage,
+            objectContext: nextObjectContext,
+          }),
           origin: 'author_edit',
-          operationId: `co-creation:${opened.session.sessionId}:context:${chapterId}`,
+          operationId: `co-creation:${opened.session.sessionId}:context:${contextHash.slice(0, 24)}`,
         });
       }
       const recovered = await recoverCompletedAssistantTurns(opened);
       opened = recovered.workspace;
-      if (recovered.notice) setNotice(recovered.notice);
+      const combinedNotice = [discussionNotice, recovered.notice].filter(Boolean).join(' ');
+      if (combinedNotice) setNotice(combinedNotice);
       if (generation !== generationRef.current) return;
       setNovelTitle(novel.title);
       replaceSnapshot(opened);
@@ -375,7 +442,7 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
     } finally {
       if (generation === generationRef.current) setLoading(false);
     }
-  }, [chapterId, novelId, replaceSnapshot]);
+  }, [chapterId, discussionHandoff, novelId, replaceSnapshot]);
 
   const finishTurn = useCallback(async (
     start: CoCreationWorkspaceSnapshot,
@@ -809,11 +876,200 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
     }
   }, [applying, lastApplyResult, stableApplyOperationId]);
 
+  const persistGenerationRecord = useCallback(async (
+    workspace: CoCreationWorkspaceSnapshot,
+    record: CoCreationGenerationRecordV1,
+    objectContext = workspace.session.objectContext,
+  ) => {
+    const state = deserializeWorkingDraft(workspace.activeDraft?.payload);
+    const basePayload = draftPayload({
+      snapshot: workspace,
+      state,
+      currentStage: workspace.session.currentStage,
+      pendingTurn: null,
+      objectContext,
+    });
+    return coCreationSessionService.saveDraft({
+      workspace,
+      stage: workspace.session.currentStage,
+      payload: writeCoCreationGenerationRecord(basePayload, record),
+      origin: 'author_edit',
+      operationId: `co-creation:${workspace.session.sessionId}:generation:${record.request.requestId}:${record.status}`,
+    });
+  }, []);
+
+  const submitPreparedGeneration = useCallback(async (
+    workspace: CoCreationWorkspaceSnapshot,
+    prepared: CoCreationGenerationRecordV1,
+  ) => {
+    let receipt: Awaited<ReturnType<typeof coCreationGenerationService.execute>>;
+    try {
+      receipt = await coCreationGenerationService.execute(workspace, prepared.request);
+    } catch (value) {
+      const errorCode = value && typeof value === 'object' && 'code' in value
+        ? String((value as { code?: unknown }).code ?? 'CO_CREATION_GENERATION_FAILED')
+        : 'CO_CREATION_GENERATION_FAILED';
+      const errorMessage = safeFailureMessage(value instanceof Error ? value.message : '共创生成请求失败');
+      const failed: CoCreationGenerationRecordV1 = {
+        request: prepared.request,
+        status: 'failed',
+        errorCode,
+        errorMessage,
+        updatedAt: prepared.request.createdAt,
+      };
+      try {
+        const saved = await persistGenerationRecord(workspace, failed);
+        replaceSnapshot(saved);
+      } catch {
+        // The prepared immutable revision remains recoverable even if the failure marker cannot be saved.
+      }
+      throw value;
+    }
+    const completed: CoCreationGenerationRecordV1 = {
+      request: prepared.request,
+      status: receipt.receiptType === 'background_workflow' ? 'submitted' : 'handoff_ready',
+      receipt,
+      updatedAt: prepared.request.createdAt,
+    };
+    let saved: CoCreationWorkspaceSnapshot;
+    try {
+      saved = await persistGenerationRecord(workspace, completed);
+    } catch {
+      // The Task/handoff is already authoritative. Reopen and replay the same stable
+      // bookkeeping mutation instead of mislabeling a successful execution as failed.
+      const authoritative = await coCreationSessionService.open(prepared.request.novelId);
+      const stored = readCoCreationGenerationRecords(authoritative.activeDraft?.payload)
+        .find((record) => record.request.requestId === prepared.request.requestId);
+      saved = stored && stableCanonicalStringify(stored) === stableCanonicalStringify(completed)
+        ? authoritative
+        : await persistGenerationRecord(authoritative, completed);
+    }
+    replaceSnapshot(saved);
+    setNotice(receipt.receiptType === 'background_workflow'
+      ? '大纲任务已提交到现有后台工作流，请在 AI 任务中心审查 Artifact。'
+      : '章节计划已安全交接到工作台；打开后仍需由作者手动启动正文生成。');
+    return completed;
+  }, [persistGenerationRecord, replaceSnapshot]);
+
+  const startGeneration = useCallback(async (input: {
+    kind: CoCreationGenerationKind;
+    volumeId?: string;
+    chapterId?: string;
+    chapterCount?: number;
+    targetWordCount?: number;
+    additionalInstruction?: string;
+  }) => {
+    const current = snapshotRef.current;
+    if (!current || generationLockRef.current) return;
+    generationLockRef.current = true;
+    setGenerationBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const keepsCurrentChapterContext = !!input.chapterId
+        && input.chapterId === current.session.objectContext.chapterId;
+      const objectContext = input.kind === 'master_outline' || keepsCurrentChapterContext
+        ? {
+            ...current.session.objectContext,
+            ...(input.volumeId ? { volumeId: input.volumeId } : {}),
+            ...(input.chapterId ? { chapterId: input.chapterId } : {}),
+          }
+        : {
+            novelId: current.session.novelId,
+            ...(input.volumeId ? { volumeId: input.volumeId } : {}),
+            ...(input.chapterId ? { chapterId: input.chapterId } : {}),
+          };
+      const scopedWorkspace: CoCreationWorkspaceSnapshot = {
+        ...current,
+        session: { ...current.session, objectContext },
+      };
+      const compiledContext = await coCreationGenerationService.compileBaseContext(scopedWorkspace, {
+        kind: input.kind,
+        novelId: current.session.novelId,
+        sessionId: current.session.sessionId,
+        volumeId: input.volumeId,
+        chapterId: input.chapterId,
+        chapterCount: input.chapterCount,
+        additionalInstruction: input.additionalInstruction,
+        sourceDraftRevisionId: current.activeDraft?.draftRevisionId,
+        sourceDraftContentHash: current.activeDraft?.contentHash,
+      });
+      const draftPlan = input.kind === 'chapter_generation_handoff'
+        ? buildChapterPlanFromDraft(current.activeDraft?.payload)
+        : undefined;
+      const chapterPlan = draftPlan && input.additionalInstruction?.trim()
+        ? `${draftPlan}\n本轮附加要求：${input.additionalInstruction.trim()}`
+        : draftPlan || input.additionalInstruction?.trim();
+      const request = await createCoCreationGenerationRequest({
+        requestId: crypto.randomUUID(),
+        kind: input.kind,
+        novelId: current.session.novelId,
+        sessionId: current.session.sessionId,
+        volumeId: input.volumeId,
+        chapterId: input.chapterId,
+        chapterCount: input.chapterCount,
+        targetWordCount: input.targetWordCount,
+        additionalInstruction: input.additionalInstruction,
+        chapterPlan,
+        baseContextHash: compiledContext.baseContextHash,
+        compiledInputHash: compiledContext.compiledInputHash,
+        baseDataRevision: current.session.dataRevision,
+        sourceDraftRevisionId: current.activeDraft?.draftRevisionId,
+        sourceDraftContentHash: current.activeDraft?.contentHash,
+      });
+      const prepared: CoCreationGenerationRecordV1 = {
+        request,
+        status: 'prepared',
+        updatedAt: request.createdAt,
+      };
+      const saved = await persistGenerationRecord(current, prepared, objectContext);
+      replaceSnapshot(saved);
+      await submitPreparedGeneration(saved, prepared);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '启动共创生成请求失败');
+    } finally {
+      generationLockRef.current = false;
+      setGenerationBusy(false);
+    }
+  }, [persistGenerationRecord, replaceSnapshot, submitPreparedGeneration]);
+
+  const retryGeneration = useCallback(async (requestId: string) => {
+    const current = snapshotRef.current;
+    if (!current || generationLockRef.current) return;
+    const existing = readCoCreationGenerationRecords(current.activeDraft?.payload)
+      .find((record) => record.request.requestId === requestId);
+    if (!existing || !['prepared', 'failed'].includes(existing.status)) {
+      setError('该生成请求当前不能重试');
+      return;
+    }
+    if (existing.errorCode === 'CO_CREATION_GENERATION_STALE') {
+      setError('该生成请求基于旧数据，不能重试；请从上方基于当前内容重新准备。');
+      return;
+    }
+    generationLockRef.current = true;
+    setGenerationBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await submitPreparedGeneration(current, {
+        request: existing.request,
+        status: 'prepared',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '重试共创生成请求失败');
+    } finally {
+      generationLockRef.current = false;
+      setGenerationBusy(false);
+    }
+  }, [submitPreparedGeneration]);
+
   return {
     snapshot,
     loading,
     sending,
     applying,
+    generationBusy,
     error,
     notice,
     novelTitle,
@@ -829,6 +1085,9 @@ export function useCoCreationController(novelId: string | undefined, chapterId?:
     prepareFormalApply,
     confirmFormalApply,
     prepareFormalUndo,
+    generationRecords: readCoCreationGenerationRecords(snapshot?.activeDraft?.payload),
+    startGeneration,
+    retryGeneration,
     cancelFormalApply: () => setApplyPreparation(null),
     clearError: () => setError(''),
   };

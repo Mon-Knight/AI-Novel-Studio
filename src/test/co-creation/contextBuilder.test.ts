@@ -81,6 +81,31 @@ describe('co-creation context builder', () => {
     expect(after.canonicalDataHash).not.toBe(before.canonicalDataHash);
   });
 
+  it('keeps synthetic fallback protagonist identity stable without claiming a persisted source row', async () => {
+    vi.mocked(novelRepository.getById).mockResolvedValue({
+      id: 'novel-a', title: '测试作品', description: '', outline: '', protagonistMode: 'single',
+      protagonists: [{
+        id: 'novel-protagonist:novel-a:primary', label: 'primary', name: '', gender: '',
+        identity: '', personality: '', goal: '', motivation: '', ability: '', limitation: '',
+        background: '', arc: '', notes: '',
+      }],
+      dualProtagonistRelation: {} as never, status: 'draft', totalWordCount: 0, totalWords: 0,
+      targetWords: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01', volumes: [],
+    });
+
+    const first = await buildCoCreationContext({ session, messages: [] });
+    const second = await buildCoCreationContext({ session, messages: [] });
+
+    expect(second.canonicalDataHash).toBe(first.canonicalDataHash);
+    expect(first.sourceManifest).toContainEqual(expect.objectContaining({
+      sourceType: 'creative_intent_state', sourceId: 'novel-a', version: 0,
+      contentHash: 'missing',
+    }));
+    expect(first.sourceManifest.some((source) => (
+      source.sourceType === 'novel_protagonist'
+    ))).toBe(false);
+  });
+
   it('maps formal intent, setting, rule, and protagonist data to every minimum field', async () => {
     vi.mocked(creativeIntentService.getLatest).mockResolvedValue({
       taskId: 'intent-task',

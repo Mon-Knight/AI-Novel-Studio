@@ -119,13 +119,14 @@ export function getDefaultProtagonistProfile(
 export function normalizeProtagonistProfile(
   raw: unknown,
   fallbackLabel: ProtagonistProfile['label'] = 'primary',
+  fallbackId?: string,
 ): ProtagonistProfile {
   const source = isPlainObject(raw) ? raw : {};
   const ability = toSafeString(source.ability ?? source.specialAbility, '');
   const limitation = toSafeString(source.limitation ?? source.abilityLimits, '');
 
   return {
-    id: typeof source.id === 'string' && source.id ? source.id : generateId(),
+    id: typeof source.id === 'string' && source.id ? source.id : (fallbackId ?? generateId()),
     label: source.label === 'secondary' ? 'secondary' : fallbackLabel,
     name: toSafeString(source.name, ''),
     gender: toSafeString(source.gender, ''),
@@ -167,12 +168,16 @@ export function normalizeDualProtagonistRelation(raw: unknown): DualProtagonistR
 function normalizeProtagonists(
   raw: Record<string, unknown>,
   mode: ProtagonistMode,
+  novelId: string,
 ): ProtagonistProfile[] {
   const rawProtagonists = readJsonField<unknown[]>(raw, 'protagonists', 'protagonists_json', []);
   const list = Array.isArray(rawProtagonists)
     ? rawProtagonists
       .filter((item) => isPlainObject(item))
-      .map((item, index) => normalizeProtagonistProfile(item, index === 1 ? 'secondary' : 'primary'))
+      .map((item, index) => {
+        const label = index === 1 ? 'secondary' : 'primary';
+        return normalizeProtagonistProfile(item, label, `novel-protagonist:${novelId}:${label}`);
+      })
     : [];
 
   const mainCharacter = toSafeString(raw.mainCharacter ?? raw.main_character ?? raw.protagonistName, '');
@@ -180,6 +185,7 @@ function normalizeProtagonists(
 
   if (list.length === 0) {
     const primary = getDefaultProtagonistProfile('primary');
+    primary.id = `novel-protagonist:${novelId}:primary`;
     primary.name = mainCharacter;
     primary.ability = protagonistAbility;
     primary.specialAbility = protagonistAbility;
@@ -195,7 +201,10 @@ function normalizeProtagonists(
 
   list[0] = { ...list[0], label: 'primary' };
   if (mode === 'dual') {
-    if (!list[1]) list[1] = getDefaultProtagonistProfile('secondary');
+    if (!list[1]) {
+      list[1] = getDefaultProtagonistProfile('secondary');
+      list[1].id = `novel-protagonist:${novelId}:secondary`;
+    }
     list[1] = { ...list[1], label: 'secondary' };
     return list.slice(0, 2);
   }
@@ -257,7 +266,7 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
 
   const rawMode = raw.protagonistMode ?? raw.protagonist_mode;
   const protagonistMode: ProtagonistMode = rawMode === 'dual' ? 'dual' : 'single';
-  const protagonists = normalizeProtagonists(raw, protagonistMode);
+  const protagonists = normalizeProtagonists(raw, protagonistMode, id);
   const dualRelationRaw = readJsonField<unknown>(
     raw,
     'dualProtagonistRelation',

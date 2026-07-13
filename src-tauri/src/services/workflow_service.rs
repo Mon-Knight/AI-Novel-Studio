@@ -1,5 +1,5 @@
 use crate::errors::{codes, AppError};
-use crate::repositories::large_text_repository;
+use crate::repositories::{ai_task_repository, large_text_repository};
 use crate::services::ai_task_service::{
     self, ConstraintSnapshotInput, ContextSnapshotInput, CreateAiTaskInput, InputSnapshotInput,
 };
@@ -461,6 +461,764 @@ fn validate_background_kind(task_type: &str, artifact_type: &str) -> Result<(), 
     Ok(())
 }
 
+fn target_hint_identifier<'a>(
+    target_hint: &'a Option<Value>,
+    key: &str,
+) -> Result<Option<&'a str>, AppError> {
+    let Some(value) = target_hint.as_ref().and_then(|hint| hint.get(key)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_str()
+        .filter(|identifier| !identifier.trim().is_empty())
+        .map(Some)
+        .ok_or_else(|| {
+            AppError::new(
+                codes::OPERATION_PAYLOAD_CONFLICT,
+                format!("后台工作流 {key} 必须是非空字符串"),
+                false,
+            )
+        })
+}
+
+fn validate_background_scope(
+    connection: &Connection,
+    input: &CreateBackgroundWorkflowInput,
+) -> Result<(), AppError> {
+    let hinted_volume_id = target_hint_identifier(&input.target_hint_json, "volumeId")?;
+    let hinted_chapter_id = target_hint_identifier(&input.target_hint_json, "chapterId")?;
+    if hinted_chapter_id != input.chapter_id.as_deref() && hinted_chapter_id.is_some() {
+        return Err(AppError::new(
+            codes::AI_WORKFLOW_SCOPE_MISMATCH,
+            "后台工作流章节提示与冻结章节范围不一致",
+            false,
+        ));
+    }
+    if let Some(volume_id) = hinted_volume_id {
+        let volume_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM volumes WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
+                params![volume_id, input.novel_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if volume_exists != 1 {
+            return Err(AppError::new(
+                codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                "后台工作流分卷范围无效",
+                false,
+            ));
+        }
+    }
+    if let (Some(chapter_id), Some(volume_id)) = (input.chapter_id.as_deref(), hinted_volume_id) {
+        let chapter_volume_id: Option<String> = connection
+            .query_row(
+                "SELECT volume_id FROM chapters
+                 WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
+                params![chapter_id, input.novel_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(AppError::database)?
+            .flatten();
+        if chapter_volume_id.as_deref() != Some(volume_id) {
+            return Err(AppError::new(
+                codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                "后台工作流章节与分卷范围不一致",
+                false,
+            ));
+        }
+    }
+    if input.task_type == "chapter_outline_generate" {
+        if let Some(value) = input.input_payload_json.get("chapterCount") {
+            if !value.is_null()
+                && !value
+                    .as_i64()
+                    .is_some_and(|chapter_count| (1..=20).contains(&chapter_count))
+            {
+                return Err(AppError::new(
+                    codes::OPERATION_PAYLOAD_CONFLICT,
+                    "章节大纲数量必须是 1 到 20 的整数",
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn manifest_scalar(source: &Value, key: &str) -> Result<Option<String>, AppError> {
+    match source.get(key) {
+        None => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.clone())),
+        Some(Value::Number(value)) => Ok(Some(value.to_string())),
+        _ => Err(AppError::new(
+            codes::AI_CONTEXT_BUILD_FAILED,
+            format!("AI 共创大纲来源 {key} 必须是非空字符串或数字"),
+            false,
+        )),
+    }
+}
+
+fn collection_source_row(
+    connection: &Connection,
+    sql: &str,
+    novel_id: &str,
+) -> Result<Option<(Option<String>, Option<String>)>, AppError> {
+    let mut statement = connection.prepare(sql).map_err(AppError::database)?;
+    let rows = statement
+        .query_map(params![novel_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+    let state = rows
+        .into_iter()
+        .map(|(id, version, active)| {
+            json!({
+                "active": active.map(|value| value != 0),
+                "id": id,
+                "version": version,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Some((
+        None,
+        Some(large_text_repository::sha256(
+            &Value::Array(state).to_string(),
+        )),
+    )))
+}
+
+fn outline_source_row(
+    connection: &Connection,
+    sql: &str,
+    source_id: &str,
+    novel_id: &str,
+) -> Result<Option<(Option<String>, Option<String>)>, AppError> {
+    connection
+        .query_row(sql, params![source_id, novel_id], |row| {
+            let version = row.get::<_, String>(0)?;
+            let content = row.get::<_, String>(1)?;
+            Ok((Some(version), Some(large_text_repository::sha256(&content))))
+        })
+        .optional()
+        .map_err(AppError::database)
+}
+
+fn validate_co_creation_source_manifest(
+    connection: &Connection,
+    input: &CreateBackgroundWorkflowInput,
+) -> Result<(), AppError> {
+    let is_co_creation = input
+        .target_hint_json
+        .as_ref()
+        .and_then(|hint| hint.get("generationSource"))
+        .and_then(Value::as_str)
+        == Some("ai_co_creation");
+    if !is_co_creation {
+        return Ok(());
+    }
+    let sources = input.source_manifest_json.as_array().ok_or_else(|| {
+        AppError::new(
+            codes::AI_CONTEXT_BUILD_FAILED,
+            "AI 共创大纲来源清单必须是数组",
+            false,
+        )
+    })?;
+    if sources.is_empty() {
+        return Err(AppError::new(
+            codes::AI_CONTEXT_BUILD_FAILED,
+            "AI 共创大纲来源清单不能为空",
+            false,
+        ));
+    }
+
+    macro_rules! source_row {
+        ($sql:expr, $($parameter:expr),+ $(,)?) => {{
+            connection
+                .query_row($sql, params![$($parameter),+], |row| {
+                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?))
+                })
+                .optional()
+                .map_err(AppError::database)?
+        }};
+    }
+
+    let supported = |source_type: &str| {
+        matches!(
+            source_type,
+            "novel"
+                | "world_setting"
+                | "world_setting_collection"
+                | "rule_system"
+                | "rule_system_collection"
+                | "protagonist"
+                | "legacy_protagonist"
+                | "novel_protagonist"
+                | "character"
+                | "volume"
+                | "volume_collection"
+                | "chapter"
+                | "chapter_collection"
+                | "master_outline"
+                | "volume_outline"
+                | "style_profile"
+                | "creative_intent"
+                | "creative_intent_state"
+                | "co_creation_session"
+                | "co_creation_session_summary"
+                | "co_creation_message"
+                | "co_creation_draft"
+                | "co_creation_generation_request"
+        )
+    };
+    let mut identities = std::collections::HashSet::new();
+    let mut co_creation_session_id: Option<&str> = None;
+    for source in sources {
+        let source_type = source
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::AI_CONTEXT_BUILD_FAILED,
+                    "AI 共创大纲来源缺少 type",
+                    false,
+                )
+            })?;
+        let source_id = source
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::AI_CONTEXT_BUILD_FAILED,
+                    "AI 共创大纲来源缺少 id",
+                    false,
+                )
+            })?;
+        if !supported(source_type) {
+            return Err(AppError::new(
+                codes::AI_CONTEXT_BUILD_FAILED,
+                format!("AI 共创大纲来源类型不受支持：{source_type}"),
+                false,
+            ));
+        }
+        let status = source
+            .get("status")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::AI_CONTEXT_BUILD_FAILED,
+                    "AI 共创大纲来源缺少 status",
+                    false,
+                )
+            })?;
+        if !matches!(status, "used" | "missing") {
+            return Err(AppError::new(
+                codes::AI_CONTEXT_BUILD_FAILED,
+                "AI 共创大纲来源 status 无效",
+                false,
+            ));
+        }
+        if !identities.insert((source_type, source_id)) {
+            return Err(AppError::new(
+                codes::AI_CONTEXT_BUILD_FAILED,
+                format!("AI 共创大纲来源重复：{source_type}/{source_id}"),
+                false,
+            ));
+        }
+        let version = manifest_scalar(source, "version")?;
+        let hash = manifest_scalar(source, "hash")?;
+        if status == "used" && version.is_none() && hash.is_none() {
+            return Err(AppError::new(
+                codes::AI_CONTEXT_BUILD_FAILED,
+                format!("AI 共创大纲来源缺少版本或 hash：{source_type}/{source_id}"),
+                false,
+            ));
+        }
+        if source_type == "co_creation_session" && status == "used" {
+            if co_creation_session_id.replace(source_id).is_some() {
+                return Err(AppError::new(
+                    codes::AI_CONTEXT_BUILD_FAILED,
+                    "AI 共创大纲只能绑定一个共创会话",
+                    false,
+                ));
+            }
+        }
+    }
+    let co_creation_session_id = co_creation_session_id.ok_or_else(|| {
+        AppError::new(
+            codes::AI_CONTEXT_BUILD_FAILED,
+            "AI 共创大纲来源缺少权威共创会话",
+            false,
+        )
+    })?;
+
+    for source in sources {
+        let source_type = source
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::AI_CONTEXT_BUILD_FAILED,
+                    "AI 共创大纲来源缺少 type",
+                    false,
+                )
+            })?;
+        let source_id = source
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::AI_CONTEXT_BUILD_FAILED,
+                    "AI 共创大纲来源缺少 id",
+                    false,
+                )
+            })?;
+        let status = source.get("status").and_then(Value::as_str).unwrap();
+        let row = match source_type {
+            "novel" => source_row!(
+                "SELECT updated_at,NULL FROM novels WHERE id=?1 AND id=?2 AND deleted_at IS NULL",
+                source_id,
+                input.novel_id,
+            ),
+            "world_setting" => source_row!(
+                "SELECT updated_at,NULL FROM world_settings WHERE id=?1 AND novel_id=?2",
+                source_id,
+                input.novel_id,
+            ),
+            "rule_system" => source_row!(
+                "SELECT updated_at,NULL FROM rule_systems WHERE id=?1 AND novel_id=?2",
+                source_id,
+                input.novel_id,
+            ),
+            "world_setting_collection" if source_id == input.novel_id => collection_source_row(
+                connection,
+                "SELECT id,updated_at,is_active FROM world_settings
+                 WHERE novel_id=?1 ORDER BY id",
+                &input.novel_id,
+            )?,
+            "rule_system_collection" if source_id == input.novel_id => collection_source_row(
+                connection,
+                "SELECT id,updated_at,is_active FROM rule_systems
+                 WHERE novel_id=?1 ORDER BY id",
+                &input.novel_id,
+            )?,
+            "protagonist" | "legacy_protagonist" => source_row!(
+                "SELECT updated_at,NULL FROM protagonists WHERE id=?1 AND novel_id=?2",
+                source_id,
+                input.novel_id,
+            ),
+            "novel_protagonist" => source_row!(
+                "SELECT updated_at,NULL FROM novels n
+                 WHERE n.id=?2 AND n.deleted_at IS NULL
+                   AND EXISTS (
+                     SELECT 1 FROM json_each(COALESCE(n.protagonists_json,'[]')) p
+                     WHERE json_extract(p.value,'$.id')=?1
+                   )",
+                source_id,
+                input.novel_id,
+            ),
+            "volume" => source_row!(
+                "SELECT updated_at,NULL FROM volumes
+                 WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
+                source_id,
+                input.novel_id,
+            ),
+            "chapter" => source_row!(
+                "SELECT updated_at,NULL FROM chapters
+                 WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
+                source_id,
+                input.novel_id,
+            ),
+            "volume_collection" if source_id == input.novel_id => collection_source_row(
+                connection,
+                "SELECT id,updated_at,NULL FROM volumes
+                 WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id",
+                &input.novel_id,
+            )?,
+            "chapter_collection" if source_id == input.novel_id => collection_source_row(
+                connection,
+                "SELECT id,updated_at,NULL FROM chapters
+                 WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id",
+                &input.novel_id,
+            )?,
+            "master_outline" => match source.get("role").and_then(Value::as_str) {
+                Some("active_master_outline") => outline_source_row(
+                    connection,
+                    "SELECT updated_at,content FROM master_outlines
+                     WHERE id=?1 AND project_id=?2 AND is_active=1",
+                    source_id,
+                    &input.novel_id,
+                )?,
+                Some("fallback_master_outline") => outline_source_row(
+                    connection,
+                    "SELECT updated_at,content FROM master_outlines m
+                     WHERE id=?1 AND project_id=?2 AND is_active=0
+                       AND NOT EXISTS (
+                         SELECT 1 FROM master_outlines a
+                         WHERE a.project_id=?2 AND a.is_active=1
+                       )
+                       AND m.id=(
+                         SELECT latest.id FROM master_outlines latest
+                         WHERE latest.project_id=?2 ORDER BY latest.version DESC LIMIT 1
+                       )",
+                    source_id,
+                    &input.novel_id,
+                )?,
+                _ => {
+                    return Err(AppError::new(
+                        codes::AI_CONTEXT_BUILD_FAILED,
+                        "AI 共创总纲来源角色无效",
+                        false,
+                    ))
+                }
+            },
+            "volume_outline" => match source.get("role").and_then(Value::as_str) {
+                Some("active_volume_outline") => outline_source_row(
+                    connection,
+                    "SELECT updated_at,content FROM volume_outlines
+                     WHERE id=?1 AND project_id=?2 AND is_active=1",
+                    source_id,
+                    &input.novel_id,
+                )?,
+                Some("fallback_volume_outline") => outline_source_row(
+                    connection,
+                    "SELECT updated_at,content FROM volume_outlines v
+                     WHERE id=?1 AND project_id=?2 AND is_active=0
+                       AND NOT EXISTS (
+                         SELECT 1 FROM volume_outlines a
+                         WHERE a.project_id=?2 AND a.volume_id IS v.volume_id AND a.is_active=1
+                       )
+                       AND v.id=(
+                         SELECT latest.id FROM volume_outlines latest
+                         WHERE latest.project_id=?2 AND latest.volume_id IS v.volume_id
+                         ORDER BY latest.version DESC LIMIT 1
+                       )",
+                    source_id,
+                    &input.novel_id,
+                )?,
+                _ => {
+                    return Err(AppError::new(
+                        codes::AI_CONTEXT_BUILD_FAILED,
+                        "AI 共创卷纲来源角色无效",
+                        false,
+                    ))
+                }
+            },
+            "style_profile" => match source.get("role").and_then(Value::as_str) {
+                Some("active_style_profile") => source_row!(
+                    "SELECT updated_at,NULL FROM style_profiles
+                     WHERE id=?1 AND novel_id=?2 AND is_active=1",
+                    source_id,
+                    input.novel_id,
+                ),
+                Some("fallback_style_profile") => source_row!(
+                    "SELECT updated_at,NULL FROM style_profiles s
+                     WHERE id=?1 AND novel_id=?2 AND is_active=0
+                       AND NOT EXISTS (
+                         SELECT 1 FROM style_profiles a
+                         WHERE a.novel_id=?2 AND a.is_active=1
+                       )
+                       AND s.id=(
+                         SELECT latest.id FROM style_profiles latest
+                         WHERE latest.novel_id=?2 ORDER BY latest.updated_at DESC LIMIT 1
+                       )",
+                    source_id,
+                    input.novel_id,
+                ),
+                _ => {
+                    return Err(AppError::new(
+                        codes::AI_CONTEXT_BUILD_FAILED,
+                        "AI 共创风格来源角色无效",
+                        false,
+                    ))
+                }
+            },
+            "character" => source_row!(
+                "SELECT n.updated_at,NULL FROM novels n JOIN characters c ON c.novel_id=n.id
+                 WHERE c.id=?1 AND n.id=?2 AND n.deleted_at IS NULL",
+                source_id,
+                input.novel_id,
+            ),
+            "creative_intent" => source_row!(
+                "SELECT CAST(json_extract(s.payload_json,'$.intent.revision') AS TEXT),
+                        json_extract(s.payload_json,'$.intent.contentHash')
+                 FROM ai_input_snapshots s JOIN ai_tasks t ON t.task_id=s.task_id
+                 WHERE t.novel_id=?2 AND t.task_type='creative_intent_freeze'
+                   AND json_extract(s.payload_json,'$.intent.intentId')=?1
+                   AND s.rowid=(
+                     SELECT s2.rowid FROM ai_input_snapshots s2
+                     JOIN ai_tasks t2 ON t2.task_id=s2.task_id
+                     WHERE t2.novel_id=?2 AND t2.task_type='creative_intent_freeze'
+                     ORDER BY s2.rowid DESC LIMIT 1
+                   )",
+                source_id,
+                input.novel_id,
+            ),
+            "creative_intent_state" if source_id == input.novel_id => {
+                let latest = source_row!(
+                    "SELECT CAST(json_extract(s.payload_json,'$.intent.revision') AS TEXT),
+                            json_extract(s.payload_json,'$.intent.contentHash')
+                     FROM ai_input_snapshots s JOIN ai_tasks t ON t.task_id=s.task_id
+                     WHERE t.novel_id=?1 AND t.task_type='creative_intent_freeze'
+                     ORDER BY s.rowid DESC LIMIT 1",
+                    input.novel_id,
+                );
+                Some(latest.unwrap_or((Some("0".into()), Some("missing".into()))))
+            }
+            "co_creation_session" => source_row!(
+                "SELECT CAST(revision AS TEXT),state_hash FROM co_creation_sessions
+                 WHERE session_id=?1 AND novel_id=?2 AND status='active'",
+                source_id,
+                input.novel_id,
+            ),
+            "co_creation_session_summary" => source_row!(
+                "SELECT NULL,json_extract(d.payload_json,'$.sessionSummaryHash')
+                 FROM co_creation_draft_revisions d
+                 JOIN co_creation_sessions s ON s.session_id=d.session_id
+                 WHERE s.session_id=?1 AND s.novel_id=?2
+                 ORDER BY d.rowid DESC LIMIT 1",
+                source_id,
+                input.novel_id,
+            ),
+            "co_creation_message" => source_row!(
+                "SELECT NULL,m.content_hash FROM co_creation_messages m
+                 JOIN co_creation_sessions s ON s.session_id=m.session_id
+                 WHERE m.message_id=?1 AND s.novel_id=?2 AND s.session_id=?3
+                   AND m.status='completed'",
+                source_id,
+                input.novel_id,
+                co_creation_session_id,
+            ),
+            "co_creation_draft" => source_row!(
+                "SELECT NULL,d.content_hash FROM co_creation_draft_revisions d
+                 JOIN co_creation_sessions s ON s.session_id=d.session_id
+                 WHERE d.draft_revision_id=?1 AND s.novel_id=?2 AND s.session_id=?3",
+                source_id,
+                input.novel_id,
+                co_creation_session_id,
+            ),
+            "co_creation_generation_request" => source_row!(
+                "SELECT NULL,json_extract(j.value,'$.request.requestHash')
+                 FROM co_creation_draft_revisions d
+                 JOIN co_creation_sessions s ON s.session_id=d.session_id
+                 JOIN json_each(d.payload_json,'$.generationRequests') j
+                 WHERE json_extract(j.value,'$.request.requestId')=?1 AND s.novel_id=?2
+                   AND s.session_id=?3
+                 ORDER BY d.rowid DESC LIMIT 1",
+                source_id,
+                input.novel_id,
+                co_creation_session_id,
+            ),
+            _ => None,
+        };
+        if status == "missing" {
+            if row.is_some() {
+                return Err(AppError::new(
+                    codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                    format!("AI 共创大纲缺失来源已经出现：{source_type}/{source_id}"),
+                    false,
+                ));
+            }
+            continue;
+        }
+        let Some((current_version, current_hash)) = row else {
+            return Err(AppError::new(
+                codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                format!("AI 共创大纲来源已经失效：{source_type}/{source_id}"),
+                false,
+            ));
+        };
+        if let Some(expected_version) = manifest_scalar(source, "version")? {
+            if current_version.as_deref() != Some(expected_version.as_str()) {
+                return Err(AppError::new(
+                    codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                    format!("AI 共创大纲来源版本已变化：{source_type}/{source_id}"),
+                    false,
+                ));
+            }
+        }
+        if let Some(expected_hash) = manifest_scalar(source, "hash")? {
+            if current_hash.as_deref() != Some(expected_hash.as_str()) {
+                return Err(AppError::new(
+                    codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                    format!("AI 共创大纲来源内容已变化：{source_type}/{source_id}"),
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn background_step_target_hint(
+    target_hint: &Option<Value>,
+    step: &BackgroundWorkflowStepInput,
+) -> Value {
+    let mut target_hint = target_hint.clone().unwrap_or_else(|| json!({}));
+    if !target_hint.is_object() {
+        target_hint = json!({ "target": target_hint });
+    }
+    if let Some(object) = target_hint.as_object_mut() {
+        object.insert("artifactType".into(), json!(step.artifact_type));
+        object.insert("reviewOutput".into(), json!(step.review_output));
+    }
+    target_hint
+}
+
+fn background_root_payload(input: &CreateBackgroundWorkflowInput) -> Value {
+    let steps = input
+        .steps
+        .iter()
+        .map(|step| {
+            json!({
+                "stepKey": step.step_key,
+                "taskType": step.task_type,
+                "agentRole": step.agent_role,
+                "artifactType": step.artifact_type,
+                "messagesHash": large_text_repository::sha256(&step.messages.to_string()),
+                "dependencies": step.dependencies,
+                "priority": step.priority,
+                "reviewOutput": step.review_output,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "workflowName": input.workflow_name,
+        "workflowTaskType": input.task_type,
+        "payload": input.input_payload_json,
+        "steps": steps,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ensure_node_attached(
+    connection: &Connection,
+    task_id: &str,
+    workflow_id: &str,
+    workflow_name: &str,
+    root_task_id: &str,
+    parent_task_id: Option<&str>,
+    step_key: &str,
+    agent_role: &str,
+    priority: i64,
+    worker_kind: Option<&str>,
+    queued: bool,
+) -> Result<(), AppError> {
+    let metadata: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+        Option<String>,
+    ) = connection
+        .query_row(
+            "SELECT workflow_id,workflow_name,root_task_id,parent_task_id,step_key,agent_role,
+                    priority,worker_kind FROM ai_tasks WHERE task_id=?1",
+            params![task_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| AppError::new(codes::AI_TASK_NOT_FOUND, "工作流节点不存在", false))?;
+    if metadata.0.is_none() {
+        if metadata.1.is_some()
+            || metadata.2.is_some()
+            || metadata.3.is_some()
+            || metadata.4.is_some()
+            || metadata.5.is_some()
+            || metadata.7.is_some()
+        {
+            return Err(AppError::new(
+                codes::OPERATION_PAYLOAD_CONFLICT,
+                "工作流节点持久化状态不完整",
+                false,
+            ));
+        }
+        return attach_node(
+            connection,
+            task_id,
+            workflow_id,
+            workflow_name,
+            root_task_id,
+            parent_task_id,
+            step_key,
+            agent_role,
+            priority,
+            worker_kind,
+            queued,
+        );
+    }
+    if metadata.0.as_deref() != Some(workflow_id)
+        || metadata.1.as_deref() != Some(workflow_name)
+        || metadata.2.as_deref() != Some(root_task_id)
+        || metadata.3.as_deref() != parent_task_id
+        || metadata.4.as_deref() != Some(step_key)
+        || metadata.5.as_deref() != Some(agent_role)
+        || metadata.6 != priority
+        || metadata.7.as_deref() != worker_kind
+    {
+        return Err(AppError::new(
+            codes::OPERATION_PAYLOAD_CONFLICT,
+            "同一 operationId 对应了不同后台工作流节点",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_dependency(
+    connection: &Connection,
+    task_id: &str,
+    depends_on_task_id: &str,
+) -> Result<(), AppError> {
+    let existing = connection
+        .query_row(
+            "SELECT required FROM ai_task_dependencies
+             WHERE task_id=?1 AND depends_on_task_id=?2",
+            params![task_id, depends_on_task_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    match existing {
+        Some(1) => Ok(()),
+        Some(_) => Err(AppError::new(
+            codes::OPERATION_PAYLOAD_CONFLICT,
+            "后台工作流依赖强度冲突",
+            false,
+        )),
+        None => add_dependency(connection, task_id, depends_on_task_id, true),
+    }
+}
+
 pub fn create_background_workflow(
     connection: &mut Connection,
     input: CreateBackgroundWorkflowInput,
@@ -476,62 +1234,69 @@ pub fn create_background_workflow(
             false,
         ));
     }
-    let novel_exists: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM novels WHERE id=?1 AND deleted_at IS NULL",
-            params![input.novel_id],
-            |row| row.get(0),
-        )
-        .map_err(AppError::database)?;
-    if novel_exists != 1 {
-        return Err(AppError::new(
-            codes::AI_WORKFLOW_SCOPE_MISMATCH,
-            "后台工作流作品范围无效",
-            false,
-        ));
-    }
-    if let Some(chapter_id) = input.chapter_id.as_deref() {
-        let chapter_exists: i64 = connection
+    let root_operation_id = format!("{}:root", input.operation_id);
+    let recovering_frozen_workflow =
+        ai_task_repository::find_by_operation(connection, &root_operation_id)?.is_some();
+    if !recovering_frozen_workflow {
+        let novel_exists: i64 = connection
             .query_row(
-                "SELECT COUNT(*) FROM chapters WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
-                params![chapter_id, input.novel_id],
+                "SELECT COUNT(*) FROM novels WHERE id=?1 AND deleted_at IS NULL",
+                params![input.novel_id],
                 |row| row.get(0),
             )
             .map_err(AppError::database)?;
-        if chapter_exists != 1 {
+        if novel_exists != 1 {
             return Err(AppError::new(
                 codes::AI_WORKFLOW_SCOPE_MISMATCH,
-                "后台工作流章节范围无效",
+                "后台工作流作品范围无效",
                 false,
             ));
         }
-    }
-    if let Some(draft_id) = input.draft_id.as_deref() {
-        let draft: Option<(i64, Option<String>)> = connection
-            .query_row(
-                "SELECT version_no,content_hash FROM chapter_drafts
-                 WHERE id=?1 AND novel_id=?2 AND chapter_id=?3",
-                params![draft_id, input.novel_id, input.chapter_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(AppError::database)?;
-        let Some((version, hash)) = draft else {
-            return Err(AppError::new(
-                codes::AI_WORKFLOW_SCOPE_MISMATCH,
-                "后台工作流草稿范围无效",
-                false,
-            ));
-        };
-        if input.source_draft_version != Some(version)
-            || matches!((input.base_content_hash.as_deref(), hash.as_deref()), (Some(expected), Some(actual)) if expected != actual)
-        {
-            return Err(AppError::new(
-                codes::AI_WORKFLOW_SCOPE_MISMATCH,
-                "后台工作流草稿基线已变化",
-                false,
-            ));
+        if let Some(chapter_id) = input.chapter_id.as_deref() {
+            let chapter_exists: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM chapters WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
+                    params![chapter_id, input.novel_id],
+                    |row| row.get(0),
+                )
+                .map_err(AppError::database)?;
+            if chapter_exists != 1 {
+                return Err(AppError::new(
+                    codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                    "后台工作流章节范围无效",
+                    false,
+                ));
+            }
         }
+        if let Some(draft_id) = input.draft_id.as_deref() {
+            let draft: Option<(i64, Option<String>)> = connection
+                .query_row(
+                    "SELECT version_no,content_hash FROM chapter_drafts
+                     WHERE id=?1 AND novel_id=?2 AND chapter_id=?3",
+                    params![draft_id, input.novel_id, input.chapter_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(AppError::database)?;
+            let Some((version, hash)) = draft else {
+                return Err(AppError::new(
+                    codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                    "后台工作流草稿范围无效",
+                    false,
+                ));
+            };
+            if input.source_draft_version != Some(version)
+                || matches!((input.base_content_hash.as_deref(), hash.as_deref()), (Some(expected), Some(actual)) if expected != actual)
+            {
+                return Err(AppError::new(
+                    codes::AI_WORKFLOW_SCOPE_MISMATCH,
+                    "后台工作流草稿基线已变化",
+                    false,
+                ));
+            }
+        }
+        validate_background_scope(connection, &input)?;
+        validate_co_creation_source_manifest(connection, &input)?;
     }
 
     let mut keys = std::collections::HashSet::new();
@@ -577,19 +1342,18 @@ pub fn create_background_workflow(
         }
     }
 
-    let workflow_id = uuid::Uuid::new_v4().to_string();
     let root_type = format!("{}_workflow", input.task_type);
     let parent = ai_task_service::create_task(
         connection,
         background_frozen_input(
-            format!("{}:root", input.operation_id),
+            root_operation_id,
             &root_type,
             &input.novel_id,
             input.chapter_id.as_deref(),
             input.draft_id.as_deref(),
             &input.scope_type,
             input.target_hint_json.clone(),
-            input.input_payload_json.clone(),
+            background_root_payload(&input),
             input.input_body.clone(),
             input.source_manifest_json.clone(),
             input.source_draft_version,
@@ -598,7 +1362,15 @@ pub fn create_background_workflow(
             input.provider_options_json.clone(),
         ),
     )?;
-    attach_node(
+    let existing_workflow_id: Option<String> = connection
+        .query_row(
+            "SELECT workflow_id FROM ai_tasks WHERE task_id=?1",
+            params![parent.task_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    let workflow_id = existing_workflow_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    ensure_node_attached(
         connection,
         &parent.task_id,
         &workflow_id,
@@ -615,14 +1387,7 @@ pub fn create_background_workflow(
     let mut child_ids = Vec::new();
     let mut task_by_key = std::collections::HashMap::new();
     for (index, step) in input.steps.iter().enumerate() {
-        let mut target_hint = input.target_hint_json.clone().unwrap_or_else(|| json!({}));
-        if !target_hint.is_object() {
-            target_hint = json!({ "target": target_hint });
-        }
-        if let Some(object) = target_hint.as_object_mut() {
-            object.insert("artifactType".into(), json!(step.artifact_type));
-            object.insert("reviewOutput".into(), json!(step.review_output));
-        }
+        let target_hint = background_step_target_hint(&input.target_hint_json, step);
         let task = ai_task_service::create_task(
             connection,
             background_frozen_input(
@@ -642,7 +1407,7 @@ pub fn create_background_workflow(
                 input.provider_options_json.clone(),
             ),
         )?;
-        attach_node(
+        ensure_node_attached(
             connection,
             &task.task_id,
             &workflow_id,
@@ -664,8 +1429,27 @@ pub fn create_background_workflow(
             let dependency_id = task_by_key
                 .get(dependency)
                 .expect("validated dependency key");
-            add_dependency(connection, task_id, dependency_id, true)?;
+            ensure_dependency(connection, task_id, dependency_id)?;
         }
+    }
+    let attached_children = connection
+        .prepare("SELECT task_id FROM ai_tasks WHERE parent_task_id=?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map(params![parent.task_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<std::collections::HashSet<_>, _>>()
+        })
+        .map_err(AppError::database)?;
+    let expected_children = child_ids
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    if attached_children != expected_children {
+        return Err(AppError::new(
+            codes::OPERATION_PAYLOAD_CONFLICT,
+            "同一 operationId 对应了不同后台工作流步骤",
+            false,
+        ));
     }
     aggregate_parent(connection, &parent.task_id)?;
     Ok(WorkflowCreated {
@@ -1004,12 +1788,16 @@ mod tests {
         connection.execute_batch(
             "PRAGMA foreign_keys=ON;
              CREATE TABLE novels (id TEXT PRIMARY KEY,title TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT);
-             CREATE TABLE chapters (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,title TEXT NOT NULL,adopted_draft_id TEXT,status TEXT NOT NULL DEFAULT 'editing',word_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT);
+             CREATE TABLE volumes (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,title TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT);
+             CREATE TABLE chapters (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,volume_id TEXT,title TEXT NOT NULL,adopted_draft_id TEXT,status TEXT NOT NULL DEFAULT 'editing',word_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT);
              CREATE TABLE chapter_drafts (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,chapter_id TEXT NOT NULL,content TEXT NOT NULL,version_no INTEGER NOT NULL,content_hash TEXT,large_text_ref_id TEXT,source TEXT NOT NULL DEFAULT 'user_edited',word_count INTEGER NOT NULL DEFAULT 0,is_adopted INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
              INSERT INTO novels VALUES ('novel-a','Novel A','now','now',NULL);
              INSERT INTO novels VALUES ('novel-b','Novel B','now','now',NULL);
-             INSERT INTO chapters VALUES ('chapter-a','novel-a','Chapter A','draft-a','editing',2,'now','now',NULL);
-             INSERT INTO chapters VALUES ('chapter-b','novel-b','Chapter B','draft-b','editing',2,'now','now',NULL);
+             INSERT INTO volumes VALUES ('volume-a','novel-a','Volume A','now','now',NULL);
+             INSERT INTO volumes VALUES ('volume-a2','novel-a','Volume A2','now','now',NULL);
+             INSERT INTO volumes VALUES ('volume-b','novel-b','Volume B','now','now',NULL);
+             INSERT INTO chapters VALUES ('chapter-a','novel-a','volume-a','Chapter A','draft-a','editing',2,'now','now',NULL);
+             INSERT INTO chapters VALUES ('chapter-b','novel-b','volume-b','Chapter B','draft-b','editing',2,'now','now',NULL);
              INSERT INTO chapter_drafts VALUES ('draft-a','novel-a','chapter-a','source A',1,'hash-a',NULL,'user_edited',2,1,'now','now');
              INSERT INTO chapter_drafts VALUES ('draft-b','novel-b','chapter-b','source B',1,'hash-b',NULL,'user_edited',2,1,'now','now');"
         )?;
@@ -1508,6 +2296,499 @@ mod tests {
         )
         .expect_err("unmigrated task type must be rejected");
         assert_eq!(error.code, codes::OPERATION_PAYLOAD_CONFLICT);
+        Ok(())
+    }
+
+    fn single_step_background_input(
+        operation_id: &str,
+        task_type: &str,
+        artifact_type: &str,
+    ) -> CreateBackgroundWorkflowInput {
+        CreateBackgroundWorkflowInput {
+            operation_id: operation_id.into(),
+            workflow_name: format!("{task_type} workflow"),
+            task_type: task_type.into(),
+            novel_id: "novel-a".into(),
+            chapter_id: None,
+            draft_id: None,
+            scope_type: "novel".into(),
+            target_hint_json: None,
+            input_payload_json: json!({"contract":"test"}),
+            input_body: Some("source".into()),
+            source_manifest_json: json!([]),
+            source_draft_version: None,
+            base_content_hash: None,
+            provider_options_json: json!({"provider":"mock","model":"Mock"}),
+            steps: vec![BackgroundWorkflowStepInput {
+                step_key: "candidate".into(),
+                task_type: task_type.into(),
+                agent_role: "candidate".into(),
+                artifact_type: artifact_type.into(),
+                messages: json!([{"role":"user","content":"run"}]),
+                dependencies: vec![],
+                priority: Some(10),
+                review_output: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn workflow12_background_operation_replays_without_requeue_or_graph_rewrite(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let input = single_step_background_input(
+            "stable-background-operation",
+            "outline_generate",
+            "outline_text",
+        );
+        let first = create_background_workflow(&mut connection, input.clone())?;
+        connection.execute(
+            "UPDATE ai_tasks SET status='completed' WHERE task_id=?1",
+            params![first.child_task_ids[0]],
+        )?;
+        aggregate_parent(&connection, &first.root_task_id)?;
+
+        let replay = create_background_workflow(&mut connection, input)?;
+        assert_eq!(replay.workflow_id, first.workflow_id);
+        assert_eq!(replay.root_task_id, first.root_task_id);
+        assert_eq!(replay.child_task_ids, first.child_task_ids);
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row
+                .get::<_, i64>(0))?,
+            2
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT status FROM ai_tasks WHERE task_id=?1",
+                params![first.child_task_ids[0]],
+                |row| row.get::<_, String>(0)
+            )?,
+            "completed"
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT status FROM ai_tasks WHERE task_id=?1",
+                params![first.root_task_id],
+                |row| row.get::<_, String>(0)
+            )?,
+            "completed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workflow13_background_operation_rejects_changed_request(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let input = single_step_background_input(
+            "conflicting-background-operation",
+            "outline_generate",
+            "outline_text",
+        );
+        create_background_workflow(&mut connection, input.clone())?;
+        let mut changed = input.clone();
+        changed.input_payload_json = json!({"contract":"changed"});
+        let error = create_background_workflow(&mut connection, changed)
+            .expect_err("changed request must conflict");
+        assert_eq!(error.code, codes::OPERATION_PAYLOAD_CONFLICT);
+
+        let mut changed_step = input;
+        changed_step.steps[0].agent_role = "different role".into();
+        let step_error = create_background_workflow(&mut connection, changed_step)
+            .expect_err("changed workflow step must conflict");
+        assert_eq!(step_error.code, codes::OPERATION_PAYLOAD_CONFLICT);
+        Ok(())
+    }
+
+    #[test]
+    fn workflow14_volume_and_chapter_scope_are_authoritative(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let mut input = single_step_background_input(
+            "scope-background-operation",
+            "chapter_outline_generate",
+            "chapter_outlines",
+        );
+        input.chapter_id = Some("chapter-a".into());
+        input.scope_type = "chapter".into();
+        input.target_hint_json = Some(json!({"volumeId":"volume-a2","chapterId":"chapter-a"}));
+        input.input_payload_json = json!({"chapterCount": 3});
+        let mismatch = create_background_workflow(&mut connection, input.clone())
+            .expect_err("chapter cannot target another volume");
+        assert_eq!(mismatch.code, codes::AI_WORKFLOW_SCOPE_MISMATCH);
+
+        input.operation_id = "cross-novel-volume-operation".into();
+        input.target_hint_json = Some(json!({"volumeId":"volume-b","chapterId":"chapter-a"}));
+        let cross_novel = create_background_workflow(&mut connection, input.clone())
+            .expect_err("volume must belong to the workflow novel");
+        assert_eq!(cross_novel.code, codes::AI_WORKFLOW_SCOPE_MISMATCH);
+
+        input.operation_id = "valid-scope-operation".into();
+        input.target_hint_json = Some(json!({"volumeId":"volume-a","chapterId":"chapter-a"}));
+        let created = create_background_workflow(&mut connection, input)?;
+        assert_eq!(created.child_task_ids.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn workflow15_chapter_outline_count_is_bounded() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let mut outlines = single_step_background_input(
+            "outline-count-operation",
+            "chapter_outline_generate",
+            "chapter_outlines",
+        );
+        outlines.input_payload_json = json!({"chapterCount": 21});
+        let count = create_background_workflow(&mut connection, outlines)
+            .expect_err("chapter count must be bounded");
+        assert_eq!(count.code, codes::OPERATION_PAYLOAD_CONFLICT);
+
+        Ok(())
+    }
+
+    #[test]
+    fn workflow16_replay_resumes_root_and_child_created_before_graph_attachment(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let input = single_step_background_input(
+            "partial-background-operation",
+            "outline_generate",
+            "outline_text",
+        );
+        let root_type = format!("{}_workflow", input.task_type);
+        let parent = ai_task_service::create_task(
+            &mut connection,
+            background_frozen_input(
+                format!("{}:root", input.operation_id),
+                &root_type,
+                &input.novel_id,
+                input.chapter_id.as_deref(),
+                input.draft_id.as_deref(),
+                &input.scope_type,
+                input.target_hint_json.clone(),
+                background_root_payload(&input),
+                input.input_body.clone(),
+                input.source_manifest_json.clone(),
+                input.source_draft_version,
+                input.base_content_hash.clone(),
+                json!([]),
+                input.provider_options_json.clone(),
+            ),
+        )?;
+        let step = &input.steps[0];
+        let child = ai_task_service::create_task(
+            &mut connection,
+            background_frozen_input(
+                format!("{}:{}", input.operation_id, step.step_key),
+                &step.task_type,
+                &input.novel_id,
+                input.chapter_id.as_deref(),
+                input.draft_id.as_deref(),
+                &input.scope_type,
+                Some(background_step_target_hint(&input.target_hint_json, step)),
+                input.input_payload_json.clone(),
+                input.input_body.clone(),
+                input.source_manifest_json.clone(),
+                input.source_draft_version,
+                input.base_content_hash.clone(),
+                step.messages.clone(),
+                input.provider_options_json.clone(),
+            ),
+        )?;
+        assert_eq!(
+            connection.query_row(
+                "SELECT COUNT(*) FROM ai_tasks WHERE workflow_id IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?,
+            0
+        );
+
+        let resumed = create_background_workflow(&mut connection, input)?;
+        assert_eq!(resumed.root_task_id, parent.task_id);
+        assert_eq!(resumed.child_task_ids, vec![child.task_id]);
+        assert_eq!(
+            connection.query_row(
+                "SELECT COUNT(*) FROM ai_tasks WHERE workflow_id=?1",
+                params![resumed.workflow_id],
+                |row| row.get::<_, i64>(0)
+            )?,
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workflow17_co_creation_sources_guard_first_create_but_not_frozen_replay(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        connection.execute(
+            "INSERT INTO co_creation_sessions
+             (session_id,novel_id,workspace_type,status,revision,state_hash,created_at,updated_at)
+             VALUES ('session-a','novel-a','ai_co_creation','active',1,?1,'now','now')",
+            params!["a".repeat(64)],
+        )?;
+        let mut input = single_step_background_input(
+            "guarded-co-creation-operation",
+            "outline_generate",
+            "outline_text",
+        );
+        input.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        input.source_manifest_json = json!([
+            {
+                "type":"novel",
+                "id":"novel-a",
+                "version":"now",
+                "status":"used"
+            },
+            {
+                "type":"co_creation_session",
+                "id":"session-a",
+                "version":1,
+                "hash":"a".repeat(64),
+                "status":"used"
+            }
+        ]);
+        let first = create_background_workflow(&mut connection, input.clone())?;
+        connection.execute(
+            "UPDATE novels SET updated_at='changed' WHERE id='novel-a'",
+            [],
+        )?;
+
+        let replay = create_background_workflow(&mut connection, input.clone())?;
+        assert_eq!(replay.workflow_id, first.workflow_id);
+        assert_eq!(replay.root_task_id, first.root_task_id);
+        assert_eq!(replay.child_task_ids, first.child_task_ids);
+
+        input.operation_id = "new-stale-co-creation-operation".into();
+        let stale = create_background_workflow(&mut connection, input)
+            .expect_err("a first create must reject changed manifest sources");
+        assert_eq!(stale.code, codes::AI_WORKFLOW_SCOPE_MISMATCH);
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row
+                .get::<_, i64>(0))?,
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workflow18_co_creation_manifest_fails_closed_for_unknown_sources(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let mut input = single_step_background_input(
+            "unknown-co-creation-source",
+            "outline_generate",
+            "outline_text",
+        );
+        input.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        input.source_manifest_json = json!([{
+            "type":"untrusted_source",
+            "id":"source-a",
+            "status":"used"
+        }]);
+        let error = create_background_workflow(&mut connection, input)
+            .expect_err("unknown source types must fail closed");
+        assert_eq!(error.code, codes::AI_CONTEXT_BUILD_FAILED);
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+
+        let mut missing = single_step_background_input(
+            "unknown-missing-co-creation-source",
+            "outline_generate",
+            "outline_text",
+        );
+        missing.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        missing.source_manifest_json = json!([{
+            "type":"untrusted_source",
+            "id":"source-a",
+            "status":"missing"
+        }]);
+        let missing_error = create_background_workflow(&mut connection, missing)
+            .expect_err("unknown missing source types must also fail closed");
+        assert_eq!(missing_error.code, codes::AI_CONTEXT_BUILD_FAILED);
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workflow19_co_creation_guards_real_protagonist_session_collections_and_active_outline(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        connection.execute("ALTER TABLE novels ADD COLUMN protagonists_json TEXT", [])?;
+        connection.execute(
+            "UPDATE novels SET protagonists_json=?1 WHERE id='novel-a'",
+            params![json!([{"id":"profile-a","name":"主角"}]).to_string()],
+        )?;
+        connection.execute(
+            "INSERT INTO co_creation_sessions
+             (session_id,novel_id,workspace_type,status,revision,state_hash,created_at,updated_at)
+             VALUES ('session-a','novel-a','ai_co_creation','active',1,?1,'now','now')",
+            params!["a".repeat(64)],
+        )?;
+        let mut valid = single_step_background_input(
+            "real-co-creation-sources",
+            "outline_generate",
+            "outline_text",
+        );
+        valid.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        valid.source_manifest_json = json!([
+            {"type":"novel","id":"novel-a","version":"now","status":"used"},
+            {"type":"novel_protagonist","id":"profile-a","version":"now","status":"used"},
+            {
+                "type":"co_creation_session","id":"session-a","version":1,
+                "hash":"a".repeat(64),"status":"used"
+            }
+        ]);
+        let created = create_background_workflow(&mut connection, valid)?;
+        assert_eq!(created.child_task_ids.len(), 1);
+
+        connection.execute(
+            "UPDATE co_creation_sessions SET revision=2,state_hash=?1 WHERE session_id='session-a'",
+            params!["b".repeat(64)],
+        )?;
+        let mut stale_session = single_step_background_input(
+            "stale-co-creation-session",
+            "outline_generate",
+            "outline_text",
+        );
+        stale_session.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        stale_session.source_manifest_json = json!([
+            {"type":"novel","id":"novel-a","version":"now","status":"used"},
+            {
+                "type":"co_creation_session","id":"session-a","version":1,
+                "hash":"a".repeat(64),"status":"used"
+            }
+        ]);
+        let session_error = create_background_workflow(&mut connection, stale_session)
+            .expect_err("changed session CAS must invalidate a first create");
+        assert_eq!(session_error.code, codes::AI_WORKFLOW_SCOPE_MISMATCH);
+
+        let collection_hash = collection_source_row(
+            &connection,
+            "SELECT id,updated_at,NULL FROM volumes
+             WHERE novel_id=?1 AND deleted_at IS NULL ORDER BY id",
+            "novel-a",
+        )?
+        .and_then(|(_, hash)| hash)
+        .expect("collection hash");
+        connection.execute(
+            "INSERT INTO volumes VALUES ('volume-new','novel-a','New','now','now',NULL)",
+            [],
+        )?;
+        let mut stale_collection = single_step_background_input(
+            "stale-co-creation-collection",
+            "outline_generate",
+            "outline_text",
+        );
+        stale_collection.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        stale_collection.source_manifest_json = json!([
+            {
+                "type":"co_creation_session","id":"session-a","version":2,
+                "hash":"b".repeat(64),"status":"used"
+            },
+            {
+                "type":"volume_collection","id":"novel-a","hash":collection_hash,
+                "role":"collection_state","status":"used"
+            }
+        ]);
+        let collection_error = create_background_workflow(&mut connection, stale_collection)
+            .expect_err("an inserted volume must invalidate the frozen collection");
+        assert_eq!(collection_error.code, codes::AI_WORKFLOW_SCOPE_MISMATCH);
+
+        connection.execute_batch(
+            "CREATE TABLE master_outlines (
+                id TEXT PRIMARY KEY,project_id TEXT NOT NULL,content TEXT NOT NULL,
+                version INTEGER NOT NULL,is_active INTEGER NOT NULL,updated_at TEXT NOT NULL
+             );
+             INSERT INTO master_outlines VALUES
+               ('outline-a','novel-a','A',1,1,'outline-a-time'),
+               ('outline-b','novel-a','B',1,0,'outline-b-time');
+             UPDATE master_outlines SET is_active=0 WHERE id='outline-a';
+             UPDATE master_outlines SET is_active=1 WHERE id='outline-b';",
+        )?;
+        let mut stale_outline = single_step_background_input(
+            "stale-active-outline",
+            "outline_generate",
+            "outline_text",
+        );
+        stale_outline.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        stale_outline.source_manifest_json = json!([
+            {
+                "type":"co_creation_session","id":"session-a","version":2,
+                "hash":"b".repeat(64),"status":"used"
+            },
+            {
+                "type":"master_outline","id":"outline-a","version":"outline-a-time",
+                "hash":large_text_repository::sha256("A"),
+                "role":"active_master_outline","status":"used"
+            }
+        ]);
+        let outline_error = create_background_workflow(&mut connection, stale_outline)
+            .expect_err("switching the active outline must invalidate the frozen selection");
+        assert_eq!(outline_error.code, codes::AI_WORKFLOW_SCOPE_MISMATCH);
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row
+                .get::<_, i64>(0))?,
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workflow20_co_creation_manifest_rejects_duplicates_and_non_scalar_guards(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        connection.execute(
+            "INSERT INTO co_creation_sessions
+             (session_id,novel_id,workspace_type,status,revision,state_hash,created_at,updated_at)
+             VALUES ('session-a','novel-a','ai_co_creation','active',1,?1,'now','now')",
+            params!["a".repeat(64)],
+        )?;
+        let session_source = json!({
+            "type":"co_creation_session","id":"session-a","version":1,
+            "hash":"a".repeat(64),"status":"used"
+        });
+        let mut duplicate = single_step_background_input(
+            "duplicate-co-creation-source",
+            "outline_generate",
+            "outline_text",
+        );
+        duplicate.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        duplicate.source_manifest_json = json!([
+            session_source.clone(),
+            {"type":"novel","id":"novel-a","version":"now","status":"used"},
+            {"type":"novel","id":"novel-a","version":"changed","status":"used"}
+        ]);
+        let duplicate_error = create_background_workflow(&mut connection, duplicate)
+            .expect_err("duplicate source identities must fail closed");
+        assert_eq!(duplicate_error.code, codes::AI_CONTEXT_BUILD_FAILED);
+
+        let mut malformed = single_step_background_input(
+            "malformed-co-creation-source",
+            "outline_generate",
+            "outline_text",
+        );
+        malformed.target_hint_json = Some(json!({"generationSource":"ai_co_creation"}));
+        malformed.source_manifest_json = json!([
+            session_source,
+            {"type":"novel","id":"novel-a","version":{"unsafe":true},"status":"used"}
+        ]);
+        let malformed_error = create_background_workflow(&mut connection, malformed)
+            .expect_err("object guards must not degrade to existence-only validation");
+        assert_eq!(malformed_error.code, codes::AI_CONTEXT_BUILD_FAILED);
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
         Ok(())
     }
 }

@@ -1,4 +1,5 @@
 export const CO_CREATION_PROTOCOL_VERSION = 1 as const;
+export const CO_CREATION_GENERATION_PROTOCOL_VERSION = 1 as const;
 
 export type CoCreationStage =
   | 'story_seed'
@@ -157,6 +158,93 @@ export interface CoCreationObjectContext {
   objectId?: string;
   selectedText?: string;
   selectedTextHash?: string;
+  documentContentHash?: string;
+  draftId?: string;
+  draftVersion?: number;
+  selectionStart?: number;
+  selectionEnd?: number;
+  discussionHandoffId?: string;
+}
+
+export type CoCreationGenerationKind =
+  | 'master_outline'
+  | 'volume_outline'
+  | 'chapter_outlines'
+  | 'chapter_generation_handoff';
+
+export interface CoCreationGenerationRequestV1 {
+  schemaVersion: typeof CO_CREATION_GENERATION_PROTOCOL_VERSION;
+  requestId: string;
+  requestHash: string;
+  kind: CoCreationGenerationKind;
+  novelId: string;
+  sessionId: string;
+  volumeId?: string;
+  chapterId?: string;
+  chapterCount?: number;
+  targetWordCount?: number;
+  additionalInstruction?: string;
+  chapterPlan?: string;
+  baseContextHash: string;
+  compiledInputHash?: string;
+  baseDataRevision: number;
+  sourceDraftRevisionId?: string;
+  sourceDraftContentHash?: string;
+  operationId: string;
+  createdAt: string;
+}
+
+export interface CoCreationWorkflowReceiptV1 {
+  receiptType: 'background_workflow';
+  workflowId: string;
+  rootTaskId: string;
+  childTaskIds: string[];
+  submittedAt: string;
+}
+
+export interface CoCreationChapterGenerationHandoffV1 {
+  receiptType: 'chapter_generation_handoff';
+  handoffId: string;
+  requestId: string;
+  requestHash: string;
+  novelId: string;
+  volumeId?: string;
+  chapterId: string;
+  chapterPlan: string;
+  targetWordCount?: number;
+  baseContextHash: string;
+  sourceDraftRevisionId?: string;
+  sourceDraftContentHash?: string;
+  createdAt: string;
+}
+
+export type CoCreationGenerationReceiptV1 =
+  | CoCreationWorkflowReceiptV1
+  | CoCreationChapterGenerationHandoffV1;
+
+export interface CoCreationGenerationRecordV1 {
+  request: CoCreationGenerationRequestV1;
+  status: 'prepared' | 'submitted' | 'handoff_ready' | 'failed';
+  receipt?: CoCreationGenerationReceiptV1;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedAt: string;
+}
+
+export interface CoCreationWorkspaceDiscussionHandoffV1 {
+  schemaVersion: 1;
+  handoffId: string;
+  novelId: string;
+  chapterId: string;
+  volumeId?: string;
+  draftId?: string;
+  draftVersion?: number;
+  documentContentHash: string;
+  selectionStart?: number;
+  selectionEnd?: number;
+  selectedText?: string;
+  selectedTextHash?: string;
+  createdAt: string;
 }
 
 export interface CoCreationTurnContextV1 {

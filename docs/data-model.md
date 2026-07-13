@@ -2250,3 +2250,71 @@ TargetLink metadata 保留 session、draft revision、suggestionIds、原 Artifa
 ## 29.5 Migration
 
 M5 无新增 migration。使用既有 012 PlacementProposal、013 ApplyPlan/TargetLink 和 020 共创会话/operation 表；001～020 checksum 保持不变。
+
+# 30. v2.3.0-M6 共创生成请求与工作台交接模型
+
+M6 不增加新的正式数据表，也不建立第二套生成任务。生成请求、失败状态和任务回执作为共创工作草案 payload 的不可变 revision 保存；后台执行继续以既有 `ai_tasks`、三类 Snapshot、Attempt、Artifact、PlacementProposal 和 Workflow DAG 为权威。
+
+## 30.1 `CoCreationGenerationRequestV1`
+
+每项请求固定包含：
+
+- `schemaVersion / requestId / requestHash / operationId`
+- `kind`：只允许 `master_outline`、`volume_outline`、`chapter_outlines`、`chapter_generation_handoff`
+- `novelId / sessionId` 及可选 `volumeId / chapterId`
+- 可选 `chapterCount=1..20`、目标字数、受限作者附加要求和章节计划
+- `baseContextHash / compiledInputHash / baseDataRevision`（handoff 只使用前者，后台大纲必须同时使用两者）
+- 来源共创草案 revision ID/content hash
+- 创建时间
+
+请求 hash 对规范化后的完整请求体计算 SHA-256；稳定 operationId 为 `co-creation-generation:{sessionId}:{requestId}`。`baseContextHash` 固定正式 Canon 与待确认语义字段，`compiledInputHash` 固定 compiler version、最终 Prompt messages、input body/payload、scope/steps、排序来源 manifest 和非密钥 Provider 参数。保存 prepared request 导致的已知 session CAS 递增不属于 Prompt 语义 hash；执行时的最新 revision/state hash 会单独进入 Rust 首次创建 guard。请求完整性、作品归属、卷章关系和两个最新 hash 在提交前复核。
+
+请求记录的状态为 `prepared / submitted / handoff_ready / failed`，回执更新通过新的共创草案 revision 追加，不原地修改历史 revision。每个 `requestId + status` 使用稳定 mutation ID，prepared/submitted/failed 时间固定使用 `request.createdAt`；状态提交响应丢失时重开权威会话并重放同一 mutation，不把已经创建的 Workflow 误记为失败。
+
+## 30.2 大纲后台回执
+
+作品总纲、分卷大纲和章节大纲回执固定保存：
+
+```text
+receiptType = background_workflow
+workflowId / rootTaskId / childTaskIds
+submittedAt
+```
+
+执行流程固定为：
+
+```text
+重开权威共创会话并验证精确 request lineage
+  → 严格重编译最新 Canon、共创语义与大纲上下文
+  → 比较 baseContextHash + compiledInputHash
+  → submitPrepared（不再读取作品业务数据）
+  → 现有 Input / Context / Constraint Snapshot 与 Task DAG
+```
+
+共创 session、草案、请求 hash 和正式数据来源进入既有 Context/Input Snapshot manifest。manifest 统一为 `type/id/version/hash/role/status`，按 identity 排序且禁止冲突重复；卷、章、世界、规则还携带集合 hash，活动总纲/卷纲/风格携带选择角色和内容/版本 guard。Rust 只在 root operation 首次创建前校验这些来源，并要求消息、草案和请求属于同一 session；未知来源、伪造 `missing`、非标量 guard 或 stale 来源均在零 Task 状态失败。root 已存在后以冻结 Task request hash 恢复完整或部分图，不再被当前 Canon 阻断。大纲 Artifact 的人工审查沿用任务中心；M6 没有新增把大纲 Artifact 写入正式大纲表的 Apply 语义。
+
+## 30.3 章节生成 handoff
+
+`CoCreationChapterGenerationHandoffV1` 保存 handoff ID、原请求身份、作品/分卷/章节、章节计划、目标字数、context hash 和来源草案。工作台从最新共创草案恢复并再次验证：
+
+1. record 状态为 `handoff_ready`；
+2. request hash/operation 完整，receipt 与原请求逐项一致；
+3. 当前 Canon + 共创字段的 context hash 未变化；
+4. chapter 仍属于指定 novel/volume。
+
+验证通过后只把章节计划预填到现有 AI 生成面板。它不创建正文、草稿、Artifact 或 ApplyPlan；只有作者在工作台手动生成后，现有 `chapter_generate` 管线才创建候选。
+
+## 30.4 工作台讨论上下文
+
+工作台 → 共创使用路由 `location.state` 临时携带 `CoCreationWorkspaceDiscussionHandoffV1`，URL 只包含作品/章节 ID。可选选区固定保存：
+
+- 最新完整正文 SHA-256；
+- UTF-16 code unit `selectionStart/selectionEnd`；
+- `selectedText` 与独立 SHA-256；
+- draft ID/version。
+
+共创 Controller 在写入不可变草案前重新读取最新完整正文并复核范围和两个 hash。正文已变化、dirty 内容被作者放弃、分片不可用或选区边界非法时，只保存 chapter/object 定位，不保存选区文本。
+
+## 30.5 Migration
+
+M6 无新增 migration。`co_creation_draft_revisions.payload_json` 保存生成请求/回执与讨论对象上下文；后台任务继续复用 017/018/019，正式采用继续复用 012/013，001～020 definition/checksum 均保持不变。
