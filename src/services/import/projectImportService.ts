@@ -8,6 +8,7 @@ import { volumeRepository } from '../database/volumeRepository';
 import { novelService } from '../novels/novelService';
 import { outputProfileService } from '../styles/outputProfileService';
 import { styleProfileService } from '../styles/styleProfileService';
+import { rollbackFailedProjectImport } from './importRollbackService';
 import type { TxtAnalyzeResult } from './txtImportService';
 
 type JsonRecord = Record<string, unknown>;
@@ -67,7 +68,7 @@ function chapterStatus(value: unknown): ChapterStatus | undefined {
 }
 
 async function rollbackNovel(novelId: string): Promise<void> {
-  try { await novelService.deleteNovelCascade(novelId); } catch { /* keep original import error */ }
+  await rollbackFailedProjectImport(novelId);
 }
 
 export async function importTxtNovel(input: {
@@ -116,7 +117,14 @@ export async function importTxtNovel(input: {
       outputProfileCount: 0,
     };
   } catch (error) {
-    await rollbackNovel(novel.id);
+    try {
+      await rollbackNovel(novel.id);
+    } catch (rollbackError) {
+      throw Object.assign(new Error('导入失败，且未能完整回滚新建作品'), {
+        importError: error,
+        rollbackError,
+      });
+    }
     throw error;
   }
 }
@@ -271,7 +279,14 @@ export async function importProjectBackup(
       outputProfileCount: outputs.length,
     };
   } catch (error) {
-    await rollbackNovel(novel.id);
+    try {
+      await rollbackNovel(novel.id);
+    } catch (rollbackError) {
+      throw Object.assign(new Error('导入失败，且未能完整回滚新建作品'), {
+        importError: error,
+        rollbackError,
+      });
+    }
     throw error;
   }
 }

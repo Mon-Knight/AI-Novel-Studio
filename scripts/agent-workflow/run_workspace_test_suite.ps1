@@ -239,7 +239,10 @@ $suiteConfig = @{
     }
     'import-export' = @{
         TestPath = 'src/test/import-export'
-        CargoTests = @()
+        CargoTests = @(
+            'commands::imports::tests::import01_failed_import_cleanup_removes_all_new_rows_and_keeps_existing_project',
+            'commands::imports::tests::import02_cleanup_error_rolls_back_every_delete'
+        )
     }
 }
 

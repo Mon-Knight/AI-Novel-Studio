@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   styleGetAll: vi.fn(), styleCreate: vi.fn(), outputGetAll: vi.fn(), outputCreate: vi.fn(),
   summaries: vi.fn(), contexts: vi.fn(),
   novelCreate: vi.fn(), novelUpdate: vi.fn(), novelDeleteCascade: vi.fn(),
+  rollbackFailedImport: vi.fn(),
 }));
 
 vi.mock('../../services/database/novelRepository', () => ({
@@ -64,6 +65,9 @@ vi.mock('../../services/novels/novelService', () => ({
     deleteNovelCascade: mocks.novelDeleteCascade,
   },
 }));
+vi.mock('../../services/import/importRollbackService', () => ({
+  rollbackFailedProjectImport: mocks.rollbackFailedImport,
+}));
 
 import { buildNovelBackup, exportNovelToTxt } from '../../services/export/exportService';
 import { importProjectBackup, importTxtNovel } from '../../services/import/projectImportService';
@@ -101,6 +105,7 @@ describe('project import and export', () => {
     mocks.novelCreate.mockResolvedValue({ ...novel, id: 'novel-new' });
     mocks.novelUpdate.mockResolvedValue({ ...novel, id: 'novel-new' });
     mocks.novelDeleteCascade.mockResolvedValue(undefined);
+    mocks.rollbackFailedImport.mockResolvedValue(undefined);
     mocks.volumeCreate.mockResolvedValue({ id: 'volume-new', novelId: 'novel-new', title: '第一卷', orderIndex: 0 });
     mocks.volumeUpdate.mockResolvedValue(undefined);
     mocks.chapterCreate.mockImplementation(async (input: { title: string }) => ({ id: `chapter-${input.title}`, title: input.title }));
@@ -183,5 +188,46 @@ describe('project import and export', () => {
     expect(result.missingContentCount).toBe(1);
     expect(result.adoptedChapterCount).toBe(0);
     expect(mocks.draftCreate).not.toHaveBeenCalled();
+  });
+
+  it('rolls back a newly created TXT project when chapter persistence fails', async () => {
+    mocks.chapterCreate.mockRejectedValueOnce(new Error('chapter write failed'));
+
+    await expect(importTxtNovel({
+      title: '失败作品',
+      analysis: {
+        totalChars: 4,
+        totalWords: 4,
+        detectedChapterCount: 1,
+        warnings: [],
+        chapters: [{ title: '第一章', content: '正文', orderIndex: 0, wordCount: 2 }],
+      },
+    })).rejects.toThrow('chapter write failed');
+    expect(mocks.rollbackFailedImport).toHaveBeenCalledWith('novel-new');
+  });
+
+  it('rolls back a newly created JSON project when persistence fails', async () => {
+    mocks.volumeCreate.mockRejectedValueOnce(new Error('volume write failed'));
+
+    await expect(importProjectBackup({
+      novel,
+      volumes: [{ title: '第一卷' }],
+      chapters: [],
+    })).rejects.toThrow('volume write failed');
+    expect(mocks.rollbackFailedImport).toHaveBeenCalledWith('novel-new');
+  });
+
+  it('does not invoke rollback after a successful import', async () => {
+    await importTxtNovel({
+      title: '成功作品',
+      analysis: {
+        totalChars: 4,
+        totalWords: 4,
+        detectedChapterCount: 1,
+        warnings: [],
+        chapters: [{ title: '第一章', content: '正文', orderIndex: 0, wordCount: 2 }],
+      },
+    });
+    expect(mocks.rollbackFailedImport).not.toHaveBeenCalled();
   });
 });

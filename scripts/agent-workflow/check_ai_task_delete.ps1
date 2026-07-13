@@ -40,7 +40,9 @@ $dbFile = Join-Path $root "src-tauri\src\db.rs"
 $mainFile = Join-Path $root "src-tauri\src\main.rs"
 $dbServiceFile = Join-Path $root "src\services\database\db.ts"
 $serviceFile = Join-Path $root "src\services\ai\aiTaskService.ts"
+$centerServiceFile = Join-Path $root "src\services\ai-tasks\aiTaskCenterService.ts"
 $pageFile = Join-Path $root "src\pages\AiTasks\AiTasksPage.tsx"
+$pageTestFile = Join-Path $root "src\test\ai-task-center\taskCenter.test.tsx"
 $errorFile = Join-Path $root "src\utils\errorMessage.ts"
 $runtimeScript = Join-Path $root "scripts\agent-workflow\runtime_check_ai_task_delete.ps1"
 
@@ -49,7 +51,9 @@ Assert-FileExists $dbFile
 Assert-FileExists $mainFile
 Assert-FileExists $dbServiceFile
 Assert-FileExists $serviceFile
+Assert-FileExists $centerServiceFile
 Assert-FileExists $pageFile
+Assert-FileExists $pageTestFile
 Assert-FileExists $errorFile
 Assert-FileExists $runtimeScript
 
@@ -92,15 +96,15 @@ Assert-Contains $serviceFile 'check\.length > 0' "post-clear guard"
 Assert-NotContains $serviceFile '\.catch\(\(\) => getLocalTasks' "tauri getAll fallback catch"
 Assert-NotContains $serviceFile '\.catch\(\(\) => \{' "tauri dbCall fallback catch"
 
-Assert-Contains $pageFile 'await loadTasks\(\)' "page reload after delete"
-Assert-Contains $pageFile 'result\.deletedCount' "page delete count feedback"
-Assert-Contains $pageFile 'console\.error' "page delete error logging"
-Assert-Contains $pageFile "failed full error" "page full error object logging"
-Assert-Contains $pageFile "describeUnknownError" "page real error summary"
-Assert-Contains $pageFile '\[AI_TASK_DELETE_UI\] delete selected clicked' "page delete click logging"
-Assert-Contains $pageFile '\[AI_TASK_DELETE_VERIFY_FAILED\]' "page post-delete verification"
-Assert-Contains $pageFile "beforeCount > 0 && result\.deletedCount === 0" "clear zero-delete failure"
-Assert-NotContains $pageFile "e\?\.message \|\| '未知错误'" "unknown error fallback in AI task page"
+Assert-Contains $centerServiceFile "archive_ai_task_view" "unified task archive command"
+Assert-Contains $centerServiceFile "delete_ai_task_record" "legacy task delete command"
+Assert-Contains $centerServiceFile "delete_legacy_generation_job_record" "legacy generation delete command"
+Assert-Contains $centerServiceFile 'await aiTaskCenterService\.refresh\(\)' "task center refresh after delete"
+Assert-Contains $pageFile 'await aiTaskCenterService\.deleteRecord\(item\)' "page delegates record delete"
+Assert-Contains $pageFile "confirmDanger" "page delete confirmation"
+Assert-Contains $pageFile "awaiting_confirmation.*completed.*failed.*cancelled.*expired" "terminal-only delete gate"
+Assert-Contains $pageTestFile "deletes a terminal record after confirmation" "page terminal delete test"
+Assert-Contains $pageTestFile "never offers deletion for active tasks" "page active delete guard test"
 
 Assert-Contains $runtimeScript "cargo test ai_task_delete_runtime_insert_list_delete_clear" "runtime test command"
 

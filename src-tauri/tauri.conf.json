@@ -22,6 +22,7 @@
       },
       "fs": {
         "all": false,
+        "readFile": true,
         "writeFile": true,
         "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
       },

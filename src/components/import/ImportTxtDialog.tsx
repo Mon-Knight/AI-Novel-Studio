@@ -1,153 +1,226 @@
 /**
- * AI Novel Studio - TXT 导入确认弹窗
+ * AI Novel Studio - TXT 系统文件导入
  */
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { readTextFile, analyzeTxtForChapters } from '../../services/import/txtImportService';
-import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
-import { importTxtNovel } from '../../services/import/projectImportService';
-import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
+import { importTxtNovel } from '../../services/import/projectImportService';
+import {
+  parseTxtImportPreview,
+  type TxtImportPreview,
+} from '../../services/import/importPreviewService';
+import {
+  systemFilePickerService,
+  type SelectedImportFile,
+} from '../../services/import/systemFilePickerService';
+import { formatNumber } from '../../utils/format';
+import ImportFileStatusCard, { type ImportParseStatus } from './ImportFileStatusCard';
+import '../../styles/import-dialog.css';
 
 interface ImportTxtDialogProps {
   onClose: () => void;
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState<'select' | 'analyze' | 'importing' | 'done'>('select');
-  const [fileName, setFileName] = useState('');
-  const [analyzeResult, setAnalyzeResult] = useState<TxtAnalyzeResult | null>(null);
+  const importLock = useRef(false);
+  const [selectedFile, setSelectedFile] = useState<SelectedImportFile | null>(null);
+  const [parseStatus, setParseStatus] = useState<ImportParseStatus>('selected');
+  const [preview, setPreview] = useState<TxtImportPreview | null>(null);
   const [novelTitle, setNovelTitle] = useState('');
   const [genre, setGenre] = useState('');
-  const [desc, setDesc] = useState('');
-  const [error, setError] = useState('');
+  const [description, setDescription] = useState('');
+  const [selecting, setSelecting] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [resultMsg, setResultMsg] = useState('');
+  const [doneMessage, setDoneMessage] = useState('');
+  const [error, setError] = useState('');
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const resetSelectionState = () => {
+    setSelectedFile(null);
+    setParseStatus('selected');
+    setPreview(null);
+    setNovelTitle('');
+    setGenre('');
+    setDescription('');
+    setDoneMessage('');
     setError('');
-    setFileName(file.name);
+  };
+
+  const handleChooseFile = async () => {
+    if (selecting || importing) return;
+    resetSelectionState();
+    setSelecting(true);
     try {
-      const text = await readTextFile(file);
-      if (!text.trim()) { setError('文件内容为空'); return; }
-      const result = analyzeTxtForChapters(text);
-      setAnalyzeResult(result);
-      setNovelTitle(file.name.replace(/\.(txt|TXT)$/, '').slice(0, 40));
-      setStep('analyze');
-    } catch (err: any) { setError(err.message || '读取失败'); }
+      const file = await systemFilePickerService.select('txt');
+      if (!file) return;
+      setSelectedFile(file);
+      setParseStatus('selected');
+    } catch (selectionError) {
+      setError(errorMessage(selectionError, '选择文件失败'));
+    } finally {
+      setSelecting(false);
+    }
+  };
+
+  const handleParse = async () => {
+    if (!selectedFile || importing || parseStatus === 'parsing') return;
+    setError('');
+    setPreview(null);
+    setParseStatus('parsing');
+    try {
+      const content = await systemFilePickerService.readText(selectedFile);
+      const nextPreview = parseTxtImportPreview(content, selectedFile.name);
+      setPreview(nextPreview);
+      setNovelTitle(nextPreview.suggestedTitle);
+      setParseStatus('ready');
+    } catch (parseError) {
+      setParseStatus('error');
+      setError(errorMessage(parseError, 'TXT 解析失败'));
+    }
   };
 
   const handleImport = async () => {
-    if (!analyzeResult || !novelTitle.trim()) return;
-    setImporting(true); setError('');
+    if (importLock.current || !preview || parseStatus !== 'ready' || !novelTitle.trim()) return;
+    importLock.current = true;
+    setImporting(true);
+    setError('');
     try {
-      await runWithLoading(
+      const result = await runWithLoading(
         {
           title: '正在导入 TXT 文件',
           initialMessage: '正在创建作品和章节……',
-          successMessage: `导入成功！共导入章节`,
+          successMessage: '导入成功',
           errorMessage: '导入失败',
-          successAutoCloseMs: 1500,
+          successAutoCloseMs: 1200,
         },
         async ({ setMessage, setStage, setPercent }) => {
-          setStage('创建作品……');
-          const result = await importTxtNovel({
+          setStage('创建作品');
+          return importTxtNovel({
             title: novelTitle,
             genre,
-            description: desc,
-            analysis: analyzeResult,
+            description,
+            analysis: preview.analysis,
             onProgress: ({ stage, current, total }) => {
               setStage(`正在写入：${stage}`);
               setMessage(`正在导入并采用章节 ${current} / ${total}……`);
               setPercent(Math.round((current / Math.max(total, 1)) * 90));
             },
           });
-          setPercent(100);
-          setImporting(false);
-          setResultMsg(`导入成功！已创建作品《${result.novelTitle}》，共导入并采用 ${result.adoptedChapterCount} 章。`);
-          setStep('done');
-          setTimeout(() => { onClose(); navigate(`/novels/${result.novelId}`); }, 1500);
         },
       );
-    } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }
+      setDoneMessage(`已创建作品《${result.novelTitle}》，共导入并采用 ${result.adoptedChapterCount} 章。`);
+      setTimeout(() => {
+        onClose();
+        navigate(`/novels/${result.novelId}`);
+      }, 1500);
+    } catch (importError) {
+      setError(errorMessage(importError, '导入失败，未写入不完整作品'));
+    } finally {
+      importLock.current = false;
+      setImporting(false);
+    }
+  };
+
+  const closeIfIdle = () => {
+    if (!importing) onClose();
   };
 
   return (
     <>
-      <div className="modal-overlay" onClick={onClose} />
-      <div className="modal-content" style={{ maxWidth: 580, width: '90%', maxHeight: '80vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <span style={{ fontSize: 18, fontWeight: 700 }}>📄 导入 TXT</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
-        </div>
+      <div className="modal-overlay" onClick={closeIfIdle} />
+      <div
+        className="modal-content"
+        style={{ maxWidth: 620, width: '90%', maxHeight: '82vh', overflowY: 'auto' }}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="导入 TXT"
+      >
+        <header className="import-dialog-header">
+          <span>导入 TXT</span>
+          <button type="button" onClick={closeIfIdle} disabled={importing} aria-label="关闭">×</button>
+        </header>
 
-        {step === 'select' && (
-          <div>
-            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              选择要导入的 TXT 文件，支持 UTF-8 编码的中文小说文本。
-            </div>
-            <div onClick={() => fileInputRef.current?.click()} style={{ padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
-              <div style={{ fontSize: 14 }}>点击选择 TXT 文件</div>
-            </div>
-            <input ref={fileInputRef} type="file" accept=".txt,.TXT" onChange={handleFileSelect} style={{ display: 'none' }} />
-          </div>
-        )}
-
-        {step === 'analyze' && analyzeResult && (
-          <div>
-            <div style={{ fontSize: 13, marginBottom: 12, padding: 8, background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae6fd' }}>
-              📄 {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 · {formatNumber(analyzeResult.totalWords)} 字
-              {analyzeResult.detectedChapterCount > 0 && <> · 识别到 <strong>{analyzeResult.detectedChapterCount}</strong> 个章节</>}
-            </div>
-            {analyzeResult.warnings.map((w, i) => (
-              <div key={i} style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>⚠️ {w}</div>
-            ))}
-            {analyzeResult.chapters.length <= 6 && (
-              <div style={{ fontSize: 12, marginBottom: 12, maxHeight: 150, overflowY: 'auto' }}>
-                {analyzeResult.chapters.map((ch, i) => <div key={i} style={{ padding: '2px 0' }}>· {ch.title}（{ch.wordCount} 字）</div>)}
-              </div>
+        {!doneMessage && (
+          <>
+            <p className="import-dialog-description">
+              请选择 UTF-8 编码的 TXT 小说文本。文件只会在解析通过并确认预览后写入。
+            </p>
+            {!selectedFile ? (
+              <section className="import-file-picker">
+                <div className="import-file-picker-icon">📄</div>
+                <p>当前仅支持 .txt 文件</p>
+                <button type="button" className="btn btn-primary btn-sm" onClick={handleChooseFile} disabled={selecting}>
+                  {selecting ? '正在打开系统窗口……' : '选择文件'}
+                </button>
+              </section>
+            ) : (
+              <ImportFileStatusCard
+                file={selectedFile}
+                status={parseStatus}
+                disabled={selecting || importing || parseStatus === 'parsing'}
+                onParse={handleParse}
+                onReselect={handleChooseFile}
+              />
             )}
-            {analyzeResult.chapters.length > 6 && (
-              <div style={{ fontSize: 12, marginBottom: 12, color: 'var(--color-text-muted)' }}>
-                前 6 章：{analyzeResult.chapters.slice(0, 6).map((c) => c.title).join(' / ')} ……
-              </div>
+
+            {preview && parseStatus === 'ready' && (
+              <section className="import-preview-card" data-testid="txt-import-preview">
+                <div className="import-preview-title">导入预览</div>
+                <div className="import-preview-summary">
+                  {formatNumber(preview.analysis.totalChars)} 字符 · {formatNumber(preview.analysis.totalWords)} 字 · {preview.analysis.chapters.length} 章
+                </div>
+                {preview.analysis.warnings.map((warning) => (
+                  <div key={warning} className="import-preview-warning">⚠ {warning}</div>
+                ))}
+                <div className="import-preview-list">
+                  {preview.analysis.chapters.map((chapter, index) => (
+                    <div key={`${chapter.title}-${index}`}>{index + 1}. {chapter.title}（{chapter.wordCount} 字）</div>
+                  ))}
+                </div>
+                <div className="import-form-grid">
+                  <label>
+                    <span>作品名称 *</span>
+                    <input className="input" value={novelTitle} onChange={(event) => setNovelTitle(event.target.value)} />
+                  </label>
+                  <label>
+                    <span>题材</span>
+                    <input className="input" value={genre} onChange={(event) => setGenre(event.target.value)} placeholder="如：玄幻 / 科幻 / 都市" />
+                  </label>
+                  <label>
+                    <span>简介</span>
+                    <textarea className="input" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+                  </label>
+                </div>
+                <div className="import-confirm-note">确认后将创建新作品，并把预览中的章节写入为已采用正文。</div>
+                <div className="import-dialog-actions">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={closeIfIdle} disabled={importing}>取消</button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleImport}
+                    disabled={importing || !novelTitle.trim()}
+                    data-testid="confirm-txt-import"
+                  >
+                    {importing ? '正在导入……' : '确认导入'}
+                  </button>
+                </div>
+              </section>
             )}
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div>
-                <label style={{ fontSize: 12 }}>作品名称 *</label>
-                <input className="input" value={novelTitle} onChange={(e) => setNovelTitle(e.target.value)} style={{ width: '100%' }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 12 }}>题材</label>
-                <input className="input" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="如：玄幻/科幻/都市" style={{ width: '100%' }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 12 }}>简介</label>
-                <textarea className="input" value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} />
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button className="btn btn-secondary btn-sm" onClick={onClose}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing || !novelTitle.trim()}>
-                {importing ? '⏳ 导入中...' : '✅ 确认导入'}
-              </button>
-            </div>
-          </div>
+          </>
         )}
 
-        {step === 'done' && (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>{resultMsg}</div>
+        {doneMessage && (
+          <div className="import-done" role="status">
+            <div>✓</div>
+            <strong>{doneMessage}</strong>
           </div>
         )}
-
-        {error && <div style={{ padding: 8, background: '#fee2e2', borderRadius: 6, color: 'var(--color-error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
+        {error && <div className="import-error" role="alert">{error}</div>}
       </div>
     </>
   );

@@ -1,147 +1,188 @@
 /**
- * AI Novel Studio - JSON 导入确认弹窗
+ * AI Novel Studio - JSON 系统文件导入
  */
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { styleProfileService } from '../../services/styles/styleProfileService';
-import { outputProfileService } from '../../services/styles/outputProfileService';
-import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
-import { importProjectBackup } from '../../services/import/projectImportService';
-import type { JsonDetectResult } from '../../services/import/jsonImportService';
 import { runWithLoading } from '../../lib/runWithLoading';
+import {
+  executeJsonImport,
+  jsonImportTypeLabel,
+} from '../../services/import/jsonImportExecutionService';
+import {
+  parseJsonImportPreview,
+  type JsonImportPreview,
+} from '../../services/import/importPreviewService';
+import {
+  systemFilePickerService,
+  type SelectedImportFile,
+} from '../../services/import/systemFilePickerService';
+import ImportFileStatusCard, { type ImportParseStatus } from './ImportFileStatusCard';
+import '../../styles/import-dialog.css';
 
 interface ImportJsonDialogProps {
   onClose: () => void;
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState<'select' | 'confirm' | 'done'>('select');
-  const [detectResult, setDetectResult] = useState<JsonDetectResult | null>(null);
-  const [rawData, setRawData] = useState<unknown>(null);
-  const [error, setError] = useState('');
+  const importLock = useRef(false);
+  const [selectedFile, setSelectedFile] = useState<SelectedImportFile | null>(null);
+  const [parseStatus, setParseStatus] = useState<ImportParseStatus>('selected');
+  const [preview, setPreview] = useState<JsonImportPreview | null>(null);
+  const [selecting, setSelecting] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [resultMsg, setResultMsg] = useState('');
+  const [doneMessage, setDoneMessage] = useState('');
+  const [error, setError] = useState('');
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const resetSelectionState = () => {
+    setSelectedFile(null);
+    setParseStatus('selected');
+    setPreview(null);
+    setDoneMessage('');
     setError('');
+  };
+
+  const handleChooseFile = async () => {
+    if (selecting || importing) return;
+    resetSelectionState();
+    setSelecting(true);
     try {
-      const text = await file.text();
-      const data = parseJsonFile(text);
-      const result = detectJsonImportType(data);
-      setRawData(data);
-      setDetectResult(result);
-      if (result.type === 'unknown') { setError('无法识别该 JSON 格式。当前支持：AI Novel Studio 作品 JSON、风格方案、输出控制方案。'); return; }
-      setStep('confirm');
-    } catch (err: any) { setError(err.message || '解析失败'); }
+      const file = await systemFilePickerService.select('json');
+      if (!file) return;
+      setSelectedFile(file);
+      setParseStatus('selected');
+    } catch (selectionError) {
+      setError(errorMessage(selectionError, '选择文件失败'));
+    } finally {
+      setSelecting(false);
+    }
+  };
+
+  const handleParse = async () => {
+    if (!selectedFile || importing || parseStatus === 'parsing') return;
+    setError('');
+    setPreview(null);
+    setParseStatus('parsing');
+    try {
+      const content = await systemFilePickerService.readText(selectedFile);
+      const nextPreview = parseJsonImportPreview(content);
+      setPreview(nextPreview);
+      setParseStatus('ready');
+    } catch (parseError) {
+      setParseStatus('error');
+      setError(errorMessage(parseError, 'JSON 解析失败'));
+    }
   };
 
   const handleImport = async () => {
-    if (!detectResult || !rawData) return;
-    setImporting(true); setError('');
+    if (importLock.current || !preview || parseStatus !== 'ready') return;
+    importLock.current = true;
+    setImporting(true);
+    setError('');
     try {
-      await runWithLoading(
+      const result = await runWithLoading(
         {
           title: '正在导入 JSON 文件',
-          initialMessage: `正在导入${detectResult.type === 'style_profile' ? '风格方案' : detectResult.type === 'output_profile' ? '输出控制方案' : '作品'}……`,
+          initialMessage: `正在导入${jsonImportTypeLabel(preview.detection.type)}……`,
           successMessage: '导入成功',
           errorMessage: '导入失败',
           successAutoCloseMs: 1200,
         },
-        async ({ setMessage }) => {
-          const obj = rawData as Record<string, unknown>;
-          let destination = '/';
-          if (detectResult.type === 'style_profile') {
-            setMessage('正在导入风格方案……');
-            await styleProfileService.create({
-          name: (obj.name as string) || '导入风格',
-          sourceType: 'json_import',
-          narrativePerspective: obj.narrativePerspective as any,
-          tone: obj.tone as any, pace: obj.pace as any,
-          dialogueRatio: (obj.dialogueRatio as number) || 0.35,
-          descriptionRatio: (obj.descriptionRatio as number) || 0.4,
-          styleSummary: (obj.styleSummary as string) || '',
-        });
-        setResultMsg('风格方案导入成功！');
-      } else if (detectResult.type === 'output_profile') {
-        await outputProfileService.create({
-          name: (obj.name as string) || '导入输出方案',
-          targetWordCount: (obj.targetWordCount as number) || 4000,
-          paceLevel: obj.paceLevel as any, dialogueRatio: (obj.dialogueRatio as number) || 0.35,
-          descriptionRatio: (obj.descriptionRatio as number) || 0.4,
-          endingHookRequired: !!obj.endingHookRequired,
-        });
-        setResultMsg('输出控制方案导入成功！');
-      } else if (detectResult.type === 'ai_novel_studio_project') {
-        const result = await importProjectBackup(rawData, ({ stage, current, total }) => {
-          setMessage(`${stage}（${current}/${Math.max(total, 1)}）`);
-        });
-        destination = `/novels/${result.novelId}`;
-        setResultMsg(
-          `作品「${result.novelTitle}」导入成功：${result.volumeCount} 卷、${result.chapterCount} 章，恢复正文 ${result.adoptedChapterCount} 章`
-          + (result.missingContentCount ? `；${result.missingContentCount} 章的旧备份不含正文` : ''),
-        );
-      }
-      setImporting(false); setStep('done');
+        async ({ setMessage }) => executeJsonImport(preview, setMessage),
+      );
+      setDoneMessage(result.message);
       setTimeout(() => {
         onClose();
-        if (detectResult.type === 'style_profile' || detectResult.type === 'output_profile') navigate('/styles');
-        else navigate(destination);
+        navigate(result.destination);
       }, 1500);
-        },
-      );
-    } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }
+    } catch (importError) {
+      setError(errorMessage(importError, '导入失败，未写入不完整数据'));
+    } finally {
+      importLock.current = false;
+      setImporting(false);
+    }
+  };
+
+  const closeIfIdle = () => {
+    if (!importing) onClose();
   };
 
   return (
     <>
-      <div className="modal-overlay" onClick={onClose} />
-      <div className="modal-content" style={{ maxWidth: 500, width: '90%' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <span style={{ fontSize: 18, fontWeight: 700 }}>📋 导入 JSON</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
-        </div>
+      <div className="modal-overlay" onClick={closeIfIdle} />
+      <div
+        className="modal-content"
+        style={{ maxWidth: 560, width: '90%', maxHeight: '82vh', overflowY: 'auto' }}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="导入 JSON"
+      >
+        <header className="import-dialog-header">
+          <span>导入 JSON</span>
+          <button type="button" onClick={closeIfIdle} disabled={importing} aria-label="关闭">×</button>
+        </header>
 
-        {step === 'select' && (
-          <div>
-            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              选择 JSON 文件。支持：AI Novel Studio 完整作品 JSON、风格方案、输出控制方案。
-            </div>
-            <div onClick={() => fileInputRef.current?.click()} style={{ padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
-              <div style={{ fontSize: 14 }}>点击选择 JSON 文件</div>
-            </div>
-            <input ref={fileInputRef} type="file" accept=".json,.JSON" onChange={handleFileSelect} style={{ display: 'none' }} />
-          </div>
+        {!doneMessage && (
+          <>
+            <p className="import-dialog-description">
+              支持 AI Novel Studio 项目备份、风格方案和输出控制方案。解析预览不会写入数据。
+            </p>
+            {!selectedFile ? (
+              <section className="import-file-picker">
+                <div className="import-file-picker-icon">📋</div>
+                <p>当前仅支持 .json 文件</p>
+                <button type="button" className="btn btn-primary btn-sm" onClick={handleChooseFile} disabled={selecting}>
+                  {selecting ? '正在打开系统窗口……' : '选择文件'}
+                </button>
+              </section>
+            ) : (
+              <ImportFileStatusCard
+                file={selectedFile}
+                status={parseStatus}
+                disabled={selecting || importing || parseStatus === 'parsing'}
+                onParse={handleParse}
+                onReselect={handleChooseFile}
+              />
+            )}
+
+            {preview && parseStatus === 'ready' && (
+              <section className="import-preview-card" data-testid="json-import-preview">
+                <div className="import-preview-title">导入预览</div>
+                <dl className="import-preview-details">
+                  <div><dt>类型</dt><dd>{jsonImportTypeLabel(preview.detection.type)}</dd></div>
+                  {preview.detection.name && <div><dt>名称</dt><dd>{preview.detection.name}</dd></div>}
+                  {preview.detection.summary && <div><dt>摘要</dt><dd>{preview.detection.summary}</dd></div>}
+                </dl>
+                <div className="import-confirm-note">确认后才会正式写入；项目备份将创建一个新作品。</div>
+                <div className="import-dialog-actions">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={closeIfIdle} disabled={importing}>取消</button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleImport}
+                    disabled={importing}
+                    data-testid="confirm-json-import"
+                  >
+                    {importing ? '正在导入……' : '确认导入'}
+                  </button>
+                </div>
+              </section>
+            )}
+          </>
         )}
 
-        {step === 'confirm' && detectResult && (
-          <div>
-            <div style={{ padding: 12, background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae6fd', marginBottom: 16, fontSize: 13 }}>
-              <div>类型：<strong>{detectResult.type === 'ai_novel_studio_project' ? '完整作品' : detectResult.type === 'style_profile' ? '风格方案' : '输出控制方案'}</strong></div>
-              {detectResult.name && <div>名称：{detectResult.name}</div>}
-              {detectResult.summary && <div>摘要：{detectResult.summary}</div>}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn btn-secondary btn-sm" onClick={onClose}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing}>
-                {importing ? '⏳ 导入中...' : '✅ 确认导入'}
-              </button>
-            </div>
+        {doneMessage && (
+          <div className="import-done" role="status">
+            <div>✓</div>
+            <strong>{doneMessage}</strong>
           </div>
         )}
-
-        {step === 'done' && (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>{resultMsg}</div>
-          </div>
-        )}
-
-        {error && <div style={{ padding: 8, background: '#fee2e2', borderRadius: 6, color: 'var(--color-error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
+        {error && <div className="import-error" role="alert">{error}</div>}
       </div>
     </>
   );

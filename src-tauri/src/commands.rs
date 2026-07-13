@@ -8,6 +8,7 @@ pub mod ai_worker;
 pub mod apply;
 pub mod artifacts;
 pub mod drafts;
+pub mod imports;
 pub mod recovery;
 pub mod workflows;
 
