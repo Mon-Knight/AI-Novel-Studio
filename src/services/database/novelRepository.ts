@@ -19,8 +19,11 @@ import {
   type NovelNormalizeReport,
 } from '../../features/novels/novelNormalizer';
 import { toIsoDateOrNow } from '../../utils/date';
+import { countTextWords } from '../../utils/contentHash';
 
 const NOVELS_KEY = 'ai_novel_studio_novels';
+const CHAPTERS_KEY = 'ai_novel_studio_chapters';
+const DRAFTS_LIST_KEY_PREFIX = 'ai_novel_studio_drafts_list_';
 
 export interface NovelRepairResult {
   before: number;
@@ -72,6 +75,50 @@ function normalizeNovelOrThrow(raw: unknown, message: string): Novel {
   return normalized;
 }
 
+function localAdoptedWordCount(novelId: string): number {
+  const rawChapters = lsGet<unknown>(CHAPTERS_KEY);
+  if (!Array.isArray(rawChapters)) return 0;
+
+  return rawChapters.reduce((total, rawChapter) => {
+    if (!rawChapter || typeof rawChapter !== 'object') return total;
+    const chapter = rawChapter as Record<string, unknown>;
+    const chapterNovelId = chapter.novelId ?? chapter.novel_id;
+    const chapterId = chapter.id;
+    const adoptedDraftId = chapter.adoptedDraftId ?? chapter.adopted_draft_id;
+    const deletedAt = chapter.deletedAt ?? chapter.deleted_at;
+    if (chapterNovelId !== novelId || typeof chapterId !== 'string'
+      || typeof adoptedDraftId !== 'string' || deletedAt) {
+      return total;
+    }
+
+    const rawDrafts = lsGet<unknown>(`${DRAFTS_LIST_KEY_PREFIX}${chapterId}`);
+    if (!Array.isArray(rawDrafts)) return total;
+    const adopted = rawDrafts.find((rawDraft) => {
+      if (!rawDraft || typeof rawDraft !== 'object') return false;
+      const draft = rawDraft as Record<string, unknown>;
+      const isAdopted = draft.isAdopted ?? draft.is_adopted;
+      return draft.id === adoptedDraftId
+        && (draft.chapterId ?? draft.chapter_id) === chapterId
+        && (draft.novelId ?? draft.novel_id) === novelId
+        && (isAdopted === true || isAdopted === 1);
+    }) as Record<string, unknown> | undefined;
+    if (!adopted) return total;
+
+    const storedCount = adopted.wordCount ?? adopted.word_count;
+    if (typeof storedCount === 'number' && Number.isFinite(storedCount) && storedCount >= 0) {
+      return total + storedCount;
+    }
+    return total + countTextWords(typeof adopted.content === 'string' ? adopted.content : '');
+  }, 0);
+}
+
+function withAuthoritativeWordTotals(novels: Novel[]): Novel[] {
+  return novels.map((novel) => {
+    const totalWordCount = localAdoptedWordCount(novel.id);
+    return { ...novel, totalWordCount, totalWords: totalWordCount };
+  });
+}
+
 function getLocalNovels(): Novel[] {
   const stored = lsGet<unknown>(NOVELS_KEY);
   const totalCount = Array.isArray(stored) ? stored.length : 0;
@@ -82,12 +129,12 @@ function getLocalNovels(): Novel[] {
     if (report.repairedCount > 0 || report.skippedCount > 0 || !Array.isArray(stored)) {
       lsSet(NOVELS_KEY, report.items);
     }
-    return report.items;
+    return withAuthoritativeWordTotals(report.items);
   }
 
   const seed = buildSeedNovels();
   lsSet(NOVELS_KEY, seed);
-  return seed;
+  return withAuthoritativeWordTotals(seed);
 }
 
 function saveLocalNovels(novels: Novel[]): void {
@@ -107,8 +154,8 @@ function normalizePatch(existing: Novel, input: UpdateNovelInput): Novel {
     ...existing,
     ...input,
     dualProtagonistRelation: mergedRelation,
-    totalWordCount: input.totalWordCount ?? existing.totalWordCount,
-    totalWords: input.totalWordCount ?? existing.totalWords,
+    totalWordCount: existing.totalWordCount,
+    totalWords: existing.totalWordCount,
     targetWordCount: input.targetWordCount ?? existing.targetWordCount,
     targetWords: input.targetWordCount ?? existing.targetWords,
     mainCharacter: input.mainCharacter ?? input.protagonists?.[0]?.name ?? existing.mainCharacter,

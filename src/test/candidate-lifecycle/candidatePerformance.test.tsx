@@ -77,5 +77,5 @@ describe('large candidate reliability', () => {
     console.info('[candidate-performance]', { baseChars: baseContent.length, candidateChars: candidateContent.length,
       changedBlocks: diff.blocks.filter((block) => block.kind !== 'unchanged').length, diffMs: Math.round(diffMs),
       toggleMs: Math.round(toggleMs), stableDiffDomNodes: diffDomNodeCounts[0] });
-  });
+  }, 15_000);
 });

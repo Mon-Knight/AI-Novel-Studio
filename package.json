@@ -34,6 +34,7 @@
     "test:ai-workflow": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite ai-workflow",
     "test:stage3-prerequisites": "vitest run src/test/stage3-prerequisites/contracts.test.ts",
     "test:import-export": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite import-export",
+    "test:novel-detail": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite novel-detail",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",
     "test:quality-workspace": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_quality_workspace.ps1",

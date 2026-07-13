@@ -93,7 +93,6 @@ export interface UpdateNovelInput {
   targetWordCount?: number;
   currentVolumeId?: string;
   currentChapterId?: string;
-  totalWordCount?: number;
   protagonistMode?: ProtagonistMode;
   protagonists?: ProtagonistProfile[];
   dualProtagonistRelation?: DualProtagonistRelation | null;

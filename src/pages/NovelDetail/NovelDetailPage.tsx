@@ -75,13 +75,15 @@ function NovelDetailPage() {
     title: string; subtitle: string; genre: string;
     description: string; status: string; targetWordCount: number;
   }) => {
-    if (!novelId) return;
-    const updated = await novelService.updateNovel(novelId, {
+    if (!novelId) throw new Error('缺少作品标识，无法保存');
+    await novelService.updateNovel(novelId, {
       title: data.title, subtitle: data.subtitle, genre: data.genre,
       description: data.description, status: data.status as Novel['status'],
       targetWordCount: data.targetWordCount,
     });
-    if (updated) setNovel(updated);
+    const refreshed = await novelService.getNovelById(novelId);
+    if (!refreshed) throw new Error('作品保存后无法读取最新信息');
+    setNovel(refreshed);
   };
 
   const handleSaveWorldSetting = async (id: string | null, data: { title: string; content: string }) => {

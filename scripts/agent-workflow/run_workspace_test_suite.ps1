@@ -17,7 +17,8 @@ param(
         'ai-task-center',
         'ai-worker',
         'ai-workflow',
-        'import-export'
+        'import-export',
+        'novel-detail'
     )]
     [string]$Suite
 )
@@ -242,6 +243,14 @@ $suiteConfig = @{
         CargoTests = @(
             'commands::imports::tests::import01_failed_import_cleanup_removes_all_new_rows_and_keeps_existing_project',
             'commands::imports::tests::import02_cleanup_error_rolls_back_every_delete'
+        )
+    }
+    'novel-detail' = @{
+        TestPath = 'src/test/novel-detail'
+        CargoTests = @(
+            'commands::tests::novel01_update_reuses_connection_and_reports_missing_target',
+            'commands::tests::novel02_total_words_sum_only_current_adopted_drafts',
+            'commands::tests::novel03_adopted_total_persists_after_reopen_and_tracks_changes'
         )
     }
 }

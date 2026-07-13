@@ -472,7 +472,7 @@ export type ChapterEventStatus =
 | status | TEXT | 是 | draft / writing / paused / completed / archived |
 | current_volume_id | TEXT | 否 | 当前写作分卷 |
 | current_chapter_id | TEXT | 否 | 当前写作章节 |
-| total_word_count | INTEGER | 是 | 总字数 |
+| total_word_count | INTEGER | 是 | 兼容缓存字段；展示总字数必须从当前已采用正文动态聚合，不以此字段为权威来源 |
 | target_word_count | INTEGER | 否 | 目标总字数 |
 | last_opened_at | TEXT | 否 | 最近打开时间 |
 | created_at | TEXT | 是 | 创建时间 |
@@ -746,9 +746,11 @@ export interface ChapterDraft {
 3. chapters.adopted_draft_id 更新为当前 draft.id
 4. chapters.status 更新为 adopted
 5. chapters.word_count 更新为当前 draft.word_count
-6. novels.total_word_count 重新统计或增量更新
+6. 作品总字数查询按 `chapters.adopted_draft_id` 指向且 `chapter_drafts.is_adopted = 1` 的正文动态聚合
 7. 触发后续章节总结任务
 ```
+
+`novels.total_word_count` 仅为历史兼容缓存。作品列表与详情页不得直接信任该值，也不得由作品元数据保存请求覆盖统计；页面刷新和应用重启后都应从 SQLite 的已采用正文关系重新聚合。
 
 ---
 

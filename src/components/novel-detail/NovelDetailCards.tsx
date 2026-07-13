@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { confirmDanger } from '../../utils/nativeDialog';
 import type { Novel, ProtagonistProfile, DualProtagonistRelation, ProtagonistMode } from '../../types/novel';
 import type { WorldSetting } from '../../types/setting';
@@ -12,6 +12,7 @@ import {
 } from '../../features/novels/novelNormalizer';
 import { formatNumber } from '../../utils/format';
 import { formatDate } from '../../utils/date';
+import { describeUnknownError } from '../../utils/errorMessage';
 
 interface NovelBasicInfoCardProps {
   novel: Novel;
@@ -22,7 +23,7 @@ interface NovelBasicInfoCardProps {
     description: string;
     status: string;
     targetWordCount: number;
-  }) => void;
+  }) => Promise<void>;
 }
 
 const statusOptions = [
@@ -43,6 +44,7 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
   const [targetWordCount, setTargetWordCount] = useState(novel.targetWordCount || 0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const saveLockRef = useRef(false);
 
   useEffect(() => {
     setTitle(novel.title);
@@ -54,10 +56,12 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
   }, [novel]);
 
   const handleSave = async () => {
+    if (saveLockRef.current) return;
     if (!title.trim()) {
       setMessage('作品名称不能为空');
       return;
     }
+    saveLockRef.current = true;
     setSaving(true);
     setMessage('');
     try {
@@ -69,17 +73,18 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
         status,
         targetWordCount,
       });
-      setMessage('保存成功');
+      setMessage('');
       setEditing(false);
-      setTimeout(() => setMessage(''), 2000);
-    } catch {
-      setMessage('保存失败');
+    } catch (error) {
+      setMessage(describeUnknownError(error, '作品信息保存失败，请稍后重试'));
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleCancel = () => {
+    if (saveLockRef.current) return;
     setTitle(novel.title);
     setSubtitle(novel.subtitle || '');
     setGenre(novel.genre || '');
@@ -98,7 +103,7 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
           <span style={{ fontSize: 16, fontWeight: 600 }}>作品信息</span>
         </div>
         {!editing ? (
-          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => { setMessage(''); setEditing(true); }}>
             ✏️ 编辑
           </button>
         ) : null}
@@ -107,57 +112,67 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
       {editing ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
-            <label className="panel-field-label">作品名称 *</label>
+            <label className="panel-field-label" htmlFor="novel-basic-title">作品名称 *</label>
             <input
+              id="novel-basic-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="form-input"
               placeholder="请输入作品名称"
+              disabled={saving}
               style={{ width: '100%', fontSize: 15, fontWeight: 500 }}
             />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label className="panel-field-label">副标题</label>
+              <label className="panel-field-label" htmlFor="novel-basic-subtitle">副标题</label>
               <input
+                id="novel-basic-subtitle"
                 type="text"
                 value={subtitle}
                 onChange={(e) => setSubtitle(e.target.value)}
                 className="form-input"
                 placeholder="可选"
+                disabled={saving}
                 style={{ width: '100%' }}
               />
             </div>
             <div>
-              <label className="panel-field-label">题材</label>
+              <label className="panel-field-label" htmlFor="novel-basic-genre">题材</label>
               <input
+                id="novel-basic-genre"
                 type="text"
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
                 className="form-input"
                 placeholder="如：科幻、仙侠、悬疑"
+                disabled={saving}
                 style={{ width: '100%' }}
               />
             </div>
           </div>
           <div>
-            <label className="panel-field-label">简介</label>
+            <label className="panel-field-label" htmlFor="novel-basic-description">简介</label>
             <textarea
+              id="novel-basic-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="form-textarea"
               placeholder="简要介绍作品背景和主要情节方向"
+              disabled={saving}
               style={{ width: '100%', height: 100, resize: 'vertical' }}
             />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label className="panel-field-label">作品状态</label>
+              <label className="panel-field-label" htmlFor="novel-basic-status">作品状态</label>
               <select
+                id="novel-basic-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as Novel['status'])}
                 className="panel-select"
+                disabled={saving}
               >
                 {statusOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -165,26 +180,28 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
               </select>
             </div>
             <div>
-              <label className="panel-field-label">目标总字数</label>
+              <label className="panel-field-label" htmlFor="novel-basic-target-words">目标总字数</label>
               <input
+                id="novel-basic-target-words"
                 type="number"
                 value={targetWordCount}
                 onChange={(e) => setTargetWordCount(Number(e.target.value))}
                 className="form-input"
                 placeholder="如：300000"
+                disabled={saving}
                 style={{ width: '100%' }}
                 min={0}
               />
             </div>
           </div>
           {message && (
-            <div style={{ fontSize: 13, color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)' }}>
+            <div role="alert" style={{ fontSize: 13, color: 'var(--color-error)' }}>
               {message}
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn btn-secondary btn-sm" onClick={handleCancel}>取消</button>
-            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+            <button className="btn btn-secondary btn-sm" onClick={handleCancel} disabled={saving}>取消</button>
+            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving} data-testid="save-novel-basic-info">
               {saving ? '保存中...' : '💾 保存'}
             </button>
           </div>

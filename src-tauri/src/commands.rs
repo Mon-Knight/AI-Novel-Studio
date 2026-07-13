@@ -83,7 +83,7 @@ pub struct CreateNovelInput {
     pub target_word_count: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNovelInput {
     pub title: Option<String>,
@@ -95,7 +95,6 @@ pub struct UpdateNovelInput {
     pub target_word_count: Option<i64>,
     pub current_volume_id: Option<String>,
     pub current_chapter_id: Option<String>,
-    pub total_word_count: Option<i64>,
     pub protagonist_mode: Option<String>,
     pub protagonists: Option<Vec<ProtagonistProfileDto>>,
     pub dual_protagonist_relation: Option<DualProtagonistRelationDto>,
@@ -144,7 +143,38 @@ fn protagonist_ability_from_json(value: &str) -> String {
 }
 
 fn novel_select_sql() -> &'static str {
-    "SELECT id, title, subtitle, genre, description, outline, cover_path, status, current_volume_id, current_chapter_id, total_word_count, target_word_count, last_opened_at, protagonist_mode, protagonists_json, dual_protagonist_relation_json, main_character, protagonist_ability, created_at, updated_at FROM novels"
+    "SELECT
+        n.id,
+        n.title,
+        n.subtitle,
+        n.genre,
+        n.description,
+        n.outline,
+        n.cover_path,
+        n.status,
+        n.current_volume_id,
+        n.current_chapter_id,
+        COALESCE((
+            SELECT SUM(d.word_count)
+            FROM chapters c
+            JOIN chapter_drafts d
+              ON d.id = c.adopted_draft_id
+             AND d.chapter_id = c.id
+             AND d.novel_id = c.novel_id
+            WHERE c.novel_id = n.id
+              AND c.deleted_at IS NULL
+              AND d.is_adopted = 1
+        ), 0) AS total_word_count,
+        n.target_word_count,
+        n.last_opened_at,
+        n.protagonist_mode,
+        n.protagonists_json,
+        n.dual_protagonist_relation_json,
+        n.main_character,
+        n.protagonist_ability,
+        n.created_at,
+        n.updated_at
+     FROM novels n"
 }
 
 fn map_novel_row(row: &Row<'_>) -> rusqlite::Result<NovelDto> {
@@ -191,7 +221,7 @@ fn map_novel_row(row: &Row<'_>) -> rusqlite::Result<NovelDto> {
 pub fn get_all_novels() -> Result<Vec<NovelDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let sql = format!(
-        "{} WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+        "{} WHERE n.deleted_at IS NULL ORDER BY n.updated_at DESC",
         novel_select_sql()
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -205,18 +235,22 @@ pub fn get_all_novels() -> Result<Vec<NovelDto>, String> {
     Ok(novels)
 }
 
-#[tauri::command]
-pub fn get_novel_by_id(id: String) -> Result<Option<NovelDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+fn get_novel_by_id_internal(connection: &Connection, id: &str) -> Result<Option<NovelDto>, String> {
     let sql = format!(
-        "{} WHERE id = ?1 AND deleted_at IS NULL",
+        "{} WHERE n.id = ?1 AND n.deleted_at IS NULL",
         novel_select_sql()
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = connection.prepare(&sql).map_err(|e| e.to_string())?;
 
     stmt.query_row(params![id], map_novel_row)
         .optional()
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_novel_by_id(id: String) -> Result<Option<NovelDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    get_novel_by_id_internal(&conn, &id)
 }
 
 #[tauri::command]
@@ -233,12 +267,14 @@ pub fn create_novel(input: CreateNovelInput) -> Result<NovelDto, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    get_novel_by_id(id)?.ok_or_else(|| "作品创建后无法读取".to_string())
+    get_novel_by_id_internal(&conn, &id)?.ok_or_else(|| "作品创建后无法读取".to_string())
 }
 
-#[tauri::command]
-pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+fn update_novel_internal(
+    connection: &Connection,
+    id: &str,
+    input: UpdateNovelInput,
+) -> Result<NovelDto, String> {
     let now = chrono::Utc::now().to_rfc3339();
     let protagonists_json = input
         .protagonists
@@ -249,8 +285,9 @@ pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, Str
         .as_ref()
         .map(|relation| serde_json::to_string(relation).unwrap_or_else(|_| "{}".to_string()));
 
-    conn.execute(
-        "UPDATE novels SET
+    let affected = connection
+        .execute(
+            "UPDATE novels SET
             title = COALESCE(?1, title),
             subtitle = COALESCE(?2, subtitle),
             description = COALESCE(?3, description),
@@ -260,37 +297,45 @@ pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, Str
             target_word_count = COALESCE(?7, target_word_count),
             current_volume_id = COALESCE(?8, current_volume_id),
             current_chapter_id = COALESCE(?9, current_chapter_id),
-            total_word_count = COALESCE(?10, total_word_count),
-            protagonist_mode = COALESCE(?11, protagonist_mode),
-            protagonists_json = COALESCE(?12, protagonists_json),
-            dual_protagonist_relation_json = COALESCE(?13, dual_protagonist_relation_json),
-            main_character = COALESCE(?14, main_character),
-            protagonist_ability = COALESCE(?15, protagonist_ability),
-            updated_at = ?16
-         WHERE id = ?17",
-        params![
-            input.title,
-            input.subtitle,
-            input.description,
-            input.outline,
-            input.genre,
-            input.status,
-            input.target_word_count,
-            input.current_volume_id,
-            input.current_chapter_id,
-            input.total_word_count,
-            input.protagonist_mode,
-            protagonists_json,
-            relation_json,
-            input.main_character,
-            input.protagonist_ability,
-            now,
-            &id,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+            protagonist_mode = COALESCE(?10, protagonist_mode),
+            protagonists_json = COALESCE(?11, protagonists_json),
+            dual_protagonist_relation_json = COALESCE(?12, dual_protagonist_relation_json),
+            main_character = COALESCE(?13, main_character),
+            protagonist_ability = COALESCE(?14, protagonist_ability),
+            updated_at = ?15
+         WHERE id = ?16 AND deleted_at IS NULL",
+            params![
+                input.title,
+                input.subtitle,
+                input.description,
+                input.outline,
+                input.genre,
+                input.status,
+                input.target_word_count,
+                input.current_volume_id,
+                input.current_chapter_id,
+                input.protagonist_mode,
+                protagonists_json,
+                relation_json,
+                input.main_character,
+                input.protagonist_ability,
+                now,
+                id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
 
-    get_novel_by_id(id)?.ok_or_else(|| "作品保存后无法读取".to_string())
+    if affected != 1 {
+        return Err("作品不存在或已删除，无法保存".to_string());
+    }
+
+    get_novel_by_id_internal(connection, id)?.ok_or_else(|| "作品保存后无法读取".to_string())
+}
+
+#[tauri::command]
+pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    update_novel_internal(&conn, &id, input)
 }
 
 #[tauri::command]
@@ -4625,6 +4670,262 @@ mod tests {
         "chapter_events",
         "chapter_summaries",
     ];
+
+    fn create_novel_detail_test_schema(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "
+            CREATE TABLE novels (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                genre TEXT,
+                description TEXT,
+                outline TEXT NOT NULL DEFAULT '',
+                cover_path TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                current_volume_id TEXT,
+                current_chapter_id TEXT,
+                total_word_count INTEGER NOT NULL DEFAULT 0,
+                target_word_count INTEGER,
+                last_opened_at TEXT,
+                protagonist_mode TEXT NOT NULL DEFAULT 'single',
+                protagonists_json TEXT NOT NULL DEFAULT '[]',
+                dual_protagonist_relation_json TEXT NOT NULL DEFAULT '{}',
+                main_character TEXT NOT NULL DEFAULT '',
+                protagonist_ability TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+
+            CREATE TABLE chapters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'not_started',
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+
+            CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                title TEXT,
+                content TEXT NOT NULL,
+                source TEXT NOT NULL,
+                version_no INTEGER NOT NULL,
+                word_count INTEGER NOT NULL,
+                is_adopted INTEGER NOT NULL DEFAULT 0,
+                ai_task_id TEXT,
+                note TEXT,
+                large_text_ref_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            ",
+        )
+    }
+
+    fn insert_novel_detail_test_record(
+        conn: &Connection,
+        id: &str,
+        cached_total: i64,
+    ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO novels (
+                id, title, subtitle, genre, description, outline, cover_path, status,
+                current_volume_id, current_chapter_id, total_word_count, target_word_count,
+                last_opened_at, protagonist_mode, protagonists_json,
+                dual_protagonist_relation_json, main_character, protagonist_ability,
+                created_at, updated_at, deleted_at
+             ) VALUES (
+                ?1, '旧标题', NULL, '科幻', '简介', '', NULL, 'writing',
+                NULL, NULL, ?2, 100000, NULL, 'single', '[]', '{}', '', '',
+                'before', 'before', NULL
+             )",
+            params![id, cached_total],
+        )?;
+        Ok(())
+    }
+
+    fn insert_novel_detail_test_draft(
+        conn: &Connection,
+        id: &str,
+        novel_id: &str,
+        chapter_id: &str,
+        content: &str,
+        word_count: i64,
+        is_adopted: bool,
+    ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO chapter_drafts (
+                id, novel_id, chapter_id, title, content, source, version_no,
+                word_count, is_adopted, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, NULL, ?4, 'user_edited', 1, ?5, ?6, 'before', 'before')",
+            params![
+                id,
+                novel_id,
+                chapter_id,
+                content,
+                word_count,
+                i64::from(is_adopted)
+            ],
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn novel01_update_reuses_connection_and_reports_missing_target(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_novel_detail_test_schema(&conn)?;
+        insert_novel_detail_test_record(&conn, "novel-1", 999_999)?;
+
+        let updated = update_novel_internal(
+            &conn,
+            "novel-1",
+            UpdateNovelInput {
+                title: Some("新标题".to_string()),
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(updated.title, "新标题");
+        assert_eq!(updated.total_word_count, 0);
+
+        let error = update_novel_internal(
+            &conn,
+            "missing",
+            UpdateNovelInput {
+                title: Some("不会写入".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect_err("missing novel must not report a successful save");
+        assert_eq!(error, "作品不存在或已删除，无法保存");
+        Ok(())
+    }
+
+    #[test]
+    fn novel02_total_words_sum_only_current_adopted_drafts(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_novel_detail_test_schema(&conn)?;
+        insert_novel_detail_test_record(&conn, "novel-1", 999_999)?;
+        conn.execute(
+            "INSERT INTO chapters (id, novel_id, adopted_draft_id, word_count, status, updated_at, deleted_at)
+             VALUES ('chapter-current', 'novel-1', 'draft-current', 1, 'adopted', 'before', NULL),
+                    ('chapter-empty', 'novel-1', NULL, 500, 'editing', 'before', NULL),
+                    ('chapter-deleted', 'novel-1', 'draft-deleted', 700, 'adopted', 'before', 'deleted')",
+            [],
+        )?;
+        insert_novel_detail_test_draft(
+            &conn,
+            "draft-current",
+            "novel-1",
+            "chapter-current",
+            "当前采用正文",
+            120,
+            true,
+        )?;
+        insert_novel_detail_test_draft(
+            &conn,
+            "draft-old",
+            "novel-1",
+            "chapter-current",
+            "旧正文",
+            500,
+            true,
+        )?;
+        insert_novel_detail_test_draft(
+            &conn,
+            "draft-deleted",
+            "novel-1",
+            "chapter-deleted",
+            "已删除章节正文",
+            700,
+            true,
+        )?;
+
+        let novel = get_novel_by_id_internal(&conn, "novel-1")?.expect("test novel should exist");
+        assert_eq!(novel.total_word_count, 120);
+        Ok(())
+    }
+
+    #[test]
+    fn novel03_adopted_total_persists_after_reopen_and_tracks_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "ai-novel-studio-novel-detail-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let mut conn = Connection::open(&path)?;
+            create_novel_detail_test_schema(&conn)?;
+            insert_novel_detail_test_record(&conn, "novel-1", 999_999)?;
+            conn.execute(
+                "INSERT INTO chapters (id, novel_id, adopted_draft_id, word_count, status, updated_at, deleted_at)
+                 VALUES ('chapter-1', 'novel-1', NULL, 0, 'editing', 'before', NULL)",
+                [],
+            )?;
+            insert_novel_detail_test_draft(
+                &conn,
+                "draft-1",
+                "novel-1",
+                "chapter-1",
+                "第一版正文",
+                18,
+                false,
+            )?;
+            insert_novel_detail_test_draft(
+                &conn,
+                "draft-2",
+                "novel-1",
+                "chapter-1",
+                "第二版正文",
+                27,
+                false,
+            )?;
+            adopt_chapter_draft_internal(&mut conn, "draft-1", "chapter-1")?;
+            assert_eq!(
+                get_novel_by_id_internal(&conn, "novel-1")?
+                    .expect("test novel should exist")
+                    .total_word_count,
+                18
+            );
+        }
+
+        {
+            let mut reopened = Connection::open(&path)?;
+            assert_eq!(
+                get_novel_by_id_internal(&reopened, "novel-1")?
+                    .expect("test novel should survive reopen")
+                    .total_word_count,
+                18
+            );
+            adopt_chapter_draft_internal(&mut reopened, "draft-2", "chapter-1")?;
+            assert_eq!(
+                get_novel_by_id_internal(&reopened, "novel-1")?
+                    .expect("test novel should exist after readoption")
+                    .total_word_count,
+                27
+            );
+            reopened.execute_batch(
+                "UPDATE chapter_drafts SET is_adopted = 0 WHERE chapter_id = 'chapter-1';
+                 UPDATE chapters SET adopted_draft_id = NULL, word_count = 0 WHERE id = 'chapter-1';",
+            )?;
+            assert_eq!(
+                get_novel_by_id_internal(&reopened, "novel-1")?
+                    .expect("test novel should exist after clearing adoption")
+                    .total_word_count,
+                0
+            );
+        }
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
 
     fn create_runtime_ai_task_table(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
