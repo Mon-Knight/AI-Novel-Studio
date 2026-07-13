@@ -15,47 +15,125 @@ import {
   parseQualityCheckResult,
   withQualityCheckStructuredRetry,
 } from './qualityCheckOutput';
+import { dbCall, isTauri } from '../database/db';
+import type { UnifiedAiTask } from '../../types/ai-task';
+import { aiTaskStore } from '../../store/aiTaskStore';
+import { aiWorkerClientService } from '../ai-tasks/aiWorkerClientService';
+
+export async function prepareQualityCheck(input: RunQualityCheckInput) {
+  const settings = aiSettingsService.getSettings();
+  const novel = await novelRepository.getById(input.novelId);
+  let specialAbility: string | undefined;
+  let forbiddenBehaviors: string | undefined;
+  try {
+    const protag = await protagonistRepository.getByNovelId(input.novelId);
+    if (protag) {
+      specialAbility = protag.specialAbility?.trim();
+      forbiddenBehaviors = protag.forbiddenBehaviors?.trim();
+    }
+  } catch { /* non-critical */ }
+  let contextSummary: string | undefined;
+  try {
+    const ctxResult = await getContextForChapterTask({
+      novelId: input.novelId, chapterId: input.chapterId,
+      volumeId: input.volumeId as string | undefined,
+      taskType: 'quality_check',
+    });
+    if (ctxResult.chapterSummaries.length > 0 || ctxResult.volumeContexts.length > 0) {
+      contextSummary = buildContextPromptSection(ctxResult);
+    }
+  } catch { /* context is optional */ }
+  const request = buildQualityCheckPrompt({
+    novelTitle: novel?.title || '未命名作品',
+    chapterTitle: input.chapterTitle,
+    chapterOutline: input.chapterOutline,
+    chapterGoal: input.chapterGoal,
+    draftContent: input.draftContent,
+    contentHash: input.contentHash,
+    wordCount: input.wordCount,
+    specialAbility,
+    forbiddenBehaviors,
+    contextSummary,
+  });
+  return { settings, request };
+}
 
 export const qualityCheckAiService = {
-  async runCheck(input: RunQualityCheckInput): Promise<QualityCheckResult> {
-    const settings = aiSettingsService.getSettings();
-    const novel = await novelRepository.getById(input.novelId);
-
-    let specialAbility: string | undefined;
-    let forbiddenBehaviors: string | undefined;
-    try {
-      const protag = await protagonistRepository.getByNovelId(input.novelId);
-      if (protag) {
-        specialAbility = protag.specialAbility?.trim();
-        forbiddenBehaviors = protag.forbiddenBehaviors?.trim();
-      }
-    } catch { /* non-critical */ }
-
-    // v1.7.15 读取章节上下文用于质量检查
-    let contextSummary: string | undefined;
-    try {
-      const ctxResult = await getContextForChapterTask({
-        novelId: input.novelId, chapterId: input.chapterId,
-        volumeId: input.volumeId as string | undefined,
+  async submitCheck(input: RunQualityCheckInput): Promise<{ taskId: string; status: string }> {
+    if (!isTauri()) {
+      const result = await this.runCheck({ ...input, useUnifiedPipeline: true });
+      return { taskId: result.aiTaskId || '', status: 'completed' };
+    }
+    const { settings, request } = await prepareQualityCheck(input);
+    await aiWorkerClientService.configureFromLocalSettings();
+    const task = await dbCall<UnifiedAiTask>('create_ai_task', {
+      input: {
+        operationId: crypto.randomUUID(),
+        traceId: crypto.randomUUID(),
         taskType: 'quality_check',
-      });
-      if (ctxResult.chapterSummaries.length > 0 || ctxResult.volumeContexts.length > 0) {
-        contextSummary = buildContextPromptSection(ctxResult);
-      }
-    } catch { /* 上下文加载失败不影响检查 */ }
-
-    const request = buildQualityCheckPrompt({
-      novelTitle: novel?.title || '未命名作品',
-      chapterTitle: input.chapterTitle,
-      chapterOutline: input.chapterOutline,
-      chapterGoal: input.chapterGoal,
-      draftContent: input.draftContent,
-      contentHash: input.contentHash,
-      wordCount: input.wordCount,
-      specialAbility,
-      forbiddenBehaviors,
-      contextSummary,
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        draftId: input.draftId,
+        scopeType: 'draft',
+        targetHintJson: { chapterId: input.chapterId, draftId: input.draftId },
+        inputSnapshot: {
+          schemaVersion: 1,
+          inputType: 'quality_check_input',
+          payloadJson: { chapterTitle: input.chapterTitle, wordCount: input.wordCount, worker: true },
+          body: input.draftContent,
+          sourceDraftId: input.draftId,
+          sourceDraftVersion: input.draftVersion,
+          baseContentHash: input.contentHash,
+        },
+        contextSnapshot: {
+          schemaVersion: 1,
+          sourceManifestJson: {
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            volumeId: input.volumeId || null,
+          },
+          compiledContext: JSON.stringify(request.messages),
+          budgetJson: { maxTokens: request.maxTokens || settings.maxTokens },
+          compilerVersion: 'quality-worker-context-v1',
+        },
+        constraintSnapshot: {
+          schemaVersion: 1,
+          payloadJson: { artifactType: 'quality_report', readOnly: true, worker: 'quality_check' },
+          promptTemplateId: 'quality_check',
+          promptTemplateVersion: '1',
+          promptTemplateHash: await computeContentSha256(request.messages.map((message) => message.content).join('\n')),
+          providerOptionsJson: {
+            provider: settings.provider,
+            model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+            temperature: request.temperature ?? settings.temperature,
+            maxTokens: request.maxTokens ?? settings.maxTokens,
+            timeoutSeconds: settings.timeoutSeconds,
+          },
+        },
+      },
     });
+    try {
+      await dbCall('enqueue_ai_worker_task', { taskId: task.taskId });
+    } catch (error) {
+      await dbCall('transition_ai_task', {
+        input: { taskId: task.taskId, expectedStatus: 'ready', nextStatus: 'failed' },
+      }).catch(() => undefined);
+      throw error;
+    }
+    aiTaskStore.upsert({
+      taskId: task.taskId,
+      taskType: 'quality_check',
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      status: 'queued',
+      progress: '已加入后台队列',
+      createdAt: task.createdAt,
+    });
+    return { taskId: task.taskId, status: 'queued' };
+  },
+
+  async runCheck(input: RunQualityCheckInput): Promise<QualityCheckResult> {
+    const { settings, request } = await prepareQualityCheck(input);
 
     const task = input.useUnifiedPipeline ? null : await aiTaskService.create('quality_check', {
       novelId: input.novelId,

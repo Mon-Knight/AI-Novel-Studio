@@ -2,6 +2,7 @@ import type {
   ApplyExecutionResult,
   ApplyPlan,
   ArtifactTargetLink,
+  CreateInitializationApplyPlanInput,
   PlacementProposal,
   ProposalValidation,
 } from '../../types/placement';
@@ -10,6 +11,7 @@ import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { draftVersionService } from '../database/draftVersionService';
 import { chapterConstraintValidationService } from './chapterConstraintValidationService';
 import type { ChapterDraft } from '../../types/ai';
+import { assertNormalizedCandidateReady, normalizeCandidate } from './normalizedCandidateService';
 
 interface PlacementInput {
   artifactId: string;
@@ -59,9 +61,28 @@ function loadBrowserArtifact(artifactId: string): Record<string, any> | null {
 
 function browserContent(artifactId: string): string {
   const artifact = loadBrowserArtifact(artifactId);
-  const structured = artifact?.structuredPayloadJson;
-  return structured?.chapterText || structured?.revisedContent || structured?.revised_content
-    || artifact?.displayContent || artifact?.rawContent || '';
+  if (!artifact) throw { code: 'ARTIFACT_VALIDATION_FAILED', message: 'Artifact 不存在', retryable: false };
+  const sourceDraftId = artifact.source?.draftId;
+  const chapterId = artifact.source?.chapterId;
+  const drafts = chapterId
+    ? lsGet<Array<Record<string, any>>>(`ai_novel_studio_drafts_list_${chapterId}`) || []
+    : [];
+  const sourceDraft = drafts.find((draft) => draft.id === sourceDraftId);
+  const normalized = normalizeCandidate({
+    content: artifact.displayContent || artifact.rawContent || '',
+    rawResponse: artifact.rawContent || artifact.displayContent || '',
+    structuredPayload: artifact.structuredPayloadJson,
+    baseContent: typeof sourceDraft?.content === 'string' ? sourceDraft.content : undefined,
+  });
+  try {
+    return assertNormalizedCandidateReady(normalized);
+  } catch (error) {
+    throw {
+      code: 'ARTIFACT_VALIDATION_FAILED',
+      message: error instanceof Error ? error.message : 'Artifact 正文格式异常',
+      retryable: false,
+    };
+  }
 }
 
 async function ensureBrowserConstraintValidationAllowsApply(artifactId: string): Promise<void> {
@@ -123,6 +144,12 @@ export const placementApplyService = {
       browserPlans.set(plan.planId, plan);
       lsSet(`ai_novel_studio_apply_plan_${plan.planId}`, plan);
       return plan;
+    });
+  },
+
+  async createInitializationPlan(input: CreateInitializationApplyPlanInput): Promise<ApplyPlan> {
+    return dbCall('create_initialization_apply_plan', { input }, () => {
+      throw new Error('多 Canon 原子 Apply 仅在 Tauri/SQLite 桌面环境中可用');
     });
   },
 

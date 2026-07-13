@@ -152,19 +152,10 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setVolumeCandidate(null);
     setChapterCandidates([]);
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成作品总大纲',
-          initialMessage: '正在读取作品设定……',
-          successMessage: '作品总大纲已生成，请确认后保存',
-          errorMessage: '作品总大纲生成失败',
-        },
-        async ({ setStage }) => {
-          setStage('正在分析世界观和角色……');
-          const outline = await outlineGenerateService.generateNovelOutline(novelId);
-          setNovelOutline(outline);
-        },
-      );
+      const created = await outlineGenerateService.submitNovelOutline(novelId);
+      flash(`作品总纲已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
+
     } catch (e: any) {
       flash('AI 作品总大纲生成失败：' + (e?.message || '未知错误'));
     } finally {
@@ -211,22 +202,12 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setVolumeCandidate(null);
     setChapterCandidates([]);
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成分卷大纲',
-          initialMessage: '正在读取当前采用总纲……',
-          successMessage: '分卷大纲已生成，请确认后保存',
-          errorMessage: '分卷大纲生成失败',
-        },
-        async ({ setStage }) => {
-          setStage('正在基于总纲分析分卷结构……');
-          const candidate = await outlineGenerateService.generateVolumeOutline({
-            novelId,
-            volumeTitle: target?.title,
-          });
-          setVolumeCandidate(candidate);
-        },
-      );
+      const created = await outlineGenerateService.submitVolumeOutline({
+        novelId, volumeTitle: target?.title, volumeId: target?.id,
+      });
+      flash(`分卷大纲已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
+
     } catch (e: any) {
       flash('AI 分卷大纲生成失败：' + (e?.message || '未知错误'));
     } finally {
@@ -260,23 +241,12 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
     setAiLoading('chapters');
     setChapterCandidates([]);
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成章节大纲',
-          initialMessage: '正在读取当前采用分卷大纲和总纲……',
-          successMessage: '章节大纲已生成，请逐条确认保存',
-          errorMessage: '章节大纲生成失败',
-        },
-        async ({ setStage }) => {
-          setStage('AI 正在基于上级大纲规划章节结构……');
-          const candidates = await outlineGenerateService.generateChapterOutlines({
-            novelId,
-            volumeId,
-            chapterCount: 6,
-          });
-          setChapterCandidates(candidates);
-        },
-      );
+      const created = await outlineGenerateService.submitChapterOutlines({
+        novelId, volumeId, chapterCount: 6,
+      });
+      flash(`章节大纲已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
+
     } catch (e: any) {
       flash('AI 章节大纲生成失败：' + (e?.message || '未知错误'));
     } finally {

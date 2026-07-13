@@ -1002,7 +1002,10 @@ pub(crate) mod tests {
         let mut connection = connection()?;
         let task = create_task(&mut connection, task_input("operation-cancel-race"))?;
         let attempt = start_attempt(&mut connection, &task.task_id, Some("mock"))?;
-        assert_eq!(cancel_task(&mut connection, &task.task_id)?.status, "cancel_requested");
+        assert_eq!(
+            cancel_task(&mut connection, &task.task_id)?.status,
+            "cancel_requested"
+        );
 
         let cancelled = mark_attempt_succeeded(
             &mut connection,

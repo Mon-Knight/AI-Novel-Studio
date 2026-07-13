@@ -9,6 +9,30 @@ import { chapterSummaryService } from '../context/chapterSummaryService';
 import { createAiClient, aiSettingsService } from './aiClient';
 import { aiTaskService } from './aiTaskService';
 import { safeJsonParse } from './jsonUtils';
+import { aiWorkflowService, type WorkflowCreated } from '../ai-tasks/aiWorkflowService';
+
+function buildVolumeSummaryMessages(input: SummarizeVolumeInput): Array<{ role: string; content: string }> {
+  const chaptersSummary = input.chapterContexts.map((ctx, i) => [
+    `第${i + 1}章：${ctx.chapterTitle}`,
+    `摘要：${ctx.summary}`,
+    ctx.keyEvents.length > 0 ? `关键事件：${ctx.keyEvents.join('；')}` : '',
+    ctx.protagonistStateChange ? `主角变化：${ctx.protagonistStateChange}` : '',
+    ctx.settingChanges?.length ? `设定变化：${ctx.settingChanges.join('；')}` : '',
+    ctx.unresolvedQuestions?.length ? `未解决问题：${ctx.unresolvedQuestions.join('；')}` : '',
+    ctx.factsMustRemember?.length ? `必须记住的事实：${ctx.factsMustRemember.join('；')}` : '',
+  ].filter(Boolean).join('\n')).join('\n\n---\n\n');
+  const system = [
+    '你是一位专业的小说编辑，擅长对长篇小说的分卷进行总结和梳理。',
+    `卷名：${input.volumeTitle}`,
+    '只能基于以下章节上下文生成结构化卷总结，不得编造。',
+    chaptersSummary.slice(0, 8000),
+    '请严格返回 JSON，字段为 summaryTitle、volumeMainArc、majorEvents、protagonistGrowth、characterChanges、relationshipChanges、factionChanges、settingChanges、foreshadowingCollected、unresolvedQuestions、factsMustRemember、nextVolumeHook。',
+  ].join('\n\n');
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: `请汇总卷「${input.volumeTitle}」的章节上下文，生成结构化卷总结。` },
+  ];
+}
 
 /** 检查卷是否满足生成卷上下文的条件 */
 export async function checkVolumeCompletion(
@@ -94,6 +118,23 @@ export async function collectVolumeChapterContexts(
 
 /** AI 生成卷总结 */
 export const volumeSummaryAiService = {
+  async submitBackground(input: SummarizeVolumeInput): Promise<WorkflowCreated> {
+    return aiWorkflowService.createBackground({
+      workflowName: `${input.volumeTitle} · 卷摘要`,
+      taskType: 'volume_summary',
+      novelId: input.novelId,
+      scopeType: 'volume',
+      targetHintJson: { volumeId: input.volumeId },
+      inputPayloadJson: { volumeId: input.volumeId, chapterIds: input.chapterContexts.map((item) => item.chapterId) },
+      inputBody: JSON.stringify(input.chapterContexts),
+      sourceManifestJson: input.chapterContexts.map((item) => ({ type: 'chapter_summary', id: item.chapterId })),
+      steps: [{
+        stepKey: 'volume_summary', taskType: 'volume_summary', agentRole: '卷摘要',
+        artifactType: 'volume_summary', messages: buildVolumeSummaryMessages(input), reviewOutput: true,
+      }],
+    });
+  },
+
   async summarize(input: SummarizeVolumeInput): Promise<VolumeSummarizeResult> {
     const settings = aiSettingsService.getSettings();
 

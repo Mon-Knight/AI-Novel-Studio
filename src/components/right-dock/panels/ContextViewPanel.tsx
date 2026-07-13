@@ -11,7 +11,6 @@ import { contextRecordService } from '../../../services/context/contextRecordSer
 import { volumeRepository } from '../../../services/database/volumeRepository';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { checkVolumeCompletion, collectVolumeChapterContexts, volumeSummaryAiService } from '../../../services/ai/volumeSummaryService';
-import { runWithLoading } from '../../../lib/runWithLoading';
 import ContextRecordList from '../../context-records/ContextRecordList';
 import ContextRecordForm from '../../context-records/ContextRecordForm';
 
@@ -47,6 +46,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
   const [volumeChecks, setVolumeChecks] = useState<Record<string, VolumeCompletionCheck>>({});
   const [genLoading, setGenLoading] = useState<Record<string, boolean>>({});
   const [genError, setGenError] = useState<Record<string, string>>({});
+  const [genMessage, setGenMessage] = useState<Record<string, string>>({});
   const [genResult, setGenResult] = useState<Record<string, VolumeSummarizeResult>>({});
 
   const load = useCallback(async () => {
@@ -114,27 +114,19 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
     if (!novelId) return;
     setGenLoading((prev) => ({ ...prev, [volume.id]: true }));
     setGenError((prev) => ({ ...prev, [volume.id]: '' }));
+    setGenMessage((prev) => ({ ...prev, [volume.id]: '' }));
 
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成卷上下文',
-          initialMessage: `正在汇总「${volume.title}」的章节上下文……`,
-          successMessage: '卷上下文生成完成',
-          errorMessage: '生成失败',
-        },
-        async ({ setStage }) => {
-          setStage('收集章节上下文……');
-          const chapterContexts = await collectVolumeChapterContexts(volume.id, chapters);
+      const chapterContexts = await collectVolumeChapterContexts(volume.id, chapters);
+      const created = await volumeSummaryAiService.submitBackground({
+        novelId, volumeId: volume.id, volumeTitle: volume.title, chapterContexts,
+      });
+      setGenMessage((prev) => ({
+        ...prev,
+        [volume.id]: `卷摘要已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`,
+      }));
+      return;
 
-          setStage('AI 正在汇总……');
-          const result = await volumeSummaryAiService.summarize({
-            novelId, volumeId: volume.id, volumeTitle: volume.title,
-            chapterContexts,
-          });
-          setGenResult((prev) => ({ ...prev, [volume.id]: result }));
-        },
-      );
     } catch (e: any) {
       setGenError((prev) => ({ ...prev, [volume.id]: e.message || '生成失败' }));
     } finally {
@@ -238,6 +230,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
               const check = volumeChecks[vol.id];
               const isLoading = genLoading[vol.id];
               const error = genError[vol.id];
+              const message = genMessage[vol.id];
               const result = genResult[vol.id];
 
               return (
@@ -283,6 +276,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
                     </button>
                   )}
                   {error && <div style={{ fontSize: 10, color: 'var(--color-error)', marginTop: 4 }}>{error}</div>}
+                  {message && <div style={{ fontSize: 10, color: 'var(--color-success)', marginTop: 4 }}>{message}</div>}
 
                   {/* 生成结果预览 */}
                   {result && (

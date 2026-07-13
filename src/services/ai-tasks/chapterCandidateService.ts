@@ -12,6 +12,7 @@ import { draftVersionService } from '../database/draftVersionService';
 import { chapterConstraintValidationService } from './chapterConstraintValidationService';
 import { placementApplyService } from './placementApplyService';
 import { calculateChapterDiff } from './chapterDiffService';
+import { assertNormalizedCandidateReady, normalizeCandidate } from './normalizedCandidateService';
 
 interface AdoptCandidateInput {
   record: CandidateReviewRecord;
@@ -34,6 +35,8 @@ interface CandidateRecoveryArtifactDto {
   sourceDraftVersion: number;
   baseContentHash: string;
   content: string;
+  rawContent?: string;
+  structuredPayload?: unknown;
   contentHash: string;
   contentLength: number;
   processingStatus: string;
@@ -82,6 +85,8 @@ function browserRecovery(novelId: string, chapterId: string): ChapterCandidateRe
         sourceDraftVersion: stored.source.draftVersion,
         baseContentHash: stored.source.baseContentHash,
         content: stored.displayContent || stored.rawContent || '',
+        rawContent: stored.rawContent || stored.displayContent || '',
+        structuredPayload: stored.structuredPayloadJson,
         contentHash: '',
         contentLength: Array.from(stored.displayContent || stored.rawContent || '').length,
         processingStatus: stored.processingStatus,
@@ -125,6 +130,15 @@ function recoveredActivity(
 
 async function validateAuthoritativeContext(input: AdoptCandidateInput): Promise<void> {
   const { record } = input;
+  const normalized = record.candidate.normalizedCandidate ?? normalizeCandidate({
+    content: record.candidate.content,
+    rawResponse: record.candidate.content,
+    baseContent: record.candidate.baseContent,
+  });
+  const safeContent = assertNormalizedCandidateReady(normalized);
+  if (safeContent !== record.candidate.content) {
+    throw new Error('候选正文与规范化结果不一致，已阻止采用。');
+  }
   const candidateId = record.candidate.candidateId || record.candidate.artifactId;
   if (candidateId !== record.candidate.artifactId) {
     throw new Error('候选身份与 Artifact 不一致。');
@@ -155,7 +169,7 @@ async function validateAuthoritativeContext(input: AdoptCandidateInput): Promise
   });
   if (!lifecycle.canAdopt) throw new Error(lifecycle.cannotAdoptReason || '当前候选不可采用。');
 
-  const actualCandidateHash = await computeContentSha256(record.candidate.content);
+  const actualCandidateHash = await computeContentSha256(safeContent);
   if (record.candidate.contentHash !== actualCandidateHash) {
     throw new Error('候选正文哈希已变化，已阻止采用。');
   }
@@ -181,6 +195,14 @@ export const chapterCandidateService = {
 
     const chapterDrafts = await draftVersionService.getByChapterId(chapterId);
     const sourceDraft = chapterDrafts.find((draft) => draft.id === persisted.sourceDraftId);
+    const normalized = normalizeCandidate({
+      content: persisted.content,
+      rawResponse: persisted.rawContent || persisted.content,
+      structuredPayload: persisted.structuredPayload,
+      baseContent: sourceDraft?.content,
+    });
+    const safeContent = normalized.status === 'ready' ? normalized.fullText : '';
+    const safeContentHash = await computeContentSha256(safeContent);
     const adopted = persisted.adopted
       || chapterDrafts.some((draft) => draft.artifactId === persisted.artifactId);
     if (!sourceDraft || sourceDraft.novelId !== novelId || sourceDraft.contentState?.status === 'unavailable') {
@@ -190,10 +212,11 @@ export const chapterCandidateService = {
             candidateId: persisted.candidateId,
             artifactId: persisted.artifactId,
             taskId: persisted.taskId,
-            content: persisted.content,
-            contentHash: persisted.contentHash || await computeContentSha256(persisted.content),
-            wordCount: Array.from(persisted.content).length,
+            content: safeContent,
+            contentHash: safeContentHash,
+            wordCount: Array.from(safeContent).length,
             createdAt: persisted.createdAt,
+            normalizedCandidate: normalized,
           },
           target: {
             resultId: persisted.artifactId,
@@ -204,7 +227,7 @@ export const chapterCandidateService = {
             sourceDraftId: persisted.sourceDraftId,
             sourceRevision: persisted.sourceDraftVersion,
             baseContentHash: persisted.baseContentHash,
-            contentHash: persisted.contentHash,
+            contentHash: safeContentHash,
             source: 'ai_generate',
           },
           invalidated: true,
@@ -214,9 +237,9 @@ export const chapterCandidateService = {
         activity,
       };
     }
-    const contentHash = persisted.contentHash || await computeContentSha256(persisted.content);
+    const contentHash = safeContentHash;
     const validation = await chapterConstraintValidationService.getLatest(persisted.artifactId);
-    const diff = await calculateChapterDiff({
+    const diff = normalized.status === 'ready' ? await calculateChapterDiff({
       novelId,
       chapterId,
       baseDraftId: persisted.sourceDraftId,
@@ -229,8 +252,8 @@ export const chapterCandidateService = {
       candidateSourceDraftVersion: persisted.sourceDraftVersion,
       candidateBaseContentHash: persisted.baseContentHash,
       baseContent: sourceDraft.content,
-      candidateContent: persisted.content,
-    });
+      candidateContent: safeContent,
+    }) : { status: 'blocked' as const, blocks: [], reason: normalized.error || '候选格式异常。' };
     let invalidatedReason: string | undefined;
     if (!persisted.proposal && !adopted && validation?.status !== 'blocked') invalidatedReason = '候选缺少采用目标。';
     if (persisted.proposal && !adopted) {
@@ -244,13 +267,14 @@ export const chapterCandidateService = {
           artifactId: persisted.artifactId,
           taskId: persisted.taskId,
           proposal: persisted.proposal,
-          content: persisted.content,
+          content: safeContent,
           contentHash,
-          wordCount: Array.from(persisted.content).length,
+          wordCount: Array.from(safeContent).length,
           baseContent: sourceDraft.content,
           createdAt: persisted.createdAt,
           constraintValidation: validation || undefined,
           diff,
+          normalizedCandidate: normalized,
         },
         target: {
           resultId: persisted.artifactId,

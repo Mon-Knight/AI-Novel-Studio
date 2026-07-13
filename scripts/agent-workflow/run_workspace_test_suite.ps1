@@ -13,7 +13,10 @@ param(
         'apply-plan',
         'constraint-validation',
         'chapter-diff',
-        'candidate-lifecycle'
+        'candidate-lifecycle',
+        'ai-task-center',
+        'ai-worker',
+        'ai-workflow'
     )]
     [string]$Suite
 )
@@ -74,6 +77,7 @@ $suiteConfig = @{
             'migrations::tests::db28_fake_legacy_snapshot_schema_fails_closed',
             'migrations::tests::db29_incomplete_legacy_ledger_fails_before_forward_writes',
             'migrations::tests::db30_fake_existing_delete_guard_blocks_015',
+            'migrations::tests::db35_orchestration_upgrade_is_idempotent_and_enforces_graph_integrity',
             'db::tests::db31_database_initialization_failure_returns_error',
             'tests::db32_database_startup_errors_are_classified',
             'tests::db33_database_startup_notice_redacts_internal_details',
@@ -174,6 +178,57 @@ $suiteConfig = @{
         CargoTests = @(
             'services::artifact_service::tests::art12_recovers_latest_completed_chapter_candidate_without_new_schema',
             'services::artifact_service::tests::art13_running_task_is_exposed_for_interrupted_recovery_without_a_candidate'
+        )
+    }
+    'ai-task-center' = @{
+        TestPath = 'src/test/ai-task-center'
+        CargoTests = @(
+            'repositories::ai_task_view_repository::tests::task_center01_unified_source_wins_exact_id_dedup',
+            'repositories::ai_task_view_repository::tests::task_center02_completed_candidate_waits_for_review',
+            'repositories::ai_task_view_repository::tests::task_center03_query_failure_is_an_error_not_empty',
+            'repositories::ai_task_view_repository::tests::task_center04_reopens_sqlite_and_restores_persisted_task'
+        )
+    }
+    'ai-worker' = @{
+        TestPath = 'src/test/ai-worker'
+        CargoTests = @(
+            'ai_worker::tests::worker01_two_workers_cannot_claim_the_same_task',
+            'ai_worker::tests::worker02_progress_and_lease_are_persisted',
+            'ai_worker::tests::worker03_expired_lease_recovers_with_new_attempt',
+            'ai_worker::tests::worker04_cancel_request_reaches_terminal_cancelled',
+            'ai_worker::tests::worker05_temporary_error_queues_a_new_attempt',
+            'ai_worker::tests::worker06_success_creates_exactly_one_artifact_and_no_canon_write',
+            'ai_worker::tests::worker07_malformed_result_fails_and_is_not_reported_success',
+            'ai_worker::tests::worker08_mock_provider_honors_cancellation_token',
+            'ai_worker::tests::worker09_dependency_is_rechecked_at_claim_time',
+            'ai_worker::tests::worker10_parallel_nodes_are_claimed_once_each',
+            'ai_worker::tests::worker11_mock_workflow_creates_one_review_bundle_without_canon_write',
+            'ai_worker::tests::worker12_local_retry_creates_attempt_only_for_failed_child',
+            'ai_worker::tests::worker16_stage_2e_quality_revision_completes_once_without_canon_write',
+            'ai_worker::tests::worker17_stage_2e_local_retry_only_repeats_failed_child',
+            'ai_worker::tests::worker18_stage_2e_stale_late_response_creates_no_artifact'
+        )
+    }
+    'ai-workflow' = @{
+        TestPath = 'src/test/ai-task-center'
+        CargoTests = @(
+            'services::workflow_service::tests::workflow01_parent_root_children_and_dependencies_are_persisted',
+            'services::workflow_service::tests::workflow02_cross_project_dependency_and_cycle_are_rejected',
+            'services::workflow_service::tests::workflow03_dependency_blocks_then_releases_downstream',
+            'services::workflow_service::tests::workflow04_local_retry_preserves_successful_siblings',
+            'services::workflow_service::tests::workflow05_parent_cancel_cascades_and_keeps_completed_artifact',
+            'services::workflow_service::tests::workflow06_stale_propagates_to_tasks_and_artifacts',
+            'services::workflow_service::tests::workflow07_reopen_restores_graph_state',
+            'services::workflow_service::tests::workflow08_adopted_draft_change_marks_entire_workflow_stale',
+            'services::workflow_service::tests::workflow09_parent_status_is_derived_from_required_children',
+            'services::apply_service::tests::workflow_stale_artifact_cannot_create_apply_plan',
+            'ai_worker::tests::worker09_dependency_is_rechecked_at_claim_time',
+            'ai_worker::tests::worker10_parallel_nodes_are_claimed_once_each',
+            'ai_worker::tests::worker11_mock_workflow_creates_one_review_bundle_without_canon_write',
+            'ai_worker::tests::worker12_local_retry_creates_attempt_only_for_failed_child',
+            'ai_worker::tests::worker16_stage_2e_quality_revision_completes_once_without_canon_write',
+            'ai_worker::tests::worker17_stage_2e_local_retry_only_repeats_failed_child',
+            'ai_worker::tests::worker18_stage_2e_stale_late_response_creates_no_artifact'
         )
     }
 }

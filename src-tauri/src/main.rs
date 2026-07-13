@@ -4,6 +4,7 @@
 )]
 
 mod ai;
+mod ai_worker;
 mod commands;
 mod db;
 mod domain;
@@ -228,8 +229,11 @@ fn main() {
     let saved_state = window_state::load_window_state(&app_data_dir);
     let state_for_close = app_data_dir.clone();
     let focus_watch_dir = app_data_dir.clone();
+    let worker_manager = ai_worker::AiWorkerManager::new();
+    let worker_manager_for_setup = worker_manager.clone();
 
     tauri::Builder::default()
+        .manage(worker_manager)
         .invoke_handler(tauri::generate_handler![
             commands::get_all_novels,
             commands::get_novel_by_id,
@@ -267,6 +271,17 @@ fn main() {
             commands::ai_tasks::fail_ai_task_attempt,
             commands::ai_tasks::cancel_ai_task,
             commands::ai_tasks::record_ai_task_late_response,
+            commands::ai_task_views::list_ai_task_views,
+            commands::ai_worker::configure_ai_worker_provider,
+            commands::ai_worker::enqueue_ai_worker_task,
+            commands::ai_worker::request_ai_worker_cancel,
+            commands::ai_worker::retry_ai_worker_task,
+            commands::ai_worker::get_ai_task_artifact_content,
+            commands::workflows::create_chapter_summary_workflow,
+            commands::workflows::create_background_ai_workflow,
+            commands::workflows::cancel_ai_workflow_task,
+            commands::workflows::retry_ai_workflow_step,
+            commands::workflows::mark_ai_workflow_downstream_stale,
             commands::artifacts::create_result_artifact,
             commands::artifacts::record_chapter_constraint_validation,
             commands::artifacts::get_latest_chapter_constraint_validation,
@@ -276,6 +291,7 @@ fn main() {
             commands::apply::validate_placement_proposal,
             commands::apply::rebuild_placement_proposal,
             commands::apply::create_apply_plan,
+            commands::apply::create_initialization_apply_plan,
             commands::apply::get_apply_plan,
             commands::apply::execute_apply_plan,
             commands::apply::get_artifact_target_links,
@@ -373,6 +389,7 @@ fn main() {
             if let Some(window) = app.get_window("main") {
                 window_state::apply_window_state(&window, &saved_state);
             }
+            worker_manager_for_setup.start(app.handle());
 
             // Native Feel P1.1: 后台监听聚焦请求（单实例第二启动时聚焦已有窗口）
             let handle = app.handle();

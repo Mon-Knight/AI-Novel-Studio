@@ -16,6 +16,7 @@ import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { styleProfileService } from '../styles/styleProfileService';
 import { masterOutlineService, volumeOutlineService } from '../outlines/outlineService';
+import { aiWorkflowService, type WorkflowCreated } from '../ai-tasks/aiWorkflowService';
 
 export interface VolumeOutlineCandidate {
   title: string;
@@ -129,6 +130,83 @@ async function buildOutlineContext(novelId: string, volumeId?: string) {
 }
 
 export const outlineGenerateService = {
+  async submitNovelOutline(novelId: string): Promise<WorkflowCreated> {
+    const context = await buildOutlineContext(novelId);
+    const request = buildOutlineGeneratePrompt(context);
+    return aiWorkflowService.createBackground({
+      workflowName: `${context.novelTitle} · 作品总纲`, taskType: 'outline_generate',
+      novelId, scopeType: 'novel',
+      targetHintJson: { outlineType: 'master', activeMasterOutlineId: context.activeMasterOutlineId },
+      inputPayloadJson: { novelTitle: context.novelTitle, contextSnapshot: context.contextSnapshot },
+      inputBody: JSON.stringify(context),
+      sourceManifestJson: [
+        ...(context.activeMasterOutlineId ? [{ type: 'master_outline', id: context.activeMasterOutlineId }] : []),
+      ],
+      steps: [{ stepKey: 'master_outline', taskType: 'outline_generate', agentRole: '总纲',
+        artifactType: 'outline_text', messages: request.messages, reviewOutput: true }],
+    });
+  },
+
+  async submitVolumeOutline(input: { novelId: string; volumeTitle?: string; volumeId?: string }): Promise<WorkflowCreated> {
+    const context = await buildOutlineContext(input.novelId, input.volumeId);
+    const request = buildVolumeOutlineGeneratePrompt({
+      novelTitle: context.novelTitle, novelGenre: context.novelGenre, description: context.description,
+      worldBackground: context.worldBackground, ruleSystems: context.ruleSystems,
+      protagonist: context.protagonist, specialAbility: context.specialAbility,
+      existingVolumes: context.existingVolumes, existingChapters: context.existingChapters,
+      volumeTitle: input.volumeTitle, activeMasterOutline: context.activeMasterOutline,
+      styleSummary: context.styleSummary,
+    });
+    return aiWorkflowService.createBackground({
+      workflowName: `${input.volumeTitle || context.novelTitle} · 分卷大纲`, taskType: 'volume_outline_generate',
+      novelId: input.novelId, scopeType: 'volume',
+      targetHintJson: { volumeId: input.volumeId, activeMasterOutlineId: context.activeMasterOutlineId },
+      inputPayloadJson: { volumeTitle: input.volumeTitle, contextSnapshot: context.contextSnapshot },
+      inputBody: JSON.stringify(context),
+      sourceManifestJson: [
+        ...(context.activeMasterOutlineId ? [{ type: 'master_outline', id: context.activeMasterOutlineId }] : []),
+      ],
+      steps: [{ stepKey: 'volume_outline', taskType: 'volume_outline_generate', agentRole: '卷纲',
+        artifactType: 'volume_outline', messages: request.messages, reviewOutput: true }],
+    });
+  },
+
+  async submitChapterOutlines(input: {
+    novelId: string; volumeId?: string; chapterId?: string; chapterTitle?: string;
+    chapterGoal?: string; chapterCount?: number;
+  }): Promise<WorkflowCreated> {
+    const [context, volume] = await Promise.all([
+      buildOutlineContext(input.novelId, input.volumeId),
+      input.volumeId ? volumeRepository.getById(input.volumeId).catch(() => null) : Promise.resolve(null),
+    ]);
+    const request = buildChapterOutlineGeneratePrompt({
+      novelTitle: context.novelTitle, novelGenre: context.novelGenre, description: context.description,
+      worldBackground: context.worldBackground, ruleSystems: context.ruleSystems,
+      protagonist: context.protagonist, specialAbility: context.specialAbility,
+      existingVolumes: context.existingVolumes, existingChapters: context.existingChapters,
+      volumeTitle: volume?.title || context.novelTitle, volumeSummary: volume?.summary || volume?.goal,
+      currentChapterTitle: input.chapterTitle, currentChapterGoal: input.chapterGoal,
+      chapterCount: input.chapterCount, activeMasterOutline: context.activeMasterOutline,
+      activeVolumeOutline: context.activeVolumeOutline, styleSummary: context.styleSummary,
+    });
+    return aiWorkflowService.createBackground({
+      workflowName: `${input.chapterTitle || volume?.title || context.novelTitle} · 章节大纲`,
+      taskType: 'chapter_outline_generate', novelId: input.novelId, chapterId: input.chapterId,
+      scopeType: input.chapterId ? 'chapter' : 'volume',
+      targetHintJson: { volumeId: input.volumeId, chapterId: input.chapterId,
+        activeMasterOutlineId: context.activeMasterOutlineId, activeVolumeOutlineId: context.activeVolumeOutlineId },
+      inputPayloadJson: { chapterTitle: input.chapterTitle, chapterGoal: input.chapterGoal,
+        chapterCount: input.chapterCount, contextSnapshot: context.contextSnapshot },
+      inputBody: JSON.stringify(context),
+      sourceManifestJson: [
+        ...(context.activeMasterOutlineId ? [{ type: 'master_outline', id: context.activeMasterOutlineId }] : []),
+        ...(context.activeVolumeOutlineId ? [{ type: 'volume_outline', id: context.activeVolumeOutlineId }] : []),
+      ],
+      steps: [{ stepKey: 'chapter_outlines', taskType: 'chapter_outline_generate', agentRole: '章纲',
+        artifactType: 'chapter_outlines', messages: request.messages, reviewOutput: true }],
+    });
+  },
+
   async generateNovelOutline(novelId: string): Promise<string> {
     const settings = aiSettingsService.getSettings();
     const context = await buildOutlineContext(novelId);

@@ -7,6 +7,7 @@ import { extractJsonObject, safeJsonParse } from './jsonUtils';
 import { fixRunStore } from './fixRunStore';
 import { unifiedAiPipeline } from '../ai-tasks/unifiedAiPipeline';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { aiWorkflowService, type WorkflowCreated } from '../ai-tasks/aiWorkflowService';
 import type { QualityCheckItem } from '../../types/qualityCheck';
 import type { ChapterDraft } from '../../types/ai';
 
@@ -191,7 +192,7 @@ function normalizeFixResult(raw: RawFixResult, rawText: string, sourceContent: s
 }
 
 /** 构建 AI 修稿 Prompt (v1.7.19 精准局部修稿) */
-function buildFixPrompt(params: {
+export function buildFixPrompt(params: {
   chapterTitle: string;
   chapterOutline?: string;
   draftContent: string;
@@ -341,6 +342,79 @@ function validateFixScope(
 }
 
 export const qualityFixService = {
+  async submitBackground(params: {
+    novelId: string;
+    chapterId: string;
+    chapterTitle: string;
+    chapterOutline?: string;
+    currentDraft: ChapterDraft;
+    pendingIssues: QualityCheckItem[];
+    ignoredIssues: QualityCheckItem[];
+    beforeReportId: string;
+    chapterContext?: string;
+    volumeContext?: string;
+    styleSummary?: string;
+  }): Promise<WorkflowCreated> {
+    const request = buildFixPrompt({
+      chapterTitle: params.chapterTitle,
+      chapterOutline: params.chapterOutline,
+      draftContent: params.currentDraft.content,
+      pendingIssues: params.pendingIssues,
+      ignoredIssues: params.ignoredIssues,
+      chapterContext: params.chapterContext,
+      volumeContext: params.volumeContext,
+      styleSummary: params.styleSummary,
+    });
+    const baseContentHash = params.currentDraft.contentState?.status === 'ready'
+      ? params.currentDraft.contentState.contentHash
+      : await computeContentSha256(params.currentDraft.content);
+    return aiWorkflowService.createBackground({
+      workflowName: `${params.chapterTitle} · 质量修复与复检`,
+      taskType: 'quality_fix',
+      novelId: params.novelId,
+      chapterId: params.chapterId,
+      draftId: params.currentDraft.id,
+      scopeType: 'draft',
+      targetHintJson: {
+        chapterId: params.chapterId,
+        draftId: params.currentDraft.id,
+        beforeReportId: params.beforeReportId,
+        staleAgainstLatest: true,
+      },
+      inputPayloadJson: {
+        beforeReportId: params.beforeReportId,
+        pendingIssueIds: params.pendingIssues.map((item) => item.id),
+        ignoredIssueIds: params.ignoredIssues.map((item) => item.id),
+      },
+      inputBody: params.currentDraft.content,
+      sourceManifestJson: [{
+        type: 'chapter_draft', id: params.currentDraft.id,
+        version: params.currentDraft.versionNo, hash: baseContentHash,
+      }],
+      sourceDraftVersion: params.currentDraft.versionNo,
+      baseContentHash,
+      steps: [
+        {
+          stepKey: 'quality_fix', taskType: 'quality_fix', agentRole: '修复',
+          artifactType: 'chapter_text', messages: request.messages,
+        },
+        {
+          stepKey: 'quality_recheck', taskType: 'quality_recheck', agentRole: '复检',
+          artifactType: 'quality_report', dependencies: ['quality_fix'], reviewOutput: true,
+          messages: [{
+            role: 'system',
+            content: [
+              '你是小说章节质量检查员。请只检查随请求附带的上游修复后正文 Artifact。',
+              '输出严格 JSON：{"overallScore":0,"summary":"","items":[]}。',
+              'items 中可包含 issueType、severity、title、description、suggestion、quote。',
+              '不得修改正文，不得声称已经采用结果。',
+            ].join('\n'),
+          }, { role: 'user', content: '请复检上游修复后的完整章节正文。' }],
+        },
+      ],
+    });
+  },
+
   async runFix(params: {
     novelId: string;
     chapterId: string;

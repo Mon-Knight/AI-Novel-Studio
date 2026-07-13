@@ -6,13 +6,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { runWithLoading } from '../../lib/runWithLoading';
 import {
   masterOutlineService, volumeOutlineService, chapterOutlineService,
-  loadOutlineContext,
 } from '../../services/outlines/outlineService';
-import { createAiClient, aiSettingsService } from '../../services/ai/aiClient';
-import { aiTaskService } from '../../services/ai/aiTaskService';
-import { buildOutlineGeneratePrompt, buildVolumeOutlineGeneratePrompt, buildChapterOutlineGeneratePrompt } from '../../services/ai/promptBuilder';
 import type { OutlineGenerationContext, OutlineType } from '../../types/outline';
-import type { OutlineGeneratePromptContext, VolumeOutlineGeneratePromptContext, ChapterOutlineGeneratePromptContext } from '../../services/ai/promptBuilder';
+import { outlineGenerateService } from '../../services/ai/outlineGenerateService';
 
 interface OutlineEditorProps {
   projectId: string;
@@ -22,25 +18,6 @@ interface OutlineEditorProps {
   targetIndex?: number;    // order index
   parentOutlineId?: string; // for chapter -> volume outline, for volume -> master outline
   onSaved?: () => void;
-}
-
-/** 构建章节大纲 AI 生成 Prompt 上下文 */
-function buildChapterPromptContext(
-  base: OutlineGenerationContext, chapterTitle?: string,
-): ChapterOutlineGeneratePromptContext {
-  return {
-    novelTitle: base.novelTitle,
-    novelGenre: base.novelGenre,
-    worldBackground: base.worldBackground,
-    protagonist: [base.protagonistName, base.protagonistIdentity].filter(Boolean).join('；') || undefined,
-    specialAbility: base.protagonistAbility,
-    existingChapters: base.existingChapters,
-    volumeTitle: chapterTitle,
-    chapterCount: 6,
-    activeMasterOutline: base.activeMasterOutline,
-    activeVolumeOutline: (base as any).activeVolumeOutline,
-    styleSummary: base.styleSummary,
-  };
 }
 
 function OutlineEditor({
@@ -53,8 +30,9 @@ function OutlineEditor({
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [versions, setVersions] = useState<{ id: string; version: number; isActive: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [context, setContext] = useState<OutlineGenerationContext | null>(null);
+  const [context, _setContext] = useState<OutlineGenerationContext | null>(null);
   const [showContext, setShowContext] = useState(false);
+  const [backgroundMessage, setBackgroundMessage] = useState('');
 
   const typeLabel = outlineType === 'master' ? '总纲' : outlineType === 'volume' ? '分卷大纲' : '章节大纲';
 
@@ -102,92 +80,16 @@ function OutlineEditor({
   // AI 生成大纲
   const handleAiGenerate = async () => {
     try {
-      await runWithLoading(
-        {
-          title: `AI 正在生成${typeLabel}`,
-          initialMessage: outlineType === 'volume'
-            ? '正在读取当前采用总纲……'
-            : outlineType === 'chapter'
-              ? '正在读取当前采用分卷大纲和总纲……'
-              : '正在读取作品设定、主角背景和世界设定……',
-          successMessage: `${typeLabel}生成完成，请检查并保存`,
-          errorMessage: `${typeLabel}生成失败`,
-        },
-        async ({ setMessage, setStage }) => {
-          setStage('正在构建完整上下文……');
-          setMessage('正在读取世界背景、主角设定、已有大纲……');
-          const ctx = await loadOutlineContext(projectId);
-          setContext(ctx);
+      const created = outlineType === 'master'
+        ? await outlineGenerateService.submitNovelOutline(projectId)
+        : outlineType === 'volume'
+          ? await outlineGenerateService.submitVolumeOutline({ novelId: projectId, volumeId: targetId, volumeTitle: targetTitle })
+          : await outlineGenerateService.submitChapterOutlines({
+            novelId: projectId, chapterId: targetId, chapterTitle: targetTitle, chapterCount: 6,
+          });
+      setBackgroundMessage(`${typeLabel}已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
 
-          // 显示缺失信息提示
-          const warnings: string[] = [];
-          if (!ctx.protagonistName) warnings.push('缺少主角设定');
-          if (!ctx.worldBackground) warnings.push('缺少世界背景');
-          if (outlineType === 'volume' && !ctx.activeMasterOutline) warnings.push('缺少总纲（建议先生成总纲）');
-          if (outlineType === 'chapter') {
-            if (!ctx.activeMasterOutline) warnings.push('缺少总纲');
-            if (!(ctx as any).activeVolumeOutline) warnings.push('缺少分卷大纲（建议先生成分卷大纲）');
-          }
-          if (warnings.length > 0) {
-            setStage(`⚠️ ${warnings.join('、')}，将生成简化版`);
-          }
-
-          setStage('正在调用 AI 生成……');
-          setMessage('AI 正在组织内容结构，请稍候……');
-
-          const settings = aiSettingsService.getSettings();
-
-          let request;
-          if (outlineType === 'master') {
-            const promptCtx: OutlineGeneratePromptContext = {
-              novelTitle: ctx.novelTitle, novelGenre: ctx.novelGenre,
-              description: ctx.description || undefined,
-              worldBackground: ctx.worldBackground, ruleSystems: ctx.ruleSystems || undefined,
-              protagonist: [ctx.protagonistName, ctx.protagonistIdentity].filter(Boolean).join('；') || undefined,
-              specialAbility: ctx.protagonistAbility,
-              existingVolumes: ctx.existingVolumes || undefined,
-              existingChapters: ctx.existingChapters || undefined,
-            };
-            request = buildOutlineGeneratePrompt(promptCtx);
-          } else if (outlineType === 'volume') {
-            const promptCtx: VolumeOutlineGeneratePromptContext = {
-              novelTitle: ctx.novelTitle, novelGenre: ctx.novelGenre,
-              worldBackground: ctx.worldBackground,
-              protagonist: [ctx.protagonistName, ctx.protagonistIdentity].filter(Boolean).join('；') || undefined,
-              specialAbility: ctx.protagonistAbility,
-              existingVolumes: ctx.existingVolumes || undefined,
-              volumeTitle: targetTitle,
-              activeMasterOutline: ctx.activeMasterOutline,
-              styleSummary: ctx.styleSummary,
-            };
-            request = buildVolumeOutlineGeneratePrompt(promptCtx);
-          } else {
-            const promptCtx = buildChapterPromptContext(ctx, targetTitle);
-            request = buildChapterOutlineGeneratePrompt(promptCtx);
-          }
-
-          const task = await aiTaskService.create(
-            outlineType === 'master' ? 'outline_generate' : outlineType === 'volume' ? 'volume_outline_generate' : 'chapter_outline_generate',
-            { novelId: projectId, runtimeMode: settings.runtimeMode, provider: settings.provider, modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName, inputSummary: `生成${typeLabel}：${targetTitle || ctx.novelTitle}` },
-          ).catch(() => null);
-
-          const client = createAiClient(settings);
-          const response = await client.generate(request);
-
-          if (task) {
-            await aiTaskService.markSucceeded(task.id, {
-              resultText: response.text,
-              tokenInput: response.tokenInput, tokenOutput: response.tokenOutput, tokenTotal: response.tokenTotal,
-            });
-          }
-
-          setContent(response.text);
-          setIsDirty(true);
-
-          setStage('生成完成');
-          setMessage(`AI 已生成${typeLabel}，请检查内容后保存`);
-        },
-      );
     } catch (e: any) {
       // 错误已在弹窗显示
     }
@@ -326,6 +228,11 @@ function OutlineEditor({
           </span>
         )}
       </div>
+      {backgroundMessage && (
+        <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--color-success)', background: '#ecfdf5', borderRadius: 6 }}>
+          {backgroundMessage}
+        </div>
+      )}
 
       {/* 上下文摘要 */}
       {showContext && context && (

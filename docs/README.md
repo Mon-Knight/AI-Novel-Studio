@@ -35,6 +35,13 @@
 | [api-routes.md](technical/api-routes.md) | API 路由说明 | 🚧 占位，待后续细化 |
 | [deployment.md](technical/deployment.md) | 部署说明 | 🚧 占位，待后续细化 |
 
+## architecture/ - 架构冻结与实施边界
+
+| 文档 | 说明 | 状态 |
+|------|------|------|
+| [stage3-prerequisites.md](architecture/stage3-prerequisites.md) | 阶段 3 前置输入、确认、治理与多 Canon 事务契约 | ✅ V1 已实现 |
+| [multi-target-transaction.md](architecture/multi-target-transaction.md) | 多目标 ApplyPlan 事务与回滚边界 | ✅ 初始化创建试点已落地 |
+
 ## design/ - 设计文档
 
 | 文档 | 说明 | 状态 |

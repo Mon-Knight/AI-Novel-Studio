@@ -14,10 +14,8 @@ import RightToolbar from '../../components/right-dock/RightToolbar';
 import RightPanel from '../../components/right-dock/RightPanel';
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
-import GlobalAiTaskModal from '../../components/workspace/GlobalAiTaskModal';
 import RecoveryDialog from '../../components/workspace/RecoveryDialog';
 import CandidateReviewPane from '../../components/workspace/CandidateReviewPane';
-import type { AiTaskModalState } from '../../components/workspace/GlobalAiTaskModal';
 import { novelRepository } from '../../services/database/novelRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { volumeRepository } from '../../services/database/volumeRepository';
@@ -166,10 +164,6 @@ function WritingWorkspacePage() {
   }, []);
   const handleLocateDone = useCallback(() => setLocateTarget(null), []);
 
-  // v1.7.19 全局 AI 任务弹窗状态
-  const [aiModal, setAiModal] = useState<AiTaskModalState>({
-    running: false, title: '', stage: '', progress: 0,
-  });
   const [candidateRecords, setCandidateRecords] = useState<Map<string, CandidateReviewRecord>>(() => new Map());
   const [candidateActivities, setCandidateActivities] = useState<Map<string, CandidateGenerationActivity>>(() => new Map());
   const [candidateReadErrors, setCandidateReadErrors] = useState<Map<string, string>>(() => new Map());
@@ -178,15 +172,6 @@ function WritingWorkspacePage() {
   const candidateRecoveryTokensRef = useRef(new Map<string, number>());
   candidateActivitiesRef.current = candidateActivities;
   const [focusMode, setFocusMode] = useState(false);
-  const showAiModal = useCallback((title: string, subtitle?: string) => {
-    setAiModal({ running: true, title, subtitle, stage: '', progress: 0 });
-  }, []);
-  const updateAiModal = useCallback((stage: string, progress: number) => {
-    setAiModal((prev) => ({ ...prev, stage, progress }));
-  }, []);
-  const hideAiModal = useCallback(() => {
-    setAiModal((prev) => ({ ...prev, running: false, stage: '完成', progress: 100 }));
-  }, []);
 
   // v1.7.19 质量检查状态上移（不随面板卸载丢失）
   const [qcReport, setQcReport] = useState<any>(null);
@@ -838,13 +823,13 @@ function WritingWorkspacePage() {
     }
     setSummaryLoading(true); setSummaryError('');
     try {
-      const result = await chapterSummarizeService.summarize({
+      await chapterSummarizeService.submitBackground({
         novelId, chapterId: activeChapter.id, adoptedDraftId: currentDraft.id,
+        sourceDraftVersion: currentDraft.versionNo,
         chapterTitle: activeChapter.title, chapterOutline: activeChapter.outline,
-        adoptedContent: currentDraft.content.slice(0, 3000),
+        adoptedContent: currentDraft.content,
       });
-      setSummaryResult(result);
-      setSummaryDialogOpen(true);
+      setSummaryError('章节总结已转入后台；完成后请在任务中心审查。');
     } catch (e: any) { setSummaryError(e.message || '总结生成失败'); }
     finally { setSummaryLoading(false); }
   }, [novelId, activeChapter, currentDraft, contentAvailable]);
@@ -1149,8 +1134,6 @@ function WritingWorkspacePage() {
       {/* 中间正文编辑区 */}
       <div className="workspace-editor" onClick={handleEditorClick}>
 
-        {/* v1.7.19 全局 AI 任务弹窗 */}
-        <GlobalAiTaskModal state={aiModal} />
         {/* 顶部信息栏 */}
         <div className="workspace-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1297,10 +1280,6 @@ function WritingWorkspacePage() {
         currentDraftId={activeDraft?.id}
         currentDraftVersion={activeDraft?.versionNo}
         onApplyAiText={applyAiTextToEditor}
-        // v1.7.19 全局 AI 弹窗
-        showAiModal={showAiModal}
-        updateAiModal={updateAiModal}
-        hideAiModal={hideAiModal}
         // v1.0.45 统一上下文 + 侧栏状态
         writingContext={writingContext}
         sidebarState={sidebarState}

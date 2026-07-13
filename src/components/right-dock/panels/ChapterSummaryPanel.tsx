@@ -9,10 +9,12 @@ import { chapterSummaryService } from '../../../services/context/chapterSummaryS
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeService';
-import { validateSummary, hashContent } from '../../../services/ai/summaryValidator';
+import { hashContent } from '../../../services/ai/summaryValidator';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { formatDateTime } from '../../../utils/date';
 import { runWithLoading } from '../../../lib/runWithLoading';
+import { aiWorkflowService } from '../../../services/ai-tasks/aiWorkflowService';
+import { Link } from 'react-router-dom';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
@@ -30,6 +32,8 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   const [validation, setValidation] = useState<ChapterSummaryValidation | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [resultTarget, setResultTarget] = useState<ChapterCandidateTarget | null>(null);
+  const [workflowSubmitting, setWorkflowSubmitting] = useState(false);
+  const [workflowMessage, setWorkflowMessage] = useState('');
 
   const load = useCallback(async () => {
     if (!chapter?.id) return;
@@ -64,6 +68,29 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleStartSummaryWorkflow = async () => {
+    if (!novelId || !chapter || workflowSubmitting) return;
+    setWorkflowSubmitting(true); setWorkflowMessage(''); setGenError('');
+    try {
+      const drafts = await draftVersionService.getByChapterId(chapter.id);
+      const draft = chapter.adoptedDraftId
+        ? drafts.find((item) => item.id === chapter.adoptedDraftId)
+        : drafts.find((item) => item.isAdopted);
+      if (!draft) throw new Error('当前章节没有可用的已采用正文。');
+      const created = await aiWorkflowService.createChapterSummary({
+        novelId,
+        chapterId: chapter.id,
+        draftId: draft.id,
+        workflowName: `${chapter.title} · 摘要审查`,
+      });
+      setWorkflowMessage(`组合工作流已提交（${created.rootTaskId.slice(0, 8)}），可继续阅读和编辑。`);
+    } catch (error) {
+      setGenError(error instanceof Error ? error.message : '组合工作流提交失败');
+    } finally {
+      setWorkflowSubmitting(false);
+    }
+  };
+
   // AI 生成章节总结 → 自动校验
   const handleGenerateSummary = async () => {
     if (!novelId || !chapter) return;
@@ -88,41 +115,15 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
 
     setGenLoading(true); setGenError(''); setGenResult(null); setValidation(null); setSaveSuccess(false);
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在生成章节总结',
-          initialMessage: '正在准备上下文数据……',
-          successMessage: '章节总结生成完成，正在进行一致性校验……',
-          errorMessage: '总结生成失败',
-        },
-        async ({ setStage, setMessage }) => {
-          setStage('正在分析章节内容……');
-          const result = await chapterSummarizeService.summarize({
-            novelId, chapterId: chapter.id, adoptedDraftId: draft.id,
-            chapterTitle: chapter.title, chapterOutline: chapter.outline,
-            adoptedContent: draft.content.slice(0, 5000),
-          });
-          setGenResult(result);
-          setResultTarget({
-            resultId: crypto.randomUUID(),
-            novelId,
-            chapterId: chapter.id,
-            volumeId: chapter.volumeId,
-            sourceDraftId: draft.id,
-            sourceDraftVersion: draft.versionNo,
-            baseContentHash: draft.contentState?.status === 'ready'
-              ? draft.contentState.contentHash
-              : hashContent(draft.content),
-            createdAt: new Date().toISOString(),
-          });
+      const created = await chapterSummarizeService.submitBackground({
+        novelId, chapterId: chapter.id, adoptedDraftId: draft.id,
+        sourceDraftVersion: draft.versionNo,
+        chapterTitle: chapter.title, chapterOutline: chapter.outline,
+        adoptedContent: draft.content,
+      });
+      setWorkflowMessage(`章节摘要已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
 
-          // 自动一致性校验
-          setMessage('正在进行一致性校验……');
-          setStage('校验总结与正文是否一致……');
-          const v = validateSummary(draft.content, result);
-          setValidation(v);
-        },
-      );
     } catch (e: any) {
       setGenError(e.message || '总结生成失败');
     } finally {
@@ -233,6 +234,17 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
             )}
           </>
         )}
+      </div>
+
+      <div className="panel-section" style={{ border: '1px solid var(--color-border-light)', borderRadius: 6, padding: 10 }}>
+        <div className="panel-section-title">后台摘要审查工作流</div>
+        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+          资料准备 → 摘要候选 → 一致性检查 → 待审查汇总。不会自动保存总结或修改正文。
+        </div>
+        <button className="btn btn-secondary btn-sm" type="button" onClick={handleStartSummaryWorkflow} disabled={workflowSubmitting} style={{ width: '100%' }}>
+          {workflowSubmitting ? '正在提交…' : '启动后台组合工作流'}
+        </button>
+        {workflowMessage && <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 7 }}>{workflowMessage} <Link to="/ai-tasks">查看任务</Link></div>}
       </div>
 
       {/* 过期提示 */}

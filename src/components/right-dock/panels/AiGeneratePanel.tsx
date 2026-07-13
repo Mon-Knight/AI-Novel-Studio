@@ -31,6 +31,7 @@ import { placementApplyService } from '../../../services/ai-tasks/placementApply
 import { chapterCandidateService } from '../../../services/ai-tasks/chapterCandidateService';
 import { chapterConstraintValidationService } from '../../../services/ai-tasks/chapterConstraintValidationService';
 import { calculateChapterDiff } from '../../../services/ai-tasks/chapterDiffService';
+import { normalizeCandidate } from '../../../services/ai-tasks/normalizedCandidateService';
 import type { ConstraintValidationResult } from '../../../types/chapterConstraintValidation';
 import type { ChapterDiffResult } from '../../../types/chapterDiff';
 
@@ -531,6 +532,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             },
           });
           const response = pipeline.response;
+          const normalizedCandidate = normalizeCandidate({
+            content: response.text,
+            rawResponse: response.text,
+            baseContent: sourceDraft?.content || '',
+          });
+          const candidateText = normalizedCandidate.status === 'ready'
+            ? normalizedCandidate.fullText
+            : '';
           const asyncIdentity = {
             requestId,
             taskId: pipeline.task.taskId,
@@ -551,7 +560,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
           setPercent(80);
           setStage('正在校验生成结果……');
-          const validation = buildValidationSnapshot(ctx, response.text);
+          const validation = buildValidationSnapshot(ctx, candidateText);
           const validationWarning = buildValidationWarningText(validation);
           setMessage('正在保存生成结果……');
 
@@ -568,7 +577,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             inputSnapshot,
             contextSnapshot,
             constraintSnapshot,
-            artifactBody: response.text,
+            artifactBody: candidateText,
           });
           if (!ownsAsyncIdentity()) return;
           const diff = await calculateChapterDiff({
@@ -584,10 +593,11 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             candidateSourceDraftVersion: requestTarget.sourceRevision,
             candidateBaseContentHash: requestTarget.baseContentHash,
             baseContent: sourceDraft?.content || '',
-            candidateContent: response.text,
+            candidateContent: candidateText,
           });
           if (!ownsAsyncIdentity()) return;
-          const proposal = constraintResult.status !== 'blocked' && diff.status === 'ready'
+          const proposal = normalizedCandidate.status === 'ready'
+            && constraintResult.status !== 'blocked' && diff.status === 'ready'
             ? await placementApplyService.createProposal({
               artifactId: pipeline.artifact.artifactId,
               target: {
@@ -600,7 +610,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             })
             : undefined;
           if (!ownsAsyncIdentity()) return;
-          const candidateHash = await computeContentSha256(response.text);
+          const candidateHash = await computeContentSha256(candidateText);
           if (!ownsAsyncIdentity()) return;
           const validationWithDraft: GenerationValidationState = { draftId: pipeline.artifact.artifactId, ...validation };
           const resultMetadata: DraftResultMetadata = {
@@ -627,14 +637,15 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
             candidateId: pipeline.artifact.artifactId,
             artifactId: pipeline.artifact.artifactId,
             proposal,
-            content: response.text,
+            content: candidateText,
             contentHash: candidateHash,
-            wordCount: response.text.length,
+            wordCount: Array.from(candidateText).length,
             taskId: pipeline.task.taskId,
             baseContent: sourceDraft?.content || '',
             createdAt: pipeline.artifact.createdAt,
             constraintValidation: constraintResult,
             diff,
+            normalizedCandidate,
           };
           const nextRecord: CandidateReviewRecord = {
             candidate: nextCandidate,
@@ -656,7 +667,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           });
 
           // 校验警告提示
-          if (constraintResult.status === 'blocked') {
+          if (normalizedCandidate.status !== 'ready') {
+            setErrorMsg(normalizedCandidate.error || 'AI 返回格式异常，无法重建完整正文。');
+            setStatusMsg('候选结果已保留在高级详情中，但当前不可采用。');
+          } else if (constraintResult.status === 'blocked') {
             setErrorMsg('当前候选未通过硬性约束验证，请处理下方问题后重新生成。');
             setStatusMsg('候选结果已保留，但当前不可采用。');
           } else if (diff.status !== 'ready') {
@@ -671,7 +685,9 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
           }
 
           // Native Feel P2.2: 生成完成通知
-          notifyNative({ kind: 'success', body: `正文候选生成完成（${response.text.length} 字），确认后才写入正式正文` });
+          notifyNative({ kind: 'success', body: normalizedCandidate.status === 'ready'
+            ? `正文候选生成完成（${candidateText.length} 字），确认后才写入正式正文`
+            : 'AI 返回格式异常，候选已保留供排查但禁止采用' });
       })();
 
       if (ownsRequest()) {

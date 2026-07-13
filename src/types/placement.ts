@@ -1,6 +1,7 @@
 import type { ChapterDraft } from './ai';
 import type { ConstraintValidationResult } from './chapterConstraintValidation';
 import type { ChapterDiffResult } from './chapterDiff';
+import type { NormalizedCandidate } from './normalizedCandidate';
 
 export interface PlacementTarget {
   targetType: string;
@@ -72,6 +73,17 @@ export interface ApplyPlan {
   completedAt?: string;
 }
 
+export interface CreateInitializationApplyPlanInput {
+  proposalId: string;
+  expectedBundleHash: string;
+  selectedCandidates: Array<{
+    candidateId: string;
+    expectedCandidateHash: string;
+    conflictAcknowledged?: boolean;
+  }>;
+  parentPlanId?: string;
+}
+
 export interface ArtifactTargetLink {
   linkId: string;
   artifactId: string;
@@ -108,6 +120,8 @@ export interface PlacementCandidate {
   createdAt?: string;
   constraintValidation?: ConstraintValidationResult;
   diff?: ChapterDiffResult;
+  /** User-facing candidate model. `content` must equal `fullText` whenever this is present. */
+  normalizedCandidate?: NormalizedCandidate;
 }
 
 export type CandidateGenerationStatus = 'idle' | 'generating' | 'validating' | 'cancelled' | 'failed';
@@ -145,6 +159,7 @@ export type CandidateLifecycleStatus =
   | 'failed'
   | 'read_failed'
   | 'diff_failed'
+  | 'format_error'
   | 'empty_content'
   | 'identity_mismatch';
 

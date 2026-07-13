@@ -2072,3 +2072,25 @@ AI Novel Studio 的数据模型应服务于以下目标：
 ```
 
 所有后续开发都应围绕以上数据原则展开。
+
+---
+
+# 27. 阶段 3 前置契约与持久化映射
+
+阶段 3 的创作意图、初始化候选和导演治理不新增独立任务或业务表，统一复用现有不可变快照、Artifact、AiTask/DAG 和 ApplyPlan：
+
+| 数据 | 权威持久化位置 | 关键身份 |
+|------|----------------|----------|
+| 冻结创作意图 | `ai_input_snapshots.payload_json` | `intentId + revision + contentHash` |
+| 导演预算 | `ai_context_snapshots.budget_json` | `governanceId + intent contentHash` |
+| 导演权限 | `ai_constraint_snapshots.payload_json` | `governanceId + contentHash` |
+| 初始化候选包 | `result_artifacts.structured_payload_json` | `bundleId + revision + contentHash` |
+| 导演决策审计 | `generic_json` ResultArtifact | `decisionId + taskId + contentHash` |
+| 多目标正式写入 | `artifact_apply_plans/operations/dependencies` | `operationId + requestHash` |
+| 写入证据 | `artifact_target_links` | Artifact、Operation 与 Canon 目标 |
+
+创作意图陈述必须标记为 `author_explicit`、`inferred_preference` 或 `requires_confirmation`。后两类只有记录 `confirmedBy=author` 后才能视为作者确认。初始化候选必须包含证据、解释、冲突、独立 hash 和逐项确认；候选包或候选 hash 变化后旧确认不得复用。
+
+首个多 Canon Apply 仅允许创建 `world_setting`、`rule_system` 和 `character`。所有目标 ID 在 Plan 固化前由 Rust 预分配；依赖必须无环；同一作品范围、Artifact 有效性、候选确认和 payload hash 必须在事务内复检。业务写入、TargetLink 与 Plan 完成结果在同一个 `BEGIN IMMEDIATE` 事务中提交，任一失败整体回滚。
+
+完整协议与阶段边界见 `docs/architecture/stage3-prerequisites.md`。

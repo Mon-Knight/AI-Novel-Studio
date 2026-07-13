@@ -249,8 +249,7 @@ pub(crate) fn save_chapter_draft_in_transaction(
     trace_id: &str,
     operation_id: &str,
 ) -> Result<SaveChapterDraftAtomicOutput, AppError> {
-    let add_context =
-        |error: AppError| error.with_context(Some(trace_id), Some(operation_id));
+    let add_context = |error: AppError| error.with_context(Some(trace_id), Some(operation_id));
     draft_repository::validate_target(transaction, &input.novel_id, &input.chapter_id)
         .map_err(add_context)?;
     let existing_draft = if let Some(draft_id) = input.draft_id.as_deref() {
@@ -574,12 +573,7 @@ where
             .map_err(|error| add_context(error.into()))?;
     }
 
-    let output = save_chapter_draft_in_transaction(
-        &transaction,
-        &input,
-        &trace_id,
-        &operation_id,
-    )?;
+    let output = save_chapter_draft_in_transaction(&transaction, &input, &trace_id, &operation_id)?;
     let draft_id = output.draft.id.clone();
     let result_json = serde_json::to_string(&output).map_err(|_| {
         add_context(AppError::new(
@@ -672,13 +666,18 @@ pub(crate) fn adopt_chapter_draft_in_transaction(
     trace_id: &str,
     operation_id: &str,
 ) -> Result<AdoptChapterDraftAtomicOutput, AppError> {
-    let add_context =
-        |error: AppError| error.with_context(Some(trace_id), Some(operation_id));
+    let add_context = |error: AppError| error.with_context(Some(trace_id), Some(operation_id));
     draft_repository::validate_target(transaction, &input.novel_id, &input.chapter_id)
         .map_err(add_context)?;
     let draft = draft_repository::find_draft(transaction, &input.draft_id)
         .map_err(add_context)?
-        .ok_or_else(|| add_context(AppError::new(codes::TARGET_DRAFT_NOT_FOUND, "目标草稿不存在", false)))?;
+        .ok_or_else(|| {
+            add_context(AppError::new(
+                codes::TARGET_DRAFT_NOT_FOUND,
+                "目标草稿不存在",
+                false,
+            ))
+        })?;
     if draft.novel_id != input.novel_id || draft.chapter_id != input.chapter_id {
         return Err(add_context(AppError::new(
             codes::TARGET_DRAFT_NOT_FOUND,
@@ -694,7 +693,10 @@ pub(crate) fn adopt_chapter_draft_in_transaction(
         )));
     }
     let full_content = load_full_content(transaction, &draft).map_err(add_context)?;
-    if !full_content.content_hash.eq_ignore_ascii_case(&input.content_hash) {
+    if !full_content
+        .content_hash
+        .eq_ignore_ascii_case(&input.content_hash)
+    {
         return Err(add_context(AppError::new(
             codes::DOCUMENT_HASH_MISMATCH,
             "草稿正文已发生变化",
@@ -709,13 +711,19 @@ pub(crate) fn adopt_chapter_draft_in_transaction(
             |row| row.get(0),
         )
         .map_err(|error| add_context(error.into()))?;
-    let draft_rows = transaction.execute(
-        "UPDATE chapter_drafts SET is_adopted = CASE WHEN id = ?1 THEN 1 ELSE 0 END,
+    let draft_rows = transaction
+        .execute(
+            "UPDATE chapter_drafts SET is_adopted = CASE WHEN id = ?1 THEN 1 ELSE 0 END,
                 updated_at = ?2 WHERE chapter_id = ?3 AND novel_id = ?4",
-        params![input.draft_id, now, input.chapter_id, input.novel_id],
-    ).map_err(|error| add_context(error.into()))?;
+            params![input.draft_id, now, input.chapter_id, input.novel_id],
+        )
+        .map_err(|error| add_context(error.into()))?;
     if expected_draft_rows < 1 || draft_rows as i64 != expected_draft_rows {
-        return Err(add_context(AppError::new(codes::DRAFT_UPDATE_ZERO_ROWS, "章节草稿采用更新数量不一致", false)));
+        return Err(add_context(AppError::new(
+            codes::DRAFT_UPDATE_ZERO_ROWS,
+            "章节草稿采用更新数量不一致",
+            false,
+        )));
     }
     let chapter_rows = transaction.execute(
         "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3
@@ -723,13 +731,27 @@ pub(crate) fn adopt_chapter_draft_in_transaction(
         params![input.draft_id, draft.word_count, now, input.chapter_id, input.novel_id],
     ).map_err(|error| add_context(error.into()))?;
     if chapter_rows != 1 {
-        return Err(add_context(AppError::new(codes::DOCUMENT_VERSION_CONFLICT, "章节采用目标已变化", false)));
+        return Err(add_context(AppError::new(
+            codes::DOCUMENT_VERSION_CONFLICT,
+            "章节采用目标已变化",
+            false,
+        )));
     }
     let adopted = draft_repository::find_draft(transaction, &input.draft_id)
         .map_err(add_context)?
-        .ok_or_else(|| add_context(AppError::new(codes::TARGET_DRAFT_NOT_FOUND, "采用结果不存在", false)))?;
+        .ok_or_else(|| {
+            add_context(AppError::new(
+                codes::TARGET_DRAFT_NOT_FOUND,
+                "采用结果不存在",
+                false,
+            ))
+        })?;
     if !adopted.is_adopted {
-        return Err(add_context(AppError::new(codes::DATABASE_TRANSACTION_FAILED, "采用结果校验失败", false)));
+        return Err(add_context(AppError::new(
+            codes::DATABASE_TRANSACTION_FAILED,
+            "采用结果校验失败",
+            false,
+        )));
     }
     Ok(AdoptChapterDraftAtomicOutput {
         operation_id: operation_id.to_string(),
@@ -836,12 +858,8 @@ pub fn adopt_chapter_draft_atomic(
         )
         .map_err(|error| add_context(error.into()))?;
 
-    let output = adopt_chapter_draft_in_transaction(
-        &transaction,
-        &input,
-        &trace_id,
-        &operation_id,
-    )?;
+    let output =
+        adopt_chapter_draft_in_transaction(&transaction, &input, &trace_id, &operation_id)?;
     let result_json = serde_json::to_string(&output).map_err(|_| {
         add_context(AppError::new(
             codes::DATABASE_TRANSACTION_FAILED,

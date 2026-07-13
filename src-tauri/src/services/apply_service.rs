@@ -7,7 +7,7 @@ use crate::errors::{codes, AppError};
 use crate::repositories::{
     apply_plan_repository, artifact_target_link_repository, large_text_repository,
 };
-use crate::services::{draft_service, placement_service};
+use crate::services::{draft_service, initialization_apply_service, placement_service};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
@@ -26,6 +26,193 @@ struct ArtifactApplySource {
     source_draft_version: Option<i64>,
     source_base_content_hash: Option<String>,
     processing_status: String,
+    stale_at: Option<String>,
+}
+
+#[derive(Debug)]
+struct CandidateReplacement {
+    start: usize,
+    end: usize,
+    replacement: String,
+}
+
+fn json_object_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    let unfenced = if trimmed.starts_with("```") {
+        let body = trimmed
+            .find('\n')
+            .map(|index| &trimmed[index + 1..])
+            .unwrap_or_default();
+        body.rfind("```")
+            .map(|index| &body[..index])
+            .unwrap_or(body)
+            .trim()
+    } else {
+        trimmed
+    };
+    unfenced.starts_with('{')
+        || unfenced.starts_with('[')
+        || serde_json::from_str::<Value>(unfenced)
+            .is_ok_and(|parsed| parsed.is_object() || parsed.is_array())
+}
+
+fn structured_chapter_text(payload: &Value) -> Option<String> {
+    [
+        "chapterText",
+        "chapter_text",
+        "revisedContent",
+        "revised_content",
+        "fullText",
+        "full_text",
+        "candidateText",
+        "candidate_text",
+    ]
+    .iter()
+    .find_map(|key| payload.get(key).and_then(Value::as_str))
+    .filter(|value| !value.trim().is_empty())
+    .map(str::to_owned)
+}
+
+fn char_offset_to_byte(value: &str, offset: usize) -> Option<usize> {
+    if offset == value.chars().count() {
+        return Some(value.len());
+    }
+    value.char_indices().nth(offset).map(|(index, _)| index)
+}
+
+fn paragraph_ranges(value: &str) -> Vec<(usize, usize)> {
+    let bytes = value.as_bytes();
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\n' && index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
+            ranges.push((start, index));
+            index += 2;
+            while index < bytes.len() && bytes[index] == b'\n' {
+                index += 1;
+            }
+            start = index;
+        } else {
+            index += 1;
+        }
+    }
+    ranges.push((start, value.len()));
+    ranges
+}
+
+fn unique_match(value: &str, needle: &str, start: usize, end: usize) -> Option<usize> {
+    if needle.is_empty() || start > end || end > value.len() {
+        return None;
+    }
+    let slice = &value[start..end];
+    let first = slice.find(needle)?;
+    if slice[first + needle.len()..].contains(needle) {
+        return None;
+    }
+    Some(start + first)
+}
+
+fn integer_field(value: &Value, camel: &str, snake: &str) -> Option<usize> {
+    value
+        .get(camel)
+        .or_else(|| value.get(snake))
+        .and_then(Value::as_u64)
+        .and_then(|number| usize::try_from(number).ok())
+}
+
+fn rebuild_targeted_fix(base_content: &str, payload: &Value) -> Result<String, AppError> {
+    let ranges = payload
+        .get("changedRanges")
+        .or_else(|| payload.get("changed_ranges"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "候选缺少可用于重建正文的修改片段",
+                false,
+            )
+        })?;
+    if ranges.is_empty() || base_content.trim().is_empty() {
+        return Err(AppError::new(
+            codes::ARTIFACT_VALIDATION_FAILED,
+            "候选无法从冻结正文重建",
+            false,
+        ));
+    }
+    let normalized = base_content.replace("\r\n", "\n").replace('\r', "\n");
+    let paragraphs = paragraph_ranges(&normalized);
+    let mut replacements = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        let before = range
+            .get("before")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let after = range
+            .get("after")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if before.is_empty() && after.is_empty() {
+            return Err(AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "候选修改片段为空",
+                false,
+            ));
+        }
+        let offset_match = integer_field(range, "startOffset", "start_offset")
+            .zip(integer_field(range, "endOffset", "end_offset"))
+            .and_then(|(start, end)| {
+                let start_byte = char_offset_to_byte(&normalized, start)?;
+                let end_byte = char_offset_to_byte(&normalized, end)?;
+                (start_byte <= end_byte
+                    && normalized
+                        .get(start_byte..end_byte)
+                        .is_some_and(|value| value == before))
+                .then_some((start_byte, end_byte))
+            });
+        let paragraph_match = integer_field(range, "paragraphIndex", "paragraph_index")
+            .and_then(|paragraph_index| paragraphs.get(paragraph_index).copied())
+            .and_then(|(start, end)| {
+                if before.is_empty() {
+                    Some((end, end))
+                } else {
+                    unique_match(&normalized, before, start, end)
+                        .map(|position| (position, position + before.len()))
+                }
+            });
+        let global_match = unique_match(&normalized, before, 0, normalized.len())
+            .map(|position| (position, position + before.len()));
+        let (start, end) = offset_match
+            .or(paragraph_match)
+            .or(global_match)
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::ARTIFACT_VALIDATION_FAILED,
+                    "候选修改片段无法在冻结正文中唯一定位",
+                    false,
+                )
+            })?;
+        replacements.push(CandidateReplacement {
+            start,
+            end,
+            replacement: after.to_string(),
+        });
+    }
+    replacements.sort_by(|left, right| right.start.cmp(&left.start));
+    for pair in replacements.windows(2) {
+        if pair[0].start < pair[1].end {
+            return Err(AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "候选修改片段相互重叠",
+                false,
+            ));
+        }
+    }
+    let mut rebuilt = normalized;
+    for replacement in replacements {
+        rebuilt.replace_range(replacement.start..replacement.end, &replacement.replacement);
+    }
+    Ok(rebuilt)
 }
 
 fn read_artifact(
@@ -36,7 +223,8 @@ fn read_artifact(
         .query_row(
             "SELECT task_id, raw_content_ref_id, display_content_ref_id, structured_payload_json,
                 content_hash, source_novel_id, source_chapter_id, source_draft_id,
-                source_draft_version, source_base_content_hash, processing_status, schema_version
+                source_draft_version, source_base_content_hash, processing_status, schema_version,
+                (SELECT triggered_at FROM ai_artifact_stale_events s WHERE s.artifact_id=result_artifacts.artifact_id)
          FROM result_artifacts WHERE artifact_id = ?1",
             params![artifact_id],
             |row| {
@@ -55,6 +243,7 @@ fn read_artifact(
                     source_draft_version: row.get(8)?,
                     source_base_content_hash: row.get(9)?,
                     processing_status: row.get(10)?,
+                    stale_at: row.get(12)?,
                 })
             },
         )
@@ -74,13 +263,45 @@ fn chapter_text(
     artifact: &ArtifactApplySource,
 ) -> Result<String, AppError> {
     if let Some(payload) = artifact.structured_payload.as_ref() {
-        for key in ["chapterText", "revisedContent", "revised_content"] {
-            if let Some(content) = payload.get(key).and_then(Value::as_str) {
-                if !content.trim().is_empty() {
-                    return Ok(content.to_string());
-                }
+        if let Some(content) = structured_chapter_text(payload) {
+            if json_object_text(&content) {
+                return Err(AppError::new(
+                    codes::ARTIFACT_VALIDATION_FAILED,
+                    "候选完整正文仍是结构化数据",
+                    false,
+                ));
             }
+            return Ok(content);
         }
+        let source_draft_id = artifact.source_draft_id.as_deref().ok_or_else(|| {
+            AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "候选缺少冻结正文身份",
+                false,
+            )
+        })?;
+        let (inline_content, large_text_ref_id): (String, Option<String>) = connection
+            .query_row(
+                "SELECT content,large_text_ref_id FROM chapter_drafts WHERE id=?1",
+                params![source_draft_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(AppError::database)?
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::ARTIFACT_VALIDATION_FAILED,
+                    "候选冻结正文不存在",
+                    false,
+                )
+            })?;
+        let base_content = large_text_ref_id
+            .map(|document_id| {
+                large_text_repository::read_verified_document(connection, &document_id)
+                    .map(|value| value.content)
+            })
+            .unwrap_or(Ok(inline_content))?;
+        return rebuild_targeted_fix(&base_content, payload);
     }
     let document_id = artifact
         .display_content_ref_id
@@ -91,6 +312,13 @@ fn chapter_text(
         return Err(AppError::new(
             codes::ARTIFACT_VALIDATION_FAILED,
             "Artifact 正文为空",
+            false,
+        ));
+    }
+    if json_object_text(&verified.content) {
+        return Err(AppError::new(
+            codes::ARTIFACT_VALIDATION_FAILED,
+            "Artifact 正文格式异常，禁止采用原始 JSON",
             false,
         ));
     }
@@ -133,6 +361,13 @@ pub fn create_plan(
     }
     let target = ready[0];
     let artifact = read_artifact(connection, &proposal.artifact_id)?;
+    if artifact.stale_at.is_some() {
+        return Err(AppError::new(
+            codes::APPLY_PLAN_STALE,
+            "过期 Artifact 不能直接采用",
+            false,
+        ));
+    }
     if artifact.processing_status != "valid" && artifact.processing_status != "valid_with_warnings"
     {
         return Err(AppError::new(
@@ -378,6 +613,9 @@ pub fn execute_plan(
                 false,
             ));
         }
+        if initialization_apply_service::is_initialization_plan(&plan) {
+            return initialization_apply_service::execute_in_transaction(&transaction, plan);
+        }
         if plan.operations.len() != 1 || !plan.dependencies.is_empty() {
             return Err(AppError::new(
                 codes::PLACEMENT_TARGET_UNRESOLVED,
@@ -400,6 +638,13 @@ pub fn execute_plan(
                 )
             })?;
         let artifact = read_artifact(&transaction, &plan.artifact_id)?;
+        if artifact.stale_at.is_some() {
+            return Err(AppError::new(
+                codes::APPLY_PLAN_STALE,
+                "过期 Artifact 不能执行采用",
+                false,
+            ));
+        }
         if artifact.processing_status != "valid"
             && artifact.processing_status != "valid_with_warnings"
         {
@@ -426,6 +671,37 @@ pub fn execute_plan(
                 "Artifact 来源基线与 ApplyPlan 不一致",
                 false,
             ));
+        }
+        if operation.action == "confirm_artifact_review" {
+            let now = Utc::now().to_rfc3339();
+            let link = ArtifactTargetLink {
+                link_id: uuid::Uuid::new_v4().to_string(),
+                artifact_id: plan.artifact_id.clone(),
+                plan_id: plan.plan_id.clone(),
+                apply_operation_id: operation.apply_operation_id.clone(),
+                target_type: "artifact_review".into(),
+                target_id: plan.artifact_id.clone(),
+                target_version: Some(artifact.schema_version),
+                target_hash: Some(artifact.content_hash.clone()),
+                operation_id: plan.operation_id.clone(),
+                result_metadata: Some(json!({ "reviewConfirmed": true, "canonWritten": false })),
+                created_at: now.clone(),
+            };
+            artifact_target_link_repository::insert_link(&transaction, &link)?;
+            let result_value = json!({
+                "artifactId": plan.artifact_id,
+                "reviewConfirmed": true,
+                "canonWritten": false,
+            });
+            apply_plan_repository::complete(&transaction, &plan.plan_id, &result_value, &now)?;
+            return Ok(ApplyExecutionResult {
+                plan_id: plan.plan_id,
+                operation_id: plan.operation_id,
+                status: ApplyPlanStatus::Completed,
+                target_links: vec![link],
+                result: result_value,
+                idempotent_replay: false,
+            });
         }
         let content = chapter_text(&transaction, &artifact)?;
         let content_hash = large_text_repository::sha256(&content);
@@ -562,11 +838,12 @@ pub fn execute_plan(
 mod tests {
     use super::*;
     use crate::domain::apply_plan::{
-        CreateApplyPlanInput, ExecuteApplyPlanInput, QualityFixApplyPayload,
+        CreateApplyPlanInput, CreateInitializationApplyPlanInput, ExecuteApplyPlanInput,
+        InitializationCandidateSelection, QualityFixApplyPayload,
     };
     use crate::domain::placement::{CreatePlacementProposalInput, PlacementTargetOverride};
     use crate::migrations;
-    use crate::services::placement_service;
+    use crate::services::{initialization_apply_service, placement_service};
 
     fn setup() -> Result<Connection, Box<dyn std::error::Error>> {
         let mut connection = Connection::open_in_memory()?;
@@ -590,7 +867,22 @@ mod tests {
              CREATE TABLE chapter_summaries (id TEXT PRIMARY KEY, chapter_id TEXT NOT NULL,
                  is_expired INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
              CREATE TABLE context_records (id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, volume_id TEXT,
-                 context_type TEXT NOT NULL, is_expired INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+                  context_type TEXT NOT NULL, is_expired INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+             CREATE TABLE world_settings (
+                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL,
+                  content TEXT NOT NULL DEFAULT '', structured_json TEXT,
+                  is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+             CREATE TABLE rule_systems (
+                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL, category TEXT,
+                  content TEXT NOT NULL DEFAULT '', forbidden_rules TEXT, structured_json TEXT,
+                  is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+             CREATE TABLE characters (
+                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, name TEXT NOT NULL,
+                  role_type TEXT NOT NULL DEFAULT 'supporting', identity TEXT, faction TEXT,
+                  relation_to_protagonist TEXT, goal TEXT, personality TEXT, behavior_limits TEXT,
+                  forbidden_behaviors TEXT, current_state TEXT, source TEXT NOT NULL DEFAULT 'manual',
+                  source_type TEXT NOT NULL DEFAULT 'manual', is_protagonist INTEGER NOT NULL DEFAULT 0,
+                  is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
              INSERT INTO novels (id,title,created_at,updated_at) VALUES
                 ('novel-a','A','now','now'),('novel-b','B','now','now');
              INSERT INTO chapters (id,novel_id,volume_id,title,created_at,updated_at) VALUES
@@ -688,6 +980,180 @@ mod tests {
             operation_id: plan.operation_id.clone(),
             request_hash: plan.request_hash.clone(),
         }
+    }
+
+    fn initialization_candidate(
+        candidate_id: &str,
+        target_type: &str,
+        proposed_value: Value,
+        depends_on: Vec<&str>,
+        confirmed: bool,
+        with_conflict: bool,
+    ) -> Value {
+        let conflicts = if with_conflict {
+            json!([{
+                "code": "POSSIBLE_DUPLICATE",
+                "severity": "warning",
+                "message": "可能与已有设定重叠",
+                "evidenceRefs": ["evidence-1"]
+            }])
+        } else {
+            json!([])
+        };
+        let body = json!({
+            "candidateId": candidate_id,
+            "targetType": target_type,
+            "proposedValue": proposed_value,
+            "knowledgeClass": "requires_confirmation",
+            "confidence": 0.9,
+            "evidence": [{
+                "evidenceId": "evidence-1",
+                "sourceType": "author_input",
+                "excerpt": "作者初始化输入"
+            }],
+            "explanation": "由作者输入生成的初始化候选",
+            "conflicts": conflicts,
+            "dependsOnCandidateIds": depends_on,
+        });
+        let candidate_hash = initialization_apply_service::canonical_hash(&body);
+        let mut candidate = body;
+        let object = candidate.as_object_mut().expect("candidate object");
+        object.insert("conflictAcknowledged".into(), Value::Bool(with_conflict));
+        object.insert(
+            "confirmation".into(),
+            if confirmed {
+                json!({ "status": "confirmed", "confirmedBy": "author", "confirmedAt": "now" })
+            } else {
+                json!({ "status": "pending" })
+            },
+        );
+        object.insert("candidateHash".into(), Value::String(candidate_hash));
+        candidate
+    }
+
+    fn initialization_fixture(
+        connection: &mut Connection,
+        confirmed: bool,
+        cycle: bool,
+        with_conflict: bool,
+    ) -> Result<(String, String, Vec<InitializationCandidateSelection>), Box<dyn std::error::Error>>
+    {
+        let world_dependencies = if cycle {
+            vec!["candidate-character"]
+        } else {
+            vec![]
+        };
+        let character_dependencies = if cycle {
+            vec!["candidate-world"]
+        } else {
+            vec!["candidate-rule"]
+        };
+        let items = vec![
+            initialization_candidate(
+                "candidate-world",
+                "world_setting",
+                json!({ "title": "天空城", "content": "浮空城市群", "isActive": true }),
+                world_dependencies,
+                confirmed,
+                with_conflict,
+            ),
+            initialization_candidate(
+                "candidate-rule",
+                "rule_system",
+                json!({ "title": "魔法规则", "category": "力量体系", "content": "施法需要代价" }),
+                vec!["candidate-world"],
+                confirmed,
+                false,
+            ),
+            initialization_candidate(
+                "candidate-character",
+                "character",
+                json!({ "name": "林澈", "roleType": "protagonist", "identity": "见习术士" }),
+                character_dependencies,
+                confirmed,
+                false,
+            ),
+        ];
+        let mut bundle = json!({
+            "schemaVersion": 1,
+            "bundleId": "bundle-a",
+            "novelId": "novel-a",
+            "revision": 1,
+            "intent": { "intentId": "intent-a", "revision": 1, "contentHash": "intent-hash" },
+            "items": items,
+            "createdAt": "now"
+        });
+        let bundle_hash = initialization_apply_service::canonical_hash(&bundle);
+        bundle
+            .as_object_mut()
+            .expect("bundle object")
+            .insert("contentHash".into(), Value::String(bundle_hash.clone()));
+        connection.execute("INSERT INTO ai_tasks (task_id,task_type,novel_id,scope_type,status,trace_id,operation_id,request_hash,created_at,completed_at) VALUES ('task-init','project_initialization','novel-a','novel','completed','trace-init','op-init','hash-init','now','now')", [])?;
+        connection.execute("INSERT INTO ai_task_attempts (attempt_id,task_id,attempt_number,status,started_at,finished_at) VALUES ('attempt-init','task-init',1,'succeeded','now','now')", [])?;
+        let raw = bundle.to_string();
+        let raw_hash = large_text_repository::sha256(&raw);
+        large_text_repository::insert_document_for_target(
+            connection,
+            "artifact-init-doc",
+            "result_artifact",
+            "artifact-init",
+            "raw_content",
+            None,
+            &raw,
+            &raw_hash,
+            "now",
+        )?;
+        connection.execute(
+            "INSERT INTO result_artifacts
+             (artifact_id,task_id,attempt_id,artifact_type,schema_version,raw_content_ref_id,
+              structured_payload_json,source_novel_id,content_hash,content_length,processing_status,created_at)
+             VALUES ('artifact-init','task-init','attempt-init','generic_json',1,'artifact-init-doc',
+                     ?1,'novel-a',?2,?3,'valid','now')",
+            params![raw, raw_hash, raw.chars().count() as i64],
+        )?;
+        let proposal = placement_service::create_proposal(
+            connection,
+            CreatePlacementProposalInput {
+                artifact_id: "artifact-init".into(),
+                target: None,
+                parent_proposal_id: None,
+            },
+        )?;
+        let selections = bundle["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .map(|candidate| InitializationCandidateSelection {
+                candidate_id: candidate["candidateId"].as_str().unwrap().to_string(),
+                expected_candidate_hash: candidate["candidateHash"].as_str().unwrap().to_string(),
+                conflict_acknowledged: candidate["conflicts"]
+                    .as_array()
+                    .map(|conflicts| !conflicts.is_empty())
+                    .unwrap_or(false),
+            })
+            .collect();
+        Ok((proposal.proposal_id, bundle_hash, selections))
+    }
+
+    #[test]
+    fn workflow_stale_artifact_cannot_create_apply_plan() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut db = setup()?;
+        let created = proposal(&mut db)?;
+        db.execute("INSERT INTO ai_artifact_stale_events(artifact_id,source_task_id,reason,triggered_at) VALUES ('artifact-a','task-a','upstream changed','now')",[])?;
+        let error = create_plan(
+            &mut db,
+            CreateApplyPlanInput {
+                proposal_id: created.proposal_id,
+                parent_plan_id: None,
+                source: Some("ai_generated".into()),
+                note: None,
+                quality_fix: None,
+            },
+        )
+        .expect_err("stale artifact must be blocked");
+        assert_eq!(error.code, codes::APPLY_PLAN_STALE);
+        Ok(())
     }
 
     #[test]
@@ -1056,6 +1522,271 @@ mod tests {
             db.query_row("SELECT COUNT(*) FROM chapter_drafts", [], |row| row.get(0))?;
         assert_eq!(status, "validated");
         assert_eq!(count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn apply13_review_only_plan_records_confirmation_without_canon_write(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = setup()?;
+        db.execute("INSERT INTO ai_tasks (task_id,task_type,novel_id,chapter_id,draft_id,scope_type,status,trace_id,operation_id,request_hash,created_at,completed_at) VALUES ('task-review','chapter_summary','novel-a','chapter-a','source-draft','draft','completed','trace-review','op-review','hash-review','now','now')",[])?;
+        db.execute("INSERT INTO ai_task_attempts (attempt_id,task_id,attempt_number,status,started_at,finished_at) VALUES ('attempt-review','task-review',1,'succeeded','now','now')",[])?;
+        let body = "{\"summary\":\"review me\"}";
+        let body_hash = large_text_repository::sha256(body);
+        large_text_repository::insert_document_for_target(
+            &db,
+            "artifact-review-doc",
+            "result_artifact",
+            "artifact-review",
+            "raw_content",
+            None,
+            body,
+            &body_hash,
+            "now",
+        )?;
+        db.execute("INSERT INTO result_artifacts (artifact_id,task_id,attempt_id,artifact_type,schema_version,raw_content_ref_id,source_novel_id,source_chapter_id,source_draft_id,source_draft_version,source_base_content_hash,content_hash,content_length,processing_status,created_at) VALUES ('artifact-review','task-review','attempt-review','chapter_summary',1,'artifact-review-doc','novel-a','chapter-a','source-draft',1,(SELECT content_hash FROM chapter_drafts WHERE id='source-draft'),?1,?2,'valid','now')",params![body_hash,body.chars().count() as i64])?;
+        let proposal = placement_service::create_proposal(
+            &mut db,
+            CreatePlacementProposalInput {
+                artifact_id: "artifact-review".into(),
+                target: None,
+                parent_proposal_id: None,
+            },
+        )?;
+        assert_eq!(proposal.targets[0].action, "confirm_artifact_review");
+        let review_plan = create_plan(
+            &mut db,
+            CreateApplyPlanInput {
+                proposal_id: proposal.proposal_id,
+                parent_plan_id: None,
+                source: Some("ai_review".into()),
+                note: Some("reviewed".into()),
+                quality_fix: None,
+            },
+        )?;
+        let executed = execute_plan(&mut db, execute_input(&review_plan))?;
+        assert_eq!(executed.status, ApplyPlanStatus::Completed);
+        assert_eq!(executed.target_links[0].target_type, "artifact_review");
+        assert_eq!(
+            executed.result.get("canonWritten").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM chapter_drafts", [], |row| row
+                .get::<_, i64>(0))?,
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT adopted_draft_id FROM chapters WHERE id='chapter-a'",
+                [],
+                |row| row.get::<_, String>(0)
+            )?,
+            "source-draft"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stage3_init01_confirmed_candidates_create_multi_target_plan(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = setup()?;
+        let (proposal_id, bundle_hash, selected_candidates) =
+            initialization_fixture(&mut db, true, false, false)?;
+        let created = initialization_apply_service::create_plan(
+            &mut db,
+            CreateInitializationApplyPlanInput {
+                proposal_id,
+                expected_bundle_hash: bundle_hash,
+                selected_candidates,
+                parent_plan_id: None,
+            },
+        )?;
+        assert_eq!(created.status, ApplyPlanStatus::Ready);
+        assert_eq!(created.operations.len(), 3);
+        assert_eq!(created.dependencies.len(), 2);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM world_settings", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stage3_init02_atomic_apply_writes_three_targets_and_replays_idempotently(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = setup()?;
+        let (proposal_id, bundle_hash, selected_candidates) =
+            initialization_fixture(&mut db, true, false, false)?;
+        let created = initialization_apply_service::create_plan(
+            &mut db,
+            CreateInitializationApplyPlanInput {
+                proposal_id,
+                expected_bundle_hash: bundle_hash,
+                selected_candidates,
+                parent_plan_id: None,
+            },
+        )?;
+        let executed = execute_plan(&mut db, execute_input(&created))?;
+        assert_eq!(executed.status, ApplyPlanStatus::Completed);
+        assert_eq!(executed.target_links.len(), 3);
+        assert_eq!(
+            executed.result.get("canonWritten").and_then(Value::as_bool),
+            Some(true)
+        );
+        let replay = execute_plan(&mut db, execute_input(&created))?;
+        assert!(replay.idempotent_replay);
+        for table in ["world_settings", "rule_systems", "characters"] {
+            let count: i64 = db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })?;
+            assert_eq!(count, 1, "{table} should contain one target");
+        }
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM artifact_target_links", [], |row| row
+                .get::<_, i64>(
+                0
+            ))?,
+            3
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stage3_init03_late_conflict_rolls_back_all_prior_canon_writes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = setup()?;
+        let (proposal_id, bundle_hash, selected_candidates) =
+            initialization_fixture(&mut db, true, false, false)?;
+        let created = initialization_apply_service::create_plan(
+            &mut db,
+            CreateInitializationApplyPlanInput {
+                proposal_id,
+                expected_bundle_hash: bundle_hash,
+                selected_candidates,
+                parent_plan_id: None,
+            },
+        )?;
+        db.execute("INSERT INTO rule_systems (id,novel_id,title,content,is_active,created_at,updated_at) VALUES ('existing-rule','novel-a','魔法规则','existing',1,'now','now')", [])?;
+        let error = execute_plan(&mut db, execute_input(&created)).unwrap_err();
+        assert_eq!(error.code, codes::TARGET_VERSION_CONFLICT);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM world_settings", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM characters", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM artifact_target_links", [], |row| row
+                .get::<_, i64>(
+                0
+            ))?,
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT status FROM artifact_apply_plans WHERE plan_id=?1",
+                params![created.plan_id],
+                |row| row.get::<_, String>(0)
+            )?,
+            "failed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stage3_init04_unconfirmed_candidate_and_cycle_fail_closed(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut unconfirmed_db = setup()?;
+        let (proposal_id, bundle_hash, selected_candidates) =
+            initialization_fixture(&mut unconfirmed_db, false, false, false)?;
+        let error = initialization_apply_service::create_plan(
+            &mut unconfirmed_db,
+            CreateInitializationApplyPlanInput {
+                proposal_id,
+                expected_bundle_hash: bundle_hash,
+                selected_candidates,
+                parent_plan_id: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, codes::ARTIFACT_VALIDATION_FAILED);
+
+        let mut cycle_db = setup()?;
+        let (proposal_id, bundle_hash, selected_candidates) =
+            initialization_fixture(&mut cycle_db, true, true, false)?;
+        let error = initialization_apply_service::create_plan(
+            &mut cycle_db,
+            CreateInitializationApplyPlanInput {
+                proposal_id,
+                expected_bundle_hash: bundle_hash,
+                selected_candidates,
+                parent_plan_id: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, codes::ARTIFACT_VALIDATION_FAILED);
+        Ok(())
+    }
+
+    #[test]
+    fn apply14_targeted_fix_fragments_rebuild_complete_prose_before_apply(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = setup()?;
+        let artifact = ArtifactApplySource {
+            task_id: "task-a".into(),
+            schema_version: 1,
+            raw_content_ref_id: "artifact-doc".into(),
+            display_content_ref_id: None,
+            structured_payload: Some(json!({
+                "mode": "targeted_fix",
+                "revision_summary": "只修改一处",
+                "changed_ranges": [{ "before": "source", "after": "revised" }]
+            })),
+            content_hash: "raw-hash".into(),
+            source_novel_id: "novel-a".into(),
+            source_chapter_id: Some("chapter-a".into()),
+            source_draft_id: Some("source-draft".into()),
+            source_draft_version: Some(1),
+            source_base_content_hash: None,
+            processing_status: "valid".into(),
+            stale_at: None,
+        };
+        let content = chapter_text(&db, &artifact)?;
+        assert_eq!(content, "revised chapter");
+        assert!(!content.contains("changed_ranges"));
+        Ok(())
+    }
+
+    #[test]
+    fn apply15_raw_or_nested_json_can_never_become_chapter_body(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = setup()?;
+        let nested = ArtifactApplySource {
+            task_id: "task-a".into(),
+            schema_version: 1,
+            raw_content_ref_id: "artifact-doc".into(),
+            display_content_ref_id: None,
+            structured_payload: Some(json!({
+                "mode": "full_rewrite",
+                "revised_content": "{\"mode\":\"not prose\"}"
+            })),
+            content_hash: "raw-hash".into(),
+            source_novel_id: "novel-a".into(),
+            source_chapter_id: Some("chapter-a".into()),
+            source_draft_id: Some("source-draft".into()),
+            source_draft_version: Some(1),
+            source_base_content_hash: None,
+            processing_status: "valid".into(),
+            stale_at: None,
+        };
+        let error = chapter_text(&db, &nested).expect_err("nested JSON must be rejected");
+        assert_eq!(error.code, codes::ARTIFACT_VALIDATION_FAILED);
         Ok(())
     }
 }

@@ -6,7 +6,7 @@ use crate::errors::{codes, AppError};
 use crate::repositories::{large_text_repository, placement_repository};
 use crate::services::constraint_validation_service;
 use chrono::Utc;
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
 fn project_revision_hash(
     artifact_id: &str,
@@ -70,11 +70,60 @@ pub fn create_proposal(
     }
     constraint_validation_service::ensure_latest_allows_apply(&transaction, &input.artifact_id)?;
     if artifact.artifact_type != "chapter_text" {
-        return Err(AppError::new(
-            codes::PLACEMENT_TARGET_UNRESOLVED,
-            "M2 仅支持正文单目标落位",
-            false,
-        ));
+        if !matches!(
+            artifact.artifact_type.as_str(),
+            "quality_report"
+                | "chapter_summary"
+                | "volume_summary"
+                | "outline_text"
+                | "volume_outline"
+                | "chapter_outlines"
+                | "generic_json"
+        ) {
+            return Err(AppError::new(
+                codes::PLACEMENT_TARGET_UNRESOLVED,
+                "Artifact 类型不能进入审查确认",
+                false,
+            ));
+        }
+        let project_revision_hash = large_text_repository::sha256(
+            &serde_json::json!({
+                "artifactId": artifact.artifact_id,
+                "artifactType": artifact.artifact_type,
+                "processingStatus": artifact.processing_status,
+            })
+            .to_string(),
+        );
+        let target = PlacementTarget {
+            target_type: "artifact_review".into(),
+            target_id: artifact.artifact_id.clone(),
+            novel_id: artifact.source_novel_id.clone(),
+            chapter_id: artifact.source_chapter_id.clone(),
+            draft_id: artifact.source_draft_id.clone(),
+            action: "confirm_artifact_review".into(),
+            expected_version: artifact.source_draft_version,
+            expected_hash: artifact.source_base_content_hash.clone(),
+            source_priority: 1,
+            confidence: 1.0,
+            reason: "AI 候选等待用户审查确认".into(),
+            is_ready: true,
+        };
+        let proposal = PlacementProposal {
+            proposal_id: uuid::Uuid::new_v4().to_string(),
+            artifact_id: artifact.artifact_id,
+            parent_proposal_id: input.parent_proposal_id,
+            schema_version: PLACEMENT_SCHEMA_VERSION,
+            targets: vec![target],
+            confidence: 1.0,
+            reasons: vec!["用户确认只记录审查证据，不自动写入作品".into()],
+            warnings: Vec::new(),
+            unresolved_items: Vec::new(),
+            project_revision_hash,
+            created_at: Utc::now().to_rfc3339(),
+        };
+        placement_repository::insert_proposal(&transaction, &proposal)?;
+        transaction.commit().map_err(AppError::database)?;
+        return Ok(proposal);
     }
     let source_chapter_id = artifact.source_chapter_id.as_deref().ok_or_else(|| {
         AppError::new(
@@ -229,6 +278,43 @@ pub fn validate_proposal(
         });
     }
     let target = ready_targets[0];
+    if target.action == "confirm_artifact_review" {
+        let current: Option<(String, String, Option<String>)> = connection
+            .query_row(
+                "SELECT artifact_type,processing_status,
+                    (SELECT triggered_at FROM ai_artifact_stale_events s WHERE s.artifact_id=result_artifacts.artifact_id ORDER BY triggered_at DESC LIMIT 1)
+                 FROM result_artifacts WHERE artifact_id=?1 AND source_novel_id=?2",
+                rusqlite::params![proposal.artifact_id,target.novel_id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+            )
+            .optional()
+            .map_err(AppError::database)?;
+        let Some((artifact_type, processing_status, stale_at)) = current else {
+            return Ok(ProposalValidation {
+                proposal_id: proposal.proposal_id,
+                stale: true,
+                reason: Some("审查 Artifact 已不存在".into()),
+                current_project_revision_hash: String::new(),
+            });
+        };
+        let current_hash = large_text_repository::sha256(
+            &serde_json::json!({
+                "artifactId": proposal.artifact_id,
+                "artifactType": artifact_type,
+                "processingStatus": processing_status,
+            })
+            .to_string(),
+        );
+        let stale = stale_at.is_some()
+            || !matches!(processing_status.as_str(), "valid" | "valid_with_warnings")
+            || current_hash != proposal.project_revision_hash;
+        return Ok(ProposalValidation {
+            proposal_id: proposal.proposal_id,
+            stale,
+            reason: stale.then(|| "审查结果已失效或过期".into()),
+            current_project_revision_hash: current_hash,
+        });
+    }
     let current = placement_repository::read_target_state(
         connection,
         &target.novel_id,

@@ -3,12 +3,9 @@ import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
 import type { PolishMode, PolishRequestOptions } from '../../../types/polish';
 import { PolishModeLabels } from '../../../types/polish';
-import { polishService } from '../../../services/quality/polishService';
 import { polishAiService } from '../../../services/ai/polishAiService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
-import { runWithLoading } from '../../../lib/runWithLoading';
-import { hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 
 interface PolishPanelProps {
@@ -25,7 +22,7 @@ interface PolishPanelProps {
 
 const POLISH_MODES: PolishMode[] = ['keep_plot', 'enhance_description', 'reduce_redundancy', 'strengthen_conflict', 'adjust_pacing', 'unify_style', 'fix_language', 'custom'];
 
-function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, currentEditorDirty, currentEditorWordCount, currentContentHash, currentDraftId, currentDraftVersion, onApplyAiText }: PolishPanelProps) {
+function PolishPanel({ novelId, chapter, onGenerated: _onGenerated, currentEditorContent, currentEditorDirty, currentEditorWordCount, currentDraftId, onApplyAiText }: PolishPanelProps) {
   const liveChapterIdRef = useRef(chapter?.id || '');
   liveChapterIdRef.current = chapter?.id || '';
   const liveNovelIdRef = useRef(novelId || '');
@@ -78,91 +75,38 @@ function PolishPanel({ novelId, chapter, onGenerated, currentEditorContent, curr
     }
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
-    const requestBaseHash = currentContentHash || hashTextContent(currentEditorContent ?? currentDraft.content);
-    const requestSourceDraftId = currentDraftId || currentDraft.id;
-    const requestSourceRevision = currentDraftVersion || currentDraft.versionNo;
     const sourceContent = currentEditorContent ?? currentDraft.content;
     const sourceWordCount = currentEditorWordCount ?? currentDraft.wordCount;
     if (sourceContent.trim().length < 10 || sourceWordCount < 10) { setError('正文过短，无法润色'); return; }
     setLoading(true); setError(''); setStatusMsg('');
 
     try {
-      await runWithLoading(
-        {
-          title: 'AI 正在润色正文',
-          initialMessage: '正在准备润色参数……',
-          successMessage: `润色完成！`,
-          errorMessage: '润色失败',
-        },
-        async ({ setMessage, setStage, setPercent }) => {
-          setStage('创建润色任务……');
-          setPercent(5);
-          const options: PolishRequestOptions = {
-            mode, customInstruction: customInstruction.trim() || undefined,
-            preservePlot: true, preserveCharacters: true, preserveKeyEvents: true,
-          };
-          let sourceDraft = currentDraft;
-          if (currentEditorDirty || currentDraft.content !== sourceContent) {
-            setMessage('正在保存当前正文快照……');
-            sourceDraft = await draftVersionService.create({
-              novelId: requestNovelId,
-              chapterId: requestChapterId,
-              title: `${chapter.title} - 润色快照`,
-              content: sourceContent,
-              source: 'user_edited',
-              note: '润色正文快照',
-            });
-            if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-              setCurrentDraft(sourceDraft);
-              onGenerated?.(sourceDraft, {
-                resultId: sourceDraft.id,
-                novelId: requestNovelId,
-                chapterId: requestChapterId,
-                sourceDraftId: requestSourceDraftId,
-                sourceRevision: requestSourceRevision,
-                baseContentHash: requestBaseHash,
-                source: 'polish',
-              });
-            }
-          }
-          const record = await polishService.create({ novelId: requestNovelId, chapterId: requestChapterId, sourceDraftId: sourceDraft.id, mode, instruction: customInstruction.trim() || undefined });
+      const options: PolishRequestOptions = {
+        mode, customInstruction: customInstruction.trim() || undefined,
+        preservePlot: true, preserveCharacters: true, preserveKeyEvents: true,
+      };
+      let sourceDraft = currentDraft;
+      if (currentEditorDirty || currentDraft.content !== sourceContent) {
+        sourceDraft = await draftVersionService.create({
+          novelId: requestNovelId,
+          chapterId: requestChapterId,
+          title: `${chapter.title} - 润色快照`,
+          content: sourceContent,
+          source: 'user_edited',
+          note: '后台润色冻结正文快照',
+        });
+        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
+          setCurrentDraft(sourceDraft);
+        }
+      }
+      const created = await polishAiService.submitBackground({
+        novelId: requestNovelId, chapterId: requestChapterId, sourceDraftId: sourceDraft.id,
+        sourceDraftVersion: sourceDraft.versionNo, draftContent: sourceDraft.content,
+        chapterTitle: chapter.title, chapterOutline: chapter.outline, options,
+      });
+      setStatusMsg(`润色已转入后台（${created.rootTaskId.slice(0, 8)}），可继续编辑；完成后请到任务中心审查。`);
+      return;
 
-          setMessage('正在分析原文……');
-          setStage('AI 正在润色正文……');
-          setPercent(30);
-          const polishedText = await polishAiService.runPolish({
-            novelId: requestNovelId, chapterId: requestChapterId, sourceDraftId: sourceDraft.id,
-            draftContent: sourceContent, chapterTitle: chapter.title,
-            chapterOutline: chapter.outline, options,
-          });
-
-          setMessage('正在保存润色结果……');
-          setPercent(80);
-          const resultDraft = await draftVersionService.create({
-            novelId: requestNovelId, chapterId: requestChapterId,
-            content: polishedText, source: 'ai_polished',
-            note: `${PolishModeLabels[mode]}润色`,
-          });
-
-          await polishService.update(record.id, { status: 'succeeded', resultDraftId: resultDraft.id });
-          setPercent(100);
-
-          if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
-          const resultMetadata: DraftResultMetadata = {
-            resultId: resultDraft.id,
-            novelId: requestNovelId,
-            chapterId: requestChapterId,
-            sourceDraftId: sourceDraft.id,
-            sourceRevision: sourceDraft.versionNo,
-            baseContentHash: requestBaseHash,
-            source: 'polish',
-          };
-          onGenerated?.(resultDraft, resultMetadata);
-          setLastPolishResult(resultDraft);
-          setLastPolishTarget(resultMetadata);
-          setStatusMsg(`润色完成！已保存为草稿 v${resultDraft.versionNo}。`);
-        },
-      );
     } catch (e: any) {
       setError(e.message || '润色失败');
     } finally {

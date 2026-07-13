@@ -5,7 +5,6 @@ import { outlineGenerateService, type VolumeOutlineCandidate, type ChapterOutlin
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { clearCachedChapterOutlineDraft, setCachedChapterOutlineDraft } from '../../../services/prompt/chapterOutlineDraftCache';
 import type { Chapter } from '../../../types/chapter';
-import type { ChapterCandidateTarget } from '../../../types/workspaceSafety';
 import type { Volume } from '../../../types/volume';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { formatNumber } from '../../../utils/format';
@@ -39,10 +38,10 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
   // 作品总大纲结果
   const [novelOutline, setNovelOutline] = useState('');
   // 分卷大纲结果
-  const [volumeOutline, setVolumeOutline] = useState<VolumeOutlineCandidate | null>(null);
+  const [volumeOutline, _setVolumeOutline] = useState<VolumeOutlineCandidate | null>(null);
   // 章节大纲结果
   const [chapterOutlines, setChapterOutlines] = useState<ChapterOutlineCandidate[]>([]);
-  const [chapterOutlineTarget, setChapterOutlineTarget] = useState<ChapterCandidateTarget | null>(null);
+  const [chapterOutlineTarget, _setChapterOutlineTarget] = useState<import('../../../types/workspaceSafety').ChapterCandidateTarget | null>(null);
 
   useEffect(() => {
     if (chapter?.volumeId) {
@@ -77,17 +76,10 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
     if (!novelId) return;
     setLoading(true); setGenMode('novel'); setError('');
     try {
-      await runWithLoading({
-        title: 'AI 正在生成作品总大纲',
-        initialMessage: '正在读取作品设定和世界观……',
-        successMessage: '作品总大纲生成完成',
-        errorMessage: '作品总大纲生成失败',
-      }, async ({ setStage }) => {
-        setStage('正在分析主角和世界背景……');
-        const result = await outlineGenerateService.generateNovelOutline(novelId);
-        setNovelOutline(result);
-        setStage('生成完成');
-      });
+      const created = await outlineGenerateService.submitNovelOutline(novelId);
+      setApplyMsg(`作品总纲已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
+
     } catch (e: any) {
       setError(e.message || '作品总大纲生成失败');
     } finally {
@@ -103,20 +95,12 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
     }
     setLoading(true); setGenMode('volume'); setError('');
     try {
-      await runWithLoading({
-        title: 'AI 正在生成分卷大纲',
-        initialMessage: '正在读取当前采用总纲……',
-        successMessage: '分卷大纲生成完成',
-        errorMessage: '分卷大纲生成失败',
-      }, async ({ setStage, setMessage }) => {
-        setStage('正在分析分卷结构……');
-        const result = await outlineGenerateService.generateVolumeOutline({
-          novelId, volumeTitle: volume.title,
-        });
-        setVolumeOutline(result);
-        setMessage('正在基于总纲整理分卷逻辑……');
-        setStage('生成完成');
+      const created = await outlineGenerateService.submitVolumeOutline({
+        novelId, volumeTitle: volume.title, volumeId: volume.id,
       });
+      setApplyMsg(`分卷大纲已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
+
     } catch (e: any) {
       setError(e.message || '分卷大纲生成失败');
     } finally {
@@ -130,35 +114,17 @@ function OutlinePanel({ novelId, chapter, onChapterOutlineApplied, onChapterGoal
       setError('请先在左侧目录树中选择一个章节');
       return;
     }
-    const requestTarget: ChapterCandidateTarget = {
-      resultId: crypto.randomUUID(),
-      novelId,
-      chapterId: chapter.id,
-      volumeId: chapter.volumeId,
-      createdAt: new Date().toISOString(),
-    };
     setLoading(true); setGenMode('chapter'); setError('');
     try {
-      await runWithLoading({
-        title: 'AI 正在生成章节大纲',
-        initialMessage: '正在读取当前采用分卷大纲和总纲……',
-        successMessage: '章节大纲生成完成',
-        errorMessage: '章节大纲生成失败',
-      }, async ({ setMessage, setStage }) => {
-        setStage('正在推演本章剧情结构……');
-        const result = await outlineGenerateService.generateChapterOutlines({
-          novelId,
-          volumeId: chapter.volumeId,
-          chapterId: chapter.id,
-          chapterTitle: chapter.title,
-          chapterGoal: chapterGoalDraft.trim() || chapter.goal || undefined,
-          chapterCount: 3,
-        });
-        setChapterOutlines(result);
-        setChapterOutlineTarget(requestTarget);
-        setMessage(`已生成 ${result.length} 个章节大纲候选（基于上级大纲）`);
-        setStage('生成完成');
+      const created = await outlineGenerateService.submitChapterOutlines({
+        novelId, volumeId: chapter.volumeId, chapterId: chapter.id,
+        chapterTitle: chapter.title,
+        chapterGoal: chapterGoalDraft.trim() || chapter.goal || undefined,
+        chapterCount: 3,
       });
+      setApplyMsg(`章节大纲已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+      return;
+
     } catch (e: any) {
       setError(e.message || '章节大纲生成失败');
     } finally {

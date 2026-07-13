@@ -136,8 +136,7 @@ pub fn create_large_text_save_session(
     let cache_dir = session_cache_dir(&session_id);
 
     // Create cache directory
-    fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("无法创建缓存目录: {}", e))?;
+    fs::create_dir_all(&cache_dir).map_err(|e| format!("无法创建缓存目录: {}", e))?;
 
     // Compute SHA-256 if not provided
     let content_sha256 = input.content_sha256.clone();
@@ -156,8 +155,8 @@ pub fn create_large_text_save_session(
         updated_at: now,
     };
 
-    let manifest_json =
-        serde_json::to_string_pretty(&session).map_err(|e| format!("序列化 manifest 失败: {}", e))?;
+    let manifest_json = serde_json::to_string_pretty(&session)
+        .map_err(|e| format!("序列化 manifest 失败: {}", e))?;
 
     fs::write(manifest_path(&session_id), manifest_json)
         .map_err(|e| format!("写入 manifest 失败: {}", e))?;
@@ -583,8 +582,7 @@ fn count_saved_chunks(cache_dir: &PathBuf) -> Result<usize, String> {
 pub(crate) fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
     let cache_dir = session_cache_dir(session_id);
     if cache_dir.exists() {
-        fs::remove_dir_all(&cache_dir)
-            .map_err(|e| format!("清理缓存目录失败: {}", e))?;
+        fs::remove_dir_all(&cache_dir).map_err(|e| format!("清理缓存目录失败: {}", e))?;
     }
     Ok(())
 }

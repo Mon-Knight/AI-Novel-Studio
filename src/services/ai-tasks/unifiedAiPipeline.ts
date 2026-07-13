@@ -267,10 +267,18 @@ async function executePipeline(input: UnifiedAiPipelineInput, intentHash: string
   const operationId = createId();
   const task = await createTask(input, operationId, intentHash);
   input.onTaskCreated?.(task);
-  aiTaskStore.upsert({ taskId: task.taskId, status: task.status, progress: 'ready' });
+  aiTaskStore.upsert({
+    taskId: task.taskId,
+    taskType: input.taskType,
+    novelId: input.novelId,
+    chapterId: input.chapterId,
+    status: task.status,
+    progress: '准备中',
+    createdAt: task.createdAt,
+  });
   const attempt = await startAttempt(task.taskId, input.providerId);
   taskAttempts.set(task.taskId, attempt.attemptId);
-  aiTaskStore.upsert({ taskId: task.taskId, status: 'running', progress: 'provider' });
+  aiTaskStore.upsert({ taskId: task.taskId, taskType: input.taskType, status: 'running', progress: 'AI 正在处理' });
   try {
     const providerResult = await providerAdapter.execute(
       attempt.attemptId,
@@ -293,7 +301,7 @@ async function executePipeline(input: UnifiedAiPipelineInput, intentHash: string
     if (marked.status === 'cancel_requested' || marked.status === 'cancelled') {
       throw { code: 'AI_PROVIDER_CANCELLED', message: '取消后的迟到响应已忽略', retryable: false };
     }
-    aiTaskStore.upsert({ taskId: task.taskId, status: 'validating', progress: 'artifact_validation' });
+    aiTaskStore.upsert({ taskId: task.taskId, taskType: input.taskType, status: 'validating', progress: '正在检查结果' });
     let structuredPayload: unknown;
     try {
       structuredPayload = input.parseStructuredPayload?.(providerResult.response.text);
@@ -310,6 +318,7 @@ async function executePipeline(input: UnifiedAiPipelineInput, intentHash: string
     const completed = await getTask(task.taskId) || { ...task, status: 'completed' as const };
     aiTaskStore.upsert({
       taskId: task.taskId,
+      taskType: input.taskType,
       status: completed.status,
       artifactId: artifact.artifactId,
       errorSummary: artifact.processingStatus === 'invalid' ? 'Artifact 校验失败' : undefined,

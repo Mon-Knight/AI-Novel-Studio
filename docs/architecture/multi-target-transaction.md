@@ -2,6 +2,8 @@
 
 > v2.3.0 实现单目标安全应用；v2.4.0 实现本文件的完整多目标事务。
 
+> 2026-07-13 更新：阶段 3 前置已按本文边界落地 `world_setting / rule_system / character` 的 create-only 多目标试点。更新、删除、长文本和其他 Canon 目标仍属于后续完整实现。
+
 ## 1. 总原则
 
 SQLite 是应用结果的权威状态。一次 ApplyPlan 的业务写入、长文本引用、ArtifactTargetLink 和幂等结果必须在同一 Immediate transaction 中完成。React 状态、localStorage 和缓存都不是提交依据。

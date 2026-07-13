@@ -8,6 +8,8 @@ import { aiTaskService } from './aiTaskService';
 import { buildChapterSummarizePrompt } from './promptBuilder';
 import { safeJsonParse } from './jsonUtils';
 import { novelRepository } from '../database/novelRepository';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { aiWorkflowService, type WorkflowCreated } from '../ai-tasks/aiWorkflowService';
 
 function normalizeImportance(value: unknown): 1 | 2 | 3 | 4 | 5 {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 3;
@@ -51,6 +53,42 @@ function normalizeResult(result: Partial<ChapterSummarizeResult>, fallbackText: 
 }
 
 export const chapterSummarizeService = {
+  async submitBackground(input: SummarizeAdoptedChapterInput & { sourceDraftVersion: number }): Promise<WorkflowCreated> {
+    const novel = await novelRepository.getById(input.novelId).catch(() => null);
+    const request = buildChapterSummarizePrompt({
+      novelTitle: novel?.title,
+      chapterTitle: input.chapterTitle,
+      chapterOutline: input.chapterOutline,
+      adoptedContent: input.adoptedContent,
+      chapterCharacters: input.chapterCharacters,
+      chapterEvents: input.chapterEvents,
+    });
+    const baseContentHash = await computeContentSha256(input.adoptedContent);
+    return aiWorkflowService.createBackground({
+      workflowName: `${input.chapterTitle} · 章节摘要`,
+      taskType: 'chapter_summary',
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      draftId: input.adoptedDraftId,
+      scopeType: 'draft',
+      targetHintJson: {
+        chapterId: input.chapterId, draftId: input.adoptedDraftId, staleAgainstLatest: true,
+      },
+      inputPayloadJson: { chapterTitle: input.chapterTitle, chapterOutline: input.chapterOutline },
+      inputBody: input.adoptedContent,
+      sourceManifestJson: [{
+        type: 'chapter_draft', id: input.adoptedDraftId,
+        version: input.sourceDraftVersion, hash: baseContentHash,
+      }],
+      sourceDraftVersion: input.sourceDraftVersion,
+      baseContentHash,
+      steps: [{
+        stepKey: 'chapter_summary', taskType: 'chapter_summary', agentRole: '摘要',
+        artifactType: 'chapter_summary', messages: request.messages, reviewOutput: true,
+      }],
+    });
+  },
+
   async summarize(input: SummarizeAdoptedChapterInput): Promise<ChapterSummarizeResult> {
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId).catch(() => null);

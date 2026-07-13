@@ -12,14 +12,13 @@ import {
 import { qualityCheckService, computeStatistics } from '../../../services/quality/qualityCheckService';
 import { qualityCheckAiService } from '../../../services/ai/qualityCheckAiService';
 import { qualityFixService } from '../../../services/ai/qualityFixService';
+import { qualityRevisionWorkflowService } from '../../../services/ai/qualityRevisionWorkflowService';
 import type { FixComparison, FixScopeValidation } from '../../../services/ai/qualityFixService';
-import { fixRunStore } from '../../../services/ai/fixRunStore';
 import { getContextForChapterTask, buildContextPromptSection } from '../../../services/prompt/contextReaderService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
-import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 import type { PlacementProposal } from '../../../types/placement';
 import { placementApplyService } from '../../../services/ai-tasks/placementApplyService';
@@ -78,8 +77,8 @@ function CheckPanel({
   currentDraftId,
   currentDraftVersion,
   onApplyAiText,
-  showAiModal,
-  updateAiModal,
+  showAiModal: _showAiModal,
+  updateAiModal: _updateAiModal,
   hideAiModal,
 }: CheckPanelProps) {
   const liveChapterIdRef = useRef(chapter?.id || '');
@@ -90,6 +89,7 @@ function CheckPanel({
   const [report, setReport] = useState<QualityCheckReport | null>(qcReport ?? null);
   const [items, setItems] = useState<QualityCheckItem[]>(qcItems ?? []);
   const [loading, setLoading] = useState(false);
+  const [workflowLoading, setWorkflowLoading] = useState(false);
   const [error, setError] = useState('');
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
   const [filter, setFilter] = useState<QualityIssueFilter>('all');
@@ -116,6 +116,7 @@ function CheckPanel({
   const [fixCandidate, setFixCandidate] = useState<FixCandidate | null>(null);
 
   useEffect(() => {
+    setWorkflowLoading(false);
     setFixLoading(false);
     setFixStage('');
     setFixProgress(0);
@@ -198,15 +199,12 @@ function CheckPanel({
     }
     if (loading) return; // v1.7.20 防重复点击
     setLoading(true); setError(''); setLocateMessage('');
-    showAiModal?.('AI 正在质量检查', 'AI 正在检查逻辑、设定和文笔……');
     try {
-      updateAiModal?.('正在准备检查参数……', 10);
       let sourceDraft = currentDraft?.novelId === novelId && currentDraft.chapterId === requestChapterId
         ? currentDraft
         : null;
       const needsSnapshotDraft = !sourceDraft || sourceDraft.content !== sourceContent || currentEditorDirty;
       if (needsSnapshotDraft) {
-        updateAiModal?.('正在保存当前正文快照……', 18);
         sourceDraft = await draftVersionService.create({
           novelId,
           chapterId: chapter.id,
@@ -231,69 +229,21 @@ function CheckPanel({
       if (!sourceDraft) {
         throw new Error('无法创建质量检查正文快照。');
       }
-
-      const checkedAt = new Date().toISOString();
       const contentHash = hashTextContent(sourceContent);
-      const rpt = await qualityCheckService.createReport({
-        novelId, chapterId: chapter.id, draftId: sourceDraft.id,
-        contentHash,
-        contentLength: sourceContent.length,
-        checkedAt,
-      });
-
-      updateAiModal?.('正在请求 AI 质量检查……', 35);
-      const result = await qualityCheckAiService.runCheck({
+      const submitted = await qualityCheckAiService.submitCheck({
         novelId, chapterId: chapter.id, draftId: sourceDraft.id,
         volumeId: chapter.volumeId,
         draftContent: sourceContent, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, chapterGoal: chapter.goal,
         contentHash,
         draftVersion: sourceDraft.versionNo,
-        useUnifiedPipeline: true,
         wordCount: sourceWordCount,
       });
-
-      if (!result || (!result.items && !result.summary)) {
-        throw new Error('AI 返回内容为空，质量检查未完成。');
-      }
-
-      updateAiModal?.('正在保存检查结果……', 80);
-      const saved = await qualityCheckService.saveResult({
-        reportId: rpt.id, novelId, chapterId: chapter.id,
-        draftId: sourceDraft.id, result,
-        draftVersion: sourceDraft.versionNo,
-        contentHash,
-        contentLength: sourceContent.length,
-        checkedAt,
-      });
-
-      if (liveNovelIdRef.current !== novelId || liveChapterIdRef.current !== requestChapterId) {
-        hideAiModal?.();
-        return;
-      }
-
-      updateAiModal?.('正在加载最新结果……', 95);
-      syncUp(saved.report ? {
-        ...saved.report,
-        contentHash,
-        contentLength: sourceContent.length,
-        checkedAt,
-      } : null, saved.items);
-      setFilter('all');
-
-      updateAiModal?.('质量检查完成', 100);
-      // v1.7.20 成功后延迟关闭弹窗
-      await new Promise((r) => setTimeout(r, 500));
-      hideAiModal?.();
+      setLocateMessage(`质量检查已提交（${submitted.taskId.slice(0, 8)}），可继续编辑或切换页面。完成后请到任务中心审查。`);
     } catch (e: any) {
-      console.error('[QualityCheck] run failed', e);
+      console.error('[QualityCheck] submit failed', e);
       const msg = e?.message || (typeof e === 'string' ? e : '质量检查失败');
       setError(msg);
-      // v1.7.20 失败时弹窗显示错误，不立即关闭
-      updateAiModal?.(`失败: ${msg}`, 0);
-      // 停留 2.5 秒后关闭
-      await new Promise((r) => setTimeout(r, 2500));
-      hideAiModal?.();
     } finally {
       setLoading(false);
     }
@@ -321,11 +271,6 @@ function CheckPanel({
   /** AI 修稿并复检 (v1.7.16) */
   const handleAIFix = async () => {
     if (!novelId || !chapter || !currentDraft || !activeReport) return;
-    const requestNovelId = novelId;
-    const requestChapterId = chapter.id;
-    const requestBaseHash = effectiveContentHash;
-    const requestSourceDraftId = currentDraftId || currentDraft.id;
-    const requestSourceRevision = currentDraftVersion || currentDraft.versionNo;
     if (reportOutdated) {
       setFixError('当前正文已修改，请先重新进行质量检测后再使用 AI 修复。');
       return;
@@ -335,178 +280,83 @@ function CheckPanel({
 
     if (fixLoading || loading) return; // v1.7.20 防重复
     setFixLoading(true); setFixError(''); setFixComparison(null); setFixProgress(0);
-    setSourceDraftId(currentDraft.id);
-    showAiModal?.('AI 正在修复并复检', 'AI 正在根据质量问题自动优化正文……');
     try {
-      updateAiModal?.('正在分析待处理问题...', 5);
       const ignored = activeItems.filter((i) => i.status === 'ignored');
-
-      updateAiModal?.('正在读取上下文...', 15);
-
-      // 读取章节上下文
       let chapterContext: string | undefined;
-      let usedCtxIds = '';
-      let skippedCtxIds = '';
-      let ctxWarnings = '';
       try {
         const ctxResult = await getContextForChapterTask({
-          novelId, chapterId: chapter.id, volumeId: chapter.volumeId,
-          taskType: 'quality_fix',
+          novelId, chapterId: chapter.id, volumeId: chapter.volumeId, taskType: 'quality_fix',
         });
         if (ctxResult.chapterSummaries.length > 0 || ctxResult.volumeContexts.length > 0) {
           chapterContext = buildContextPromptSection(ctxResult);
         }
-        usedCtxIds = JSON.stringify(ctxResult.chapterContexts.map((c) => c.id).concat(ctxResult.volumeContexts.map((v) => v.id)));
-        skippedCtxIds = JSON.stringify([]);
-        ctxWarnings = JSON.stringify(ctxResult.warnings);
-      } catch { /* non-critical */ }
-
-      updateAiModal?.('正在生成修订版正文...', 30);
-      const { fixResult, fixRun, scopeValidation, taskId, artifactId } = await qualityFixService.runFix({
+      } catch { /* 上下文缺失不阻止提交冻结正文和问题清单 */ }
+      const created = await qualityFixService.submitBackground({
         novelId, chapterId: chapter.id, chapterTitle: chapter.title,
         chapterOutline: chapter.outline, currentDraft,
         pendingIssues: pending, ignoredIssues: ignored,
-        beforeReportId: activeReport.id,
-        beforeScore: activeReport.overallScore || 0,
-        beforePendingCount: statistics.pending,
-        beforeSeriousCount: statistics.critical,
-        chapterContext,
+        beforeReportId: activeReport.id, chapterContext,
       });
-      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-        setFixScopeValidation(scopeValidation);
-      }
-
-      // v1.7.19 修稿范围门控：范围越界 → 拒绝，不创建候选草稿
-      if (!scopeValidation.passed) {
-        fixRun.status = 'failed';
-        fixRun.failureReason = scopeValidation.rejectReason || '修稿范围校验未通过';
-        (fixRun as any).warnings = JSON.stringify(scopeValidation.warnings);
-        await fixRunStore.save(fixRun);
-        throw new Error(scopeValidation.rejectReason || '修稿范围越界，修订版未采用');
-      }
-
-      // 保存上下文信息到 fixRun
-      (fixRun as any).usedContextIds = usedCtxIds;
-      (fixRun as any).skippedContextIds = skippedCtxIds;
-      (fixRun as any).warnings = ctxWarnings;
-      await fixRunStore.save(fixRun);
-      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-        setLastFixRunId(fixRun.id);
-      }
-
-      if (fixRun.status === 'failed') {
-        if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-          setFixError(fixRun.failureReason || 'AI 修稿失败');
-          setFixLoading(false);
-        }
-        return;
-      }
-
-      updateAiModal?.('正在重新质量检查...', 75);
-      const fixedContentHash = await computeContentSha256(fixResult.revisedContent);
-      const checkResult = await qualityCheckAiService.runCheck({
-        novelId, chapterId: chapter.id, draftId: requestSourceDraftId,
-        volumeId: chapter.volumeId,
-        draftContent: fixResult.revisedContent,
-        chapterTitle: chapter.title,
-        chapterOutline: chapter.outline, chapterGoal: chapter.goal,
-        contentHash: fixedContentHash,
-        wordCount: countTextWords(fixResult.revisedContent),
-      });
-
-      updateAiModal?.('正在对比修复效果...', 90);
-      const candidateCheckedAt = new Date().toISOString();
-      const afterItemsForStats: QualityCheckItem[] = checkResult.items.map((it, index) => ({
-        id: `candidate-${index}`,
-        reportId: 'candidate',
-        novelId,
-        chapterId: chapter.id,
-        draftId: requestSourceDraftId,
-        issueType: (it.issueType || 'other') as QualityCheckItem['issueType'],
-        severity: (it.severity || 'medium') as QualityCheckItem['severity'],
-        title: it.title || '',
-        description: it.description || '',
-        category: it.category,
-        evidence: it.evidence,
-        suggestion: it.suggestion,
-        quote: it.quote,
-        startOffset: it.startOffset,
-        endOffset: it.endOffset,
-        paragraphIndex: it.paragraphIndex,
-        issueKey: `candidate-${index}`,
-        status: 'pending',
-        createdAt: candidateCheckedAt,
-        updatedAt: candidateCheckedAt,
-      }));
-      const afterStats = computeStatistics(afterItemsForStats);
-      const comparison = qualityFixService.compareResults(
-        fixRun.beforeScore, checkResult.overallScore,
-        fixRun.beforePendingCount, afterStats.pending,
-        fixRun.beforeSeriousCount, afterStats.critical,
-        activeItems.length, afterItemsForStats.length,
-        statistics.high, afterStats.high,
-        fixResult.fixedIssueKeys.length,
-      );
-      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-        setFixComparison(comparison);
-      }
-      fixRun.targetContentHash = fixedContentHash;
-      fixRun.afterScore = checkResult.overallScore;
-      fixRun.afterPendingCount = afterStats.pending;
-      fixRun.afterSeriousCount = afterStats.critical;
-      fixRun.fixedIssueIds = activeItems
-        .filter((i) => fixResult.fixedIssueKeys.includes(i.issueKey))
-        .map((i) => i.id);
-      fixRun.newIssueIds = afterItemsForStats.map((i) => i.issueKey);
-
-      updateAiModal?.('正在建立安全落位建议...', 95);
-      const proposal = await placementApplyService.createProposal({
-        artifactId,
-        target: { novelId: requestNovelId, chapterId: requestChapterId, draftId: requestSourceDraftId },
-        browserExpectedVersion: requestSourceRevision,
-        browserExpectedHash: requestBaseHash,
-      });
-      fixRun.status = 'validated';
-      await fixRunStore.save(fixRun);
-      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-        setFixCandidate({
-          artifactId,
-          taskId,
-          proposal,
-          content: fixResult.revisedContent,
-          novelId: requestNovelId,
-          chapterId: requestChapterId,
-          contentHash: fixedContentHash,
-          sourceDraftId: requestSourceDraftId,
-          sourceDraftVersion: requestSourceRevision,
-          baseContentHash: requestBaseHash,
-          fixRunId: fixRun.id,
-          fixedIssueIds: activeItems
-            .filter((item) => fixResult.fixedIssueKeys.includes(item.issueKey))
-            .map((item) => item.id),
-        });
-        setFixStage(comparison.isBetter
-          ? '修复候选已通过复检，等待确认采用'
-          : '修复候选已保存，可查看后决定是否采用');
-      }
-
-      if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-        hideAiModal?.();
-        setFixLoading(false);
-        setTimeout(() => {
-          if (liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId) {
-            setFixStage('');
-          }
-        }, 3000);
-      }
-    } catch (e: any) {
-      if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
-      const msg = e.message || 'AI 修稿失败';
-      setFixError(msg);
-      updateAiModal?.(`失败: ${msg}`, 0);
-      await new Promise((r) => setTimeout(r, 2500));
-      hideAiModal?.();
+      setFixStage(`修复与复检已转入后台（${created.rootTaskId.slice(0, 8)}），完成后请在任务中心审查。`);
+    } catch (error) {
+      setFixError(error instanceof Error ? error.message : '后台修复任务提交失败');
+    } finally {
       setFixLoading(false);
+    }
+    if (Date.now() >= 0) return;
+
+  };
+
+  const handleQualityRevisionWorkflow = async () => {
+    if (!novelId || !chapter || loading || fixLoading || workflowLoading) return;
+    const requestChapterId = chapter.id;
+    const sourceContent = currentEditorContent ?? currentDraft?.content ?? '';
+    const sourceWordCount = currentEditorWordCount ?? countTextWords(sourceContent);
+    if (sourceContent.trim().length < 10 || sourceWordCount < 10) {
+      setError('正文过短，请先生成或编辑正文');
+      return;
+    }
+    if (sourceWordCount < 300 && !(await confirmInfo({
+      title: '正文较短',
+      message: '当前正文不足 300 字，组合审查结果可能有限。是否继续？',
+    }))) return;
+
+    setWorkflowLoading(true);
+    setError('');
+    setLocateMessage('');
+    try {
+      let sourceDraft = currentDraft?.novelId === novelId && currentDraft.chapterId === requestChapterId
+        ? currentDraft
+        : null;
+      if (!sourceDraft || sourceDraft.content !== sourceContent || currentEditorDirty) {
+        sourceDraft = await draftVersionService.create({
+          novelId,
+          chapterId: requestChapterId,
+          title: `${chapter.title} - 组合审查冻结快照`,
+          content: sourceContent,
+          source: 'user_edited',
+          note: '章节质量审查与修订候选冻结快照',
+        });
+        if (liveNovelIdRef.current === novelId && liveChapterIdRef.current === requestChapterId) {
+          setCurrentDraft(sourceDraft);
+          onGenerated?.(sourceDraft, {
+            resultId: sourceDraft.id,
+            novelId,
+            chapterId: requestChapterId,
+            sourceDraftId: currentDraftId || currentDraft?.id,
+            sourceRevision: currentDraftVersion || currentDraft?.versionNo,
+            baseContentHash: currentContentHash || hashTextContent(sourceContent),
+            source: 'quality_check',
+          });
+        }
+      }
+      if (!sourceDraft) throw new Error('无法创建组合审查正文快照。');
+      const created = await qualityRevisionWorkflowService.submit({ novelId, chapter, currentDraft: sourceDraft });
+      setLocateMessage(`章节质量审查与修订候选已转入后台（${created.rootTaskId.slice(0, 8)}）。可继续编辑或切换页面，完成后请到任务中心决定是否采用修复候选。`);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '组合审查工作流提交失败');
+    } finally {
+      setWorkflowLoading(false);
     }
   };
 
@@ -634,6 +484,14 @@ function CheckPanel({
         )}
         <button className="btn btn-primary btn-sm" onClick={handleRunCheck} disabled={loading} style={{ width: '100%' }}>
           {loading ? '⏳ 检查中...' : '🔍 开始质量检查'}
+        </button>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={handleQualityRevisionWorkflow}
+          disabled={loading || fixLoading || workflowLoading}
+          style={{ width: '100%', marginTop: 6 }}
+        >
+          {workflowLoading ? '⏳ 正在提交…' : '🧭 后台质量审查与修订候选'}
         </button>
 
         {/* v1.7.16/v1.7.18 AI 修复并复检 */}

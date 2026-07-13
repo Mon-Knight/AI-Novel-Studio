@@ -6,8 +6,46 @@ import { buildChapterPolishPrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import type { RunPolishInput } from '../../types/polish';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { aiWorkflowService, type WorkflowCreated } from '../ai-tasks/aiWorkflowService';
 
 export const polishAiService = {
+  async submitBackground(input: RunPolishInput & { sourceDraftVersion: number }): Promise<WorkflowCreated> {
+    const novel = await novelRepository.getById(input.novelId);
+    const request = buildChapterPolishPrompt({
+      novelTitle: novel?.title || '未命名作品',
+      chapterTitle: input.chapterTitle,
+      chapterOutline: input.chapterOutline,
+      draftContent: input.draftContent,
+      polishMode: input.options.mode,
+      customInstruction: input.options.customInstruction,
+    });
+    const baseContentHash = await computeContentSha256(input.draftContent);
+    return aiWorkflowService.createBackground({
+      workflowName: `${input.chapterTitle} · 正文润色`,
+      taskType: 'chapter_polish',
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      draftId: input.sourceDraftId,
+      scopeType: 'draft',
+      targetHintJson: {
+        chapterId: input.chapterId, draftId: input.sourceDraftId, staleAgainstLatest: true,
+      },
+      inputPayloadJson: { mode: input.options.mode, customInstruction: input.options.customInstruction },
+      inputBody: input.draftContent,
+      sourceManifestJson: [{
+        type: 'chapter_draft', id: input.sourceDraftId,
+        version: input.sourceDraftVersion, hash: baseContentHash,
+      }],
+      sourceDraftVersion: input.sourceDraftVersion,
+      baseContentHash,
+      steps: [{
+        stepKey: 'polish', taskType: 'chapter_polish', agentRole: '润色',
+        artifactType: 'chapter_text', messages: request.messages, reviewOutput: true,
+      }],
+    });
+  },
+
   async runPolish(input: RunPolishInput): Promise<string> {
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId);

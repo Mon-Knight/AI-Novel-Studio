@@ -4,6 +4,7 @@ import type {
   CandidateLifecycleContext,
   CandidateReviewRecord,
 } from '../../types/placement';
+import { normalizeCandidate } from '../../services/ai-tasks/normalizedCandidateService';
 
 export interface DeriveCandidateLifecycleInput {
   record: CandidateReviewRecord | null;
@@ -106,15 +107,32 @@ export function deriveCandidateLifecycle(input: DeriveCandidateLifecycleInput): 
   }
 
   const { candidate, target } = record;
+  if (!candidate.content.trim()) {
+    return context(input, { status: 'empty_content', cannotAdoptReason: '候选正文为空，请重新生成。' });
+  }
+  const normalized = candidate.normalizedCandidate ?? normalizeCandidate({
+    content: candidate.content,
+    rawResponse: candidate.content,
+    baseContent: candidate.baseContent,
+  });
+  if (normalized.status !== 'ready') {
+    return context(input, {
+      status: 'format_error',
+      cannotAdoptReason: normalized.error || '候选格式异常，无法重建完整正文。',
+    });
+  }
+  if (candidate.content !== normalized.fullText) {
+    return context(input, {
+      status: 'format_error',
+      cannotAdoptReason: '候选正文与规范化结果不一致，已阻止采用。',
+    });
+  }
   const identityFailure = identityError(record);
   if (identityFailure) {
     return context(input, { status: 'identity_mismatch', cannotAdoptReason: identityFailure });
   }
   if (target.novelId !== input.currentNovelId || target.chapterId !== input.currentChapterId) {
     return context(input, { status: 'invalidated', cannotAdoptReason: '该候选属于其他作品或章节。' });
-  }
-  if (!candidate.content.trim()) {
-    return context(input, { status: 'empty_content', cannotAdoptReason: '候选正文为空，请重新生成。' });
   }
   if (record.adopted) {
     return context(input, { status: 'adopted', cannotAdoptReason: '该候选已经采用，不能再次采用。' });

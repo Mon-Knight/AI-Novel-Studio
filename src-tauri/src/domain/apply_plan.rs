@@ -3,6 +3,7 @@ use serde_json::Value;
 
 pub const APPLY_PLAN_SCHEMA_VERSION: i64 = 1;
 pub const APPLY_VALIDATOR_VERSION: &str = "single-target-v1";
+pub const INITIALIZATION_APPLY_VALIDATOR_VERSION: &str = "initialization-multi-target-v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +104,25 @@ pub struct CreateApplyPlanInput {
     pub note: Option<String>,
     #[serde(default)]
     pub quality_fix: Option<QualityFixApplyPayload>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializationCandidateSelection {
+    pub candidate_id: String,
+    pub expected_candidate_hash: String,
+    #[serde(default)]
+    pub conflict_acknowledged: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateInitializationApplyPlanInput {
+    pub proposal_id: String,
+    pub expected_bundle_hash: String,
+    pub selected_candidates: Vec<InitializationCandidateSelection>,
+    #[serde(default)]
+    pub parent_plan_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

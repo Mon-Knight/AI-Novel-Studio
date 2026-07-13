@@ -27,7 +27,7 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 **当前版本：v2.2.0**
 
-**阶段：v2.3.0-M2 内部里程碑 — AI 结果单目标安全落位（正式版本仍为 2.2.0）**
+**阶段：v2.3.0 内部实施 — 统一任务、Rust Worker 与父子任务 DAG（正式版本仍为 2.2.0）**
 
 当前内部里程碑在 v2.2.0 可靠性基础上增加 `ResultArtifact → PlacementProposal → ApplyPlan → Rust ApplyExecutor → ArtifactTargetLink` 链路。已迁移的正文生成和 AI 修稿结果在用户确认前不写入正式正文；确认时由 SQLite `BEGIN IMMEDIATE` 事务完成再次校验、正文保存与采用、来源链接和幂等结果。
 
@@ -51,6 +51,12 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 - **统一离开保护**：章节操作、Hash 路由、历史导航、程序导航和 Tauri 关闭统一提供保存、放弃、取消决策并防重入。
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
 - **AI 结果安全落位**：PlacementProposal 支持目标审计/stale/rebuild，ApplyPlan 固化版本/hash 与 operationId/requestHash，ArtifactTargetLink 永久追踪正式正文来源。
+- **结构化候选审查**：定向修复和全文改写统一重建为完整小说正文，并提供修改摘要、逐项差异导航与格式/约束采用门禁；原始 AI 响应只在高级工程详情中可见。
+- **统一 AI 任务中心**：新 Task、最新执行、候选结果、应用计划和旧任务兼容记录统一可见；任务条不会遮挡正文或阻止导航。
+- **后台质量检查试点**：手动章节质量检查由应用进程内 Rust Worker 持久执行，支持进度恢复、真实取消、临时错误重试和重启恢复。
+- **父子任务与 DAG**：工作流节点、依赖、局部重试、级联取消和 stale 传播持久化到现有任务体系；任务中心可展开查看工作流步骤。
+- **组合质量审查**：冻结章节、质量检查、修复候选、复检和审查汇总组成一个可恢复的五步后台工作流；最终仍由作者决定是否采用修复正文。
+- **章节摘要组合试点**：后台依次准备资料、生成摘要候选、检查一致性并汇总待审查结果，不自动保存总结或修改 Canon。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。
@@ -108,6 +114,8 @@ npm run tauri build
 
 API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端。
 
+AI 质量检查、修复复检、润色、章节/卷摘要以及主纲/卷纲/章纲会提交到应用进程内 Rust Worker。任务运行时可以继续阅读、编辑和导航；候选结果保存在统一任务中心，只有明确确认后正文候选才会通过 ApplyPlan 写入。
+
 ---
 
 ## 6. 页面与功能入口
@@ -123,7 +131,7 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | `/styles` | 风格方案 | 风格方案与输出控制方案管理 |
 | `/assets` | 创作资产 | 角色库、设定库与设定推演入口 |
 | `/templates` | 模板中心 | 提示词模板管理 |
-| `/ai-tasks` | AI 任务记录 | AI 任务历史与状态追踪 |
+| `/ai-tasks` | AI 任务中心 | 运行中、待确认、已完成、失败任务及高级审计详情 |
 | `/import-export` | 导入导出 | TXT / Markdown 导入导出与 JSON 备份 |
 | `/settings` | 设置中心 | AI 模式、API Key、模型参数 |
 | `/coming-soon` | 即将开放 | 未完成能力的统一占位入口 |
@@ -264,3 +272,4 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 | 技术文档 | [docs/technical/](docs/technical/) |
 | 设计文档 | [docs/design/](docs/design/) |
 | 总索引 | [docs/README.md](docs/README.md) |
+| 阶段 3 前置契约 | [docs/architecture/stage3-prerequisites.md](docs/architecture/stage3-prerequisites.md) |

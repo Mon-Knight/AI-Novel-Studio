@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import Sidebar from '../sidebar/Sidebar';
 import TopBar from '../topbar/TopBar';
+import AiTaskBar from '../ai-tasks/AiTaskBar';
 import '../../styles/app-shell.css';
 
 interface AppShellProps {
@@ -17,6 +18,7 @@ function AppShell({ children }: AppShellProps) {
       {!isWritingWorkspace && <Sidebar />}
       <div className="app-main">
         <TopBar />
+        <AiTaskBar />
         <div className="app-content">
           {children}
         </div>

@@ -1,14 +1,14 @@
 use crate::db::get_connection;
 use crate::domain::apply_plan::{
     ApplyExecutionResult, ApplyPlan, ArtifactTargetLink, CreateApplyPlanInput,
-    ExecuteApplyPlanInput,
+    CreateInitializationApplyPlanInput, ExecuteApplyPlanInput,
 };
 use crate::domain::placement::{
     CreatePlacementProposalInput, PlacementProposal, PlacementTargetOverride, ProposalValidation,
 };
 use crate::errors::AppError;
 use crate::repositories::artifact_target_link_repository;
-use crate::services::{apply_service, placement_service};
+use crate::services::{apply_service, initialization_apply_service, placement_service};
 
 #[tauri::command]
 pub fn create_placement_proposal(
@@ -53,6 +53,16 @@ pub fn create_apply_plan(input: CreateApplyPlanInput) -> Result<ApplyPlan, AppEr
         .lock()
         .map_err(|_| AppError::poisoned_lock())?;
     apply_service::create_plan(&mut connection, input)
+}
+
+#[tauri::command]
+pub fn create_initialization_apply_plan(
+    input: CreateInitializationApplyPlanInput,
+) -> Result<ApplyPlan, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    initialization_apply_service::create_plan(&mut connection, input)
 }
 
 #[tauri::command]

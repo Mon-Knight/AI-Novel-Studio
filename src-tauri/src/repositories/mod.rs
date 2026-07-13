@@ -1,4 +1,5 @@
 pub mod ai_task_repository;
+pub mod ai_task_view_repository;
 pub mod apply_plan_repository;
 pub mod artifact_repository;
 pub mod artifact_target_link_repository;

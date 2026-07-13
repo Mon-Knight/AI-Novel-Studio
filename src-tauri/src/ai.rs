@@ -1,7 +1,8 @@
-use reqwest::blocking::Client;
+use reqwest::blocking::Client as BlockingClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -106,12 +107,14 @@ fn short_body(body: &str) -> String {
 }
 
 #[tauri::command]
-pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatCompletionResponse, String> {
+pub fn ai_chat_completion(
+    request: AiChatCompletionRequest,
+) -> Result<AiChatCompletionResponse, String> {
     validate_request(&request)?;
 
     let url = build_chat_completions_url(&request.base_url);
     let timeout_seconds = request.timeout_seconds.unwrap_or(120);
-    let client = Client::builder()
+    let client = BlockingClient::builder()
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|e| format!("AI 调用失败：HTTP 客户端初始化失败：{}", e))?;
@@ -125,7 +128,10 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
             .find(|message| message.role == "user")
             .map(|message| message.content.as_str())
             .unwrap_or("");
-        println!("[ai_chat_completion] messages count={}", request.messages.len());
+        println!(
+            "[ai_chat_completion] messages count={}",
+            request.messages.len()
+        );
         println!(
             "[ai_chat_completion] user message length={}",
             last_user_message.chars().count()
@@ -145,8 +151,8 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
     }
 
     let body = json!({
-        "model": request.model_name,
-        "messages": request.messages,
+        "model": &request.model_name,
+        "messages": &request.messages,
         "temperature": request.temperature.unwrap_or(0.7),
         "max_tokens": request.max_tokens.unwrap_or(8000),
     });
@@ -159,7 +165,10 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
         .send()
         .map_err(|e| {
             if e.is_timeout() {
-                format!("AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。", timeout_seconds)
+                format!(
+                    "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
+                    timeout_seconds
+                )
             } else if e.is_connect() {
                 "AI 调用失败：网络连接失败，请检查 API Base URL、网络连接或代理设置。".to_string()
             } else {
@@ -173,11 +182,20 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
         .map_err(|e| format!("AI 调用失败：读取响应失败：{}", e))?;
 
     if !status.is_success() {
-        return Err(user_error_from_status(status, &text_body, &body["model"].as_str().unwrap_or("")));
+        return Err(user_error_from_status(
+            status,
+            &text_body,
+            &body["model"].as_str().unwrap_or(""),
+        ));
     }
 
-    let data: Value = serde_json::from_str(&text_body)
-        .map_err(|e| format!("AI 调用失败：响应不是有效 JSON：{}。原始返回：{}", e, text_body.chars().take(240).collect::<String>()))?;
+    let data: Value = serde_json::from_str(&text_body).map_err(|e| {
+        format!(
+            "AI 调用失败：响应不是有效 JSON：{}。原始返回：{}",
+            e,
+            text_body.chars().take(240).collect::<String>()
+        )
+    })?;
 
     let content = data
         .get("choices")
@@ -195,9 +213,94 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
     let usage = data.get("usage");
     Ok(AiChatCompletionResponse {
         text: content,
-        token_input: usage.and_then(|u| u.get("prompt_tokens")).and_then(Value::as_i64),
-        token_output: usage.and_then(|u| u.get("completion_tokens")).and_then(Value::as_i64),
-        total_tokens: usage.and_then(|u| u.get("total_tokens")).and_then(Value::as_i64),
+        token_input: usage
+            .and_then(|u| u.get("prompt_tokens"))
+            .and_then(Value::as_i64),
+        token_output: usage
+            .and_then(|u| u.get("completion_tokens"))
+            .and_then(Value::as_i64),
+        total_tokens: usage
+            .and_then(|u| u.get("total_tokens"))
+            .and_then(Value::as_i64),
+        raw: data,
+    })
+}
+
+pub async fn ai_chat_completion_async(
+    request: AiChatCompletionRequest,
+    cancellation: CancellationToken,
+) -> Result<AiChatCompletionResponse, String> {
+    validate_request(&request)?;
+    let url = build_chat_completions_url(&request.base_url);
+    let timeout_seconds = request.timeout_seconds.unwrap_or(120);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds))
+        .build()
+        .map_err(|error| format!("AI 调用失败：HTTP 客户端初始化失败：{error}"))?;
+    let body = json!({
+        "model": request.model_name,
+        "messages": request.messages,
+        "temperature": request.temperature.unwrap_or(0.7),
+        "max_tokens": request.max_tokens.unwrap_or(8000),
+    });
+    let response = cancellation
+        .run_until_cancelled(
+            client
+                .post(url)
+                .bearer_auth(request.api_key.trim())
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send(),
+        )
+        .await
+        .ok_or_else(|| "AI 请求已取消".to_string())?
+        .map_err(|error| {
+            if error.is_timeout() {
+                format!("AI 调用失败：请求超时（{timeout_seconds} 秒），请检查网络或增加超时时间。")
+            } else if error.is_connect() {
+                "AI 调用失败：网络连接失败，请检查 API Base URL、网络连接或代理设置。".to_string()
+            } else {
+                format!("AI 调用失败：网络请求失败：{error}")
+            }
+        })?;
+    let status = response.status();
+    let text_body = cancellation
+        .run_until_cancelled(response.text())
+        .await
+        .ok_or_else(|| "AI 请求已取消".to_string())?
+        .map_err(|error| format!("AI 调用失败：读取响应失败：{error}"))?;
+    if !status.is_success() {
+        return Err(user_error_from_status(
+            status,
+            &text_body,
+            body["model"].as_str().unwrap_or(""),
+        ));
+    }
+    let data: Value = serde_json::from_str(&text_body)
+        .map_err(|error| format!("AI 调用失败：响应不是有效 JSON：{error}"))?;
+    let content = data
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if content.trim().is_empty() {
+        return Err("AI 调用失败：模型返回空内容，请检查提示词、模型名称或重试。".into());
+    }
+    let usage = data.get("usage");
+    Ok(AiChatCompletionResponse {
+        text: content,
+        token_input: usage
+            .and_then(|value| value.get("prompt_tokens"))
+            .and_then(Value::as_i64),
+        token_output: usage
+            .and_then(|value| value.get("completion_tokens"))
+            .and_then(Value::as_i64),
+        total_tokens: usage
+            .and_then(|value| value.get("total_tokens"))
+            .and_then(Value::as_i64),
         raw: data,
     })
 }

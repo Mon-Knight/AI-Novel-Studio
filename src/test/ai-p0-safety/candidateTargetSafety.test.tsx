@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Chapter } from '../../types/chapter';
+import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   getVolume: vi.fn(),
   getChapter: vi.fn(),
   updateChapter: vi.fn(),
   generateChapterOutlines: vi.fn(),
+  submitChapterOutlines: vi.fn(),
   getEvents: vi.fn(),
   getCharacters: vi.fn(),
   getChapterCharacters: vi.fn(),
@@ -20,7 +22,9 @@ const mocks = vi.hoisted(() => ({
   createDraft: vi.fn(),
   adoptExact: vi.fn(),
   summarize: vi.fn(),
+  submitSummary: vi.fn(),
   runFix: vi.fn(),
+  submitFix: vi.fn(),
   compareFix: vi.fn(),
   adoptFixRun: vi.fn(),
   saveFixRun: vi.fn(),
@@ -44,6 +48,7 @@ vi.mock('../../services/ai/outlineGenerateService', () => ({
     generateNovelOutline: vi.fn(),
     generateVolumeOutline: vi.fn(),
     generateChapterOutlines: mocks.generateChapterOutlines,
+    submitChapterOutlines: mocks.submitChapterOutlines,
   },
 }));
 vi.mock('../../services/prompt/chapterOutlineDraftCache', () => ({
@@ -84,7 +89,7 @@ vi.mock('../../services/database/draftVersionService', () => ({
   },
 }));
 vi.mock('../../services/ai/chapterSummarizeService', () => ({
-  chapterSummarizeService: { summarize: mocks.summarize },
+  chapterSummarizeService: { summarize: mocks.summarize, submitBackground: mocks.submitSummary },
 }));
 vi.mock('../../services/ai/summaryValidator', () => ({
   validateSummary: () => ({ passed: true, score: 100, problems: [], safeToContext: true }),
@@ -96,6 +101,7 @@ vi.mock('../../services/ai/aiClient', () => ({
 vi.mock('../../services/ai/qualityFixService', () => ({
   qualityFixService: {
     runFix: mocks.runFix,
+    submitBackground: mocks.submitFix,
     compareResults: mocks.compareFix,
     adoptFixRun: mocks.adoptFixRun,
     revertFixRun: vi.fn(),
@@ -161,17 +167,15 @@ function chapter(id: string): Chapter {
 describe('P0 generated candidate target binding', () => {
   it('keeps an outline candidate bound to the chapter that generated it', async () => {
     mocks.getVolume.mockResolvedValue({ id: 'volume-a', title: 'Volume A' });
-    mocks.generateChapterOutlines.mockResolvedValue([
-      { title: 'Candidate A', outline: 'Outline A', goal: 'Goal A' },
-    ]);
+    mocks.submitChapterOutlines.mockResolvedValue({ workflowId: 'workflow-a', rootTaskId: 'root-a', childTaskIds: ['child-a'] });
     const view = render(<OutlinePanel novelId="novel-a" chapter={chapter('chapter-a')} />);
     fireEvent.click(screen.getByRole('button', { name: /生成章节大纲/ }));
-    const apply = await screen.findByRole('button', { name: /应用到当前章节/ });
-    expect((apply as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(mocks.submitChapterOutlines).toHaveBeenCalledWith(expect.objectContaining({
+      novelId: 'novel-a', chapterId: 'chapter-a', volumeId: 'volume-a',
+    })));
+    expect(await screen.findByText(/章节大纲已转入后台/)).toBeTruthy();
 
     view.rerender(<OutlinePanel novelId="novel-a" chapter={chapter('chapter-b')} />);
-    expect(await screen.findByText(/候选仍可查看，但不能写入当前章节/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: /应用到当前章节/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(mocks.updateChapter).not.toHaveBeenCalled();
   });
 
@@ -205,23 +209,15 @@ describe('P0 generated candidate target binding', () => {
       createdAt: '2026-07-12T00:00:00.000Z',
       updatedAt: '2026-07-12T00:00:00.000Z',
     }]);
-    mocks.summarize.mockResolvedValue({
-      summary: 'Summary A',
-      keyEvents: [],
-      characterChanges: [],
-      relationshipChanges: [],
-      newForeshadows: [],
-      resolvedForeshadows: [],
-      nextChapterHints: '',
-      contextRecords: [],
-    });
-    const view = render(<ChapterSummaryPanel novelId="novel-a" chapter={chapter('chapter-a')} />);
+    mocks.submitSummary.mockResolvedValue({ workflowId: 'workflow-a', rootTaskId: 'root-a', childTaskIds: ['child-a'] });
+    const view = render(<MemoryRouter><ChapterSummaryPanel novelId="novel-a" chapter={chapter('chapter-a')} /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /生成章节上下文/ }));
-    expect((await screen.findByRole('button', { name: /确认保存/ }) as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(mocks.submitSummary).toHaveBeenCalledWith(expect.objectContaining({
+      chapterId: 'chapter-a', adoptedDraftId: 'draft-chapter-a', sourceDraftVersion: 3,
+    })));
+    expect(await screen.findByText(/章节摘要已转入后台/)).toBeTruthy();
 
-    view.rerender(<ChapterSummaryPanel novelId="novel-a" chapter={chapter('chapter-b')} />);
-    expect(await screen.findByText(/该总结候选不能保存到当前章节/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: /确认保存/ }) as HTMLButtonElement).disabled).toBe(true);
+    view.rerender(<MemoryRouter><ChapterSummaryPanel novelId="novel-a" chapter={chapter('chapter-b')} /></MemoryRouter>);
     expect(mocks.createSummary).not.toHaveBeenCalled();
   });
 
@@ -236,20 +232,17 @@ describe('P0 generated candidate target binding', () => {
     mocks.getSummary.mockResolvedValue(null);
     mocks.getDrafts.mockResolvedValue([adopted]);
     mocks.getChapter.mockResolvedValue(chapterA);
-    mocks.summarize.mockResolvedValue({
-      summary: 'Summary A', keyEvents: [], characterChanges: [], relationshipChanges: [],
-      newForeshadows: [], resolvedForeshadows: [], nextChapterHints: '', contextRecords: [],
-    });
+    mocks.submitSummary.mockResolvedValue({ workflowId: 'workflow-a', rootTaskId: 'root-a', childTaskIds: ['child-a'] });
     mocks.createSummary.mockResolvedValue({
       id: 'summary-a', novelId: 'novel-a', chapterId: 'chapter-a', volumeId: 'volume-a',
       adoptedDraftId: adopted.id, summary: 'Summary A', enabled: true, isExpired: false,
       createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z',
     });
-    render(<ChapterSummaryPanel novelId="novel-a" chapter={chapterA} />);
+    render(<MemoryRouter><ChapterSummaryPanel novelId="novel-a" chapter={chapterA} /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /生成章节上下文/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /确认保存/ }));
 
-    await waitFor(() => expect(mocks.createSummary).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.submitSummary).toHaveBeenCalledOnce());
+    expect(mocks.createSummary).not.toHaveBeenCalled();
     expect(mocks.updateChapter).not.toHaveBeenCalled();
   });
 
@@ -265,13 +258,6 @@ describe('P0 generated candidate target binding', () => {
       isAdopted: true,
       createdAt: '2026-07-12T00:00:00.000Z',
       updatedAt: '2026-07-12T00:00:00.000Z',
-    };
-    const candidateDraft = {
-      ...sourceDraft,
-      id: 'draft-candidate',
-      content: 'Revised candidate content.',
-      versionNo: 4,
-      isAdopted: false,
     };
     const report = {
       id: 'report-before',
@@ -295,15 +281,7 @@ describe('P0 generated candidate target binding', () => {
       createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z',
     } as any;
     mocks.getLatestDraft.mockResolvedValue(sourceDraft);
-    mocks.runFix.mockResolvedValue({
-      fixResult: { revisedContent: candidateDraft.content, fixedIssueKeys: ['issue-key-a'] },
-      fixRun: {
-        id: 'fix-run-a', status: 'success', beforeScore: 60, beforePendingCount: 1,
-        beforeSeriousCount: 0, fixedIssueIds: [], newIssueIds: [],
-      },
-      scopeValidation: { passed: true, warnings: [] },
-    });
-    mocks.createDraft.mockResolvedValue(candidateDraft);
+    mocks.submitFix.mockResolvedValue({ workflowId: 'workflow-a', rootTaskId: 'root-a', childTaskIds: ['fix-a', 'recheck-a'] });
     mocks.runQualityCheck.mockResolvedValue({ overallScore: 90, summary: 'Better', items: [] });
     mocks.compareFix.mockReturnValue({
       isBetter: true, isWorse: false, beforeScore: 60, afterScore: 90,
@@ -335,8 +313,10 @@ describe('P0 generated candidate target binding', () => {
       />,
     );
     fireEvent.click(await screen.findByRole('button', { name: /AI 修复并复检/ }));
-    const confirm = await screen.findByRole('button', { name: /确认采用/ });
-    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(mocks.submitFix).toHaveBeenCalledWith(expect.objectContaining({
+      novelId: 'novel-a', chapterId: 'chapter-a', beforeReportId: 'report-before',
+    })));
+    expect(await screen.findByText(/修复与复检已转入后台/)).toBeTruthy();
 
     expect(mocks.adoptExact).not.toHaveBeenCalled();
     expect(mocks.adoptFixRun).not.toHaveBeenCalled();

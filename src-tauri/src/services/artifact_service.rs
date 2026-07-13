@@ -1,6 +1,6 @@
+use crate::domain::placement::PlacementProposal;
 use crate::domain::result_artifact::ArtifactProcessingStatus;
 use crate::errors::{codes, AppError};
-use crate::domain::placement::PlacementProposal;
 use crate::repositories::{
     ai_task_repository, artifact_repository, large_text_repository, placement_repository,
 };
@@ -76,6 +76,8 @@ pub struct CandidateRecoveryArtifactDto {
     pub source_draft_version: i64,
     pub base_content_hash: String,
     pub content: String,
+    pub raw_content: String,
+    pub structured_payload: Option<Value>,
     pub content_hash: String,
     pub content_length: usize,
     pub processing_status: String,
@@ -121,6 +123,8 @@ fn requires_json(artifact_type: &str) -> bool {
             | "style_analysis"
             | "chapter_summary"
             | "volume_summary"
+            | "volume_outline"
+            | "chapter_outlines"
     )
 }
 
@@ -374,7 +378,7 @@ pub fn recover_chapter_candidate(
         .query_row(
             "SELECT r.artifact_id, r.task_id, r.source_novel_id, r.source_chapter_id,
                     r.source_draft_id, r.source_draft_version, r.source_base_content_hash,
-                    r.raw_content_ref_id, r.display_content_ref_id, r.processing_status,
+                    r.raw_content_ref_id, r.display_content_ref_id, r.structured_payload_json, r.processing_status,
                     t.status, r.created_at
              FROM result_artifacts r
              JOIN ai_tasks t ON t.task_id = r.task_id
@@ -406,9 +410,10 @@ pub fn recover_chapter_candidate(
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, String>(7)?,
                     row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(9)?,
                     row.get::<_, String>(10)?,
                     row.get::<_, String>(11)?,
+                    row.get::<_, String>(12)?,
                 ))
             },
         )
@@ -417,19 +422,40 @@ pub fn recover_chapter_candidate(
 
     let candidate = if let Some(artifact) = artifact {
         let chapter = artifact.3.ok_or_else(|| {
-            AppError::new(codes::ARTIFACT_VALIDATION_FAILED, "Candidate chapter identity is missing", false)
+            AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "Candidate chapter identity is missing",
+                false,
+            )
         })?;
         let source_draft_id = artifact.4.ok_or_else(|| {
-            AppError::new(codes::ARTIFACT_VALIDATION_FAILED, "Candidate source draft is missing", false)
+            AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "Candidate source draft is missing",
+                false,
+            )
         })?;
         let source_draft_version = artifact.5.ok_or_else(|| {
-            AppError::new(codes::ARTIFACT_VALIDATION_FAILED, "Candidate source version is missing", false)
+            AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "Candidate source version is missing",
+                false,
+            )
         })?;
         let base_content_hash = artifact.6.ok_or_else(|| {
-            AppError::new(codes::ARTIFACT_VALIDATION_FAILED, "Candidate baseline hash is missing", false)
+            AppError::new(
+                codes::ARTIFACT_VALIDATION_FAILED,
+                "Candidate baseline hash is missing",
+                false,
+            )
         })?;
         let content_ref = artifact.8.as_deref().unwrap_or(&artifact.7);
         let verified = large_text_repository::read_verified_document(connection, content_ref)?;
+        let raw_verified = large_text_repository::read_verified_document(connection, &artifact.7)?;
+        let structured_payload = artifact
+            .9
+            .as_deref()
+            .and_then(|value| serde_json::from_str(value).ok());
         let adopted = connection
             .query_row(
                 "SELECT EXISTS(
@@ -441,7 +467,8 @@ pub fn recover_chapter_candidate(
             )
             .map_err(AppError::database)?
             != 0;
-        let proposal = placement_repository::get_latest_proposal_for_artifact(connection, &artifact.0)?;
+        let proposal =
+            placement_repository::get_latest_proposal_for_artifact(connection, &artifact.0)?;
         Some(CandidateRecoveryArtifactDto {
             candidate_id: artifact.0.clone(),
             artifact_id: artifact.0,
@@ -452,18 +479,23 @@ pub fn recover_chapter_candidate(
             source_draft_version,
             base_content_hash,
             content: verified.content,
+            raw_content: raw_verified.content,
+            structured_payload,
             content_hash: verified.content_hash,
             content_length: verified.content_length,
-            processing_status: artifact.9,
-            task_status: artifact.10,
+            processing_status: artifact.10,
+            task_status: artifact.11,
             proposal,
             adopted,
-            created_at: artifact.11,
+            created_at: artifact.12,
         })
     } else {
         None
     };
-    Ok(ChapterCandidateRecoveryDto { candidate, latest_task })
+    Ok(ChapterCandidateRecoveryDto {
+        candidate,
+        latest_task,
+    })
 }
 
 #[cfg(test)]
@@ -575,8 +607,8 @@ mod tests {
     }
 
     #[test]
-    fn art04_repository_rejects_in_place_content_update(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn art04_repository_rejects_in_place_content_update() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut connection = connection()?;
         let (task_id, attempt_id) = validating_task(&mut connection, "artifact-immutable")?;
         let artifact = create_artifact(
@@ -717,7 +749,8 @@ mod tests {
         task.input_snapshot.source_draft_version = Some(3);
         task.input_snapshot.base_content_hash = Some("base-hash".to_string());
         let created = ai_task_service::create_task(&mut connection, task)?;
-        let attempt = ai_task_service::start_attempt(&mut connection, &created.task_id, Some("fake"))?;
+        let attempt =
+            ai_task_service::start_attempt(&mut connection, &created.task_id, Some("fake"))?;
         ai_task_service::mark_attempt_succeeded(
             &mut connection,
             &created.task_id,

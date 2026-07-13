@@ -61,7 +61,10 @@ pub fn upsert(
                 false,
             ));
         }
-        if input.base_draft_version.is_some_and(|version| version != base.version_no) {
+        if input
+            .base_draft_version
+            .is_some_and(|version| version != base.version_no)
+        {
             return Err(AppError::new(
                 codes::RECOVERY_BASE_CONFLICT,
                 "恢复快照的基础草稿版本已变化",
@@ -91,8 +94,8 @@ pub fn upsert(
         .as_ref()
         .map(|snapshot| snapshot.created_at.clone())
         .unwrap_or_else(|| now.clone());
-    let use_large_text = input.recovery_content.len()
-        > large_text_repository::LARGE_TEXT_THRESHOLD_BYTES;
+    let use_large_text =
+        input.recovery_content.len() > large_text_repository::LARGE_TEXT_THRESHOLD_BYTES;
     let document_id = use_large_text.then(|| uuid::Uuid::new_v4().to_string());
     let recovery_target_id = format!("{}:{}", input.novel_id, input.chapter_id);
     if let Some(document_id) = document_id.as_deref() {
@@ -134,12 +137,8 @@ pub fn upsert(
         }
     }
     transaction.commit().map_err(|error| {
-        AppError::new(
-            codes::DATABASE_COMMIT_UNKNOWN,
-            "恢复快照提交状态未知",
-            true,
-        )
-        .with_details(serde_json::json!({ "sqliteError": error.to_string() }))
+        AppError::new(codes::DATABASE_COMMIT_UNKNOWN, "恢复快照提交状态未知", true)
+            .with_details(serde_json::json!({ "sqliteError": error.to_string() }))
     })?;
     let mut output = stored_snapshot;
     output.recovery_content = input.recovery_content;
@@ -252,8 +251,7 @@ mod tests {
         let latest = "恢复正文".repeat(30_000);
         upsert(&mut connection, recovery("novel-a", "chapter-a1", "first"))?;
         upsert(&mut connection, recovery("novel-a", "chapter-a1", &latest))?;
-        let stored = get(&connection, "novel-a", "chapter-a1")?
-            .expect("snapshot exists");
+        let stored = get(&connection, "novel-a", "chapter-a1")?.expect("snapshot exists");
         assert_eq!(stored.recovery_content, latest);
         assert!(stored.large_text_ref_id.is_some());
         let count: i64 = connection.query_row(
@@ -262,11 +260,10 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(count, 1);
-        let document_count: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM large_text_documents",
-            [],
-            |row| row.get(0),
-        )?;
+        let document_count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM large_text_documents", [], |row| {
+                row.get(0)
+            })?;
         assert_eq!(document_count, 1);
         Ok(())
     }
@@ -286,7 +283,10 @@ mod tests {
     #[test]
     fn db14_recovery_is_isolated_from_draft_history() -> Result<(), Box<dyn std::error::Error>> {
         let mut connection = test_connection()?;
-        upsert(&mut connection, recovery("novel-a", "chapter-a1", "unsaved"))?;
+        upsert(
+            &mut connection,
+            recovery("novel-a", "chapter-a1", "unsaved"),
+        )?;
         let draft_count: i64 =
             connection.query_row("SELECT COUNT(*) FROM chapter_drafts", [], |row| row.get(0))?;
         assert_eq!(draft_count, 0);

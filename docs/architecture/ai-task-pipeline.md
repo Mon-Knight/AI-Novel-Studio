@@ -303,3 +303,43 @@ Provider.
 5. 最后迁移大纲、人物、事件、设定与总结等业务落位入口。
 
 任何阶段都不得让占位 Store 接管未完成的生产请求，也不得删除 legacy 表或历史读取能力。
+
+## 8. 阶段 2A / 2B / 2C / 2D / 2E 已实施边界
+
+- 阶段 2A 使用 `ai_tasks` 作为唯一权威任务来源，`ai_task_records` 与 `generation_jobs` 只进入只读兼容投影；任务中心不依据时间或文本相似度猜测关联。
+- 阶段 2B 只迁移手动章节质量检查。React 编译冻结请求并入队后立即返回；Rust 应用进程内 Worker 事务认领、续租、调用 Provider、写 Attempt/Artifact 和推送事件。
+- Worker 运行字段由 `017_ai_task_worker_runtime` 提供；架构预留的 `016_text_range_locks` 编号保持不变。
+- Provider 凭据仅存在于应用进程内 Worker 配置，Snapshot 只保存实际模型参数和大文本引用；应用重启后 Worker 在前端重新注册本地配置前不会认领 queued 请求。
+- 第一版后台只在应用开启时运行。应用退出后 lease 过期，下一次启动会把中断 Attempt 留痕并按重试上限在同一 Task 下创建新 Attempt。
+- 质量检查成功只生成 `quality_report` Artifact，不写正文、不更新正式质量报告表、不创建 ApplyPlan，也不触发质量修复。
+- 阶段 2C 通过 `018_ai_task_orchestration` 在同一 `ai_tasks` 权威模型中增加 workflow/root/parent/step/role/priority/concurrency 与 stale 身份；依赖保存在 `ai_task_dependencies`，Artifact 过期记录保存在 append-only `ai_artifact_stale_events`。
+- 父 Task 没有独立 Provider 状态机：它不创建 Attempt，也不持有 lease；其状态、进度和等待确认均从子 Task 与最终 Artifact 聚合。
+- `waiting_dependency` 映射为 `ready + 未完成依赖`，`waiting_user` 映射为 `completed + requiresReview`，`interrupted` 映射为 Attempt 中断留痕与 Task 重新 queued/failed，`stale` 映射为 stale 关系并优先显示为结果已过期。
+- Worker 认领前重新检查依赖，两个固定执行槽提供有限并行；相同非空 concurrency group 同时只运行一个节点。
+- 章节摘要试点固定为四步：资料准备 → 摘要候选 → 一致性检查 → 审查汇总。中间 Artifact 不请求用户确认，父任务只链接最终汇总候选，任何步骤都不写 Canon、正文、Story State 或正式章节总结。
+- 阶段 2D 继续复用同一 Worker 与 DAG，不增加 schema：React 只编译并提交冻结请求；Rust 负责 Provider、Attempt、lease、heartbeat、取消、重试、恢复、进度与 Artifact。
+- 迁移入口为质量检查/修复/复检、润色、章节/卷摘要和主纲/卷纲/章纲。质量修复使用两步依赖，其余使用单步父子工作流；父 Task 仍不调用 Provider。
+- 迁移入口的生产 UI 不再调用 `createAiClient` 或等待 Provider Promise，也不使用 AI 全屏 Loading。页面卸载、导航和刷新不拥有任务生命周期。
+- `chapter_text` 与所有最终待审查 Artifact 完成时 Worker 建立 PlacementProposal；任务中心的用户确认才创建并执行 ApplyPlan。正文计划写入新草稿，摘要和大纲使用 `artifact_review` TargetLink 记录确认但不自动写正式上下文、规划或 Canon。
+- 正文基线型工作流通过冻结 draft/version/hash 和 latest-draft 检查传播 stale；显式 DAG 上游变化继续使用 2C 的递归 stale 传播。
+- 阶段 2E 的章节质量审查与修订候选固定为五步：冻结章节快照 → 质量检查 → 修复候选 → 修复复检 → 汇总审查包。五个节点各自拥有 Task、Attempt 和 Artifact，父 Task 仍只聚合状态。
+- 冻结快照和汇总审查包由 Rust Worker 本地执行；质量检查、修复与复检继续通过异步 Provider 路径。最终汇总只保存三类上游 Artifact 身份、初检/复检结构和修复候选引用，不复制采用权。
+- 汇总审查包只进入 `waiting_user` 映射。用户可从任务中心打开关联 `chapter_text` 修复候选；只有该正文 Proposal 通过 stale 校验并显式确认后才允许 ApplyPlan，未确认时不写正文或 Canon。
+- Worker 在 Provider 返回后、创建 Artifact 前再次读取 `stale_at`。在途任务若因正文基线变化过期，响应以 `AI_WORKFLOW_STALE` 失败关闭，不保存迟到 Artifact；待执行节点继续因 stale 和依赖门禁不可认领。
+
+## 9. 结构化章节候选的审查与采用边界
+
+章节正文 Artifact 的审查展示不得直接消费 Provider 原始字符串。工作台与任务中心使用同一条只读规范化链：
+
+```text
+ResultArtifact(raw / structured) + frozen chapter snapshot
+    → NormalizedCandidate
+    → 完整正文 / 修改摘要 / 用户差异 / 内部定位 / 原始审计
+```
+
+- `targeted_fix` 优先读取结构化完整正文；只有片段时，必须在冻结正文中通过精确 offset、指定段落内唯一文本或全局唯一文本定位，再重建完整章节。定位失败或片段重叠都产生不可采用的重建错误。
+- `full_rewrite` 只接受明确的正文文本；若没有 `changed_ranges`，规范化层基于冻结正文生成段落级差异，供审查导航使用。
+- `paragraphIndex`、`startOffset`、`endOffset` 和 candidate paragraph 只服务定位与高亮。普通视图不显示这些字段；原始响应、ID、hash 和 Provider 审计信息只进入折叠的高级工程详情。
+- 解析失败、无法重建、约束检查未完成或阻断、目标 stale、复检未完成时，统一采用门禁必须关闭并给出作者可理解的原因。
+- React 的 `NormalizedCandidate` 是展示与前置门禁模型，不替代 Artifact 或 ApplyPlan。浏览器 Apply 与 Rust ApplyExecutor 都重新从持久化 Artifact 和冻结正文派生安全正文，禁止把原始或嵌套 JSON 写入章节。
+- 该边界不增加数据库表或 migration，不改变 Provider 请求参数，也不自动 Apply。

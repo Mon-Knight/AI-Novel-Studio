@@ -41,7 +41,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 15] {
+fn migrations() -> [Migration; 17] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -117,6 +117,16 @@ fn migrations() -> [Migration; 15] {
             id: SNAPSHOT_DELETE_GUARDS_MIGRATION_ID,
             definition: "snapshot_delete_guards_v1(ai_input_snapshots,ai_context_snapshots,ai_constraint_snapshots,result_artifacts)",
             apply: apply_snapshot_delete_guards,
+        },
+        Migration {
+            id: "017_ai_task_worker_runtime",
+            definition: "ai_task_worker_runtime_v1(tasks.worker_kind,owner,lease,heartbeat,progress,cancel_requested,retry,max_attempts,available,interrupted,attempts.interrupted,retry,indexes)",
+            apply: apply_ai_task_worker_runtime,
+        },
+        Migration {
+            id: "018_ai_task_orchestration",
+            definition: "ai_task_orchestration_v1(tasks.workflow,name,root,parent,agent_role,step,priority,concurrency,required,stale,dependencies.required,foreign_keys,cycle_guard,isolation,indexes,artifact_stale_events.append_only)",
+            apply: apply_ai_task_orchestration,
         },
     ]
 }
@@ -419,6 +429,141 @@ fn apply_ai_task_attempts(transaction: &Transaction<'_>) -> Result<(), AppError>
                 ON ai_task_attempts(task_id, status, attempt_number);
             CREATE INDEX IF NOT EXISTS idx_ai_task_attempts_provider_request
                 ON ai_task_attempts(provider_id, provider_request_id);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_task_worker_runtime(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    for (column, definition) in [
+        ("worker_kind", "TEXT"),
+        ("worker_owner_id", "TEXT"),
+        ("lease_expires_at", "TEXT"),
+        ("heartbeat_at", "TEXT"),
+        ("progress_stage", "TEXT"),
+        (
+            "progress_percent",
+            "INTEGER NOT NULL DEFAULT 0 CHECK (progress_percent BETWEEN 0 AND 100)",
+        ),
+        ("cancel_requested_at", "TEXT"),
+        ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
+        (
+            "max_attempts",
+            "INTEGER NOT NULL DEFAULT 2 CHECK (max_attempts >= 1)",
+        ),
+        ("available_at", "TEXT"),
+        ("interrupted_at", "TEXT"),
+    ] {
+        if !table_has_column(transaction, "ai_tasks", column)? {
+            transaction
+                .execute(
+                    &format!("ALTER TABLE ai_tasks ADD COLUMN {column} {definition}"),
+                    [],
+                )
+                .map_err(AppError::database)?;
+        }
+    }
+    for (column, definition) in [
+        ("interrupted_at", "TEXT"),
+        ("interruption_reason", "TEXT"),
+        ("retry_scheduled_at", "TEXT"),
+    ] {
+        if !table_has_column(transaction, "ai_task_attempts", column)? {
+            transaction
+                .execute(
+                    &format!("ALTER TABLE ai_task_attempts ADD COLUMN {column} {definition}"),
+                    [],
+                )
+                .map_err(AppError::database)?;
+        }
+    }
+    transaction
+        .execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_ai_tasks_worker_claim
+                ON ai_tasks(worker_kind, status, available_at, lease_expires_at, created_at);
+             CREATE INDEX IF NOT EXISTS idx_ai_tasks_worker_owner
+                ON ai_tasks(worker_owner_id, lease_expires_at);
+             CREATE INDEX IF NOT EXISTS idx_ai_attempts_interrupted
+                ON ai_task_attempts(task_id, interrupted_at);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_task_orchestration(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    for (column, definition) in [
+        ("workflow_id", "TEXT"),
+        ("workflow_name", "TEXT"),
+        ("root_task_id", "TEXT"),
+        ("parent_task_id", "TEXT"),
+        ("agent_role", "TEXT"),
+        ("step_key", "TEXT"),
+        ("priority", "INTEGER NOT NULL DEFAULT 0"),
+        ("concurrency_group", "TEXT"),
+        (
+            "required_for_parent",
+            "INTEGER NOT NULL DEFAULT 1 CHECK (required_for_parent IN (0,1))",
+        ),
+        ("stale_at", "TEXT"),
+        ("stale_reason", "TEXT"),
+        ("stale_source_task_id", "TEXT"),
+    ] {
+        if !table_has_column(transaction, "ai_tasks", column)? {
+            transaction
+                .execute(
+                    &format!("ALTER TABLE ai_tasks ADD COLUMN {column} {definition}"),
+                    [],
+                )
+                .map_err(AppError::database)?;
+        }
+    }
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_task_dependencies (
+                task_id TEXT NOT NULL,
+                depends_on_task_id TEXT NOT NULL,
+                required INTEGER NOT NULL DEFAULT 1 CHECK (required IN (0,1)),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (task_id, depends_on_task_id),
+                CHECK (task_id <> depends_on_task_id),
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT,
+                FOREIGN KEY (depends_on_task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS ai_artifact_stale_events (
+                artifact_id TEXT PRIMARY KEY,
+                source_task_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                triggered_at TEXT NOT NULL,
+                FOREIGN KEY (artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                FOREIGN KEY (source_task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_tasks_workflow_parent
+                ON ai_tasks(workflow_id, parent_task_id, priority, created_at);
+            CREATE INDEX IF NOT EXISTS idx_ai_tasks_workflow_status
+                ON ai_tasks(workflow_id, status, stale_at, step_key);
+            CREATE INDEX IF NOT EXISTS idx_ai_task_dependencies_upstream
+                ON ai_task_dependencies(depends_on_task_id, task_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_artifact_stale_source
+                ON ai_artifact_stale_events(source_task_id, triggered_at);
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_dependency_same_novel
+                BEFORE INSERT ON ai_task_dependencies
+                WHEN (SELECT novel_id FROM ai_tasks WHERE task_id=NEW.task_id)
+                   <> (SELECT novel_id FROM ai_tasks WHERE task_id=NEW.depends_on_task_id)
+                BEGIN SELECT RAISE(ABORT, 'cross novel task dependency'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_dependency_cycle
+                BEFORE INSERT ON ai_task_dependencies
+                WHEN EXISTS (
+                    WITH RECURSIVE downstream(task_id) AS (
+                        SELECT NEW.task_id
+                        UNION
+                        SELECT d.task_id FROM ai_task_dependencies d
+                        JOIN downstream x ON d.depends_on_task_id=x.task_id
+                    )
+                    SELECT 1 FROM downstream WHERE task_id=NEW.depends_on_task_id
+                )
+                BEGIN SELECT RAISE(ABORT, 'cyclic task dependency'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_artifact_stale_events_immutable_update
+                BEFORE UPDATE ON ai_artifact_stale_events BEGIN SELECT RAISE(ABORT, 'immutable artifact stale event'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_artifact_stale_events_immutable_delete
+                BEFORE DELETE ON ai_artifact_stale_events BEGIN SELECT RAISE(ABORT, 'immutable artifact stale event'); END;",
         )
         .map_err(AppError::database)
 }
@@ -1313,7 +1458,7 @@ fn apply_artifact_target_links(transaction: &Transaction<'_>) -> Result<(), AppE
 mod tests {
     use super::*;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 15] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 17] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -1373,6 +1518,14 @@ mod tests {
         (
             "015_snapshot_delete_guards",
             "05e7b1124fb4f78a80e46d6e8dff6e727784094aab5e6cb743b2f2eaf972bf9d",
+        ),
+        (
+            "017_ai_task_worker_runtime",
+            "aabb4d11a03dd8ff9bf7ad2e63c2fe4cc451d8889847721e7dd64a7875ef0f31",
+        ),
+        (
+            "018_ai_task_orchestration",
+            "51bba502603ff63184079f539354b97e80614563e6867ab3836591d75c801beb",
         ),
     ];
 
@@ -1449,7 +1602,7 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let migrations = list_applied(&connection)?;
-        assert_eq!(migrations.len(), 15);
+        assert_eq!(migrations.len(), 17);
         for (applied, (expected_id, expected_checksum)) in
             migrations.iter().zip(EXPECTED_MIGRATION_CHECKSUMS)
         {
@@ -1711,7 +1864,7 @@ mod tests {
 
         run_migrations(&mut connection)?;
         let upgraded = list_applied(&connection)?;
-        assert_eq!(upgraded.len(), 15);
+        assert_eq!(upgraded.len(), 17);
         assert_eq!(&upgraded[..4], &original[..4]);
         let once = upgraded.clone();
         run_migrations(&mut connection)?;
@@ -1725,13 +1878,17 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         for table in [
-            "artifact_placement_proposals", "artifact_placement_targets",
-            "artifact_apply_plans", "artifact_apply_operations",
-            "artifact_apply_dependencies", "artifact_target_links",
+            "artifact_placement_proposals",
+            "artifact_placement_targets",
+            "artifact_apply_plans",
+            "artifact_apply_operations",
+            "artifact_apply_dependencies",
+            "artifact_target_links",
         ] {
             let exists: i64 = connection.query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-                params![table], |row| row.get(0),
+                params![table],
+                |row| row.get(0),
             )?;
             assert_eq!(exists, 1, "missing table {table}");
         }
@@ -1958,6 +2115,28 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(migration_count, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn db35_orchestration_upgrade_is_idempotent_and_enforces_graph_integrity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE chapter_drafts (id TEXT PRIMARY KEY,novel_id TEXT NOT NULL,chapter_id TEXT NOT NULL,content TEXT NOT NULL,version_no INTEGER NOT NULL,large_text_ref_id TEXT);")?;
+        run_migrations(&mut connection)?;
+        let once = list_applied(&connection)?;
+        run_migrations(&mut connection)?;
+        assert_eq!(list_applied(&connection)?, once);
+        connection.execute_batch(
+            "INSERT INTO ai_tasks(task_id,task_type,novel_id,scope_type,status,trace_id,operation_id,request_hash,created_at,workflow_id,root_task_id) VALUES
+             ('a','step','novel-a','novel','ready','t','o-a','h','n','w','a'),
+             ('b','step','novel-a','novel','ready','t','o-b','h','n','w','a'),
+             ('c','step','novel-b','novel','ready','t','o-c','h','n','x','c');
+             INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('b','a','n');"
+        )?;
+        assert!(connection.execute("INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('missing','a','n')",[]).is_err());
+        assert!(connection.execute("INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('a','c','n')",[]).is_err());
+        assert!(connection.execute("INSERT INTO ai_task_dependencies(task_id,depends_on_task_id,created_at) VALUES ('a','b','n')",[]).is_err());
         Ok(())
     }
 }

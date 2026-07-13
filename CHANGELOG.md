@@ -1,5 +1,73 @@
 # AI Novel Studio - CHANGELOG
 
+### AI 候选审查：结构化结果规范化与安全采用
+
+- 新增统一 `NormalizedCandidate`，将定向修复和全文改写规范化为完整小说正文、修改摘要、差异项、内部定位信息与原始响应；全文改写缺少结构化差异时自动生成段落差异。
+- 定向修复可依据冻结正文、段落位置和唯一片段安全重建完整章节；无法定位、修改片段重叠、异常 JSON 或正文仍为结构化数据时按失败关闭并禁止采用。
+- 工作台和统一任务中心复用同一候选审查组件：普通视图只展示正文、修改摘要和逐项原文/修改后对照，原始响应、ID、hash 与定位字段仅保留在折叠的高级工程区域。
+- 约束检查、结果过期、复检状态和格式校验统一进入候选标题与采用门禁；吸底操作栏提供放弃、重新生成、查看差异和审查采用，长正文使用单层滚动与适合阅读的正文排版。
+- 浏览器与 Rust Apply 路径均重新验证候选正文；任何原始或嵌套 JSON 都不能作为章节正文写入，且不自动采用候选。
+- 补充定向修复、全文改写、异常 JSON、片段重建、禁止采用、结构化审查和长正文滚动测试；未新增 migration，未修改 Provider 参数或版本号。
+
+### 阶段 3 前置：创作意图、初始化确认与多 Canon 事务边界
+
+- 冻结 `CreativeIntentSnapshotV1`：按 revision、parentIntentId 和 SHA-256 固化创作意图，明确区分作者事实、推断偏好和必须人工确认的信息；推断信息不得伪装为作者确认。
+- 新增 `InitializationCandidateBundleV1`：每个初始化候选必须携带证据、生成解释、冲突说明、独立 hash 和逐项确认状态，候选包变化后旧确认自动失效。
+- 新增未来导演治理契约：冻结 Provider 调用、token、成本和时长预算，限定可提交 Task/可提议 Canon 目标，禁止自动 Apply、修改 Provider 配置，并以可持久化 Artifact 记录决策、备选、理由和证据。
+- 复用现有 Snapshot、ResultArtifact、AiTask/DAG 与 ApplyPlan，不新增任务体系或 migration；意图写入 input snapshot，预算写入 context snapshot，权限写入 constraint snapshot，初始化候选和决策审计写入 Artifact。
+- 新增初始化多目标 ApplyPlan：只接受已持久化 Artifact 中经作者逐项确认的世界设定、规则系统和角色创建候选；后端预分配目标 ID，按依赖拓扑排序，并在同一 SQLite Immediate transaction 中写 Canon、TargetLink 和完成结果。
+- 多目标 Apply 任一 hash、跨作品、循环依赖、未确认冲突、重复业务键或 affected rows 校验失败时整体回滚；幂等重放只返回首次结果。浏览器 LocalStorage 模式明确拒绝多 Canon 原子写入。
+- 保持应用版本 2.2.0；未实现正式创作导演、Story State、多 Agent 或自动 Apply，未修改 Provider 参数。
+
+### 阶段 2E：组合工作流试点与阶段 2 收口
+
+- 新增“章节冻结快照 → 质量检查 → 修复候选 → 修复复检 → 汇总审查包”五步工作流；一个父 Task 通过现有 DAG 管理五个独立子 Task、Attempt 和 Artifact，不新增 migration 或任务体系。
+- 工作台增加非阻塞组合审查入口，提交冻结正文和 Prompt 后立即返回；页面切换、组件卸载或 WebView 刷新不持有执行生命周期。
+- Rust Worker 增加冻结快照与审查汇总两个本地节点，复用现有质量检查、修复和复检 Provider 节点；最终审查包唯一引用修复候选、初检和复检 Artifact，只进入等待确认。
+- 任务中心增加五步作者文案，并可从最终审查包直接打开修复正文候选；只有用户确认修复候选后才执行现有 ApplyPlan，汇总包确认只记录审查证据。
+- stale 检测增加 Worker 持久化前复检，正文变化后已在途的迟到响应会失败关闭且不产生 Artifact；未认领节点继续由 DAG 阻止执行。
+- 新增五步 DAG 规格、完整 Mock 执行、失败节点局部重试、迟到响应丢弃、最终 Artifact 唯一和无自动 Canon/Apply 动态测试。
+- 普通任务条和任务中心统一使用作者文案，未知任务类型不再回退显示内部类型名；高级详情继续保留完整审计字段。
+- 使用既有真实 API 配置完成一次 release 桌面五步冒烟：运行中可切换章节，最终 5/5 进入等待确认，未采用时正文版本和字数保持不变。
+
+### 阶段 2D：阻塞式 AI 入口迁移
+
+- 在 017 Worker 与 018 编排结构上增加通用后台工作流提交命令；冻结 Prompt、输入正文、来源清单、目标范围和非密钥 Provider 参数，不新增 migration 或任务表。
+- 质量修复改为“修复候选 → 复检”两步依赖 DAG；质量检查继续复用 2B Worker。润色、章节/卷摘要、作品总纲、分卷大纲和章节大纲改为单步待审查工作流。
+- 右栏、作品大纲页、独立大纲编辑器和正文采用后总结入口提交后立即返回；Provider、Attempt、取消、重试、恢复、进度和 Artifact 全部由 Rust Worker 管理，不再挂接 AI 全屏 Loading。
+- Worker 按任务规格写 `chapter_text / quality_report / chapter_summary / volume_summary / outline_text / volume_outline / chapter_outlines` Artifact；待审查输出自动建立 PlacementProposal，只有任务中心的用户确认才创建并执行 ApplyPlan。正文计划可写新草稿，摘要/大纲计划只记录审查 TargetLink，不写 Canon。
+- Mock Provider 覆盖全部迁移类型；新增质量修复依赖、每步单 Artifact、正文 Proposal、无自动 Canon 写入和未迁移任务拒绝测试。
+- 旧 AI Service 方法仅保留给未迁移兼容代码；本阶段生产 UI 已关闭对应 WebView Provider 执行链。
+
+### 阶段 2C：父子任务编排与依赖 DAG
+
+- 新增 `018_ai_task_orchestration`：扩展现有 `ai_tasks` 的 workflow/root/parent/role/step/priority/concurrency/stale 字段，新增任务依赖表与 append-only Artifact stale 事件，不建立第三套任务系统。
+- DAG 依赖在 SQLite 和 Rust 服务双重校验，禁止自依赖、循环依赖和跨作品/章节/工作流关联；Worker 认领时再次验证所有必需上游已完成。
+- 父 Task 只聚合子节点状态和进度，不创建 Attempt、不调用 Provider；`waiting_dependency`、`waiting_user`、`interrupted` 与 `stale` 映射到现有状态和持久化关系。
+- 现有 Worker 扩为两个并发槽，支持依赖释放、有限并行、局部重试、级联取消、重启恢复和单并发组互斥；已成功节点与有效 Artifact 不重复执行。
+- stale 可由上游任务显式传播，并在章节采用草稿/version/hash 变化时自动传播；过期 Artifact 无法创建或执行 ApplyPlan。
+- 新增“资料准备 → 摘要候选 → 一致性检查 → 审查汇总”四步 Mock/Provider 试点；每步独立 Attempt/Artifact，父任务只链接最终审查候选，不写正文、Canon、Story State 或正式章节总结。
+- 任务中心新增工作流进度、当前步骤、展开子任务、局部重试/取消、失败与过期原因展示；工程 ID 与 Provider 元数据仍只在高级详情中出现。
+
+### 阶段 2A：统一 AI 任务中心
+
+- 新增以 `ai_tasks` 为权威来源的只读任务投影，聚合最新 Attempt、主 Artifact、PlacementProposal、ApplyPlan、TargetLink、作品/章节范围、错误与待审查状态。
+- `ai_task_records` 与 `generation_jobs` 仅作为 Legacy 兼容投影；按 `ai_tasks > ai_task_records > generation_jobs` 和稳定 ID 去重，不推断或伪造历史关联。
+- AI 任务中心按正在运行、等待确认、最近完成、失败任务分区；普通视图使用作者文案，高级详情保留 Task/Attempt/hash/trace 等完整审计信息。
+- 新增应用级非阻塞任务条，位于正常布局流内，不覆盖正文、不阻止编辑或导航、不自动跳页；完成候选提示进入任务中心审查。
+- 任务 Store 可从 SQLite 重新水合并接收管线实时摘要；查询失败显示明确错误而不是伪装为空列表。
+- 移除写作工作台对遮挡式 `GlobalAiTaskModal` 的挂载；旧入口仍保留兼容链路，不批量迁移。
+
+### 阶段 2B：单任务 Rust 后台 Worker 试点
+
+- 仅将手动“章节质量检查”迁移为应用进程内 Rust Worker；质量修复、润色、大纲、章节生成和其他入口保持原链路。
+- 新增 `017_ai_task_worker_runtime` migration；`016` 继续保留给 TextRangeLock。Task/Attempt 增加 worker owner、lease、heartbeat、持久进度、取消请求、重试、可执行时间和中断记录，不建立第三套任务表。
+- Worker 启动扫描 queued 与 lease 过期任务，使用 `BEGIN IMMEDIATE` 事务认领、同 Task 新 Attempt 重试、重复认领保护和 Artifact 唯一保护。
+- Provider 改由 Rust 异步请求执行；API Key 只进入应用进程内 Worker 配置，不写入 Snapshot、Task、日志或 SQLite。Mock Provider 提供可控自动化路径。
+- 取消请求先持久化 `cancel_requested`，再通过 Rust CancellationToken 中断 reqwest；最终持久化 `cancelled`，取消响应不会创建 Artifact。
+- Worker 进度同时写入 SQLite 并通过 `ai-task-progress` Tauri Event 推送；React 提交后立即返回工作台，只负责任务条、任务中心、取消、重试和读取最终 Artifact。
+- 成功仅写不可变 `quality_report` Artifact，不创建或采用正文，不自动修改 Canon；无效响应保存 invalid Artifact 并令任务失败。
+
 ### 任务 8C：候选生命周期与工作台可靠性加固
 
 - 新增统一候选生命周期派生逻辑，集中校验候选、Task、Artifact、章节、冻结基线、约束、差异和 Proposal 身份，所有采用入口共享同一门禁。

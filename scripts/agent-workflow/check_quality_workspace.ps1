@@ -83,7 +83,6 @@ Assert-Contains $workspacePage "onRunCommand=" "workspace passes editor commands
 Assert-Contains $rightToolbar "command: 'save'" "right toolbar has save command"
 Assert-Contains $rightToolbar "id: 'draft-history'" "right toolbar has draft history panel"
 Assert-Contains $rightToolbar "command: 'format'" "right toolbar has format command"
-Assert-Contains $rightToolbar "command: 'adopt-current'" "right toolbar has adopt command"
 
 Assert-Contains $rightPanel "currentEditorContent" "right panel receives current editor content"
 Assert-Contains $rightPanel "currentContentHash" "right panel receives content hash"
@@ -91,12 +90,14 @@ Assert-Contains $rightPanel "onApplyAiText" "right panel forwards AI apply callb
 
 Assert-Contains $checkPanel "currentEditorContent" "check panel consumes current editor content"
 Assert-Contains $checkPanel "reportOutdated" "check panel detects outdated report"
-Assert-Contains $checkPanel "qualityCheckService\.createReport\(\{" "check panel creates SQLite report"
+Assert-Contains $checkPanel "qualityCheckAiService\.submitCheck\(\{" "manual quality check submits persistent worker task"
 Assert-Contains $checkPanel "contentHash" "check panel binds content hash"
-Assert-Contains $checkPanel "qualityCheckService\.saveResult\(\{" "check panel saves result"
+Assert-Contains $checkPanel "submitted\.taskId\.slice" "manual quality check returns to non-blocking workspace"
+Assert-NotContains $checkPanel "qualityCheckService\.createReport\(\{" "manual quality check does not create WebView report placeholder"
+Assert-NotContains $checkPanel "qualityCheckService\.saveResult\(\{" "manual quality check does not persist WebView provider result"
 Assert-Contains $checkPanel "setFixError\(" "AI fix blocks stale reports"
 Assert-Contains $checkPanel "comparison\.isBetter" "AI fix gates adoption by comparison"
-Assert-Contains $checkPanel "onGenerated\(newDraft,\s*resultMetadata\)" "AI fix applies target-bound better draft to workspace"
+Assert-Contains $checkPanel "onGenerated\(adopted,\s*resultMetadata\)" "AI fix applies target-bound adopted draft to workspace"
 
 Assert-Contains $qualityTypes "contentHash\?: string" "quality type content hash"
 Assert-Contains $qualityTypes "contentLength\?: number" "quality type content length"
