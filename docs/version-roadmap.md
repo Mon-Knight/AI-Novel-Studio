@@ -3,7 +3,8 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.2.0（工作区可靠性与基础设施收口）
+> 当前正式版本：v2.2.0（工作区可靠性与基础设施收口）
+> 当前内部里程碑：v2.3.0-M3（创作意图作者审校与冻结闭环）
 
 ---
 
@@ -136,6 +137,7 @@ v2.0.3  正文版本管理增强
 v2.1.0  单章质量闭环稳定版
 v2.1.1  正文变更安全门
 v2.2.0  工作区可靠性与基础设施收口（当前）
+v2.3.0-M3 创作意图作者审校与冻结闭环（内部里程碑；正式版本仍为 2.2.0）
 ```
 
 ---
@@ -221,6 +223,7 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 | v2.1.0 | 已完成 | 单章质量闭环稳定版 | 工程、快照、生成、版本、质检、修复状态集中展示与链路修复 |
 | v2.1.1 | 已完成 | 正文变更安全门 | 固定目标与基础版本、隔离迟到响应、冲突拒绝、原子采用、会话级幂等应用 |
 | v2.2.0 | **当前** | **工作区可靠性与基础设施收口** | 迁移账本、结构化错误、长正文原子保存与完整性读取、恢复快照、全局 Leave Guard、React/SQLite 故障测试 |
+| v2.3.0-M3 | 内部里程碑 | 创作意图作者审校与冻结闭环 | 作者逐项审校、不可变 revision、Rust CAS/事务、三类 Snapshot；正式版本仍为 2.2.0 |
 
 ### v2.1.1 单一版本目标
 
@@ -253,7 +256,21 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 ---
 
-## 6. Agent Runtime 阶段
+## 6. v2.3.0 内部实施里程碑
+
+> 内部里程碑 tag 不等于正式应用发版，`package.json`、`Cargo.toml` 与 Tauri 配置继续保持 2.2.0。
+
+### v2.3.0-M3 创作意图作者审校与冻结闭环
+
+1. 作品详情提供创作意图入口，作者逐项新增、编辑、删除、确认或拒绝；编辑已确认或已拒绝内容后必须重新决定。
+2. 每次冻结创建不可变 revision，并由 Rust 权威生成身份、时间、statement hash 和 content hash。
+3. `expectedRevision + expectedContentHash` CAS、确定性 operation 和单一 Immediate transaction 保证并发安全、幂等与失败无残留。
+4. 桌面端只复用现有 Task、Attempt 和三类 Snapshot；浏览器开发模式提供带作品级锁和严格版本链校验的 LocalStorage 恢复。
+5. 本里程碑不新增 migration/schema，不调用 Provider/Worker，不创建 Artifact/Proposal/ApplyPlan/TargetLink，不写 Canon，也不扩展到初始化候选、导演或 Story State。
+
+---
+
+## 7. Agent Runtime 阶段
 
 ```text
 v1.0.44 Agent Workflow Runtime 最小闭环 ✅
@@ -267,7 +284,7 @@ v3.x    Multi-Agent / 自主创作
 
 ---
 
-## 7. 发布规则
+## 8. 发布规则
 
 稳定版本发布推荐命令：
 

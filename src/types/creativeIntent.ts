@@ -47,6 +47,33 @@ export interface CreativeIntentSnapshotV1 {
   contentHash: string;
 }
 
+export interface CreativeIntentConfirmationInputV1 {
+  status: ConfirmationStatus;
+}
+
+export interface CreativeIntentStatementInputV1 {
+  statementId: string;
+  kind: CreativeIntentStatementV1['kind'];
+  knowledgeClass: CreativeKnowledgeClass;
+  value: unknown;
+  confidence: number;
+  evidence: EvidenceReferenceV1[];
+  confirmation: CreativeIntentConfirmationInputV1;
+}
+
+export interface FreezeCreativeIntentCommandInput {
+  novelId: string;
+  expectedRevision: number;
+  expectedContentHash?: string;
+  statements: CreativeIntentStatementInputV1[];
+}
+
+export interface CreativeIntentRecordV1 {
+  taskId: string;
+  intent: CreativeIntentSnapshotV1;
+  idempotentReplay: boolean;
+}
+
 export type InitializationTargetType = 'world_setting' | 'rule_system' | 'character';
 
 export interface InitializationConflictV1 {
@@ -144,4 +171,3 @@ export interface DirectorDecisionAuditV1 {
   createdAt: string;
   contentHash: string;
 }
-

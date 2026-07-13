@@ -29,11 +29,11 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 **当前版本：v2.2.0**
 
-**阶段：v2.3.0 内部实施 — 统一任务、Rust Worker 与父子任务 DAG（正式版本仍为 2.2.0）**
+**阶段：v2.3.0-M3 内部里程碑 — 创作意图作者审校与冻结闭环（正式应用版本仍为 v2.2.0）**
 
-当前内部里程碑在 v2.2.0 可靠性基础上增加 `ResultArtifact → PlacementProposal → ApplyPlan → Rust ApplyExecutor → ArtifactTargetLink` 链路。已迁移的正文生成和 AI 修稿结果在用户确认前不写入正式正文；确认时由 SQLite `BEGIN IMMEDIATE` 事务完成再次校验、正文保存与采用、来源链接和幂等结果。
+M3 在作品详情新增创作意图入口。作者可逐项新增、编辑、删除、确认或拒绝陈述；修改已确认或已拒绝内容会自动撤销旧决定。每次冻结创建新的不可变 revision，通过 `parentIntentId` 连接历史版本，并以 statement/content SHA-256 校验内容。
 
-本版本不增加新的 AI 自动写入范围，也不引入未来 Agent 功能；重点是让现有写作工作台在并发、异常退出、数据库故障和长正文损坏场景下保持可恢复、可验证。
+桌面端冻结由 Rust 在单一 `BEGIN IMMEDIATE` 事务中完成，使用 `expectedRevision + expectedContentHash` 乐观锁和确定性 `operationId` 保证并发安全与幂等。该本地作者操作只复用现有 `AiTask + local-author Attempt + 三类 Snapshot`，不调用 Provider 或 Worker，不创建 Artifact、PlacementProposal、ApplyPlan，不写 Canon，也不新增 migration/schema。
 
 ---
 
@@ -52,6 +52,7 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 - **异常恢复快照**：dirty 正文按章节 debounce 持久化，恢复内容不占草稿版本，基线冲突时只能对比、复制、导出或另存候选。
 - **统一离开保护**：章节操作、Hash 路由、历史导航、程序导航和 Tauri 关闭统一提供保存、放弃、取消决策并防重入。
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
+- **创作意图审校与冻结**：作者逐项审校创作目标、事实、偏好和约束；显式输入必须确认，推断 pending 不冒充作者确认，冻结后形成可恢复、可校验的不可变 revision。
 - **AI 结果安全落位**：PlacementProposal 支持目标审计/stale/rebuild，ApplyPlan 固化版本/hash 与 operationId/requestHash，ArtifactTargetLink 永久追踪正式正文来源。
 - **结构化候选审查**：定向修复和全文改写统一重建为完整小说正文，并提供修改摘要、逐项差异导航与格式/约束采用门禁；原始 AI 响应只在高级工程详情中可见。
 - **统一 AI 任务中心**：新 Task、最新执行、候选结果、应用计划和旧任务兼容记录统一可见；任务条不会遮挡正文或阻止导航。
@@ -126,6 +127,7 @@ AI 质量检查、修复复检、润色、章节/卷摘要以及主纲/卷纲/�
 |------|------|------|
 | `/` | 作品管理首页 | 作品卡片列表与快捷入口 |
 | `/novels/:id` | 作品详情 | 基础设定、大纲、角色、风格、设定推演入口 |
+| `/novels/:id/creative-intent` | 创作意图 | 逐项审校并冻结作品级创作意图 revision |
 | `/novels/:id/workspace` | 写作工作台 | AI 逐章创作核心工作区 |
 | `/novels/:id/outline` | 大纲编辑器 | 分卷与章节大纲编辑 |
 | `/novels/:id/setting-suggestions` | 设定库 AI 推演 | 生成并采纳角色、势力、地点、规则候选 |
@@ -181,6 +183,7 @@ AI 质量检查、修复复检、润色、章节/卷摘要以及主纲/卷纲/�
 | v2.1.0 | 已完成：单章质量闭环稳定版 |
 | v2.1.1 | 已完成：正文变更安全门 |
 | v2.2.0 | **当前：工作区可靠性与基础设施收口** |
+| v2.3.0-M3（内部） | 已完成：创作意图作者审校与冻结闭环；正式版本仍为 v2.2.0 |
 | v2.x | 后续：任务恢复、约束验证与 Agent 能力增强 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
@@ -220,6 +223,9 @@ npm run test
 # 正文变更安全门动态测试
 npm run test:workspace-safety
 
+# 创作意图审校、冻结与前置契约专项
+npm run test:creative-intent
+
 # Rust / SQLite 命令安全测试
 cd src-tauri
 cargo test
@@ -255,7 +261,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ## 12. 当前限制
 
-- v2.2.0 仍只覆盖单章正文工作区；通用多目标放置、正文范围锁定和跨目标事务尚未实现。
+- v2.3.0-M3 只完成创作意图作者审校与冻结；初始化候选生成、正式创作导演、Story State 和 Multi-Agent 尚未开放，冻结不会触发 Artifact、ApplyPlan 或 Canon 写入。
 - AI 请求仍以完整响应为主；流式输出、可靠网络取消和进程重启后的在途任务恢复尚未完成。
 - React 组件、路由、关闭适配器和 SQLite 故障路径已有动态测试；发布态 Windows WebView 的完整桌面 E2E 仍需人工回归。
 - 参考小说导入暂未实现。
@@ -275,3 +281,4 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 | 设计文档 | [docs/design/](docs/design/) |
 | 总索引 | [docs/README.md](docs/README.md) |
 | 阶段 3 前置契约 | [docs/architecture/stage3-prerequisites.md](docs/architecture/stage3-prerequisites.md) |
+| v2.3.0-M3 验收 | [docs/audit/phase-3/15-stage-3a-creative-intent-acceptance.md](docs/audit/phase-3/15-stage-3a-creative-intent-acceptance.md) |

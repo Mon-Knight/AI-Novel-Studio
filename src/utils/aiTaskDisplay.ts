@@ -20,6 +20,7 @@ const AI_TASK_DISPLAY_LABELS: Record<string, string> = {
   outline_generate: '作品总纲候选',
   volume_outline_generate: '分卷大纲候选',
   chapter_outline_generate: '章节大纲候选',
+  creative_intent_freeze: '冻结创作意图',
 };
 
 export function getAiTaskDisplayLabel(taskType: string): string {

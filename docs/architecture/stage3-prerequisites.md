@@ -2,7 +2,7 @@
 
 ## 1. 状态
 
-本文冻结阶段 3 开始前的 V1 输入、确认、治理和 Apply 边界。它不实现正式创作导演、Story State、多 Agent 或自动 Apply。
+本文冻结阶段 3 的 V1 输入、确认、治理和 Apply 边界。v2.3.0-M3 已落地其中的创作意图作者审校与本地冻结闭环；正式创作导演、初始化候选 Worker、Story State、多 Agent 和自动 Apply 仍未实现。
 
 阶段 3 后续能力必须继续复用现有 `AiTask + Attempt + Snapshot + Artifact + Proposal + ApplyPlan + DAG`，不得为创作意图或导演另建任务系统。
 
@@ -11,7 +11,7 @@
 `CreativeIntentSnapshotV1` 是一次不可变、可追溯的作者意图快照：
 
 - `schemaVersion=1`；
-- `intentId` 是意图链身份；
+- `intentId` 是当前冻结 revision 的不可变身份，版本链由 `parentIntentId` 连接；
 - `revision` 从 1 递增；
 - `parentIntentId` 指向上一冻结版本；
 - 每条 statement 有独立 `statementHash`；
@@ -27,6 +27,16 @@
 | `requires_confirmation` | AI 提议、信息不足或会改变方向的内容 | 默认 pending，必须人工确认 |
 
 推断结果允许进入冻结输入，以便复现当时决策，但 pending 不等于 Canon，也不得被 Prompt 编译器描述成“作者已确认”。
+
+### 2.1 v2.3.0-M3 实施边界
+
+- 正式入口为 `/novels/:novelId/creative-intent`；
+- 作者显式输入必须 confirmed；推断/待确认项可 pending 或由作者确认/拒绝，编辑已确认或已拒绝内容会撤销旧决定；
+- 冻结提交 `expectedRevision + expectedContentHash`，Rust 生成 revision、父链接、ID、时间和 hash；
+- operation 固定为 `creative-intent:{novelId}:revision:{n}`，相同 request 幂等重放，不同 payload 冲突拒绝；
+- SQLite 在一个 `BEGIN IMMEDIATE` 中写 `AiTask + local-author Attempt + 三类 Snapshot` 并完成 Task，任一步失败整体回滚；
+- Context 预算为零，Constraint 禁止读取/提交/提议/应用 Canon；不产生 Artifact、Proposal、ApplyPlan、TargetLink 或 Canon 写入；
+- 浏览器 LocalStorage 是开发兼容回退，使用作品级锁与严格版本链校验，但不替代桌面 SQLite 权威来源。
 
 ## 3. 初始化候选协议
 
@@ -110,9 +120,8 @@ COMMIT
 
 任何校验、业务唯一性、SQL、TargetLink 或完成结果失败都会回滚同一事务。事务外只记录 Plan failed；不会留下部分 Canon 或部分 TargetLink。completed Plan 的重复请求按 `operationId/requestHash` 返回首次结果，不再次执行 SQL。
 
-## 7. 阶段 3 仍需在正式功能中完成
+## 7. 阶段 3 仍需在后续功能中完成
 
-- 提供作者可编辑和逐项确认创作意图的正式 UI；
 - 由 Rust Worker 生成并持久化初始化候选 Artifact；
 - 将治理契约接入真实导演任务提交门禁和用量记账；
 - 为更新既有 Canon 设计 expectedVersion/hash 与合并冲突，而不是扩张当前 create-only 入口；

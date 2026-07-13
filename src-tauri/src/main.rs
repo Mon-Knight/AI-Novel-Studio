@@ -273,6 +273,8 @@ fn main() {
             commands::ai_tasks::fail_ai_task_attempt,
             commands::ai_tasks::cancel_ai_task,
             commands::ai_tasks::record_ai_task_late_response,
+            commands::creative_intent::get_latest_creative_intent,
+            commands::creative_intent::freeze_creative_intent,
             commands::ai_task_views::list_ai_task_views,
             commands::ai_task_views::archive_ai_task_view,
             commands::ai_task_views::delete_legacy_generation_job_record,

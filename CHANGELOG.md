@@ -1,5 +1,16 @@
 # AI Novel Studio - CHANGELOG
 
+### v2.3.0-M3：创作意图作者审校与冻结闭环
+
+- 作品详情新增创作意图入口与独立桌面编辑页，支持新增、编辑、删除、确认和拒绝陈述；知识分类保持只读，修改已确认或已拒绝内容会自动回到 pending。
+- 作者显式输入必须逐项确认后才能冻结；推断偏好和待确认信息必须保留证据，pending 明确不等于作者确认。页面业务规则与异步读取编排位于 `features/creative-intent`，作品路由切换会隔离迟到响应。
+- 新增 Rust 权威读取与冻结命令；冻结在单一 SQLite `BEGIN IMMEDIATE` 事务中创建不可变 revision、父版本链接、Rust 权威 ID/时间和 statement/content SHA-256。
+- 使用 `expectedRevision + expectedContentHash` CAS、确定性 `creative-intent:{novelId}:revision:{n}` operation、request hash 和幂等重放；相同 revision 的不同 payload 会被拒绝。
+- 桌面端复用现有 `AiTask + local-author Attempt + Input/Context/Constraint Snapshot`，Task 最终为 completed，Provider 调用、token、费用和时长预算均为零；浏览器开发模式提供按作品锁定的 LocalStorage 恢复、严格版本链校验和损坏数据失败关闭。
+- TypeScript 与 Rust 共用稳定 hash 向量，并补充大整数防碰撞、ECMAScript 数字格式和 UTF-16 对象键排序；凭据文本、空内容和自洽但语义无效的快照均会失败关闭。
+- 新增 r1/r2、重启恢复、确认失效、防双击、并发冲突、跨作品迟到读取、事务回滚、存储失败、推断隔离及 hash 兼容测试；专项前端 20/20、全量 Vitest 193/193、Rust 166/166、Node 安全门 5/5 通过。
+- 正式应用版本保持 2.2.0；未新增或修改 migration/schema，未调用或修改 Provider/Worker，未创建 Artifact、PlacementProposal、ApplyPlan、TargetLink 或 Canon 写入。
+
 ### 冷启动首屏与作品读取修复
 
 - 首页保持首屏代码优先加载，其余页面改为按路由加载；生产构建的首屏 JavaScript 从约 919.30 KB 降至 326.65 KB，降低 WebView 冷启动解析开销。

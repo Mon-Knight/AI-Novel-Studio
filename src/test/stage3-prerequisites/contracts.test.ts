@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   assertDirectorDecisionAllowed,
   buildInitializationCandidateBundle,
@@ -7,6 +7,7 @@ import {
   createDirectorGovernance,
   decideInitializationCandidates,
   freezeCreativeIntent,
+  stableCanonicalStringify,
 } from '../../services/ai-tasks/stage3PrerequisiteService';
 
 const authorEvidence = [{
@@ -58,6 +59,49 @@ async function frozenIntent() {
 }
 
 describe('stage 3 prerequisite contracts', () => {
+  it('matches the Rust creative-intent hash vector', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-13T00:00:00.000Z'));
+    try {
+      const intent = await freezeCreativeIntent({
+        intentId: 'intent-fixed',
+        novelId: 'novel-a',
+        revision: 1,
+        createdAt: '2026-07-13T00:00:00.000Z',
+        statements: [{
+          statementId: 'goal-1',
+          kind: 'goal',
+          knowledgeClass: 'author_explicit',
+          value: '写一部长篇东方奇幻小说',
+          confidence: 1,
+          evidence: [],
+          confirmation: {
+            status: 'confirmed',
+            confirmedBy: 'author',
+            confirmedAt: '2026-07-13T00:00:00.000Z',
+          },
+        }],
+      });
+      expect(intent.statements[0].statementHash).toBe(
+        '7b6c2ee789159e1b5f370bdbc3a798d304bf007b2dfc9b19dafc012e16170e3e',
+      );
+      expect(intent.contentHash).toBe(
+        'bfca2c4714852edf3f1f3f992f59929e4a8728941f7f2264ea3fed96c9004229',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the same number and UTF-16 key canonicalization vector as Rust', () => {
+    const vector = JSON.parse(
+      '{"\\uE000":"bmp","\\uD800\\uDC00":"astral","large":1e21,"small":1e-6,"negativeZero":-0}',
+    );
+    expect(stableCanonicalStringify(vector)).toBe(
+      '{"large":1e+21,"negativeZero":0,"small":0.000001,"𐀀":"astral","":"bmp"}',
+    );
+  });
+
   it('freezes and versions explicit, inferred and pending creative intent separately', async () => {
     const intent = await frozenIntent();
     expect(intent.schemaVersion).toBe(1);
@@ -179,4 +223,3 @@ describe('stage 3 prerequisite contracts', () => {
     expect(audit.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 });
-

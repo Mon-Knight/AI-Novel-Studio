@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub const CREATIVE_INTENT_SCHEMA_VERSION: i64 = 1;
 pub const INITIALIZATION_CANDIDATE_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -9,6 +10,15 @@ pub enum CreativeKnowledgeClass {
     AuthorExplicit,
     InferredPreference,
     RequiresConfirmation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CreativeIntentKind {
+    Goal,
+    Preference,
+    Fact,
+    Constraint,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,10 +38,77 @@ pub struct EvidenceReferenceV1 {
 #[serde(rename_all = "camelCase")]
 pub struct AuthorConfirmationV1 {
     pub status: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmed_by: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreativeIntentConfirmationInputV1 {
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreativeIntentStatementInputV1 {
+    pub statement_id: String,
+    pub kind: CreativeIntentKind,
+    pub knowledge_class: CreativeKnowledgeClass,
+    pub value: Value,
+    pub confidence: f64,
+    #[serde(default)]
+    pub evidence: Vec<EvidenceReferenceV1>,
+    pub confirmation: CreativeIntentConfirmationInputV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreativeIntentStatementV1 {
+    pub statement_id: String,
+    pub kind: CreativeIntentKind,
+    pub knowledge_class: CreativeKnowledgeClass,
+    pub value: Value,
+    pub confidence: f64,
+    #[serde(default)]
+    pub evidence: Vec<EvidenceReferenceV1>,
+    pub confirmation: AuthorConfirmationV1,
+    pub statement_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreativeIntentSnapshotV1 {
+    pub schema_version: i64,
+    pub intent_id: String,
+    pub novel_id: String,
+    pub revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_intent_id: Option<String>,
+    pub status: String,
+    pub statements: Vec<CreativeIntentStatementV1>,
+    pub created_at: String,
+    pub frozen_at: String,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FreezeCreativeIntentInput {
+    pub novel_id: String,
+    pub expected_revision: i64,
+    #[serde(default)]
+    pub expected_content_hash: Option<String>,
+    pub statements: Vec<CreativeIntentStatementInputV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreativeIntentRecordV1 {
+    pub task_id: String,
+    pub intent: CreativeIntentSnapshotV1,
+    pub idempotent_replay: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

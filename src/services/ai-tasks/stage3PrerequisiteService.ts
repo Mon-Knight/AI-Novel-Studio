@@ -39,33 +39,52 @@ export interface CreateDirectorGovernanceInput extends Omit<DirectorGovernanceV1
 
 export interface CreateDirectorDecisionAuditInput extends Omit<DirectorDecisionAuditV1, 'schemaVersion' | 'contentHash'> {}
 
-function stableStringify(value: unknown): string {
+export function stableCanonicalStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(stableCanonicalStringify).join(',')}]`;
   const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableCanonicalStringify(record[key])}`).join(',')}}`;
 }
 
 function fail(message: string): never {
   throw new Error(message);
 }
 
+function valueIsEmpty(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length === 0;
+  return false;
+}
+
+function containsCredential(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return /(?:api[_ -]?key\s*[:=]|apikey\s*[:=]|authorization\s*[:=]|bearer\s+[a-z0-9._-]{8,}|sk-[a-z0-9_-]{8,})/i.test(value);
+  }
+  if (Array.isArray(value)) return value.some(containsCredential);
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
+    ['apikey', 'api_key', 'authorization', 'secret'].includes(key.toLowerCase())
+    || containsCredential(child)
+  ));
+}
+
 function validateConfirmation(
   knowledgeClass: CreativeIntentStatementV1['knowledgeClass'],
   confirmation: AuthorConfirmationV1,
 ): void {
-  if (confirmation.status === 'confirmed' && confirmation.confirmedBy !== 'author') {
-    fail('确认结果必须由作者显式确认');
+  if (confirmation.status === 'pending' && (confirmation.confirmedBy || confirmation.confirmedAt)) {
+    fail('待确认信息不得携带作者确认记录');
   }
-  if (confirmation.status === 'confirmed' && !confirmation.confirmedAt) {
-    fail('确认结果必须记录确认时间');
+  if (confirmation.status !== 'pending' && confirmation.confirmedBy !== 'author') {
+    fail('确认或拒绝结果必须由作者显式确认');
+  }
+  if (confirmation.status !== 'pending' && !confirmation.confirmedAt) {
+    fail('确认或拒绝结果必须记录决定时间');
   }
   if (knowledgeClass === 'author_explicit' && confirmation.status !== 'confirmed') {
     fail('作者明确输入必须记录为作者已确认');
-  }
-  if (knowledgeClass !== 'author_explicit' && confirmation.status === 'confirmed'
-      && confirmation.confirmedBy !== 'author') {
-    fail('推断或待确认信息不得自动确认');
   }
 }
 
@@ -73,16 +92,17 @@ function validateEvidence(evidence: EvidenceReferenceV1[], required: boolean): v
   if (required && evidence.length === 0) fail('推断、待确认信息和初始化候选必须提供证据');
   const ids = new Set<string>();
   for (const item of evidence) {
-    if (!item.evidenceId.trim()) fail('证据 ID 不能为空');
-    if (ids.has(item.evidenceId)) fail(`证据 ID 重复: ${item.evidenceId}`);
-    ids.add(item.evidenceId);
+    const evidenceId = item.evidenceId.trim();
+    if (!evidenceId) fail('证据 ID 不能为空');
+    if (ids.has(evidenceId)) fail(`证据 ID 重复: ${item.evidenceId}`);
+    ids.add(evidenceId);
   }
 }
 
 async function hash(value: unknown): Promise<string> {
   const serialized = JSON.stringify(value);
   if (serialized === undefined) fail('协议内容必须可以持久化为 JSON');
-  return computeContentSha256(stableStringify(JSON.parse(serialized)));
+  return computeContentSha256(stableCanonicalStringify(JSON.parse(serialized)));
 }
 
 export async function freezeCreativeIntent(input: FreezeCreativeIntentInput): Promise<CreativeIntentSnapshotV1> {
@@ -93,17 +113,22 @@ export async function freezeCreativeIntent(input: FreezeCreativeIntentInput): Pr
   const ids = new Set<string>();
   const statements: CreativeIntentStatementV1[] = [];
   for (const statement of input.statements) {
-    if (!statement.statementId.trim()) fail('创作意图陈述 ID 不能为空');
-    if (ids.has(statement.statementId)) fail(`创作意图陈述 ID 重复: ${statement.statementId}`);
-    ids.add(statement.statementId);
-    if (statement.confidence < 0 || statement.confidence > 1) fail('confidence 必须位于 0 到 1');
+    const statementId = statement.statementId.trim();
+    if (!statementId) fail('创作意图陈述 ID 不能为空');
+    if (ids.has(statementId)) fail(`创作意图陈述 ID 重复: ${statement.statementId}`);
+    ids.add(statementId);
+    if (valueIsEmpty(statement.value)) fail('创作意图内容不能为空');
+    if (!Number.isFinite(statement.confidence)
+        || statement.confidence < 0 || statement.confidence > 1) fail('confidence 必须位于 0 到 1');
     validateConfirmation(statement.knowledgeClass, statement.confirmation);
     validateEvidence(statement.evidence, statement.knowledgeClass !== 'author_explicit');
     statements.push({ ...statement, statementHash: await hash(statement) });
   }
 
+  if (containsCredential(input)) fail('创作意图不得包含 API Key 或授权信息');
+
   const createdAt = input.createdAt ?? new Date().toISOString();
-  const frozenAt = new Date().toISOString();
+  const frozenAt = createdAt;
   const withoutHash = {
     schemaVersion: CREATIVE_INTENT_SCHEMA_VERSION,
     intentId: input.intentId ?? crypto.randomUUID(),
@@ -116,6 +141,35 @@ export async function freezeCreativeIntent(input: FreezeCreativeIntentInput): Pr
     frozenAt,
   };
   return { ...withoutHash, contentHash: await hash(withoutHash) };
+}
+
+export async function validateCreativeIntentSnapshot(
+  snapshot: CreativeIntentSnapshotV1,
+  expectedNovelId = snapshot.novelId,
+): Promise<void> {
+  if (snapshot.schemaVersion !== CREATIVE_INTENT_SCHEMA_VERSION || snapshot.status !== 'frozen') {
+    fail('创作意图快照协议无效');
+  }
+  if (snapshot.novelId !== expectedNovelId || snapshot.revision < 1 || snapshot.statements.length === 0
+      || !snapshot.intentId.trim() || !snapshot.createdAt.trim() || !snapshot.frozenAt.trim()) {
+    fail('创作意图快照范围或 revision 无效');
+  }
+  const ids = new Set<string>();
+  for (const statement of snapshot.statements) {
+    const statementId = statement.statementId.trim();
+    if (!statementId || ids.has(statementId)) fail('创作意图快照包含重复陈述');
+    ids.add(statementId);
+    if (valueIsEmpty(statement.value)) fail('创作意图快照包含空内容');
+    if (!Number.isFinite(statement.confidence)
+        || statement.confidence < 0 || statement.confidence > 1) fail('confidence 必须位于 0 到 1');
+    validateConfirmation(statement.knowledgeClass, statement.confirmation);
+    validateEvidence(statement.evidence, statement.knowledgeClass !== 'author_explicit');
+    const { statementHash, ...body } = statement;
+    if (await hash(body) !== statementHash) fail(`创作意图陈述 hash 校验失败: ${statement.statementId}`);
+  }
+  if (containsCredential(snapshot)) fail('创作意图快照包含凭据或授权信息');
+  const { contentHash, ...body } = snapshot;
+  if (await hash(body) !== contentHash) fail('创作意图快照 contentHash 校验失败');
 }
 
 export async function buildInitializationCandidateBundle(
