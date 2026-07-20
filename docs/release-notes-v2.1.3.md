@@ -52,6 +52,7 @@
 - 为旧 `style_profiles` 表幂等补充 `description` 列，修正风格列表可选参数和上下文日志 `{ input }` IPC 包装。
 - 修复 Windows 运行器启动 `.cmd` 的 `EINVAL`、Edge 150 capability 和旧 E2E 可执行文件选择问题。
 - 修复 GitHub Windows runner 错用 `tauri-driver --version` 校验 0.1.5 的问题，改为从 Cargo 安装清单确认精确版本并兼容 CRLF 输出。
+- 修复候选采用 E2E 对 SQLite CRLF 与 HTML textarea LF 进行逐字节比较造成的 Windows 误报；断言仅标准化换行，仍验证正文字符完整一致。
 
 ## 主要文件变更
 

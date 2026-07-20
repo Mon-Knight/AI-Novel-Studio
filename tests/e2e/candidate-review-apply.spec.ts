@@ -32,6 +32,10 @@ interface AiTaskView {
   provider?: string;
 }
 
+function normalizeTextareaLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
+}
+
 describe('candidate review and adoption', () => {
   it('generates a candidate, reviews its constraints, and adopts it only after confirmation', async () => {
     const projectId = await createProjectThroughUi(E2E_FIXTURES.candidateApply.projectTitle);
@@ -87,7 +91,8 @@ describe('candidate review and adoption', () => {
     expect(await editor.getAttribute('data-draft-id')).toBe(resultId);
     expect(await editor.getAttribute('data-adopted')).toBe('false');
     expect(Number(await editor.getAttribute('data-word-count'))).toBe(candidate.wordCount);
-    expect(await editor.getValue()).toBe(candidate.content);
+    expect(normalizeTextareaLineEndings(await editor.getValue()))
+      .toBe(normalizeTextareaLineEndings(candidate.content));
     expect(await editor.getAttribute('data-dirty')).toBe('false');
 
     const tasks = await bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId });
@@ -157,7 +162,8 @@ describe('candidate review and adoption', () => {
     expect(generationTasksAfterRepeat[0].id).toBe(aiTaskId);
     expect(generationTasksAfterRepeat[0].status).toBe('succeeded');
     const adoptedEditor = await waitForTestId('chapter-editor');
-    expect(await adoptedEditor.getValue()).toBe(candidate.content);
+    expect(normalizeTextareaLineEndings(await adoptedEditor.getValue()))
+      .toBe(normalizeTextareaLineEndings(candidate.content));
     expect(await adoptedEditor.getAttribute('data-adopted')).toBe('true');
     expect(Number(await adoptedEditor.getAttribute('data-word-count'))).toBe(candidate.wordCount);
   });
