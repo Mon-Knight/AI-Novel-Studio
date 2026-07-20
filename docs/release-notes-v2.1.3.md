@@ -51,6 +51,7 @@
 - 统一编辑器与 Rust 草稿保存的中英文计字语义，避免页面与数据库字数不一致。
 - 为旧 `style_profiles` 表幂等补充 `description` 列，修正风格列表可选参数和上下文日志 `{ input }` IPC 包装。
 - 修复 Windows 运行器启动 `.cmd` 的 `EINVAL`、Edge 150 capability 和旧 E2E 可执行文件选择问题。
+- 修复 GitHub Windows runner 错用 `tauri-driver --version` 校验 0.1.5 的问题，改为从 Cargo 安装清单确认精确版本并兼容 CRLF 输出。
 
 ## 主要文件变更
 
@@ -88,7 +89,7 @@
 
 - 产品当前没有崩溃恢复流程，因此不伪造 `recovery-dialog`。
 - 当前数据模型没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试验证现有草稿、AI Task、目标绑定、基础哈希、采用状态和幂等约束。
-- GitHub-hosted Windows 的实际缓存、桌面会话和 artifact 服务只能在 workflow 首次推送后验证；本地已完成 workflow 静态检查和同等桌面命令验证。
+- GitHub-hosted Windows runner 的缓存、桌面会话、WebView2 / EdgeDriver 下载和 artifact 服务可能随 runner 镜像变化；本版本以 `main` smoke 与 `v2.1.3` tag full workflow 的实际结果作为线上验收。
 - React 组件级并发覆盖、安装程序 UI、原生文件选择器、系统托盘、Windows 通知和多显示器不在本版本范围。
 
 ## 后续计划
