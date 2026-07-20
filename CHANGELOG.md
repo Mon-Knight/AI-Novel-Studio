@@ -1,6 +1,6 @@
 # AI Novel Studio - CHANGELOG
 
-## 未发布 - Windows 真实桌面 E2E 自动化
+## v2.1.3 (2026-07-21) - Windows 真实桌面 E2E 与稳定性
 
 ### 新增
 
@@ -12,6 +12,7 @@
 - 新增始终写出的 `frontend-diagnostics.json`，记录脱敏后的路由、DOM 摘要、console、未处理异常、Rust 诊断和 WebView 网络尝试摘要；运行器独立复核该文件，缺失、解析失败、console error、未处理异常、guard 未安装或网络尝试非零都会使 spec 失败。
 - 新增作品提交只读探针：用独立 `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX` 连接读取作品行数、标题和更新时间，证明保存事务已对其他连接可见并验证没有重复写入。
 - 新增 [Windows 桌面 E2E 自动化文档](docs/technical/desktop-e2e.md)，记录审计基线、Windows 前置条件、隔离与网络阻断、命令、失败产物和 stale executable 排障。
+- 新增 Windows GitHub Actions 门禁：Pull Request 与 `main` 推送运行桌面 smoke，定时任务、版本 tag 和手动完整模式运行六条真实桌面流程；失败时上传脱敏诊断产物。
 
 ### 修改
 
@@ -30,12 +31,12 @@
 - 修复 Rust 草稿计字把部分标点计入字数、与编辑器“每个中日韩字符 + 每个连续 ASCII 字母数字词”语义不一致的问题，并增加中英文、Markdown 分隔符和纯标点回归测试。
 - 修复健康门禁暴露的风格与上下文 IPC 错误：为旧 `style_profiles` 表幂等迁移 `description` 列并保留空库内建风格，使 `list_style_profiles` 接受可选项目参数，并把 `save_context_read_log` 调用按 Rust DTO 正确包装为 `{ input }`。
 
-### 版本边界
+### 版本说明
 
-- 保持应用版本 `2.1.2`，本条目不代表新的版本发布或 tag。
+- 应用版本统一更新为 `2.1.3`；既有 `v2.1.2` tag 保持指向完整备份与恢复版本，不移动、不覆盖。
 - 产品当前没有崩溃恢复对话框，因此不伪造 `recovery-dialog`；安装程序、原生文件选择器、托盘、Windows 通知、多显示器和视觉识别也不在首批范围。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选采用测试覆盖现有草稿、AI 任务、目标与基础正文绑定、采用状态、页面字数同步和重复采用幂等，不把等价约束描述成不存在的实体状态。
-- 最终验证命令、通过数量和连续运行结果以本次任务完成汇报的真实执行结果为准，不在验证完成前预填。
+- 本版本不扩展 AI 自动写入范围，不修改既有 migration，只发布桌面 E2E 基础设施及真实测试暴露的稳定性修复。
 
 ## v2.1.2 (2026-07-20) - 完整备份与恢复闭环
 

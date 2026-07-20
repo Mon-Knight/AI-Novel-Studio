@@ -1,6 +1,6 @@
 # Windows 桌面 E2E 自动化
 
-> 适用版本：v2.1.2 工作区中的桌面 E2E 基础设施
+> 适用版本：v2.1.3 及后续版本的桌面 E2E 基础设施
 > 目标平台：Windows 10 / 11，真实 Tauri 窗口、Rust IPC、SQLite 与 WebView2
 
 本套测试使用 WebdriverIO、`tauri-driver` 和 Microsoft Edge WebDriver 直接操作 WebView DOM。测试只通过 `data-testid`、元素状态、路由和受限 Tauri IPC 进行定位与断言；截图不参与点击、定位或通过判定，且只在失败后、WebDriver 会话仍可访问时尽力生成。
@@ -156,6 +156,17 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 ```
 
 运行器优先使用显式环境变量，其次扫描 `.e2e-tools`，最后搜索 `PATH`。驱动下载和 `npm install` 可能需要网络，但测试运行本身不依赖互联网。
+
+### 3.1 Windows CI
+
+`.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
+
+- Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
+- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行六个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+
+CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
+
+所有依赖、Rust crates、`tauri-driver` 和 EdgeDriver 都在准备阶段下载。专用 E2E EXE 随后使用 Cargo / npm offline 模式构建；真正的 WDIO 步骤设置 `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`、`CARGO_NET_OFFLINE=true` 和 `NPM_CONFIG_OFFLINE=true`，不会在场景执行时补装依赖。应用侧仍由 WebView 网络 guard、强制 Mock Provider 和 Rust AI IPC 阻断共同保证零外部业务请求；WebDriver 只使用本机 loopback 端口。失败时 CI 上传脱敏后的 `test-results/e2e`，保留 7 天。
 
 ---
 

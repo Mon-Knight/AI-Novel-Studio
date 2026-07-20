@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.2（完整备份与恢复闭环）+ 未发布桌面 E2E 基础设施
+> 当前版本：v2.1.3（Windows 真实桌面 E2E 与稳定性）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-v2.1.2 在既有正文安全验证上增加项目备份恢复的真实 SQLite 往返验证：
+截至 v2.1.3，测试体系在既有正文安全与项目备份恢复验证上增加 Windows 真实桌面 E2E：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -156,6 +156,8 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 测试通过 `data-testid`、元素状态、HashRouter 和 Tauri IPC 定位与断言，不使用中文文本、CSS 类、DOM 层级、屏幕坐标或截图识别。`frontend-diagnostics.json`、WebdriverIO、driver / Rust 日志、数据库位置和进程清理结果都会写入诊断目录；失败时在会话仍可访问的前提下尽力追加 DOM、当前路由和截图。
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
+
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行六条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ---
 

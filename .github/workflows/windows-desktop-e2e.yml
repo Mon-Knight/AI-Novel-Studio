@@ -1,0 +1,286 @@
+name: Windows desktop quality and E2E
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    # Tuesday 02:00 Asia/Shanghai. Scheduled workflows run from the default branch.
+    - cron: "0 18 * * 1"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Desktop E2E suite to run
+        required: true
+        default: full
+        type: choice
+        options:
+          - smoke
+          - full
+          - full-three
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  quality:
+    name: Frontend, Rust, and production build
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Select stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup target add x86_64-pc-windows-msvc --toolchain stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustc --version
+
+      - name: Cache Rust dependencies and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-quality-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-quality-${{ runner.os }}-
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm run test
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust targets
+        shell: pwsh
+        run: |
+          cargo check --locked --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo check --locked --features e2e --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build production Tauri executable
+        run: npm run tauri:build -- --bundles none --ci
+
+  desktop-e2e:
+    name: Real Windows Tauri E2E (${{ ((github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 'full') || (github.event_name == 'workflow_dispatch' && inputs.suite) || 'smoke' }})
+    needs: quality
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      E2E_SUITE: ${{ ((github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 'full') || (github.event_name == 'workflow_dispatch' && inputs.suite) || 'smoke' }}
+      MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Select stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup target add x86_64-pc-windows-msvc --toolchain stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustc --version
+
+      - name: Cache E2E Rust dependencies and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .e2e-tools/target
+          key: windows-e2e-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-e2e-${{ runner.os }}-
+
+      - name: Install Node and Rust dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install tauri-driver 0.1.5
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE ".e2e-tools\tauri-driver"
+          cargo install tauri-driver --version 0.1.5 --locked --root $root
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $driver = Join-Path $root "bin\tauri-driver.exe"
+          if (-not (Test-Path -LiteralPath $driver -PathType Leaf)) {
+            throw "tauri-driver was not installed at $driver"
+          }
+          $driverBanner = (& $driver --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $driverBanner -notmatch "\b0\.1\.5\b") {
+            throw "Expected tauri-driver 0.1.5, received: $driverBanner"
+          }
+          "AI_NOVEL_STUDIO_E2E_DRIVER=$driver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Match EdgeDriver to the installed WebView2 Runtime
+        id: edgedriver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $clientId = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          $registryPaths = @(
+            "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$clientId",
+            "Registry::HKEY_CURRENT_USER\Software\Microsoft\EdgeUpdate\Clients\$clientId"
+          )
+          $runtimeVersions = @(
+            foreach ($registryPath in $registryPaths) {
+              if (Test-Path -LiteralPath $registryPath) {
+                $value = (Get-ItemProperty -LiteralPath $registryPath -Name pv -ErrorAction Stop).pv
+                if ($value -and $value -ne "0.0.0.0") { [string]$value }
+              }
+            }
+          )
+          if ($runtimeVersions.Count -eq 0) {
+            throw "Microsoft Edge WebView2 Runtime was not found in the documented registry locations."
+          }
+          $runtimeVersion = $runtimeVersions |
+            Sort-Object { [version]$_ } -Descending |
+            Select-Object -First 1
+          $runtimeBuild = (($runtimeVersion -split "\.")[0..2] -join ".")
+
+          # Keep Evergreen from changing versions between discovery and the test session.
+          $policyPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\EdgeUpdate"
+          New-Item -Path $policyPath -Force | Out-Null
+          New-ItemProperty -Path $policyPath -Name "Update$clientId" -PropertyType DWord -Value 0 -Force | Out-Null
+
+          $driverRoot = Join-Path $env:GITHUB_WORKSPACE ".e2e-tools\edgedriver-$runtimeVersion"
+          $archive = Join-Path $env:RUNNER_TEMP "edgedriver_win64.zip"
+          $download = "https://msedgedriver.microsoft.com/$runtimeVersion/edgedriver_win64.zip"
+          New-Item -ItemType Directory -Path $driverRoot -Force | Out-Null
+          $downloaded = $false
+          foreach ($attempt in 1..3) {
+            try {
+              Invoke-WebRequest -Uri $download -OutFile $archive -TimeoutSec 120
+              $downloaded = $true
+              break
+            } catch {
+              if ($attempt -eq 3) { throw }
+              Start-Sleep -Seconds (2 * $attempt)
+            }
+          }
+          if (-not $downloaded) { throw "EdgeDriver download did not complete." }
+          Expand-Archive -LiteralPath $archive -DestinationPath $driverRoot -Force
+          $nativeDriver = Join-Path $driverRoot "msedgedriver.exe"
+          if (-not (Test-Path -LiteralPath $nativeDriver -PathType Leaf)) {
+            throw "EdgeDriver archive did not contain msedgedriver.exe."
+          }
+
+          $driverBanner = (& $nativeDriver --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $driverBanner -notmatch "(\d+\.\d+\.\d+\.\d+)") {
+            throw "Unable to read the downloaded EdgeDriver version: $driverBanner"
+          }
+          $driverVersion = $Matches[1]
+          $driverBuild = (($driverVersion -split "\.")[0..2] -join ".")
+          if ($driverBuild -ne $runtimeBuild) {
+            throw "EdgeDriver $driverVersion does not match WebView2 Runtime $runtimeVersion (expected build $runtimeBuild)."
+          }
+
+          "AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER=$nativeDriver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WEBVIEW2_RUNTIME_VERSION=$runtimeVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "EDGE_DRIVER_VERSION=$driverVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WebView2 Runtime: $runtimeVersion"
+          "Microsoft Edge WebDriver: $driverVersion"
+
+      - name: Build the isolated E2E application
+        shell: pwsh
+        env:
+          CARGO_NET_OFFLINE: "true"
+          NPM_CONFIG_OFFLINE: "true"
+          VITE_AI_NOVEL_STUDIO_E2E: "1"
+        run: |
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE ".e2e-tools\target"
+          node node_modules/@tauri-apps/cli/tauri.js build --features e2e --bundles none --ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify WebView2 and EdgeDriver still match
+        shell: pwsh
+        run: |
+          $clientId = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          $paths = @(
+            "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$clientId",
+            "Registry::HKEY_CURRENT_USER\Software\Microsoft\EdgeUpdate\Clients\$clientId"
+          )
+          $versions = @(
+            foreach ($path in $paths) {
+              if (Test-Path -LiteralPath $path) {
+                $value = (Get-ItemProperty -LiteralPath $path -Name pv -ErrorAction Stop).pv
+                if ($value -and $value -ne "0.0.0.0") { [string]$value }
+              }
+            }
+          )
+          $current = $versions | Sort-Object { [version]$_ } -Descending | Select-Object -First 1
+          if (-not $current) { throw "WebView2 Runtime disappeared before E2E execution." }
+          $currentBuild = (($current -split "\.")[0..2] -join ".")
+          $driverBuild = (($env:EDGE_DRIVER_VERSION -split "\.")[0..2] -join ".")
+          if ($currentBuild -ne $driverBuild) {
+            throw "WebView2 changed to $current after EdgeDriver $env:EDGE_DRIVER_VERSION was provisioned."
+          }
+
+      - name: Run real desktop E2E without dependency downloads
+        shell: pwsh
+        env:
+          AI_NOVEL_STUDIO_E2E_SKIP_BUILD: "1"
+          CARGO_NET_OFFLINE: "true"
+          NPM_CONFIG_OFFLINE: "true"
+        run: |
+          $command = if ($env:E2E_SUITE -eq "smoke") { "test:e2e:smoke" } else { "test:e2e" }
+          $repeat = if ($env:E2E_SUITE -eq "full-three") { 3 } else { 1 }
+          foreach ($run in 1..$repeat) {
+            Write-Host "Running $command ($run/$repeat)"
+            npm run $command
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Upload E2E failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/e2e
+          if-no-files-found: warn
+          retention-days: 7
