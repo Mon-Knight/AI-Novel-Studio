@@ -16,6 +16,7 @@ import AiTasksPage from './pages/AiTasks/AiTasksPage';
 import ImportExportPage from './pages/ImportExport/ImportExportPage';
 import OutlineEditorPage from './pages/OutlineEditor/OutlineEditorPage';
 import SettingSuggestionsPage from './pages/SettingSuggestions/SettingSuggestionsPage';
+import E2eDialogHost from './components/common/E2eDialogHost';
 
 function App() {
   const globalLoading = useGlobalLoadingModal(1200);
@@ -56,6 +57,7 @@ function App() {
         onClose={globalLoading.closeModal}
         onRetry={globalLoading.onRetry}
       />
+      <E2eDialogHost />
     </ErrorBoundary>
   );
 }

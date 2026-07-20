@@ -109,7 +109,12 @@ function HomePage() {
 
       {/* 快捷入口 */}
       <div className="home-quick-actions">
-        <div className="quick-action-card" onClick={() => setShowCreateModal(true)} style={{ borderColor: 'var(--color-primary)', background: 'var(--color-primary-light)' }}>
+        <div
+          className="quick-action-card"
+          data-testid="project-create"
+          onClick={() => setShowCreateModal(true)}
+          style={{ borderColor: 'var(--color-primary)', background: 'var(--color-primary-light)' }}
+        >
           <div className="qa-icon">✏️</div>
           <div className="qa-label" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>新建作品</div>
         </div>
@@ -134,34 +139,37 @@ function HomePage() {
         <span className="home-section-count">共 {novels.length} 部</span>
       </div>
 
-      {novels.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>
-          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📖</div>
-          <div style={{ fontSize: 16, marginBottom: 16 }}>还没有作品，点击上方「新建作品」开始</div>
-        </div>
-      ) : (
-        <div className="novel-card-grid">
-          {novels.map((novel) => (
-            <NovelCard
-              key={novel.id}
-              novel={novel}
-              onClick={() => navigate(`/novels/${novel.id}`)}
-              onEnterWorkspace={() => navigate(`/novels/${novel.id}/workspace`)}
-              onDelete={handleDeleteNovel}
-            />
-          ))}
-        </div>
-      )}
+      <div data-testid="project-list">
+        {novels.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>
+            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📖</div>
+            <div style={{ fontSize: 16, marginBottom: 16 }}>还没有作品，点击上方「新建作品」开始</div>
+          </div>
+        ) : (
+          <div className="novel-card-grid">
+            {novels.map((novel) => (
+              <NovelCard
+                key={novel.id}
+                novel={novel}
+                onClick={() => navigate(`/novels/${novel.id}`)}
+                onEnterWorkspace={() => navigate(`/novels/${novel.id}/workspace`)}
+                onDelete={handleDeleteNovel}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* 新建作品弹窗 */}
       {showCreateModal && (
-        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+        <div className="modal-overlay" data-testid="project-create-dialog" onClick={() => setShowCreateModal(false)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">✏️ 新建作品</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <label className="panel-field-label">作品名称 *</label>
                 <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
+                  data-testid="project-name-input"
                   className="form-input" placeholder="请输入作品名称" style={{ width: '100%' }}
                   autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateNovel()} />
               </div>
@@ -177,13 +185,13 @@ function HomePage() {
                   style={{ width: '100%', height: 80, resize: 'vertical' }} />
               </div>
               {createError && (
-                <div style={{ fontSize: 13, color: 'var(--color-error)' }}>{createError}</div>
+                <div data-testid="error-notice" style={{ fontSize: 13, color: 'var(--color-error)' }}>{createError}</div>
               )}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn btn-secondary" onClick={() => { setShowCreateModal(false); setCreateError(''); }}>
                   取消
                 </button>
-                <button className="btn btn-primary" onClick={handleCreateNovel} disabled={creating}>
+                <button data-testid="project-save" className="btn btn-primary" onClick={handleCreateNovel} disabled={creating}>
                   {creating ? '创建中...' : '创建作品'}
                 </button>
               </div>

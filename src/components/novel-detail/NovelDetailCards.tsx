@@ -91,14 +91,22 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
   };
 
   return (
-    <div className="detail-card" style={{ gridColumn: '1 / -1' }}>
+    <div
+      className="detail-card"
+      data-testid="project-settings"
+      data-project-id={novel.id}
+      data-project-name={novel.title}
+      data-saving={saving ? 'true' : 'false'}
+      data-editing={editing ? 'true' : 'false'}
+      style={{ gridColumn: '1 / -1' }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 18 }}>📖</span>
           <span style={{ fontSize: 16, fontWeight: 600 }}>作品信息</span>
         </div>
         {!editing ? (
-          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
+          <button data-testid="project-edit" className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
             ✏️ 编辑
           </button>
         ) : null}
@@ -110,6 +118,7 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
             <label className="panel-field-label">作品名称 *</label>
             <input
               type="text"
+              data-testid="project-name-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="form-input"
@@ -177,14 +186,9 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
               />
             </div>
           </div>
-          {message && (
-            <div style={{ fontSize: 13, color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)' }}>
-              {message}
-            </div>
-          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn btn-secondary btn-sm" onClick={handleCancel}>取消</button>
-            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+            <button data-testid="project-save" className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
               {saving ? '保存中...' : '💾 保存'}
             </button>
           </div>
@@ -227,6 +231,14 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
               <div>{formatDate(novel.updatedAt)}</div>
             </div>
           </div>
+        </div>
+      )}
+      {message && (
+        <div
+          data-testid={message === '保存成功' ? 'success-notice' : 'error-notice'}
+          style={{ fontSize: 13, marginTop: 10, color: message === '保存成功' ? 'var(--color-success)' : 'var(--color-error)' }}
+        >
+          {message}
         </div>
       )}
     </div>

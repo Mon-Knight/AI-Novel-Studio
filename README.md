@@ -66,6 +66,8 @@ v2.1.2 聚焦作品数据的可信备份与恢复：完整项目 JSON 以版本�
 - Rust（仅 Tauri 桌面模式需要）
 - Windows 10/11
 
+运行真实桌面 E2E 还需要 `tauri-driver 0.1.5`、Microsoft Edge WebView2 Runtime，以及与 WebView2 主版本一致的 `msedgedriver.exe`。详细安装与版本匹配见 [Windows 桌面 E2E 自动化](docs/technical/desktop-e2e.md)。
+
 ### 安装与启动
 
 ```powershell
@@ -189,9 +191,10 @@ ai-novel-studio/
 │  └─ agent-tools/      # Agent Tool Layer
 ├─ src-tauri/           # Tauri Rust 桌面壳
 ├─ prompts/             # AI 提示词模板
+├─ tests/e2e/           # WebdriverIO Windows 真实桌面 E2E
 ├─ docs/                # 项目文档
 ├─ .github/             # GitHub 配置与开发辅助系统
-└─ scripts/             # 构建与验证脚本
+└─ scripts/             # 构建、E2E 运行与验证脚本
 ```
 
 ---
@@ -199,6 +202,15 @@ ai-novel-studio/
 ## 11. 测试与构建
 
 ```powershell
+# Windows 真实 Tauri 启动冒烟测试
+npm run test:e2e:smoke
+
+# Windows 真实 Tauri 六个核心 E2E 流程
+npm run test:e2e
+
+# 定向复测一个独立桌面场景
+npm run test:e2e -- --spec candidate-review-apply
+
 # 全部前端正文安全动态测试（Node 原生 test runner）
 npm run test
 
@@ -234,7 +246,11 @@ npm run tauri build
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-详细分层、覆盖范围与静态检查边界见 [docs/technical/testing.md](docs/technical/testing.md)。
+桌面 E2E 每个 suite 先在独立的 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的 Tauri 应用，再为每个 spec 独立启动真实窗口，并分配独立临时 SQLite 与 WebView2 用户目录。固定 fixtures 从空库经 UI 建立场景数据，支持 `--spec` 独立复测；作品保存还用第二个只读 SQLite 连接证明事务已提交且没有重复写入。
+
+测试通过 DOM、`data-testid` 和受限 Tauri IPC 操作，不依赖中文文本、屏幕坐标或截图识别。E2E 构建强制使用 Mock Provider，WebView 在请求前阻断外部网络，Rust AI IPC 再做后端阻断；运行器必须从 `frontend-diagnostics.json` 证明无 console error、未处理异常和外部网络尝试。失败截图只用于诊断，且仅在 WebDriver 会话仍可访问时尽力生成。
+
+详细分层、覆盖范围与静态检查边界见 [docs/technical/testing.md](docs/technical/testing.md)，桌面环境、隔离、失败产物和排障见 [docs/technical/desktop-e2e.md](docs/technical/desktop-e2e.md)。
 
 ---
 
@@ -244,8 +260,10 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - SQLite 与 LocalStorage 无法构成跨存储 ACID 事务；项目级本地缓存恢复失败时，前端会撤销刚导入的 SQLite 作品，撤销失败会明确报告。
 - AI 请求仍以完整响应为主；流式输出、可靠网络取消和进程重启后的在途任务恢复尚未完成。
 - 大文本全文校验、读取失败恢复与草稿引用之间的端到端原子性仍需后续专项收敛。
-- v2.1.1 / v2.1.2 已引入前端与 Rust 动态测试，但 React 组件级并发覆盖和 Windows 桌面 E2E 仍不完整。
-- HashRouter 非按钮导航与 Tauri 原生窗口关闭尚未形成完整的可恢复离开保护，当前以工作台按钮导航和 `beforeunload` 防护为主。
+- v2.1.1 / v2.1.2 已引入前端与 Rust 动态测试，未发布工作区已接入首批 Windows 真实桌面 E2E；React 组件级并发覆盖和全量页面 E2E 仍不完整。
+- 章节切换 Leave Guard 已有桌面 E2E；HashRouter 其他非按钮导航与 Tauri 原生窗口关闭尚未形成完整的可恢复离开保护。
+- 产品当前没有崩溃恢复对话框，因此 `recovery-dialog` 和崩溃恢复流程尚未覆盖。
+- 当前数据模型没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；桌面 E2E 验证现有草稿、AI 任务、目标绑定、基础正文哈希、采用状态和幂等约束，不把不存在的实体宣称为已覆盖。
 - 参考小说导入暂未实现。
 - 自动风格画像分析暂未实现。
 - Multi-Agent 自主创作暂未开放，计划 v3.x。
@@ -260,5 +278,6 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 | 用户指南 | [docs/user/](docs/user/) |
 | 项目管理 | [docs/project/](docs/project/) |
 | 技术文档 | [docs/technical/](docs/technical/) |
+| Windows 桌面 E2E | [docs/technical/desktop-e2e.md](docs/technical/desktop-e2e.md) |
 | 设计文档 | [docs/design/](docs/design/) |
 | 总索引 | [docs/README.md](docs/README.md) |

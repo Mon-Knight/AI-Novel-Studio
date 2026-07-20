@@ -1,5 +1,42 @@
 # AI Novel Studio - CHANGELOG
 
+## 未发布 - Windows 真实桌面 E2E 自动化
+
+### 新增
+
+- 新增 WebdriverIO + `tauri-driver` + EdgeDriver 的 Windows 真实 Tauri E2E，首批覆盖应用启动、作品创建与打开、作品信息保存、卷章与正文保存、Mock AI 候选审查采用、未保存离开保护。
+- 新增 `npm run test:e2e:smoke` 和 `npm run test:e2e`；每个 suite 在独立 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的 Tauri 应用，每个 spec 再独立启动窗口，并使用独立临时 SQLite、WebView2 用户目录、单实例状态目录和 driver 端口，不读取或修改正式用户数据库。
+- 为关键业务节点增加克制的 `data-testid` 契约，并在 E2E 专用构建中把原生确认流程映射为可由 WebDriver 访问的 DOM 对话框。
+- 新增仅限 E2E 构建的前端诊断桥和 Rust `get_e2e_diagnostics`，只允许数据库健康检查与必要只读查询；业务写入仍经过真实 React、Tauri IPC、Rust command 和 SQLite 事务。
+- 新增失败诊断：当前路由、前端 console / 未处理异常、WebdriverIO / Tauri Driver / Rust 日志、测试数据库位置和进程清理结果；失败时在 WebDriver 会话仍可访问的前提下尽力保存 DOM 与截图，截图不参与定位或断言。
+- 新增始终写出的 `frontend-diagnostics.json`，记录脱敏后的路由、DOM 摘要、console、未处理异常、Rust 诊断和 WebView 网络尝试摘要；运行器独立复核该文件，缺失、解析失败、console error、未处理异常、guard 未安装或网络尝试非零都会使 spec 失败。
+- 新增作品提交只读探针：用独立 `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX` 连接读取作品行数、标题和更新时间，证明保存事务已对其他连接可见并验证没有重复写入。
+- 新增 [Windows 桌面 E2E 自动化文档](docs/technical/desktop-e2e.md)，记录审计基线、Windows 前置条件、隔离与网络阻断、命令、失败产物和 stale executable 排障。
+
+### 修改
+
+- E2E 可执行文件必须同时满足 Cargo `e2e` feature 与 `AI_NOVEL_STUDIO_E2E=1`，每个 spec 还必须通过随机 run-id 与临时目录 marker 握手；Rust 会规范化路径、拒绝正式数据目录，并用 SQLite `PRAGMA database_list` 复核实际打开的数据库。
+- E2E 模式隔离 SQLite、WebView2、单实例锁与窗口状态；成功后清理临时数据，失败时保留复盘目录。进程快照、残留进程或临时目录清理无法可靠完成时，运行器会 fail-closed 并停止后续 spec。
+- AI 设置在 E2E 构建中强制返回本地 Mock Provider；WebView 在 `App` 加载前安装 guard，在请求发出前拦截外部 fetch / XHR / WebSocket / EventSource / beacon，Rust AI IPC 再在创建或发送 HTTP 请求前硬阻断真实 Provider。该机制不是操作系统级防火墙；当前应用没有自动更新器，测试运行不依赖互联网。
+- 固定 fixtures 和显式 spec 清单让每个场景从自己的空库经 UI 建立确定性数据，不依赖执行顺序；新增 `npm run test:e2e -- --spec <name>` 定向运行入口。
+- E2E 运行器只按本轮 WebdriverIO 进程树、唯一 staged `ai-novel-studio-e2e.exe` 和隔离数据 / WebView2 路径识别并清理归属进程，不按通用进程名终止用户已有进程；超时、清理不可验证或残留 PID 都会使测试失败。
+
+### 修复
+
+- 修复 `create_novel` / `update_novel` 持有全局 SQLite Mutex 后递归调用再次加锁的查询命令，导致作品创建或保存 IPC 永久挂起的问题。命令现在复用已持有的连接完成 read-back，并由 300 ms Rust 超时回归测试和真实桌面保存流程覆盖。
+- 修复 Windows 系统强调色 IPC 同步等待 `reg query` 时可能阻塞 Tauri command 的问题：生产路径改为后台阻塞任务并以 750 ms 为硬上限，超时会终止子进程；E2E 模式直接跳过注册表查询，避免污染测试进程与时序。
+- 修复 Windows 运行器通过 `npm.cmd` 启动产生 `EINVAL` 的问题，改为由当前 Node 进程直接启动 Tauri CLI / WebdriverIO 入口。
+- 默认在 `.e2e-tools/target/release` 中从 Cargo 包名与 Tauri `productName` 两种候选里选择最新产物，创建本轮唯一 staged 应用副本并校验文件大小 / 副本时间，避免覆盖生产 target 或误启旧 bundle EXE；同时补充 `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1` 与 stale executable 排障说明。
+- 修复 Rust 草稿计字把部分标点计入字数、与编辑器“每个中日韩字符 + 每个连续 ASCII 字母数字词”语义不一致的问题，并增加中英文、Markdown 分隔符和纯标点回归测试。
+- 修复健康门禁暴露的风格与上下文 IPC 错误：为旧 `style_profiles` 表幂等迁移 `description` 列并保留空库内建风格，使 `list_style_profiles` 接受可选项目参数，并把 `save_context_read_log` 调用按 Rust DTO 正确包装为 `{ input }`。
+
+### 版本边界
+
+- 保持应用版本 `2.1.2`，本条目不代表新的版本发布或 tag。
+- 产品当前没有崩溃恢复对话框，因此不伪造 `recovery-dialog`；安装程序、原生文件选择器、托盘、Windows 通知、多显示器和视觉识别也不在首批范围。
+- 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选采用测试覆盖现有草稿、AI 任务、目标与基础正文绑定、采用状态、页面字数同步和重复采用幂等，不把等价约束描述成不存在的实体状态。
+- 最终验证命令、通过数量和连续运行结果以本次任务完成汇报的真实执行结果为准，不在验证完成前预填。
+
 ## v2.1.2 (2026-07-20) - 完整备份与恢复闭环
 
 ### 新增

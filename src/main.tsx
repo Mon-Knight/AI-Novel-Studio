@@ -1,3 +1,4 @@
+import './services/tauri/e2eBridge';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';

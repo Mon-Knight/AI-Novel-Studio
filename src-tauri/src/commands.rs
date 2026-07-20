@@ -179,7 +179,9 @@ fn map_novel_row(row: &Row<'_>) -> rusqlite::Result<NovelDto> {
 
 #[tauri::command]
 pub fn get_all_novels() -> Result<Vec<NovelDto>, String> {
+    crate::runtime::append_e2e_log("get_all_novels: waiting for database lock");
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    crate::runtime::append_e2e_log("get_all_novels: database lock acquired");
     let sql = format!(
         "{} WHERE deleted_at IS NULL ORDER BY updated_at DESC",
         novel_select_sql()
@@ -192,12 +194,17 @@ pub fn get_all_novels() -> Result<Vec<NovelDto>, String> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
+    crate::runtime::append_e2e_log("get_all_novels: complete");
     Ok(novels)
 }
 
 #[tauri::command]
 pub fn get_novel_by_id(id: String) -> Result<Option<NovelDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    get_novel_by_id_internal(&conn, &id)
+}
+
+fn get_novel_by_id_internal(conn: &Connection, id: &str) -> Result<Option<NovelDto>, String> {
     let sql = format!(
         "{} WHERE id = ?1 AND deleted_at IS NULL",
         novel_select_sql()
@@ -223,7 +230,7 @@ pub fn create_novel(input: CreateNovelInput) -> Result<NovelDto, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    get_novel_by_id(id)?.ok_or_else(|| "作品创建后无法读取".to_string())
+    get_novel_by_id_internal(&conn, &id)?.ok_or_else(|| "作品创建后无法读取".to_string())
 }
 
 #[tauri::command]
@@ -280,7 +287,7 @@ pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, Str
     )
     .map_err(|e| e.to_string())?;
 
-    get_novel_by_id(id)?.ok_or_else(|| "作品保存后无法读取".to_string())
+    get_novel_by_id_internal(&conn, &id)?.ok_or_else(|| "作品保存后无法读取".to_string())
 }
 
 #[tauri::command]
@@ -1028,7 +1035,26 @@ pub struct CreateChapterDraftInput {
 }
 
 fn count_words(content: &str) -> i64 {
-    content.chars().filter(|c| !c.is_whitespace()).count() as i64
+    let mut count = 0_i64;
+    let mut in_ascii_word = false;
+
+    for character in content.chars() {
+        let is_cjk = ('\u{3400}'..='\u{4dbf}').contains(&character)
+            || ('\u{4e00}'..='\u{9fff}').contains(&character);
+        if is_cjk {
+            count += 1;
+            in_ascii_word = false;
+        } else if character.is_ascii_alphanumeric() {
+            if !in_ascii_word {
+                count += 1;
+                in_ascii_word = true;
+            }
+        } else {
+            in_ascii_word = false;
+        }
+    }
+
+    count
 }
 
 fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterDraftDto> {
@@ -1283,11 +1309,12 @@ fn adopt_chapter_draft_internal(
 
     let word_count = validate_live_draft_target_internal(&transaction, draft_id, chapter_id)?;
 
-    transaction.execute(
-        "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
-        params![&now, chapter_id],
-    )
-    .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
+    transaction
+        .execute(
+            "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
+            params![&now, chapter_id],
+        )
+        .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
 
     let adopted_rows = transaction.execute(
         "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3 AND EXISTS (SELECT 1 FROM chapters AS c WHERE c.id = chapter_drafts.chapter_id AND c.novel_id = chapter_drafts.novel_id AND c.deleted_at IS NULL)",
@@ -1379,7 +1406,9 @@ pub struct SaveChapterEngineeringDraftInput {
     pub quality_rules_json: String,
 }
 
-fn map_chapter_engineering_state_row(row: &Row<'_>) -> rusqlite::Result<ChapterEngineeringStateDto> {
+fn map_chapter_engineering_state_row(
+    row: &Row<'_>,
+) -> rusqlite::Result<ChapterEngineeringStateDto> {
     Ok(ChapterEngineeringStateDto {
         id: row.get(0)?,
         novel_id: row.get(1)?,
@@ -1539,7 +1568,9 @@ pub struct SaveChapterGenerationSnapshotInput {
     pub created_at: String,
 }
 
-fn map_chapter_generation_snapshot_row(row: &Row<'_>) -> rusqlite::Result<ChapterGenerationSnapshotDto> {
+fn map_chapter_generation_snapshot_row(
+    row: &Row<'_>,
+) -> rusqlite::Result<ChapterGenerationSnapshotDto> {
     Ok(ChapterGenerationSnapshotDto {
         id: row.get(0)?,
         novel_id: row.get(1)?,
@@ -1764,7 +1795,10 @@ fn map_generation_step_result_row(row: &Row<'_>) -> rusqlite::Result<GenerationS
     })
 }
 
-fn get_generation_job_by_id_internal(conn: &Connection, id: &str) -> Result<GenerationJobDto, String> {
+fn get_generation_job_by_id_internal(
+    conn: &Connection,
+    id: &str,
+) -> Result<GenerationJobDto, String> {
     let mut stmt = conn.prepare(
         "SELECT id, world_id, novel_id, volume_id, chapter_id, job_type, status, current_step, progress_percent, provider, model_name, input_token_estimate, output_token_estimate, actual_input_tokens, actual_output_tokens, cost_estimate, error_code, error_message, retry_count, created_at, started_at, finished_at FROM generation_jobs WHERE id = ?1",
     ).map_err(|e| e.to_string())?;
@@ -1835,7 +1869,9 @@ pub fn get_generation_job(id: String) -> Result<Option<GenerationJobDto>, String
 }
 
 #[tauri::command]
-pub fn get_generation_jobs_by_chapter_id(chapter_id: String) -> Result<Vec<GenerationJobDto>, String> {
+pub fn get_generation_jobs_by_chapter_id(
+    chapter_id: String,
+) -> Result<Vec<GenerationJobDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, world_id, novel_id, volume_id, chapter_id, job_type, status, current_step, progress_percent, provider, model_name, input_token_estimate, output_token_estimate, actual_input_tokens, actual_output_tokens, cost_estimate, error_code, error_message, retry_count, created_at, started_at, finished_at FROM generation_jobs WHERE chapter_id = ?1 ORDER BY created_at DESC",
@@ -1849,7 +1885,10 @@ pub fn get_generation_jobs_by_chapter_id(chapter_id: String) -> Result<Vec<Gener
 }
 
 #[tauri::command]
-pub fn cancel_generation_job(id: String, finished_at: String) -> Result<Option<GenerationJobDto>, String> {
+pub fn cancel_generation_job(
+    id: String,
+    finished_at: String,
+) -> Result<Option<GenerationJobDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE generation_jobs SET status = 'cancelled', finished_at = ?1 WHERE id = ?2 AND status NOT IN ('completed', 'failed', 'cancelled')",
@@ -2147,7 +2186,8 @@ fn delete_ai_task_records_by_ids_internal(
     conn.execute_batch("BEGIN TRANSACTION")
         .map_err(|e| format!("Failed to begin transaction: {}", e))?;
 
-    let mut deleted_child_rows: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut deleted_child_rows: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
 
     // 按顺序清理子表引用（FOREIGN KEY 子表必须在父表删除前处理）
     let child_tables: &[&str] = &[
@@ -2164,7 +2204,10 @@ fn delete_ai_task_records_by_ids_internal(
             "UPDATE {} SET ai_task_id = NULL WHERE ai_task_id IN ({})",
             table, placeholders_str
         );
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
         match conn.execute(&sql, rusqlite::params_from_iter(params_refs.iter())) {
             Ok(rows) => {
                 if rows > 0 {
@@ -2258,7 +2301,8 @@ fn clear_ai_task_records_internal(
     conn.execute_batch("BEGIN TRANSACTION")
         .map_err(|e| format!("Failed to begin transaction: {}", e))?;
 
-    let mut deleted_child_rows: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut deleted_child_rows: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
 
     // 按顺序清理子表引用（FOREIGN KEY 子表必须在父表删除前处理）
     // 使用子查询匹配所有 ai_task_records 的 id
@@ -2666,18 +2710,27 @@ fn style_select_sql() -> &'static str {
 }
 
 #[tauri::command]
-pub fn list_style_profiles(project_id: String) -> Result<Vec<StyleProfileDto>, String> {
+pub fn list_style_profiles(project_id: Option<String>) -> Result<Vec<StyleProfileDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let sql = format!(
-        "{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC",
-        style_select_sql()
-    );
+    let sql = match project_id.as_ref() {
+        Some(_) => format!(
+            "{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC",
+            style_select_sql()
+        ),
+        None => format!("{} ORDER BY is_active DESC, updated_at DESC", style_select_sql()),
+    };
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let items = stmt
-        .query_map(params![&project_id], map_style_profile_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    let items = if let Some(project_id) = project_id {
+        stmt.query_map(params![project_id], map_style_profile_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    } else {
+        stmt.query_map([], map_style_profile_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
     Ok(items)
 }
 
@@ -3671,9 +3724,7 @@ pub fn create_quality_check_report(
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
-    let scope = input
-        .scope
-        .unwrap_or_else(|| "current_draft".to_string());
+    let scope = input.scope.unwrap_or_else(|| "current_draft".to_string());
     println!(
         "[QUALITY_CHECK] create_report start id={} novel_id={} chapter_id={} draft_id={}",
         id, input.novel_id, input.chapter_id, input.draft_id
@@ -3731,9 +3782,11 @@ pub fn get_quality_check_issues(chapter_id: String) -> Result<GetQualityCheckIss
             quality_item_select_sql()
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![&rpt.id], map_quality_item_row)
+        let rows = stmt
+            .query_map(params![&rpt.id], map_quality_item_row)
             .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
     } else {
         Vec::new()
     };
@@ -3905,13 +3958,20 @@ pub fn save_quality_check_result(
     let mut saved_items: Vec<QualityCheckItemDto> = Vec::new();
 
     for new_item in new_items {
-        let issue_key = new_item.issue_key.clone().unwrap_or_else(|| {
-            uuid::Uuid::new_v4().to_string()
-        });
+        let issue_key = new_item
+            .issue_key
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let title = new_item.title.clone().unwrap_or_default();
         let description = new_item.description.clone().unwrap_or_default();
-        let severity = new_item.severity.clone().unwrap_or_else(|| "medium".to_string());
-        let issue_type = new_item.issue_type.clone().unwrap_or_else(|| "other".to_string());
+        let severity = new_item
+            .severity
+            .clone()
+            .unwrap_or_else(|| "medium".to_string());
+        let issue_type = new_item
+            .issue_type
+            .clone()
+            .unwrap_or_else(|| "other".to_string());
         let category = new_item.category.clone();
         let evidence = new_item.evidence.clone();
         let suggestion = new_item.suggestion.clone();
@@ -4152,7 +4212,8 @@ pub fn save_chapter_summary(input: SaveChapterSummaryInput) -> Result<ChapterSum
             ],
         ).map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE id=?1").map_err(|e| e.to_string())?;
-        stmt.query_row(params![existing_id], map_chapter_summary_row).map_err(|e| e.to_string())
+        stmt.query_row(params![existing_id], map_chapter_summary_row)
+            .map_err(|e| e.to_string())
     } else {
         let new_id = uuid::Uuid::new_v4().to_string();
         conn.execute(
@@ -4170,7 +4231,8 @@ pub fn save_chapter_summary(input: SaveChapterSummaryInput) -> Result<ChapterSum
             ],
         ).map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE id=?1").map_err(|e| e.to_string())?;
-        stmt.query_row(params![&new_id], map_chapter_summary_row).map_err(|e| e.to_string())
+        stmt.query_row(params![&new_id], map_chapter_summary_row)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -4191,12 +4253,14 @@ pub fn mark_chapter_summaries_expired(chapter_id: String) -> Result<(), String> 
     conn.execute(
         "UPDATE chapter_summaries SET is_expired = 1, updated_at = ?1 WHERE chapter_id = ?2",
         params![chrono::Utc::now().to_rfc3339(), &chapter_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     // 同时标记关联的 context_records 过期
     conn.execute(
         "UPDATE context_records SET is_expired = 1, updated_at = ?1 WHERE chapter_id = ?2",
         params![chrono::Utc::now().to_rfc3339(), &chapter_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -4207,7 +4271,8 @@ pub fn update_chapter_summary_enabled(id: String, enabled: bool) -> Result<(), S
     conn.execute(
         "UPDATE chapter_summaries SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
         params![enabled as i64, chrono::Utc::now().to_rfc3339(), &id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -4269,7 +4334,9 @@ fn map_context_record_row(row: &rusqlite::Row) -> rusqlite::Result<ContextRecord
 
 /// 批量保存上下文记录
 #[tauri::command]
-pub fn save_context_records(inputs: Vec<SaveContextRecordInput>) -> Result<Vec<ContextRecordDto>, String> {
+pub fn save_context_records(
+    inputs: Vec<SaveContextRecordInput>,
+) -> Result<Vec<ContextRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let mut results = Vec::new();
@@ -4289,7 +4356,10 @@ pub fn save_context_records(inputs: Vec<SaveContextRecordInput>) -> Result<Vec<C
         ).map_err(|e| e.to_string())?;
 
         let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records WHERE id=?1").map_err(|e| e.to_string())?;
-        results.push(stmt.query_row(params![&new_id], map_context_record_row).map_err(|e| e.to_string())?);
+        results.push(
+            stmt.query_row(params![&new_id], map_context_record_row)
+                .map_err(|e| e.to_string())?,
+        );
     }
     Ok(results)
 }
@@ -4299,7 +4369,8 @@ pub fn save_context_records(inputs: Vec<SaveContextRecordInput>) -> Result<Vec<C
 pub fn get_context_records(novel_id: String) -> Result<Vec<ContextRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records WHERE novel_id=?1 ORDER BY created_at DESC").map_err(|e| e.to_string())?;
-    let items = stmt.query_map(params![&novel_id], map_context_record_row)
+    let items = stmt
+        .query_map(params![&novel_id], map_context_record_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -4313,7 +4384,8 @@ pub fn update_context_record_active(id: String, is_active: bool) -> Result<(), S
     conn.execute(
         "UPDATE context_records SET is_active = ?1, updated_at = ?2 WHERE id = ?3",
         params![is_active as i64, chrono::Utc::now().to_rfc3339(), &id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -4472,7 +4544,8 @@ pub fn save_quality_fix_run(input: SaveQualityFixRunInput) -> Result<QualityFixR
     let mut stmt = conn.prepare(
         "SELECT id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at FROM quality_fix_runs WHERE id=?1"
     ).map_err(|e| e.to_string())?;
-    stmt.query_row(params![&input.id], map_fix_run_row).map_err(|e| e.to_string())
+    stmt.query_row(params![&input.id], map_fix_run_row)
+        .map_err(|e| e.to_string())
 }
 
 /// 获取章节的修稿记录
@@ -4482,7 +4555,8 @@ pub fn get_quality_fix_runs(chapter_id: String) -> Result<Vec<QualityFixRunDto>,
     let mut stmt = conn.prepare(
         "SELECT id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at FROM quality_fix_runs WHERE chapter_id=?1 ORDER BY created_at DESC"
     ).map_err(|e| e.to_string())?;
-    let items = stmt.query_map(params![&chapter_id], map_fix_run_row)
+    let items = stmt
+        .query_map(params![&chapter_id], map_fix_run_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -4496,7 +4570,8 @@ pub fn update_quality_fix_run_status(id: String, status: String) -> Result<(), S
     conn.execute(
         "UPDATE quality_fix_runs SET status = ?1, updated_at = ?2 WHERE id = ?3",
         params![&status, chrono::Utc::now().to_rfc3339(), &id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -4531,6 +4606,8 @@ pub fn save_context_read_log(input: SaveContextReadLogInput) -> Result<(), Strin
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     const RUNTIME_AI_TASK_CHILD_TABLES: [&str; 5] = [
         "chapter_drafts",
@@ -4539,6 +4616,84 @@ mod tests {
         "chapter_events",
         "chapter_summaries",
     ];
+
+    #[test]
+    fn draft_word_count_matches_editor_semantics() {
+        assert_eq!(count_words("你好，世界！ Hello world 2026."), 7);
+        assert_eq!(count_words("# 标题\nalpha-beta `42`"), 5);
+        assert_eq!(count_words(" \n\t，。！？ "), 0);
+    }
+
+    #[test]
+    fn create_novel_command_returns_without_relocking_database_mutex() {
+        crate::db::init_test_database();
+        let (sender, receiver) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let result = create_novel(CreateNovelInput {
+                title: "Mutex regression novel".to_string(),
+                subtitle: None,
+                description: None,
+                outline: None,
+                genre: None,
+                target_word_count: None,
+            });
+            let _ = sender.send(result);
+        });
+
+        let result = receiver
+            .recv_timeout(Duration::from_millis(300))
+            .expect("create_novel timed out while re-locking the database mutex");
+        assert!(result.is_ok(), "create_novel failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn update_novel_command_returns_without_relocking_database_mutex() {
+        crate::db::init_test_database();
+        let novel_id = format!("mutex-regression-{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        {
+            let conn = crate::db::get_connection()
+                .lock()
+                .expect("lock test database");
+            conn.execute(
+                "INSERT INTO novels (id, title, outline, status, total_word_count, protagonist_mode, protagonists_json, dual_protagonist_relation_json, main_character, protagonist_ability, created_at, updated_at) VALUES (?1, 'Before update', '', 'draft', 0, 'single', '[]', '{}', '', '', ?2, ?2)",
+                params![&novel_id, &now],
+            )
+            .expect("seed novel");
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = update_novel(
+                novel_id,
+                UpdateNovelInput {
+                    title: Some("After update".to_string()),
+                    subtitle: None,
+                    description: None,
+                    outline: None,
+                    genre: None,
+                    status: None,
+                    target_word_count: None,
+                    current_volume_id: None,
+                    current_chapter_id: None,
+                    total_word_count: None,
+                    protagonist_mode: None,
+                    protagonists: None,
+                    dual_protagonist_relation: None,
+                    main_character: None,
+                    protagonist_ability: None,
+                },
+            );
+            let _ = sender.send(result);
+        });
+
+        let result = receiver
+            .recv_timeout(Duration::from_millis(300))
+            .expect("update_novel timed out while re-locking the database mutex")
+            .expect("update_novel failed");
+        assert_eq!(result.title, "After update");
+    }
 
     fn create_runtime_ai_task_table(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
@@ -4854,8 +5009,8 @@ mod tests {
     }
 
     #[test]
-    fn adopt_rejects_cross_novel_target_without_changes(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn adopt_rejects_cross_novel_target_without_changes() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut conn = Connection::open_in_memory()?;
         create_chapter_draft_test_schema(&conn)?;
         insert_test_chapter_for_novel(
@@ -4870,26 +5025,24 @@ mod tests {
         insert_test_draft(&conn, "draft-old", "chapter-cross-novel", "旧正文", true)?;
         insert_test_draft(&conn, "draft-new", "chapter-cross-novel", "新正文", false)?;
 
-        let error = adopt_chapter_draft_internal(
-            &mut conn,
-            "draft-new",
-            "chapter-cross-novel",
-        )
-        .expect_err("cross-novel draft/chapter pair must be rejected");
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-cross-novel")
+            .expect_err("cross-novel draft/chapter pair must be rejected");
 
         assert!(error.starts_with("target_mismatch:"), "{error}");
         assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
         assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
         assert_eq!(
-            get_test_chapter_state(&conn, "chapter-cross-novel")?.0.as_deref(),
+            get_test_chapter_state(&conn, "chapter-cross-novel")?
+                .0
+                .as_deref(),
             Some("draft-old")
         );
         Ok(())
     }
 
     #[test]
-    fn adopt_rejects_soft_deleted_chapter_without_changes(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn adopt_rejects_soft_deleted_chapter_without_changes() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut conn = Connection::open_in_memory()?;
         create_chapter_draft_test_schema(&conn)?;
         insert_test_chapter_for_novel(
@@ -4911,7 +5064,9 @@ mod tests {
         assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
         assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
         assert_eq!(
-            get_test_chapter_state(&conn, "chapter-deleted")?.0.as_deref(),
+            get_test_chapter_state(&conn, "chapter-deleted")?
+                .0
+                .as_deref(),
             Some("draft-old")
         );
         Ok(())
@@ -5005,10 +5160,7 @@ mod tests {
         Ok(())
     }
 
-    fn count_runtime_ai_task_child_refs(
-        conn: &Connection,
-        task_id: &str,
-    ) -> rusqlite::Result<i64> {
+    fn count_runtime_ai_task_child_refs(conn: &Connection, task_id: &str) -> rusqlite::Result<i64> {
         let mut count = 0;
         for table in RUNTIME_AI_TASK_CHILD_TABLES {
             let sql = format!("SELECT COUNT(*) FROM {} WHERE ai_task_id = ?1", table);

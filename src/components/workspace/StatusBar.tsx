@@ -27,7 +27,7 @@ function StatusBar({ chapter, draftWordCount, isDirty, draftVersion }: StatusBar
       )}
       <div className="statusbar-item">
         <span>字数：</span>
-        <strong>{formatNumber(wordCount)}</strong>
+        <strong data-testid="chapter-word-count" data-word-count={wordCount}>{formatNumber(wordCount)}</strong>
         <span className="text-muted"> / {formatNumber(targetWords)}</span>
       </div>
       <span className="statusbar-separator" />

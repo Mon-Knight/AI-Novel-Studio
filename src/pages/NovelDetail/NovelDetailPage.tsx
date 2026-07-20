@@ -141,7 +141,7 @@ function NovelDetailPage() {
   }
 
   return (
-    <div className="novel-detail-page">
+    <div className="novel-detail-page" data-project-id={novel.id} data-project-name={novel.title}>
       <div className="detail-header">
         <div className="detail-cover">📖</div>
         <div className="detail-info">

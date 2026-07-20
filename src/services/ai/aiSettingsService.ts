@@ -7,6 +7,7 @@ import { RealAiClient, validateRealAiConfig } from './realAiClient';
 import { aiTaskService } from './aiTaskService';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
+const E2E_ENABLED = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
 
 const defaultSettings: AiSettings = {
   runtimeMode: 'mock',
@@ -62,6 +63,7 @@ export function validateApiSettings(settings: AiSettings): void {
 
 export const aiSettingsService = {
   getSettings(): AiSettings {
+    if (E2E_ENABLED) return { ...defaultSettings };
     const stored = lsGet<Partial<AiSettings>>(AI_SETTINGS_KEY);
     return stored ? migrateSettings(stored) : { ...defaultSettings };
   },

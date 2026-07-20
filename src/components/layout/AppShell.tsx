@@ -9,7 +9,7 @@ interface AppShellProps {
 
 function AppShell({ children }: AppShellProps) {
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-testid="app-shell">
       <Sidebar />
       <div className="app-main">
         <TopBar />

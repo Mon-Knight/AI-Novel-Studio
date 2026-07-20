@@ -4,6 +4,10 @@
  */
 import type { AiGenerateRequest, AiGenerateResponse, AiClient } from '../../types/ai';
 
+const E2E_MODE = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+const E2E_TOKEN_INPUT = 320;
+const E2E_TOKEN_OUTPUT = 640;
+
 function countWords(text: string): number {
   const cleaned = text.replace(/[#*\-`>\s]+/g, ' ').trim();
   if (!cleaned) return 0;
@@ -13,7 +17,8 @@ function countWords(text: string): number {
 }
 
 function delay(ms?: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms || (800 + Math.random() * 1200)));
+  const duration = ms ?? (E2E_MODE ? 20 : 800 + Math.random() * 1200);
+  return new Promise((resolve) => setTimeout(resolve, duration));
 }
 
 /** 从系统提示词中检测任务类型 */
@@ -320,8 +325,8 @@ export class MockAiClient implements AiClient {
 
     return {
       text,
-      tokenInput: Math.floor(Math.random() * 500) + 200,
-      tokenOutput: Math.floor(Math.random() * 1000) + 500,
+      tokenInput: E2E_MODE ? E2E_TOKEN_INPUT : Math.floor(Math.random() * 500) + 200,
+      tokenOutput: E2E_MODE ? E2E_TOKEN_OUTPUT : Math.floor(Math.random() * 1000) + 500,
     };
   }
 }

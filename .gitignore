@@ -36,3 +36,7 @@ Thumbs.db
 
 # Tauri
 src-tauri/target/
+
+# Local WebDriver binaries and desktop E2E artifacts
+.e2e-tools/
+test-results/e2e/

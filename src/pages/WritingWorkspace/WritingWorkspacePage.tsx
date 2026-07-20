@@ -267,7 +267,7 @@ function WritingWorkspacePage() {
 
   const confirmDiscardChapterGoal = useCallback(async () => {
     if (!chapterGoalDirtyRef.current) return true;
-    return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？' });
+    return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？', testId: 'leave-guard' });
   }, []);
 
   const confirmEditorLeave = useCallback(async () => {
@@ -277,11 +277,12 @@ function WritingWorkspacePage() {
     const saveFirst = await confirmInfo({
       title: '正文尚未保存',
       message: '当前正文存在未保存修改。\n\n选择“确定”将先保存草稿再继续；选择“取消”可进一步选择放弃修改或留在当前章节。',
+      testId: 'leave-guard',
     });
     if (saveFirst) {
       const saved = await editorRef.current?.save();
       if (!saved) {
-        await showError({ title: '无法离开当前章节', message: '正文保存失败，已保留当前编辑内容。' });
+        await showError({ title: '无法离开当前章节', message: '正文保存失败，已保留当前编辑内容。', testId: 'error-notice' });
         return false;
       }
       return true;
@@ -290,6 +291,7 @@ function WritingWorkspacePage() {
     return await confirmDanger({
       title: '放弃未保存正文',
       message: '确认放弃当前未保存正文并继续吗？该操作无法恢复。选择“取消”将留在当前章节。',
+      testId: 'leave-guard',
     });
   }, []);
 
@@ -457,22 +459,23 @@ function WritingWorkspacePage() {
     } as const;
     const decision = validateDocumentApplication(identity, liveTarget);
     if (!decision.ok) {
-      await showError({ title: '无法应用 AI 输出', message: decision.message });
+      await showError({ title: '无法应用 AI 输出', message: decision.message, testId: 'error-notice' });
       return false;
     }
     const liveDraft = currentDraftRef.current;
     if (payload.sourceDraftId && liveDraft?.id !== payload.sourceDraftId) {
-      await showError({ title: '无法应用 AI 输出', message: '基础草稿已切换，请重新生成结果。' });
+      await showError({ title: '无法应用 AI 输出', message: '基础草稿已切换，请重新生成结果。', testId: 'error-notice' });
       return false;
     }
     if (payload.sourceRevision !== undefined && liveDraft?.versionNo !== payload.sourceRevision) {
-      await showError({ title: '无法应用 AI 输出', message: '基础草稿版本已变化，请重新生成结果。' });
+      await showError({ title: '无法应用 AI 输出', message: '基础草稿版本已变化，请重新生成结果。', testId: 'error-notice' });
       return false;
     }
     if (payload.mode === 'replace_all') {
       const ok = await confirmInfo({
         title: '应用 AI 输出',
         message: `${editorSnapshotRef.current.isDirty ? '当前正文存在未保存修改。\n\n' : ''}将用 AI 输出替换当前正文，是否继续？`,
+        testId: 'apply-confirm',
       });
       if (!ok) return false;
     }
@@ -506,7 +509,7 @@ function WritingWorkspacePage() {
       });
     }
     pendingApplyKeysRef.current.delete(request.id);
-    void showError({ title: 'AI 输出未应用', message: reason });
+    void showError({ title: 'AI 输出未应用', message: reason, testId: 'error-notice' });
   }, []);
 
   const runEditorCommand = useCallback((type: EditorCommandType) => {
@@ -715,27 +718,6 @@ function WritingWorkspacePage() {
         </div>
       )}
 
-      {/* 无章节空状态 */}
-      {loadState === 'ready' && chapters.length === 0 && !pageLoading && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', zIndex: 10 }}>
-          <div style={{ textAlign: 'center', maxWidth: 420 }}>
-            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📝</div>
-            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>当前作品还没有章节</div>
-            <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
-              你可以直接在工作台创建第一卷和第一章，开始写作。
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button className="btn btn-primary btn-sm" onClick={() => handleCreateFirstChapter()} disabled={creating}>
-                {creating ? '⏳ 创建中...' : '📖 创建第一卷并新建第一章'}
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
-                ← 返回作品详情
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 左侧卷章目录树 */}
       <div className="workspace-sidebar">
         {/* 顶部导航区 */}
@@ -788,29 +770,49 @@ function WritingWorkspacePage() {
           <div className="workspace-topbar-spacer" aria-hidden="true" />
         </div>
 
-        <EditorArea
-          ref={editorRef}
-          chapter={activeChapter}
-          novelTitle={novel?.title}
-          novelId={novelId}
-          currentDraft={activeDraft}
-          onDraftChange={handleDraftChange}
-          onEditorContentChange={handleEditorContentChange}
-          onDraftSaved={handleDraftApplied}
-          applyTextRequest={applyTextRequest}
-          onApplyTextConsumed={handleApplyTextConsumed}
-          onApplyTextRejected={handleApplyTextRejected}
-          commandRequest={editorCommandRequest}
-          onChapterUpdated={handleChapterOutlineApplied}
-          locateTarget={locateTarget}
-          onLocateDone={handleLocateDone}
-        />
-        <StatusBar
-          chapter={activeChapter}
-          draftWordCount={draftWordCount}
-          isDirty={isDirty}
-          draftVersion={activeDraft ? `v${activeDraft.versionNo}` : 'v0 占位'}
-        />
+        {loadState === 'ready' && chapters.length === 0 && !pageLoading ? (
+          <div
+            data-testid="workspace-empty-state"
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)' }}
+          >
+            <div style={{ textAlign: 'center', maxWidth: 420 }}>
+              <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📝</div>
+              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>当前作品还没有章节</div>
+              <div style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
+                你可以在左侧目录先创建分卷，再创建第一章。
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/novels/${novelId}`)}>
+                ← 返回作品详情
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <EditorArea
+              ref={editorRef}
+              chapter={activeChapter}
+              novelTitle={novel?.title}
+              novelId={novelId}
+              currentDraft={activeDraft}
+              onDraftChange={handleDraftChange}
+              onEditorContentChange={handleEditorContentChange}
+              onDraftSaved={handleDraftApplied}
+              applyTextRequest={applyTextRequest}
+              onApplyTextConsumed={handleApplyTextConsumed}
+              onApplyTextRejected={handleApplyTextRejected}
+              commandRequest={editorCommandRequest}
+              onChapterUpdated={handleChapterOutlineApplied}
+              locateTarget={locateTarget}
+              onLocateDone={handleLocateDone}
+            />
+            <StatusBar
+              chapter={activeChapter}
+              draftWordCount={draftWordCount}
+              isDirty={isDirty}
+              draftVersion={activeDraft ? `v${activeDraft.versionNo}` : 'v0 占位'}
+            />
+          </>
+        )}
       </div>
 
       {/* 右侧工具栏 */}

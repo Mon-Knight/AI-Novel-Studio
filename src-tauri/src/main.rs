@@ -9,6 +9,7 @@ mod db;
 mod large_text_save;
 mod outline_commands;
 mod project_backup;
+mod runtime;
 mod system_accent;
 mod window_state;
 
@@ -41,14 +42,24 @@ fn get_app_data_dir() -> std::path::PathBuf {
 fn main() {
     let startup_at = std::time::Instant::now();
     println!("[Startup] tauri main start");
+    #[cfg(feature = "e2e")]
+    runtime::require_e2e_runtime_flag_for_feature().unwrap_or_else(|error| {
+        eprintln!("[E2E] startup rejected: {}", error);
+        std::process::exit(2);
+    });
+    let e2e_data_dir = runtime::initialize_e2e_environment().unwrap_or_else(|error| {
+        eprintln!("[E2E] startup rejected: {}", error);
+        std::process::exit(2);
+    });
     db::init_database();
+    runtime::append_e2e_log("startup: database initialized");
     println!(
         "[Startup] database initialized: {} ms",
         startup_at.elapsed().as_millis()
     );
 
     // Native Feel P1.1: 确定应用数据目录
-    let app_data_dir = get_app_data_dir();
+    let app_data_dir = e2e_data_dir.unwrap_or_else(get_app_data_dir);
 
     // 单实例检测
     if !window_state::try_acquire_instance_lock(&app_data_dir) {
@@ -118,6 +129,8 @@ fn main() {
             commands::get_ai_task_records_by_chapter_id,
             commands::get_ai_task_records_by_novel_id,
             ai::ai_chat_completion,
+            runtime::get_e2e_diagnostics,
+            runtime::get_e2e_novel_commit_state,
             large_text_save::create_large_text_save_session,
             large_text_save::append_large_text_chunk,
             large_text_save::finalize_large_text_save,

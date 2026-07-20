@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import type { Volume } from '../../types/volume';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
+import { showError } from '../../utils/nativeDialog';
 
 interface VolumeTreeProps {
   volumes: Volume[];
@@ -61,7 +62,7 @@ function VolumeTree({
       setNewVolumeTitle('');
       setShowNewVolume(false);
     } catch (e: any) {
-      alert('创建分卷失败：' + (e?.message || '未知错误'));
+      await showError({ title: '创建分卷失败', message: e?.message || '未知错误', testId: 'error-notice' });
     } finally {
       setCreating(false);
     }
@@ -72,7 +73,7 @@ function VolumeTree({
     const volumeId = newChapterVolumeId || volumes[0]?.id;
     if (!volumeId) {
       if (!onCreateFirstChapter) {
-        alert('当前无分卷，请先创建分卷。');
+        await showError({ title: '无法创建章节', message: '当前无分卷，请先创建分卷。', testId: 'error-notice' });
         return;
       }
       setCreating(true);
@@ -82,7 +83,7 @@ function VolumeTree({
         setShowNewChapter(false);
         setNewChapterVolumeId('');
       } catch (e: any) {
-        alert('创建章节失败：' + (e?.message || '未知错误'));
+        await showError({ title: '创建章节失败', message: e?.message || '未知错误', testId: 'error-notice' });
       } finally {
         setCreating(false);
       }
@@ -96,7 +97,7 @@ function VolumeTree({
       setNewChapterVolumeId('');
       ensureExpanded(volumeId);
     } catch (e: any) {
-      alert('创建章节失败：' + (e?.message || '未知错误'));
+      await showError({ title: '创建章节失败', message: e?.message || '未知错误', testId: 'error-notice' });
     } finally {
       setCreating(false);
     }
@@ -136,17 +137,17 @@ function VolumeTree({
         <div className="workspace-sidebar-header">
           <span>📖 卷章目录</span>
           <div style={{ display: 'flex', gap: 4 }}>
-            <button style={xsBtnPrimary}
+            <button style={xsBtnPrimary} data-testid="chapter-create"
               onClick={() => handleOpenNewChapter()} disabled={creating} title="新建章节（自动创建第一卷）">
               + 章节
             </button>
-            <button style={xsBtnSecondary}
+            <button style={xsBtnSecondary} data-testid="volume-create"
               onClick={() => { setNewVolumeTitle(''); setShowNewVolume(true); }} disabled={creating} title="新建分卷">
               + 分卷
             </button>
           </div>
         </div>
-        <div className="workspace-sidebar-tree">
+        <div className="workspace-sidebar-tree" data-testid="chapter-list">
           <div style={{ padding: 16, textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 12 }}>
               尚无章节，点击上方按钮创建
@@ -155,20 +156,20 @@ function VolumeTree({
         </div>
         {/* 新建分卷弹窗 */}
         {showNewVolume && (
-          <div className="modal-overlay" onClick={() => setShowNewVolume(false)}>
+          <div className="modal-overlay" data-testid="volume-create-dialog" onClick={() => setShowNewVolume(false)}>
             <div className="modal-dialog" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
               <div className="modal-title">📖 新建分卷</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
                   <label className="panel-field-label">分卷名称</label>
-                  <input type="text" className="form-input" value={newVolumeTitle}
+                  <input type="text" className="form-input" data-testid="volume-title-input" value={newVolumeTitle}
                     onChange={(e) => setNewVolumeTitle(e.target.value)}
                     placeholder="例如：第一卷" style={{ width: '100%' }}
                     autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateVolume()} />
                 </div>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => setShowNewVolume(false)}>取消</button>
-                  <button className="btn btn-primary btn-sm" onClick={handleCreateVolume} disabled={creating || !newVolumeTitle.trim()}>
+                  <button className="btn btn-primary btn-sm" data-testid="volume-save" onClick={handleCreateVolume} disabled={creating || !newVolumeTitle.trim()}>
                     {creating ? '创建中...' : '创建'}
                   </button>
                 </div>
@@ -178,14 +179,14 @@ function VolumeTree({
         )}
         {/* 新建章节弹窗 */}
         {showNewChapter && (
-          <div className="modal-overlay" onClick={() => setShowNewChapter(false)}>
+          <div className="modal-overlay" data-testid="chapter-create-dialog" onClick={() => setShowNewChapter(false)}>
             <div className="modal-dialog" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
               <div className="modal-title">📝 新建章节</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {volumes.length > 0 && (
                   <div>
                     <label className="panel-field-label">所属分卷</label>
-                    <select className="form-input" value={newChapterVolumeId || volumes[0]?.id || ''}
+                    <select className="form-input" data-testid="chapter-volume-select" value={newChapterVolumeId || volumes[0]?.id || ''}
                       onChange={(e) => setNewChapterVolumeId(e.target.value)} style={{ width: '100%' }}>
                       {volumes.map((v) => (
                         <option key={v.id} value={v.id}>{v.title}</option>
@@ -200,14 +201,14 @@ function VolumeTree({
                 )}
                 <div>
                   <label className="panel-field-label">章节标题</label>
-                  <input type="text" className="form-input" value={newChapterTitle}
+                  <input type="text" className="form-input" data-testid="chapter-title-input" value={newChapterTitle}
                     onChange={(e) => setNewChapterTitle(e.target.value)}
                     placeholder="例如：第1章" style={{ width: '100%' }}
                     autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()} />
                 </div>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => setShowNewChapter(false)}>取消</button>
-                  <button className="btn btn-primary btn-sm" onClick={handleCreateChapter} disabled={creating || !newChapterTitle.trim()}>
+                  <button className="btn btn-primary btn-sm" data-testid="chapter-create-submit" onClick={handleCreateChapter} disabled={creating || !newChapterTitle.trim()}>
                     {creating ? '创建中...' : '创建'}
                   </button>
                 </div>
@@ -224,30 +225,37 @@ function VolumeTree({
       <div className="workspace-sidebar-header">
         <span>📖 卷章目录</span>
         <div style={{ display: 'flex', gap: 4 }}>
-          <button style={xsBtnPrimary}
+          <button style={xsBtnPrimary} data-testid="chapter-create"
             onClick={() => handleOpenNewChapter()} disabled={creating} title="新建章节（自动创建第一卷）">
             + 章节
           </button>
-          <button style={xsBtnSecondary}
+          <button style={xsBtnSecondary} data-testid="volume-create"
             onClick={() => { setNewVolumeTitle(''); setShowNewVolume(true); }} disabled={creating} title="新建分卷">
             + 分卷
           </button>
         </div>
       </div>
-      <div className="workspace-sidebar-tree">
+      <div className="workspace-sidebar-tree" data-testid="chapter-list">
         <div className="tree-novel-root"><span>📖</span> 作品相关</div>
 
         {volumes.sort((a, b) => a.orderIndex - b.orderIndex).map((volume) => {
           const volumeChapters = getVolumeChapters(volume.id);
           const isExpanded = expandedVolumes[volume.id] ?? true;
           return (
-            <div key={volume.id} className="tree-volume">
+            <div
+              key={volume.id}
+              className="tree-volume"
+              data-testid="volume-item"
+              data-volume-id={volume.id}
+              data-volume-title={volume.title}
+            >
               <div className="tree-volume-header" onClick={() => toggleVolume(volume.id)}>
                 <span className={`tree-arrow ${isExpanded ? 'expanded' : ''}`}>▶</span>
                 <span>{volume.title}</span>
               </div>
               {isExpanded && volumeChapters.map((chapter) => (
-                <div key={chapter.id}
+              <div key={chapter.id} data-testid="chapter-item" data-chapter-id={chapter.id} data-chapter-title={chapter.title}
+                  data-active={activeChapterId === chapter.id ? 'true' : 'false'}
                   className={`tree-chapter ${activeChapterId === chapter.id ? 'active' : ''}`}
                   onClick={() => onSelectChapter(chapter.id)}>
                   <span className="chapter-status-dot" style={{ background: statusDotColors[chapter.status] || 'var(--color-text-muted)' }} />
@@ -269,7 +277,8 @@ function VolumeTree({
           <div className="tree-volume">
             <div className="tree-volume-header" style={{ color: 'var(--color-text-muted)' }}>📄 未分组章节</div>
             {orphanChapters.map((chapter) => (
-              <div key={chapter.id}
+                <div key={chapter.id} data-testid="chapter-item" data-chapter-id={chapter.id} data-chapter-title={chapter.title}
+                data-active={activeChapterId === chapter.id ? 'true' : 'false'}
                 className={`tree-chapter ${activeChapterId === chapter.id ? 'active' : ''}`}
                 onClick={() => onSelectChapter(chapter.id)}>
                 <span className="chapter-status-dot" style={{ background: statusDotColors[chapter.status] || 'var(--color-text-muted)' }} />
@@ -282,20 +291,20 @@ function VolumeTree({
 
       {/* 新建分卷弹窗 */}
       {showNewVolume && (
-        <div className="modal-overlay" onClick={() => setShowNewVolume(false)}>
+        <div className="modal-overlay" data-testid="volume-create-dialog" onClick={() => setShowNewVolume(false)}>
           <div className="modal-dialog" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">📖 新建分卷</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
                 <label className="panel-field-label">分卷名称</label>
-                <input type="text" className="form-input" value={newVolumeTitle}
+                <input type="text" className="form-input" data-testid="volume-title-input" value={newVolumeTitle}
                   onChange={(e) => setNewVolumeTitle(e.target.value)}
                   placeholder="例如：第二卷" style={{ width: '100%' }}
                   autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateVolume()} />
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowNewVolume(false)}>取消</button>
-                <button className="btn btn-primary btn-sm" onClick={handleCreateVolume} disabled={creating || !newVolumeTitle.trim()}>
+                <button className="btn btn-primary btn-sm" data-testid="volume-save" onClick={handleCreateVolume} disabled={creating || !newVolumeTitle.trim()}>
                   {creating ? '创建中...' : '创建'}
                 </button>
               </div>
@@ -306,14 +315,14 @@ function VolumeTree({
 
       {/* 新建章节弹窗 */}
       {showNewChapter && (
-        <div className="modal-overlay" onClick={() => setShowNewChapter(false)}>
+        <div className="modal-overlay" data-testid="chapter-create-dialog" onClick={() => setShowNewChapter(false)}>
           <div className="modal-dialog" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">📝 新建章节</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {volumes.length > 0 && (
                 <div>
                   <label className="panel-field-label">所属分卷</label>
-                  <select className="form-input" value={newChapterVolumeId || volumes[0]?.id || ''}
+                  <select className="form-input" data-testid="chapter-volume-select" value={newChapterVolumeId || volumes[0]?.id || ''}
                     onChange={(e) => setNewChapterVolumeId(e.target.value)} style={{ width: '100%' }}>
                     {volumes.map((v) => (
                       <option key={v.id} value={v.id}>{v.title}</option>
@@ -323,14 +332,14 @@ function VolumeTree({
               )}
               <div>
                 <label className="panel-field-label">章节标题</label>
-                <input type="text" className="form-input" value={newChapterTitle}
+                <input type="text" className="form-input" data-testid="chapter-title-input" value={newChapterTitle}
                   onChange={(e) => setNewChapterTitle(e.target.value)}
                   placeholder="例如：第2章" style={{ width: '100%' }}
                   autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()} />
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowNewChapter(false)}>取消</button>
-                <button className="btn btn-primary btn-sm" onClick={handleCreateChapter} disabled={creating || !newChapterTitle.trim()}>
+                <button className="btn btn-primary btn-sm" data-testid="chapter-create-submit" onClick={handleCreateChapter} disabled={creating || !newChapterTitle.trim()}>
                   {creating ? '创建中...' : '创建'}
                 </button>
               </div>

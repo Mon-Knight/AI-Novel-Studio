@@ -16,7 +16,7 @@ function FirstTimeGuide() {
   if (!visible) return null;
 
   return (
-    <div style={{
+    <div data-testid="first-time-guide" style={{
       background: 'linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%)',
       border: '1px solid var(--color-border-light)',
       borderRadius: 12,
@@ -24,7 +24,7 @@ function FirstTimeGuide() {
       marginBottom: 16,
       position: 'relative',
     }}>
-      <button onClick={dismiss} style={{ position: 'absolute', top: 8, right: 12, background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--color-text-muted)' }}>✕</button>
+      <button data-testid="first-time-guide-dismiss" aria-label="关闭首次使用指南" onClick={dismiss} style={{ position: 'absolute', top: 8, right: 12, background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--color-text-muted)' }}>✕</button>
       <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>🚀 AI Novel Studio 基础创作流程</div>
       <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 2 }}>
         <div>1. 📖 <strong>创建作品</strong> — 填写作品名称、题材和简介</div>

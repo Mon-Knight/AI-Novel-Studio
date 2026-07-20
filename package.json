@@ -14,7 +14,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
-    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs",
+    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs src/services/tauri/e2eBridgeSecurity.test.mjs",
     "test:workspace-safety": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",
@@ -22,7 +22,9 @@
     "test:ai-tasks-delete": "npm run test:ai-tasks-delete:static && npm run test:ai-tasks-delete:runtime",
     "test:ai-tasks-delete:static": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_ai_task_delete.ps1",
     "test:ai-tasks-delete:runtime": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_ai_task_delete.ps1",
-    "test:project-backup": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_project_backup.ps1"
+    "test:project-backup": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_project_backup.ps1",
+    "test:e2e": "tsx scripts/e2e/run-e2e.ts",
+    "test:e2e:smoke": "tsx scripts/e2e/run-e2e.ts --smoke"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.6.0",
@@ -32,14 +34,23 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.5.14",
+    "@types/mocha": "10.0.10",
+    "@types/node": "24.10.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@wdio/cli": "9.29.1",
+    "@wdio/globals": "9.29.1",
+    "@wdio/local-runner": "9.29.1",
+    "@wdio/mocha-framework": "9.29.1",
+    "@wdio/spec-reporter": "9.29.1",
+    "@wdio/types": "9.29.1",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.2",
     "eslint-plugin-react-refresh": "^0.4.7",
+    "tsx": "4.23.1",
     "typescript": "^5.4.5",
     "vite": "^5.3.1"
   }

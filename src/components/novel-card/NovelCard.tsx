@@ -63,7 +63,13 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
   }, [novel.id, novel.currentVolumeId, novel.currentChapterId]);
 
   return (
-    <div className="novel-card" onClick={onClick}>
+    <div
+      className="novel-card"
+      data-testid="project-card"
+      data-project-id={novel.id}
+      data-project-name={novel.title}
+      onClick={onClick}
+    >
       {/* v1.0.26 删除按钮 */}
       {onDelete && (
         <button
@@ -83,7 +89,24 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
         <span className="novel-card-cover-icon">{icon}</span>
         <span className="novel-card-genre">{novel.genre || '未分类'}</span>
       </div>
-      <div className="novel-card-body">
+      <div
+        className="novel-card-body"
+        data-testid="project-open"
+        data-project-id={novel.id}
+        data-project-name={novel.title}
+        role="button"
+        tabIndex={0}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          event.stopPropagation();
+          onClick();
+        }}
+      >
         <div className="novel-card-title">{novel.title}</div>
         <div className="novel-card-desc">{novel.description || ''}</div>
         {progressLabel && <div className="novel-card-progress">{progressLabel}</div>}

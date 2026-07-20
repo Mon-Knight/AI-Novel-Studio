@@ -7,6 +7,51 @@
 
 let tauriDialogApi: typeof import('@tauri-apps/api/dialog') | null = null;
 
+export interface DialogOptions {
+  title?: string;
+  message: string;
+  okLabel?: string;
+  cancelLabel?: string;
+  testId?: string;
+}
+
+export interface E2eDialogRequest extends Required<Pick<DialogOptions, 'message'>> {
+  id: number;
+  title: string;
+  okLabel: string;
+  cancelLabel?: string;
+  testId: string;
+  kind: 'confirm' | 'message';
+  tone: 'info' | 'danger' | 'error';
+  resolve: (confirmed: boolean) => void;
+}
+
+type E2eDialogListener = (request: E2eDialogRequest) => void;
+
+let e2eDialogListener: E2eDialogListener | null = null;
+let nextDialogId = 1;
+
+const e2eDialogsEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+
+export function registerE2eDialogHost(listener: E2eDialogListener): () => void {
+  e2eDialogListener = listener;
+  return () => {
+    if (e2eDialogListener === listener) e2eDialogListener = null;
+  };
+}
+
+function showE2eDialog(input: Omit<E2eDialogRequest, 'id' | 'resolve'>): Promise<boolean> | null {
+  if (!e2eDialogsEnabled || !e2eDialogListener) return null;
+
+  return new Promise<boolean>((resolve) => {
+    e2eDialogListener?.({
+      ...input,
+      id: nextDialogId++,
+      resolve,
+    });
+  });
+}
+
 async function getTauriDialog() {
   if (tauriDialogApi) return tauriDialogApi;
   try {
@@ -18,13 +63,15 @@ async function getTauriDialog() {
 }
 
 /** 危险操作确认 — 默认按钮为"取消"/"确认"，强调风险 */
-export async function confirmDanger(options: {
-  title?: string;
-  message: string;
-  okLabel?: string;
-  cancelLabel?: string;
-}): Promise<boolean> {
-  const { title = '确认操作', message } = options;
+export async function confirmDanger(options: DialogOptions): Promise<boolean> {
+  const {
+    title = '确认操作', message, okLabel = '确认', cancelLabel = '取消', testId = 'dialog-confirmation',
+  } = options;
+
+  const e2eResult = showE2eDialog({
+    title, message, okLabel, cancelLabel, testId, kind: 'confirm', tone: 'danger',
+  });
+  if (e2eResult) return await e2eResult;
 
   try {
     const dialog = await getTauriDialog();
@@ -45,13 +92,15 @@ export async function confirmDanger(options: {
 }
 
 /** 普通确认 */
-export async function confirmInfo(options: {
-  title?: string;
-  message: string;
-  okLabel?: string;
-  cancelLabel?: string;
-}): Promise<boolean> {
-  const { title = '提示', message } = options;
+export async function confirmInfo(options: DialogOptions): Promise<boolean> {
+  const {
+    title = '提示', message, okLabel = '确认', cancelLabel = '取消', testId = 'dialog-confirmation',
+  } = options;
+
+  const e2eResult = showE2eDialog({
+    title, message, okLabel, cancelLabel, testId, kind: 'confirm', tone: 'info',
+  });
+  if (e2eResult) return await e2eResult;
 
   try {
     const dialog = await getTauriDialog();
@@ -73,8 +122,17 @@ export async function confirmInfo(options: {
 export async function showInfo(options: {
   title?: string;
   message: string;
+  testId?: string;
 }): Promise<void> {
-  const { title = '提示', message } = options;
+  const { title = '提示', message, testId = 'info-notice' } = options;
+
+  const e2eResult = showE2eDialog({
+    title, message, okLabel: '确定', testId, kind: 'message', tone: 'info',
+  });
+  if (e2eResult) {
+    await e2eResult;
+    return;
+  }
 
   try {
     const dialog = await getTauriDialog();
@@ -93,8 +151,17 @@ export async function showInfo(options: {
 export async function showError(options: {
   title?: string;
   message: string;
+  testId?: string;
 }): Promise<void> {
-  const { title = '错误', message } = options;
+  const { title = '错误', message, testId = 'error-notice' } = options;
+
+  const e2eResult = showE2eDialog({
+    title, message, okLabel: '确定', testId, kind: 'message', tone: 'error',
+  });
+  if (e2eResult) {
+    await e2eResult;
+    return;
+  }
 
   try {
     const dialog = await getTauriDialog();

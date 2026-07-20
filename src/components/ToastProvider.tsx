@@ -62,6 +62,8 @@ function ToastProvider({ children }: { children: React.ReactNode }) {
               key={toast.id}
               className={`toast-item toast-${toast.kind}`}
               role="status"
+              data-testid={toast.kind === 'error' ? 'error-notice' : toast.kind === 'success' ? 'success-notice' : undefined}
+              data-toast-id={toast.id}
             >
               <div className="toast-content">
                 {toast.title && <div className="toast-title">{toast.title}</div>}

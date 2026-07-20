@@ -73,6 +73,8 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [adopting, setAdopting] = useState(false);
   const [lastSaved, setLastSaved] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastApplyRequestId = useRef('');
@@ -327,6 +329,8 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
 
   const handleSave = useCallback(async (): Promise<ChapterDraft | null> => {
     if (!chapter || !novelId) return null;
+    if (saving) return null;
+    setSaving(true);
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     const requestDraftId = currentDraft?.id;
@@ -388,8 +392,10 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
         setTimeout(() => setSaveMsg(''), 3000);
       }
       return null;
+    } finally {
+      setSaving(false);
     }
-  }, [chapter, novelId, content, currentDraft, onDraftSaved, emitContentSnapshot]);
+  }, [chapter, novelId, content, currentDraft, onDraftSaved, emitContentSnapshot, saving]);
 
   useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
 
@@ -401,6 +407,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
 
   const handleAdoptCurrent = useCallback(async () => {
     if (!chapter || !novelId) return;
+    if (adopting || saving) return;
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     let draftToAdopt = currentDraft;
@@ -409,6 +416,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       const ok = await confirmInfo({
         title: '保存并采用',
         message: '当前正文存在未保存修改。需要先保存为草稿，再将该草稿确认为正式正文。是否继续？',
+        testId: 'apply-confirm',
       });
       if (!ok) return;
       draftToAdopt = await handleSave();
@@ -422,6 +430,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       if (!(await confirmInfo({
         title: '采用草稿',
         message: `确认采用草稿 v${existingDraft.versionNo} 作为正式正文？`,
+        testId: 'apply-confirm',
       }))) {
         return;
       }
@@ -434,6 +443,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     }
     const draftForAdoption = draftToAdopt;
 
+    setAdopting(true);
     try {
       const adopted = await runWithLoading(
         {
@@ -469,8 +479,10 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
         setSaveMsg('采用失败');
         setTimeout(() => setSaveMsg(''), 3000);
       }
+    } finally {
+      setAdopting(false);
     }
-  }, [chapter, novelId, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved]);
+  }, [chapter, novelId, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved, adopting, saving]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -544,7 +556,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
                   </button>
                 ) : (
                   <span style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn btn-primary btn-sm" onClick={handleSaveOutline} style={{ fontSize: 11 }}>
+                    <button className="btn btn-primary btn-sm" onClick={handleSaveOutline} disabled={saving} style={{ fontSize: 11 }}>
                       💾 保存
                     </button>
                     <button className="btn btn-secondary btn-sm" onClick={handleCancelEditOutline} style={{ fontSize: 11 }}>
@@ -597,7 +609,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
             <div className="editor-info-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>📋 编写章节大纲</span>
               <span style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-primary btn-sm" onClick={handleSaveOutline} style={{ fontSize: 11 }}>
+                    <button className="btn btn-primary btn-sm" onClick={handleSaveOutline} disabled={saving} style={{ fontSize: 11 }}>
                   💾 保存
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={handleCancelEditOutline} style={{ fontSize: 11 }}>
@@ -623,7 +635,19 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       )}
 
       <div className="editor-paper">
-        <textarea ref={textareaRef} className="editor-textarea" value={content}
+        <textarea
+          ref={textareaRef}
+          className="editor-textarea"
+          data-testid="chapter-editor"
+          data-chapter-id={chapter.id}
+          data-draft-id={currentDraft?.id ?? ''}
+          data-draft-version={currentDraft?.versionNo ?? ''}
+          data-content-hash={hashTextContent(content)}
+          data-adopted={currentDraft?.isAdopted ? 'true' : 'false'}
+          data-word-count={countTextWords(content)}
+          data-dirty={isDirty ? 'true' : 'false'}
+          data-saving={saving ? 'true' : 'false'}
+          value={content}
           onChange={(e) => handleContentChange(e.target.value)}
           onSelect={handleSelectionChange}
           placeholder="在这里输入或粘贴正文内容...&#10;&#10;点击右侧 AI 生成面板，AI 将根据章节大纲生成正文。"

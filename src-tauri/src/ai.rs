@@ -71,6 +71,14 @@ fn validate_request(request: &AiChatCompletionRequest) -> Result<(), String> {
     Ok(())
 }
 
+fn ensure_ai_network_allowed(network_blocked: bool) -> Result<(), String> {
+    if network_blocked {
+        return Err("AI network requests are disabled in E2E mode".to_string());
+    }
+
+    Ok(())
+}
+
 fn user_error_from_status(status: reqwest::StatusCode, body: &str, model_name: &str) -> String {
     match status.as_u16() {
         400 => format!("AI 调用失败：请求参数不合法（400 Bad Request）。请检查模型名称、max_tokens 和提示词格式。{}", short_body(body)),
@@ -106,7 +114,10 @@ fn short_body(body: &str) -> String {
 }
 
 #[tauri::command]
-pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatCompletionResponse, String> {
+pub fn ai_chat_completion(
+    request: AiChatCompletionRequest,
+) -> Result<AiChatCompletionResponse, String> {
+    ensure_ai_network_allowed(crate::runtime::is_network_blocked())?;
     validate_request(&request)?;
 
     let url = build_chat_completions_url(&request.base_url);
@@ -125,7 +136,10 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
             .find(|message| message.role == "user")
             .map(|message| message.content.as_str())
             .unwrap_or("");
-        println!("[ai_chat_completion] messages count={}", request.messages.len());
+        println!(
+            "[ai_chat_completion] messages count={}",
+            request.messages.len()
+        );
         println!(
             "[ai_chat_completion] user message length={}",
             last_user_message.chars().count()
@@ -159,7 +173,10 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
         .send()
         .map_err(|e| {
             if e.is_timeout() {
-                format!("AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。", timeout_seconds)
+                format!(
+                    "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
+                    timeout_seconds
+                )
             } else if e.is_connect() {
                 "AI 调用失败：网络连接失败，请检查 API Base URL、网络连接或代理设置。".to_string()
             } else {
@@ -173,11 +190,20 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
         .map_err(|e| format!("AI 调用失败：读取响应失败：{}", e))?;
 
     if !status.is_success() {
-        return Err(user_error_from_status(status, &text_body, &body["model"].as_str().unwrap_or("")));
+        return Err(user_error_from_status(
+            status,
+            &text_body,
+            &body["model"].as_str().unwrap_or(""),
+        ));
     }
 
-    let data: Value = serde_json::from_str(&text_body)
-        .map_err(|e| format!("AI 调用失败：响应不是有效 JSON：{}。原始返回：{}", e, text_body.chars().take(240).collect::<String>()))?;
+    let data: Value = serde_json::from_str(&text_body).map_err(|e| {
+        format!(
+            "AI 调用失败：响应不是有效 JSON：{}。原始返回：{}",
+            e,
+            text_body.chars().take(240).collect::<String>()
+        )
+    })?;
 
     let content = data
         .get("choices")
@@ -195,9 +221,26 @@ pub fn ai_chat_completion(request: AiChatCompletionRequest) -> Result<AiChatComp
     let usage = data.get("usage");
     Ok(AiChatCompletionResponse {
         text: content,
-        token_input: usage.and_then(|u| u.get("prompt_tokens")).and_then(Value::as_i64),
-        token_output: usage.and_then(|u| u.get("completion_tokens")).and_then(Value::as_i64),
-        total_tokens: usage.and_then(|u| u.get("total_tokens")).and_then(Value::as_i64),
+        token_input: usage
+            .and_then(|u| u.get("prompt_tokens"))
+            .and_then(Value::as_i64),
+        token_output: usage
+            .and_then(|u| u.get("completion_tokens"))
+            .and_then(Value::as_i64),
+        total_tokens: usage
+            .and_then(|u| u.get("total_tokens"))
+            .and_then(Value::as_i64),
         raw: data,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn e2e_mode_blocks_ai_network_requests_before_dispatch() {
+        assert!(ensure_ai_network_allowed(true).is_err());
+        assert!(ensure_ai_network_allowed(false).is_ok());
+    }
 }

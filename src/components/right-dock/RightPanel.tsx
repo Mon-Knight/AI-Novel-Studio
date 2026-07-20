@@ -121,6 +121,7 @@ function RightPanel({
       const target = e.target as HTMLElement;
       if (panelRef.current?.contains(target)) return;
       if (target.closest('.right-toolbar')) return;
+      if (target.closest('[data-e2e-dialog-host="true"]')) return;
       onClose();
     }
     document.addEventListener('mousedown', handleDocumentMouseDown, true);

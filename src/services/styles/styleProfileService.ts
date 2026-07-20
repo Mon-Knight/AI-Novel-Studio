@@ -78,7 +78,10 @@ export const styleProfileService = {
         }));
       });
       const profiles = dtos.map(fromDto);
-      return novelId ? profiles.filter((s) => s.novelId === novelId) : profiles;
+      if (profiles.length > 0) return novelId ? profiles.filter((s) => s.novelId === novelId) : profiles;
+      return novelId
+        ? getLocalAll().filter((profile) => !profile.novelId || profile.novelId === novelId)
+        : getLocalAll();
     } catch { return novelId ? getLocalAll().filter((s) => !s.novelId || s.novelId === novelId) : getLocalAll(); }
   },
 

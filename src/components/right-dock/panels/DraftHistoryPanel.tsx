@@ -34,6 +34,7 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
   const [latestReport, setLatestReport] = useState<QualityCheckReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const [busyDraftId, setBusyDraftId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const requestEpoch = ++loadEpochRef.current;
@@ -78,9 +79,11 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
   }, [onClose]);
 
   const handleAdopt = async (draft: ChapterDraft) => {
-    if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
-    if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？` }))) return;
+    if (busyDraftId) return;
+    setBusyDraftId(draft.id);
     try {
+      if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
+      if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？`, testId: 'apply-confirm' }))) return;
       const adoptedDraft = await draftVersionService.adopt(draft.id, chapterId);
       const syncedDraft = await draftVersionService.getAdoptedByChapterId(chapterId);
       const verifiedDraft = syncedDraft ?? adoptedDraft;
@@ -99,21 +102,30 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
     } catch (error) {
       console.error('[DraftHistory] failed to adopt draft', error);
       setMsg('采用失败，原正式正文未改变');
+    } finally {
+      setBusyDraftId(null);
     }
     setTimeout(() => setMsg(''), 2000);
   };
 
   const handleLoad = async (draft: ChapterDraft) => {
+    if (busyDraftId) return;
     if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
     onLoadDraft(draft);
   };
 
   const handleDelete = async (draft: ChapterDraft) => {
-    if (!(await confirmInfo({ title: '废弃草稿', message: `确认废弃 v${draft.versionNo}？此操作不会删除已采用正文。` }))) return;
-    await draftVersionService.delete(draft.id, chapterId);
-    setMsg(`v${draft.versionNo} 已废弃`);
-    setTimeout(() => setMsg(''), 2000);
-    await load();
+    if (busyDraftId) return;
+    setBusyDraftId(draft.id);
+    try {
+      if (!(await confirmInfo({ title: '废弃草稿', message: `确认废弃 v${draft.versionNo}？此操作不会删除已采用正文。`, testId: 'apply-confirm' }))) return;
+      await draftVersionService.delete(draft.id, chapterId);
+      setMsg(`v${draft.versionNo} 已废弃`);
+      setTimeout(() => setMsg(''), 2000);
+      await load();
+    } finally {
+      setBusyDraftId(null);
+    }
   };
 
   return (
@@ -130,7 +142,7 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
           <span className="right-panel-title">📋 草稿历史</span>
           <button className="right-panel-close" onClick={onClose}>✕</button>
         </div>
-        <div className="right-panel-body">
+        <div className="right-panel-body" data-testid="draft-history">
           {msg && (
             <div style={{ fontSize: 13, padding: '6px 12px', background: '#e8f5e9', borderRadius: 6, marginBottom: 12, color: '#2e7d32' }}>
               {msg}
@@ -147,7 +159,7 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {drafts.map((draft) => (
-                <div key={draft.id} style={{
+                <div key={draft.id} data-testid="draft-history-item" data-draft-id={draft.id} data-adopted={draft.isAdopted ? 'true' : 'false'} style={{
                   border: `1px solid ${draft.id === currentDraftId ? 'var(--color-primary)' : 'var(--color-border-light)'}`,
                   borderRadius: 8, padding: 12,
                   background: draft.isAdopted ? '#e8f5e9' : draft.id === currentDraftId ? 'var(--color-primary-light)' : 'var(--color-bg-card)',
@@ -170,14 +182,14 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => { void handleLoad(draft); }}
+                    <button className="btn btn-secondary btn-sm" onClick={() => { void handleLoad(draft); }} disabled={!!busyDraftId}
                       style={{ fontSize: 12 }}>📖 恢复</button>
                     {!draft.isAdopted && (
-                      <button className="btn btn-primary btn-sm" onClick={() => handleAdopt(draft)}
+                      <button className="btn btn-primary btn-sm" onClick={() => handleAdopt(draft)} disabled={!!busyDraftId}
                         style={{ fontSize: 12 }}>✅ 采用</button>
                     )}
                     {!draft.isAdopted && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(draft)}
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(draft)} disabled={!!busyDraftId}
                         style={{ fontSize: 12 }}>废弃</button>
                     )}
                   </div>
