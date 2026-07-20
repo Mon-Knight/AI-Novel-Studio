@@ -38,7 +38,7 @@ function ExportCard({ novelId }: ExportCardProps) {
         </button>
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
-        仅导出已采用的章节正文。JSON 备份包含完整作品数据，可用于恢复。
+        仅导出已采用的章节正文。完整 JSON 可在桌面版恢复为新的作品。
       </div>
       {msg && <div style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4 }}>{msg}</div>}
       {err && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 4 }}>{err}</div>}

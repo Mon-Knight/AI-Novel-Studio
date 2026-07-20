@@ -11,14 +11,14 @@
 | [quick-start.md](user/quick-start.md) | 快速开始指南 | ✅ 已整理 |
 | [desktop-usage.md](user/desktop-usage.md) | Windows 桌面端使用说明 | ✅ 已整理 |
 | [ai-settings.md](user/ai-settings.md) | AI 模式与模型配置 | ✅ 已整理 |
-| [data-import-export.md](user/data-import-export.md) | 数据导入导出说明 | ✅ v1.7.8 已补充 |
+| [data-import-export.md](user/data-import-export.md) | 数据导入导出与完整项目备份恢复说明 | ✅ v2.1.2 已同步 |
 | [workflow-guide.md](user/workflow-guide.md) | 创作工作流指南 | 🚧 占位，待后续细化 |
 
 ## project/ - 项目管理文档
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
-| [version-roadmap.md](version-roadmap.md) | 当前权威版本路线图 | ✅ v2.1.1 已同步 |
+| [version-roadmap.md](version-roadmap.md) | 当前权威版本路线图 | ✅ v2.1.2 已同步 |
 | [module-boundaries.md](project/module-boundaries.md) | 模块边界定义 | ✅ 已有 |
 | [development-rules.md](project/development-rules.md) | 开发规则总览 | ✅ 已有 |
 | [agent-task-rules.md](project/agent-task-rules.md) | Agent 任务执行规则 | 🚧 占位，待后续细化 |
@@ -31,7 +31,7 @@
 | [architecture.md](technical/architecture.md) | 项目架构总览 | 🚧 占位，待后续细化 |
 | [database.md](technical/database.md) | 数据库设计与迁移 | 🚧 占位，待后续细化 |
 | [desktop-build.md](technical/desktop-build.md) | 桌面端构建指南 | 🚧 占位，待后续细化 |
-| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.1.1 已补充 |
+| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.1.2 已补充 |
 | [api-routes.md](technical/api-routes.md) | API 路由说明 | 🚧 占位，待后续细化 |
 | [deployment.md](technical/deployment.md) | 部署说明 | 🚧 占位，待后续细化 |
 

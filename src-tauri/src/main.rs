@@ -8,6 +8,7 @@ mod commands;
 mod db;
 mod large_text_save;
 mod outline_commands;
+mod project_backup;
 mod system_accent;
 mod window_state;
 
@@ -170,6 +171,9 @@ fn main() {
             commands::get_quality_fix_runs,
             commands::update_quality_fix_run_status,
             commands::save_context_read_log,
+            project_backup::export_project_backup,
+            project_backup::import_project_backup,
+            project_backup::discard_imported_project_backup,
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {

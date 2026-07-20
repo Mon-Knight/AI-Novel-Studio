@@ -1,21 +1,21 @@
 # check_docs_sync.ps1
 # AI Novel Studio - Document Sync Check
-# Version: v1.7.10
+# Version: derived from package.json
 # Purpose: Check key documents exist and version is synced
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
+$package = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
+$CURRENT_VERSION = $package.version
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Document Sync Check" -ForegroundColor Cyan
-Write-Host "  Version: v1.7.10" -ForegroundColor Cyan
+Write-Host "  Version: v$CURRENT_VERSION" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $Results = @()
-$CURRENT_VERSION = "1.7.10"
-
 # Check file existence
 $requiredFiles = @(
     "AGENTS.md",

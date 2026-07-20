@@ -6,13 +6,7 @@ import { novelRepository } from '../database/novelRepository';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
-import { settingRepository } from '../database/settingRepository';
-import { protagonistRepository } from '../database/protagonistRepository';
-import { characterService } from '../characters/characterService';
-import { styleProfileService } from '../styles/styleProfileService';
-import { outputProfileService } from '../styles/outputProfileService';
-import { chapterSummaryService } from '../context/chapterSummaryService';
-import { contextRecordService } from '../context/contextRecordService';
+import { createCompleteProjectBackup } from '../backup/projectBackupService';
 import { formatDateTime } from '../../utils/date';
 import { formatNumber } from '../../utils/format';
 
@@ -136,49 +130,7 @@ export async function exportNovelBackupJson(novelId: string): Promise<string> {
   const novel = await novelRepository.getById(novelId);
   if (!novel) throw new Error('作品不存在');
 
-  const [
-    volumes, chapters, worldSettings, ruleSystems, protagonist,
-    characters, styles, outputs, summaries, contexts,
-  ] = await Promise.all([
-    volumeRepository.getByNovelId(novelId),
-    chapterRepository.getByNovelId(novelId),
-    settingRepository.getWorldSettings(novelId),
-    settingRepository.getRuleSystems(novelId),
-    protagonistRepository.getByNovelId(novelId),
-    characterService.getByNovelId(novelId),
-    styleProfileService.getAll(novelId),
-    outputProfileService.getAll?.(novelId) ?? Promise.resolve([]),
-    chapterSummaryService.getByNovelId(novelId),
-    contextRecordService.getByNovelId(novelId),
-  ]);
-
-  const chapterChars: any[] = [];
-  const chapterEvents: any[] = [];
-
-  const backup = {
-    type: 'ai_novel_studio_project',
-    version: '1.0.30',
-    exportedAt: new Date().toISOString(),
-    novel: {
-      ...novel,
-      outline: novel.outline ?? '',
-      protagonistMode: novel.protagonistMode ?? 'single',
-      protagonists: novel.protagonists ?? [],
-      dualProtagonistRelation: novel.dualProtagonistRelation ?? {},
-    },
-    volumes,
-    chapters,
-    worldSettings: worldSettings || [],
-    ruleSystems: ruleSystems || [],
-    protagonist: protagonist || null,
-    characters: characters || [],
-    chapterCharacters: chapterChars,
-    chapterEvents: chapterEvents,
-    styleProfiles: styles || [],
-    outputProfiles: outputs || [],
-    chapterSummaries: summaries || [],
-    contextRecords: contexts || [],
-  };
+  const backup = await createCompleteProjectBackup(novelId);
 
   return await saveFile(
     JSON.stringify(backup, null, 2),

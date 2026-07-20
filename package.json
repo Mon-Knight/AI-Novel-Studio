@@ -1,7 +1,7 @@
 {
   "name": "ai-novel-studio",
   "private": true,
-  "version": "2.1.1",
+  "version": "2.1.2",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"
@@ -14,14 +14,15 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
-    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
+    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs",
     "test:workspace-safety": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",
     "test:quality-workspace": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_quality_workspace.ps1",
     "test:ai-tasks-delete": "npm run test:ai-tasks-delete:static && npm run test:ai-tasks-delete:runtime",
     "test:ai-tasks-delete:static": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_ai_task_delete.ps1",
-    "test:ai-tasks-delete:runtime": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_ai_task_delete.ps1"
+    "test:ai-tasks-delete:runtime": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_ai_task_delete.ps1",
+    "test:project-backup": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/runtime_check_project_backup.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.6.0",

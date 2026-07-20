@@ -7,6 +7,11 @@ import { novelService } from '../../services/novels/novelService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { outputProfileService } from '../../services/styles/outputProfileService';
 import { parseJsonFile, detectJsonImportType } from '../../services/import/jsonImportService';
+import {
+  getProjectBackupSummary,
+  isCompleteProjectBackup,
+  restoreCompleteProjectBackup,
+} from '../../services/backup/projectBackupService';
 import { normalizeNovel } from '../../features/novels/novelNormalizer';
 import type { JsonDetectResult } from '../../services/import/jsonImportService';
 import { runWithLoading } from '../../lib/runWithLoading';
@@ -24,6 +29,9 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
+  const isProjectBackupCandidate = detectResult?.type === 'ai_novel_studio_project'
+    && detectResult.isProjectBackupCandidate === true;
+  const hasValidProjectBackup = isProjectBackupCandidate && isCompleteProjectBackup(rawData);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -75,6 +83,13 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
           endingHookRequired: !!obj.endingHookRequired,
         });
         setResultMsg('输出控制方案导入成功！');
+      } else if (detectResult.type === 'ai_novel_studio_project' && detectResult.isProjectBackupCandidate) {
+        if (!isCompleteProjectBackup(rawData)) {
+          throw new Error('完整项目备份校验不通过，不能按旧版项目 JSON 导入。');
+        }
+        setMessage(`正在验证并恢复：${getProjectBackupSummary(rawData)}`);
+        const result = await restoreCompleteProjectBackup(rawData);
+        setResultMsg(`作品「${result.title}」已完整恢复：${Object.values(result.restoredRecords).reduce((total, count) => total + count, 0)} 条记录`);
       } else if (detectResult.type === 'ai_novel_studio_project') {
         const novelData = obj.novel as Record<string, any>;
         if (!novelData?.title) { setError('作品 JSON 缺少必要字段'); setImporting(false); return; }
@@ -127,7 +142,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         {step === 'select' && (
           <div>
             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              选择 JSON 文件。支持：AI Novel Studio 完整作品 JSON、风格方案、输出控制方案。
+              选择 JSON 文件。支持完整作品备份、旧版项目 JSON、风格方案和输出控制方案。
             </div>
             <div onClick={() => fileInputRef.current?.click()} style={{ padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
@@ -140,13 +155,23 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
         {step === 'confirm' && detectResult && (
           <div>
             <div style={{ padding: 12, background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae6fd', marginBottom: 16, fontSize: 13 }}>
-              <div>类型：<strong>{detectResult.type === 'ai_novel_studio_project' ? '完整作品' : detectResult.type === 'style_profile' ? '风格方案' : '输出控制方案'}</strong></div>
+              <div>类型：<strong>{detectResult.type === 'ai_novel_studio_project' ? (isProjectBackupCandidate ? (hasValidProjectBackup ? '完整作品备份' : '无效或不支持的完整备份') : '旧版项目 JSON') : detectResult.type === 'style_profile' ? '风格方案' : '输出控制方案'}</strong></div>
               {detectResult.name && <div>名称：{detectResult.name}</div>}
               {detectResult.summary && <div>摘要：{detectResult.summary}</div>}
             </div>
+            {isProjectBackupCandidate && !hasValidProjectBackup && (
+              <div style={{ marginBottom: 16, padding: 10, border: '1px solid #ef4444', background: '#fef2f2', color: '#b91c1c', fontSize: 12 }}>
+                此完整备份文件不完整或协议版本不受支持，不能按旧版项目 JSON 导入。
+              </div>
+            )}
+            {detectResult.type === 'ai_novel_studio_project' && !isProjectBackupCandidate && (
+              <div style={{ marginBottom: 16, padding: 10, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12 }}>
+                这是旧版项目 JSON，只能恢复基础作品资料，不能替代完整备份。
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="btn btn-secondary btn-sm" onClick={onClose}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing}>
+              <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing || (isProjectBackupCandidate && !hasValidProjectBackup)}>
                 {importing ? '⏳ 导入中...' : '✅ 确认导入'}
               </button>
             </div>

@@ -1,15 +1,17 @@
 # verify_project.ps1
 # AI Novel Studio - Unified Project Verification
-# Version: v1.7.10
+# Version: derived from package.json
 # Purpose: Run all build and verification steps, output unified summary
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
+$package = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
+$CURRENT_VERSION = $package.version
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Project Verification" -ForegroundColor Cyan
-Write-Host "  Version: v1.7.10" -ForegroundColor Cyan
+Write-Host "  Version: v$CURRENT_VERSION" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -54,6 +56,26 @@ try {
     Write-Host "[verify_project] npm run build: FAIL (exception)" -ForegroundColor Red
     Write-Host "  $_" -ForegroundColor Red
     $Results += @{ Step = "npm run build"; Status = "FAIL" }
+} finally {
+    Pop-Location
+}
+Write-Host ""
+
+# Project backup runtime regression
+Write-Host "[verify_project] Running npm run test:project-backup..." -ForegroundColor Yellow
+Push-Location $ProjectRoot
+try {
+    $projectBackupOutput = npm run test:project-backup 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[verify_project] npm run test:project-backup: PASS" -ForegroundColor Green
+        $Results += @{ Step = "npm run test:project-backup"; Status = "PASS" }
+    } else {
+        Write-Host "[verify_project] npm run test:project-backup: FAIL" -ForegroundColor Red
+        $Results += @{ Step = "npm run test:project-backup"; Status = "FAIL" }
+    }
+} catch {
+    Write-Host "[verify_project] npm run test:project-backup: FAIL (exception)" -ForegroundColor Red
+    $Results += @{ Step = "npm run test:project-backup"; Status = "FAIL" }
 } finally {
     Pop-Location
 }

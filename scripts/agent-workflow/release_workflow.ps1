@@ -1,20 +1,21 @@
 # release_workflow.ps1
 # AI Novel Studio - Pre-release Check
-# Version: v1.7.10
+# Version: derived from package.json
 # Purpose: Pre-release checks, does NOT force release
 # Warning: Does NOT auto-create tag, auto-push, auto-delete, or auto-modify version
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path "$ScriptDir\..\.."
+$package = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
+$CURRENT_VERSION = $package.version
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Pre-release Check" -ForegroundColor Cyan
-Write-Host "  Version: v1.7.10" -ForegroundColor Cyan
+Write-Host "  Version: v$CURRENT_VERSION" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-$CURRENT_VERSION = "1.7.10"
 $allOk = $true
 
 # Step 1: Check CHANGELOG.md contains current version

@@ -61,7 +61,7 @@ pub fn get_connection() -> &'static Mutex<Connection> {
     DB.get().expect("Database not initialized")
 }
 
-fn create_tables(conn: &Connection) -> SqliteResult<()> {
+pub(crate) fn create_tables(conn: &Connection) -> SqliteResult<()> {
     create_base_tables(conn)?;
     run_migrations(conn)?;
     create_indexes(conn)?;

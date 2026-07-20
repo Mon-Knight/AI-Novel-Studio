@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.1（正文变更安全门）
+> 当前版本：v2.1.2（完整备份与恢复闭环）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-v2.1.1 开始采用以下验证层次：
+v2.1.2 在既有正文安全验证上增加项目备份恢复的真实 SQLite 往返验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -25,7 +25,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.1.1 动态测试入口
+## 2. 动态测试入口
 
 ### 2.1 全部现有前端安全原语动态测试
 
@@ -102,6 +102,23 @@ npm run test:ai-tasks-delete:runtime
 ```
 
 组合入口先执行静态契约，再执行运行时测试；运行时入口必须传播内部 `cargo test` 的失败退出码。
+
+### 2.4 v2.1.2 完整项目备份恢复测试
+
+```powershell
+npm run test:project-backup
+```
+
+该入口运行 `project_backup_` Rust 测试。完整往返场景在同一临时 SQLite 项目库中执行“导出 -> 清空项目数据 -> 导入 -> 全量比对”，避免把“新建数据库”误当成已验证语义。
+
+| 编号 | 场景 | 预期 |
+|------|------|------|
+| BK01 | 完整备份往返 | 清空临时项目数据后恢复为新作品；按 ID 映射规范化后，重新导出的全部项目记录与备份一致，并通过外键检查 |
+| BK02 | 无效关联 ID | 导入失败，目标库中不留下部分项目记录 |
+| BK03 | 篡改大文本校验值 | 导入失败，目标库中不留下部分项目记录 |
+| BK04 | 源数据大文本已损坏 | 导出被拒绝，不生成无法恢复的完整备份 |
+
+该组测试证明 SQLite 范围内的事务恢复和全量数据比较；它不替代浏览器 LocalStorage 与 Tauri 的跨存储端到端测试。
 
 ---
 
@@ -213,8 +230,9 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 ### 6.2 导出功能
 
 1. 进入 `/import-export`。
-2. 分别导出 TXT、Markdown 和 JSON 备份。
-3. 确认桌面模式出现保存位置选择，成功后显示保存路径。
+2. 分别导出 TXT、Markdown 和完整项目 JSON 备份。
+3. 导入完整备份，确认原作品不被覆盖，恢复结果作为新作品出现。
+4. 确认桌面模式出现保存位置选择，成功后显示保存路径。
 
 ### 6.3 桌面布局
 
@@ -232,6 +250,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - 尚未引入 Playwright Windows 桌面端到端测试。
 - DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
 - 大文本 DB04～DB07、质量报告事务、跨重启任务恢复和锁定内容尚未纳入本版本自动化门槛。
+- 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 
 发布结论必须准确区分“已由自动化证明”“仅手动验证”和“尚未覆盖”。
