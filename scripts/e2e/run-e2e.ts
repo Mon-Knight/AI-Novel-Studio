@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import net from 'node:net';
+import { randomInt, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { finished } from 'node:stream/promises';
 import { promisify } from 'node:util';
@@ -38,6 +39,7 @@ const allSpecs = [
   'project-create-open.spec.ts',
   'project-edit-save.spec.ts',
   'chapter-save.spec.ts',
+  'large-text-save.spec.ts',
   'candidate-review-apply.spec.ts',
   'leave-guard.spec.ts',
 ];
@@ -45,7 +47,9 @@ const specs = selectSpecs(process.argv.slice(2));
 
 const artifactRoot = path.resolve(process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ?? path.join(workspaceRoot, 'test-results', 'e2e'));
 const keepData = process.env.AI_NOVEL_STUDIO_E2E_KEEP_DATA === '1';
-const driverPortBase = Number(process.env.AI_NOVEL_STUDIO_E2E_DRIVER_PORT ?? '4444');
+const driverPortBase = process.env.AI_NOVEL_STUDIO_E2E_DRIVER_PORT
+  ? validateDriverPortBase(Number(process.env.AI_NOVEL_STUDIO_E2E_DRIVER_PORT), specs.length)
+  : await findAvailableDriverPortBase(specs.length);
 const specTimeoutMs = positiveIntegerEnvironment('AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT', 10 * 60 * 1000);
 const realDriver = process.env.AI_NOVEL_STUDIO_E2E_DRIVER ?? (process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
 const nativeDriver = resolveNativeDriver();
@@ -73,6 +77,7 @@ try {
 }
 console.log(`[E2E] application: ${diagnosticPath(appPath)}`);
 console.log(`[E2E] Cargo target: ${diagnosticPath(e2eCargoTargetDirectory)}`);
+console.log(`[E2E] driver port base: ${driverPortBase}`);
 if (nativeDriver) console.log(`[E2E] native WebDriver: ${diagnosticPath(nativeDriver)}`);
 installSignalCleanup();
 
@@ -144,6 +149,7 @@ for (const [index, spec] of specs.entries()) {
       specRoot: diagnosticPath(specRoot),
       markerPath: diagnosticPath(markerPath),
       databasePath: diagnosticPath(path.join(specRoot, 'ai-novel-studio.db')),
+      driverPort: driverPortBase + index,
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut,
@@ -178,6 +184,7 @@ await writeRunMetadata(artifactRoot, {
   failures,
   runRoot: diagnosticPath(runRoot),
   cargoTarget: diagnosticPath(e2eCargoTargetDirectory),
+  driverPortBase,
   cleanupError: suiteCleanupError ?? null,
   dataDirectoryRetained: keepData || failures !== 0,
 });
@@ -195,6 +202,48 @@ interface WdioRunResult {
   signal: NodeJS.Signals | null;
   timedOut: boolean;
   wdioPid?: number;
+}
+
+function validateDriverPortBase(base: number, specCount: number): number {
+  const highestPort = base + specCount - 1 + 1000;
+  if (!Number.isSafeInteger(base) || base < 1024 || highestPort > 65535) {
+    throw new Error(`AI_NOVEL_STUDIO_E2E_DRIVER_PORT cannot reserve ${specCount} driver/native port pairs from ${String(base)}.`);
+  }
+  return base;
+}
+
+async function findAvailableDriverPortBase(specCount: number): Promise<number> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const base = validateDriverPortBase(randomInt(20_000, 40_000), specCount);
+    const ports = Array.from({ length: specCount }, (_, index) => [base + index, base + index + 1000]).flat();
+    let available = true;
+    for (const port of ports) {
+      if (!(await isPortAvailable(port))) {
+        available = false;
+        break;
+      }
+    }
+    if (available) return base;
+  }
+  throw new Error('Unable to reserve an available local port block for desktop E2E drivers.');
+}
+
+async function isPortAvailable(port: number): Promise<boolean> {
+  if (!(await canBindPort(port, '127.0.0.1', false))) return false;
+  return canBindPort(port, '::1', true);
+}
+
+function canBindPort(port: number, host: string, allowUnavailableAddress: boolean): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      resolve(allowUnavailableAddress && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code ?? ''));
+    });
+    server.listen({ port, host, exclusive: true }, () => {
+      server.close((error) => resolve(!error));
+    });
+  });
 }
 
 function selectSpecs(args: string[]): string[] {

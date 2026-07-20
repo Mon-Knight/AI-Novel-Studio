@@ -9,6 +9,7 @@ import { buildFreshChapterGenerationContext } from '../../../services/prompt/con
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { notifyNative } from '../../../utils/nativeNotification';
+import { showToast } from '../../../utils/toast';
 import { confirmInfo, confirmDanger } from '../../../utils/nativeDialog';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { aiTaskService } from '../../../services/ai/aiTaskService';
@@ -655,6 +656,11 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       await draftVersionService.adopt(latest.id, requestChapterId);
       if (liveNovelIdRef.current !== requestNovelId || liveChapterIdRef.current !== requestChapterId) return;
       setStatusMsg('已采用为正式正文！');
+      showToast({
+        kind: 'success',
+        title: '正文已采用',
+        message: `草稿 v${latest.versionNo} 已设为当前章节正式正文。`,
+      });
       setTimeout(() => setStatusMsg(''), 3000);
       onAdopted?.();
     } catch (error) {

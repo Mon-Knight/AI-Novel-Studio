@@ -60,7 +60,18 @@ export interface LargeTextSaveResult {
   aborted?: boolean;
 }
 
-/** 默认分片大小：64KB */
+/** 分片已缓存、尚未提交数据库的结果 */
+export interface LargeTextUploadResult {
+  success: boolean;
+  sessionId?: string;
+  totalChars?: number;
+  totalBytes?: number;
+  chunkCount?: number;
+  error?: string;
+  aborted?: boolean;
+}
+
+/** 默认分片大小：64K Unicode 字符 */
 export const DEFAULT_CHUNK_SIZE = 64 * 1024;
 
 /** 大文本阈值：超过此大小使用分片保存 */

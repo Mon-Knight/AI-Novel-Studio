@@ -1034,7 +1034,7 @@ pub struct CreateChapterDraftInput {
     pub large_text_ref_id: Option<String>,
 }
 
-fn count_words(content: &str) -> i64 {
+pub(crate) fn count_words(content: &str) -> i64 {
     let mut count = 0_i64;
     let mut in_ascii_word = false;
 
@@ -1077,7 +1077,7 @@ fn map_draft_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterDraftDto> {
     })
 }
 
-fn get_draft_by_id_internal(
+pub(crate) fn get_draft_by_id_internal(
     conn: &rusqlite::Connection,
     id: &str,
 ) -> Result<ChapterDraftDto, String> {
@@ -1086,7 +1086,7 @@ fn get_draft_by_id_internal(
         .map_err(|e| e.to_string())
 }
 
-fn get_draft_by_id_and_chapter_internal(
+pub(crate) fn get_draft_by_id_and_chapter_internal(
     conn: &rusqlite::Connection,
     id: &str,
     chapter_id: &str,
@@ -1214,9 +1214,9 @@ pub fn update_chapter_draft(
     source: Option<String>,
     large_text_ref_id: Option<String>,
 ) -> Result<ChapterDraftDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    update_chapter_draft_internal(
-        &conn,
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    update_chapter_draft_with_cleanup_internal(
+        &mut conn,
         &id,
         &chapter_id,
         &content,
@@ -1225,13 +1225,60 @@ pub fn update_chapter_draft(
     )
 }
 
+fn update_chapter_draft_with_cleanup_internal(
+    conn: &mut Connection,
+    id: &str,
+    chapter_id: &str,
+    content: &str,
+    source: Option<&str>,
+    large_text_ref_id: Option<&str>,
+) -> Result<ChapterDraftDto, String> {
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("draft_update_transaction_begin_failed: {}", e))?;
+    let old_large_text_ref = transaction
+        .query_row(
+            "SELECT large_text_ref_id FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?2",
+            params![id, chapter_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|e| format!("draft_update_large_text_lookup_failed: {}", e))?
+        .ok_or_else(|| {
+            format!(
+                "draft_update_conflict: expected one draft for id={} chapter_id={}",
+                id, chapter_id
+            )
+        })?;
+    let draft = update_chapter_draft_internal(
+        &transaction,
+        id,
+        chapter_id,
+        content,
+        source,
+        large_text_ref_id,
+    )?;
+    if let Some(old_document_id) = old_large_text_ref.as_deref() {
+        if large_text_ref_id != Some(old_document_id) {
+            crate::large_text_save::delete_unreferenced_draft_large_text(
+                &transaction,
+                old_document_id,
+            )?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|e| format!("draft_update_transaction_commit_failed: {}", e))?;
+    Ok(draft)
+}
+
 fn validate_live_draft_target_internal(
     conn: &Connection,
     draft_id: &str,
     chapter_id: &str,
 ) -> Result<i64, String> {
     let target = conn.query_row(
-        "SELECT d.chapter_id, d.novel_id, d.word_count, c.id, c.novel_id, c.deleted_at FROM chapter_drafts AS d LEFT JOIN chapters AS c ON c.id = ?2 WHERE d.id = ?1",
+        "SELECT d.chapter_id, d.novel_id, d.word_count, d.large_text_ref_id, c.id, c.novel_id, c.deleted_at FROM chapter_drafts AS d LEFT JOIN chapters AS c ON c.id = ?2 WHERE d.id = ?1",
         params![draft_id, chapter_id],
         |row| {
             Ok((
@@ -1241,6 +1288,7 @@ fn validate_live_draft_target_internal(
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         },
     );
@@ -1249,6 +1297,7 @@ fn validate_live_draft_target_internal(
         actual_chapter_id,
         draft_novel_id,
         word_count,
+        large_text_ref_id,
         target_chapter_id,
         chapter_novel_id,
         deleted_at,
@@ -1292,6 +1341,13 @@ fn validate_live_draft_target_internal(
             chapter_id,
             chapter_novel_id.as_deref().unwrap_or("<missing>")
         ));
+    }
+
+    if let Some(document_id) = large_text_ref_id.as_deref() {
+        let full_content =
+            crate::large_text_save::read_large_text_document_internal(conn, document_id)
+                .map_err(|e| format!("adopt_large_text_read_failed: {}", e))?;
+        return Ok(count_words(&full_content));
     }
 
     Ok(word_count)
@@ -1364,12 +1420,42 @@ pub fn adopt_chapter_draft(
 
 #[tauri::command]
 pub fn delete_chapter_draft(id: String, chapter_id: String) -> Result<(), String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?2",
-        params![id, chapter_id],
-    )
-    .map_err(|e| e.to_string())?;
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    delete_chapter_draft_internal(&mut conn, &id, &chapter_id)
+}
+
+fn delete_chapter_draft_internal(
+    conn: &mut Connection,
+    id: &str,
+    chapter_id: &str,
+) -> Result<(), String> {
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("draft_delete_transaction_begin_failed: {}", e))?;
+    let old_large_text_ref = transaction
+        .query_row(
+            "SELECT large_text_ref_id FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?2",
+            params![id, chapter_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|e| format!("draft_delete_large_text_lookup_failed: {}", e))?
+        .flatten();
+    transaction
+        .execute(
+            "DELETE FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?2",
+            params![id, chapter_id],
+        )
+        .map_err(|e| format!("draft_delete_failed: {}", e))?;
+    if let Some(old_document_id) = old_large_text_ref.as_deref() {
+        crate::large_text_save::delete_unreferenced_draft_large_text(
+            &transaction,
+            old_document_id,
+        )?;
+    }
+    transaction
+        .commit()
+        .map_err(|e| format!("draft_delete_transaction_commit_failed: {}", e))?;
     Ok(())
 }
 
@@ -2717,7 +2803,10 @@ pub fn list_style_profiles(project_id: Option<String>) -> Result<Vec<StyleProfil
             "{} WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC",
             style_select_sql()
         ),
-        None => format!("{} ORDER BY is_active DESC, updated_at DESC", style_select_sql()),
+        None => format!(
+            "{} ORDER BY is_active DESC, updated_at DESC",
+            style_select_sql()
+        ),
     };
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let items = if let Some(project_id) = project_id {
@@ -4819,6 +4908,27 @@ mod tests {
         Ok(())
     }
 
+    fn attach_test_large_text(
+        conn: &Connection,
+        document_id: &str,
+        draft_id: &str,
+    ) -> rusqlite::Result<()> {
+        crate::large_text_save::create_large_text_tables(conn)?;
+        conn.execute(
+            "INSERT INTO large_text_documents (id, target_type, target_id, field_name, total_chars, total_bytes, chunk_count, content_sha256, created_at, updated_at) VALUES (?1, 'draft', ?2, 'content', 4, 4, 1, 'test-hash', 'before', 'before')",
+            params![document_id, draft_id],
+        )?;
+        conn.execute(
+            "INSERT INTO large_text_chunks (document_id, chunk_index, content, char_count, byte_count, chunk_sha256, created_at) VALUES (?1, 0, 'text', 4, 4, 'test-hash', 'before')",
+            params![document_id],
+        )?;
+        conn.execute(
+            "UPDATE chapter_drafts SET large_text_ref_id = ?1 WHERE id = ?2",
+            params![document_id, draft_id],
+        )?;
+        Ok(())
+    }
+
     fn get_test_draft_adopted(conn: &Connection, id: &str) -> rusqlite::Result<i64> {
         conn.query_row(
             "SELECT is_adopted FROM chapter_drafts WHERE id = ?1",
@@ -4886,6 +4996,30 @@ mod tests {
     }
 
     #[test]
+    fn adopt_rejects_corrupted_large_text_without_changing_chapter(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", None, 0, "editing")?;
+        insert_test_draft(&conn, "draft-a", "chapter-a", "preview", false)?;
+        attach_test_large_text(&conn, "document-a", "draft-a")?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-a", "chapter-a")
+            .expect_err("corrupted large text must not be adopted");
+
+        assert!(
+            error.starts_with("adopt_large_text_read_failed:"),
+            "{error}"
+        );
+        assert_eq!(get_test_draft_adopted(&conn, "draft-a")?, 0);
+        let chapter = get_test_chapter_state(&conn, "chapter-a")?;
+        assert!(chapter.0.is_none());
+        assert_eq!(chapter.1, 0);
+        assert_eq!(chapter.2, "editing");
+        Ok(())
+    }
+
+    #[test]
     fn db03_update_zero_rows_returns_conflict_and_preserves_content(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let conn = Connection::open_in_memory()?;
@@ -4924,6 +5058,71 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(content, "原正文");
+        Ok(())
+    }
+
+    #[test]
+    fn updating_large_text_draft_to_small_text_removes_old_document(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", None, 0, "editing")?;
+        insert_test_draft(&conn, "draft-a", "chapter-a", "preview", false)?;
+        attach_test_large_text(&conn, "document-a", "draft-a")?;
+
+        let updated = update_chapter_draft_with_cleanup_internal(
+            &mut conn,
+            "draft-a",
+            "chapter-a",
+            "small replacement",
+            Some("user_edited"),
+            None,
+        )?;
+
+        assert_eq!(updated.content, "small replacement");
+        assert!(updated.large_text_ref_id.is_none());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM large_text_documents", [], |row| row
+                .get::<_, i64>(
+                0
+            ))?,
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM large_text_chunks", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deleting_large_text_draft_removes_old_document() -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", None, 0, "editing")?;
+        insert_test_draft(&conn, "draft-a", "chapter-a", "preview", false)?;
+        attach_test_large_text(&conn, "document-a", "draft-a")?;
+
+        delete_chapter_draft_internal(&mut conn, "draft-a", "chapter-a")?;
+
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM chapter_drafts", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM large_text_documents", [], |row| row
+                .get::<_, i64>(
+                0
+            ))?,
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM large_text_chunks", [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
         Ok(())
     }
 

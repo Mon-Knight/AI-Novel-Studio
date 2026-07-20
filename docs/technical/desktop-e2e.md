@@ -1,6 +1,6 @@
 # Windows 桌面 E2E 自动化
 
-> 适用版本：v2.1.3 及后续版本的桌面 E2E 基础设施
+> 适用版本：v2.1.4 及后续版本的桌面 E2E 基础设施
 > 目标平台：Windows 10 / 11，真实 Tauri 窗口、Rust IPC、SQLite 与 WebView2
 
 本套测试使用 WebdriverIO、`tauri-driver` 和 Microsoft Edge WebDriver 直接操作 WebView DOM。测试只通过 `data-testid`、元素状态、路由和受限 Tauri IPC 进行定位与断言；截图不参与点击、定位或通过判定，且只在失败后、WebDriver 会话仍可访问时尽力生成。
@@ -110,6 +110,7 @@ tests/e2e/
   project-create-open.spec.ts
   project-edit-save.spec.ts
   chapter-save.spec.ts
+  large-text-save.spec.ts
   candidate-review-apply.spec.ts
   leave-guard.spec.ts
   helpers.ts
@@ -128,7 +129,7 @@ src-tauri/src/runtime.rs
 - E2E 构建与生产构建使用不同 Cargo target：默认是 `.e2e-tools/target`，运行器拒绝与 `src-tauri/target` 重叠的覆盖路径，因此测试不会覆盖生产 release 产物。
 - Cargo `e2e` feature 和运行时标记必须双向匹配：E2E feature 构建没有 `AI_NOVEL_STUDIO_E2E=1` 会拒绝启动，普通构建收到该标记也会拒绝进入 E2E 模式。
 - `window.__AI_NOVEL_STUDIO_E2E__` 只在 `VITE_AI_NOVEL_STUDIO_E2E=1` 的专用构建中存在。
-- IPC 桥只允许诊断和只读查询：`get_e2e_diagnostics`、`get_e2e_novel_commit_state`、`get_all_novels`、`get_novel_by_id`、`get_chapters_by_novel_id`、`get_drafts_by_chapter_id`、`get_ai_task_records_by_chapter_id`。测试数据仍通过真实 UI 和生产写入 IPC 建立，不直接写 SQLite。
+- IPC 桥默认只允许诊断和只读查询：`get_e2e_diagnostics`、`get_e2e_novel_commit_state`、`get_e2e_large_text_draft_state` 及必要业务读取。另有 `corrupt_e2e_large_text_chunk` 仅用于隔离测试库故障注入；大文本状态探针与损坏命令只在 Cargo `e2e` feature 下注册和编译，运行时还必须通过标志、临时路径与 marker 校验，普通生产产物不包含这两个命令。除该确定性损坏场景外，测试数据仍通过真实 UI 和生产写入 IPC 建立。
 - 原生确认框在 E2E 构建中由 `E2eDialogHost` 映射为语义等价的 DOM 对话框；正式构建仍使用 Tauri 原生 dialog。
 - `fixtures/data.ts` 保存固定作品名、章节正文、离开保护正文和 Mock 响应片段，运行器按显式 `allSpecs` 清单选择场景。每个 spec 单独启动应用并使用空数据库，不预灌生产表、不依赖前一测试；场景数据从这些确定性输入经 UI 创建，AI 内容由本地 Mock Provider 返回。
 - 每个 suite 只构建一次。运行器在 `.e2e-tools/target/release` 中比较 Cargo 包名 `ai-novel-studio.exe` 与 Tauri `productName` 对应 EXE，选取修改时间最新的现有产物，再复制为本轮唯一的 `%TEMP%\...\application\ai-novel-studio-e2e.exe`；每个 spec 都独立启动这份只读 staged EXE。
@@ -162,7 +163,7 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
 - Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
-- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行六个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行七个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
@@ -186,7 +187,7 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-运行器先构建一次 suite 应用；六个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
+运行器先构建一次 suite 应用；七个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
 
 ### 4.3 定向单场景复测
 
@@ -227,7 +228,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | 变量 | 作用 |
 |------|------|
 | `AI_NOVEL_STUDIO_E2E=1` | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝 |
-| `VITE_AI_NOVEL_STUDIO_E2E=1` | 构建时启用前端只读桥和 DOM 对话框，由运行器自动设置 |
+| `VITE_AI_NOVEL_STUDIO_E2E=1` | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置 |
 | `AI_NOVEL_STUDIO_E2E_DATA_DIR` | 单个 spec 已存在的绝对临时目录；由运行器生成 |
 | `AI_NOVEL_STUDIO_E2E_RUN_ID` | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成 |
 | `AI_NOVEL_STUDIO_E2E_APP` | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建 |
@@ -235,7 +236,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | `AI_NOVEL_STUDIO_E2E_DRIVER` | `tauri-driver` 可执行文件名或路径 |
 | `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER` | `msedgedriver.exe` 路径 |
 | `AI_NOVEL_STUDIO_E2E_DRIVER_HOST` | driver 地址，默认 `127.0.0.1` |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT` | 起始端口，默认 `4444`；原生 driver 使用 `+1000` |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT` | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000` |
 | `AI_NOVEL_STUDIO_E2E_ARTIFACTS` | 运行诊断产物根目录，默认 `test-results/e2e` |
 | `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1` | 即使成功也保留临时 SQLite / WebView2 数据 |
 | `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1` | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE |
@@ -301,7 +302,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | 应用 / 首页 | `app-shell`、`project-list`、`project-create`、`project-card`、`project-open` |
 | 作品编辑 | `project-settings`、`project-edit`、`project-name-input`、`project-save` |
 | 卷章 | `volume-create`、`volume-create-dialog`、`volume-title-input`、`volume-save`、`volume-item`、`chapter-create-first`、`chapter-create`、`chapter-create-dialog`、`chapter-title-input`、`chapter-create-submit`、`chapter-list`、`chapter-item` |
-| 编辑器 | `chapter-editor`、`chapter-save` |
+| 编辑器 | `chapter-editor`、`chapter-save`、`chapter-adopt`、`chapter-load-retry` |
 | AI 候选 | `ai-generate`、`ai-generate-submit`、`candidate-review`、`candidate-content`、`candidate-constraints`、`candidate-replace`、`candidate-apply` |
 | 确认与保护 | `generation-preflight`、`apply-confirm`、`leave-guard`、`dialog-confirm`、`dialog-cancel` |
 | 结果 | `error-notice`、`success-notice` |
@@ -320,10 +321,11 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | `project-create-open.spec.ts` | 从 UI 新建作品、输入名称、保存、回到列表并打开；断言名称、作品 ID、详情路由和 SQLite 记录 |
 | `project-edit-save.spec.ts` | 打开设置并修改名称；限定时间内完成保存；按钮恢复；成功提示出现；导航后重新读取仍正确；独立只读 SQLite 连接看见已提交标题 / 新更新时间，且数据库仅有一条对应作品 |
 | `chapter-save.spec.ts` | 显式创建卷和章节；在编辑器输入、保存、切换页面并重新打开；断言正文完整、卷章归属和 SQLite 草稿记录 |
+| `large-text-save.spec.ts` | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换 |
 | `candidate-review-apply.spec.ts` | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用 |
 | `leave-guard.spec.ts` | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖 |
 
-这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于只读验收，不替换写入流程。
+这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收和隔离库故障注入，不替换正常业务写入流程。
 
 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体。候选 spec 按现有真实模型验证其等价业务约束：结果 ID、目标作品 / 章节、基础正文 hash、apply mode、`chapter_drafts` 候选、`ai_task_records` 的 Mock 成功状态、`chapters.adopted_draft_id`、唯一正式草稿和重复采用幂等。不能把不存在的表或状态写成已验证；如果未来引入这些正式模型，需增加相应 IPC 只读查询和状态断言。
 
@@ -395,6 +397,8 @@ test-results/e2e/<spec>/
 
 运行器对 `frontend-diagnostics.json` 的硬门禁进一步暴露了三处原本会被 UI fallback 掩盖的 console error：旧 `style_profiles` 表缺少 `description` 列、`list_style_profiles` 不接受可选的项目参数，以及 `save_context_read_log` 的前端调用没有按 Rust DTO 包装 `{ input }`。修复包括兼容旧库的幂等列迁移与迁移测试、可选 `project_id` 查询及空 SQLite 结果时保留内建风格，以及正确的 context log 参数包装；同一候选桌面场景随后要求 console error 为零。
 
+v2.1.4 的长正文场景暴露并验证了大文本保存链的真实缺陷：struct IPC 参数缺少 `{ input }`、整文 hash 不匹配仍提交、读取损坏时回退预览，以及 document / chunks 与 draft 引用跨命令。修复后，Rust 强校验并以单事务提交，工作台在目标全文读取失败时保留原安全章节。连续运行还暴露固定 `4444/5444` 端口可能被上一轮占用；运行器现默认预检并随机选择一组空闲 driver 端口。
+
 ---
 
 ## 12. 故障排查
@@ -420,7 +424,7 @@ test-results/e2e/<spec>/
 ### 12.3 driver 无法启动或端口占用
 
 - 用 `cargo install --list` 确认 `tauri-driver v0.1.5` 在 `PATH`。
-- 改用空闲端口：`$env:AI_NOVEL_STUDIO_E2E_DRIVER_PORT = '5444'`。
+- 默认运行器会为整个 suite 预检并选择空闲的 driver / native driver 端口组。若显式设置了 `AI_NOVEL_STUDIO_E2E_DRIVER_PORT`，请取消该覆盖后重试，或改为一段完整空闲区间。
 - 查看 `run.json` 的残留 PID；确认上一次异常中断的 driver 已结束后再运行。
 
 ### 12.4 IPC 超时或页面停在加载状态

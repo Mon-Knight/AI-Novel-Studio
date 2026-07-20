@@ -15,6 +15,24 @@ mod window_state;
 
 use tauri::Manager;
 
+#[cfg(feature = "e2e")]
+macro_rules! generate_app_handler {
+    ($($command:path),* $(,)?) => {
+        tauri::generate_handler![
+            $($command,)*
+            runtime::get_e2e_large_text_draft_state,
+            runtime::corrupt_e2e_large_text_chunk,
+        ]
+    };
+}
+
+#[cfg(not(feature = "e2e"))]
+macro_rules! generate_app_handler {
+    ($($command:path),* $(,)?) => {
+        tauri::generate_handler![$($command),*]
+    };
+}
+
 /// Native Feel P1: 获取应用数据目录
 fn get_app_data_dir() -> std::path::PathBuf {
     #[cfg(target_os = "windows")]
@@ -74,7 +92,7 @@ fn main() {
     let focus_watch_dir = app_data_dir.clone();
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(generate_app_handler![
             commands::get_all_novels,
             commands::get_novel_by_id,
             commands::create_novel,
@@ -134,6 +152,8 @@ fn main() {
             large_text_save::create_large_text_save_session,
             large_text_save::append_large_text_chunk,
             large_text_save::finalize_large_text_save,
+            large_text_save::commit_large_text_draft_create,
+            large_text_save::commit_large_text_draft_update,
             large_text_save::abort_large_text_save,
             large_text_save::cleanup_expired_large_text_save_sessions,
             large_text_save::read_large_text_content,

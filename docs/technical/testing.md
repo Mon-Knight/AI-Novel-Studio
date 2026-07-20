@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.3（Windows 真实桌面 E2E 与稳定性）
+> 当前版本：v2.1.4（大文本正文安全闭环）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.1.3，测试体系在既有正文安全与项目备份恢复验证上增加 Windows 真实桌面 E2E：
+截至 v2.1.4，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加大文本完整性、事务故障和编辑器失败关闭验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -52,7 +52,7 @@ src/features/workspace/documentSafety.test.mjs
 
 - A 章节请求未完成时切换到 B，单调加载 guard 在 commit 前拒绝 A 的迟到 token。
 - 请求目标作品 / 章节与当前文档不一致时拒绝应用。
-- 基础正文哈希变化时返回冲突。来源草稿 ID / revision 由工作台生产路径校验，尚无 React 组件级自动测试。
+- 基础正文哈希变化时返回冲突。来源草稿 ID / revision 由工作台生产路径校验；编辑器完整水合、归属拒绝和失败保留另有组件模块测试。
 - 相同结果、目标、基础哈希和模式生成稳定幂等键；当前工作区会话中重复 claim 被拒绝，应用失败释放后允许重试。
 
 测试必须使用可控 Promise 顺序验证行为，不得退化为读取源码字符串。
@@ -121,20 +121,41 @@ npm run test:project-backup
 
 该组测试证明 SQLite 范围内的事务恢复和全量数据比较；它不替代浏览器 LocalStorage 与 Tauri 的跨存储端到端测试。
 
-### 2.5 Windows 真实桌面 E2E
+### 2.5 v2.1.4 大文本正文安全测试
+
+```powershell
+cd src-tauri
+cargo test large_text -- --test-threads=1
+cd ..
+
+npx tsx --test src/components/workspace/EditorArea.test.tsx
+```
+
+| 编号 | 场景 | 预期 |
+|------|------|------|
+| DB04 | 整文 SHA-256 不匹配 | 校验失败，document、chunks、draft 均无新增 |
+| DB05 | 数据库已提交但缓存清理失败 | 正文保持 committed，返回 cleanup warning，不报告为可盲重试失败 |
+| DB06 | draft create / update 在 document 写入后失败 | 同事务整体回滚，不留下新 document 或错误引用 |
+| DB07 | 缺片、片 hash / 元数据错误或已存 chunk 损坏 | 保存或读取失败，不返回预览全文 |
+| DB-LIFECYCLE | 连续更新、转小文本、删除草稿 | 旧 document 仅在不再被引用时删除，chunks 级联清理 |
+| DB-UNICODE | 中文、emoji、CRLF | 全文、Unicode 字符数、UTF-8 字节数和完整字数一致 |
+
+编辑器模块测试覆盖 loading / error 时保留已知安全内容、只接受归属当前作品章节的完整草稿，以及已验证无草稿章节的安全清空。它通过 Vite SSR 加载真实 `EditorArea` 模块，不以源码字符串匹配代替行为。
+
+### 2.6 Windows 真实桌面 E2E
 
 ```powershell
 # 启动、窗口、迁移和前端异常冒烟测试
 npm run test:e2e:smoke
 
-# 六个独立桌面核心流程
+# 七个独立桌面核心流程
 npm run test:e2e
 
 # 定向运行一个独立场景（扩展名可省略）
 npm run test:e2e -- --spec candidate-review-apply
 ```
 
-该入口使用 WebdriverIO、`tauri-driver`、匹配 WebView2 的 EdgeDriver 和真实 Tauri release EXE。每个 suite 在独立 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的应用，每个 spec 独立启动该 suite 的 staged EXE，并使用独立临时 SQLite、WebView2 profile、单实例状态目录和 driver 端口；写入仍通过 React UI、Tauri IPC 与 Rust command 完成，测试桥只提供受限只读验收查询。
+该入口使用 WebdriverIO、`tauri-driver`、匹配 WebView2 的 EdgeDriver 和真实 Tauri release EXE。每个 suite 在独立 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的应用，每个 spec 独立启动该 suite 的 staged EXE，并使用独立临时 SQLite、WebView2 profile、单实例状态目录和自动选择的空闲 driver 端口；正常业务写入仍通过 React UI、Tauri IPC 与 Rust command 完成。测试桥只提供受限验收查询，以及仅限隔离 E2E 库的大文本故障注入。
 
 E2E feature、运行时标记和逐 spec run-id marker 必须同时匹配，SQLite 实际路径也会通过只读诊断复核。固定 `fixtures/data.ts` 和显式 spec 清单提供确定性输入；每个场景从空库经 UI 建立自己的数据，既不依赖执行顺序，也可以用 `--spec` 单独运行。
 
@@ -150,6 +171,7 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 | `project-create-open.spec.ts` | 创建作品、返回列表并打开 |
 | `project-edit-save.spec.ts` | 修改作品信息，验证保存不挂起、提交且不重复写入 |
 | `chapter-save.spec.ts` | 显式创建卷和章节、保存正文、切换页面并重新打开 |
+| `large-text-save.spec.ts` | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭 |
 | `candidate-review-apply.spec.ts` | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等 |
 | `leave-guard.spec.ts` | 未保存离开保护的取消、保存并离开及放弃修改分支 |
 
@@ -157,7 +179,7 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行六条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行七条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ---
 
@@ -283,14 +305,14 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ## 7. 当前测试限制
 
-- v2.1.1 已引入 Node 原生安全原语动态测试，桌面 E2E 已补充首批真实 React / Tauri 流程；更广泛的 React 组件级并发集成覆盖仍需继续补齐。
+- v2.1.1 已引入 Node 原生安全原语动态测试，v2.1.4 增加编辑器失败关闭模块测试；更广泛的 React 组件级并发集成覆盖仍需继续补齐。
 - 章节切换的 Leave Guard 已纳入桌面 E2E；HashRouter 其他非按钮导航与 Tauri 原生窗口 close-request 尚未纳入可恢复离开保护的自动化闭环。
 - 当前动态测试已证明会话级幂等 claim / release；该状态尚未持久化，应用重启后的重复结果仍需持久化操作记录与集成测试。
 - Windows 桌面自动化采用 WebdriverIO + Tauri Driver，不计划用 Playwright 浏览器页面或截图式 Computer Use 替代真实 Tauri E2E。
 - 产品当前没有崩溃恢复对话框，因此 `recovery-dialog` 尚无真实业务节点或自动化流程；不得为测试伪造产品功能。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
 - DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
-- 大文本 DB04～DB07、质量报告事务、跨重启任务恢复和锁定内容尚未纳入本版本自动化门槛。
+- 大文本 DB04～DB07 已由 Rust / SQLite 与真实 Tauri 故障场景覆盖；质量报告事务、跨重启任务恢复和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 

@@ -192,6 +192,30 @@ export async function fillTestId(testId: string, value: string): Promise<void> {
   await element.setValue(value);
 }
 
+export async function fillTextareaTestId(testId: string, value: string): Promise<string> {
+  const canonicalValue = await browser.execute((id, nextValue) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    if (!(element instanceof HTMLTextAreaElement)) {
+      throw new Error(`${id} is not a textarea`);
+    }
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (!setter) throw new Error('HTMLTextAreaElement value setter is unavailable');
+    setter.call(element, nextValue);
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: null }));
+    return element.value;
+  }, testId, value);
+
+  await browser.waitUntil(async () => {
+    const element = await browser.$(`[data-testid="${testId}"]`);
+    return await element.getAttribute('data-dirty') === 'true'
+      && (await element.getValue()).length === canonicalValue.length;
+  }, {
+    timeout: 30000,
+    timeoutMsg: `${testId} did not receive the complete textarea value`,
+  });
+  return canonicalValue;
+}
+
 export async function createProjectThroughUi(title = unique('E2E Project')): Promise<string> {
   await clickTestId('project-create');
   await fillTestId('project-name-input', title);

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "e2e")]
+use rusqlite::{params, OptionalExtension};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
@@ -60,6 +62,32 @@ pub struct E2eNovelCommitState {
     pub row_count: i64,
     pub title: Option<String>,
     pub updated_at: Option<String>,
+}
+
+#[cfg(feature = "e2e")]
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eLargeTextDraftState {
+    pub draft_id: String,
+    pub chapter_id: String,
+    pub large_text_ref_id: Option<String>,
+    pub preview: String,
+    pub document_count: i64,
+    pub chunk_count: i64,
+    pub total_chars: i64,
+    pub total_bytes: i64,
+    pub content_sha256: Option<String>,
+    pub adopted: bool,
+}
+
+#[cfg(feature = "e2e")]
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eLargeTextCorruptionResult {
+    pub draft_id: String,
+    pub document_id: String,
+    pub chunk_index: i64,
+    pub affected_rows: usize,
 }
 
 pub fn is_e2e_enabled() -> bool {
@@ -146,9 +174,136 @@ pub fn get_e2e_novel_commit_state(novel_id: String) -> Result<E2eNovelCommitStat
     let data_dir = e2e_data_dir()?
         .ok_or_else(|| "E2E commit diagnostics are unavailable outside E2E mode".to_string())?;
     let database_path = fs::canonicalize(data_dir.join(DATABASE_FILE)).map_err(|error| {
-        format!("failed to resolve the E2E database for commit diagnostics: {}", error)
+        format!(
+            "failed to resolve the E2E database for commit diagnostics: {}",
+            error
+        )
     })?;
     read_novel_commit_state(&database_path, &novel_id)
+}
+
+#[cfg(feature = "e2e")]
+fn require_e2e_command_data_dir(command: &str) -> Result<PathBuf, String> {
+    e2e_data_dir()?.ok_or_else(|| format!("{} is unavailable outside E2E mode", command))
+}
+
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub fn get_e2e_large_text_draft_state(draft_id: String) -> Result<E2eLargeTextDraftState, String> {
+    require_e2e_command_data_dir("large-text draft diagnostics")?;
+    let conn = crate::db::get_connection()
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let (chapter_id, large_text_ref_id, preview, adopted) = conn
+        .query_row(
+            "SELECT chapter_id, large_text_ref_id, content, is_adopted FROM chapter_drafts WHERE id = ?1",
+            params![&draft_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("failed to read E2E large-text draft state: {}", error))?
+        .ok_or_else(|| format!("E2E large-text draft does not exist: {}", draft_id))?;
+
+    let mut state = E2eLargeTextDraftState {
+        draft_id: draft_id.clone(),
+        chapter_id,
+        large_text_ref_id: large_text_ref_id.clone(),
+        preview,
+        document_count: 0,
+        chunk_count: 0,
+        total_chars: 0,
+        total_bytes: 0,
+        content_sha256: None,
+        adopted,
+    };
+    let Some(document_id) = large_text_ref_id else {
+        return Ok(state);
+    };
+
+    state.document_count = conn
+        .query_row(
+            "SELECT COUNT(*) FROM large_text_documents WHERE id = ?1 AND target_type = 'draft' AND target_id = ?2 AND field_name = 'content'",
+            params![&document_id, &draft_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("failed to count E2E large-text documents: {}", error))?;
+    if let Some((total_chars, total_bytes, content_sha256)) = conn
+        .query_row(
+            "SELECT total_chars, total_bytes, content_sha256 FROM large_text_documents WHERE id = ?1",
+            params![&document_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("failed to read E2E large-text document metadata: {}", error))?
+    {
+        state.total_chars = total_chars;
+        state.total_bytes = total_bytes;
+        state.content_sha256 = content_sha256;
+    }
+    state.chunk_count = conn
+        .query_row(
+            "SELECT COUNT(*) FROM large_text_chunks WHERE document_id = ?1",
+            params![&document_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("failed to count E2E large-text chunks: {}", error))?;
+    Ok(state)
+}
+
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub fn corrupt_e2e_large_text_chunk(
+    draft_id: String,
+    chunk_index: i64,
+) -> Result<E2eLargeTextCorruptionResult, String> {
+    require_e2e_command_data_dir("large-text corruption injection")?;
+    if chunk_index < 0 {
+        return Err("E2E large-text chunk index must be non-negative".to_string());
+    }
+    let conn = crate::db::get_connection()
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let document_id = conn
+        .query_row(
+            "SELECT document.id FROM chapter_drafts AS draft INNER JOIN large_text_documents AS document ON document.id = draft.large_text_ref_id AND document.target_type = 'draft' AND document.target_id = draft.id AND document.field_name = 'content' WHERE draft.id = ?1",
+            params![&draft_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("failed to resolve E2E large-text draft binding: {}", error))?
+        .ok_or_else(|| format!("E2E draft has no valid large-text binding: {}", draft_id))?;
+    let affected_rows = conn
+        .execute(
+            "UPDATE large_text_chunks SET content = content || '\n[E2E_CORRUPTED_CHUNK]' WHERE document_id = ?1 AND chunk_index = ?2",
+            params![&document_id, chunk_index],
+        )
+        .map_err(|error| format!("failed to corrupt E2E large-text chunk: {}", error))?;
+    if affected_rows != 1 {
+        return Err(format!(
+            "E2E large-text corruption expected one chunk, affected {}",
+            affected_rows
+        ));
+    }
+    append_e2e_log("fault-injection: corrupted one isolated large-text chunk");
+    Ok(E2eLargeTextCorruptionResult {
+        draft_id,
+        document_id,
+        chunk_index,
+        affected_rows,
+    })
 }
 
 #[cfg(test)]

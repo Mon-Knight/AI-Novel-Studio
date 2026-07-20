@@ -26,6 +26,35 @@ export interface EditorContentSnapshot {
   selectionEnd?: number;
 }
 
+export type EditorDocumentState = 'ready' | 'loading' | 'error';
+
+export type EditorDraftContentResolution =
+  | { action: 'preserve'; reason?: string }
+  | { action: 'replace'; content: string; draft?: ChapterDraft | null };
+
+/**
+ * Keeps the last known complete editor value until the target draft has been
+ * fully hydrated and its ownership has been verified.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveEditorDraftContent(input: {
+  documentState: EditorDocumentState;
+  novelId?: string;
+  chapterId?: string;
+  draft?: ChapterDraft | null;
+}): EditorDraftContentResolution {
+  if (input.documentState !== 'ready') return { action: 'preserve' };
+
+  if (!input.draft) return { action: 'replace', content: '', draft: null };
+  if (!input.novelId || !input.chapterId
+    || input.draft.novelId !== input.novelId
+    || input.draft.chapterId !== input.chapterId) {
+    return { action: 'preserve', reason: '草稿与当前章节不一致，已阻止载入' };
+  }
+
+  return { action: 'replace', content: input.draft.content, draft: input.draft };
+}
+
 export type EditorCommandType = 'save' | 'format' | 'adopt-current';
 
 export interface EditorCommandRequest {
@@ -38,6 +67,7 @@ interface EditorAreaProps {
   novelTitle?: string;
   novelId?: string;
   currentDraft?: ChapterDraft | null;
+  documentState?: EditorDocumentState;
   onDraftChange?: (wordCount: number, isDirty: boolean) => void;
   onEditorContentChange?: (snapshot: EditorContentSnapshot) => void;
   onDraftSaved?: (draft: ChapterDraft) => void;
@@ -59,6 +89,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   chapter,
   novelId,
   currentDraft,
+  documentState = 'ready',
   onDraftChange,
   onEditorContentChange,
   onDraftSaved,
@@ -82,6 +113,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   const liveDocumentRef = useRef({ novelId, chapterId: chapter?.id });
   const liveDraftIdRef = useRef(currentDraft?.id);
   const liveContentRef = useRef(content);
+  const loadedChapterIdRef = useRef<string>();
 
   liveDocumentRef.current = { novelId, chapterId: chapter?.id };
   liveDraftIdRef.current = currentDraft?.id;
@@ -112,28 +144,27 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
 
   // 加载当前草稿
   useEffect(() => {
-    if (currentDraft) {
-      if (!chapter?.id || !novelId
-        || currentDraft.novelId !== novelId
-        || currentDraft.chapterId !== chapter.id) {
-        setSaveMsg('草稿与当前章节不一致，已阻止载入');
-        return;
-      }
-      setContent(currentDraft.content);
+    const resolution = resolveEditorDraftContent({
+      documentState,
+      novelId,
+      chapterId: chapter?.id,
+      draft: currentDraft,
+    });
+    if (resolution.action === 'replace') {
+      setContent(resolution.content);
       setIsDirty(false);
-      setLastSaved(formatDateTime(currentDraft.updatedAt));
-      emitContentSnapshot(currentDraft.content, false, currentDraft);
-    } else if (chapter?.id) {
-      setContent('');
-      setIsDirty(false);
-      setLastSaved('');
-      emitContentSnapshot('', false, null);
+      setSaveMsg('');
+      setLastSaved(resolution.draft ? formatDateTime(resolution.draft.updatedAt) : '');
+      loadedChapterIdRef.current = chapter?.id;
+      emitContentSnapshot(resolution.content, false, resolution.draft);
+    } else if (resolution.reason) {
+      setSaveMsg(resolution.reason);
     }
     // 切换章节时重置大纲编辑状态
     setIsEditingOutline(false);
     setOutlineDraft('');
     setOutlineSaveMsg('');
-  }, [currentDraft, chapter?.id, novelId, emitContentSnapshot]);
+  }, [currentDraft, chapter?.id, novelId, documentState, emitContentSnapshot]);
 
   // 定位正文功能 (v1.7.16: 多级策略 + 明显高亮)
   const [_highlightRange, setHighlightRange] = useState<{ start: number; end: number } | null>(null);
@@ -218,7 +249,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   };
 
   const handleSaveOutline = useCallback(async () => {
-    if (!chapter || !novelId) return;
+    if (!chapter || !novelId || documentState !== 'ready') return;
     try {
       await runWithLoading(
         {
@@ -242,7 +273,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       setOutlineSaveMsg('❌ 保存失败');
       setTimeout(() => setOutlineSaveMsg(''), 3000);
     }
-  }, [chapter, novelId, outlineDraft, onChapterUpdated]);
+  }, [chapter, novelId, outlineDraft, onChapterUpdated, documentState]);
 
   // Ctrl+S 保存大纲（编辑模式时）
   useEffect(() => {
@@ -258,11 +289,12 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
   }, [isEditingOutline, handleSaveOutline]);
 
   const handleContentChange = useCallback((value: string) => {
+    if (documentState !== 'ready') return;
     setContent(value);
     const dirty = value !== (currentDraft?.content || '');
     setIsDirty(dirty);
     emitContentSnapshot(value, dirty);
-  }, [currentDraft, emitContentSnapshot]);
+  }, [currentDraft, documentState, emitContentSnapshot]);
 
   // v1.0.45: 选中文本变化时也通知父组件（不改变 content/dirty）
   const handleSelectionChange = useCallback(() => {
@@ -287,6 +319,12 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     lastApplyRequestId.current = applyTextRequest.id;
     const incoming = applyTextRequest.text.trim();
     if (!incoming) return;
+    if (documentState !== 'ready') {
+      const reason = '完整正文尚未安全载入，已阻止应用 AI 输出';
+      setSaveMsg(reason);
+      onApplyTextRejected?.(applyTextRequest, reason);
+      return;
+    }
     if (!chapter || !novelId
       || applyTextRequest.novelId !== novelId
       || applyTextRequest.chapterId !== chapter.id) {
@@ -325,10 +363,10 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     setSaveMsg('未保存');
     onApplyTextConsumed?.(applyTextRequest);
     textareaRef.current?.focus();
-  }, [applyTextRequest, chapter, novelId, content, currentDraft, emitContentSnapshot, onApplyTextConsumed, onApplyTextRejected]);
+  }, [applyTextRequest, chapter, novelId, content, currentDraft, documentState, emitContentSnapshot, onApplyTextConsumed, onApplyTextRejected]);
 
   const handleSave = useCallback(async (): Promise<ChapterDraft | null> => {
-    if (!chapter || !novelId) return null;
+    if (!chapter || !novelId || documentState !== 'ready') return null;
     if (saving) return null;
     setSaving(true);
     const requestNovelId = novelId;
@@ -395,18 +433,19 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     } finally {
       setSaving(false);
     }
-  }, [chapter, novelId, content, currentDraft, onDraftSaved, emitContentSnapshot, saving]);
+  }, [chapter, novelId, content, currentDraft, documentState, onDraftSaved, emitContentSnapshot, saving]);
 
   useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
 
   const handleFormat = useCallback(() => {
+    if (documentState !== 'ready') return;
     handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim());
     setSaveMsg('已排版');
     setTimeout(() => setSaveMsg(''), 2000);
-  }, [content, handleContentChange]);
+  }, [content, documentState, handleContentChange]);
 
   const handleAdoptCurrent = useCallback(async () => {
-    if (!chapter || !novelId) return;
+    if (!chapter || !novelId || documentState !== 'ready') return;
     if (adopting || saving) return;
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
@@ -482,7 +521,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     } finally {
       setAdopting(false);
     }
-  }, [chapter, novelId, content, currentDraft, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved, adopting, saving]);
+  }, [chapter, novelId, content, currentDraft, documentState, emitContentSnapshot, handleSave, isDirty, onChapterUpdated, onDraftSaved, adopting, saving]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -512,6 +551,50 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
           <div className="editor-empty-icon">📝</div>
           <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>选择章节开始写作</div>
           <div className="text-sm text-muted">请从左侧目录树中选择一个章节</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (documentState !== 'ready') {
+    const isLoading = documentState === 'loading';
+    return (
+      <div className="editor-content" data-document-state={documentState}>
+        <div className="editor-chapter-title">第{chapter.chapterNumber}章：{chapter.title}</div>
+        <div
+          role="status"
+          style={{
+            width: 'min(100%, 1180px)', maxWidth: 1180, margin: '0 auto 10px', padding: '9px 12px',
+            color: isLoading ? 'var(--color-text-secondary)' : 'var(--color-error)',
+            background: 'var(--color-bg-hover)', border: '1px solid var(--color-border-light)', borderRadius: 6,
+            fontSize: 13,
+          }}
+        >
+          {isLoading
+            ? '正在校验并读取完整正文，下方保留切换前内容且暂不可编辑。'
+            : '完整正文不可用。下方仅保留切换前的安全内容供参考，不会写入当前章节。'}
+        </div>
+        <div className="editor-paper">
+          <textarea
+            ref={textareaRef}
+            className="editor-textarea"
+            data-testid="chapter-editor"
+            data-document-state={documentState}
+            data-chapter-id={loadedChapterIdRef.current ?? ''}
+            data-target-chapter-id={chapter.id}
+            data-draft-id={currentDraft?.id ?? ''}
+            data-draft-version={currentDraft?.versionNo ?? ''}
+            data-content-hash={hashTextContent(content)}
+            data-adopted={currentDraft?.isAdopted ? 'true' : 'false'}
+            data-word-count={countTextWords(content)}
+            data-dirty={isDirty ? 'true' : 'false'}
+            data-saving="false"
+            aria-disabled="true"
+            readOnly
+            value={content}
+            onSelect={handleSelectionChange}
+            spellCheck={false}
+          />
         </div>
       </div>
     );

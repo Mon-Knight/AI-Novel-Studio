@@ -61,6 +61,12 @@ export type PanelType =
   | 'draft-history' | 'chapter-summary' | 'context-view' | null;
 
 const NOVEL_LOAD_RETRY_DELAYS_MS = [120, 240, 480];
+const CHAPTER_DOCUMENT_LOAD_ERROR = '无法读取并校验完整正文。为防止截断内容覆盖原文，已阻止切换或写入，当前安全正文保持不变，请重试。';
+
+type ChapterDocumentLoadState =
+  | { status: 'ready'; chapterId?: string }
+  | { status: 'loading'; chapterId: string }
+  | { status: 'error'; chapterId: string; message: string };
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -189,6 +195,11 @@ function WritingWorkspacePage() {
   // 工作台加载状态机
   type WorkspaceLoadState = 'loading' | 'ready' | 'novel_not_found' | 'error';
   const [loadState, setLoadState] = useState<WorkspaceLoadState>('loading');
+  const [chapterDocumentLoad, setChapterDocumentLoad] = useState<ChapterDocumentLoadState>({ status: 'ready' });
+  const isChapterDocumentBlocked = chapterDocumentLoad.status === 'loading'
+    || (chapterDocumentLoad.status === 'error' && chapterDocumentLoad.chapterId === activeChapterId);
+  const chapterDocumentBlockedRef = useRef(isChapterDocumentBlocked);
+  chapterDocumentBlockedRef.current = isChapterDocumentBlocked;
 
   const commitActiveChapter = useCallback((chapterId: string) => {
     documentLoadGuardRef.current.invalidate();
@@ -198,34 +209,52 @@ function WritingWorkspacePage() {
     currentDraftRef.current = null;
   }, []);
 
-  const loadChapterDraft = useCallback(async (chapterId: string) => {
+  const loadChapterDraft = useCallback(async (chapterId: string, activateOnSuccess = false) => {
     const requestNovelId = activeNovelIdRef.current;
     if (!requestNovelId) return false;
     const target = { novelId: requestNovelId, chapterId };
     const token = documentLoadGuardRef.current.issue(target);
+    chapterDocumentBlockedRef.current = true;
+    setChapterDocumentLoad({ status: 'loading', chapterId });
     try {
       const resolved = await resolveGuardedDocumentLoad(
         documentLoadGuardRef.current,
         token,
         draftVersionService.getLatestByChapterId(chapterId),
-        () => ({ novelId: activeNovelIdRef.current, chapterId: activeChapterIdRef.current }),
+        () => activateOnSuccess
+          ? target
+          : { novelId: activeNovelIdRef.current, chapterId: activeChapterIdRef.current },
       );
       if (!resolved.accepted) return false;
+      if (activeNovelIdRef.current !== requestNovelId) return false;
       const draft = resolved.value;
       if (draft) {
         const draftDecision = validateDraftDocumentTarget(draft, target);
         if (!draftDecision.ok) throw new Error(draftDecision.message);
       }
+      if (activateOnSuccess) commitActiveChapter(chapterId);
       setCurrentDraft(draft);
       currentDraftRef.current = draft;
       setDraftWordCount(draft?.wordCount || 0);
       setIsDirty(false);
+      chapterDocumentBlockedRef.current = false;
+      setChapterDocumentLoad({ status: 'ready', chapterId });
       return true;
     } catch (error) {
-      console.error('[Workspace] failed to load chapter draft', { chapterId, error });
+      console.warn('[Workspace] blocked an unsafe chapter draft load', { chapterId, error });
+      if (token.epoch === documentLoadGuardRef.current.currentEpoch
+        && activeNovelIdRef.current === requestNovelId
+        && (activateOnSuccess || activeChapterIdRef.current === chapterId)) {
+        chapterDocumentBlockedRef.current = activeChapterIdRef.current === chapterId;
+        setChapterDocumentLoad({
+          status: 'error',
+          chapterId,
+          message: CHAPTER_DOCUMENT_LOAD_ERROR,
+        });
+      }
       return false;
     }
-  }, []);
+  }, [commitActiveChapter]);
 
   useEffect(() => {
     if (!novelId) return;
@@ -254,8 +283,9 @@ function WritingWorkspacePage() {
         const targetId = (urlChapterId && list.find((c) => c.id === urlChapterId))
           ? urlChapterId : list[0]?.id;
         if (targetId) {
-          commitActiveChapter(targetId);
-          loadChapterDraft(targetId);
+          void loadChapterDraft(targetId, true);
+        } else {
+          setChapterDocumentLoad({ status: 'ready' });
         }
       }
       setLoadState('ready');
@@ -304,13 +334,28 @@ function WritingWorkspacePage() {
   }, [confirmDiscardChapterGoal, confirmEditorLeave]);
 
   const handleSelectChapter = useCallback(async (chapterId: string) => {
-    if (chapterId === activeChapterIdRef.current) return;
+    if (chapterId === activeChapterIdRef.current) {
+      if (chapterDocumentLoad.status !== 'ready'
+        && chapterDocumentLoad.chapterId !== chapterId) {
+        documentLoadGuardRef.current.invalidate();
+        chapterDocumentBlockedRef.current = false;
+        setChapterDocumentLoad({ status: 'ready', chapterId });
+      }
+      return;
+    }
     if (!(await confirmWorkspaceLeave())) return;
     setChapterGoalDirty(false);
-    commitActiveChapter(chapterId);
     // v1.0.44: 切换章节时不再强制关闭面板，面板会通过 props 更新感知新章节
-    loadChapterDraft(chapterId);
-  }, [commitActiveChapter, confirmWorkspaceLeave, loadChapterDraft]);
+    void loadChapterDraft(chapterId, true);
+  }, [chapterDocumentLoad, confirmWorkspaceLeave, loadChapterDraft]);
+
+  const retryChapterDraftLoad = useCallback(() => {
+    if (chapterDocumentLoad.status !== 'error') return;
+    void loadChapterDraft(
+      chapterDocumentLoad.chapterId,
+      chapterDocumentLoad.chapterId !== activeChapterIdRef.current,
+    );
+  }, [chapterDocumentLoad, loadChapterDraft]);
 
   const handleTogglePanel = useCallback(async (panel: PanelType) => {
     if (activePanel === 'outline' && !(await confirmDiscardChapterGoal())) return;
@@ -363,6 +408,14 @@ function WritingWorkspacePage() {
   }, []);
 
   const handleDraftApplied = useCallback((draft: ChapterDraft, metadata?: DraftResultMetadata) => {
+    if (chapterDocumentBlockedRef.current) {
+      void showError({
+        title: '完整正文尚未载入',
+        message: CHAPTER_DOCUMENT_LOAD_ERROR,
+        testId: 'error-notice',
+      });
+      return false;
+    }
     const liveTarget = {
       novelId: activeNovelIdRef.current,
       chapterId: activeChapterIdRef.current,
@@ -444,6 +497,10 @@ function WritingWorkspacePage() {
   }, []);
 
   const applyAiTextToEditor = useCallback(async (payload: AiTextApplyPayload) => {
+    if (chapterDocumentBlockedRef.current) {
+      await showError({ title: '无法应用 AI 输出', message: CHAPTER_DOCUMENT_LOAD_ERROR, testId: 'error-notice' });
+      return false;
+    }
     const text = payload.text.trim();
     if (!text) return false;
     const liveTarget = {
@@ -513,6 +570,7 @@ function WritingWorkspacePage() {
   }, []);
 
   const runEditorCommand = useCallback((type: EditorCommandType) => {
+    if (chapterDocumentBlockedRef.current) return;
     setEditorCommandRequest({
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type,
@@ -632,6 +690,8 @@ function WritingWorkspacePage() {
       setLoadState('ready');
       setCurrentDraft(result.draft);
       currentDraftRef.current = result.draft;
+      chapterDocumentBlockedRef.current = false;
+      setChapterDocumentLoad({ status: 'ready', chapterId: result.chapter.id });
       setDraftWordCount(0);
       setIsDirty(false);
       console.info('[Workspace] UI updated: volumes=', volsAfter.length, 'chapters=', chsAfter.length);
@@ -676,6 +736,8 @@ function WritingWorkspacePage() {
     setLoadState('ready');
     setCurrentDraft(result.draft);
     currentDraftRef.current = result.draft;
+    chapterDocumentBlockedRef.current = false;
+    setChapterDocumentLoad({ status: 'ready', chapterId: result.chapter.id });
     setDraftWordCount(0);
     setIsDirty(false);
     console.info('[Workspace] handleCreateChapter done, chapterId=', result.chapter.id);
@@ -683,7 +745,7 @@ function WritingWorkspacePage() {
 
   return (
     <div
-      className={`workspace-page${activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}
+      className={`workspace-page${!isChapterDocumentBlocked && activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}
       data-summary-exists={summaryExists ? 'true' : 'false'}
     >
       {pageLoading && (
@@ -788,12 +850,35 @@ function WritingWorkspacePage() {
           </div>
         ) : (
           <>
+            {chapterDocumentLoad.status === 'error' && (
+              <div
+                data-testid="error-notice"
+                data-chapter-id={chapterDocumentLoad.chapterId}
+                role="alert"
+                style={{
+                  margin: '10px 16px 0', padding: '10px 12px', display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', gap: 12, color: 'var(--color-error)',
+                  background: 'var(--color-bg-hover)', border: '1px solid var(--color-error)', borderRadius: 6,
+                  fontSize: 13,
+                }}
+              >
+                <span>{chapterDocumentLoad.message}</span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  data-testid="chapter-load-retry"
+                  onClick={retryChapterDraftLoad}
+                >
+                  重试
+                </button>
+              </div>
+            )}
             <EditorArea
               ref={editorRef}
               chapter={activeChapter}
               novelTitle={novel?.title}
               novelId={novelId}
               currentDraft={activeDraft}
+              documentState={isChapterDocumentBlocked ? chapterDocumentLoad.status : 'ready'}
               onDraftChange={handleDraftChange}
               onEditorContentChange={handleEditorContentChange}
               onDraftSaved={handleDraftApplied}
@@ -816,10 +901,12 @@ function WritingWorkspacePage() {
       </div>
 
       {/* 右侧工具栏 */}
-      <RightToolbar activePanel={activePanel} onTogglePanel={handleTogglePanel} onRunCommand={runEditorCommand} />
+      {!isChapterDocumentBlocked && (
+        <RightToolbar activePanel={activePanel} onTogglePanel={handleTogglePanel} onRunCommand={runEditorCommand} />
+      )}
 
       {/* 草稿历史面板 */}
-      {activePanel === 'draft-history' && (
+      {!isChapterDocumentBlocked && activePanel === 'draft-history' && (
         <DraftHistoryPanel
           chapterId={activeChapterId}
           currentDraftId={activeDraft?.id}
@@ -834,7 +921,7 @@ function WritingWorkspacePage() {
       )}
 
       {/* 右侧弹出面板 */}
-      <RightPanel
+      {!isChapterDocumentBlocked && <RightPanel
         panelType={activePanel === 'draft-history' ? null : activePanel}
         onClose={handleClosePanel}
         novelId={novelId}
@@ -879,7 +966,7 @@ function WritingWorkspacePage() {
         onUpdateToolState={(toolKey: string, patch: Partial<PanelToolState>) => {
           setSidebarState((prev) => updateToolState(prev, toolKey, patch));
         }}
-      />
+      />}
 
       {/* v0.8.0 章节总结确认弹窗 */}
       {summaryDialogOpen && summaryResult && (

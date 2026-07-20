@@ -7,10 +7,10 @@
 
 import {
   DEFAULT_CHUNK_SIZE,
-  LARGE_TEXT_THRESHOLD,
   shouldUseLargeTextSave,
   type CreateLargeTextSessionOptions,
   type LargeTextSaveResult,
+  type LargeTextUploadResult,
 } from '../types/largeTextSave';
 import { isTauriRuntime, tauriInvoke } from './tauri/runtime';
 
@@ -24,7 +24,7 @@ interface TauriCreateSessionInput {
   totalChunks: number;
   totalChars: number;
   totalBytes: number;
-  contentSha256?: string;
+  contentSha256: string;
 }
 
 interface TauriCreateSessionOutput {
@@ -38,7 +38,7 @@ interface TauriAppendChunkInput {
   content: string;
   charCount: number;
   byteCount: number;
-  chunkSha256?: string;
+  chunkSha256: string;
 }
 
 interface TauriAppendChunkOutput {
@@ -57,6 +57,7 @@ interface TauriFinalizeOutput {
   totalChars: number;
   totalBytes: number;
   chunkCount: number;
+  cleanupWarning?: string | null;
 }
 
 // ==================== 工具函数 ====================
@@ -68,65 +69,137 @@ function byteLength(content: string): number {
 
 /** 计算字符长度 */
 function charLength(content: string): number {
-  return content.length;
+  let count = 0;
+  for (const _character of content) {
+    count += 1;
+  }
+  return count;
 }
 
 /** 将文本按字符边界切分成指定大小的分片 */
 function splitContent(content: string, chunkSize: number): string[] {
-  const chunks: string[] = [];
-  let offset = 0;
-  while (offset < content.length) {
-    const end = Math.min(offset + chunkSize, content.length);
-    // 尝试在 chunkSize 范围内找到完整的 UTF-8 字符边界
-    let actualEnd = end;
-    if (end < content.length) {
-      // 确保不在 surrogate pair 中间切断
-      const code = content.charCodeAt(end - 1);
-      if (code >= 0xd800 && code <= 0xdbff) {
-        actualEnd = end - 1;
-      }
-    }
-    chunks.push(content.slice(offset, actualEnd));
-    offset = actualEnd;
+  if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
+    throw new Error('分片大小必须是正整数');
   }
+
+  const chunks: string[] = [];
+  let chunkStart = 0;
+  let codeUnitOffset = 0;
+  let chunkChars = 0;
+
+  while (codeUnitOffset < content.length) {
+    const codePoint = content.codePointAt(codeUnitOffset);
+    codeUnitOffset += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+    chunkChars += 1;
+
+    if (chunkChars === chunkSize) {
+      chunks.push(content.slice(chunkStart, codeUnitOffset));
+      chunkStart = codeUnitOffset;
+      chunkChars = 0;
+    }
+  }
+
+  if (chunkStart < content.length) {
+    chunks.push(content.slice(chunkStart));
+  }
+
   return chunks;
 }
 
-/** 计算 SHA-256（仅在浏览器支持时） */
-async function computeSha256(content: string): Promise<string | undefined> {
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(content);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    } catch {
-      return undefined;
-    }
+function createAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('保存已取消', 'AbortError');
   }
-  return undefined;
+  const error = new Error('保存已取消');
+  error.name = 'AbortError';
+  return error;
 }
 
-// ==================== 主保存函数 ====================
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function tryAbortSession(sessionId: string): Promise<void> {
+  if (!sessionId) return;
+  try {
+    await abortLargeTextSave(sessionId);
+  } catch {
+    // 保留原始保存错误，缓存可由过期会话清理兜底。
+  }
+}
+
+function reportFailure(
+  options: CreateLargeTextSessionOptions,
+  error: unknown,
+): LargeTextUploadResult {
+  const aborted = isAbortError(error);
+  const message = errorMessage(error);
+  options.onProgress?.({
+    stage: aborted ? 'aborted' : 'error',
+    percent: 0,
+    message: aborted ? '保存已取消' : `保存失败：${message}`,
+    error: aborted ? undefined : message,
+  });
+  return {
+    success: false,
+    error: message,
+    aborted,
+  };
+}
+
+function reportDone(
+  options: CreateLargeTextSessionOptions,
+  totalChars: number,
+): void {
+  options.onProgress?.({
+    stage: 'done',
+    percent: 100,
+    message: `保存完成（${totalChars} 字符）`,
+  });
+}
+
+function validateContent(content: string): LargeTextUploadResult | null {
+  if (!content && content !== '') {
+    return { success: false, error: '保存内容不能为 null/undefined' };
+  }
+  return null;
+}
+
+function successfulDirectResult(content: string): LargeTextUploadResult {
+  return {
+    success: true,
+    totalChars: charLength(content),
+    totalBytes: byteLength(content),
+    chunkCount: 0,
+  };
+}
+
+/** 计算 SHA-256。Rust 校验要求整文与每个分片都必须携带哈希。 */
+async function computeSha256(content: string): Promise<string> {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error('当前运行环境不支持 SHA-256，无法安全保存大文本');
+  }
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ==================== 分片上传 ====================
 
 /**
- * 使用分片方式保存大文本
- *
- * @example
- * ```ts
- * const result = await saveLargeTextWithChunks({
- *   targetType: 'draft',
- *   targetId: chapterId,
- *   fieldName: 'content',
- *   content: largeTextContent,
- *   onProgress: (p) => console.log(p.stage, p.percent),
- * });
- * ```
+ * 只把大文本分片写入临时缓存，并返回后续原子事务使用的会话 ID。
+ * 调用方必须继续 finalize/commit，或在失败时 abort 该会话。
  */
-export async function saveLargeTextWithChunks(
+export async function uploadLargeTextChunks(
   options: CreateLargeTextSessionOptions,
-): Promise<LargeTextSaveResult> {
+): Promise<LargeTextUploadResult> {
   const {
     targetType,
     targetId,
@@ -138,44 +211,39 @@ export async function saveLargeTextWithChunks(
     signal,
   } = options;
 
-  // 检查是否已取消
   if (signal?.aborted) {
-    return { success: false, error: '保存已取消', aborted: true };
+    return reportFailure(options, createAbortError());
   }
 
-  // 检查内容是否为空（空内容允许保存）
-  if (!content && content !== '') {
-    return { success: false, error: '保存内容不能为 null/undefined' };
+  const invalidContent = validateContent(content);
+  if (invalidContent) {
+    return invalidContent;
   }
 
-  // 浏览器模式：直接返回（由调用方通过 localStorage 保存）
   if (!isTauriRuntime()) {
     onProgress?.({ stage: 'done', percent: 100, message: '浏览器模式：内容由 localStorage 保存' });
-    return { success: true, totalChars: charLength(content), totalBytes: byteLength(content), chunkCount: 0 };
+    return successfulDirectResult(content);
   }
 
   const totalChars = charLength(content);
   const totalBytes = byteLength(content);
 
-  // 小文本直接返回（由调用方通过普通接口保存）
-  if (!shouldUseLargeTextSave(content) && totalBytes < LARGE_TEXT_THRESHOLD) {
+  if (!shouldUseLargeTextSave(content)) {
     onProgress?.({ stage: 'done', percent: 100, message: '小文本，使用普通保存接口' });
-    return { success: true, totalChars, totalBytes, chunkCount: 0 };
+    return successfulDirectResult(content);
   }
 
   let sessionId = '';
 
   try {
-    // ============ 阶段 1: 创建保存会话 ============
     onProgress?.({ stage: 'creating', percent: 0, message: '正在准备保存...' });
 
     if (signal?.aborted) {
-      throw new DOMException('保存已取消', 'AbortError');
+      throw createAbortError();
     }
 
     const chunks = splitContent(content, chunkSize);
     const totalChunksCount = chunks.length;
-
     const contentSha256 = await computeSha256(content);
 
     const createInput: TauriCreateSessionInput = {
@@ -191,18 +259,14 @@ export async function saveLargeTextWithChunks(
 
     const createResult = await tauriInvoke<TauriCreateSessionOutput>(
       'create_large_text_save_session',
-      createInput as unknown as Record<string, unknown>,
+      { input: createInput },
     );
     sessionId = createResult.sessionId;
 
     if (signal?.aborted) {
-      await tauriInvoke<void>('abort_large_text_save', {
-        sessionId,
-      });
-      throw new DOMException('保存已取消', 'AbortError');
+      throw createAbortError();
     }
 
-    // ============ 阶段 2: 上传分片 ============
     onProgress?.({
       stage: 'uploading',
       percent: 0,
@@ -213,10 +277,7 @@ export async function saveLargeTextWithChunks(
 
     for (let i = 0; i < totalChunksCount; i++) {
       if (signal?.aborted) {
-        await tauriInvoke<void>('abort_large_text_save', {
-          sessionId,
-        });
-        throw new DOMException('保存已取消', 'AbortError');
+        throw createAbortError();
       }
 
       const chunk = chunks[i];
@@ -233,7 +294,7 @@ export async function saveLargeTextWithChunks(
 
       const appendResult = await tauriInvoke<TauriAppendChunkOutput>(
         'append_large_text_chunk',
-        appendInput as unknown as Record<string, unknown>,
+        { input: appendInput },
       );
 
       const percent = Math.round(((i + 1) / totalChunksCount) * 80); // 上传占 0-80%
@@ -247,32 +308,52 @@ export async function saveLargeTextWithChunks(
       });
     }
 
-    // ============ 阶段 3: 完成保存（写入数据库） ============
-    onProgress?.({
+    return {
+      success: true,
+      sessionId,
+      totalChars,
+      totalBytes,
+      chunkCount: totalChunksCount,
+    };
+  } catch (error: unknown) {
+    await tryAbortSession(sessionId);
+    return reportFailure(options, error);
+  }
+}
+
+// ==================== 主保存函数 ====================
+
+/** 上传分片并用通用大文本事务提交数据库。 */
+export async function saveLargeTextWithChunks(
+  options: CreateLargeTextSessionOptions,
+): Promise<LargeTextSaveResult> {
+  const uploadResult = await uploadLargeTextChunks(options);
+  if (!uploadResult.success || !uploadResult.sessionId) {
+    return uploadResult;
+  }
+
+  const { sessionId } = uploadResult;
+  try {
+    options.onProgress?.({
       stage: 'finalizing',
       percent: 85,
       message: '正在写入数据库...',
     });
 
-    if (signal?.aborted) {
-      await tauriInvoke<void>('abort_large_text_save', {
-        sessionId,
-      });
-      throw new DOMException('保存已取消', 'AbortError');
+    if (options.signal?.aborted) {
+      throw createAbortError();
     }
 
     const finalizeInput: TauriFinalizeInput = { sessionId };
     const finalizeResult = await tauriInvoke<TauriFinalizeOutput>(
       'finalize_large_text_save',
-      finalizeInput as unknown as Record<string, unknown>,
+      { input: finalizeInput },
     );
 
-    // ============ 阶段 4: 完成 ============
-    onProgress?.({
-      stage: 'done',
-      percent: 100,
-      message: `保存完成（${totalChars} 字符）`,
-    });
+    if (finalizeResult.cleanupWarning) {
+      console.warn('[LARGE_TEXT_CLEANUP_WARNING]', finalizeResult.cleanupWarning);
+    }
+    reportDone(options, finalizeResult.totalChars);
 
     return {
       success: true,
@@ -282,34 +363,8 @@ export async function saveLargeTextWithChunks(
       chunkCount: finalizeResult.chunkCount,
     };
   } catch (error: unknown) {
-    const isAborted = error instanceof DOMException && error.name === 'AbortError';
-
-    // 尝试清理
-    if (sessionId && !isAborted) {
-      try {
-        await tauriInvoke<void>('abort_large_text_save', {
-          sessionId,
-        });
-      } catch {
-        // 清理失败不影响错误报告
-      }
-    }
-
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
-
-    onProgress?.({
-      stage: isAborted ? 'aborted' : 'error',
-      percent: 0,
-      message: isAborted ? '保存已取消' : `保存失败：${errorMessage}`,
-      error: isAborted ? undefined : errorMessage,
-    });
-
-    return {
-      success: false,
-      error: errorMessage,
-      aborted: isAborted,
-    };
+    await tryAbortSession(sessionId);
+    return reportFailure(options, error);
   }
 }
 
@@ -320,7 +375,7 @@ export async function saveLargeTextWithChunks(
  */
 export async function abortLargeTextSave(sessionId: string): Promise<void> {
   if (!isTauriRuntime()) return;
-  await tauriInvoke<void>('abort_large_text_save', { sessionId });
+  await tauriInvoke<void>('abort_large_text_save', { input: { sessionId } });
 }
 
 // ==================== 清理过期会话 ====================

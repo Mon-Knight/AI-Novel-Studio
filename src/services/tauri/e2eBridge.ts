@@ -29,6 +29,8 @@ const SAFE_COMMANDS = new Set([
   'get_drafts_by_chapter_id',
   'get_ai_task_records_by_chapter_id',
   'get_e2e_novel_commit_state',
+  'get_e2e_large_text_draft_state',
+  'corrupt_e2e_large_text_chunk',
 ]);
 
 let consoleEntries: E2eConsoleEntry[] = [];

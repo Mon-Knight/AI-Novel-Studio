@@ -25,13 +25,13 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.1.3**
+**当前版本：v2.1.4**
 
-**阶段：Windows 真实桌面 E2E 与稳定性 - 自动验证真实 Tauri、Rust IPC 与 SQLite 核心流程**
+**阶段：大文本正文安全闭环 - 全文强校验、草稿原子事务与失败关闭读取**
 
-v2.1.3 将 WebdriverIO、Tauri Driver 和 EdgeDriver 接入真实 Windows Tauri 窗口。核心流程通过 DOM、稳定 `data-testid` 与受限 Tauri IPC 执行，测试数据使用独立临时 SQLite 和 WebView2 用户目录，Mock AI 与前后端网络门禁确保测试不会调用真实 Provider。
+v2.1.4 将超过 100KB 的章节正文纳入完整性与事务保护：整文及逐片 SHA-256、片数、顺序、字符数和字节数必须全部匹配，document、chunks 与草稿引用在同一个 SQLite 事务内提交。完整正文读取失败时工作台保留已知安全章节并阻止编辑、保存与采用，不再把 500 字预览当作全文。
 
-v2.1.2 已完成完整备份与恢复闭环。v2.1.3 不扩展新的 AI 自动写入能力，重点用真实桌面自动化保护应用启动、作品保存、卷章正文、候选采用和未保存离开流程，并修复测试暴露的 SQLite 锁、Windows 强调色、计字与旧库兼容问题。
+v2.1.3 已建立 WebdriverIO + Tauri Driver 的真实 Windows 桌面验证基础。v2.1.4 不扩展新的 AI 自动写入能力、不修改 migration，重点修复大文本 IPC 不可用、损坏内容仍提交、读取失败回退预览、跨命令孤儿数据和旧文档泄漏等已确认缺陷。
 
 ---
 
@@ -45,6 +45,7 @@ v2.1.2 已完成完整备份与恢复闭环。v2.1.3 不扩展新的 AI 自动�
 - **多版本草稿**：AI 初稿、重生成稿、用户编辑稿、润色稿互不覆盖。
 - **正文变更安全门**：AI 结果携带固定目标、来源草稿、基础版本 / 哈希与结果 ID；目标或基础正文变化时拒绝静默应用。
 - **安全保存与采用**：草稿零行更新视为冲突；正式采用验证草稿归属并在 SQLite 事务中原子切换。
+- **大文本正文安全**：超过 100KB 的章节草稿分片保存，全文与逐片强校验；分片文档和草稿引用同事务提交，损坏读取失败关闭且不会用预览覆盖正文。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。
@@ -169,7 +170,8 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | v2.1.0 | 已完成：单章质量闭环稳定版 |
 | v2.1.1 | 已完成：正文变更安全门 |
 | v2.1.2 | 已完成：完整备份与恢复闭环 |
-| v2.1.3 | **当前：Windows 真实桌面 E2E 与稳定性** |
+| v2.1.3 | 已完成：Windows 真实桌面 E2E 与稳定性 |
+| v2.1.4 | **当前：大文本正文安全闭环** |
 | v2.x | 后续：任务恢复、约束验证与 Agent 能力增强 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
@@ -207,7 +209,7 @@ ai-novel-studio/
 # Windows 真实 Tauri 启动冒烟测试
 npm run test:e2e:smoke
 
-# Windows 真实 Tauri 六个核心 E2E 流程
+# Windows 真实 Tauri 七个核心 E2E 流程
 npm run test:e2e
 
 # 定向复测一个独立桌面场景
@@ -248,7 +250,7 @@ npm run tauri build
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-桌面 E2E 每个 suite 先在独立的 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的 Tauri 应用，再为每个 spec 独立启动真实窗口，并分配独立临时 SQLite 与 WebView2 用户目录。固定 fixtures 从空库经 UI 建立场景数据，支持 `--spec` 独立复测；作品保存还用第二个只读 SQLite 连接证明事务已提交且没有重复写入。
+桌面 E2E 每个 suite 先在独立的 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的 Tauri 应用，再为每个 spec 独立启动真实窗口，并分配独立临时 SQLite、WebView2 用户目录和自动探测的空闲 driver 端口。固定 fixtures 从空库经 UI 建立场景数据，支持 `--spec` 独立复测；长正文规格还逐值核对全文、SQLite 元数据与 SHA-256，并通过仅限 E2E 的损坏注入证明读取失败不会覆盖安全正文。
 
 测试通过 DOM、`data-testid` 和受限 Tauri IPC 操作，不依赖中文文本、屏幕坐标或截图识别。E2E 构建强制使用 Mock Provider，WebView 在请求前阻断外部网络，Rust AI IPC 再做后端阻断；运行器必须从 `frontend-diagnostics.json` 证明无 console error、未处理异常和外部网络尝试。失败截图只用于诊断，且仅在 WebDriver 会话仍可访问时尽力生成。
 
@@ -261,8 +263,8 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - v2.1.1 安全门覆盖当前单章正文的目标、版本、保存与采用边界；通用多目标放置和正文锁定模型尚未实现。
 - SQLite 与 LocalStorage 无法构成跨存储 ACID 事务；项目级本地缓存恢复失败时，前端会撤销刚导入的 SQLite 作品，撤销失败会明确报告。
 - AI 请求仍以完整响应为主；流式输出、可靠网络取消和进程重启后的在途任务恢复尚未完成。
-- 大文本全文校验、读取失败恢复与草稿引用之间的端到端原子性仍需后续专项收敛。
-- v2.1.1 / v2.1.2 已引入前端与 Rust 动态测试，v2.1.3 正式接入首批 Windows 真实桌面 E2E；React 组件级并发覆盖和全量页面 E2E 仍不完整。
+- v2.1.4 已收敛章节草稿的大文本事务与失败关闭读取；其他实体类型尚未接入通用大文本原子提交协议。
+- v2.1.1 / v2.1.2 已引入前端与 Rust 动态测试，v2.1.3 接入首批 Windows 真实桌面 E2E，v2.1.4 增加编辑器失败关闭测试与长正文真实窗口流程；更广泛的 React 组件覆盖和全量页面 E2E 仍不完整。
 - 章节切换 Leave Guard 已有桌面 E2E；HashRouter 其他非按钮导航与 Tauri 原生窗口关闭尚未形成完整的可恢复离开保护。
 - 产品当前没有崩溃恢复对话框，因此 `recovery-dialog` 和崩溃恢复流程尚未覆盖。
 - 当前数据模型没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；桌面 E2E 验证现有草稿、AI 任务、目标绑定、基础正文哈希、采用状态和幂等约束，不把不存在的实体宣称为已覆盖。
