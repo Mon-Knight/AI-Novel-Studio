@@ -1,4 +1,10 @@
 import { invoke } from '@tauri-apps/api/tauri';
+import {
+  getMockAiGateStateForE2e,
+  pauseMockAiForE2e,
+  releaseMockAiForE2e,
+  type E2eMockAiGateState,
+} from '../ai/mockAiClient';
 import { redactDiagnosticText, serializeConsoleArguments } from './e2eDiagnosticSanitizer';
 import { installE2eNetworkGuard, type E2eNetworkAttempts, type E2eNetworkGuard } from './e2eNetworkGuard';
 
@@ -16,6 +22,9 @@ interface E2eBridge {
   getConsoleLogs: () => E2eConsoleEntry[];
   getUnhandledErrors: () => string[];
   getNetworkAttempts: () => E2eNetworkAttempts;
+  getMockAiGateState: () => E2eMockAiGateState;
+  pauseMockAi: () => E2eMockAiGateState;
+  releaseMockAi: () => E2eMockAiGateState;
   clearDiagnostics: () => void;
 }
 
@@ -28,6 +37,8 @@ const SAFE_COMMANDS = new Set([
   'get_chapters_by_novel_id',
   'get_drafts_by_chapter_id',
   'get_ai_task_records_by_chapter_id',
+  'get_generation_jobs_by_chapter_id',
+  'get_generation_step_results',
   'get_e2e_novel_commit_state',
   'get_e2e_large_text_draft_state',
   'corrupt_e2e_large_text_chunk',
@@ -87,6 +98,9 @@ function createBridge(): E2eBridge {
     getConsoleLogs: () => [...consoleEntries],
     getUnhandledErrors: () => [...unhandledErrors],
     getNetworkAttempts,
+    getMockAiGateState: getMockAiGateStateForE2e,
+    pauseMockAi: pauseMockAiForE2e,
+    releaseMockAi: releaseMockAiForE2e,
     clearDiagnostics: () => {
       consoleEntries = [];
       unhandledErrors = [];

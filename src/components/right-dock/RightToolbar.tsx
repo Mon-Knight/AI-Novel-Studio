@@ -54,6 +54,8 @@ function RightToolbar({ activePanel, onTogglePanel, onRunCommand }: RightToolbar
               ? 'chapter-adopt'
               : btn.kind === 'panel' && btn.id === 'ai-generate'
                 ? 'ai-generate'
+                : btn.kind === 'panel' && btn.id === 'engineering'
+                  ? 'chapter-engineering'
                 : undefined}
           className={`right-toolbar-btn ${btn.kind === 'panel' && activePanel === btn.id ? 'active' : ''}`}
           onClick={() => {

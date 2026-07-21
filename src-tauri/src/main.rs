@@ -135,6 +135,7 @@ fn main() {
             commands::cancel_generation_job,
             commands::save_generation_step_result,
             commands::get_generation_step_results,
+            commands::recover_interrupted_generation_jobs,
             commands::create_ai_task_record,
             commands::mark_ai_task_succeeded,
             commands::mark_ai_task_failed,

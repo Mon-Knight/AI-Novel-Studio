@@ -8,6 +8,53 @@ const E2E_MODE = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
 const E2E_TOKEN_INPUT = 320;
 const E2E_TOKEN_OUTPUT = 640;
 
+export interface E2eMockAiGateState {
+  paused: boolean;
+  waitingRequests: number;
+  requestCount: number;
+}
+
+let e2eGatePaused = false;
+let e2eRequestCount = 0;
+const e2eGateWaiters = new Set<() => void>();
+
+function requireE2eMockGate(): void {
+  if (!E2E_MODE) throw new Error('Mock AI gate is available only in E2E mode');
+}
+
+export function getMockAiGateStateForE2e(): E2eMockAiGateState {
+  requireE2eMockGate();
+  return {
+    paused: e2eGatePaused,
+    waitingRequests: e2eGateWaiters.size,
+    requestCount: e2eRequestCount,
+  };
+}
+
+export function pauseMockAiForE2e(): E2eMockAiGateState {
+  requireE2eMockGate();
+  e2eGatePaused = true;
+  return getMockAiGateStateForE2e();
+}
+
+export function releaseMockAiForE2e(): E2eMockAiGateState {
+  requireE2eMockGate();
+  e2eGatePaused = false;
+  const waiters = [...e2eGateWaiters];
+  e2eGateWaiters.clear();
+  waiters.forEach((resolve) => resolve());
+  return getMockAiGateStateForE2e();
+}
+
+async function waitForMockAiGateForE2e(): Promise<void> {
+  if (!E2E_MODE) return;
+  e2eRequestCount += 1;
+  if (!e2eGatePaused) return;
+  await new Promise<void>((resolve) => {
+    e2eGateWaiters.add(resolve);
+  });
+}
+
 function countWords(text: string): number {
   const cleaned = text.replace(/[#*\-`>\s]+/g, ' ').trim();
   if (!cleaned) return 0;
@@ -275,6 +322,7 @@ function mockChapterPolish(_info: ReturnType<typeof extractInfo>, messages: { ro
 
 export class MockAiClient implements AiClient {
   async generate(request: AiGenerateRequest): Promise<AiGenerateResponse> {
+    await waitForMockAiGateForE2e();
     await delay();
     const taskType = (request.taskType as MockTaskType | undefined) || detectTaskType(request.messages);
     const info = extractInfo(request.messages);

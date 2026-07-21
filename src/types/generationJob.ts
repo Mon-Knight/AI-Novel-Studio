@@ -83,3 +83,8 @@ export interface RunMockGenerationJobInput {
 export interface RunChapterDraftGenerationJobInput extends RunMockGenerationJobInput {
   title?: string;
 }
+
+export interface StartupGenerationRecovery {
+  recoveredJobs: number;
+  recoveredAt: string;
+}

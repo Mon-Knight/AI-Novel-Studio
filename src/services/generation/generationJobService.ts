@@ -19,10 +19,28 @@ import type {
   GenerationStepStatus,
   RunChapterDraftGenerationJobInput,
   RunMockGenerationJobInput,
+  StartupGenerationRecovery,
 } from '../../types/generationJob';
 
 const JOBS_KEY = 'ai_novel_studio_generation_jobs';
 const STEPS_KEY_PREFIX = 'ai_novel_studio_generation_steps_';
+const STARTUP_RECOVERY_ERROR_CODE = 'APP_RESTART_INTERRUPTED';
+const STARTUP_RECOVERY_MESSAGE = '应用在任务完成前退出；已保留完成步骤和草稿，请确认后手动重新开始。';
+
+const TERMINAL_JOB_STATUSES: ReadonlySet<GenerationJobStatus> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+const ALLOWED_JOB_TRANSITIONS: Readonly<Record<GenerationJobStatus, ReadonlySet<GenerationJobStatus>>> = {
+  pending: new Set(['pending', 'running', 'retrying', 'failed', 'cancelled']),
+  running: new Set(['running', 'retrying', 'completed', 'failed', 'cancelled']),
+  retrying: new Set(['retrying', 'running', 'completed', 'failed', 'cancelled']),
+  failed: new Set(['failed']),
+  completed: new Set(['completed']),
+  cancelled: new Set(['cancelled']),
+};
 
 interface RawGenerationJob extends Partial<GenerationJob> {
   world_id?: string | null;
@@ -49,6 +67,7 @@ interface RawGenerationJob extends Partial<GenerationJob> {
 interface RawGenerationStepResult extends Partial<GenerationStepResult> {
   job_id?: string;
   step_name?: string;
+  inputSnapshotJson?: string | null;
   input_snapshot_json?: string | null;
   output_json?: string | null;
   output_text?: string | null;
@@ -97,6 +116,11 @@ function parseJson(value: unknown): unknown {
   } catch {
     return undefined;
   }
+}
+
+function normalizeJsonField(value: unknown, fallback?: unknown): unknown {
+  const candidate = value ?? fallback;
+  return typeof candidate === 'string' ? parseJson(candidate) : candidate;
 }
 
 function normalizeJob(raw: unknown): GenerationJob | null {
@@ -153,8 +177,8 @@ function normalizeStep(raw: unknown): GenerationStepResult | null {
     jobId,
     stepName,
     status: normalizeStepStatus(item.status),
-    inputSnapshot: item.inputSnapshot ?? parseJson(item.input_snapshot_json),
-    outputJson: item.outputJson ?? parseJson(item.output_json),
+    inputSnapshot: item.inputSnapshot ?? normalizeJsonField(item.inputSnapshotJson, item.input_snapshot_json),
+    outputJson: normalizeJsonField(item.outputJson, item.output_json),
     outputText: toSafeString(item.outputText ?? item.output_text).trim() || undefined,
     errorMessage: toSafeString(item.errorMessage ?? item.error_message).trim() || undefined,
     createdAt: toSafeString(item.createdAt ?? item.created_at, nowISO()),
@@ -166,7 +190,7 @@ function normalizeSteps(raw: unknown): GenerationStepResult[] {
   return raw
     .map(normalizeStep)
     .filter((item): item is GenerationStepResult => item !== null)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
 
 function normalizeJobStatus(value: unknown): GenerationJobStatus {
@@ -211,6 +235,24 @@ function upsertLocalJob(job: GenerationJob): GenerationJob {
   else jobs.unshift(job);
   saveLocalJobs(jobs);
   return job;
+}
+
+function updateLocalJob(existing: GenerationJob, input: UpdateGenerationJobInput): GenerationJob {
+  if (TERMINAL_JOB_STATUSES.has(existing.status)) {
+    throw new Error(`generation_job_terminal: ${existing.id} is already ${existing.status}`);
+  }
+  if (input.status && !ALLOWED_JOB_TRANSITIONS[existing.status].has(input.status)) {
+    throw new Error(`generation_job_invalid_transition: ${existing.status} -> ${input.status}`);
+  }
+  if (input.progressPercent !== undefined) {
+    if (!Number.isInteger(input.progressPercent) || input.progressPercent < 0 || input.progressPercent > 100) {
+      throw new Error(`generation_job_invalid_progress: ${input.progressPercent} is outside 0..100`);
+    }
+    if (input.progressPercent < existing.progressPercent) {
+      throw new Error(`generation_job_progress_regression: ${existing.progressPercent} -> ${input.progressPercent}`);
+    }
+  }
+  return upsertLocalJob({ ...existing, ...input });
 }
 
 function getLocalSteps(jobId: string): GenerationStepResult[] {
@@ -355,6 +397,51 @@ function applyLowRiskPatches(content: string, patches: PatchCandidate[]): {
 }
 
 export const generationJobService = {
+  async recoverInterruptedAtStartup(): Promise<StartupGenerationRecovery> {
+    const recoveredAt = nowISO();
+    return dbCall<StartupGenerationRecovery>(
+      'recover_interrupted_generation_jobs',
+      {},
+      () => {
+        const jobs = getLocalJobs();
+        const interrupted = jobs.filter((job) => (
+          job.status === 'pending' || job.status === 'running' || job.status === 'retrying'
+        ));
+        if (interrupted.length === 0) {
+          return { recoveredJobs: 0, recoveredAt };
+        }
+        const interruptedIds = new Set(interrupted.map((job) => job.id));
+        saveLocalJobs(jobs.map((job) => {
+          if (!interruptedIds.has(job.id)) return job;
+          return {
+            ...job,
+            status: 'failed',
+            errorCode: STARTUP_RECOVERY_ERROR_CODE,
+            errorMessage: STARTUP_RECOVERY_MESSAGE,
+            finishedAt: recoveredAt,
+          };
+        }));
+        for (const job of interrupted) {
+          saveLocalStep({
+            id: generateId(),
+            jobId: job.id,
+            stepName: job.currentStep ?? 'preflight',
+            status: 'failed',
+            outputJson: {
+              recoveryReason: STARTUP_RECOVERY_ERROR_CODE,
+              previousStatus: job.status,
+              preservedProgressPercent: job.progressPercent,
+            },
+            outputText: STARTUP_RECOVERY_MESSAGE,
+            errorMessage: STARTUP_RECOVERY_MESSAGE,
+            createdAt: recoveredAt,
+          });
+        }
+        return { recoveredJobs: interrupted.length, recoveredAt };
+      },
+    );
+  },
+
   async create(input: CreateGenerationJobInput): Promise<GenerationJob> {
     const now = nowISO();
     const job: GenerationJob = {
@@ -387,7 +474,7 @@ export const generationJobService = {
       () => {
         const existing = getLocalJobs().find((item) => item.id === input.id);
         if (!existing) throw new Error('生成任务不存在');
-        return upsertLocalJob({ ...existing, ...input });
+        return updateLocalJob(existing, input);
       },
     );
     const normalized = normalizeJob(raw);
@@ -421,7 +508,19 @@ export const generationJobService = {
       () => {
         const existing = getLocalJobs().find((item) => item.id === id);
         if (!existing) return null;
-        return upsertLocalJob({ ...existing, status: 'cancelled', finishedAt: now, progressPercent: existing.progressPercent });
+        if (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled') {
+          return existing;
+        }
+        const cancelled = upsertLocalJob({ ...existing, status: 'cancelled', finishedAt: now, progressPercent: existing.progressPercent });
+        saveLocalStep({
+          id: generateId(),
+          jobId: existing.id,
+          stepName: existing.currentStep ?? 'preflight',
+          status: 'cancelled',
+          outputText: '任务已取消。',
+          createdAt: now,
+        });
+        return cancelled;
       },
     );
     return normalizeJob(raw);
@@ -450,7 +549,14 @@ export const generationJobService = {
     const raw = await dbCall<unknown>(
       'save_generation_step_result',
       { input: toStepDbInput(step) },
-      () => saveLocalStep(step),
+      () => {
+        const parent = getLocalJobs().find((item) => item.id === step.jobId);
+        if (!parent) throw new Error(`generation_step_parent_not_found: ${step.jobId}`);
+        if (TERMINAL_JOB_STATUSES.has(parent.status)) {
+          throw new Error(`generation_step_parent_terminal: ${step.jobId} is already ${parent.status}`);
+        }
+        return saveLocalStep(step);
+      },
     );
     const normalized = normalizeStep(raw);
     if (!normalized) throw new Error('生成步骤保存返回无效数据');
@@ -502,6 +608,7 @@ export const generationJobService = {
       await updateJob({ status: 'running', currentStep: stepName, progressPercent });
       await delay(120);
       const result = await action();
+      await ensureNotCancelled();
       const step = await this.saveStep({
         jobId: job.id,
         stepName,
@@ -573,6 +680,7 @@ export const generationJobService = {
         status: 'skipped',
         outputText: 'v1.9.7 不保存正文版本；v2.0.0 将接入正文版本保存。',
       }));
+      await ensureNotCancelled();
       job = await this.update({
         id: job.id,
         status: 'completed',
@@ -586,29 +694,35 @@ export const generationJobService = {
       if (e instanceof Error && e.message === 'generation_job_cancelled') {
         const cancelled = await this.cancel(job.id);
         if (cancelled) job = cancelled;
-        await this.saveStep({
-          jobId: job.id,
-          stepName: job.currentStep ?? 'preflight',
-          status: 'cancelled',
-          outputText: '任务已取消。',
-        });
+        await emit();
+        return job;
+      }
+      const persisted = await this.getById(job.id);
+      if (persisted && (persisted.status === 'completed' || persisted.status === 'failed' || persisted.status === 'cancelled')) {
+        job = persisted;
         await emit();
         return job;
       }
       const message = e instanceof Error ? e.message : '生成任务失败';
-      job = await this.update({
-        id: job.id,
-        status: 'failed',
-        errorMessage: message,
-        progressPercent: job.progressPercent,
-        finishedAt: nowISO(),
-      });
-      await this.saveStep({
-        jobId: job.id,
-        stepName: job.currentStep ?? 'preflight',
-        status: 'failed',
-        errorMessage: message,
-      });
+      try {
+        await this.saveStep({
+          jobId: job.id,
+          stepName: job.currentStep ?? 'preflight',
+          status: 'failed',
+          errorMessage: message,
+        });
+        job = await this.update({
+          id: job.id,
+          status: 'failed',
+          errorMessage: message,
+          progressPercent: job.progressPercent,
+          finishedAt: nowISO(),
+        });
+      } catch (finalizationError) {
+        const terminal = await this.getById(job.id);
+        if (!terminal || !TERMINAL_JOB_STATUSES.has(terminal.status)) throw finalizationError;
+        job = terminal;
+      }
       await emit();
       return job;
     }
@@ -653,6 +767,7 @@ export const generationJobService = {
       await ensureNotCancelled();
       await updateJob({ status: 'running', currentStep: stepName, progressPercent });
       const result = await action();
+      await ensureNotCancelled();
       const step = await this.saveStep({
         jobId: job.id,
         stepName,
@@ -823,6 +938,7 @@ export const generationJobService = {
           outputText: `已自动应用 ${result.applied.length} 个低风险 patch，并保存修复草稿 v${patchedDraft.versionNo}。`,
         };
       });
+      await ensureNotCancelled();
       job = await this.update({
         id: job.id,
         status: 'completed',
@@ -836,29 +952,35 @@ export const generationJobService = {
       if (e instanceof Error && e.message === 'generation_job_cancelled') {
         const cancelled = await this.cancel(job.id);
         if (cancelled) job = cancelled;
-        await this.saveStep({
-          jobId: job.id,
-          stepName: job.currentStep ?? 'preflight',
-          status: 'cancelled',
-          outputText: '任务已取消。',
-        });
+        await emit();
+        return { job };
+      }
+      const persisted = await this.getById(job.id);
+      if (persisted && (persisted.status === 'completed' || persisted.status === 'failed' || persisted.status === 'cancelled')) {
+        job = persisted;
         await emit();
         return { job };
       }
       const message = e instanceof Error ? e.message : '正文生成任务失败';
-      job = await this.update({
-        id: job.id,
-        status: 'failed',
-        errorMessage: message,
-        progressPercent: job.progressPercent,
-        finishedAt: nowISO(),
-      });
-      await this.saveStep({
-        jobId: job.id,
-        stepName: job.currentStep ?? 'preflight',
-        status: 'failed',
-        errorMessage: message,
-      });
+      try {
+        await this.saveStep({
+          jobId: job.id,
+          stepName: job.currentStep ?? 'preflight',
+          status: 'failed',
+          errorMessage: message,
+        });
+        job = await this.update({
+          id: job.id,
+          status: 'failed',
+          errorMessage: message,
+          progressPercent: job.progressPercent,
+          finishedAt: nowISO(),
+        });
+      } catch (finalizationError) {
+        const terminal = await this.getById(job.id);
+        if (!terminal || !TERMINAL_JOB_STATUSES.has(terminal.status)) throw finalizationError;
+        job = terminal;
+      }
       await emit();
       return { job };
     }

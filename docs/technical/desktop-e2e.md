@@ -1,6 +1,6 @@
 # Windows 桌面 E2E 自动化
 
-> 适用版本：v2.1.4 及后续版本的桌面 E2E 基础设施
+> 适用版本：v2.1.5 及后续版本的桌面 E2E 基础设施
 > 目标平台：Windows 10 / 11，真实 Tauri 窗口、Rust IPC、SQLite 与 WebView2
 
 本套测试使用 WebdriverIO、`tauri-driver` 和 Microsoft Edge WebDriver 直接操作 WebView DOM。测试只通过 `data-testid`、元素状态、路由和受限 Tauri IPC 进行定位与断言；截图不参与点击、定位或通过判定，且只在失败后、WebDriver 会话仍可访问时尽力生成。
@@ -75,7 +75,7 @@
 | 写作工作台 | 卷 / 章创建、章节列表、章节项、编辑器和保存无稳定锚点 |
 | AI 候选 | 生成入口、生成提交、约束、候选审查、采用和确认无稳定锚点 |
 | 离开保护 | 原生确认框无法通过 WebDriver DOM 访问 |
-| 恢复 | 产品尚无崩溃恢复对话框，也就不存在 `recovery-dialog` 节点 |
+| 恢复 | 首批 E2E 接入时产品尚无恢复节点；v2.1.5 已增加真实 `recovery-dialog` 与重启流程 |
 
 ---
 
@@ -304,12 +304,13 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | 卷章 | `volume-create`、`volume-create-dialog`、`volume-title-input`、`volume-save`、`volume-item`、`chapter-create-first`、`chapter-create`、`chapter-create-dialog`、`chapter-title-input`、`chapter-create-submit`、`chapter-list`、`chapter-item` |
 | 编辑器 | `chapter-editor`、`chapter-save`、`chapter-adopt`、`chapter-load-retry` |
 | AI 候选 | `ai-generate`、`ai-generate-submit`、`candidate-review`、`candidate-content`、`candidate-constraints`、`candidate-replace`、`candidate-apply` |
+| 章节工程任务 | `chapter-engineering`、`engineering-panel`、`engineering-tab-jobs`、`generation-job-start`、`generation-job-cancel`、`generation-job-status`、`generation-job-step`、`generation-job-recovery` |
 | 确认与保护 | `generation-preflight`、`apply-confirm`、`leave-guard`、`dialog-confirm`、`dialog-cancel` |
-| 结果 | `error-notice`、`success-notice` |
+| 结果与恢复 | `error-notice`、`success-notice`、`recovery-dialog`、`recovery-dismiss` |
 
 重复节点使用同一个语义 test ID，并用业务属性区分，例如 `data-project-id`、`data-chapter-id`、`data-chapter-title`。只给业务边界和必要子操作增加选择器，不给普通布局元素批量加 ID。
 
-`recovery-dialog` 当前没有加入：产品尚未实现崩溃恢复对话框。创建一个只为测试存在的假恢复 UI 会错误地改变验收语义；应在真实恢复功能落地时同时加入该选择器和桌面流程。
+`recovery-dialog` 是正式启动恢复体验的一部分，不是测试专用假 UI。只有检测到遗留章节工程任务或恢复检查本身失败时才显示；E2E 只通过 DOM 读取其状态并关闭。
 
 ---
 
@@ -324,14 +325,15 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | `large-text-save.spec.ts` | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换 |
 | `candidate-review-apply.spec.ts` | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用 |
 | `leave-guard.spec.ts` | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖 |
+| `restart-task-recovery.spec.ts` | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI |
 
-这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收和隔离库故障注入，不替换正常业务写入流程。
+这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收、隔离库故障注入和 E2E-only Mock pause / release，不替换正常业务写入流程；pause gate 不调用网络，也不直接修改数据库。
 
 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体。候选 spec 按现有真实模型验证其等价业务约束：结果 ID、目标作品 / 章节、基础正文 hash、apply mode、`chapter_drafts` 候选、`ai_task_records` 的 Mock 成功状态、`chapters.adopted_draft_id`、唯一正式草稿和重复采用幂等。不能把不存在的表或状态写成已验证；如果未来引入这些正式模型，需增加相应 IPC 只读查询和状态断言。
 
 尚未覆盖：
 
-- 崩溃恢复与 `recovery-dialog`，因为产品当前没有该功能；
+- 不确定 AI 步骤的自动续跑、旧 `ai_task_records` 跨重启恢复和真实 HTTP 取消；
 - Windows 安装程序、原生文件选择器、系统托盘、Windows 通知；
 - OCR、截图识别、屏幕坐标、多显示器；
 - Tauri 原生窗口 close-request 的完整恢复式离开保护；
@@ -398,6 +400,8 @@ test-results/e2e/<spec>/
 运行器对 `frontend-diagnostics.json` 的硬门禁进一步暴露了三处原本会被 UI fallback 掩盖的 console error：旧 `style_profiles` 表缺少 `description` 列、`list_style_profiles` 不接受可选的项目参数，以及 `save_context_read_log` 的前端调用没有按 Rust DTO 包装 `{ input }`。修复包括兼容旧库的幂等列迁移与迁移测试、可选 `project_id` 查询及空 SQLite 结果时保留内建风格，以及正确的 context log 参数包装；同一候选桌面场景随后要求 console error 为零。
 
 v2.1.4 的长正文场景暴露并验证了大文本保存链的真实缺陷：struct IPC 参数缺少 `{ input }`、整文 hash 不匹配仍提交、读取损坏时回退预览，以及 document / chunks 与 draft 引用跨命令。修复后，Rust 强校验并以单事务提交，工作台在目标全文读取失败时保留原安全章节。连续运行还暴露固定 `4444/5444` 端口可能被上一轮占用；运行器现默认预检并随机选择一组空闲 driver 端口。
+
+v2.1.5 的重启场景确认了章节工程 runner 只存在于页面内 Promise：进程退出后，SQLite 中的 `pending` / `running` / `retrying` 会永久遗留，面板重载后的本地运行标志又会复位，允许用户重复启动。状态更新还允许迟到回调覆盖取消，step 的 `INSERT OR REPLACE` 可覆盖旧 checkpoint。修复后，启动事务把遗留任务确定结算为 `APP_RESTART_INTERRUPTED`，终态不可复活、进度不可倒退、step ID 不可覆盖，面板同时检查持久化 active 状态。系统不会自动重放不确定步骤。
 
 ---
 

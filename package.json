@@ -1,7 +1,7 @@
 {
   "name": "ai-novel-studio",
   "private": true,
-  "version": "2.1.4",
+  "version": "2.1.5",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"
@@ -14,7 +14,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
-    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs src/services/tauri/e2eBridgeSecurity.test.mjs && tsx --test src/components/workspace/EditorArea.test.tsx",
+    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs src/services/tauri/e2eBridgeSecurity.test.mjs && tsx --test --test-concurrency=1 src/components/workspace/EditorArea.test.tsx src/services/generation/generationJobService.test.ts",
     "test:workspace-safety": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "test:setting-suggestions": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_setting_suggestions.ps1",

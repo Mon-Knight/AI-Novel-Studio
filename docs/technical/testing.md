@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.4（大文本正文安全闭环）
+> 当前版本：v2.1.5（章节工程任务跨重启恢复闭环）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.1.4，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加大文本完整性、事务故障和编辑器失败关闭验证：
+截至 v2.1.5，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加任务状态机、启动恢复事务和真实应用进程重启验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -142,13 +142,35 @@ npx tsx --test src/components/workspace/EditorArea.test.tsx
 
 编辑器模块测试覆盖 loading / error 时保留已知安全内容、只接受归属当前作品章节的完整草稿，以及已验证无草稿章节的安全清空。它通过 Vite SSR 加载真实 `EditorArea` 模块，不以源码字符串匹配代替行为。
 
-### 2.6 Windows 真实桌面 E2E
+### 2.6 v2.1.5 任务重启恢复测试
+
+```powershell
+cd src-tauri
+cargo test startup_task_recovery -- --test-threads=1
+cargo test generation_job -- --test-threads=1
+cd ..
+
+npm run test:e2e -- --spec restart-task-recovery
+```
+
+| 编号 | 场景 | 预期 |
+|------|------|------|
+| REC01 | 启动时存在 `pending` / `running` / `retrying` 任务 | 同一事务结算为 `failed`，错误码为 `APP_RESTART_INTERRUPTED`，原进度和结果保留 |
+| REC02 | 恢复 checkpoint 插入失败 | 任务更新整体回滚，不留下半恢复状态 |
+| REC03 | 对同一数据库再次执行恢复 | 返回 0，终态和 checkpoint 数量均不变 |
+| REC04 | 取消后的迟到完成、终态复活或进度倒退 | Rust 状态机拒绝写入 |
+| REC05 | 重复 step ID 与同时间戳结果 | ID 不可覆盖，读取顺序按时间和 ID 稳定 |
+| REC-E2E | Mock AI 请求暂停后重启真实 Tauri 应用 | 同一隔离 SQLite 中任务安全终结；对话框、保留 checkpoint、二次启动幂等、零外网和零残留均成立 |
+
+恢复测试只证明 `generation_jobs` 的安全中断结算，不证明不确定步骤可以自动续跑。E2E pause gate 只存在于 `VITE_AI_NOVEL_STUDIO_E2E=1` 的专用前端构建中，生产构建不可用。
+
+### 2.7 Windows 真实桌面 E2E
 
 ```powershell
 # 启动、窗口、迁移和前端异常冒烟测试
 npm run test:e2e:smoke
 
-# 七个独立桌面核心流程
+# 八个独立桌面核心流程
 npm run test:e2e
 
 # 定向运行一个独立场景（扩展名可省略）
@@ -174,12 +196,13 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 | `large-text-save.spec.ts` | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭 |
 | `candidate-review-apply.spec.ts` | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等 |
 | `leave-guard.spec.ts` | 未保存离开保护的取消、保存并离开及放弃修改分支 |
+| `restart-task-recovery.spec.ts` | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等 |
 
 测试通过 `data-testid`、元素状态、HashRouter 和 Tauri IPC 定位与断言，不使用中文文本、CSS 类、DOM 层级、屏幕坐标或截图识别。`frontend-diagnostics.json`、WebdriverIO、driver / Rust 日志、数据库位置和进程清理结果都会写入诊断目录；失败时在会话仍可访问的前提下尽力追加 DOM、当前路由和截图。
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行七条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行八条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ---
 
@@ -307,12 +330,12 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 - v2.1.1 已引入 Node 原生安全原语动态测试，v2.1.4 增加编辑器失败关闭模块测试；更广泛的 React 组件级并发集成覆盖仍需继续补齐。
 - 章节切换的 Leave Guard 已纳入桌面 E2E；HashRouter 其他非按钮导航与 Tauri 原生窗口 close-request 尚未纳入可恢复离开保护的自动化闭环。
-- 当前动态测试已证明会话级幂等 claim / release；该状态尚未持久化，应用重启后的重复结果仍需持久化操作记录与集成测试。
+- 当前动态测试已证明会话级幂等 claim / release，以及 `generation_jobs` 重启后的安全终结；跨重启自动续跑和其他 AI 任务模型仍需要持久化 attempt / operation 记录与副作用幂等协议。
 - Windows 桌面自动化采用 WebdriverIO + Tauri Driver，不计划用 Playwright 浏览器页面或截图式 Computer Use 替代真实 Tauri E2E。
-- 产品当前没有崩溃恢复对话框，因此 `recovery-dialog` 尚无真实业务节点或自动化流程；不得为测试伪造产品功能。
+- `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
 - DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
-- 大文本 DB04～DB07 已由 Rust / SQLite 与真实 Tauri 故障场景覆盖；质量报告事务、跨重启任务恢复和持久正文锁定模型尚未纳入本版本自动化门槛。
+- 大文本 DB04～DB07 与章节工程任务跨重启安全结算已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；质量报告事务、自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 

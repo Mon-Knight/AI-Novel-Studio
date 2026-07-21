@@ -4,7 +4,9 @@ import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
+import { generationJobService } from './services/generation/generationJobService';
 import { tauriInvoke } from './services/tauri/runtime';
+import { describeUnknownError } from './utils/errorMessage';
 import './styles/variables.css';
 import './styles/global.css';
 
@@ -76,24 +78,41 @@ async function applySystemAccentColor() {
   }
 }
 
-markStartup('react-before-render');
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <HashRouter>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    </HashRouter>
-  </React.StrictMode>,
-);
+async function bootstrapApplication() {
+  let startupRecovery;
+  try {
+    startupRecovery = await generationJobService.recoverInterruptedAtStartup();
+  } catch (error) {
+    const message = describeUnknownError(error, '生成任务恢复检查失败');
+    console.error('[STARTUP_TASK_RECOVERY_FAILED]', { message });
+    startupRecovery = {
+      recoveredJobs: 0,
+      recoveredAt: new Date().toISOString(),
+      error: message,
+    };
+  }
 
-requestAnimationFrame(() => {
-  markStartup('react-mounted');
+  markStartup('react-before-render');
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <HashRouter>
+        <ToastProvider>
+          <App startupRecovery={startupRecovery} />
+        </ToastProvider>
+      </HashRouter>
+    </React.StrictMode>,
+  );
+
   requestAnimationFrame(() => {
-    markStartup('first-page-ready');
-    scheduleHideStartupSplash();
-    logStartupTimings();
+    markStartup('react-mounted');
+    requestAnimationFrame(() => {
+      markStartup('first-page-ready');
+      scheduleHideStartupSplash();
+      logStartupTimings();
+    });
   });
-});
 
-void applySystemAccentColor();
+  void applySystemAccentColor();
+}
+
+void bootstrapApplication();

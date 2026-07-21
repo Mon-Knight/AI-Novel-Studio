@@ -1,5 +1,5 @@
 use crate::db::{get_connection, get_database_path};
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 // ==================== Novel ====================
@@ -1892,8 +1892,101 @@ fn get_generation_job_by_id_internal(
         .map_err(|e| e.to_string())
 }
 
+fn generation_job_status_is_terminal(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "cancelled")
+}
+
+fn generation_job_transition_is_allowed(current: &str, next: &str) -> bool {
+    current == next
+        || matches!(
+            (current, next),
+            ("pending", "running")
+                | ("pending", "retrying")
+                | ("pending", "failed")
+                | ("pending", "cancelled")
+                | ("running", "retrying")
+                | ("running", "completed")
+                | ("running", "failed")
+                | ("running", "cancelled")
+                | ("retrying", "running")
+                | ("retrying", "completed")
+                | ("retrying", "failed")
+                | ("retrying", "cancelled")
+        )
+}
+
+fn update_generation_job_internal(
+    conn: &Connection,
+    input: &UpdateGenerationJobInput,
+) -> Result<GenerationJobDto, String> {
+    let current = get_generation_job_by_id_internal(conn, &input.id)
+        .map_err(|error| format!("generation_job_not_found: {}", error))?;
+    if generation_job_status_is_terminal(&current.status) {
+        return Err(format!(
+            "generation_job_terminal: {} is already {}",
+            input.id, current.status
+        ));
+    }
+    if let Some(next_status) = input.status.as_deref() {
+        if !generation_job_transition_is_allowed(&current.status, next_status) {
+            return Err(format!(
+                "generation_job_invalid_transition: {} -> {}",
+                current.status, next_status
+            ));
+        }
+    }
+    if let Some(progress) = input.progress_percent {
+        if !(0..=100).contains(&progress) {
+            return Err(format!(
+                "generation_job_invalid_progress: {} is outside 0..100",
+                progress
+            ));
+        }
+        if progress < current.progress_percent {
+            return Err(format!(
+                "generation_job_progress_regression: {} -> {}",
+                current.progress_percent, progress
+            ));
+        }
+    }
+
+    let affected = conn
+        .execute(
+            "UPDATE generation_jobs SET status = COALESCE(?1, status), current_step = COALESCE(?2, current_step), progress_percent = COALESCE(?3, progress_percent), provider = COALESCE(?4, provider), model_name = COALESCE(?5, model_name), input_token_estimate = COALESCE(?6, input_token_estimate), output_token_estimate = COALESCE(?7, output_token_estimate), actual_input_tokens = COALESCE(?8, actual_input_tokens), actual_output_tokens = COALESCE(?9, actual_output_tokens), cost_estimate = COALESCE(?10, cost_estimate), error_code = COALESCE(?11, error_code), error_message = COALESCE(?12, error_message), retry_count = COALESCE(?13, retry_count), started_at = COALESCE(?14, started_at), finished_at = COALESCE(?15, finished_at) WHERE id = ?16",
+            params![
+                &input.status,
+                &input.current_step,
+                input.progress_percent,
+                &input.provider,
+                &input.model_name,
+                input.input_token_estimate,
+                input.output_token_estimate,
+                input.actual_input_tokens,
+                input.actual_output_tokens,
+                input.cost_estimate,
+                &input.error_code,
+                &input.error_message,
+                input.retry_count,
+                &input.started_at,
+                &input.finished_at,
+                &input.id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    if affected != 1 {
+        return Err(format!(
+            "generation_job_update_conflict: expected one row, affected {}",
+            affected
+        ));
+    }
+    get_generation_job_by_id_internal(conn, &input.id)
+}
+
 #[tauri::command]
 pub fn create_generation_job(input: CreateGenerationJobInput) -> Result<GenerationJobDto, String> {
+    if input.status != "pending" || input.progress_percent != 0 {
+        return Err("generation_job_invalid_initial_state: expected pending at 0%".to_string());
+    }
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO generation_jobs (id, world_id, novel_id, volume_id, chapter_id, job_type, status, current_step, progress_percent, provider, model_name, retry_count, created_at, started_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
@@ -1920,28 +2013,7 @@ pub fn create_generation_job(input: CreateGenerationJobInput) -> Result<Generati
 #[tauri::command]
 pub fn update_generation_job(input: UpdateGenerationJobInput) -> Result<GenerationJobDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE generation_jobs SET status = COALESCE(?1, status), current_step = COALESCE(?2, current_step), progress_percent = COALESCE(?3, progress_percent), provider = COALESCE(?4, provider), model_name = COALESCE(?5, model_name), input_token_estimate = COALESCE(?6, input_token_estimate), output_token_estimate = COALESCE(?7, output_token_estimate), actual_input_tokens = COALESCE(?8, actual_input_tokens), actual_output_tokens = COALESCE(?9, actual_output_tokens), cost_estimate = COALESCE(?10, cost_estimate), error_code = COALESCE(?11, error_code), error_message = COALESCE(?12, error_message), retry_count = COALESCE(?13, retry_count), started_at = COALESCE(?14, started_at), finished_at = COALESCE(?15, finished_at) WHERE id = ?16",
-        params![
-            &input.status,
-            &input.current_step,
-            input.progress_percent,
-            &input.provider,
-            &input.model_name,
-            input.input_token_estimate,
-            input.output_token_estimate,
-            input.actual_input_tokens,
-            input.actual_output_tokens,
-            input.cost_estimate,
-            &input.error_code,
-            &input.error_message,
-            input.retry_count,
-            &input.started_at,
-            &input.finished_at,
-            &input.id,
-        ],
-    ).map_err(|e| e.to_string())?;
-    get_generation_job_by_id_internal(&conn, &input.id)
+    update_generation_job_internal(&conn, &input)
 }
 
 #[tauri::command]
@@ -1975,25 +2047,77 @@ pub fn cancel_generation_job(
     id: String,
     finished_at: String,
 ) -> Result<Option<GenerationJobDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE generation_jobs SET status = 'cancelled', finished_at = ?1 WHERE id = ?2 AND status NOT IN ('completed', 'failed', 'cancelled')",
-        params![&finished_at, &id],
-    ).map_err(|e| e.to_string())?;
-    match get_generation_job_by_id_internal(&conn, &id) {
-        Ok(job) => Ok(Some(job)),
-        Err(err) if err.contains("Query returned no rows") => Ok(None),
-        Err(err) => Err(err),
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    cancel_generation_job_internal(&mut conn, &id, &finished_at)
+}
+
+fn cancel_generation_job_internal(
+    conn: &mut Connection,
+    id: &str,
+    finished_at: &str,
+) -> Result<Option<GenerationJobDto>, String> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("generation_job_cancel_begin_failed: {}", error))?;
+    let current = match get_generation_job_by_id_internal(&tx, id) {
+        Ok(job) => job,
+        Err(error) if error.contains("Query returned no rows") => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if generation_job_status_is_terminal(&current.status) {
+        tx.commit()
+            .map_err(|error| format!("generation_job_cancel_commit_failed: {}", error))?;
+        return Ok(Some(current));
     }
+
+    let step_name = normalized_recovery_step_name(current.current_step.clone());
+    tx.execute(
+        "UPDATE generation_jobs SET status = 'cancelled', finished_at = ?1 WHERE id = ?2 AND status NOT IN ('completed', 'failed', 'cancelled')",
+        params![finished_at, id],
+    )
+    .map_err(|error| format!("generation_job_cancel_update_failed: {}", error))?;
+    tx.execute(
+        "INSERT INTO generation_step_results (id, job_id, step_name, status, output_text, created_at) VALUES (?1, ?2, ?3, 'cancelled', ?4, ?5)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            id,
+            step_name,
+            "任务已取消。",
+            finished_at,
+        ],
+    )
+    .map_err(|error| format!("generation_job_cancel_checkpoint_failed: {}", error))?;
+    let cancelled = get_generation_job_by_id_internal(&tx, id)?;
+    tx.commit()
+        .map_err(|error| format!("generation_job_cancel_commit_failed: {}", error))?;
+    Ok(Some(cancelled))
 }
 
 #[tauri::command]
 pub fn save_generation_step_result(
     input: SaveGenerationStepResultInput,
 ) -> Result<GenerationStepResultDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT OR REPLACE INTO generation_step_results (id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    save_generation_step_result_internal(&mut conn, &input)
+}
+
+fn save_generation_step_result_internal(
+    conn: &mut Connection,
+    input: &SaveGenerationStepResultInput,
+) -> Result<GenerationStepResultDto, String> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("generation_step_begin_failed: {}", error))?;
+    let parent = get_generation_job_by_id_internal(&tx, &input.job_id)
+        .map_err(|error| format!("generation_step_parent_not_found: {}", error))?;
+    if generation_job_status_is_terminal(&parent.status) {
+        return Err(format!(
+            "generation_step_parent_terminal: {} is already {}",
+            input.job_id, parent.status
+        ));
+    }
+    tx.execute(
+        "INSERT INTO generation_step_results (id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             &input.id,
             &input.job_id,
@@ -2006,18 +2130,30 @@ pub fn save_generation_step_result(
             &input.created_at,
         ],
     ).map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at FROM generation_step_results WHERE id = ?1",
-    ).map_err(|e| e.to_string())?;
-    stmt.query_row(params![&input.id], map_generation_step_result_row)
-        .map_err(|e| e.to_string())
+    let result = {
+        let mut stmt = tx.prepare(
+            "SELECT id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at FROM generation_step_results WHERE id = ?1",
+        ).map_err(|e| e.to_string())?;
+        stmt.query_row(params![&input.id], map_generation_step_result_row)
+            .map_err(|e| e.to_string())?
+    };
+    tx.commit()
+        .map_err(|error| format!("generation_step_commit_failed: {}", error))?;
+    Ok(result)
 }
 
 #[tauri::command]
 pub fn get_generation_step_results(job_id: String) -> Result<Vec<GenerationStepResultDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    get_generation_step_results_internal(&conn, &job_id)
+}
+
+fn get_generation_step_results_internal(
+    conn: &Connection,
+    job_id: &str,
+) -> Result<Vec<GenerationStepResultDto>, String> {
     let mut stmt = conn.prepare(
-        "SELECT id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at FROM generation_step_results WHERE job_id = ?1 ORDER BY created_at ASC",
+        "SELECT id, job_id, step_name, status, input_snapshot_json, output_json, output_text, error_message, created_at FROM generation_step_results WHERE job_id = ?1 ORDER BY created_at ASC, id ASC",
     ).map_err(|e| e.to_string())?;
     let items = stmt
         .query_map(params![job_id], map_generation_step_result_row)
@@ -2025,6 +2161,124 @@ pub fn get_generation_step_results(job_id: String) -> Result<Vec<GenerationStepR
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     Ok(items)
+}
+
+const STARTUP_RECOVERY_ERROR_CODE: &str = "APP_RESTART_INTERRUPTED";
+const STARTUP_RECOVERY_MESSAGE: &str =
+    "应用在任务完成前退出；已保留完成步骤和草稿，请确认后手动重新开始。";
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupTaskRecoveryDto {
+    pub recovered_jobs: i64,
+    pub recovered_at: String,
+}
+
+#[derive(Debug)]
+struct InterruptedGenerationJob {
+    id: String,
+    previous_status: String,
+    current_step: Option<String>,
+    progress_percent: i64,
+}
+
+fn normalized_recovery_step_name(current_step: Option<String>) -> String {
+    const STEPS: [&str; 9] = [
+        "preflight",
+        "compile_context",
+        "chapter_card",
+        "scene_plan",
+        "draft_generation",
+        "quality_check",
+        "patch_generation",
+        "patch_apply",
+        "save_version",
+    ];
+    current_step
+        .filter(|step| STEPS.contains(&step.as_str()))
+        .unwrap_or_else(|| "preflight".to_string())
+}
+
+fn recover_interrupted_generation_jobs_internal(
+    conn: &mut Connection,
+    recovered_at: &str,
+) -> Result<StartupTaskRecoveryDto, String> {
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("task_recovery_begin_failed: {}", error))?;
+    let jobs = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, status, current_step, progress_percent FROM generation_jobs WHERE status IN ('pending', 'running', 'retrying') ORDER BY created_at ASC, id ASC",
+            )
+            .map_err(|error| format!("task_recovery_query_failed: {}", error))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(InterruptedGenerationJob {
+                    id: row.get(0)?,
+                    previous_status: row.get(1)?,
+                    current_step: row.get(2)?,
+                    progress_percent: row.get(3)?,
+                })
+            })
+            .map_err(|error| format!("task_recovery_query_failed: {}", error))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("task_recovery_query_failed: {}", error))?;
+        rows
+    };
+
+    let mut recovered_jobs = 0_i64;
+    for job in jobs {
+        let affected = tx
+            .execute(
+                "UPDATE generation_jobs SET status = 'failed', error_code = ?1, error_message = ?2, finished_at = ?3 WHERE id = ?4 AND status IN ('pending', 'running', 'retrying')",
+                params![
+                    STARTUP_RECOVERY_ERROR_CODE,
+                    STARTUP_RECOVERY_MESSAGE,
+                    recovered_at,
+                    &job.id,
+                ],
+            )
+            .map_err(|error| format!("task_recovery_job_update_failed: {}", error))?;
+        if affected == 0 {
+            continue;
+        }
+
+        let step_name = normalized_recovery_step_name(job.current_step);
+        let output_json = serde_json::json!({
+            "recoveryReason": STARTUP_RECOVERY_ERROR_CODE,
+            "previousStatus": job.previous_status,
+            "preservedProgressPercent": job.progress_percent,
+        })
+        .to_string();
+        tx.execute(
+            "INSERT INTO generation_step_results (id, job_id, step_name, status, output_json, output_text, error_message, created_at) VALUES (?1, ?2, ?3, 'failed', ?4, ?5, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                &job.id,
+                step_name,
+                output_json,
+                STARTUP_RECOVERY_MESSAGE,
+                recovered_at,
+            ],
+        )
+        .map_err(|error| format!("task_recovery_checkpoint_insert_failed: {}", error))?;
+        recovered_jobs += 1;
+    }
+
+    tx.commit()
+        .map_err(|error| format!("task_recovery_commit_failed: {}", error))?;
+    Ok(StartupTaskRecoveryDto {
+        recovered_jobs,
+        recovered_at: recovered_at.to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn recover_interrupted_generation_jobs() -> Result<StartupTaskRecoveryDto, String> {
+    let recovered_at = chrono::Utc::now().to_rfc3339();
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    recover_interrupted_generation_jobs_internal(&mut conn, &recovered_at)
 }
 
 // ==================== AI Task Records ====================
@@ -5389,6 +5643,335 @@ mod tests {
                 table
             );
         }
+    }
+
+    fn create_task_recovery_test_schema(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "
+            CREATE TABLE generation_jobs (
+                id TEXT PRIMARY KEY,
+                world_id TEXT,
+                novel_id TEXT NOT NULL DEFAULT 'novel-1',
+                volume_id TEXT,
+                chapter_id TEXT NOT NULL DEFAULT 'chapter-1',
+                job_type TEXT NOT NULL DEFAULT 'chapter_generation',
+                status TEXT NOT NULL,
+                current_step TEXT,
+                progress_percent INTEGER NOT NULL DEFAULT 0,
+                provider TEXT,
+                model_name TEXT,
+                input_token_estimate INTEGER,
+                output_token_estimate INTEGER,
+                actual_input_tokens INTEGER,
+                actual_output_tokens INTEGER,
+                cost_estimate REAL,
+                error_code TEXT,
+                error_message TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                finished_at TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT
+            );
+
+            CREATE TABLE generation_step_results (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                step_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_snapshot_json TEXT,
+                output_json TEXT,
+                output_text TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            ",
+        )
+    }
+
+    fn generation_job_update_input(id: &str) -> UpdateGenerationJobInput {
+        UpdateGenerationJobInput {
+            id: id.to_string(),
+            status: None,
+            current_step: None,
+            progress_percent: None,
+            provider: None,
+            model_name: None,
+            input_token_estimate: None,
+            output_token_estimate: None,
+            actual_input_tokens: None,
+            actual_output_tokens: None,
+            cost_estimate: None,
+            error_code: None,
+            error_message: None,
+            retry_count: None,
+            started_at: None,
+            finished_at: None,
+        }
+    }
+
+    #[test]
+    fn generation_job_updates_reject_terminal_revival_and_progress_regression(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_task_recovery_test_schema(&conn)?;
+        conn.execute_batch(
+            "
+            INSERT INTO generation_jobs (id, status, current_step, progress_percent, created_at) VALUES
+                ('job-running', 'running', 'draft_generation', 40, '2026-01-01T00:00:00Z'),
+                ('job-pending', 'pending', NULL, 0, '2026-01-01T00:00:01Z'),
+                ('job-cancelled', 'cancelled', 'quality_check', 82, '2026-01-01T00:00:02Z'),
+                ('job-retrying', 'retrying', 'draft_generation', 72, '2026-01-01T00:00:03Z');
+            ",
+        )?;
+
+        let mut running = generation_job_update_input("job-running");
+        running.status = Some("running".to_string());
+        running.current_step = Some("quality_check".to_string());
+        running.progress_percent = Some(82);
+        let updated = update_generation_job_internal(&conn, &running)?;
+        assert_eq!(updated.status, "running");
+        assert_eq!(updated.progress_percent, 82);
+
+        let mut regression = generation_job_update_input("job-running");
+        regression.progress_percent = Some(72);
+        let regression_error = update_generation_job_internal(&conn, &regression)
+            .expect_err("progress must never move backwards");
+        assert!(regression_error.starts_with("generation_job_progress_regression:"));
+
+        let mut complete = generation_job_update_input("job-running");
+        complete.status = Some("completed".to_string());
+        complete.progress_percent = Some(100);
+        complete.finished_at = Some("2026-01-01T00:01:00Z".to_string());
+        let completed = update_generation_job_internal(&conn, &complete)?;
+        assert_eq!(completed.status, "completed");
+
+        let mut revive = generation_job_update_input("job-running");
+        revive.status = Some("running".to_string());
+        let terminal_error = update_generation_job_internal(&conn, &revive)
+            .expect_err("completed task must be immutable");
+        assert!(terminal_error.starts_with("generation_job_terminal:"));
+
+        let mut cancelled_to_completed = generation_job_update_input("job-cancelled");
+        cancelled_to_completed.status = Some("completed".to_string());
+        assert!(
+            update_generation_job_internal(&conn, &cancelled_to_completed)
+                .expect_err("cancelled task must win over a late completion")
+                .starts_with("generation_job_terminal:")
+        );
+
+        let mut skip_running = generation_job_update_input("job-pending");
+        skip_running.status = Some("completed".to_string());
+        assert!(update_generation_job_internal(&conn, &skip_running)
+            .expect_err("pending task cannot jump straight to completed")
+            .starts_with("generation_job_invalid_transition:"));
+
+        let mut retry = generation_job_update_input("job-retrying");
+        retry.status = Some("running".to_string());
+        retry.progress_percent = Some(72);
+        assert_eq!(
+            update_generation_job_internal(&conn, &retry)?.status,
+            "running"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn generation_step_ids_are_immutable_and_ordering_is_deterministic(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_task_recovery_test_schema(&conn)?;
+        conn.execute(
+            "INSERT INTO generation_jobs (id, status, current_step, progress_percent, created_at) VALUES ('job-1', 'running', 'draft_generation', 72, '2026-01-01T00:00:00Z')",
+            [],
+        )?;
+        let first = SaveGenerationStepResultInput {
+            id: "step-a".to_string(),
+            job_id: "job-1".to_string(),
+            step_name: "draft_generation".to_string(),
+            status: "succeeded".to_string(),
+            input_snapshot_json: None,
+            output_json: None,
+            output_text: Some("first".to_string()),
+            error_message: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        save_generation_step_result_internal(&mut conn, &first)?;
+
+        let mut duplicate = SaveGenerationStepResultInput {
+            output_text: Some("overwritten".to_string()),
+            ..first
+        };
+        let duplicate_error = save_generation_step_result_internal(&mut conn, &duplicate)
+            .expect_err("a step id must not overwrite an existing checkpoint");
+        assert!(duplicate_error.contains("UNIQUE constraint failed"));
+        duplicate.id = "step-b".to_string();
+        save_generation_step_result_internal(&mut conn, &duplicate)?;
+
+        let steps = get_generation_step_results_internal(&conn, "job-1")?;
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["step-a", "step-b"]
+        );
+        assert_eq!(steps[0].output_text.as_deref(), Some("first"));
+        Ok(())
+    }
+
+    #[test]
+    fn generation_job_cancellation_is_atomic_and_rejects_late_success_steps(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_task_recovery_test_schema(&conn)?;
+        conn.execute(
+            "INSERT INTO generation_jobs (id, status, current_step, progress_percent, created_at) VALUES ('job-cancel-race', 'running', 'draft_generation', 72, '2026-01-01T00:00:00Z')",
+            [],
+        )?;
+
+        let cancelled =
+            cancel_generation_job_internal(&mut conn, "job-cancel-race", "2026-01-01T00:01:00Z")?
+                .expect("running job should be cancelled");
+        assert_eq!(cancelled.status, "cancelled");
+        let cancelled_steps = get_generation_step_results_internal(&conn, "job-cancel-race")?;
+        assert_eq!(cancelled_steps.len(), 1);
+        assert_eq!(cancelled_steps[0].status, "cancelled");
+        assert_eq!(cancelled_steps[0].step_name, "draft_generation");
+
+        cancel_generation_job_internal(&mut conn, "job-cancel-race", "2026-01-01T00:02:00Z")?;
+        assert_eq!(
+            get_generation_step_results_internal(&conn, "job-cancel-race")?.len(),
+            1,
+            "repeated cancellation must not add another checkpoint"
+        );
+
+        let late_success = SaveGenerationStepResultInput {
+            id: "step-late-success".to_string(),
+            job_id: "job-cancel-race".to_string(),
+            step_name: "draft_generation".to_string(),
+            status: "succeeded".to_string(),
+            input_snapshot_json: None,
+            output_json: Some(r#"{"late":true}"#.to_string()),
+            output_text: Some("late output".to_string()),
+            error_message: None,
+            created_at: "2026-01-01T00:03:00Z".to_string(),
+        };
+        let error = save_generation_step_result_internal(&mut conn, &late_success)
+            .expect_err("terminal parent must reject a late success checkpoint");
+        assert!(error.starts_with("generation_step_parent_terminal:"));
+        assert_eq!(
+            get_generation_step_results_internal(&conn, "job-cancel-race")?.len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn startup_task_recovery_is_atomic_and_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_task_recovery_test_schema(&conn)?;
+        conn.execute_batch(
+            "
+            INSERT INTO generation_jobs (id, status, current_step, progress_percent, created_at) VALUES
+                ('job-pending', 'pending', NULL, 0, '2026-01-01T00:00:00Z'),
+                ('job-running', 'running', 'draft_generation', 72, '2026-01-01T00:00:01Z'),
+                ('job-retrying', 'retrying', 'quality_check', 82, '2026-01-01T00:00:02Z'),
+                ('job-completed', 'completed', 'save_version', 100, '2026-01-01T00:00:03Z');
+            INSERT INTO generation_step_results (id, job_id, step_name, status, output_text, created_at)
+                VALUES ('step-existing', 'job-running', 'compile_context', 'succeeded', 'checkpoint', '2026-01-01T00:00:04Z');
+            ",
+        )?;
+
+        let recovered_at = "2026-07-21T08:00:00Z";
+        let result = recover_interrupted_generation_jobs_internal(&mut conn, recovered_at)?;
+        assert_eq!(result.recovered_jobs, 3);
+        assert_eq!(result.recovered_at, recovered_at);
+
+        for job_id in ["job-pending", "job-running", "job-retrying"] {
+            let state: (String, Option<String>, Option<String>, Option<String>) = conn.query_row(
+                "SELECT status, error_code, error_message, finished_at FROM generation_jobs WHERE id = ?1",
+                params![job_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+            assert_eq!(state.0, "failed");
+            assert_eq!(state.1.as_deref(), Some(STARTUP_RECOVERY_ERROR_CODE));
+            assert_eq!(state.2.as_deref(), Some(STARTUP_RECOVERY_MESSAGE));
+            assert_eq!(state.3.as_deref(), Some(recovered_at));
+        }
+        let completed: (String, Option<String>) = conn.query_row(
+            "SELECT status, error_code FROM generation_jobs WHERE id = 'job-completed'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(completed, ("completed".to_string(), None));
+        let preserved_progress: i64 = conn.query_row(
+            "SELECT progress_percent FROM generation_jobs WHERE id = 'job-running'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(preserved_progress, 72);
+
+        let recovery_steps: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM generation_step_results WHERE status = 'failed'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(recovery_steps, 3);
+        let all_steps: i64 =
+            conn.query_row("SELECT COUNT(*) FROM generation_step_results", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(all_steps, 4);
+        let recovery_json: String = conn.query_row(
+            "SELECT output_json FROM generation_step_results WHERE job_id = 'job-running' AND status = 'failed'",
+            [],
+            |row| row.get(0),
+        )?;
+        let recovery_json: serde_json::Value = serde_json::from_str(&recovery_json)?;
+        assert_eq!(recovery_json["previousStatus"], "running");
+        assert_eq!(recovery_json["preservedProgressPercent"], 72);
+
+        let second = recover_interrupted_generation_jobs_internal(&mut conn, recovered_at)?;
+        assert_eq!(second.recovered_jobs, 0);
+        let steps_after_second_start: i64 =
+            conn.query_row("SELECT COUNT(*) FROM generation_step_results", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(steps_after_second_start, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn startup_task_recovery_rolls_back_when_checkpoint_insert_fails(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_task_recovery_test_schema(&conn)?;
+        conn.execute_batch(
+            "
+            INSERT INTO generation_jobs (id, status, current_step, progress_percent, created_at)
+                VALUES ('job-running', 'running', 'draft_generation', 72, '2026-01-01T00:00:00Z');
+            CREATE TRIGGER fail_recovery_checkpoint
+            BEFORE INSERT ON generation_step_results
+            BEGIN
+                SELECT RAISE(ABORT, 'forced recovery checkpoint failure');
+            END;
+            ",
+        )?;
+
+        let error = recover_interrupted_generation_jobs_internal(&mut conn, "2026-07-21T08:00:00Z")
+            .expect_err("checkpoint failure must roll back every task transition");
+        assert!(
+            error.starts_with("task_recovery_checkpoint_insert_failed:"),
+            "{error}"
+        );
+        let job_status: String = conn.query_row(
+            "SELECT status FROM generation_jobs WHERE id = 'job-running'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(job_status, "running");
+        Ok(())
     }
 
     #[test]

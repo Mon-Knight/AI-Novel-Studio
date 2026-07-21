@@ -120,6 +120,24 @@ function stepStatusClass(status: string): string {
   return 'fallback';
 }
 
+function latestStepByName(
+  steps: GenerationStepResult[],
+  stepName: GenerationStepName,
+): GenerationStepResult | undefined {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (steps[index].stepName === stepName) return steps[index];
+  }
+  return undefined;
+}
+
+function isActiveGenerationJob(job: GenerationJob | null | undefined): boolean {
+  return job?.status === 'pending' || job?.status === 'running' || job?.status === 'retrying';
+}
+
+function isTerminalGenerationJob(job: GenerationJob | null | undefined): boolean {
+  return job?.status === 'completed' || job?.status === 'failed' || job?.status === 'cancelled';
+}
+
 function formatQualityTitle(item: QualityCheckItem): string {
   return item.category || item.issueType || '质量问题';
 }
@@ -263,6 +281,13 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  const applyJobUpdate = (incoming: GenerationJob) => {
+    setLatestJob((current) => {
+      if (current?.id === incoming.id && isTerminalGenerationJob(current)) return current;
+      return incoming;
+    });
+  };
+
   useEffect(() => {
     let alive = true;
     jobRunEpochRef.current += 1;
@@ -299,7 +324,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
         setBundle(nextBundle);
         setLatestSnapshot(snapshot);
         setQualityResult(quality);
-        const latest = jobs[0] ?? null;
+        const latest = jobs.find((job) => isActiveGenerationJob(job)) ?? jobs[0] ?? null;
         setLatestJob(latest);
         if (latest) {
           const steps = await generationJobService.getSteps(latest.id);
@@ -331,13 +356,14 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
   }, [bundle]);
 
   const patchGenerationStep = useMemo(
-    () => jobSteps.find((step) => step.stepName === 'patch_generation'),
+    () => latestStepByName(jobSteps, 'patch_generation'),
     [jobSteps],
   );
   const patchApplyStep = useMemo(
-    () => jobSteps.find((step) => step.stepName === 'patch_apply'),
+    () => latestStepByName(jobSteps, 'patch_apply'),
     [jobSteps],
   );
+  const hasActiveJob = isActiveGenerationJob(latestJob);
   const visibleQualityItems = useMemo(
     () => qualityResult.items.filter((item) => item.status === 'pending').slice(0, 6),
     [qualityResult.items],
@@ -528,6 +554,10 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
       setError('请先保存并应用当前工程修改，再启动 Mock 任务。');
       return;
     }
+    if (hasActiveJob) {
+      setError('当前章节已有生成任务正在运行。');
+      return;
+    }
     setJobRunning(true);
     setError('');
     setMessage('正在运行 Mock 生成任务...');
@@ -544,7 +574,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
         if (jobRunEpochRef.current === requestEpoch
           && liveNovelIdRef.current === requestNovelId
           && liveChapterIdRef.current === requestChapterId) {
-          setLatestJob(job);
+          applyJobUpdate(job);
           setJobSteps(steps);
         }
       });
@@ -552,7 +582,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
       if (jobRunEpochRef.current !== requestEpoch
         || liveNovelIdRef.current !== requestNovelId
         || liveChapterIdRef.current !== requestChapterId) return;
-      setLatestJob(finalJob);
+      applyJobUpdate(finalJob);
       setJobSteps(steps);
       setMessage(`Mock 任务已${finalJob.status === 'completed' ? '完成' : finalJob.status}`);
     } catch (e: unknown) {
@@ -580,6 +610,10 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
       setError('请先保存并应用当前工程修改，再生成本章初稿。');
       return;
     }
+    if (hasActiveJob) {
+      setError('当前章节已有生成任务正在运行。');
+      return;
+    }
     setDraftRunning(true);
     setError('');
     setMessage('正在生成本章初稿...');
@@ -605,7 +639,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
         if (draftRunEpochRef.current === requestEpoch
           && liveNovelIdRef.current === requestNovelId
           && liveChapterIdRef.current === requestChapterId) {
-          setLatestJob(job);
+          applyJobUpdate(job);
           setJobSteps(steps);
         }
       });
@@ -616,7 +650,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
       if (draftRunEpochRef.current !== requestEpoch
         || liveNovelIdRef.current !== requestNovelId
         || liveChapterIdRef.current !== requestChapterId) return;
-      setLatestJob(result.job);
+      applyJobUpdate(result.job);
       setJobSteps(steps);
       setQualityResult(quality);
       if (result.draft) {
@@ -647,7 +681,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     try {
       const cancelled = await generationJobService.cancel(latestJob.id);
       if (cancelled) {
-        setLatestJob(cancelled);
+        applyJobUpdate(cancelled);
         setJobSteps(await generationJobService.getSteps(cancelled.id));
         setMessage('任务已取消');
       }
@@ -675,7 +709,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
   }
 
   return (
-    <div className="engineering-panel">
+    <div className="engineering-panel" data-testid="engineering-panel">
       <div className="engineering-status">
         <span>{statusText}</span>
         {dirty && <strong>已修改</strong>}
@@ -695,6 +729,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
           <button
             key={tab.id}
             type="button"
+            data-testid={`engineering-tab-${tab.id}`}
             className={`engineering-tab ${activeTab === tab.id ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
@@ -946,7 +981,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
             <button
               type="button"
               className="panel-btn panel-btn-primary"
-              disabled={busy || loading || compiling || jobRunning || draftRunning}
+              data-testid="generation-job-start"
+              disabled={busy || loading || compiling || jobRunning || draftRunning || hasActiveJob}
               onClick={handleRunDraftJob}
             >
               {draftRunning ? '生成中...' : '生成本章初稿'}
@@ -954,7 +990,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
             <button
               type="button"
               className="panel-btn panel-btn-secondary"
-              disabled={busy || loading || compiling || jobRunning || draftRunning}
+              data-testid="generation-mock-job-start"
+              disabled={busy || loading || compiling || jobRunning || draftRunning || hasActiveJob}
               onClick={handleRunMockJob}
             >
               {jobRunning ? 'Mock 运行中...' : '启动 Mock 任务'}
@@ -962,6 +999,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
             <button
               type="button"
               className="panel-btn panel-btn-warning"
+              data-testid="generation-job-cancel"
               disabled={!latestJob || ['completed', 'failed', 'cancelled'].includes(latestJob.status)}
               onClick={handleCancelJob}
             >
@@ -971,7 +1009,13 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
           {!latestJob && <div className="engineering-empty">暂无生成任务。</div>}
           {latestJob && (
             <>
-              <div className="engineering-version-row">
+              <div
+                className="engineering-version-row"
+                data-testid="generation-job-status"
+                data-job-id={latestJob.id}
+                data-job-status={latestJob.status}
+                data-error-code={latestJob.errorCode || ''}
+              >
                 <div>
                   <strong>{latestJob.status}</strong>
                   <span>{latestJob.currentStep || latestJob.jobType}</span>
@@ -981,9 +1025,24 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
                   <span style={{ width: `${Math.max(0, Math.min(100, latestJob.progressPercent))}%` }} />
                 </div>
               </div>
+              {latestJob.errorCode === 'APP_RESTART_INTERRUPTED' && (
+                <div className="engineering-error" data-testid="generation-job-recovery">
+                  上次运行在此步骤中断。已完成的步骤和草稿仍然保留；请检查后重新生成，不会自动续跑。
+                </div>
+              )}
+              {latestJob.errorMessage && latestJob.errorCode !== 'APP_RESTART_INTERRUPTED' && (
+                <div className="engineering-error">{latestJob.errorMessage}</div>
+              )}
               <div className="engineering-step-list">
                 {jobSteps.map((step) => (
-                  <div className="engineering-step-row" key={step.id}>
+                  <div
+                    className="engineering-step-row"
+                    key={step.id}
+                    data-testid="generation-job-step"
+                    data-step-id={step.id}
+                    data-step-name={step.stepName}
+                    data-step-status={step.status}
+                  >
                     <div>
                       <strong>{STEP_LABELS[step.stepName]}</strong>
                       <span className={`source-${stepStatusClass(step.status)}`}>

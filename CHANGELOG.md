@@ -1,5 +1,35 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.1.5 (2026-07-21) - 章节工程任务跨重启恢复闭环
+
+### 新增
+
+- 新增 `recover_interrupted_generation_jobs` 启动恢复命令：在一个 SQLite 事务中把遗留 `pending`、`running`、`retrying` 章节工程任务结算为 `failed`，写入稳定错误码 `APP_RESTART_INTERRUPTED` 并追加失败 checkpoint。
+- 新增启动恢复对话框 `recovery-dialog`，明确显示安全结算数量，并告知已完成步骤和草稿已保留、没有自动重发 AI 请求。
+- 新增仅限 E2E 构建的 Mock AI pause gate，以及真实 Windows Tauri `restart-task-recovery.spec.ts`，用于稳定制造在途任务并验证真实进程重启后的恢复与二次启动幂等。
+- 新增 5 个 Rust 回归测试，覆盖启动恢复的原子性、回滚、幂等、终态不可复活、进度单调、取消竞态、step ID 不可覆盖及稳定排序。
+
+### 修改
+
+- 生成任务更新现在校验合法状态迁移和 `0..100` 单调进度；终态任务不可再被迟到回调改写。
+- 生成 step 使用普通 `INSERT` 保持 ID 不可变，读取按 `created_at` 与 `id` 确定性排序；工程面板读取同名 patch 时选择最新结果。
+- 章节工程面板根据 SQLite 中最新任务的持久化状态禁用新建任务，不再只依赖组件内存布尔值；恢复失败原因和步骤提供稳定 `data-testid`。
+- 任务 runner 在异步 action 后及最终完成前重新读取取消状态；若恢复或取消已经写入终态，迟到回调只接受持久化结果。
+- step 保存会在同一 SQLite 事务内检查父任务状态；取消操作在一个事务中同时写入 `cancelled` 终态与唯一取消 checkpoint，迟到成功结果不能再污染终态任务。
+
+### 修复
+
+- 修复应用退出后章节工程任务永久停留在 `pending`、`running` 或 `retrying`，重新进入页面后既无法确认结果又可能重复启动的问题。
+- 修复取消后的迟到 AI 回调仍可把任务覆盖成 `completed`，以及进度可倒退的问题。
+- 修复 `INSERT OR REPLACE` 可让重复 step ID 覆盖 checkpoint、同毫秒 step 顺序不稳定，以及 UI 选择最旧 patch 结果的问题。
+- 修复 Tauri camelCase step DTO 中 `inputSnapshotJson` / `outputJson` 未反序列化，导致输入快照丢失和 patch 计数显示为 0 的问题。
+- 修复上下文快照 Rust DTO 已成功保存，却因前端漏读 `compiledContextJson` / `sourcesJson` 而把章节工程任务误判为失败的问题。
+
+### 版本边界
+
+- 应用版本统一更新为 `2.1.5`；既有 migration 不修改，现有 `generation_jobs` 与 `generation_step_results` 字段足以完成安全结算。
+- 本版本只覆盖章节工程 `generation_jobs`。恢复不会自动重放步骤、重发 AI 请求、采用草稿或覆盖正文；旧 `ai_task_records`、真实 HTTP 取消、质量历史重放和 Agent 自主续跑仍不在本版本范围。
+
 ## v2.1.4 (2026-07-21) - 大文本正文安全闭环
 
 ### 新增

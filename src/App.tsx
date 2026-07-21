@@ -17,8 +17,13 @@ import ImportExportPage from './pages/ImportExport/ImportExportPage';
 import OutlineEditorPage from './pages/OutlineEditor/OutlineEditorPage';
 import SettingSuggestionsPage from './pages/SettingSuggestions/SettingSuggestionsPage';
 import E2eDialogHost from './components/common/E2eDialogHost';
+import StartupRecoveryDialog, { type StartupRecoveryState } from './components/common/StartupRecoveryDialog';
 
-function App() {
+interface AppProps {
+  startupRecovery: StartupRecoveryState;
+}
+
+function App({ startupRecovery }: AppProps) {
   const globalLoading = useGlobalLoadingModal(1200);
 
   return (
@@ -58,6 +63,7 @@ function App() {
         onRetry={globalLoading.onRetry}
       />
       <E2eDialogHost />
+      <StartupRecoveryDialog recovery={startupRecovery} />
     </ErrorBoundary>
   );
 }

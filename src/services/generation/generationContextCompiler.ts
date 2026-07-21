@@ -23,10 +23,12 @@ interface RawChapterGenerationSnapshot extends Partial<ChapterGenerationSnapshot
   engineering_state_id?: string | null;
   style_profile_id?: string | null;
   output_profile_id?: string | null;
+  compiledContextJson?: string;
   compiled_context_json?: string;
   compiled_prompt_text?: string;
   prompt_summary?: string;
   context_hash?: string;
+  sourcesJson?: string;
   sources_json?: string;
   created_at?: string;
 }
@@ -167,12 +169,12 @@ function normalizeSnapshot(raw: unknown): ChapterGenerationSnapshot | null {
   const chapterId = toSafeString(item.chapterId ?? item.chapter_id).trim();
   if (!id || !novelId || !chapterId) return null;
   const compiledContext = item.compiledContext ?? safeJsonParse<CompiledGenerationContext | null>(
-    toSafeString(item.compiled_context_json),
+    toSafeString(item.compiledContextJson ?? item.compiled_context_json),
     null,
   );
   if (!compiledContext) return null;
   const sources = item.sources ?? safeJsonParse<GenerationContextSource[]>(
-    toSafeString(item.sources_json),
+    toSafeString(item.sourcesJson ?? item.sources_json),
     compiledContext.sources ?? [],
   );
   return {
