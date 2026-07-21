@@ -2,7 +2,8 @@
  * AI Novel Studio - Mock AI Client (v1.0.21 增强版)
  * 根据系统提示词自动检测任务类型，返回对应的模拟数据
  */
-import type { AiGenerateRequest, AiGenerateResponse, AiClient } from '../../types/ai';
+import type { AiGenerateOptions, AiGenerateRequest, AiGenerateResponse, AiClient } from '../../types/ai';
+import { AiRequestCancelledError, throwIfAiRequestCancelled } from './aiCancellation';
 
 const E2E_MODE = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
 const E2E_TOKEN_INPUT = 320;
@@ -37,6 +38,15 @@ export function pauseMockAiForE2e(): E2eMockAiGateState {
   return getMockAiGateStateForE2e();
 }
 
+export function advanceMockAiForE2e(): E2eMockAiGateState {
+  requireE2eMockGate();
+  e2eGatePaused = true;
+  const waiters = [...e2eGateWaiters];
+  e2eGateWaiters.clear();
+  waiters.forEach((resolve) => resolve());
+  return getMockAiGateStateForE2e();
+}
+
 export function releaseMockAiForE2e(): E2eMockAiGateState {
   requireE2eMockGate();
   e2eGatePaused = false;
@@ -46,12 +56,26 @@ export function releaseMockAiForE2e(): E2eMockAiGateState {
   return getMockAiGateStateForE2e();
 }
 
-async function waitForMockAiGateForE2e(): Promise<void> {
+async function waitForMockAiGateForE2e(signal?: AbortSignal): Promise<void> {
+  throwIfAiRequestCancelled(signal);
   if (!E2E_MODE) return;
   e2eRequestCount += 1;
   if (!e2eGatePaused) return;
-  await new Promise<void>((resolve) => {
-    e2eGateWaiters.add(resolve);
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const release = () => settle();
+    const onAbort = () => settle(new AiRequestCancelledError());
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      e2eGateWaiters.delete(release);
+      signal?.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    e2eGateWaiters.add(release);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -63,9 +87,24 @@ function countWords(text: string): number {
   return cjk + words;
 }
 
-function delay(ms?: number): Promise<void> {
+function delay(ms?: number, signal?: AbortSignal): Promise<void> {
+  throwIfAiRequestCancelled(signal);
   const duration = ms ?? (E2E_MODE ? 20 : 800 + Math.random() * 1200);
-  return new Promise((resolve) => setTimeout(resolve, duration));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => finish(new AiRequestCancelledError());
+    const timer = setTimeout(() => finish(), duration);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 /** 从系统提示词中检测任务类型 */
@@ -321,9 +360,10 @@ function mockChapterPolish(_info: ReturnType<typeof extractInfo>, messages: { ro
 }
 
 export class MockAiClient implements AiClient {
-  async generate(request: AiGenerateRequest): Promise<AiGenerateResponse> {
-    await waitForMockAiGateForE2e();
-    await delay();
+  async generate(request: AiGenerateRequest, options: AiGenerateOptions = {}): Promise<AiGenerateResponse> {
+    await waitForMockAiGateForE2e(options.signal);
+    await delay(undefined, options.signal);
+    throwIfAiRequestCancelled(options.signal);
     const taskType = (request.taskType as MockTaskType | undefined) || detectTaskType(request.messages);
     const info = extractInfo(request.messages);
     let text: string;

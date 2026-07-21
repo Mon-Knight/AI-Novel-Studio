@@ -17,6 +17,18 @@ export interface Diagnostics {
   };
 }
 
+export interface MockAiGateState {
+  paused: boolean;
+  waitingRequests: number;
+  requestCount: number;
+}
+
+export type MockGateMethod =
+  | 'getMockAiGateState'
+  | 'pauseMockAi'
+  | 'advanceMockAi'
+  | 'releaseMockAi';
+
 interface BridgeShape {
   invoke: (command: string, args?: Record<string, unknown>) => unknown;
   getDiagnostics?: () => unknown;
@@ -29,6 +41,17 @@ interface BridgeShape {
 let fixtureSequence = 0;
 
 export const unique = (prefix: string): string => `${prefix}-${++fixtureSequence}`;
+
+export async function callMockGate(method: MockGateMethod): Promise<MockAiGateState> {
+  return browser.execute((methodName) => {
+    type GateBridge = Partial<Record<MockGateMethod, () => MockAiGateState>>;
+    const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: GateBridge })
+      .__AI_NOVEL_STUDIO_E2E__;
+    const operation = bridge?.[methodName];
+    if (!operation) throw new Error(`E2E Mock AI bridge method is unavailable: ${methodName}`);
+    return operation();
+  }, method);
+}
 
 export async function bridgeCall<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const response = await browser.executeAsync((name, input, done) => {

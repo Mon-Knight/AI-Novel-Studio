@@ -8,10 +8,13 @@ import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { getContextForChapterTask, buildContextPromptSection } from '../prompt/contextReaderService';
 import type { QualityCheckResult, RunQualityCheckInput } from '../../types/qualityCheck';
+import type { AiGenerateOptions } from '../../types/ai';
 import { safeJsonParse } from './jsonUtils';
+import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
 
 export const qualityCheckAiService = {
-  async runCheck(input: RunQualityCheckInput): Promise<QualityCheckResult> {
+  async runCheck(input: RunQualityCheckInput, aiOptions: AiGenerateOptions = {}): Promise<QualityCheckResult> {
+    throwIfAiRequestCancelled(aiOptions.signal);
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId);
 
@@ -62,7 +65,8 @@ export const qualityCheckAiService = {
 
     try {
       const client = createAiClient(settings);
-      const response = await client.generate(request);
+      const response = await client.generate(request, aiOptions);
+      throwIfAiRequestCancelled(aiOptions.signal);
       const text = response.text || '';
 
       const parsed = safeJsonParse<QualityCheckResult>(text, {
@@ -79,9 +83,15 @@ export const qualityCheckAiService = {
       });
 
       return parsed;
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '质量检查失败';
-      if (task) await aiTaskService.markFailed(task.id, msg);
+      if (task) {
+        if (isAiRequestCancelled(err) || aiOptions.signal?.aborted) {
+          await aiTaskService.markCancelled(task.id);
+        } else {
+          await aiTaskService.markFailed(task.id, msg);
+        }
+      }
       throw err;
     }
   },

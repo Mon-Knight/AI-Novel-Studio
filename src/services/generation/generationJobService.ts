@@ -1,5 +1,6 @@
 import { dbCall, generateId, lsGet, lsSet, nowISO } from '../database/db';
 import { createAiClient, aiSettingsService } from '../ai/aiClient';
+import { isAiRequestCancelled } from '../ai/aiCancellation';
 import { qualityCheckAiService } from '../ai/qualityCheckAiService';
 import { chapterRepository } from '../database/chapterRepository';
 import { draftVersionService } from '../database/draftVersionService';
@@ -26,6 +27,28 @@ const JOBS_KEY = 'ai_novel_studio_generation_jobs';
 const STEPS_KEY_PREFIX = 'ai_novel_studio_generation_steps_';
 const STARTUP_RECOVERY_ERROR_CODE = 'APP_RESTART_INTERRUPTED';
 const STARTUP_RECOVERY_MESSAGE = '应用在任务完成前退出；已保留完成步骤和草稿，请确认后手动重新开始。';
+
+interface ActiveJobControl {
+  controller: AbortController;
+  requestSettled?: Promise<void>;
+}
+
+const activeJobControls = new Map<string, ActiveJobControl>();
+
+async function trackActiveAiRequest<T>(
+  control: ActiveJobControl,
+  request: Promise<T>,
+): Promise<T> {
+  const settled = request.then(() => undefined, () => undefined);
+  control.requestSettled = settled;
+  try {
+    return await request;
+  } finally {
+    if (control.requestSettled === settled) {
+      control.requestSettled = undefined;
+    }
+  }
+}
 
 const TERMINAL_JOB_STATUSES: ReadonlySet<GenerationJobStatus> = new Set([
   'completed',
@@ -501,6 +524,9 @@ export const generationJobService = {
   },
 
   async cancel(id: string): Promise<GenerationJob | null> {
+    const control = activeJobControls.get(id);
+    control?.controller.abort();
+    await control?.requestSettled;
     const now = nowISO();
     const raw = await dbCall<unknown | null>(
       'cancel_generation_job',
@@ -745,6 +771,8 @@ export const generationJobService = {
     let savedDraft: ChapterDraft | undefined;
     let qualityItems: QualityCheckItem[] = [];
     let patchCandidates: PatchCandidate[] = [];
+    const control: ActiveJobControl = { controller: new AbortController() };
+    activeJobControls.set(job.id, control);
 
     const emit = async () => {
       steps = await this.getSteps(job.id);
@@ -809,7 +837,13 @@ export const generationJobService = {
         if (!snapshot) throw new Error('missing_context_snapshot');
         const request = buildSnapshotGenerateRequest(snapshot);
         const client = createAiClient(settings);
-        const response = await client.generate(request);
+        const response = await trackActiveAiRequest(
+          control,
+          client.generate(request, {
+            signal: control.controller.signal,
+            requestId: `${job.id}:draft:${generateId()}`,
+          }),
+        );
         generatedText = response.text.trim();
         if (!generatedText) throw new Error('正文模型返回为空');
         job = await this.update({
@@ -851,6 +885,24 @@ export const generationJobService = {
         const chapter = await chapterRepository.getById(input.chapterId);
         const contentHash = hashTextContent(savedDraft.content);
         const checkedAt = nowISO();
+        const result = await trackActiveAiRequest(
+          control,
+          qualityCheckAiService.runCheck({
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            draftId: savedDraft.id,
+            volumeId: input.volumeId,
+            draftContent: savedDraft.content,
+            chapterTitle: chapter?.title || input.title || '未命名章节',
+            chapterOutline: chapter?.outline,
+            chapterGoal: chapter?.goal,
+            contentHash,
+            wordCount: countTextWords(savedDraft.content),
+          }, {
+            signal: control.controller.signal,
+            requestId: `${job.id}:quality:${generateId()}`,
+          }),
+        );
         const report = await qualityCheckService.createReport({
           novelId: input.novelId,
           chapterId: input.chapterId,
@@ -859,18 +911,6 @@ export const generationJobService = {
           contentHash,
           contentLength: savedDraft.content.length,
           checkedAt,
-        });
-        const result = await qualityCheckAiService.runCheck({
-          novelId: input.novelId,
-          chapterId: input.chapterId,
-          draftId: savedDraft.id,
-          volumeId: input.volumeId,
-          draftContent: savedDraft.content,
-          chapterTitle: chapter?.title || input.title || '未命名章节',
-          chapterOutline: chapter?.outline,
-          chapterGoal: chapter?.goal,
-          contentHash,
-          wordCount: countTextWords(savedDraft.content),
         });
         const saved = await qualityCheckService.saveResult({
           reportId: report.id,
@@ -949,7 +989,7 @@ export const generationJobService = {
       await emit();
       return { job, draft: savedDraft };
     } catch (e: unknown) {
-      if (e instanceof Error && e.message === 'generation_job_cancelled') {
+      if (isAiRequestCancelled(e) || (e instanceof Error && e.message === 'generation_job_cancelled')) {
         const cancelled = await this.cancel(job.id);
         if (cancelled) job = cancelled;
         await emit();
@@ -983,6 +1023,10 @@ export const generationJobService = {
       }
       await emit();
       return { job };
+    } finally {
+      if (activeJobControls.get(job.id) === control) {
+        activeJobControls.delete(job.id);
+      }
     }
   },
 };

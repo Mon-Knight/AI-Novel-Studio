@@ -131,6 +131,12 @@ function durationMs(record: AiTaskRecord | undefined, finishedAt: string): numbe
   return Math.max(0, finished - started);
 }
 
+function isTerminalTask(record: AiTaskRecord | undefined): boolean {
+  return record?.status === 'succeeded'
+    || record?.status === 'failed'
+    || record?.status === 'cancelled';
+}
+
 function summarizeText(text: string | undefined, limit = 500): string | undefined {
   if (!text) return undefined;
   return text.length > limit ? `${text.slice(0, limit)}...` : text;
@@ -209,6 +215,7 @@ export const aiTaskService = {
     if (!id) return;
     const tasks = getLocalTasks();
     const existing = tasks.find((t) => t.id === id);
+    if (isTerminalTask(existing)) return;
     const finishedAt = nowISO();
     const computedDuration = durationMs(existing, finishedAt);
 
@@ -274,6 +281,7 @@ export const aiTaskService = {
     if (!id) return;
     const tasks = getLocalTasks();
     const existing = tasks.find((t) => t.id === id);
+    if (isTerminalTask(existing)) return;
     const finishedAt = nowISO();
     const computedDuration = durationMs(existing, finishedAt);
 
@@ -302,6 +310,46 @@ export const aiTaskService = {
         ...latest[idx],
         status: 'failed',
         errorMessage: summarizeText(errorMessage, 500),
+        durationMs: computedDuration,
+        finishedAt,
+      };
+      saveLocalTasks(latest);
+    }
+  },
+
+  async markCancelled(id: string): Promise<void> {
+    if (!id) return;
+    const tasks = getLocalTasks();
+    const existing = tasks.find((t) => t.id === id);
+    if (isTerminalTask(existing)) return;
+    const finishedAt = nowISO();
+    const computedDuration = durationMs(existing, finishedAt);
+
+    await dbCall<void>(
+      'mark_ai_task_cancelled',
+      { id, finishedAt, durationMs: computedDuration },
+      () => {
+        const idx = tasks.findIndex((t) => t.id === id);
+        if (idx === -1) return;
+        tasks[idx] = {
+          ...tasks[idx],
+          status: 'cancelled',
+          errorMessage: undefined,
+          durationMs: computedDuration,
+          finishedAt,
+        };
+        saveLocalTasks(tasks);
+      },
+    );
+
+    if (isTauri()) return;
+    const latest = getLocalTasks();
+    const idx = latest.findIndex((t) => t.id === id);
+    if (idx !== -1 && !isTerminalTask(latest[idx])) {
+      latest[idx] = {
+        ...latest[idx],
+        status: 'cancelled',
+        errorMessage: undefined,
         durationMs: computedDuration,
         finishedAt,
       };

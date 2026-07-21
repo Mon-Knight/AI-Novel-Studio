@@ -5,8 +5,13 @@
  * differences. Browser dev mode falls back to fetch with the same request body.
  */
 import { invoke } from '@tauri-apps/api/tauri';
-import type { AiGenerateRequest, AiGenerateResponse, AiClient } from '../../types/ai';
+import type { AiGenerateOptions, AiGenerateRequest, AiGenerateResponse, AiClient } from '../../types/ai';
 import { isTauri } from '../database/db';
+import {
+  AiRequestCancelledError,
+  isAiRequestCancelled,
+  throwIfAiRequestCancelled,
+} from './aiCancellation';
 
 export interface RealAiClientConfig {
   baseUrl: string;
@@ -67,7 +72,7 @@ export function validateRealAiConfig(config: RealAiClientConfig): void {
 
 function normalizeHttpError(status: number, errorBody: string, modelName: string): Error {
   if (status === 400) {
-    return new Error(`AI 调用失败：请求参数不合法（400 Bad Request），请检查模型名称、max_tokens 和提示词格式。${shortBody(errorBody)}`);
+    return new Error('AI 调用失败：请求参数不合法（400 Bad Request），请检查模型名称、max_tokens 和提示词格式。');
   }
   if (status === 401) {
     return new Error('AI 调用失败：API Key 无效或已过期（401 Unauthorized），请检查设置中心的 API Key。');
@@ -86,18 +91,18 @@ function normalizeHttpError(status: number, errorBody: string, modelName: string
     if (errorBody.toLowerCase().includes('overload')) {
       return new Error('AI 调用失败：模型服务当前过载（overloaded_error），请稍后重试。');
     }
-    return new Error(`AI 调用失败：模型服务错误（${status}），请稍后重试。${shortBody(errorBody)}`);
+    return new Error(`AI 调用失败：模型服务错误（${status}），请稍后重试。`);
   }
-  return new Error(`AI 调用失败：HTTP ${status}。${shortBody(errorBody)}`);
-}
-
-function shortBody(body: string): string {
-  const text = body.trim();
-  return text ? ` 服务返回：${text.slice(0, 240)}` : '';
+  return new Error(`AI 调用失败：HTTP ${status}。`);
 }
 
 function getLastUserMessage(request: AiGenerateRequest): string {
   return [...request.messages].reverse().find((message) => message.role === 'user')?.content || '';
+}
+
+function createAiRequestId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? `ai-${uuid}` : `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 export class RealAiClient implements AiClient {
@@ -107,7 +112,8 @@ export class RealAiClient implements AiClient {
     this.config = config;
   }
 
-  async generate(request: AiGenerateRequest): Promise<AiGenerateResponse> {
+  async generate(request: AiGenerateRequest, options: AiGenerateOptions = {}): Promise<AiGenerateResponse> {
+    throwIfAiRequestCancelled(options.signal);
     validateRealAiConfig(this.config);
 
     if (import.meta.env.DEV) {
@@ -119,10 +125,10 @@ export class RealAiClient implements AiClient {
     }
 
     if (isTauri()) {
-      return this.generateViaTauri(request);
+      return this.generateViaTauri(request, options);
     }
 
-    return this.generateViaFetch(request);
+    return this.generateViaFetch(request, options);
   }
 
   private buildRequestBody(request: AiGenerateRequest): Record<string, unknown> {
@@ -134,9 +140,15 @@ export class RealAiClient implements AiClient {
     };
   }
 
-  private async generateViaTauri(request: AiGenerateRequest): Promise<AiGenerateResponse> {
-    const response = await invoke<TauriAiResponse>('ai_chat_completion', {
+  private async generateViaTauri(
+    request: AiGenerateRequest,
+    options: AiGenerateOptions,
+  ): Promise<AiGenerateResponse> {
+    const signal = options.signal;
+    const requestId = options.requestId?.trim() || (signal ? createAiRequestId() : undefined);
+    const responsePromise = invoke<TauriAiResponse>('ai_chat_completion', {
       request: {
+        requestId,
         baseUrl: this.config.baseUrl,
         apiKey: this.config.apiKey,
         modelName: request.modelName || this.config.modelName,
@@ -147,6 +159,71 @@ export class RealAiClient implements AiClient {
       },
     });
 
+    let removeAbortListener: () => void = () => {};
+    let response: TauriAiResponse;
+    try {
+      if (!signal || !requestId) {
+        response = await responsePromise;
+      } else {
+        type ResponseOutcome =
+          | { kind: 'response'; response: TauriAiResponse }
+          | { kind: 'response-error'; error: unknown };
+        type CancellationOutcome = { kind: 'cancellation'; confirmed: boolean };
+        const responseOutcome = responsePromise.then<ResponseOutcome, ResponseOutcome>(
+          (value) => ({ kind: 'response', response: value }),
+          (error: unknown) => ({ kind: 'response-error', error }),
+        );
+        let abortHandled = false;
+        const cancellationOutcome = new Promise<CancellationOutcome>((resolve) => {
+          const onAbort = () => {
+            if (abortHandled) return;
+            abortHandled = true;
+            void invoke<boolean>('cancel_ai_request', { requestId }).then(
+              () => resolve({ kind: 'cancellation', confirmed: true }),
+              () => {
+                console.warn(
+                  '[RealAiClient] cancel_ai_request could not be confirmed; waiting for the active request to settle.',
+                );
+                resolve({ kind: 'cancellation', confirmed: false });
+              },
+            );
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+          removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+          if (signal.aborted) onAbort();
+        });
+        const outcome = await Promise.race([responseOutcome, cancellationOutcome]);
+        if (outcome.kind === 'cancellation') {
+          if (!outcome.confirmed) {
+            // The IPC transport failed, so do not report cancellation until the
+            // original command has settled and can no longer produce a late result.
+            await responseOutcome;
+          }
+          throw new AiRequestCancelledError();
+        }
+        if (outcome.kind === 'response-error') {
+          if (signal.aborted) {
+            // The original command is already settled, so a stalled cancellation
+            // IPC cannot leave an in-flight response or justify blocking the caller.
+            throw new AiRequestCancelledError();
+          }
+          throw outcome.error;
+        }
+        response = outcome.response;
+        if (signal.aborted) {
+          throw new AiRequestCancelledError();
+        }
+      }
+      throwIfAiRequestCancelled(signal);
+    } catch (error: unknown) {
+      if (isAiRequestCancelled(error)) {
+        throw new AiRequestCancelledError();
+      }
+      throw error;
+    } finally {
+      removeAbortListener();
+    }
+
     return {
       text: response.text,
       raw: response.raw,
@@ -156,11 +233,23 @@ export class RealAiClient implements AiClient {
     };
   }
 
-  private async generateViaFetch(request: AiGenerateRequest): Promise<AiGenerateResponse> {
+  private async generateViaFetch(
+    request: AiGenerateRequest,
+    options: AiGenerateOptions,
+  ): Promise<AiGenerateResponse> {
     const url = buildChatCompletionsUrl(this.config.baseUrl);
     const controller = new AbortController();
     const timeoutSeconds = this.config.timeoutSeconds ?? 120;
-    const timeout = window.setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    let abortCause: 'caller' | 'timeout' | undefined;
+    const abort = (cause: 'caller' | 'timeout') => {
+      if (controller.signal.aborted) return;
+      abortCause = cause;
+      controller.abort();
+    };
+    const onCallerAbort = () => abort('caller');
+    options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (options.signal?.aborted) onCallerAbort();
+    const timeout = window.setTimeout(() => abort('timeout'), timeoutSeconds * 1000);
 
     try {
       const response = await fetch(url, {
@@ -178,13 +267,16 @@ export class RealAiClient implements AiClient {
         throw normalizeHttpError(response.status, errorBody, request.modelName || this.config.modelName);
       }
 
-      const data = await response.json();
+      const data = await response.json().catch(() => {
+        throw new Error('AI 调用失败：模型服务返回了无法解析的响应。');
+      });
       const text = data.choices?.[0]?.message?.content || '';
 
       if (!String(text).trim()) {
         throw new Error('AI 调用失败：模型返回空内容，请检查提示词、模型名称或重试。');
       }
 
+      throwIfAiRequestCancelled(options.signal);
       return {
         text,
         raw: data,
@@ -193,7 +285,10 @@ export class RealAiClient implements AiClient {
         tokenTotal: data.usage?.total_tokens,
       };
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (controller.signal.aborted && abortCause === 'caller') {
+        throw new AiRequestCancelledError();
+      }
+      if (controller.signal.aborted && abortCause === 'timeout') {
         throw new Error(`AI 调用失败：请求超时（${timeoutSeconds} 秒），请检查网络或增加超时时间。`);
       }
       if (err instanceof TypeError && String(err.message).includes('fetch')) {
@@ -202,6 +297,7 @@ export class RealAiClient implements AiClient {
       throw err;
     } finally {
       window.clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', onCallerAbort);
     }
   }
 }

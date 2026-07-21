@@ -2,6 +2,7 @@ import { browser, expect } from '@wdio/globals';
 import {
   assertCleanDiagnostics,
   bridgeCall,
+  callMockGate,
   clickTestId,
   createFirstChapterThroughUi,
   createProjectThroughUi,
@@ -13,12 +14,6 @@ import {
 } from './helpers';
 
 const RESTART_ERROR_CODE = 'APP_RESTART_INTERRUPTED';
-
-interface MockAiGateState {
-  paused: boolean;
-  waitingRequests: number;
-  requestCount: number;
-}
 
 interface GenerationJobView {
   id: string;
@@ -38,19 +33,6 @@ interface GenerationStepView {
   status: string;
   outputJson?: string;
   createdAt: string;
-}
-
-type MockGateMethod = 'getMockAiGateState' | 'pauseMockAi' | 'releaseMockAi';
-
-async function callMockGate(method: MockGateMethod): Promise<MockAiGateState> {
-  return browser.execute((methodName) => {
-    type GateBridge = Partial<Record<MockGateMethod, () => MockAiGateState>>;
-    const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: GateBridge })
-      .__AI_NOVEL_STUDIO_E2E__;
-    const operation = bridge?.[methodName];
-    if (!operation) throw new Error(`E2E Mock AI bridge method is unavailable: ${methodName}`);
-    return operation();
-  }, method);
 }
 
 async function getJobs(chapterId: string): Promise<GenerationJobView[]> {

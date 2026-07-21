@@ -1,6 +1,6 @@
 # Windows 桌面 E2E 自动化
 
-> 适用版本：v2.1.5 及后续版本的桌面 E2E 基础设施
+> 适用版本：v2.1.6 及后续版本的桌面 E2E 基础设施
 > 目标平台：Windows 10 / 11，真实 Tauri 窗口、Rust IPC、SQLite 与 WebView2
 
 本套测试使用 WebdriverIO、`tauri-driver` 和 Microsoft Edge WebDriver 直接操作 WebView DOM。测试只通过 `data-testid`、元素状态、路由和受限 Tauri IPC 进行定位与断言；截图不参与点击、定位或通过判定，且只在失败后、WebDriver 会话仍可访问时尽力生成。
@@ -76,6 +76,7 @@
 | AI 候选 | 生成入口、生成提交、约束、候选审查、采用和确认无稳定锚点 |
 | 离开保护 | 原生确认框无法通过 WebDriver DOM 访问 |
 | 恢复 | 首批 E2E 接入时产品尚无恢复节点；v2.1.5 已增加真实 `recovery-dialog` 与重启流程 |
+| 请求取消 | v2.1.5 只能写入任务取消终态，无法中止在途 HTTP / Mock 请求；v2.1.6 增加真实取消链路与桌面回归 |
 
 ---
 
@@ -113,6 +114,8 @@ tests/e2e/
   large-text-save.spec.ts
   candidate-review-apply.spec.ts
   leave-guard.spec.ts
+  generation-job-cancel.spec.ts
+  restart-task-recovery.spec.ts
   helpers.ts
   wdio.conf.ts
 scripts/e2e/run-e2e.ts
@@ -163,7 +166,7 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
 - Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
-- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行七个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行九个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
@@ -187,7 +190,7 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-运行器先构建一次 suite 应用；七个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
+运行器先构建一次 suite 应用；九个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
 
 ### 4.3 定向单场景复测
 
@@ -283,6 +286,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 - `VITE_AI_NOVEL_STUDIO_E2E=1` 会让 AI 设置读取器无条件返回 `runtimeMode: "mock"` / `provider: "mock"`；即使隔离 profile 中出现意外设置，也不能把 E2E 切到真实 Provider。
 - Mock AI Client 在本地返回固定结构和测试正文，不需要 API Key，不访问 OpenAI、DeepSeek 或其他 Provider。
+- E2E-only pause gate 支持 `AbortSignal`；请求取消后 waiter 必须立即归零，`releaseMockAi` 不得再次结算或产生迟到正文。
 - E2E 桥在 `App` 及业务模块加载前安装 WebView 网络 guard。它允许当前应用端点及 `data:` / `blob:` / `about:`，并在请求发出前拦截外部 `fetch`、`XMLHttpRequest`、`WebSocket`、`EventSource` 和 `navigator.sendBeacon`。
 - guard 只记录 transport、protocol、时间和计数，不记录 URL、query、header 或 body；因此诊断不会泄漏 API Key、Authorization 或完整 prompt。
 - 即使前端错误进入真实 API 路径，Rust `ai_chat_completion` 也会在创建或发送 HTTP 请求之前检查 E2E 模式并返回错误。
@@ -325,6 +329,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | `large-text-save.spec.ts` | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换 |
 | `candidate-review-apply.spec.ts` | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用 |
 | `leave-guard.spec.ts` | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖 |
+| `generation-job-cancel.spec.ts` | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态 |
 | `restart-task-recovery.spec.ts` | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI |
 
 这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收、隔离库故障注入和 E2E-only Mock pause / release，不替换正常业务写入流程；pause gate 不调用网络，也不直接修改数据库。
@@ -333,7 +338,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 尚未覆盖：
 
-- 不确定 AI 步骤的自动续跑、旧 `ai_task_records` 跨重启恢复和真实 HTTP 取消；
+- 不确定 AI 步骤的自动续跑、旧 `ai_task_records` 跨重启恢复，以及旧 AI 面板和其他独立 AI 工具的通用请求取消；
 - Windows 安装程序、原生文件选择器、系统托盘、Windows 通知；
 - OCR、截图识别、屏幕坐标、多显示器；
 - Tauri 原生窗口 close-request 的完整恢复式离开保护；
@@ -403,6 +408,8 @@ v2.1.4 的长正文场景暴露并验证了大文本保存链的真实缺陷：s
 
 v2.1.5 的重启场景确认了章节工程 runner 只存在于页面内 Promise：进程退出后，SQLite 中的 `pending` / `running` / `retrying` 会永久遗留，面板重载后的本地运行标志又会复位，允许用户重复启动。状态更新还允许迟到回调覆盖取消，step 的 `INSERT OR REPLACE` 可覆盖旧 checkpoint。修复后，启动事务把遗留任务确定结算为 `APP_RESTART_INTERRUPTED`，终态不可复活、进度不可倒退、step ID 不可覆盖，面板同时检查持久化 active 状态。系统不会自动重放不确定步骤。
 
+v2.1.6 的取消场景与 loopback 测试确认了另一个真实缺陷：工作台虽然能把 `generation_jobs` 写为 `cancelled`，同步 `reqwest::blocking`、浏览器 fetch 和 Mock waiter 却仍继续运行，最长可能等待 1800 秒。发布审阅又复现了取消 IPC 未确认即结算，以及浏览器 `2xx` 非法 JSON 把正文片段带入异常的问题。修复后，章节工程 job controller 等待 AI client 与 Rust abort handle 的取消确认；服务端连接被关闭，错误正文被固定消息替代，取消 checkpoint 保持唯一，质量旧任务正确结算，迟到响应不能生成草稿或完成任务。
+
 ---
 
 ## 12. 故障排查
@@ -456,6 +463,14 @@ v2.1.5 的重启场景确认了章节工程 runner 只存在于页面内 Promise
 - 始终从 `npm run test:e2e:*` 入口运行，不直接拼装 driver capability。
 - 启动日志和 `run.json` 中的数据目录及数据库必须位于 `%TEMP%\ai-novel-studio-e2e-*`，且 marker path / run-id 对应当前 spec。
 - 若路径指向 `%LOCALAPPDATA%\AI Novel Studio`，立即停止测试并作为隔离失败处理。
+
+### 12.8 取消按钮已生效但请求仍不结束
+
+- 先定向运行 `npm run test:e2e -- --spec generation-job-cancel`，检查 gate 的 `waitingRequests` 是否在 5 秒内归零。
+- 若任务已取消但 waiter 不为 0，检查 `generationJobService` 是否向当前 AI step 传递同一个 `AbortSignal`，以及 Mock gate / delay 是否移除了 abort listener。
+- 若 UI 已显示取消但后端请求仍存在，检查 `cancel_ai_request` IPC 是否被等待；不得用 fire-and-forget 或吞掉 IPC 失败，控制调用失败时应等待原请求安全结算。
+- 真实 API 模式用 `cargo test ai::tests -- --test-threads=1` 检查 loopback socket 关闭；不要用真实 Provider、截图或延长 sleep 判断取消是否有效。
+- `AI_REQUEST_CANCELLED` 是用户取消；请求超时必须继续显示超时错误，不能为追求统一而合并两种状态。
 
 ---
 

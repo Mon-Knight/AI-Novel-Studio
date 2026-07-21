@@ -1,5 +1,35 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.1.6 (2026-07-21) - 章节工程真实 AI 请求取消闭环
+
+### 新增
+
+- 新增可选 `requestId` 与 Rust `cancel_ai_request` IPC；章节工程正文生成和质量检查现在可以从 UI 取消一路传递到真实桌面 HTTP future。
+- 新增有界活动请求注册表：最多 64 个活动请求，提前取消与近期完成 ID 各最多 128 个并使用 30 秒 TTL；注册 token、两阶段 abort attach 和 RAII 清理共同处理立即取消、重复 ID、迟到取消及 command future 被丢弃。
+- 新增统一 `AbortSignal` 契约和稳定取消码 `AI_REQUEST_CANCELLED`；浏览器 fetch 能区分用户取消与请求超时，Mock pause gate 和响应延迟也可立即中断并移除 waiter。
+- 新增 10 个 Rust AI 回归测试、9 个前端取消 / 脱敏测试和真实 Windows Tauri `generation-job-cancel.spec.ts`；完整桌面套件增至 9 个独立 spec，取消 spec 同时覆盖正文与质量请求。
+
+### 修改
+
+- 桌面 AI 调用从 `reqwest::blocking::Client` 改为异步 `reqwest::Client`，保留原超时和 OpenAI-compatible 响应契约，不新增 Tokio 直接依赖或其他大型依赖。
+- `generationJobService` 按 job 持有 `AbortController`，为正文与质量请求分配不同的无业务内容 ID；取消等待当前 AI 调用收到后端中止确认或安全结算后，再沿用现有 SQLite 原子终态与唯一 checkpoint。
+- 质量检查取消时，其旧 `ai_task_record` 结算为 `cancelled`；success / failed / cancelled 更新只允许从非终态进入，迟到回调不能复活终态。
+- 质量报告改为 AI 成功返回后再创建，避免取消在途质量请求遗留永久 `pending` 报告；一旦草稿或报告已经提交，取消不会回滚这些既成事实。
+- Rust 与浏览器 AI 错误不再携带 URL、底层 reqwest 原文、provider body 或无效响应正文，降低敏感信息进入诊断日志的风险。
+
+### 修复
+
+- 修复点击“取消任务”只修改 `generation_jobs`，却无法停止最长可继续等待 1800 秒的真实 HTTP 请求；请求可能继续占用连接、产生费用并触发迟到回调。
+- 修复 Mock AI 暂停请求取消后仍滞留 waiter，必须 release 或结束进程才能释放的问题。
+- 修复浏览器端把用户主动取消统一误报为超时，以及质量检查取消被旧任务记录成普通失败的问题。
+- 修复取消 IPC 尚未确认或调用失败时前端仍立即报告成功的问题；IPC 失败会输出无敏感内容的诊断，并等待原请求结算，避免后台请求继续运行却提前提交取消终态。
+- 修复浏览器收到 `2xx` 非法 JSON 时解析异常可能夹带 provider 正文片段的问题。
+
+### 版本边界
+
+- 应用版本统一更新为 `2.1.6`；既有 migration 与正式数据库结构不修改。
+- 本版本只覆盖章节工程 `generation_jobs` 的正文生成和质量检查请求。旧 AI 面板、其他独立 AI 工具、流式输出、质量历史重放和 Agent 自主续跑仍不在本版本范围。
+
 ## v2.1.5 (2026-07-21) - 章节工程任务跨重启恢复闭环
 
 ### 新增

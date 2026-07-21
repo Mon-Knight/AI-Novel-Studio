@@ -30,6 +30,11 @@ export const E2E_FIXTURES = {
     safeChapterTitle: 'E2E Safe Chapter',
     safeContent: 'This safe chapter must remain active when a corrupted large-text draft cannot be read.',
   },
+  generationCancel: {
+    projectTitle: 'E2E Generation Cancellation Project',
+    volumeTitle: 'E2E Cancellation Volume',
+    chapterTitle: 'E2E Cancellation Chapter',
+  },
 } as const;
 
 const LARGE_TEXT_MINIMUM_BYTES = 120 * 1024;

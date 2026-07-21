@@ -42,6 +42,7 @@ const allSpecs = [
   'large-text-save.spec.ts',
   'candidate-review-apply.spec.ts',
   'leave-guard.spec.ts',
+  'generation-job-cancel.spec.ts',
   'restart-task-recovery.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));

@@ -2748,7 +2748,7 @@ pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRec
 pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6, duration_ms = ?7, finished_at = ?8 WHERE id = ?9",
+        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6, duration_ms = ?7, finished_at = ?8 WHERE id = ?9 AND status IN ('pending', 'running')",
         params![
             input.result_text,
             input.prompt_snapshot,
@@ -2773,9 +2773,33 @@ pub fn mark_ai_task_failed(
 ) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE ai_task_records SET status = 'failed', error_message = ?1, duration_ms = ?2, finished_at = ?3 WHERE id = ?4",
+        "UPDATE ai_task_records SET status = 'failed', error_message = ?1, duration_ms = ?2, finished_at = ?3 WHERE id = ?4 AND status IN ('pending', 'running')",
         params![error_message, duration_ms, finished_at, id],
     ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn mark_ai_task_cancelled_internal(
+    conn: &Connection,
+    id: &str,
+    finished_at: &str,
+    duration_ms: Option<i64>,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE ai_task_records SET status = 'cancelled', error_message = NULL, duration_ms = ?1, finished_at = ?2 WHERE id = ?3 AND status IN ('pending', 'running')",
+        params![duration_ms, finished_at, id],
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn mark_ai_task_cancelled(
+    id: String,
+    finished_at: String,
+    duration_ms: Option<i64>,
+) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    mark_ai_task_cancelled_internal(&conn, &id, &finished_at, duration_ms)?;
     Ok(())
 }
 
@@ -6045,6 +6069,69 @@ mod tests {
 
         drop(conn);
         let _ = fs::remove_file(db_path);
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_cancellation_is_terminal_and_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                duration_ms INTEGER,
+                finished_at TEXT
+            );
+            INSERT INTO ai_task_records (id, status) VALUES ('running-task', 'running');
+            INSERT INTO ai_task_records (id, status) VALUES ('succeeded-task', 'succeeded');
+            ",
+        )?;
+
+        assert_eq!(
+            mark_ai_task_cancelled_internal(
+                &conn,
+                "running-task",
+                "2026-07-21T09:00:00Z",
+                Some(125),
+            )?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_cancelled_internal(
+                &conn,
+                "running-task",
+                "2026-07-21T09:00:01Z",
+                Some(250),
+            )?,
+            0
+        );
+        assert_eq!(
+            mark_ai_task_cancelled_internal(
+                &conn,
+                "succeeded-task",
+                "2026-07-21T09:00:02Z",
+                Some(375),
+            )?,
+            0
+        );
+
+        let cancelled: (String, Option<i64>, Option<String>) = conn.query_row(
+            "SELECT status, duration_ms, finished_at FROM ai_task_records WHERE id = 'running-task'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(cancelled.0, "cancelled");
+        assert_eq!(cancelled.1, Some(125));
+        assert_eq!(cancelled.2.as_deref(), Some("2026-07-21T09:00:00Z"));
+
+        let succeeded: String = conn.query_row(
+            "SELECT status FROM ai_task_records WHERE id = 'succeeded-task'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(succeeded, "succeeded");
         Ok(())
     }
 }

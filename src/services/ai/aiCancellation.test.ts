@@ -1,0 +1,374 @@
+import assert from 'node:assert/strict';
+import test, { after, beforeEach } from 'node:test';
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
+import { createServer } from 'vite';
+import type { AiGenerateRequest } from '../../types/ai';
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>();
+
+  get length(): number {
+    return this.values.size;
+  }
+
+  clear(): void {
+    this.values.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+}
+
+const storage = new MemoryStorage();
+Object.defineProperty(globalThis, 'window', { value: globalThis, configurable: true });
+Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+
+const originalFetch = globalThis.fetch;
+const vite = await createServer({
+  appType: 'custom',
+  define: {
+    'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
+  },
+  server: { middlewareMode: true, hmr: false },
+});
+
+const realModule = await vite.ssrLoadModule('/src/services/ai/realAiClient.ts') as typeof import('./realAiClient');
+const mockModule = await vite.ssrLoadModule('/src/services/ai/mockAiClient.ts') as typeof import('./mockAiClient');
+const cancellationModule = await vite.ssrLoadModule('/src/services/ai/aiCancellation.ts') as typeof import('./aiCancellation');
+const qualityModule = await vite.ssrLoadModule('/src/services/ai/qualityCheckAiService.ts') as typeof import('./qualityCheckAiService');
+const taskModule = await vite.ssrLoadModule('/src/services/ai/aiTaskService.ts') as typeof import('./aiTaskService');
+
+const request: AiGenerateRequest = {
+  taskType: 'quality_check',
+  messages: [
+    { role: 'system', content: '质量检查' },
+    { role: 'user', content: '测试正文' },
+  ],
+};
+
+function createRealClient(timeoutSeconds = 1) {
+  return new realModule.RealAiClient({
+    baseUrl: 'https://example.invalid/v1',
+    apiKey: 'test-key',
+    modelName: 'test-model',
+    timeoutSeconds,
+  });
+}
+
+async function waitForCondition(predicate: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+beforeEach(() => {
+  clearMocks();
+  storage.clear();
+  globalThis.fetch = originalFetch;
+  if (mockModule.getMockAiGateStateForE2e().paused) {
+    mockModule.releaseMockAiForE2e();
+  }
+});
+
+after(async () => {
+  clearMocks();
+  globalThis.fetch = originalFetch;
+  if (mockModule.getMockAiGateStateForE2e().paused) {
+    mockModule.releaseMockAiForE2e();
+  }
+  await vite.close();
+});
+
+test('Tauri cancellation waits for cancel_ai_request confirmation', async () => {
+  const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+  let rejectActiveRequest: ((reason?: unknown) => void) | undefined;
+  let confirmCancellation: (() => void) | undefined;
+  let markRequestStarted: (() => void) | undefined;
+  const requestStarted = new Promise<void>((resolve) => {
+    markRequestStarted = resolve;
+  });
+
+  mockIPC((command, args) => {
+    calls.push({ command, args });
+    if (command === 'ai_chat_completion') {
+      markRequestStarted?.();
+      return new Promise((_resolve, reject) => {
+        rejectActiveRequest = reject;
+      });
+    }
+    if (command === 'cancel_ai_request') {
+      return new Promise<boolean>((resolve) => {
+        confirmCancellation = () => {
+          rejectActiveRequest?.(cancellationModule.AI_REQUEST_CANCELLED);
+          resolve(true);
+        };
+      });
+    }
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  const controller = new AbortController();
+  const result = createRealClient().generate(request, {
+    signal: controller.signal,
+    requestId: 'request-cancel-test',
+  });
+  let resultSettled = false;
+  void result.then(
+    () => { resultSettled = true; },
+    () => { resultSettled = true; },
+  );
+  await requestStarted;
+  controller.abort();
+
+  await waitForCondition(
+    () => calls.some((call) => call.command === 'cancel_ai_request'),
+    'cancel_ai_request was not invoked',
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(resultSettled, false);
+  assert.ok(confirmCancellation);
+  confirmCancellation();
+  await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+
+  const startCall = calls.find((call) => call.command === 'ai_chat_completion');
+  const startRequest = startCall?.args.request as Record<string, unknown> | undefined;
+  const cancelCall = calls.find((call) => call.command === 'cancel_ai_request');
+  assert.equal(startRequest?.requestId, 'request-cancel-test');
+  assert.equal(cancelCall?.args.requestId, 'request-cancel-test');
+  assert.equal(calls.filter((call) => call.command === 'cancel_ai_request').length, 1);
+});
+
+test('Tauri cancellation IPC failure waits for the original request to settle', async () => {
+  let resolveActiveRequest: ((value: { text: string }) => void) | undefined;
+  let markRequestStarted: (() => void) | undefined;
+  const requestStarted = new Promise<void>((resolve) => {
+    markRequestStarted = resolve;
+  });
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
+
+  try {
+    mockIPC((command) => {
+      if (command === 'ai_chat_completion') {
+        markRequestStarted?.();
+        return new Promise<{ text: string }>((resolve) => {
+          resolveActiveRequest = resolve;
+        });
+      }
+      if (command === 'cancel_ai_request') {
+        throw new Error('Bearer secret-token cancellation transport failure');
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const controller = new AbortController();
+    const result = createRealClient().generate(request, {
+      signal: controller.signal,
+      requestId: 'request-cancel-ipc-failure',
+    });
+    let resultSettled = false;
+    void result.then(
+      () => { resultSettled = true; },
+      () => { resultSettled = true; },
+    );
+    await requestStarted;
+    controller.abort();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(resultSettled, false);
+    assert.ok(resolveActiveRequest);
+    resolveActiveRequest({ text: 'late provider response' });
+    await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /could not be confirmed/);
+    assert.doesNotMatch(warnings[0], /secret-token|Bearer/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('Tauri cancellation settles when the original request finishes before a stalled cancel IPC', async () => {
+  const calls: string[] = [];
+  let resolveActiveRequest: ((value: { text: string }) => void) | undefined;
+  let markRequestStarted: (() => void) | undefined;
+  const requestStarted = new Promise<void>((resolve) => {
+    markRequestStarted = resolve;
+  });
+
+  mockIPC((command) => {
+    calls.push(command);
+    if (command === 'ai_chat_completion') {
+      markRequestStarted?.();
+      return new Promise<{ text: string }>((resolve) => {
+        resolveActiveRequest = resolve;
+      });
+    }
+    if (command === 'cancel_ai_request') {
+      return new Promise<boolean>(() => {});
+    }
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  const controller = new AbortController();
+  const result = createRealClient().generate(request, {
+    signal: controller.signal,
+    requestId: 'request-cancel-ipc-stalled',
+  });
+  let resultSettled = false;
+  void result.then(
+    () => { resultSettled = true; },
+    () => { resultSettled = true; },
+  );
+  await requestStarted;
+  controller.abort();
+  await waitForCondition(
+    () => calls.includes('cancel_ai_request'),
+    'stalled cancel_ai_request was not invoked',
+  );
+  assert.equal(resultSettled, false);
+
+  assert.ok(resolveActiveRequest);
+  resolveActiveRequest({ text: 'late but safely settled provider response' });
+  await waitForCondition(
+    () => resultSettled,
+    'caller remained blocked after the original request safely settled',
+  );
+  await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+});
+
+test('browser caller cancellation is distinct from request timeout', async () => {
+  clearMocks();
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => (
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      const rejectAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+      signal?.addEventListener('abort', rejectAbort, { once: true });
+      if (signal?.aborted) rejectAbort();
+    })
+  )) as typeof fetch;
+
+  const controller = new AbortController();
+  const cancelled = createRealClient().generate(request, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(cancelled, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+
+  const timedOut = createRealClient(0.01).generate(request);
+  await assert.rejects(timedOut, (error: unknown) => (
+    error instanceof Error
+    && error.message.includes('请求超时')
+    && !cancellationModule.isAiRequestCancelled(error)
+  ));
+});
+
+test('browser HTTP errors do not expose provider response bodies', async () => {
+  clearMocks();
+  const sensitiveBody = 'Bearer secret-token full sensitive prompt';
+  globalThis.fetch = (async () => new Response(sensitiveBody, { status: 500 })) as typeof fetch;
+
+  await assert.rejects(createRealClient().generate(request), (error: unknown) => (
+    error instanceof Error
+    && error.message.includes('模型服务错误（500）')
+    && !error.message.includes(sensitiveBody)
+    && !error.message.includes('secret-token')
+  ));
+});
+
+test('browser malformed success responses do not expose provider response bodies', async () => {
+  clearMocks();
+  const sensitiveBody = 'Bearer secret-token full sensitive prompt';
+  globalThis.fetch = (async () => new Response(sensitiveBody, { status: 200 })) as typeof fetch;
+
+  await assert.rejects(createRealClient().generate(request), (error: unknown) => (
+    error instanceof Error
+    && error.message === 'AI 调用失败：模型服务返回了无法解析的响应。'
+    && !error.message.includes(sensitiveBody)
+    && !error.message.includes('secret-token')
+  ));
+});
+
+test('Mock AI abort removes a paused waiter and remains released safely', async () => {
+  const baseline = mockModule.getMockAiGateStateForE2e().requestCount;
+  mockModule.pauseMockAiForE2e();
+  const controller = new AbortController();
+  const result = new mockModule.MockAiClient().generate(request, { signal: controller.signal });
+
+  await waitForCondition(
+    () => mockModule.getMockAiGateStateForE2e().waitingRequests === 1,
+    'Mock AI request did not enter the pause gate',
+  );
+  controller.abort();
+
+  await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+  assert.deepEqual(mockModule.getMockAiGateStateForE2e(), {
+    paused: true,
+    waitingRequests: 0,
+    requestCount: baseline + 1,
+  });
+  assert.deepEqual(mockModule.releaseMockAiForE2e(), {
+    paused: false,
+    waitingRequests: 0,
+    requestCount: baseline + 1,
+  });
+});
+
+test('Mock AI abort also interrupts the post-gate response delay', async () => {
+  const baseline = mockModule.getMockAiGateStateForE2e().requestCount;
+  const controller = new AbortController();
+  const result = new mockModule.MockAiClient().generate(request, { signal: controller.signal });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(mockModule.getMockAiGateStateForE2e().requestCount, baseline + 1);
+  controller.abort();
+
+  await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+  assert.equal(mockModule.getMockAiGateStateForE2e().waitingRequests, 0);
+});
+
+test('quality check cancellation records the AI task as cancelled', async () => {
+  mockModule.pauseMockAiForE2e();
+  const controller = new AbortController();
+  const result = qualityModule.qualityCheckAiService.runCheck({
+    novelId: 'novel-cancel-test',
+    chapterId: 'chapter-cancel-test',
+    draftId: 'draft-cancel-test',
+    draftContent: '等待取消的质量检查正文。',
+    chapterTitle: '取消测试章节',
+  }, {
+    signal: controller.signal,
+    requestId: 'quality-cancel-test',
+  });
+
+  await waitForCondition(
+    () => mockModule.getMockAiGateStateForE2e().waitingRequests === 1,
+    'Quality check did not enter the Mock AI pause gate',
+  );
+  controller.abort();
+  await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+
+  const tasks = await taskModule.aiTaskService.getByChapterId('chapter-cancel-test');
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0]?.status, 'cancelled');
+  assert.ok(tasks[0]?.finishedAt);
+
+  await taskModule.aiTaskService.markSucceeded(tasks[0].id, { resultText: 'late result' });
+  const afterLateSuccess = await taskModule.aiTaskService.getByChapterId('chapter-cancel-test');
+  assert.equal(afterLateSuccess[0]?.status, 'cancelled');
+});

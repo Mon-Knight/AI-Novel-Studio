@@ -53,8 +53,13 @@ export interface AiGenerateResponse {
   tokenTotal?: number;
 }
 
+export interface AiGenerateOptions {
+  signal?: AbortSignal;
+  requestId?: string;
+}
+
 export interface AiClient {
-  generate(request: AiGenerateRequest): Promise<AiGenerateResponse>;
+  generate(request: AiGenerateRequest, options?: AiGenerateOptions): Promise<AiGenerateResponse>;
 }
 
 // ==================== AI 任务记录 ====================

@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.5（章节工程任务跨重启恢复闭环）
+> 当前版本：v2.1.6（章节工程真实 AI 请求取消闭环）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.1.5，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加任务状态机、启动恢复事务和真实应用进程重启验证：
+截至 v2.1.6，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加真实 HTTP 取消、AbortSignal 传播、活动请求清理与桌面取消副作用验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -164,13 +164,37 @@ npm run test:e2e -- --spec restart-task-recovery
 
 恢复测试只证明 `generation_jobs` 的安全中断结算，不证明不确定步骤可以自动续跑。E2E pause gate 只存在于 `VITE_AI_NOVEL_STUDIO_E2E=1` 的专用前端构建中，生产构建不可用。
 
-### 2.7 Windows 真实桌面 E2E
+### 2.7 v2.1.6 在途请求取消测试
+
+```powershell
+npm run test
+cd src-tauri
+cargo test ai::tests -- --test-threads=1
+cd ..
+npm run test:e2e -- --spec generation-job-cancel
+```
+
+| 编号 | 场景 | 预期 |
+|------|------|------|
+| CAN01 | 慢速 loopback HTTP 请求取消 | 2 秒内返回 `AI_REQUEST_CANCELLED`，服务端观察到连接关闭 |
+| CAN02 | 请求注册前立即取消 | tombstone 阻止网络 dispatch，完成后注册表清理 |
+| CAN03 | 重复 ID、重复取消与 future drop | 第二请求不发出；取消幂等；future 被丢弃时 HTTP 仍中止 |
+| CAN04 | 正常响应与超时 | token 统计保持；超时不误分类为用户取消 |
+| CAN05 | 浏览器 fetch 与 Mock gate / delay | caller abort、timeout 分类不同；waiter 立即移除 |
+| CAN06 | 质量检查取消 | 对应旧 AI 任务为 `cancelled`，迟到成功不能复活终态 |
+| CAN07 | 取消 IPC 延迟、失败或不结算 | 未确认且原请求仍在途时不结算；IPC 失败时等待原请求结束且诊断不含底层错误；原请求已安全结算后不再被卡住的 IPC 阻塞 |
+| CAN08 | `2xx` 非法 JSON | Rust 与浏览器固定返回解析错误，不携带 provider body |
+| CAN-E2E | UI 取消正文与质量请求 | 唯一取消 checkpoint；正文不新增草稿；质量保留既有草稿、AI task 取消且无 pending 报告；零外网和零残留 |
+
+Rust loopback 只绑定 `127.0.0.1`，测试构建显式绕过系统代理，不访问互联网；生产代理行为不变。真实桌面取消 spec 使用强制 Mock Provider，因此负责验证 React、AbortSignal、Rust/SQLite 任务终态与 WebView 生命周期，不用它替代真实 socket 关闭测试。
+
+### 2.8 Windows 真实桌面 E2E
 
 ```powershell
 # 启动、窗口、迁移和前端异常冒烟测试
 npm run test:e2e:smoke
 
-# 八个独立桌面核心流程
+# 九个独立桌面核心流程
 npm run test:e2e
 
 # 定向运行一个独立场景（扩展名可省略）
@@ -196,13 +220,14 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 | `large-text-save.spec.ts` | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭 |
 | `candidate-review-apply.spec.ts` | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等 |
 | `leave-guard.spec.ts` | 未保存离开保护的取消、保存并离开及放弃修改分支 |
+| `generation-job-cancel.spec.ts` | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
 | `restart-task-recovery.spec.ts` | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等 |
 
 测试通过 `data-testid`、元素状态、HashRouter 和 Tauri IPC 定位与断言，不使用中文文本、CSS 类、DOM 层级、屏幕坐标或截图识别。`frontend-diagnostics.json`、WebdriverIO、driver / Rust 日志、数据库位置和进程清理结果都会写入诊断目录；失败时在会话仍可访问的前提下尽力追加 DOM、当前路由和截图。
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行八条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行九条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ---
 
@@ -330,12 +355,12 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 - v2.1.1 已引入 Node 原生安全原语动态测试，v2.1.4 增加编辑器失败关闭模块测试；更广泛的 React 组件级并发集成覆盖仍需继续补齐。
 - 章节切换的 Leave Guard 已纳入桌面 E2E；HashRouter 其他非按钮导航与 Tauri 原生窗口 close-request 尚未纳入可恢复离开保护的自动化闭环。
-- 当前动态测试已证明会话级幂等 claim / release，以及 `generation_jobs` 重启后的安全终结；跨重启自动续跑和其他 AI 任务模型仍需要持久化 attempt / operation 记录与副作用幂等协议。
+- 当前动态测试已证明会话级幂等 claim / release、`generation_jobs` 重启后的安全终结，以及其中正文生成和质量检查请求的真实取消；跨重启自动续跑和其他 AI 工具仍需要各自的取消、attempt / operation 记录与副作用幂等协议。
 - Windows 桌面自动化采用 WebdriverIO + Tauri Driver，不计划用 Playwright 浏览器页面或截图式 Computer Use 替代真实 Tauri E2E。
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
 - DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
-- 大文本 DB04～DB07 与章节工程任务跨重启安全结算已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；质量报告事务、自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
+- 大文本 DB04～DB07、章节工程任务跨重启安全结算与在途 AI 取消已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；质量历史不可变重放、自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 
