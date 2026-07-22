@@ -1,4 +1,5 @@
-export const PROJECT_BACKUP_SCHEMA_VERSION = 2;
+export const PROJECT_BACKUP_SCHEMA_VERSION = 3;
+export const MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION = 2;
 
 export type BackupValue = null | boolean | number | string | BackupValue[] | { [key: string]: BackupValue };
 export type BackupRow = Record<string, BackupValue>;
@@ -89,11 +90,18 @@ export function isLocalProjectBackupData(data: unknown): data is LocalProjectBac
 
 export function isCompleteProjectBackup(data: unknown): data is CompleteProjectBackup {
   if (!isRecord(data)) return false;
-  if (data.type !== 'ai_novel_studio_project' || data.schemaVersion !== PROJECT_BACKUP_SCHEMA_VERSION) return false;
+  if (data.type !== 'ai_novel_studio_project'
+    || typeof data.schemaVersion !== 'number'
+    || !Number.isInteger(data.schemaVersion)
+    || data.schemaVersion < MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION
+    || data.schemaVersion > PROJECT_BACKUP_SCHEMA_VERSION) return false;
   if (!isRecord(data.novel) || typeof data.novel.id !== 'string' || typeof data.novel.title !== 'string') return false;
   if (!isRecord(data.tables)) return false;
   const tables = data.tables as Record<string, unknown>;
-  return REQUIRED_TABLES.every((table) => Array.isArray(tables[table]))
+  const requiredTables = data.schemaVersion >= 3
+    ? [...REQUIRED_TABLES, 'quality_issue_states']
+    : REQUIRED_TABLES;
+  return requiredTables.every((table) => Array.isArray(tables[table]))
     && (data.localStorage === undefined || isLocalProjectBackupData(data.localStorage));
 }
 

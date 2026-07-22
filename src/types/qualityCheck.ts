@@ -76,6 +76,8 @@ export interface QualityCheckItem {
   paragraphIndex?: number;
   /** 问题稳定标识，用于重新检测时去重 */
   issueKey: string;
+  /** Stable position within the immutable report snapshot. */
+  sortOrder?: number;
   /** 问题处理状态 */
   status: QualityIssueStatus;
   /** 处理备注 */
@@ -85,8 +87,22 @@ export interface QualityCheckItem {
   createdAt: string; updatedAt: string;
 }
 
+/** Mutable workflow state kept separately from immutable report items. */
+export interface QualityIssueState {
+  id: string;
+  chapterId: string;
+  issueKey: string;
+  status: QualityIssueStatus;
+  resolutionNote?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface QualityCheckResult {
   overallScore: number; summary: string;
+  /** Persisted AI task that produced this result. */
+  aiTaskId?: string;
   items: Array<{
     issueType?: QualityIssueType; severity: QualityIssueSeverity;
     /** AI 返回的类别（中文） */
@@ -126,6 +142,7 @@ export interface SaveQualityCheckResultInput {
   contentHash?: string;
   contentLength?: number;
   checkedAt?: string;
+  aiTaskId: string;
 }
 
 /** 获取质量检查结果返回 */

@@ -580,6 +580,7 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
             start_offset INTEGER,
             end_offset INTEGER,
             is_resolved INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (report_id) REFERENCES quality_check_reports(id),
@@ -590,6 +591,21 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_quality_check_items_report_id ON quality_check_items(report_id);
         CREATE INDEX IF NOT EXISTS idx_quality_check_items_issue_type ON quality_check_items(issue_type);
         CREATE INDEX IF NOT EXISTS idx_quality_check_items_severity ON quality_check_items(severity);
+
+        CREATE TABLE IF NOT EXISTS quality_issue_states (
+            id TEXT NOT NULL UNIQUE,
+            chapter_id TEXT NOT NULL,
+            issue_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            resolution_note TEXT,
+            resolved_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (chapter_id, issue_key),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quality_issue_states_status
+            ON quality_issue_states(chapter_id, status);
 
         CREATE TABLE IF NOT EXISTS polish_records (
             id TEXT PRIMARY KEY,
@@ -1036,6 +1052,7 @@ fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "quality_check_items", "paragraph_index", "INTEGER")?;
     ensure_column(conn, "quality_check_items", "category", "TEXT")?;
     ensure_column(conn, "quality_check_items", "quote", "TEXT")?;
+    ensure_column(conn, "quality_check_items", "sort_order", "INTEGER")?;
 
     // Step 2: migrate existing is_resolved data to status
     conn.execute(
@@ -1053,11 +1070,69 @@ fn migrate_quality_check_tables(conn: &Connection) -> SqliteResult<()> {
         [],
     )?;
 
+    // Preserve a deterministic replay order for reports created before sort_order existed.
+    conn.execute(
+        "UPDATE quality_check_items
+         SET sort_order = (
+             SELECT COUNT(*)
+             FROM quality_check_items AS prior
+             WHERE prior.report_id = quality_check_items.report_id
+               AND (
+                   prior.created_at < quality_check_items.created_at
+                   OR (prior.created_at = quality_check_items.created_at AND prior.rowid < quality_check_items.rowid)
+               )
+         )
+         WHERE sort_order IS NULL",
+        [],
+    )?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS quality_issue_states (
+            id TEXT NOT NULL UNIQUE,
+            chapter_id TEXT NOT NULL,
+            issue_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            resolution_note TEXT,
+            resolved_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (chapter_id, issue_key),
+            FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+        );",
+    )?;
+
+    // The latest legacy item represents the mutable state before snapshots were split.
+    conn.execute(
+        "INSERT OR IGNORE INTO quality_issue_states
+            (id, chapter_id, issue_key, status, resolution_note, resolved_at, created_at, updated_at)
+         SELECT
+            CAST(LENGTH(item.chapter_id) AS TEXT) || ':' || item.chapter_id || item.issue_key,
+            item.chapter_id,
+            item.issue_key,
+            item.status,
+            item.resolution_note,
+            item.resolved_at,
+            item.created_at,
+            item.updated_at
+         FROM quality_check_items AS item
+         WHERE item.rowid = (
+             SELECT candidate.rowid
+             FROM quality_check_items AS candidate
+             WHERE candidate.chapter_id = item.chapter_id
+               AND candidate.issue_key = item.issue_key
+             ORDER BY candidate.updated_at DESC, candidate.rowid DESC
+             LIMIT 1
+         )",
+        [],
+    )?;
+
     // Step 4: create index for issue_key
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_quality_check_items_issue_key ON quality_check_items(issue_key);
          CREATE INDEX IF NOT EXISTS idx_quality_check_items_status ON quality_check_items(status);
-         CREATE INDEX IF NOT EXISTS idx_quality_check_items_chapter_id_status ON quality_check_items(chapter_id, status);",
+         CREATE INDEX IF NOT EXISTS idx_quality_check_items_chapter_id_status ON quality_check_items(chapter_id, status);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_check_items_report_sort_order ON quality_check_items(report_id, sort_order);
+         CREATE INDEX IF NOT EXISTS idx_quality_issue_states_status ON quality_issue_states(chapter_id, status);",
     )?;
 
     Ok(())
@@ -1501,6 +1576,66 @@ mod tests {
 
         assert!(column_exists(&conn, "style_profiles", "description")?);
         create_tables(&conn)?;
+        Ok(())
+    }
+
+    #[test]
+    fn migrates_quality_snapshot_order_and_workflow_state_idempotently() -> SqliteResult<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE quality_check_reports (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL
+            );
+            CREATE TABLE chapters (id TEXT PRIMARY KEY);
+            CREATE TABLE quality_check_items (
+                id TEXT PRIMARY KEY,
+                report_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                issue_key TEXT,
+                status TEXT,
+                resolution_note TEXT,
+                resolved_at TEXT,
+                is_resolved INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO quality_check_reports (id, chapter_id) VALUES
+                ('report-quality-old', 'chapter-quality-migration'),
+                ('report-quality-new', 'chapter-quality-migration');
+            INSERT INTO chapters (id) VALUES ('chapter-quality-migration');
+            INSERT INTO quality_check_items
+                (id, report_id, chapter_id, issue_key, status, created_at, updated_at)
+                VALUES
+                ('item-old-a', 'report-quality-old', 'chapter-quality-migration', 'same-key', 'resolved', '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z'),
+                ('item-old-b', 'report-quality-old', 'chapter-quality-migration', 'other-key', 'pending', '2026-01-01T00:00:01Z', '2026-01-01T00:00:01Z'),
+                ('item-new-a', 'report-quality-new', 'chapter-quality-migration', 'same-key', 'ignored', '2026-01-01T00:00:02Z', '2026-01-01T00:00:02Z');
+            ",
+        )?;
+
+        migrate_quality_check_tables(&conn)?;
+        migrate_quality_check_tables(&conn)?;
+
+        let old_order = conn
+            .prepare(
+                "SELECT sort_order FROM quality_check_items WHERE report_id = 'report-quality-old' ORDER BY sort_order",
+            )?
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<SqliteResult<Vec<_>>>()?;
+        assert_eq!(old_order, vec![0, 1]);
+        let state: (String, String) = conn.query_row(
+            "SELECT status, resolution_note FROM quality_issue_states WHERE chapter_id = 'chapter-quality-migration' AND issue_key = 'same-key'",
+            [],
+            |row| Ok((row.get(0)?, row.get::<_, Option<String>>(1)?.unwrap_or_default())),
+        )?;
+        assert_eq!(state, ("ignored".to_string(), String::new()));
+        let state_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM quality_issue_states", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(state_count, 2);
+        assert!(column_exists(&conn, "quality_check_items", "sort_order")?);
         Ok(())
     }
 }

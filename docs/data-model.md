@@ -2072,3 +2072,79 @@ AI Novel Studio 的数据模型应服务于以下目标：
 ```
 
 所有后续开发都应围绕以上数据原则展开。
+
+---
+
+# 27. v2.1.7 质量历史快照与当前状态
+
+v2.1.7 将质量检查的“历史检测事实”和“当前问题处理状态”分开存储。该边界高于早期示例结构，后续修改质量链路时必须保持。
+
+## 27.1 `quality_check_reports`：一次检查的不可变头部
+
+每次质量检查创建独立报告。报告必须绑定：
+
+```text
+novel_id
+chapter_id
+draft_id
+ai_task_id
+content_hash / content_length
+checked_at / created_at
+```
+
+只有在全部问题和当前状态成功写入后，报告才能从 `pending` 转为 `completed`。已 completed 报告只允许使用原 `ai_task_id` 幂等读取，不得替换评分、摘要、成员或 Task 绑定。
+
+`ai_task_id` 为新报告必填。目标 Task 必须存在，`task_type = 'quality_check'`，`status = 'succeeded'`，且作品和章节归属与报告一致。
+
+## 27.2 `quality_check_items`：报告内不可变问题快照
+
+每个 item 只属于一份报告。复检再次出现同一 `issue_key` 时仍创建新 item ID，不得改写旧 item 的 `report_id`、检测字段或快照状态。
+
+`sort_order` 是报告内的稳定顺序，从 0 递增。原始快照按 `sort_order ASC, id ASC` 读取。同一输入报告中不得出现重复 `issue_key`；重复时整份报告保存失败并回滚。
+
+item 中的 `status` / `resolution_note` / `resolved_at` 只是生成当时的原始快照。回放历史报告时必须返回这些原始值，不覆盖当前工作流状态。
+
+## 27.3 `quality_issue_states`：当前可变工作流
+
+```text
+PRIMARY KEY: (chapter_id, issue_key)
+UNIQUE: id
+status: pending / resolved / ignored
+resolution_note
+resolved_at
+created_at / updated_at
+```
+
+当前报告的问题列表以 item 为检测事实，再按 `(chapter_id, issue_key)` 覆盖状态。历史报告 item 不允许修改该表；单条和批量状态更新都必须在 SQLite 事务中完成。
+
+新报告再次发现旧问题时：
+
+```text
+ignored -> ignored
+resolved -> pending
+pending  -> pending
+```
+
+如果一份旧 pending 报告在更新 completed 报告之后才返回，它只能保存自身快照，不能更新 `quality_issue_states`。判断依据为 `created_at DESC, id DESC` 中是否存在更新 completed 报告；较新但 pending / failed 的报告不阻止当前最新完整报告刷新状态。
+
+## 27.4 原子性和查询规则
+
+```text
+report ownership / AI Task / duplicate key validation
+-> insert every immutable item
+-> upsert eligible current states
+-> mark report completed
+-> read back report and items
+-> commit
+```
+
+上述步骤必须位于同一 `IMMEDIATE` 事务。任意失败都不得留下 completed 报告、部分 item 或部分状态。
+
+- 最新当前查询：只查 `status = 'completed'`，按 `created_at DESC, id DESC` 取一条。
+- 历史列表：只列 completed，使用同一稳定顺序。
+- 历史回放：按 report ID 返回原始 item，不 join 当前状态。
+- 当前问题：仅对最新 completed 报告 join 当前状态。
+
+## 27.5 完整备份
+
+`schemaVersion: 3` 导出 `quality_issue_states`。schema 2 导入仍被支持，但必须在恢复事务内按每个 `(chapter_id, issue_key)` 的 item `updated_at DESC, rowid DESC` 合成旧模型最后保存的可变状态，并按 `report_id` 分组补齐缺失的 `sort_order`，不得依赖导入后重启再修复。

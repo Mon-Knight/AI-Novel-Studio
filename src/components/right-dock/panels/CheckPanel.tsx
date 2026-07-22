@@ -22,6 +22,7 @@ import { aiSettingsService } from '../../../services/ai/aiClient';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
+import { resolveCurrentQualityRequest } from '../../../features/quality/qualityRequestSafety';
 
 interface CheckPanelProps {
   novelId?: string; chapter?: Chapter;
@@ -70,6 +71,8 @@ function CheckPanel({
   liveChapterIdRef.current = chapter?.id || '';
   const liveNovelIdRef = useRef(novelId || '');
   liveNovelIdRef.current = novelId || '';
+  const onQcChangeRef = useRef(onQcChange);
+  onQcChangeRef.current = onQcChange;
   const loadEpochRef = useRef(0);
   const [report, setReport] = useState<QualityCheckReport | null>(qcReport ?? null);
   const [items, setItems] = useState<QualityCheckItem[]>(qcItems ?? []);
@@ -78,6 +81,9 @@ function CheckPanel({
   const [currentDraft, setCurrentDraft] = useState<ChapterDraft | null>(null);
   const [filter, setFilter] = useState<QualityIssueFilter>('all');
   const [locateMessage, setLocateMessage] = useState('');
+  const [historyReports, setHistoryReports] = useState<QualityCheckReport[]>([]);
+  const [selectedReportId, setSelectedReportId] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // v1.7.19 同步 props → local
   useEffect(() => { if (qcReport !== undefined) setReport(qcReport); }, [qcReport]);
@@ -85,8 +91,8 @@ function CheckPanel({
   // 反方向同步 local → parent
   const syncUp = useCallback((r: QualityCheckReport | null, it: QualityCheckItem[]) => {
     setReport(r); setItems(it);
-    onQcChange?.(r, it);
-  }, [onQcChange]);
+    onQcChangeRef.current?.(r, it);
+  }, []);
 
   // v1.7.16/v1.7.18 AI 修稿状态
   const [fixLoading, setFixLoading] = useState(false);
@@ -126,6 +132,8 @@ function CheckPanel({
   );
   const statistics = computeStatistics(activeItems);
   const filteredItems = filter === 'all' ? activeItems : activeItems.filter((i) => i.status === filter);
+  const latestReportId = historyReports[0]?.id || '';
+  const viewingHistory = Boolean(activeReport && latestReportId && activeReport.id !== latestReportId);
 
   const loadLatest = useCallback(async () => {
     if (!novelId || !chapter?.id) return;
@@ -133,8 +141,14 @@ function CheckPanel({
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     setCurrentDraft(null);
+    setHistoryReports([]);
+    setSelectedReportId('');
     try {
-      const d = await draftVersionService.getLatestByChapterId(chapter.id);
+      const [d, result, reports] = await Promise.all([
+        draftVersionService.getLatestByChapterId(chapter.id),
+        qualityCheckService.getChapterIssues(chapter.id),
+        qualityCheckService.listReports(chapter.id),
+      ]);
       if (loadEpochRef.current !== requestEpoch
         || liveNovelIdRef.current !== requestNovelId
         || liveChapterIdRef.current !== requestChapterId) return;
@@ -142,11 +156,11 @@ function CheckPanel({
         throw new Error('草稿与质量检查目标不一致');
       }
       setCurrentDraft(d);
-      if (qcReport?.chapterId === chapter.id) return;
-      const result = await qualityCheckService.getChapterIssues(chapter.id);
       if (loadEpochRef.current !== requestEpoch
         || liveNovelIdRef.current !== requestNovelId
         || liveChapterIdRef.current !== requestChapterId) return;
+      setHistoryReports(reports);
+      setSelectedReportId(result.report?.id || '');
       syncUp(result.report, result.items);
     } catch (error) {
       if (loadEpochRef.current !== requestEpoch
@@ -155,9 +169,38 @@ function CheckPanel({
       console.error('[QualityCheck] failed to load latest report', error);
       setError(error instanceof Error ? error.message : '加载质量检查报告失败');
     }
-  }, [novelId, chapter?.id, qcReport?.chapterId, syncUp]);
+  }, [novelId, chapter?.id, syncUp]);
 
   useEffect(() => { loadLatest(); }, [loadLatest]);
+
+  const handleHistoryChange = async (reportId: string) => {
+    if (!novelId || !chapter?.id || !reportId || historyLoading) return;
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
+    setHistoryLoading(true);
+    setError('');
+    try {
+      const result = reportId === latestReportId
+        ? await qualityCheckService.getChapterIssues(requestChapterId)
+        : await qualityCheckService.getReportSnapshot(reportId);
+      if (liveNovelIdRef.current !== requestNovelId
+        || liveChapterIdRef.current !== requestChapterId) return;
+      if (result.report?.novelId !== requestNovelId
+        || result.report.chapterId !== requestChapterId) {
+        throw new Error('质量报告与当前章节不一致');
+      }
+      setSelectedReportId(reportId);
+      setFilter('all');
+      syncUp(result.report, result.items);
+    } catch (historyError) {
+      if (liveNovelIdRef.current === requestNovelId
+        && liveChapterIdRef.current === requestChapterId) {
+        setError(historyError instanceof Error ? historyError.message : '加载质量检查历史失败');
+      }
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const handleRunCheck = async () => {
     if (!novelId || !chapter) return;
@@ -245,6 +288,7 @@ function CheckPanel({
         contentHash,
         contentLength: sourceContent.length,
         checkedAt,
+        aiTaskId: result.aiTaskId,
       });
 
       if (liveNovelIdRef.current !== novelId || liveChapterIdRef.current !== requestChapterId) {
@@ -259,6 +303,13 @@ function CheckPanel({
         contentLength: sourceContent.length,
         checkedAt,
       } : null, saved.items);
+      const reports = await resolveCurrentQualityRequest(
+        () => qualityCheckService.listReports(requestChapterId),
+        () => liveNovelIdRef.current === novelId && liveChapterIdRef.current === requestChapterId,
+      );
+      if (!reports) return;
+      setHistoryReports(reports);
+      setSelectedReportId(saved.report?.id || '');
       setFilter('all');
 
       updateAiModal?.('质量检查完成', 100);
@@ -281,6 +332,7 @@ function CheckPanel({
 
   /** 更新问题状态 */
   const handleStatusChange = async (itemId: string, newStatus: QualityIssueStatus) => {
+    if (viewingHistory) return;
     const prevItems = [...items];
     const nextItems = items.map((i) =>
       i.id === itemId ? { ...i, status: newStatus, resolvedAt: newStatus === 'resolved' ? new Date().toISOString() : i.resolvedAt } : i,
@@ -300,7 +352,7 @@ function CheckPanel({
 
   /** AI 修稿并复检 (v1.7.16) */
   const handleAIFix = async () => {
-    if (!novelId || !chapter || !currentDraft || !activeReport) return;
+    if (!novelId || !chapter || !currentDraft || !activeReport || viewingHistory) return;
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     const requestBaseHash = effectiveContentHash;
@@ -465,6 +517,7 @@ function CheckPanel({
           contentHash: fixedContentHash,
           contentLength: fixResult.revisedContent.length,
           checkedAt: candidateCheckedAt,
+          aiTaskId: checkResult.aiTaskId,
         });
         fixRun.afterReportId = saved2.report?.id || rpt2.id;
         fixRun.status = 'adopted';
@@ -476,6 +529,14 @@ function CheckPanel({
         }
 
         const refreshed = await qualityCheckService.getChapterIssues(chapter.id).catch(() => saved2);
+        const reports = await resolveCurrentQualityRequest(
+          () => qualityCheckService.listReports(requestChapterId).catch(() => historyReports),
+          () => liveNovelIdRef.current === requestNovelId && liveChapterIdRef.current === requestChapterId,
+        );
+        if (reports) {
+          setHistoryReports(reports);
+          setSelectedReportId(refreshed.report?.id || '');
+        }
 
         // 复检确认更好后，才同步新草稿到当前写作工作台。
         const resultMetadata: DraftResultMetadata = {
@@ -608,7 +669,7 @@ function CheckPanel({
         </button>
 
         {/* v1.7.16/v1.7.18 AI 修复并复检 */}
-        {activeReport && statistics.pending > 0 && (
+        {activeReport && !viewingHistory && statistics.pending > 0 && (
           <div style={{ marginTop: 6 }}>
             <button
               className="btn btn-sm"
@@ -641,6 +702,37 @@ function CheckPanel({
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>}
       </div>
 
+      {historyReports.length > 0 && (
+        <div
+          className="panel-section"
+          data-testid="quality-history"
+          data-report-id={activeReport?.id || ''}
+          data-history-mode={viewingHistory ? 'snapshot' : 'current'}
+        >
+          <div className="panel-section-title">检查历史</div>
+          <select
+            data-testid="quality-history-select"
+            value={selectedReportId || activeReport?.id || ''}
+            onChange={(event) => void handleHistoryChange(event.target.value)}
+            disabled={historyLoading}
+            style={{ width: '100%', fontSize: 12 }}
+          >
+            {historyReports.map((historyReport, index) => (
+              <option key={historyReport.id} value={historyReport.id}>
+                {index === 0 ? '最新 · ' : ''}
+                {new Date(historyReport.checkedAt || historyReport.createdAt).toLocaleString()}
+                {historyReport.overallScore === undefined ? '' : ` · ${historyReport.overallScore} 分`}
+              </option>
+            ))}
+          </select>
+          {viewingHistory && (
+            <div data-testid="quality-history-readonly" style={{ marginTop: 6, fontSize: 11, color: 'var(--color-text-muted)' }}>
+              历史快照 · 只读
+            </div>
+          )}
+        </div>
+      )}
+
       {reportOutdated && (
         <div className="panel-section" style={{
           border: '1px solid #f59e0b55',
@@ -657,7 +749,12 @@ function CheckPanel({
 
       {/* 检查结果区 */}
       {activeReport && activeReport.status === 'completed' && (
-        <div className="panel-section">
+        <div
+          className="panel-section"
+          data-testid="quality-report"
+          data-report-id={activeReport.id}
+          data-draft-id={activeReport.draftId}
+        >
           <div className="panel-section-title">📊 检查结果</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <div style={{
@@ -811,6 +908,10 @@ function CheckPanel({
         <div
           key={item.id}
           className="panel-section"
+          data-testid="quality-issue"
+          data-issue-id={item.id}
+          data-issue-key={item.issueKey}
+          data-status={item.status}
           style={{
             borderLeft: `3px solid ${QualityIssueSeverityColors[item.severity]}`,
             opacity: item.status === 'resolved' || item.status === 'ignored' ? 0.65 : 1,
@@ -870,25 +971,31 @@ function CheckPanel({
             </button>
 
             {/* 状态相关按钮 */}
-            {item.status === 'pending' && (
+            {!viewingHistory && item.status === 'pending' && (
               <>
                 <button
                   className="btn btn-sm btn-primary"
+                  data-testid="quality-issue-resolve"
+                  data-issue-id={item.id}
                   onClick={() => handleStatusChange(item.id, 'resolved')}
                 >
                   ✅ 标记已处理
                 </button>
                 <button
                   className="btn btn-sm btn-secondary"
+                  data-testid="quality-issue-ignore"
+                  data-issue-id={item.id}
                   onClick={() => handleStatusChange(item.id, 'ignored')}
                 >
                   🚫 忽略
                 </button>
               </>
             )}
-            {(item.status === 'resolved' || item.status === 'ignored') && (
+            {!viewingHistory && (item.status === 'resolved' || item.status === 'ignored') && (
               <button
                 className="btn btn-sm btn-secondary"
+                data-testid="quality-issue-reopen"
+                data-issue-id={item.id}
                 onClick={() => handleStatusChange(item.id, 'pending')}
               >
                 ↩️ 重新打开

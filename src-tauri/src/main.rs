@@ -191,6 +191,8 @@ fn main() {
             commands::list_chapter_characters,
             commands::remove_chapter_character,
             commands::get_quality_check_issues,
+            commands::list_quality_check_reports,
+            commands::get_quality_check_report_snapshot,
             commands::create_quality_check_report,
             commands::update_quality_issue_status,
             commands::batch_update_quality_issue_status,

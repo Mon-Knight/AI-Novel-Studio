@@ -1,6 +1,6 @@
 # Windows 桌面 E2E 自动化
 
-> 适用版本：v2.1.6 及后续版本的桌面 E2E 基础设施
+> 适用版本：v2.1.7 及后续版本的桌面 E2E 基础设施
 > 目标平台：Windows 10 / 11，真实 Tauri 窗口、Rust IPC、SQLite 与 WebView2
 
 本套测试使用 WebdriverIO、`tauri-driver` 和 Microsoft Edge WebDriver 直接操作 WebView DOM。测试只通过 `data-testid`、元素状态、路由和受限 Tauri IPC 进行定位与断言；截图不参与点击、定位或通过判定，且只在失败后、WebDriver 会话仍可访问时尽力生成。
@@ -116,6 +116,7 @@ tests/e2e/
   leave-guard.spec.ts
   generation-job-cancel.spec.ts
   restart-task-recovery.spec.ts
+  quality-history-replay.spec.ts
   helpers.ts
   wdio.conf.ts
 scripts/e2e/run-e2e.ts
@@ -166,7 +167,7 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
 - Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
-- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行九个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行十个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
@@ -190,7 +191,7 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-运行器先构建一次 suite 应用；九个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
+运行器先构建一次 suite 应用；十个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
 
 ### 4.3 定向单场景复测
 
@@ -309,6 +310,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | 编辑器 | `chapter-editor`、`chapter-save`、`chapter-adopt`、`chapter-load-retry` |
 | AI 候选 | `ai-generate`、`ai-generate-submit`、`candidate-review`、`candidate-content`、`candidate-constraints`、`candidate-replace`、`candidate-apply` |
 | 章节工程任务 | `chapter-engineering`、`engineering-panel`、`engineering-tab-jobs`、`generation-job-start`、`generation-job-cancel`、`generation-job-status`、`generation-job-step`、`generation-job-recovery` |
+| 质量检查与历史 | `quality-check`、`quality-history`、`quality-history-select`、`quality-history-readonly`、`quality-report`、`quality-issue` |
 | 确认与保护 | `generation-preflight`、`apply-confirm`、`leave-guard`、`dialog-confirm`、`dialog-cancel` |
 | 结果与恢复 | `error-notice`、`success-notice`、`recovery-dialog`、`recovery-dismiss` |
 
@@ -331,6 +333,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | `leave-guard.spec.ts` | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖 |
 | `generation-job-cancel.spec.ts` | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态 |
 | `restart-task-recovery.spec.ts` | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI |
+| `quality-history-replay.spec.ts` | 从空库经 UI 创建作品、卷章和正文；连续执行两次固定 Mock 质检，重启真实应用后回放两份报告；断言 report / draft / content hash / AI Task 绑定、item ID 隔离、历史只读与当前计数一致 |
 
 这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收、隔离库故障注入和 E2E-only Mock pause / release，不替换正常业务写入流程；pause gate 不调用网络，也不直接修改数据库。
 
@@ -375,7 +378,7 @@ test-results/e2e/<spec>/
 
 其中 `tauri-driver.log` 保存 driver 启动和协议错误，`rust-backend.log` 保存 Rust E2E 启动与诊断阶段，`run.json` 始终记录退出码、超时、测试数据库位置和进程清理结果。
 
-前端桥只保留有限条目并截断单条消息。文本产物会脱敏 API Key、Bearer / Authorization、密码 / secret、cookie / token 和 Windows 绝对路径。运行器在 WDIO 完成、复制 Rust 日志和写入 `run.json` 后再次递归脱敏；测试临时目录保留为 `%TEMP%\ai-novel-studio-e2e-*`，仓库路径显示为 `%WORKSPACE%\...`，既可定位又不包含 Windows 账户名。测试不得输出完整 prompt、真实作品正文、用户账号或正式数据库内容。新增日志字段时必须先更新脱敏规则。
+前端桥只保留有限条目并截断单条消息。JSON 产物必须先解析，再递归脱敏键和值并重新序列化；HTML、日志和文本才使用文本级规则。脱敏覆盖 API Key、Bearer / Authorization、密码 / secret、cookie / token、完整 prompt 和 Windows 绝对路径。运行器在 WDIO 完成、复制 Rust 日志后先执行最终脱敏，再解析 `frontend-diagnostics.json` 健康门禁；malformed JSON 会被替换为不含原文的有效错误对象，并令当前 spec 失败。测试临时目录在运行元数据中保留为 `%TEMP%\ai-novel-studio-e2e-*`，仓库路径显示为 `%WORKSPACE%\...`，既可定位又不包含 Windows 账户名。测试不得输出真实作品正文、用户账号或正式数据库内容。新增日志字段时必须先更新脱敏规则和结构化产物回归测试。
 
 ---
 
@@ -409,6 +412,8 @@ v2.1.4 的长正文场景暴露并验证了大文本保存链的真实缺陷：s
 v2.1.5 的重启场景确认了章节工程 runner 只存在于页面内 Promise：进程退出后，SQLite 中的 `pending` / `running` / `retrying` 会永久遗留，面板重载后的本地运行标志又会复位，允许用户重复启动。状态更新还允许迟到回调覆盖取消，step 的 `INSERT OR REPLACE` 可覆盖旧 checkpoint。修复后，启动事务把遗留任务确定结算为 `APP_RESTART_INTERRUPTED`，终态不可复活、进度不可倒退、step ID 不可覆盖，面板同时检查持久化 active 状态。系统不会自动重放不确定步骤。
 
 v2.1.6 的取消场景与 loopback 测试确认了另一个真实缺陷：工作台虽然能把 `generation_jobs` 写为 `cancelled`，同步 `reqwest::blocking`、浏览器 fetch 和 Mock waiter 却仍继续运行，最长可能等待 1800 秒。发布审阅又复现了取消 IPC 未确认即结算，以及浏览器 `2xx` 非法 JSON 把正文片段带入异常的问题。修复后，章节工程 job controller 等待 AI client 与 Rust abort handle 的取消确认；服务端连接被关闭，错误正文被固定消息替代，取消 checkpoint 保持唯一，质量旧任务正确结算，迟到响应不能生成草稿或完成任务。
+
+v2.1.7 的质量历史场景确认了三类真实一致性缺陷：报告先标记 completed 再逐条写问题，中途失败会留下部分数据；复检会把旧 item 改挂到新报告，使旧报告丢失快照；旧请求迟到会重置新报告已处理的同 key 问题。复审还发现可通过省略 `aiTaskId` 绕过追溯、删除 Task 会清空 completed 报告绑定、更新但未完成的报告会错误阻止最新完整报告刷新状态，以及完成后的迟到历史请求可在快速切章时覆盖新章节。schema 2 多报告恢复还会跨报告累计 `sort_order`。修复后，历史快照与当前状态分离、整笔事务提交、Task 强绑定并受删除保护、旧备份按报告排序；真实窗口会修改当前问题状态，再由应用重启回归证明两份历史仍可稳定回放。
 
 ---
 

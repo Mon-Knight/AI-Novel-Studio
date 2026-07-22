@@ -6,6 +6,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { finished } from 'node:stream/promises';
 import { promisify } from 'node:util';
+import { redactLogText, sanitizeArtifactDirectory } from './artifact-sanitizer.ts';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
@@ -44,6 +45,7 @@ const allSpecs = [
   'leave-guard.spec.ts',
   'generation-job-cancel.spec.ts',
   'restart-task-recovery.spec.ts',
+  'quality-history-replay.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 
@@ -110,13 +112,9 @@ for (const [index, spec] of specs.entries()) {
   let result: WdioRunResult = { exitCode: 1, signal: null, timedOut: false };
   let cleanup: CleanupResult = { ownedPids: [], remainingPids: [] };
   let cleanupError: string | undefined;
+  let artifactError: string | undefined;
   try {
     result = await runWdio(spec, env, specArtifacts);
-    const browserHealthFailure = validateBrowserHealthArtifact(specArtifacts);
-    if (browserHealthFailure) {
-      result = { ...result, exitCode: 1 };
-      console.error(`[E2E] ${spec} browser health check failed: ${browserHealthFailure}`);
-    }
   } catch (error) {
     console.error(`[E2E] ${spec} could not start: ${redactLogText(String(error))}`);
   } finally {
@@ -136,6 +134,18 @@ for (const [index, spec] of specs.entries()) {
       console.error(`[E2E] ${spec} left owned processes after cleanup: ${cleanup.remainingPids.join(', ')}`);
     }
     await copyRustLog(specRoot, specArtifacts);
+    const artifactIssues = await sanitizeArtifactDirectory(specArtifacts);
+    if (artifactIssues.length > 0) {
+      artifactError = `artifact sanitization failed: ${artifactIssues.join('; ')}`;
+      result = { ...result, exitCode: 1 };
+      console.error(`[E2E] ${spec} ${artifactError}`);
+    }
+    const browserHealthFailure = validateBrowserHealthArtifact(specArtifacts);
+    if (browserHealthFailure) {
+      artifactError = appendCleanupError(artifactError, `browser health check failed: ${browserHealthFailure}`);
+      result = { ...result, exitCode: 1 };
+      console.error(`[E2E] ${spec} browser health check failed: ${browserHealthFailure}`);
+    }
     if (!keepData && result.exitCode === 0) {
       try {
         await removeDirectory(specRoot);
@@ -159,13 +169,36 @@ for (const [index, spec] of specs.entries()) {
       ownedPids: cleanup.ownedPids,
       remainingPids: cleanup.remainingPids,
       cleanupError: cleanupError ?? null,
+      artifactError: artifactError ?? null,
       dataDirectoryRetained: keepData || result.exitCode !== 0,
     });
-    await sanitizeArtifactDirectory(specArtifacts);
+    const metadataIssues = await sanitizeArtifactDirectory(specArtifacts);
+    if (metadataIssues.length > 0) {
+      artifactError = appendCleanupError(artifactError, `final artifact sanitization failed: ${metadataIssues.join('; ')}`);
+      result = { ...result, exitCode: 1 };
+      console.error(`[E2E] ${spec} ${artifactError}`);
+      await writeRunMetadata(specArtifacts, {
+        spec,
+        runId,
+        specRoot: diagnosticPath(specRoot),
+        markerPath: diagnosticPath(markerPath),
+        databasePath: diagnosticPath(path.join(specRoot, 'ai-novel-studio.db')),
+        driverPort: driverPortBase + index,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        timedOut: result.timedOut,
+        wdioPid: result.wdioPid,
+        ownedPids: cleanup.ownedPids,
+        remainingPids: cleanup.remainingPids,
+        cleanupError: cleanupError ?? null,
+        artifactError,
+        dataDirectoryRetained: true,
+      });
+    }
   }
   if (result.exitCode !== 0) failures += 1;
-  if (cleanupError) {
-    console.error('[E2E] aborting the remaining specs because the previous test environment was not cleanly released.');
+  if (cleanupError || artifactError) {
+    console.error('[E2E] aborting the remaining specs because the previous test environment or diagnostics were not safely released.');
     break;
   }
 }
@@ -693,27 +726,6 @@ function validateBrowserHealthArtifact(specArtifacts: string): string | undefine
   return undefined;
 }
 
-async function sanitizeArtifactDirectory(root: string): Promise<void> {
-  let entries: fs.Dirent[];
-  try {
-    entries = await fs.promises.readdir(root, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const target = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      await sanitizeArtifactDirectory(target);
-      continue;
-    }
-    if (!entry.isFile() || !/\.(json|html|log|txt)$/i.test(entry.name)) continue;
-    try {
-      const contents = await fs.promises.readFile(target, 'utf8');
-      await fs.promises.writeFile(target, redactLogText(contents), 'utf8');
-    } catch { /* best effort */ }
-  }
-}
-
 function positiveIntegerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
@@ -786,16 +798,6 @@ function findFiles(root: string, fileName: string, excludedRoots: string[] = [])
     else if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase()) matches.push(target);
   }
   return matches;
-}
-
-function redactLogText(value: string): string {
-  return value
-    .replace(/("(?:api[_-]?key|authorization|token|password|secret|cookie)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
-    .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
-    .replace(/(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,"']+/gi, '$1[REDACTED]')
-    .replace(/\bbearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/((?:api[_-]?key|token|password|secret|cookie)\s*[:=]\s*)[^\s,"']+/gi, '$1[REDACTED]')
-    .replace(/[A-Za-z]:\\[^\n"']+/g, '[REDACTED_PATH]');
 }
 
 function diagnosticPath(target: string): string {

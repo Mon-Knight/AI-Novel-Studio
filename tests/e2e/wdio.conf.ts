@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import { browser } from '@wdio/globals';
 import type { Frameworks } from '@wdio/types';
+import { sanitizeArtifactDirectory, sanitizeSecrets } from '../../scripts/e2e/artifact-sanitizer.ts';
 import { bridgeDiagnostics } from './helpers';
 
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
@@ -187,7 +188,10 @@ export const config = {
   async onComplete() {
     await stopDriver();
     await closeDriverLog();
-    sanitizeArtifactDirectory(artifactRoot);
+    const issues = await sanitizeArtifactDirectory(artifactRoot);
+    if (issues.length > 0) {
+      throw new Error(`E2E artifact sanitization failed: ${issues.join('; ')}`);
+    }
   },
 };
 
@@ -215,45 +219,8 @@ async function waitForTestIdFromBrowser(testId: string): Promise<void> {
   await element.waitForDisplayed({ timeout: 30000 });
 }
 
-function sanitizeArtifactDirectory(root: string): void {
-  if (!fs.existsSync(root)) return;
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const target = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      sanitizeArtifactDirectory(target);
-      continue;
-    }
-    if (!/\.(json|html|log|txt)$/i.test(entry.name)) continue;
-    try {
-      fs.writeFileSync(target, sanitizeSecrets(fs.readFileSync(target, 'utf8')), 'utf8');
-    } catch { /* best effort */ }
-  }
-}
-
-function redactText(value: string): string {
-  return value
-    .replace(/("(?:api[_-]?key|authorization|token|password|secret|cookie)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
-    .replace(/(sk-[A-Za-z0-9_-]{12,})/g, '[REDACTED_KEY]')
-    .replace(/(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,"']+/gi, '$1[REDACTED]')
-    .replace(/\bbearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/((?:api[_-]?key|token|password|secret|cookie)\s*[:=]\s*)[^\s,"']+/gi, '$1[REDACTED]')
-    .replace(/[A-Za-z]:\\[^\n"']+/g, '[REDACTED_PATH]');
-}
-
 function sanitizeName(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'e2e-failure';
-}
-
-export function sanitizeSecrets<T>(value: T): T {
-  const secretKey = /(api[_-]?key|authorization|token|password|secret|cookie|dataDir|databasePath)/i;
-  const visit = (item: unknown): unknown => {
-    if (Array.isArray(item)) return item.map(visit);
-    if (!item || typeof item !== 'object') {
-      return typeof item === 'string' ? redactText(item) : item;
-    }
-    return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, secretKey.test(key) ? '[REDACTED]' : visit(child)]));
-  };
-  return visit(value) as T;
 }
 
 async function getBrowserDiagnostics(timeoutMs: number): Promise<unknown> {

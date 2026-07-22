@@ -66,6 +66,8 @@ Assert-Contains $commandsFile "AI_TASK_DELETE_RUST" "runtime delete logging"
 Assert-Contains $commandsFile "ai_task_records_table_exists" "table existence check"
 Assert-Contains $commandsFile "table_exists" "table existence logging"
 Assert-Contains $commandsFile "ai_task_delete_runtime_insert_list_delete_clear" "runtime delete rust test"
+Assert-Contains $commandsFile "ai_task_delete_rejects_completed_quality_report_references" "completed quality report delete protection test"
+Assert-Contains $commandsFile "quality_check_ai_task_delete_protected" "completed quality report delete protection"
 
 Assert-Contains $dbFile "pub fn get_database_path" "database path helper"
 
@@ -102,6 +104,6 @@ Assert-Contains $pageFile '\[AI_TASK_DELETE_VERIFY_FAILED\]' "page post-delete v
 Assert-Contains $pageFile "beforeCount > 0 && result\.deletedCount === 0" "clear zero-delete failure"
 Assert-NotContains $pageFile "e\?\.message \|\| '未知错误'" "unknown error fallback in AI task page"
 
-Assert-Contains $runtimeScript "cargo test ai_task_delete_runtime_insert_list_delete_clear" "runtime test command"
+Assert-Contains $runtimeScript "cargo test ai_task_delete" "runtime test command"
 
 Write-Host "AI task delete static checks passed."

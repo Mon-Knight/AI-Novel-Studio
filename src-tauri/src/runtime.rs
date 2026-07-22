@@ -19,7 +19,7 @@ const DATABASE_FILE: &str = "ai-novel-studio.db";
 const DATABASE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const DATABASE_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 
-const REQUIRED_E2E_TABLES: [&str; 7] = [
+const REQUIRED_E2E_TABLES: [&str; 9] = [
     "novels",
     "volumes",
     "chapters",
@@ -27,6 +27,8 @@ const REQUIRED_E2E_TABLES: [&str; 7] = [
     "ai_task_records",
     "generation_jobs",
     "generation_step_results",
+    "quality_check_items",
+    "quality_issue_states",
 ];
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -834,6 +836,8 @@ mod tests {
             CREATE TABLE ai_task_records (id TEXT PRIMARY KEY);
             CREATE TABLE generation_jobs (id TEXT PRIMARY KEY);
             CREATE TABLE generation_step_results (id TEXT PRIMARY KEY);
+            CREATE TABLE quality_check_items (id TEXT PRIMARY KEY);
+            CREATE TABLE quality_issue_states (id TEXT PRIMARY KEY);
             INSERT INTO novels (id) VALUES ('novel-1');
             INSERT INTO chapter_drafts (id, is_adopted) VALUES ('draft-1', 1), ('draft-2', 0);
             ",

@@ -13,7 +13,10 @@ import { safeJsonParse } from './jsonUtils';
 import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
 
 export const qualityCheckAiService = {
-  async runCheck(input: RunQualityCheckInput, aiOptions: AiGenerateOptions = {}): Promise<QualityCheckResult> {
+  async runCheck(
+    input: RunQualityCheckInput,
+    aiOptions: AiGenerateOptions = {},
+  ): Promise<QualityCheckResult & { aiTaskId: string }> {
     throwIfAiRequestCancelled(aiOptions.signal);
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId);
@@ -61,7 +64,7 @@ export const qualityCheckAiService = {
       provider: settings.provider,
       modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
       inputSummary: `检查章节「${input.chapterTitle}」质量，hash=${input.contentHash || 'unknown'}，字数=${input.wordCount ?? input.draftContent.length}`,
-    }).catch(() => null);
+    });
 
     try {
       const client = createAiClient(settings);
@@ -75,22 +78,20 @@ export const qualityCheckAiService = {
         items: [],
       });
 
-      await aiTaskService.markSucceeded(task?.id || '', {
+      await aiTaskService.markSucceeded(task.id, {
         resultText: `评分 ${parsed.overallScore}，发现 ${parsed.items?.length || 0} 个问题`,
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
         tokenTotal: response.tokenTotal,
       });
 
-      return parsed;
+      return { ...parsed, aiTaskId: task.id };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '质量检查失败';
-      if (task) {
-        if (isAiRequestCancelled(err) || aiOptions.signal?.aborted) {
-          await aiTaskService.markCancelled(task.id);
-        } else {
-          await aiTaskService.markFailed(task.id, msg);
-        }
+      if (isAiRequestCancelled(err) || aiOptions.signal?.aborted) {
+        await aiTaskService.markCancelled(task.id);
+      } else {
+        await aiTaskService.markFailed(task.id, msg);
       }
       throw err;
     }

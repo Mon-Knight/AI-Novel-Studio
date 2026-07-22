@@ -6,7 +6,8 @@ use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const BACKUP_TYPE: &str = "ai_novel_studio_project";
-const BACKUP_SCHEMA_VERSION: u32 = 2;
+const BACKUP_SCHEMA_VERSION: u32 = 3;
+const MIN_SUPPORTED_BACKUP_SCHEMA_VERSION: u32 = 2;
 const SQLITE_BIND_BATCH_SIZE: usize = 900;
 
 type BackupRow = BTreeMap<String, JsonValue>;
@@ -136,6 +137,10 @@ const PROJECT_TABLES: &[TableSpec] = &[
         filter: "report_id IN (SELECT id FROM quality_check_reports WHERE novel_id = ?1)",
     },
     TableSpec {
+        name: "quality_issue_states",
+        filter: "chapter_id IN (SELECT id FROM chapters WHERE novel_id = ?1)",
+    },
+    TableSpec {
         name: "polish_records",
         filter: "novel_id = ?1",
     },
@@ -187,6 +192,7 @@ const INSERT_ORDER: &[&str] = &[
     "context_records",
     "quality_check_reports",
     "quality_check_items",
+    "quality_issue_states",
     "polish_records",
     "quality_fix_runs",
     "context_read_logs",
@@ -207,6 +213,7 @@ const DELETE_ORDER: &[&str] = &[
     "quality_fix_runs",
     "polish_records",
     "quality_check_items",
+    "quality_issue_states",
     "quality_check_reports",
     "context_records",
     "chapter_summaries",
@@ -447,6 +454,13 @@ fn table_names() -> Vec<&'static str> {
     names
 }
 
+fn table_names_for_schema(schema_version: u32) -> Vec<&'static str> {
+    table_names()
+        .into_iter()
+        .filter(|table| schema_version >= 3 || *table != "quality_issue_states")
+        .collect()
+}
+
 fn clear_machine_paths(row: &mut BackupRow) {
     for column in ["cover_path", "file_path"] {
         if row.contains_key(column) {
@@ -587,10 +601,12 @@ fn validate_backup(conn: &Connection, backup: &ProjectBackup) -> Result<(), Stri
     if backup.backup_type != BACKUP_TYPE {
         return Err("不是 AI Novel Studio 项目备份文件".to_string());
     }
-    if backup.schema_version != BACKUP_SCHEMA_VERSION {
+    if !(MIN_SUPPORTED_BACKUP_SCHEMA_VERSION..=BACKUP_SCHEMA_VERSION)
+        .contains(&backup.schema_version)
+    {
         return Err(format!(
-            "不支持的项目备份版本：{}，当前仅支持版本 {}",
-            backup.schema_version, BACKUP_SCHEMA_VERSION
+            "不支持的项目备份版本：{}，当前支持版本 {} 至 {}",
+            backup.schema_version, MIN_SUPPORTED_BACKUP_SCHEMA_VERSION, BACKUP_SCHEMA_VERSION
         ));
     }
     if !backup
@@ -607,7 +623,9 @@ fn validate_backup(conn: &Connection, backup: &ProjectBackup) -> Result<(), Stri
         return Err("备份缺少有效的作品信息".to_string());
     }
 
-    let expected = table_names().into_iter().collect::<HashSet<_>>();
+    let expected = table_names_for_schema(backup.schema_version)
+        .into_iter()
+        .collect::<HashSet<_>>();
     for table in backup.tables.keys() {
         if !expected.contains(table.as_str()) {
             return Err(format!("备份包含不受支持的数据表：{table}"));
@@ -621,7 +639,7 @@ fn validate_backup(conn: &Connection, backup: &ProjectBackup) -> Result<(), Stri
 
     let novel_columns = table_columns(conn, "novels")?;
     validate_row("novels", &backup.novel, &novel_columns)?;
-    for table in table_names() {
+    for table in table_names_for_schema(backup.schema_version) {
         let columns = table_columns(conn, table)?;
         let rows = backup
             .tables
@@ -922,6 +940,40 @@ fn validate_foreign_keys(tx: &Transaction<'_>) -> Result<(), String> {
     Ok(())
 }
 
+fn restore_legacy_quality_issue_states(
+    tx: &Transaction<'_>,
+    novel_id: &str,
+) -> Result<usize, String> {
+    tx.execute(
+        "INSERT OR IGNORE INTO quality_issue_states
+            (id, chapter_id, issue_key, status, resolution_note, resolved_at, created_at, updated_at)
+         SELECT
+            'legacy:' || CAST(LENGTH(item.chapter_id) AS TEXT) || ':' || item.chapter_id || item.issue_key,
+            item.chapter_id,
+            item.issue_key,
+            CASE WHEN item.status IN ('pending', 'resolved', 'ignored') THEN item.status ELSE 'pending' END,
+            item.resolution_note,
+            item.resolved_at,
+            item.created_at,
+            item.updated_at
+         FROM quality_check_items AS item
+         INNER JOIN chapters AS chapter ON chapter.id = item.chapter_id
+         WHERE chapter.novel_id = ?1
+           AND item.issue_key IS NOT NULL
+           AND TRIM(item.issue_key) <> ''
+           AND item.rowid = (
+               SELECT candidate.rowid
+               FROM quality_check_items AS candidate
+               WHERE candidate.chapter_id = item.chapter_id
+                 AND candidate.issue_key = item.issue_key
+               ORDER BY candidate.updated_at DESC, candidate.rowid DESC
+               LIMIT 1
+           )",
+        params![novel_id],
+    )
+    .map_err(|error| format!("恢复旧版质量问题状态失败：{error}"))
+}
+
 pub fn restore_project_backup_in_conn(
     conn: &mut Connection,
     backup: &ProjectBackup,
@@ -952,10 +1004,49 @@ pub fn restore_project_backup_in_conn(
     let mut restored_records = BTreeMap::new();
     restored_records.insert("novels".to_string(), 1);
     for table in INSERT_ORDER {
-        let rows = backup
-            .tables
-            .get(*table)
-            .ok_or_else(|| format!("备份缺少数据表：{table}"))?;
+        let rows = match backup.tables.get(*table) {
+            Some(rows) => rows,
+            None if backup.schema_version == 2 && *table == "quality_issue_states" => {
+                let inserted = restore_legacy_quality_issue_states(&tx, &new_novel_id)?;
+                restored_records.insert((*table).to_string(), inserted);
+                continue;
+            }
+            None => return Err(format!("备份缺少数据表：{table}")),
+        };
+        let legacy_quality_rows;
+        let rows = if backup.schema_version == 2 && *table == "quality_check_items" {
+            let mut next_sort_order_by_report = HashMap::<String, i64>::new();
+            legacy_quality_rows = rows
+                .iter()
+                .map(|row| {
+                    let mut row = row.clone();
+                    let report_id = row
+                        .get("report_id")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let next_sort_order = next_sort_order_by_report.entry(report_id).or_default();
+                    let inferred_sort_order = *next_sort_order;
+                    *next_sort_order += 1;
+                    row.entry("sort_order".to_string())
+                        .or_insert_with(|| JsonValue::from(inferred_sort_order));
+                    let missing_issue_key = row
+                        .get("issue_key")
+                        .and_then(JsonValue::as_str)
+                        .map(|issue_key| issue_key.trim().is_empty())
+                        .unwrap_or(true);
+                    if missing_issue_key {
+                        if let Some(id) = row.get("id").cloned() {
+                            row.insert("issue_key".to_string(), id);
+                        }
+                    }
+                    row
+                })
+                .collect::<Vec<_>>();
+            &legacy_quality_rows
+        } else {
+            rows
+        };
         let inserted = insert_rows(&tx, table, rows, &id_map)?;
         restored_records.insert((*table).to_string(), inserted);
     }
@@ -1121,7 +1212,8 @@ mod tests {
             INSERT INTO chapter_summaries (id, novel_id, chapter_id, adopted_draft_id, summary, character_changes, ai_task_id, created_at, updated_at) VALUES ('summary-1', '{novel_id}', 'chapter-1', 'draft-1', '总结', '[{{\"characterId\":\"character-1\"}}]', 'task-1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO context_records (id, novel_id, chapter_id, context_type, title, content, created_at, updated_at) VALUES ('context-1', '{novel_id}', 'chapter-1', 'fact', '事实', '内容', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO quality_check_reports (id, novel_id, chapter_id, draft_id, created_at, updated_at) VALUES ('report-1', '{novel_id}', 'chapter-1', 'draft-1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-            INSERT INTO quality_check_items (id, report_id, novel_id, chapter_id, draft_id, issue_type, title, description, created_at, updated_at) VALUES ('issue-1', 'report-1', '{novel_id}', 'chapter-1', 'draft-1', 'logic', '问题', '说明', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO quality_check_items (id, report_id, novel_id, chapter_id, draft_id, issue_type, title, description, issue_key, sort_order, created_at, updated_at) VALUES ('issue-1', 'report-1', '{novel_id}', 'chapter-1', 'draft-1', 'logic', '问题', '说明', 'issue-key-1', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO quality_issue_states (id, chapter_id, issue_key, status, created_at, updated_at) VALUES ('issue-state-1', 'chapter-1', 'issue-key-1', 'resolved', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO polish_records (id, novel_id, chapter_id, source_draft_id, result_draft_id, mode, ai_task_id, created_at, updated_at) VALUES ('polish-1', '{novel_id}', 'chapter-1', 'draft-1', 'draft-1', 'polish', 'task-1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO quality_fix_runs (id, novel_id, chapter_id, source_draft_id, target_draft_id, fixed_issue_ids, new_issue_ids, used_context_ids, skipped_context_ids, created_at, updated_at) VALUES ('fix-1', '{novel_id}', 'chapter-1', 'draft-1', 'draft-1', '[\"issue-1\"]', '[]', '[\"context-1\",\"summary-1\"]', '[\"context-1\"]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO context_read_logs (id, novel_id, task_type, chapter_id, volume_id, used_context_ids, skipped_context_ids, created_at) VALUES ('read-log-1', '{novel_id}', 'generate', 'chapter-1', 'volume-1', '[\"context-1\",\"summary-1\"]', '[\"context-1\"]', '2026-01-01T00:00:00Z');
@@ -1459,6 +1551,123 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
             .expect("confirm settings remain excluded");
         assert_eq!(setting_count, 0);
+    }
+
+    #[test]
+    fn project_backup_schema_two_restores_without_quality_state_table() {
+        let source = test_connection();
+        seed_full_project(&source, "novel-source");
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export source");
+        backup.schema_version = 2;
+        backup.tables.remove("quality_issue_states");
+        let first_issue = backup
+            .tables
+            .get_mut("quality_check_items")
+            .and_then(|rows| rows.first_mut())
+            .expect("quality issue fixture");
+        first_issue.remove("sort_order");
+        first_issue.insert(
+            "status".to_string(),
+            JsonValue::String("ignored".to_string()),
+        );
+        first_issue.insert(
+            "resolution_note".to_string(),
+            JsonValue::String("legacy decision".to_string()),
+        );
+        let first_issue_template = first_issue.clone();
+        let mut second_issue = first_issue_template.clone();
+        second_issue.insert(
+            "id".to_string(),
+            JsonValue::String("issue-legacy-2".to_string()),
+        );
+        second_issue.insert(
+            "issue_key".to_string(),
+            JsonValue::String("issue-key-legacy-2".to_string()),
+        );
+        second_issue.insert(
+            "status".to_string(),
+            JsonValue::String("pending".to_string()),
+        );
+        backup
+            .tables
+            .get_mut("quality_check_items")
+            .expect("quality items")
+            .push(second_issue);
+        let mut second_report = backup
+            .tables
+            .get("quality_check_reports")
+            .and_then(|rows| rows.first())
+            .expect("quality report fixture")
+            .clone();
+        second_report.insert(
+            "id".to_string(),
+            JsonValue::String("report-legacy-2".to_string()),
+        );
+        backup
+            .tables
+            .get_mut("quality_check_reports")
+            .expect("quality reports")
+            .push(second_report);
+        let mut third_issue = first_issue_template;
+        third_issue.insert(
+            "id".to_string(),
+            JsonValue::String("issue-legacy-3".to_string()),
+        );
+        third_issue.insert(
+            "report_id".to_string(),
+            JsonValue::String("report-legacy-2".to_string()),
+        );
+        third_issue.insert(
+            "issue_key".to_string(),
+            JsonValue::String("issue-key-legacy-3".to_string()),
+        );
+        backup
+            .tables
+            .get_mut("quality_check_items")
+            .expect("quality items")
+            .push(third_issue);
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore schemaVersion 2 backup");
+        assert_eq!(restored.restored_records["quality_check_items"], 3);
+        assert_eq!(restored.restored_records["quality_issue_states"], 3);
+        let item_count: i64 = target
+            .query_row("SELECT COUNT(*) FROM quality_check_items", [], |row| {
+                row.get(0)
+            })
+            .expect("count restored quality items");
+        let state_count: i64 = target
+            .query_row("SELECT COUNT(*) FROM quality_issue_states", [], |row| {
+                row.get(0)
+            })
+            .expect("count restored quality states");
+        assert_eq!(item_count, 3);
+        assert_eq!(state_count, 3);
+        let second_report_id = restored
+            .id_map
+            .get("report-legacy-2")
+            .expect("restored second report id");
+        let second_report_sort_order: i64 = target
+            .query_row(
+                "SELECT sort_order FROM quality_check_items WHERE report_id = ?1",
+                params![second_report_id],
+                |row| row.get(0),
+            )
+            .expect("read restored per-report sort order");
+        assert_eq!(second_report_sort_order, 0);
+        let legacy_state: (String, Option<String>) = target
+            .query_row(
+                "SELECT status, resolution_note FROM quality_issue_states WHERE issue_key = 'issue-key-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read restored legacy state");
+        assert_eq!(
+            legacy_state,
+            ("ignored".to_string(), Some("legacy decision".to_string()))
+        );
     }
 
     #[test]

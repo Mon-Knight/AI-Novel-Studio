@@ -1,6 +1,7 @@
 use crate::db::{get_connection, get_database_path};
 use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 // ==================== Novel ====================
 
@@ -2455,6 +2456,39 @@ fn count_ai_task_records_by_ids(conn: &Connection, ids: &[String]) -> Result<i64
     Ok(count)
 }
 
+fn ensure_ai_tasks_are_not_bound_to_completed_quality_reports(
+    conn: &Connection,
+    ids: Option<&[String]>,
+) -> Result<(), String> {
+    let protected_count = if let Some(ids) = ids {
+        let mut count = 0_i64;
+        for id in ids {
+            count += conn
+                .query_row(
+                    "SELECT COUNT(*) FROM quality_check_reports
+                     WHERE status = 'completed' AND ai_task_id = ?1",
+                    params![id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        count
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*) FROM quality_check_reports
+             WHERE status = 'completed' AND ai_task_id IS NOT NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+    };
+
+    if protected_count > 0 {
+        return Err("quality_check_ai_task_delete_protected".to_string());
+    }
+    Ok(())
+}
+
 fn sample_ai_task_ids(conn: &Connection, limit: i64) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT id FROM ai_task_records ORDER BY created_at DESC LIMIT ?1")
@@ -2517,6 +2551,7 @@ fn delete_ai_task_records_by_ids_internal(
             ids, sample_ids, db_path
         ));
     }
+    ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, Some(&ids))?;
 
     // 构建 IN 子句占位符
     let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
@@ -2636,6 +2671,7 @@ fn clear_ai_task_records_internal(
         "[AI_TASK_DELETE_RUST] clear_all called db_path={} before_count={}",
         db_path, before_count
     );
+    ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, None)?;
 
     // 开启事务
     conn.execute_batch("BEGIN TRANSACTION")
@@ -3952,6 +3988,7 @@ pub struct QualityCheckItemDto {
     pub resolved_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -4000,6 +4037,7 @@ pub struct SaveQualityCheckResultInput {
     pub content_hash: Option<String>,
     pub content_length: Option<i64>,
     pub checked_at: Option<String>,
+    pub ai_task_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4072,11 +4110,16 @@ fn map_quality_item_row(row: &rusqlite::Row) -> rusqlite::Result<QualityCheckIte
         resolved_at: row.get(19)?,
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
+        sort_order: row.get(22)?,
     })
 }
 
 fn quality_item_select_sql() -> &'static str {
-    "SELECT id, report_id, novel_id, chapter_id, draft_id, issue_type, severity, title, description, category, evidence, suggestion, quote, start_offset, end_offset, paragraph_index, issue_key, status, resolution_note, resolved_at, created_at, updated_at FROM quality_check_items"
+    "SELECT id, report_id, novel_id, chapter_id, draft_id, issue_type, severity, title, description, category, evidence, suggestion, quote, start_offset, end_offset, paragraph_index, issue_key, status, resolution_note, resolved_at, created_at, updated_at, sort_order FROM quality_check_items"
+}
+
+fn quality_workflow_item_select_sql() -> &'static str {
+    "SELECT item.id, item.report_id, item.novel_id, item.chapter_id, item.draft_id, item.issue_type, item.severity, item.title, item.description, item.category, item.evidence, item.suggestion, item.quote, item.start_offset, item.end_offset, item.paragraph_index, item.issue_key, COALESCE(state.status, item.status), CASE WHEN state.id IS NOT NULL THEN state.resolution_note ELSE item.resolution_note END, CASE WHEN state.id IS NOT NULL THEN state.resolved_at ELSE item.resolved_at END, item.created_at, COALESCE(state.updated_at, item.updated_at), item.sort_order FROM quality_check_items AS item LEFT JOIN quality_issue_states AS state ON state.chapter_id = item.chapter_id AND state.issue_key = item.issue_key"
 }
 
 fn quality_report_select_sql() -> &'static str {
@@ -4092,6 +4135,21 @@ pub fn create_quality_check_report(
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let scope = input.scope.unwrap_or_else(|| "current_draft".to_string());
+    if !matches!(scope.as_str(), "current_draft" | "adopted_draft") {
+        return Err("quality_check_scope_invalid".to_string());
+    }
+    let draft_target = conn
+        .query_row(
+            "SELECT novel_id, chapter_id FROM chapter_drafts WHERE id = ?1",
+            params![&input.draft_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("quality_check_draft_read_failed: {error}"))?
+        .ok_or_else(|| "quality_check_draft_missing".to_string())?;
+    if draft_target.0 != input.novel_id || draft_target.1 != input.chapter_id {
+        return Err("quality_check_draft_ownership_mismatch".to_string());
+    }
     println!(
         "[QUALITY_CHECK] create_report start id={} novel_id={} chapter_id={} draft_id={}",
         id, input.novel_id, input.chapter_id, input.draft_id
@@ -4127,45 +4185,127 @@ pub fn create_quality_check_report(
 /// 获取章节的质量检查结果（最新报告 + 问题列表 + 统计）
 #[tauri::command]
 pub fn get_quality_check_issues(chapter_id: String) -> Result<GetQualityCheckIssuesResult, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    get_quality_check_issues_internal(&conn, &chapter_id)
+}
 
-    // 获取最新报告
+fn load_quality_report(
+    conn: &Connection,
+    report_id: &str,
+) -> Result<Option<QualityCheckReportDto>, String> {
+    conn.query_row(
+        &format!("{} WHERE id = ?1", quality_report_select_sql()),
+        params![report_id],
+        map_quality_report_row,
+    )
+    .optional()
+    .map_err(|error| format!("quality_report_read_failed: {error}"))
+}
+
+fn load_quality_items(
+    conn: &Connection,
+    report_id: &str,
+    overlay_workflow_state: bool,
+) -> Result<Vec<QualityCheckItemDto>, String> {
+    let (select, qualifier, item_id) = if overlay_workflow_state {
+        (
+            quality_workflow_item_select_sql(),
+            "item.report_id",
+            "item.id",
+        )
+    } else {
+        (quality_item_select_sql(), "report_id", "id")
+    };
+    let sql = format!("{select} WHERE {qualifier} = ?1 ORDER BY sort_order ASC, {item_id} ASC");
+    let mut statement = conn
+        .prepare(&sql)
+        .map_err(|error| format!("quality_items_prepare_failed: {error}"))?;
+    let result = statement
+        .query_map(params![report_id], map_quality_item_row)
+        .map_err(|error| format!("quality_items_read_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("quality_items_decode_failed: {error}"));
+    result
+}
+
+fn get_quality_check_issues_internal(
+    conn: &Connection,
+    chapter_id: &str,
+) -> Result<GetQualityCheckIssuesResult, String> {
     let report = conn
         .query_row(
             &format!(
-                "{} WHERE chapter_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                "{} WHERE chapter_id = ?1 AND status = 'completed' ORDER BY created_at DESC, id DESC LIMIT 1",
                 quality_report_select_sql()
             ),
-            params![&chapter_id],
+            params![chapter_id],
             map_quality_report_row,
         )
         .optional()
-        .map_err(|e| e.to_string())?;
-
-    // 获取问题列表
-    let items: Vec<QualityCheckItemDto> = if let Some(ref rpt) = report {
-        let sql = format!(
-            "{} WHERE report_id = ?1 ORDER BY severity DESC, created_at ASC",
-            quality_item_select_sql()
-        );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![&rpt.id], map_quality_item_row)
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-    } else {
-        Vec::new()
+        .map_err(|error| format!("quality_latest_report_read_failed: {error}"))?;
+    let items = match report.as_ref() {
+        Some(report) => load_quality_items(conn, &report.id, true)?,
+        None => Vec::new(),
     };
-
-    // 计算统计
     let statistics = compute_statistics(&items);
-
     Ok(GetQualityCheckIssuesResult {
         report,
         items,
         statistics,
     })
+}
+
+fn list_quality_check_reports_internal(
+    conn: &Connection,
+    chapter_id: &str,
+) -> Result<Vec<QualityCheckReportDto>, String> {
+    let sql = format!(
+        "{} WHERE chapter_id = ?1 AND status = 'completed' ORDER BY created_at DESC, id DESC",
+        quality_report_select_sql()
+    );
+    let mut statement = conn
+        .prepare(&sql)
+        .map_err(|error| format!("quality_report_history_prepare_failed: {error}"))?;
+    let result = statement
+        .query_map(params![chapter_id], map_quality_report_row)
+        .map_err(|error| format!("quality_report_history_read_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("quality_report_history_decode_failed: {error}"));
+    result
+}
+
+#[tauri::command]
+pub fn list_quality_check_reports(
+    chapter_id: String,
+) -> Result<Vec<QualityCheckReportDto>, String> {
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    list_quality_check_reports_internal(&conn, &chapter_id)
+}
+
+fn get_quality_check_report_snapshot_internal(
+    conn: &Connection,
+    report_id: &str,
+) -> Result<GetQualityCheckIssuesResult, String> {
+    let report = load_quality_report(conn, report_id)?
+        .ok_or_else(|| "quality_check_report_missing".to_string())?;
+    if report.status != "completed" {
+        return Err("quality_check_report_not_completed".to_string());
+    }
+    let items = load_quality_items(conn, report_id, false)?;
+    let statistics = compute_statistics(&items);
+    Ok(GetQualityCheckIssuesResult {
+        report: Some(report),
+        items,
+        statistics,
+    })
+}
+
+#[tauri::command]
+pub fn get_quality_check_report_snapshot(
+    report_id: String,
+) -> Result<GetQualityCheckIssuesResult, String> {
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    get_quality_check_report_snapshot_internal(&conn, &report_id)
 }
 
 fn compute_statistics(items: &[QualityCheckItemDto]) -> QualityCheckStatisticsDto {
@@ -4191,263 +4331,414 @@ fn compute_statistics(items: &[QualityCheckItemDto]) -> QualityCheckStatisticsDt
 }
 
 /// 更新单条问题状态
+fn validate_quality_issue_status(status: &str) -> Result<(), String> {
+    if matches!(status, "pending" | "resolved" | "ignored") {
+        Ok(())
+    } else {
+        Err("quality_issue_status_invalid".to_string())
+    }
+}
+
+fn upsert_quality_issue_state(
+    conn: &Connection,
+    chapter_id: &str,
+    issue_key: &str,
+    status: &str,
+    resolution_note: Option<&str>,
+    resolved_at: Option<&str>,
+    now: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO quality_issue_states
+            (id, chapter_id, issue_key, status, resolution_note, resolved_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+         ON CONFLICT(chapter_id, issue_key) DO UPDATE SET
+            status = excluded.status,
+            resolution_note = excluded.resolution_note,
+            resolved_at = excluded.resolved_at,
+            updated_at = excluded.updated_at",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            chapter_id,
+            issue_key,
+            status,
+            resolution_note,
+            resolved_at,
+            now,
+        ],
+    )
+    .map_err(|error| format!("quality_issue_state_write_failed: {error}"))?;
+    Ok(())
+}
+
+fn get_mutable_quality_issue_identity(
+    conn: &Connection,
+    issue_id: &str,
+) -> Result<(String, String), String> {
+    let identity = conn
+        .query_row(
+            "SELECT item.report_id, item.chapter_id, item.issue_key,
+                    (SELECT report.id
+                     FROM quality_check_reports AS report
+                     WHERE report.chapter_id = item.chapter_id AND report.status = 'completed'
+                     ORDER BY report.created_at DESC, report.id DESC
+                     LIMIT 1)
+             FROM quality_check_items AS item
+             WHERE item.id = ?1",
+            params![issue_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("quality_issue_identity_read_failed: {error}"))?
+        .ok_or_else(|| "quality_issue_not_found".to_string())?;
+    if identity.3.as_deref() != Some(identity.0.as_str()) {
+        return Err("quality_issue_history_read_only".to_string());
+    }
+    Ok((identity.1, identity.2))
+}
+
+fn update_quality_issue_status_internal(
+    conn: &mut Connection,
+    issue_id: &str,
+    status: &str,
+    resolution_note: Option<&str>,
+) -> Result<QualityCheckItemDto, String> {
+    validate_quality_issue_status(status)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("quality_issue_transaction_failed: {error}"))?;
+    let identity = get_mutable_quality_issue_identity(&transaction, issue_id)?;
+    let resolved_at = (status == "resolved").then_some(now.as_str());
+    upsert_quality_issue_state(
+        &transaction,
+        &identity.0,
+        &identity.1,
+        status,
+        resolution_note,
+        resolved_at,
+        &now,
+    )?;
+    let item = transaction
+        .query_row(
+            &format!("{} WHERE item.id = ?1", quality_workflow_item_select_sql()),
+            params![issue_id],
+            map_quality_item_row,
+        )
+        .map_err(|error| format!("quality_issue_read_after_update_failed: {error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("quality_issue_commit_failed: {error}"))?;
+    Ok(item)
+}
+
 #[tauri::command]
 pub fn update_quality_issue_status(
     issue_id: String,
     status: String,
     resolution_note: Option<String>,
 ) -> Result<QualityCheckItemDto, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let resolved_at = if status == "resolved" {
-        Some(now.clone())
-    } else {
-        None
-    };
-
-    conn.execute(
-        "UPDATE quality_check_items SET status = ?1, resolution_note = ?2, resolved_at = ?3, updated_at = ?4 WHERE id = ?5",
-        params![&status, &resolution_note, &resolved_at, &now, &issue_id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let mut stmt = conn
-        .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
-        .map_err(|e| e.to_string())?;
-    stmt.query_row(params![&issue_id], map_quality_item_row)
-        .map_err(|e| e.to_string())
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    update_quality_issue_status_internal(&mut conn, &issue_id, &status, resolution_note.as_deref())
 }
 
 /// 批量更新问题状态
+fn batch_update_quality_issue_status_internal(
+    conn: &mut Connection,
+    issue_ids: &[String],
+    status: &str,
+) -> Result<Vec<QualityCheckItemDto>, String> {
+    validate_quality_issue_status(status)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("quality_issue_batch_transaction_failed: {error}"))?;
+    let resolved_at = (status == "resolved").then_some(now.as_str());
+
+    for issue_id in issue_ids {
+        let identity = get_mutable_quality_issue_identity(&transaction, issue_id)?;
+        upsert_quality_issue_state(
+            &transaction,
+            &identity.0,
+            &identity.1,
+            status,
+            None,
+            resolved_at,
+            &now,
+        )?;
+    }
+
+    let mut items = Vec::with_capacity(issue_ids.len());
+    for issue_id in issue_ids {
+        let item = transaction
+            .query_row(
+                &format!("{} WHERE item.id = ?1", quality_workflow_item_select_sql()),
+                params![issue_id],
+                map_quality_item_row,
+            )
+            .map_err(|error| format!("quality_issue_batch_read_failed: {error}"))?;
+        items.push(item);
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("quality_issue_batch_commit_failed: {error}"))?;
+    Ok(items)
+}
+
 #[tauri::command]
 pub fn batch_update_quality_issue_status(
     issue_ids: Vec<String>,
     status: String,
 ) -> Result<Vec<QualityCheckItemDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    batch_update_quality_issue_status_internal(&mut conn, &issue_ids, &status)
+}
 
-    let resolved_at = if status == "resolved" {
-        Some(now.clone())
-    } else {
-        None
-    };
-
-    for issue_id in &issue_ids {
-        conn.execute(
-            "UPDATE quality_check_items SET status = ?1, resolved_at = ?2, updated_at = ?3 WHERE id = ?4",
-            params![&status, &resolved_at, &now, issue_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    // 返回更新后的所有问题
-    let mut result = Vec::new();
-    for issue_id in &issue_ids {
-        let mut stmt = conn
-            .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
-            .map_err(|e| e.to_string())?;
-        if let Ok(item) = stmt.query_row(params![issue_id], map_quality_item_row) {
-            result.push(item);
-        }
-    }
-    Ok(result)
+fn has_newer_completed_quality_report(
+    conn: &Connection,
+    chapter_id: &str,
+    created_at: &str,
+    report_id: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM quality_check_reports
+            WHERE chapter_id = ?1 AND status = 'completed'
+              AND (created_at > ?2 OR (created_at = ?2 AND id > ?3))
+         )",
+        params![chapter_id, created_at, report_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| format!("quality_latest_report_identity_read_failed: {error}"))
 }
 
 /// 保存质量检查结果（创建 run + 合并 issues）
-#[tauri::command]
-pub fn save_quality_check_result(
-    input: SaveQualityCheckResultInput,
+fn save_quality_check_result_internal(
+    conn: &mut Connection,
+    input: &SaveQualityCheckResultInput,
 ) -> Result<GetQualityCheckIssuesResult, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    println!(
-        "[QUALITY_CHECK] save_result start report_id={} novel_id={} chapter_id={} draft_id={} item_count={}",
-        input.report_id,
-        input.novel_id,
-        input.chapter_id,
-        input.draft_id,
-        input.result.items.len()
-    );
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("quality_result_transaction_failed: {error}"))?;
+    let ownership = transaction
+        .query_row(
+            "SELECT novel_id, chapter_id, draft_id, status, ai_task_id, created_at FROM quality_check_reports WHERE id = ?1",
+            params![&input.report_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("quality_report_ownership_read_failed: {error}"))?
+        .ok_or_else(|| "quality_check_report_missing".to_string())?;
 
-    // 1. 更新报告状态
-    let affected = conn
+    if ownership.0 != input.novel_id
+        || ownership.1 != input.chapter_id
+        || ownership.2 != input.draft_id
+    {
+        return Err("quality_check_report_ownership_mismatch".to_string());
+    }
+    let ai_task_id = input.ai_task_id.trim();
+    if ai_task_id.is_empty() {
+        return Err("quality_check_ai_task_required".to_string());
+    }
+    let task = transaction
+        .query_row(
+            "SELECT novel_id, chapter_id, task_type, status FROM ai_task_records WHERE id = ?1",
+            params![ai_task_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("quality_check_ai_task_read_failed: {error}"))?
+        .ok_or_else(|| "quality_check_ai_task_missing".to_string())?;
+    if task.0.as_deref() != Some(input.novel_id.as_str())
+        || task.1.as_deref() != Some(input.chapter_id.as_str())
+        || task.2 != "quality_check"
+        || task.3 != "succeeded"
+    {
+        return Err("quality_check_ai_task_mismatch".to_string());
+    }
+    let has_newer_completed_report = has_newer_completed_quality_report(
+        &transaction,
+        &input.chapter_id,
+        &ownership.5,
+        &input.report_id,
+    )?;
+    if ownership.3 == "completed" {
+        if ownership.4.as_deref() != Some(ai_task_id) {
+            return Err("quality_check_report_ai_task_mismatch".to_string());
+        }
+        let report = load_quality_report(&transaction, &input.report_id)?;
+        let items =
+            load_quality_items(&transaction, &input.report_id, !has_newer_completed_report)?;
+        let statistics = compute_statistics(&items);
+        transaction
+            .commit()
+            .map_err(|error| format!("quality_result_idempotent_commit_failed: {error}"))?;
+        return Ok(GetQualityCheckIssuesResult {
+            report,
+            items,
+            statistics,
+        });
+    }
+    if ownership.3 != "pending" {
+        return Err("quality_check_report_not_pending".to_string());
+    }
+
+    let updates_workflow_state = !has_newer_completed_report;
+
+    let mut seen_issue_keys = HashSet::new();
+    let mut prepared_items = Vec::with_capacity(input.result.items.len());
+    for (sort_order, new_item) in input.result.items.iter().enumerate() {
+        let issue_key = new_item
+            .issue_key
+            .as_deref()
+            .filter(|key| !key.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        if !seen_issue_keys.insert(issue_key.clone()) {
+            return Err("quality_check_duplicate_issue_key".to_string());
+        }
+        prepared_items.push((sort_order, new_item, issue_key));
+    }
+
+    for (sort_order, new_item, issue_key) in prepared_items {
+        let item_id = uuid::Uuid::new_v4().to_string();
+        transaction
+            .execute(
+                "INSERT INTO quality_check_items
+                    (id, report_id, novel_id, chapter_id, draft_id, issue_type, severity, title, description, category, evidence, suggestion, quote, start_offset, end_offset, paragraph_index, issue_key, status, resolution_note, resolved_at, sort_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 'pending', NULL, NULL, ?18, ?19, ?19)",
+                params![
+                    &item_id,
+                    &input.report_id,
+                    &input.novel_id,
+                    &input.chapter_id,
+                    &input.draft_id,
+                    new_item.issue_type.as_deref().unwrap_or("other"),
+                    new_item.severity.as_deref().unwrap_or("medium"),
+                    new_item.title.as_deref().unwrap_or_default(),
+                    new_item.description.as_deref().unwrap_or_default(),
+                    &new_item.category,
+                    &new_item.evidence,
+                    &new_item.suggestion,
+                    &new_item.quote,
+                    &new_item.start_offset,
+                    &new_item.end_offset,
+                    &new_item.paragraph_index,
+                    &issue_key,
+                    sort_order as i64,
+                    &now,
+                ],
+            )
+            .map_err(|error| format!("quality_snapshot_item_insert_failed: {error}"))?;
+
+        if updates_workflow_state {
+            transaction
+                .execute(
+                "INSERT INTO quality_issue_states
+                    (id, chapter_id, issue_key, status, resolution_note, resolved_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'pending', NULL, NULL, ?4, ?4)
+                 ON CONFLICT(chapter_id, issue_key) DO UPDATE SET
+                    status = CASE WHEN quality_issue_states.status = 'ignored' THEN 'ignored' ELSE 'pending' END,
+                    resolution_note = CASE WHEN quality_issue_states.status = 'ignored' THEN quality_issue_states.resolution_note ELSE NULL END,
+                    resolved_at = CASE WHEN quality_issue_states.status = 'ignored' THEN quality_issue_states.resolved_at ELSE NULL END,
+                    updated_at = excluded.updated_at",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        &input.chapter_id,
+                        &issue_key,
+                        &now,
+                    ],
+                )
+                .map_err(|error| format!("quality_snapshot_state_write_failed: {error}"))?;
+        }
+    }
+
+    let affected = transaction
         .execute(
-            "UPDATE quality_check_reports SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3, model = ?4, content_hash = COALESCE(?5, content_hash), content_length = COALESCE(?6, content_length), checked_at = COALESCE(?7, checked_at), updated_at = ?8 WHERE id = ?9",
+            "UPDATE quality_check_reports
+             SET status = 'completed', overall_score = ?1, summary = ?2, draft_version = ?3,
+                 model = ?4, ai_task_id = ?5,
+                 content_hash = COALESCE(?6, content_hash),
+                 content_length = COALESCE(?7, content_length),
+                 checked_at = COALESCE(?8, checked_at), updated_at = ?9
+             WHERE id = ?10 AND novel_id = ?11 AND chapter_id = ?12 AND draft_id = ?13 AND status = 'pending'",
             params![
                 &input.result.overall_score,
                 &input.result.summary,
                 &input.draft_version,
                 &input.model,
+                ai_task_id,
                 &input.content_hash,
                 &input.content_length,
                 &input.checked_at,
                 &now,
                 &input.report_id,
+                &input.novel_id,
+                &input.chapter_id,
+                &input.draft_id,
             ],
         )
-        .map_err(|e| e.to_string())?;
-
-    if affected == 0 {
-        let chapter_report_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM quality_check_reports WHERE chapter_id = ?1",
-                params![&input.chapter_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(-1);
-        eprintln!(
-            "[QUALITY_CHECK] save_result missing report report_id={} chapter_id={} chapter_report_count={}",
-            input.report_id, input.chapter_id, chapter_report_count
-        );
-        return Err(format!(
-            "报告不存在: report_id={}, chapter_id={}, chapter_report_count={}",
-            input.report_id, input.chapter_id, chapter_report_count
-        ));
+        .map_err(|error| format!("quality_report_complete_failed: {error}"))?;
+    if affected != 1 {
+        return Err("quality_check_report_completion_conflict".to_string());
     }
 
-    // 2. 查询历史问题（用于合并）
-    let mut old_stmt = conn
-        .prepare(&format!(
-            "{} WHERE chapter_id = ?1",
-            quality_item_select_sql()
-        ))
-        .map_err(|e| e.to_string())?;
-    let old_items: Vec<QualityCheckItemDto> = old_stmt
-        .query_map(params![&input.chapter_id], map_quality_item_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    // 3. 处理新问题列表
-    let new_items = &input.result.items;
-    let mut saved_items: Vec<QualityCheckItemDto> = Vec::new();
-
-    for new_item in new_items {
-        let issue_key = new_item
-            .issue_key
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let title = new_item.title.clone().unwrap_or_default();
-        let description = new_item.description.clone().unwrap_or_default();
-        let severity = new_item
-            .severity
-            .clone()
-            .unwrap_or_else(|| "medium".to_string());
-        let issue_type = new_item
-            .issue_type
-            .clone()
-            .unwrap_or_else(|| "other".to_string());
-        let category = new_item.category.clone();
-        let evidence = new_item.evidence.clone();
-        let suggestion = new_item.suggestion.clone();
-        let quote = new_item.quote.clone();
-        let start_offset = new_item.start_offset;
-        let end_offset = new_item.end_offset;
-        let paragraph_index = new_item.paragraph_index;
-
-        // 查找历史匹配项
-        let old_match = old_items.iter().find(|old| old.issue_key == issue_key);
-
-        if let Some(old) = old_match {
-            // 合并：保留用户处理状态
-            let keep_status = if old.status == "ignored" {
-                "ignored".to_string()
-            } else if old.status == "resolved" {
-                // 已处理的问题如果仍被检测到，恢复为 pending
-                "pending".to_string()
-            } else {
-                "pending".to_string()
-            };
-
-            conn.execute(
-                "UPDATE quality_check_items SET report_id = ?1, severity = ?2, title = ?3, description = ?4, category = ?5, evidence = ?6, suggestion = ?7, quote = ?8, start_offset = ?9, end_offset = ?10, paragraph_index = ?11, status = ?12, updated_at = ?13 WHERE id = ?14",
-                params![
-                    &input.report_id,
-                    &severity,
-                    &title,
-                    &description,
-                    &category,
-                    &evidence,
-                    &suggestion,
-                    &quote,
-                    &start_offset,
-                    &end_offset,
-                    &paragraph_index,
-                    &keep_status,
-                    &now,
-                    &old.id,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-
-            let mut stmt = conn
-                .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
-                .map_err(|e| e.to_string())?;
-            if let Ok(item) = stmt.query_row(params![&old.id], map_quality_item_row) {
-                saved_items.push(item);
-            }
-        } else {
-            // 新增问题
-            let new_id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO quality_check_items (id, report_id, novel_id, chapter_id, draft_id, issue_type, severity, title, description, category, evidence, suggestion, quote, start_offset, end_offset, paragraph_index, issue_key, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,'pending',?18,?18)",
-                params![
-                    &new_id,
-                    &input.report_id,
-                    &input.novel_id,
-                    &input.chapter_id,
-                    &input.draft_id,
-                    &issue_type,
-                    &severity,
-                    &title,
-                    &description,
-                    &category,
-                    &evidence,
-                    &suggestion,
-                    &quote,
-                    &start_offset,
-                    &end_offset,
-                    &paragraph_index,
-                    &issue_key,
-                    &now,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-
-            let mut stmt = conn
-                .prepare(&format!("{} WHERE id = ?1", quality_item_select_sql()))
-                .map_err(|e| e.to_string())?;
-            if let Ok(item) = stmt.query_row(params![&new_id], map_quality_item_row) {
-                saved_items.push(item);
-            }
-        }
-    }
-
-    // 4. 获取最终报告
-    let report = conn
-        .query_row(
-            &format!("{} WHERE id = ?1", quality_report_select_sql()),
-            params![&input.report_id],
-            map_quality_report_row,
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-
-    let statistics = compute_statistics(&saved_items);
-    println!(
-        "[QUALITY_CHECK] save_result done report_id={} chapter_id={} saved_item_count={}",
-        input.report_id,
-        input.chapter_id,
-        saved_items.len()
-    );
-
+    let report = load_quality_report(&transaction, &input.report_id)?;
+    let items = load_quality_items(&transaction, &input.report_id, updates_workflow_state)?;
+    let statistics = compute_statistics(&items);
+    transaction
+        .commit()
+        .map_err(|error| format!("quality_result_commit_failed: {error}"))?;
     Ok(GetQualityCheckIssuesResult {
         report,
-        items: saved_items,
+        items,
         statistics,
     })
+}
+
+#[tauri::command]
+pub fn save_quality_check_result(
+    input: SaveQualityCheckResultInput,
+) -> Result<GetQualityCheckIssuesResult, String> {
+    println!(
+        "[QUALITY_CHECK] save_result start report_id={} chapter_id={} item_count={}",
+        input.report_id,
+        input.chapter_id,
+        input.result.items.len()
+    );
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    let result = save_quality_check_result_internal(&mut conn, &input);
+    if result.is_ok() {
+        println!(
+            "[QUALITY_CHECK] save_result done report_id={} chapter_id={}",
+            input.report_id, input.chapter_id
+        );
+    }
+    result
 }
 
 // ==================== Chapter Summary ====================
@@ -5083,6 +5374,7 @@ mod tests {
             CREATE TABLE quality_check_reports (
                 id TEXT PRIMARY KEY,
                 ai_task_id TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
                 FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
             );
 
@@ -6069,6 +6361,628 @@ mod tests {
 
         drop(conn);
         let _ = fs::remove_file(db_path);
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_delete_rejects_completed_quality_report_references(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for action in ["single", "batch", "clear"] {
+            let conn = Connection::open_in_memory()?;
+            create_runtime_ai_task_table(&conn)?;
+            for task_id in ["quality-task-protected", "quality-task-free-a", "quality-task-free-b"] {
+                insert_runtime_ai_task(&conn, task_id)?;
+            }
+            conn.execute(
+                "INSERT INTO quality_check_reports (id, ai_task_id, status)
+                 VALUES ('quality-report-completed', 'quality-task-protected', 'completed')",
+                [],
+            )?;
+
+            let result = match action {
+                "single" => delete_ai_task_records_by_ids_internal(
+                    &conn,
+                    vec!["quality-task-protected".to_string()],
+                    "memory".to_string(),
+                ),
+                "batch" => delete_ai_task_records_by_ids_internal(
+                    &conn,
+                    vec![
+                        "quality-task-free-a".to_string(),
+                        "quality-task-protected".to_string(),
+                    ],
+                    "memory".to_string(),
+                ),
+                "clear" => clear_ai_task_records_internal(&conn, "memory".to_string()),
+                _ => unreachable!(),
+            };
+
+            assert_eq!(
+                result.expect_err("completed quality report task must be protected"),
+                "quality_check_ai_task_delete_protected"
+            );
+            assert_eq!(count_ai_task_records_in_conn(&conn)?, 3);
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM quality_check_reports
+                     WHERE id = 'quality-report-completed'
+                       AND ai_task_id = 'quality-task-protected'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?,
+                1
+            );
+        }
+        Ok(())
+    }
+
+    fn create_quality_history_test_database() -> Result<Connection, Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        crate::db::create_tables(&conn)?;
+        conn.execute_batch(
+            "
+            INSERT INTO novels
+                (id, title, created_at, updated_at)
+                VALUES ('novel-quality', 'Quality History', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z');
+            INSERT INTO volumes
+                (id, novel_id, title, created_at, updated_at)
+                VALUES ('volume-quality', 'novel-quality', 'Volume', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z');
+            INSERT INTO chapters
+                (id, novel_id, volume_id, title, created_at, updated_at)
+                VALUES ('chapter-quality', 'novel-quality', 'volume-quality', 'Chapter', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z');
+            INSERT INTO chapter_drafts
+                (id, novel_id, chapter_id, content, created_at, updated_at)
+                VALUES ('draft-quality', 'novel-quality', 'chapter-quality', 'Draft', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z');
+            INSERT INTO ai_task_records
+                (id, novel_id, chapter_id, task_type, status, created_at)
+                VALUES ('quality-task-default', 'novel-quality', 'chapter-quality', 'quality_check', 'succeeded', '2026-07-22T00:00:00Z');
+            ",
+        )?;
+        Ok(conn)
+    }
+
+    fn insert_quality_report(
+        conn: &Connection,
+        report_id: &str,
+        status: &str,
+        created_at: &str,
+    ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO quality_check_reports
+                (id, novel_id, chapter_id, draft_id, status, created_at, updated_at)
+             VALUES (?1, 'novel-quality', 'chapter-quality', 'draft-quality', ?2, ?3, ?3)",
+            params![report_id, status, created_at],
+        )?;
+        Ok(())
+    }
+
+    fn quality_result_input(
+        report_id: &str,
+        summary: &str,
+        items: &[(&str, &str)],
+    ) -> SaveQualityCheckResultInput {
+        SaveQualityCheckResultInput {
+            report_id: report_id.to_string(),
+            novel_id: "novel-quality".to_string(),
+            chapter_id: "chapter-quality".to_string(),
+            draft_id: "draft-quality".to_string(),
+            result: QualityCheckResultDto {
+                overall_score: Some(88),
+                summary: Some(summary.to_string()),
+                items: items
+                    .iter()
+                    .map(|(issue_key, title)| QualityCheckResultItemDto {
+                        issue_type: Some("continuity".to_string()),
+                        severity: Some("high".to_string()),
+                        category: Some("logic".to_string()),
+                        title: Some((*title).to_string()),
+                        description: Some(format!("description-{title}")),
+                        evidence: Some(format!("evidence-{title}")),
+                        suggestion: Some(format!("suggestion-{title}")),
+                        quote: Some(format!("quote-{title}")),
+                        start_offset: Some(1),
+                        end_offset: Some(2),
+                        paragraph_index: Some(0),
+                        issue_key: Some((*issue_key).to_string()),
+                    })
+                    .collect(),
+            },
+            draft_version: Some(1),
+            model: Some("test-model".to_string()),
+            content_hash: Some("test-hash".to_string()),
+            content_length: Some(5),
+            checked_at: Some("2026-07-22T00:00:00Z".to_string()),
+            ai_task_id: "quality-task-default".to_string(),
+        }
+    }
+
+    #[test]
+    fn quality_reports_keep_immutable_items_and_replay_raw_order(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(&conn, "report-old", "pending", "2026-07-22T00:00:01Z")?;
+        let first = quality_result_input(
+            "report-old",
+            "first summary",
+            &[("issue-repeat", "old evidence"), ("issue-old", "old only")],
+        );
+        save_quality_check_result_internal(&mut conn, &first)?;
+        let original = get_quality_check_report_snapshot_internal(&conn, "report-old")?;
+        assert_eq!(original.items.len(), 2);
+        assert_eq!(original.items[0].sort_order, 0);
+        assert_eq!(original.items[1].sort_order, 1);
+        let original_ids = original
+            .items
+            .iter()
+            .map(|item| item.id.clone())
+            .collect::<Vec<_>>();
+
+        update_quality_issue_status_internal(
+            &mut conn,
+            &original.items[0].id,
+            "ignored",
+            Some("intentional"),
+        )?;
+        let raw_after_state_change =
+            get_quality_check_report_snapshot_internal(&conn, "report-old")?;
+        assert_eq!(raw_after_state_change.items[0].status, "pending");
+        assert_eq!(raw_after_state_change.items[0].resolution_note, None);
+
+        insert_quality_report(&conn, "report-new", "pending", "2026-07-22T00:00:02Z")?;
+        let second = quality_result_input(
+            "report-new",
+            "second summary",
+            &[("issue-repeat", "new evidence"), ("issue-new", "new only")],
+        );
+        let newest = save_quality_check_result_internal(&mut conn, &second)?;
+        assert_eq!(newest.items[0].status, "ignored");
+        assert_eq!(newest.items[0].title, "new evidence");
+        let old_idempotent_retry = save_quality_check_result_internal(&mut conn, &first)?;
+        assert_eq!(old_idempotent_retry.items[0].status, "pending");
+        assert_eq!(old_idempotent_retry.items[0].title, "old evidence");
+        assert_eq!(
+            update_quality_issue_status_internal(
+                &mut conn,
+                &original.items[0].id,
+                "resolved",
+                None,
+            )
+            .unwrap_err(),
+            "quality_issue_history_read_only"
+        );
+
+        let replay = get_quality_check_report_snapshot_internal(&conn, "report-old")?;
+        assert_eq!(
+            replay
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            original_ids
+        );
+        assert!(replay
+            .items
+            .iter()
+            .all(|item| item.report_id == "report-old"));
+        assert_eq!(replay.items[0].title, "old evidence");
+        assert_eq!(replay.items[1].title, "old only");
+        assert!(newest
+            .items
+            .iter()
+            .all(|item| !original_ids.contains(&item.id)));
+        Ok(())
+    }
+
+    #[test]
+    fn quality_result_save_rolls_back_report_items_and_states_on_nth_item_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(&conn, "report-rollback", "pending", "2026-07-22T00:00:01Z")?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_second_quality_item
+             BEFORE INSERT ON quality_check_items
+             WHEN NEW.sort_order = 1
+             BEGIN
+                 SELECT RAISE(ABORT, 'forced second item failure');
+             END;",
+        )?;
+        let input = quality_result_input(
+            "report-rollback",
+            "must rollback",
+            &[("issue-one", "one"), ("issue-two", "two")],
+        );
+        let error = save_quality_check_result_internal(&mut conn, &input)
+            .expect_err("the injected second item failure must abort the save");
+        assert!(error.starts_with("quality_snapshot_item_insert_failed:"));
+        let report_status: String = conn.query_row(
+            "SELECT status FROM quality_check_reports WHERE id = 'report-rollback'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(report_status, "pending");
+        let item_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM quality_check_items WHERE report_id = 'report-rollback'",
+            [],
+            |row| row.get(0),
+        )?;
+        let state_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM quality_issue_states", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(item_count, 0);
+        assert_eq!(state_count, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn latest_quality_workflow_ignores_newer_incomplete_reports(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(&conn, "report-completed", "pending", "2026-07-22T00:00:01Z")?;
+        let completed = quality_result_input(
+            "report-completed",
+            "completed",
+            &[("issue-completed", "completed issue")],
+        );
+        save_quality_check_result_internal(&mut conn, &completed)?;
+        insert_quality_report(&conn, "report-pending", "pending", "2026-07-22T00:00:02Z")?;
+        insert_quality_report(&conn, "report-failed", "failed", "2026-07-22T00:00:03Z")?;
+
+        let latest = get_quality_check_issues_internal(&conn, "chapter-quality")?;
+        assert_eq!(
+            latest.report.as_ref().map(|report| report.id.as_str()),
+            Some("report-completed")
+        );
+        assert_eq!(latest.items.len(), 1);
+        let history = list_quality_check_reports_internal(&conn, "chapter-quality")?;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id, "report-completed");
+        Ok(())
+    }
+
+    #[test]
+    fn completing_report_refreshes_state_when_only_newer_reports_are_incomplete(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(&conn, "report-baseline", "pending", "2026-07-22T00:00:01Z")?;
+        let baseline = quality_result_input(
+            "report-baseline",
+            "baseline",
+            &[("issue-repeat", "baseline evidence")],
+        );
+        let baseline_result = save_quality_check_result_internal(&mut conn, &baseline)?;
+        update_quality_issue_status_internal(
+            &mut conn,
+            &baseline_result.items[0].id,
+            "resolved",
+            Some("previously resolved"),
+        )?;
+
+        insert_quality_report(&conn, "report-current", "pending", "2026-07-22T00:00:02Z")?;
+        insert_quality_report(
+            &conn,
+            "report-newer-pending",
+            "pending",
+            "2026-07-22T00:00:03Z",
+        )?;
+        insert_quality_report(
+            &conn,
+            "report-newer-failed",
+            "failed",
+            "2026-07-22T00:00:04Z",
+        )?;
+        let current = quality_result_input(
+            "report-current",
+            "current complete result",
+            &[("issue-repeat", "current evidence")],
+        );
+        let saved = save_quality_check_result_internal(&mut conn, &current)?;
+
+        assert_eq!(saved.items[0].status, "pending");
+        let latest = get_quality_check_issues_internal(&conn, "chapter-quality")?;
+        assert_eq!(
+            latest.report.as_ref().map(|report| report.id.as_str()),
+            Some("report-current")
+        );
+        assert_eq!(latest.items[0].status, "pending");
+        let workflow_state: String = conn.query_row(
+            "SELECT status FROM quality_issue_states
+             WHERE chapter_id = 'chapter-quality' AND issue_key = 'issue-repeat'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(workflow_state, "pending");
+        Ok(())
+    }
+
+    #[test]
+    fn late_older_report_cannot_overwrite_newer_report_workflow_state(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        conn.execute_batch(
+            "INSERT INTO ai_task_records
+                (id, novel_id, chapter_id, task_type, status, created_at)
+             VALUES
+                ('quality-task-tie-a', 'novel-quality', 'chapter-quality', 'quality_check', 'succeeded', '2026-07-22T00:00:00Z'),
+                ('quality-task-tie-b', 'novel-quality', 'chapter-quality', 'quality_check', 'succeeded', '2026-07-22T00:00:00Z');",
+        )?;
+        let tied_created_at = "2026-07-22T00:00:05Z";
+        insert_quality_report(&conn, "report-tie-a", "pending", tied_created_at)?;
+        insert_quality_report(&conn, "report-tie-b", "pending", tied_created_at)?;
+
+        let mut newer = quality_result_input(
+            "report-tie-b",
+            "newer by id",
+            &[("issue-race", "newer evidence")],
+        );
+        newer.ai_task_id = "quality-task-tie-b".to_string();
+        let newer_result = save_quality_check_result_internal(&mut conn, &newer)?;
+        update_quality_issue_status_internal(
+            &mut conn,
+            &newer_result.items[0].id,
+            "resolved",
+            Some("keep resolved"),
+        )?;
+
+        let mut older = quality_result_input(
+            "report-tie-a",
+            "late older by id",
+            &[("issue-race", "older evidence")],
+        );
+        older.ai_task_id = "quality-task-tie-a".to_string();
+        let late_result = save_quality_check_result_internal(&mut conn, &older)?;
+        assert_eq!(late_result.items[0].status, "pending");
+        assert_eq!(late_result.items[0].title, "older evidence");
+
+        let workflow_state: (String, Option<String>) = conn.query_row(
+            "SELECT status, resolution_note FROM quality_issue_states
+             WHERE chapter_id = 'chapter-quality' AND issue_key = 'issue-race'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(
+            workflow_state,
+            ("resolved".to_string(), Some("keep resolved".to_string()))
+        );
+        let late_snapshot = get_quality_check_report_snapshot_internal(&conn, "report-tie-a")?;
+        assert_eq!(late_snapshot.items.len(), 1);
+        assert_eq!(late_snapshot.items[0].title, "older evidence");
+        assert_eq!(late_snapshot.items[0].status, "pending");
+        let latest = get_quality_check_issues_internal(&conn, "chapter-quality")?;
+        assert_eq!(
+            latest.report.as_ref().map(|report| report.id.as_str()),
+            Some("report-tie-b")
+        );
+        assert_eq!(latest.items[0].status, "resolved");
+        Ok(())
+    }
+
+    #[test]
+    fn completed_quality_result_save_is_idempotent_and_immutable(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        conn.execute(
+            "INSERT INTO ai_task_records
+                (id, novel_id, chapter_id, task_type, status, created_at)
+             VALUES ('quality-task-other', 'novel-quality', 'chapter-quality', 'quality_check', 'succeeded', '2026-07-22T00:00:00Z')",
+            [],
+        )?;
+        insert_quality_report(
+            &conn,
+            "report-idempotent",
+            "pending",
+            "2026-07-22T00:00:01Z",
+        )?;
+        let first = quality_result_input(
+            "report-idempotent",
+            "original summary",
+            &[("issue-original", "original")],
+        );
+        let first_result = save_quality_check_result_internal(&mut conn, &first)?;
+        let duplicate = quality_result_input(
+            "report-idempotent",
+            "replacement summary",
+            &[("issue-replacement", "replacement")],
+        );
+        let duplicate_result = save_quality_check_result_internal(&mut conn, &duplicate)?;
+        assert_eq!(duplicate_result.items.len(), 1);
+        assert_eq!(duplicate_result.items[0].id, first_result.items[0].id);
+        assert_eq!(duplicate_result.items[0].title, "original");
+        assert_eq!(
+            duplicate_result
+                .report
+                .as_ref()
+                .and_then(|report| report.summary.as_deref()),
+            Some("original summary")
+        );
+        let item_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM quality_check_items WHERE report_id = 'report-idempotent'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(item_count, 1);
+        let mut wrong_task_duplicate = duplicate;
+        wrong_task_duplicate.ai_task_id = "quality-task-other".to_string();
+        assert_eq!(
+            save_quality_check_result_internal(&mut conn, &wrong_task_duplicate).unwrap_err(),
+            "quality_check_report_ai_task_mismatch"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn batch_quality_state_update_is_transactional() -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(&conn, "report-batch", "pending", "2026-07-22T00:00:01Z")?;
+        let input = quality_result_input(
+            "report-batch",
+            "batch",
+            &[("issue-first", "first"), ("issue-second", "second")],
+        );
+        let saved = save_quality_check_result_internal(&mut conn, &input)?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_second_quality_state
+             BEFORE UPDATE OF status ON quality_issue_states
+             WHEN OLD.issue_key = 'issue-second'
+             BEGIN
+                 SELECT RAISE(ABORT, 'forced second state failure');
+             END;",
+        )?;
+        let ids = saved
+            .items
+            .iter()
+            .map(|item| item.id.clone())
+            .collect::<Vec<_>>();
+        let error = batch_update_quality_issue_status_internal(&mut conn, &ids, "resolved")
+            .expect_err("the injected state failure must roll back the batch");
+        assert!(error.starts_with("quality_issue_state_write_failed:"));
+        let non_pending: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM quality_issue_states WHERE status <> 'pending'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(non_pending, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn quality_result_rejects_report_ownership_and_terminal_status_mismatch(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(&conn, "report-owned", "pending", "2026-07-22T00:00:01Z")?;
+        let mut wrong_owner =
+            quality_result_input("report-owned", "wrong owner", &[("issue-one", "one")]);
+        wrong_owner.chapter_id = "another-chapter".to_string();
+        assert_eq!(
+            save_quality_check_result_internal(&mut conn, &wrong_owner).unwrap_err(),
+            "quality_check_report_ownership_mismatch"
+        );
+        insert_quality_report(&conn, "report-failed", "failed", "2026-07-22T00:00:02Z")?;
+        let failed = quality_result_input("report-failed", "failed", &[("issue-two", "two")]);
+        assert_eq!(
+            save_quality_check_result_internal(&mut conn, &failed).unwrap_err(),
+            "quality_check_report_not_pending"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn quality_result_validates_and_binds_the_succeeded_ai_task(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        conn.execute_batch(
+            "INSERT INTO ai_task_records
+                (id, novel_id, chapter_id, task_type, status, created_at)
+             VALUES
+                ('quality-task-ok', 'novel-quality', 'chapter-quality', 'quality_check', 'succeeded', '2026-07-22T00:00:00Z'),
+                ('quality-task-running', 'novel-quality', 'chapter-quality', 'quality_check', 'running', '2026-07-22T00:00:00Z'),
+                ('quality-task-wrong-type', 'novel-quality', 'chapter-quality', 'draft_generation', 'succeeded', '2026-07-22T00:00:00Z'),
+                ('quality-task-wrong-target', NULL, NULL, 'quality_check', 'succeeded', '2026-07-22T00:00:00Z');",
+        )?;
+        insert_quality_report(&conn, "report-task-ok", "pending", "2026-07-22T00:00:01Z")?;
+        let mut valid = quality_result_input(
+            "report-task-ok",
+            "bound task",
+            &[("issue-task", "task issue")],
+        );
+        valid.ai_task_id = "quality-task-ok".to_string();
+        let saved = save_quality_check_result_internal(&mut conn, &valid)?;
+        assert_eq!(
+            saved
+                .report
+                .as_ref()
+                .and_then(|report| report.ai_task_id.as_deref()),
+            Some("quality-task-ok")
+        );
+
+        insert_quality_report(
+            &conn,
+            "report-task-running",
+            "pending",
+            "2026-07-22T00:00:02Z",
+        )?;
+        let mut invalid = quality_result_input(
+            "report-task-running",
+            "invalid task",
+            &[("issue-invalid-task", "invalid task issue")],
+        );
+        invalid.ai_task_id = "quality-task-running".to_string();
+        assert_eq!(
+            save_quality_check_result_internal(&mut conn, &invalid).unwrap_err(),
+            "quality_check_ai_task_mismatch"
+        );
+        let failed_report_state: (String, i64) = conn.query_row(
+            "SELECT report.status,
+                    (SELECT COUNT(*) FROM quality_check_items AS item WHERE item.report_id = report.id)
+             FROM quality_check_reports AS report WHERE report.id = 'report-task-running'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(failed_report_state, ("pending".to_string(), 0));
+
+        for (report_id, task_id, expected_error) in [
+            ("report-task-required", "", "quality_check_ai_task_required"),
+            (
+                "report-task-wrong-type",
+                "quality-task-wrong-type",
+                "quality_check_ai_task_mismatch",
+            ),
+            (
+                "report-task-wrong-target",
+                "quality-task-wrong-target",
+                "quality_check_ai_task_mismatch",
+            ),
+        ] {
+            insert_quality_report(&conn, report_id, "pending", "2026-07-22T00:00:03Z")?;
+            let mut input = quality_result_input(
+                report_id,
+                "rejected task",
+                &[("issue-rejected-task", "rejected task issue")],
+            );
+            input.ai_task_id = task_id.to_string();
+            assert_eq!(
+                save_quality_check_result_internal(&mut conn, &input).unwrap_err(),
+                expected_error
+            );
+        }
+        let partially_written: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM quality_check_items
+             WHERE report_id IN ('report-task-required', 'report-task-wrong-type', 'report-task-wrong-target')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(partially_written, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn quality_result_rejects_duplicate_issue_keys_without_partial_writes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_quality_history_test_database()?;
+        insert_quality_report(
+            &conn,
+            "report-duplicate-key",
+            "pending",
+            "2026-07-22T00:00:01Z",
+        )?;
+        let duplicate = quality_result_input(
+            "report-duplicate-key",
+            "duplicate",
+            &[("same-key", "first"), ("same-key", "second")],
+        );
+        assert_eq!(
+            save_quality_check_result_internal(&mut conn, &duplicate).unwrap_err(),
+            "quality_check_duplicate_issue_key"
+        );
+        let state: (String, i64) = conn.query_row(
+            "SELECT report.status,
+                    (SELECT COUNT(*) FROM quality_check_items AS item WHERE item.report_id = report.id)
+             FROM quality_check_reports AS report WHERE report.id = 'report-duplicate-key'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(state, ("pending".to_string(), 0));
         Ok(())
     }
 

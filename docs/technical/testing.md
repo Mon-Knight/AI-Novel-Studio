@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.6（章节工程真实 AI 请求取消闭环）
+> 当前版本：v2.1.7（章节质量历史不可变快照与原子重放）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.1.6，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加真实 HTTP 取消、AbortSignal 传播、活动请求清理与桌面取消副作用验证：
+截至 v2.1.7，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加质量历史不可变快照、原子保存、迟到竞态、AI Task 强绑定与应用重启重放验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -82,7 +82,7 @@ cd ..
 | DB03 | 草稿更新影响 0 行 | 返回明确冲突，原正文不变 |
 | DB-ADOPT | 正式采用中途失败 | 单一事务整体回滚，不出现 0 个或多个正式草稿 |
 | DB-META | 正式采用成功 | 草稿、章节正式指针与章节元数据保持一致 |
-| AI-TASK | AI 任务删除 | 使用完整临时 Schema 清理子表引用并删除任务 |
+| AI-TASK | AI 任务删除 | 使用完整临时 Schema 清理可删除任务的子表引用；completed 质量报告引用的 Task 在单删、批量和清空时均受保护，混合操作整体拒绝 |
 
 也可按测试名过滤单项运行，例如：
 
@@ -188,13 +188,39 @@ npm run test:e2e -- --spec generation-job-cancel
 
 Rust loopback 只绑定 `127.0.0.1`，测试构建显式绕过系统代理，不访问互联网；生产代理行为不变。真实桌面取消 spec 使用强制 Mock Provider，因此负责验证 React、AbortSignal、Rust/SQLite 任务终态与 WebView 生命周期，不用它替代真实 socket 关闭测试。
 
-### 2.8 Windows 真实桌面 E2E
+### 2.8 v2.1.7 质量历史原子快照与重放
+
+```powershell
+npm run test
+cd src-tauri
+cargo test --locked quality_ -- --test-threads=1
+cd ..
+npm run test:e2e -- --spec quality-history-replay
+```
+
+| 编号 | 场景 | 预期 |
+|------|------|------|
+| QH01 | 同 issue key 连续出现 | 每份报告创建不同 item ID，旧成员和原始字段不变 |
+| QH02 | 第 N 条 item / state 写入故障 | report、items、states 与 completed 终态整体回滚 |
+| QH03 | 更新 pending / failed 报告 | 不遮挡最近 completed 报告，也不错误阻止当前完整报告刷新状态 |
+| QH04 | 旧报告在新报告 resolved 后迟到 | 旧快照正常保存，当前 workflow state 不被重置 |
+| QH05 | 历史 item 状态修改 | 单条和批量都返回 `quality_issue_history_read_only` |
+| QH06 | 缺失、运行中、错误类型或错误归属的 AI Task | 整份报告拒绝且无部分写入 |
+| QH07 | schema 2 完整备份恢复 | 恢复事务内合成缺失 states，行为不依赖重启 |
+| QH08 | 删除 completed 报告引用的 AI Task | 单删、混合批量和清空都在写入前整体拒绝，报告绑定与其他任务不变 |
+| QH09 | LocalStorage 当前状态更新与幂等重试 | 独立 state 集合覆盖当前视图，不改写历史 item；Task 不一致拒绝，旧报告重试返回原始快照 |
+| QH10 | schema 2 多报告缺少 `sort_order` | 每份报告分别从 0 编号，状态按旧 item 最后更新时间合成 |
+| QH-E2E | 两次 Mock 质检、DOM 修改状态后重启真实 Tauri 应用 | 当前 resolved 计数提交，两份原始快照不变；分别回放 report / draft / hash / Task / items，历史只读、零外网、零错误与零残留 |
+
+LocalStorage 回退测试使用同一 completed 过滤、report 次序、snapshot `sortOrder`、独立 workflow state、幂等 Task 和迟到竞态契约，并覆盖旧 item 状态合成。它只验证浏览器开发回退，真实发布门禁仍以 Rust / SQLite 和 Windows Tauri E2E 为准。
+
+### 2.9 Windows 真实桌面 E2E
 
 ```powershell
 # 启动、窗口、迁移和前端异常冒烟测试
 npm run test:e2e:smoke
 
-# 九个独立桌面核心流程
+# 十个独立桌面核心流程
 npm run test:e2e
 
 # 定向运行一个独立场景（扩展名可省略）
@@ -222,12 +248,13 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 | `leave-guard.spec.ts` | 未保存离开保护的取消、保存并离开及放弃修改分支 |
 | `generation-job-cancel.spec.ts` | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
 | `restart-task-recovery.spec.ts` | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等 |
+| `quality-history-replay.spec.ts` | 连续两次固定 Mock 质检，重启真实应用后分别回放两份不可变报告，校验只读历史、Task 追溯、稳定 item ID 与当前计数 |
 
 测试通过 `data-testid`、元素状态、HashRouter 和 Tauri IPC 定位与断言，不使用中文文本、CSS 类、DOM 层级、屏幕坐标或截图识别。`frontend-diagnostics.json`、WebdriverIO、driver / Rust 日志、数据库位置和进程清理结果都会写入诊断目录；失败时在会话仍可访问的前提下尽力追加 DOM、当前路由和截图。
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行九条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行十条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ---
 
@@ -360,7 +387,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
 - DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
-- 大文本 DB04～DB07、章节工程任务跨重启安全结算与在途 AI 取消已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；质量历史不可变重放、自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
+- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消与质量历史不可变重放已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 

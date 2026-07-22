@@ -35,6 +35,7 @@ const PROJECT_COLLECTION_KEYS = [
   'ai_novel_studio_imported_assets',
   'ai_novel_studio_quality_reports',
   'ai_novel_studio_quality_items',
+  'ai_novel_studio_quality_issue_states',
   'ai_novel_studio_polish_records',
   'ai_novel_studio_fix_runs',
   'ai_novel_studio_setting_suggestions',

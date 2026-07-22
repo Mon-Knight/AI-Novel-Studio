@@ -40,6 +40,8 @@ const SAFE_COMMANDS = new Set([
   'get_drafts_by_chapter_id',
   'get_ai_task_records_by_chapter_id',
   'get_quality_check_issues',
+  'list_quality_check_reports',
+  'get_quality_check_report_snapshot',
   'get_generation_jobs_by_chapter_id',
   'get_generation_step_results',
   'get_e2e_novel_commit_state',

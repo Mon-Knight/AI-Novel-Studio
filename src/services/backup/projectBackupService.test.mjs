@@ -11,7 +11,7 @@ const tables = [
   'ai_task_records', 'chapter_drafts', 'chapter_engineering_states',
   'chapter_generation_snapshots', 'generation_jobs', 'generation_step_results',
   'character_states', 'chapter_characters', 'chapter_events', 'chapter_summaries',
-  'context_records', 'quality_check_reports', 'quality_check_items', 'polish_records',
+  'context_records', 'quality_check_reports', 'quality_check_items', 'quality_issue_states', 'polish_records',
   'quality_fix_runs', 'context_read_logs', 'master_outlines', 'volume_outlines',
   'chapter_outlines', 'large_text_documents', 'large_text_chunks',
 ];
@@ -19,7 +19,7 @@ const tables = [
 function completeBackup() {
   return {
     type: 'ai_novel_studio_project',
-    schemaVersion: 2,
+    schemaVersion: 3,
     exportedAt: '2026-07-20T00:00:00.000Z',
     sourceAppVersion: '2.1.2',
     novel: { id: 'novel-1', title: '测试作品' },
@@ -40,10 +40,27 @@ test('旧版或缺集合的 JSON 不能进入完整恢复链路', () => {
   const incomplete = completeBackup();
   delete incomplete.tables.large_text_chunks;
   assert.equal(backupSchema.isCompleteProjectBackup(incomplete), false);
+
+  const missingCurrentTable = completeBackup();
+  delete missingCurrentTable.tables.quality_issue_states;
+  assert.equal(backupSchema.isCompleteProjectBackup(missingCurrentTable), false);
+});
+
+test('schemaVersion 2 备份保持兼容并允许缺少新增质量状态表', () => {
+  const previous = completeBackup();
+  previous.schemaVersion = 2;
+  delete previous.tables.quality_issue_states;
+  assert.equal(backupSchema.isCompleteProjectBackup(previous), true);
+});
+
+test('非整数 schemaVersion 不得进入 Rust 完整恢复链路', () => {
+  const fractional = completeBackup();
+  fractional.schemaVersion = 2.5;
+  assert.equal(backupSchema.isCompleteProjectBackup(fractional), false);
 });
 
 test('损坏或未来版本的完整备份不会降级为旧版项目 JSON', () => {
-  const malformed = { ...completeBackup(), schemaVersion: 3 };
+  const malformed = { ...completeBackup(), schemaVersion: 4 };
   const result = jsonImport.detectJsonImportType(malformed);
 
   assert.equal(result.type, 'ai_novel_studio_project');
@@ -110,6 +127,14 @@ test('项目缓存保留原始大纲、作品记录和本地 generation steps，
   source.setItem('ai_novel_studio_generation_jobs', JSON.stringify([
     { id: 'job-local', novelId: 'novel-source', chapterId: 'chapter-source' },
   ]));
+  source.setItem('ai_novel_studio_quality_issue_states', JSON.stringify([
+    {
+      id: 'quality-state-local',
+      chapterId: 'chapter-source',
+      issueKey: 'quality-key-local',
+      status: 'resolved',
+    },
+  ]));
   source.setItem('ai_novel_studio_draft_chapter-source', JSON.stringify({
     id: 'draft-local', novelId: 'novel-source', chapterId: 'chapter-source', content: '正文',
   }));
@@ -121,6 +146,7 @@ test('项目缓存保留原始大纲、作品记录和本地 generation steps，
   const data = localStorageBackup.collectLocalProjectData(backup, source);
   assert.ok(data);
   assert.equal(data.collections.ai_novel_studio_novels.length, 1);
+  assert.equal(data.collections.ai_novel_studio_quality_issue_states.length, 1);
   assert.ok(data.entries['ai_novel_studio_generation_steps_job-local']);
   assert.equal(
     data.rawEntries['ai_novel_studio_unsaved_chapter_outline_chapter-source'],
@@ -138,6 +164,7 @@ test('项目缓存保留原始大纲、作品记录和本地 generation steps，
   assert.notEqual(idMap['job-local'], 'job-local');
   assert.notEqual(idMap['draft-local'], 'draft-local');
   assert.notEqual(idMap['step-local'], 'step-local');
+  assert.notEqual(idMap['quality-state-local'], 'quality-state-local');
 
   const target = new MemoryStorage();
   localStorageBackup.restoreLocalProjectData(data, idMap, target);
@@ -159,6 +186,11 @@ test('项目缓存保留原始大纲、作品记录和本地 generation steps，
   assert.equal(step.id, idMap['step-local']);
   assert.equal(step.jobId, idMap['job-local']);
   assert.equal(step.outputJson.jobId, idMap['job-local']);
+
+  const qualityState = JSON.parse(target.getItem('ai_novel_studio_quality_issue_states'))[0];
+  assert.equal(qualityState.id, idMap['quality-state-local']);
+  assert.equal(qualityState.chapterId, 'chapter-restored');
+  assert.equal(qualityState.issueKey, 'quality-key-local');
   assert.equal(
     target.getItem('ai_novel_studio_unsaved_chapter_outline_chapter-restored'),
     '未保存的大纲原文',

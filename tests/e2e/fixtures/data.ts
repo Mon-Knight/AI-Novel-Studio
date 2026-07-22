@@ -35,6 +35,11 @@ export const E2E_FIXTURES = {
     volumeTitle: 'E2E Cancellation Volume',
     chapterTitle: 'E2E Cancellation Chapter',
   },
+  qualityHistory: {
+    projectTitle: 'E2E Quality History Project',
+    volumeTitle: 'E2E Quality History Volume',
+    chapterTitle: 'E2E Quality History Chapter',
+  },
 } as const;
 
 const LARGE_TEXT_MINIMUM_BYTES = 120 * 1024;

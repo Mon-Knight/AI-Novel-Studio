@@ -923,6 +923,7 @@ export const generationJobService = {
           contentHash,
           contentLength: savedDraft.content.length,
           checkedAt,
+          aiTaskId: result.aiTaskId,
         });
         qualityItems = saved.items;
         return {
