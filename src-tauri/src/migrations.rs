@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "2.2.0";
+const MIGRATION_VERSION: &str = "2.3.0-M1";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 4] {
+fn migrations() -> [Migration; 11] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -43,6 +43,41 @@ fn migrations() -> [Migration; 4] {
             id: "004_large_text_integrity",
             definition: "large_text_integrity_v1(documents.status,documents.target,chunks.integrity,chapter_drafts.content_hash)",
             apply: apply_large_text_integrity,
+        },
+        Migration {
+            id: "005_ai_tasks",
+            definition: "ai_tasks_v2(identity,system_and_owned_scope,status,state_revision,required_snapshot_pointers,validated_current_attempt_link,validated_result_artifact_link,trace,operation,request_hash_version,canonical_request_hash,expected_artifact_contract,target,error,timestamps,indexes,immutable_identity,no_delete,status_edges,completed_requires_valid_artifact)",
+            apply: apply_ai_tasks,
+        },
+        Migration {
+            id: "006_ai_task_attempts",
+            definition: "ai_task_attempts_v2(task,attempt_number,provider_once,model_once,provider_request_once,status,response_metadata,error,state_revision,timestamps,composite_identity,one_live_attempt,unique_provider_request,indexes,immutable_identity,no_delete,status_edges)",
+            apply: apply_ai_task_attempts,
+        },
+        Migration {
+            id: "007_ai_input_snapshots",
+            definition: "ai_input_snapshots_v2(task,schema,input_type,valid_json_payload,unique_verified_body_ref,task_bound_source_draft_identity,base_hash,content_hash,created,composite_identity,immutable_update_delete)",
+            apply: apply_ai_input_snapshots,
+        },
+        Migration {
+            id: "008_ai_context_snapshots",
+            definition: "ai_context_snapshots_v2(task,schema,valid_json_source_manifest,unique_verified_compiled_context_ref,valid_json_budget,compiler_version,content_hash,created,immutable_update_delete)",
+            apply: apply_ai_context_snapshots,
+        },
+        Migration {
+            id: "009_ai_constraint_snapshots",
+            definition: "ai_constraint_snapshots_v2(task,schema,valid_json_payload,prompt_template_identity,unique_verified_prompt_template_ref,valid_object_provider_options,content_hash,created,immutable_update_delete)",
+            apply: apply_ai_constraint_snapshots,
+        },
+        Migration {
+            id: "010_result_artifacts",
+            definition: "result_artifacts_v2(task_attempt_composite,input_snapshot,expected_artifact_contract,artifact_type,schema,unique_verified_raw_display_structured_refs,authoritative_snapshot_source_identity,content_hash,length,status,parent_same_task,derivation,created,one_root_per_attempt,immutable_identity_content,no_delete,status_edges,referenced_documents_and_chunks_immutable)",
+            apply: apply_result_artifacts,
+        },
+        Migration {
+            id: "011_artifact_validation_issues",
+            definition: "artifact_validation_issues_v2(artifact,validation_run,stable_issue_index,severity,code,sanitized_message,path,sanitized_details,validator,created,unique_run_order,indexes,append_only)",
+            apply: apply_artifact_validation_issues,
         },
     ]
 }
@@ -269,9 +304,660 @@ fn apply_large_text_integrity(transaction: &Transaction<'_>) -> Result<(), AppEr
     Ok(())
 }
 
+fn apply_ai_tasks(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_tasks (
+                task_id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL CHECK (length(task_type) BETWEEN 1 AND 96),
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT,
+                draft_id TEXT,
+                scope_type TEXT NOT NULL CHECK (scope_type IN ('system','novel','chapter','draft','selection')),
+                status TEXT NOT NULL CHECK (status IN (
+                    'created','preparing_context','ready','queued','running','validating',
+                    'completed','applying','applied','failed','cancel_requested','cancelled'
+                )),
+                state_revision INTEGER NOT NULL DEFAULT 0 CHECK (state_revision >= 0),
+                input_snapshot_id TEXT NOT NULL UNIQUE,
+                context_snapshot_id TEXT NOT NULL UNIQUE,
+                constraint_snapshot_id TEXT NOT NULL UNIQUE,
+                current_attempt_id TEXT UNIQUE,
+                result_artifact_id TEXT UNIQUE,
+                trace_id TEXT NOT NULL CHECK (length(trace_id) BETWEEN 1 AND 128),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 160),
+                request_hash_version INTEGER NOT NULL CHECK (request_hash_version >= 1),
+                request_hash TEXT NOT NULL CHECK (
+                    length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                expected_artifact_type TEXT NOT NULL
+                    CHECK (length(expected_artifact_type) BETWEEN 1 AND 96),
+                expected_artifact_schema_version INTEGER NOT NULL
+                    CHECK (expected_artifact_schema_version >= 1),
+                target_hint_json TEXT,
+                error_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                applied_at TEXT,
+                CHECK (
+                    (scope_type = 'system' AND novel_id = 'system' AND chapter_id IS NULL AND draft_id IS NULL) OR
+                    (scope_type = 'novel' AND chapter_id IS NULL AND draft_id IS NULL) OR
+                    (scope_type = 'chapter' AND chapter_id IS NOT NULL AND draft_id IS NULL) OR
+                    (scope_type IN ('draft','selection') AND chapter_id IS NOT NULL AND draft_id IS NOT NULL)
+                ),
+                CHECK (target_hint_json IS NULL OR json_valid(target_hint_json)),
+                CHECK (error_json IS NULL OR json_valid(error_json)),
+                FOREIGN KEY (input_snapshot_id) REFERENCES ai_input_snapshots(snapshot_id)
+                    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (context_snapshot_id) REFERENCES ai_context_snapshots(snapshot_id)
+                    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (constraint_snapshot_id) REFERENCES ai_constraint_snapshots(snapshot_id)
+                    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (current_attempt_id) REFERENCES ai_task_attempts(attempt_id)
+                    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (result_artifact_id) REFERENCES result_artifacts(artifact_id)
+                    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_tasks_novel_status_created
+                ON ai_tasks(novel_id, status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_ai_tasks_chapter_created
+                ON ai_tasks(chapter_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_ai_tasks_trace ON ai_tasks(trace_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_tasks_request_hash ON ai_tasks(request_hash);
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_immutable_identity
+                BEFORE UPDATE OF task_id, task_type, novel_id, chapter_id, draft_id, scope_type,
+                    input_snapshot_id, context_snapshot_id, constraint_snapshot_id, trace_id,
+                    operation_id, request_hash_version, request_hash, expected_artifact_type,
+                    expected_artifact_schema_version, target_hint_json, created_at
+                ON ai_tasks BEGIN SELECT RAISE(ABORT, 'immutable task identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_no_delete
+                BEFORE DELETE ON ai_tasks BEGIN SELECT RAISE(ABORT, 'durable task fact'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_current_attempt_link
+                BEFORE UPDATE OF current_attempt_id ON ai_tasks
+                WHEN NEW.current_attempt_id IS NULL
+                  OR OLD.status NOT IN ('ready','failed')
+                  OR NEW.status <> 'queued'
+                  OR NOT EXISTS (
+                    SELECT 1 FROM ai_task_attempts a
+                    WHERE a.attempt_id = NEW.current_attempt_id
+                      AND a.task_id = NEW.task_id AND a.status = 'queued'
+                  )
+                BEGIN SELECT RAISE(ABORT, 'invalid current attempt link'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_result_artifact_link
+                BEFORE UPDATE OF result_artifact_id ON ai_tasks
+                WHEN NEW.result_artifact_id IS NULL
+                  OR OLD.status <> 'validating'
+                  OR NEW.status NOT IN ('completed','failed')
+                  OR NOT EXISTS (
+                    SELECT 1 FROM result_artifacts a
+                    WHERE a.artifact_id = NEW.result_artifact_id
+                      AND a.task_id = NEW.task_id
+                      AND a.attempt_id = NEW.current_attempt_id
+                  )
+                BEGIN SELECT RAISE(ABORT, 'invalid result artifact link'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_status_edges
+                BEFORE UPDATE OF status ON ai_tasks
+                WHEN NOT (
+                    (OLD.status = 'created' AND NEW.status IN ('preparing_context','ready','failed','cancelled')) OR
+                    (OLD.status = 'preparing_context' AND NEW.status IN ('ready','cancel_requested','failed')) OR
+                    (OLD.status = 'ready' AND NEW.status IN ('queued','cancelled','failed')) OR
+                    (OLD.status = 'queued' AND NEW.status IN ('running','cancel_requested','cancelled','failed')) OR
+                    (OLD.status = 'running' AND NEW.status IN ('validating','cancel_requested','failed')) OR
+                    (OLD.status = 'validating' AND NEW.status IN ('completed','cancel_requested','failed')) OR
+                    (OLD.status = 'completed' AND NEW.status = 'applying') OR
+                    (OLD.status = 'applying' AND NEW.status IN ('applied','completed','failed')) OR
+                    (OLD.status = 'failed' AND NEW.status = 'queued') OR
+                    (OLD.status = 'cancel_requested' AND NEW.status = 'cancelled')
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal task status transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_validate_target_insert
+                BEFORE INSERT ON ai_tasks
+                WHEN NEW.scope_type <> 'system' AND (
+                    NOT EXISTS (SELECT 1 FROM novels n WHERE n.id = NEW.novel_id AND n.deleted_at IS NULL) OR
+                    (NEW.chapter_id IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM chapters c WHERE c.id = NEW.chapter_id
+                            AND c.novel_id = NEW.novel_id AND c.deleted_at IS NULL
+                    )) OR
+                    (NEW.draft_id IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM chapter_drafts d WHERE d.id = NEW.draft_id
+                            AND d.novel_id = NEW.novel_id AND d.chapter_id = NEW.chapter_id
+                    ))
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid task target ownership'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_tasks_completed_artifact
+                BEFORE UPDATE OF status ON ai_tasks
+                WHEN NEW.status = 'completed' AND NOT EXISTS (
+                    SELECT 1 FROM result_artifacts a
+                    WHERE a.artifact_id = NEW.result_artifact_id
+                      AND a.task_id = NEW.task_id
+                      AND a.attempt_id = NEW.current_attempt_id
+                      AND a.processing_status IN ('valid','valid_with_warnings')
+                )
+                BEGIN SELECT RAISE(ABORT, 'completed task requires valid artifact'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_task_attempts(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_task_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+                provider_id TEXT,
+                model_id TEXT,
+                provider_request_id TEXT,
+                status TEXT NOT NULL CHECK (status IN (
+                    'queued','running','succeeded','failed','cancel_requested','cancelled','late_response_ignored'
+                )),
+                state_revision INTEGER NOT NULL DEFAULT 0 CHECK (state_revision >= 0),
+                response_metadata_json TEXT,
+                error_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                CHECK (provider_request_id IS NULL OR provider_id IS NOT NULL),
+                CHECK (response_metadata_json IS NULL OR json_valid(response_metadata_json)),
+                CHECK (error_json IS NULL OR json_valid(error_json)),
+                CHECK (
+                    status NOT IN ('succeeded','failed','cancelled','late_response_ignored')
+                    OR finished_at IS NOT NULL
+                ),
+                CHECK (status <> 'failed' OR error_json IS NOT NULL),
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT,
+                UNIQUE(task_id, attempt_number),
+                UNIQUE(task_id, attempt_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_task_attempts_task_status
+                ON ai_task_attempts(task_id, status, attempt_number);
+            CREATE INDEX IF NOT EXISTS idx_ai_task_attempts_provider_request
+                ON ai_task_attempts(provider_id, provider_request_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_task_attempts_one_live
+                ON ai_task_attempts(task_id)
+                WHERE status IN ('queued','running','cancel_requested');
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_task_attempts_provider_request
+                ON ai_task_attempts(provider_id, provider_request_id)
+                WHERE provider_id IS NOT NULL AND provider_request_id IS NOT NULL;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_attempts_immutable_identity
+                BEFORE UPDATE OF attempt_id, task_id, attempt_number, created_at
+                ON ai_task_attempts BEGIN SELECT RAISE(ABORT, 'immutable attempt identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_attempts_no_delete
+                BEFORE DELETE ON ai_task_attempts BEGIN SELECT RAISE(ABORT, 'durable attempt fact'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_attempts_provider_once
+                BEFORE UPDATE OF provider_id, model_id ON ai_task_attempts
+                WHEN OLD.provider_id IS NOT NULL OR OLD.model_id IS NOT NULL
+                     OR NEW.provider_id IS NULL OR NEW.model_id IS NULL
+                BEGIN SELECT RAISE(ABORT, 'immutable provider identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_attempts_provider_request_once
+                BEFORE UPDATE OF provider_request_id ON ai_task_attempts
+                WHEN OLD.provider_request_id IS NOT NEW.provider_request_id
+                     AND (OLD.provider_request_id IS NOT NULL OR NEW.provider_request_id IS NULL)
+                BEGIN SELECT RAISE(ABORT, 'immutable provider request identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_task_attempts_status_edges
+                BEFORE UPDATE OF status ON ai_task_attempts
+                WHEN NOT (
+                    (OLD.status = 'queued' AND NEW.status IN ('running','cancel_requested','cancelled','failed')) OR
+                    (OLD.status = 'running' AND NEW.status IN ('succeeded','cancel_requested','failed','late_response_ignored')) OR
+                    (OLD.status = 'cancel_requested' AND NEW.status IN ('cancelled','late_response_ignored')) OR
+                    (OLD.status = 'cancelled' AND NEW.status = 'late_response_ignored')
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal attempt status transition'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_input_snapshots(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_input_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL UNIQUE,
+                schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+                input_type TEXT NOT NULL CHECK (length(input_type) BETWEEN 1 AND 96),
+                payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+                body_ref_id TEXT NOT NULL UNIQUE,
+                source_draft_id TEXT,
+                source_draft_version INTEGER,
+                base_content_hash TEXT,
+                content_hash TEXT NOT NULL CHECK (
+                    length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                CHECK (
+                    (source_draft_id IS NULL AND source_draft_version IS NULL AND base_content_hash IS NULL) OR
+                    (source_draft_id IS NOT NULL AND source_draft_version >= 1 AND
+                     length(base_content_hash) = 64 AND base_content_hash NOT GLOB '*[^0-9a-f]*')
+                ),
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT
+                    DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (body_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT,
+                UNIQUE(task_id, snapshot_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_input_snapshots_source
+                ON ai_input_snapshots(source_draft_id, source_draft_version, base_content_hash);
+            CREATE TRIGGER IF NOT EXISTS trg_ai_input_snapshots_immutable_update
+                BEFORE UPDATE ON ai_input_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_input_snapshots_immutable_delete
+                BEFORE DELETE ON ai_input_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_input_snapshots_validate_insert
+                BEFORE INSERT ON ai_input_snapshots
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM ai_tasks t
+                    WHERE t.task_id = NEW.task_id
+                      AND t.input_snapshot_id = NEW.snapshot_id
+                      AND t.draft_id IS NEW.source_draft_id
+                ) OR NOT EXISTS (
+                    SELECT 1 FROM large_text_documents d
+                    WHERE d.id = NEW.body_ref_id AND d.target_type = 'ai_snapshot'
+                      AND d.target_id = NEW.snapshot_id AND d.field_name = 'input_body'
+                      AND d.status = 'ready' AND d.content_sha256 IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid input snapshot identity'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_context_snapshots(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_context_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL UNIQUE,
+                schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+                source_manifest_json TEXT NOT NULL CHECK (json_valid(source_manifest_json)),
+                compiled_context_ref_id TEXT NOT NULL UNIQUE,
+                budget_json TEXT NOT NULL CHECK (json_valid(budget_json)),
+                compiler_version TEXT NOT NULL CHECK (length(compiler_version) BETWEEN 1 AND 96),
+                content_hash TEXT NOT NULL CHECK (
+                    length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT
+                    DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (compiled_context_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_context_snapshots_hash
+                ON ai_context_snapshots(content_hash, compiler_version);
+            CREATE TRIGGER IF NOT EXISTS trg_ai_context_snapshots_immutable_update
+                BEFORE UPDATE ON ai_context_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_context_snapshots_immutable_delete
+                BEFORE DELETE ON ai_context_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_context_snapshots_validate_insert
+                BEFORE INSERT ON ai_context_snapshots
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM ai_tasks t
+                    WHERE t.task_id = NEW.task_id AND t.context_snapshot_id = NEW.snapshot_id
+                ) OR NOT EXISTS (
+                    SELECT 1 FROM large_text_documents d
+                    WHERE d.id = NEW.compiled_context_ref_id AND d.target_type = 'ai_snapshot'
+                      AND d.target_id = NEW.snapshot_id AND d.field_name = 'compiled_context'
+                      AND d.status = 'ready' AND d.content_sha256 IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid context snapshot identity'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_ai_constraint_snapshots(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_constraint_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL UNIQUE,
+                schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+                payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+                prompt_template_id TEXT NOT NULL CHECK (length(prompt_template_id) BETWEEN 1 AND 160),
+                prompt_template_version TEXT NOT NULL CHECK (length(prompt_template_version) BETWEEN 1 AND 96),
+                prompt_template_hash TEXT NOT NULL CHECK (
+                    length(prompt_template_hash) = 64 AND prompt_template_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                prompt_template_ref_id TEXT NOT NULL UNIQUE,
+                provider_options_json TEXT NOT NULL CHECK (
+                    json_valid(provider_options_json) AND json_type(provider_options_json) = 'object'
+                ),
+                content_hash TEXT NOT NULL CHECK (
+                    length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE RESTRICT
+                    DEFERRABLE INITIALLY DEFERRED,
+                FOREIGN KEY (prompt_template_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_constraint_snapshots_template
+                ON ai_constraint_snapshots(prompt_template_id, prompt_template_version, prompt_template_hash);
+            CREATE TRIGGER IF NOT EXISTS trg_ai_constraint_snapshots_immutable_update
+                BEFORE UPDATE ON ai_constraint_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_constraint_snapshots_immutable_delete
+                BEFORE DELETE ON ai_constraint_snapshots BEGIN SELECT RAISE(ABORT, 'immutable snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_constraint_snapshots_validate_insert
+                BEFORE INSERT ON ai_constraint_snapshots
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM ai_tasks t
+                    WHERE t.task_id = NEW.task_id AND t.constraint_snapshot_id = NEW.snapshot_id
+                ) OR NOT EXISTS (
+                    SELECT 1 FROM large_text_documents d
+                    WHERE d.id = NEW.prompt_template_ref_id AND d.target_type = 'ai_snapshot'
+                      AND d.target_id = NEW.snapshot_id AND d.field_name = 'prompt_template'
+                      AND d.status = 'ready' AND d.content_sha256 = NEW.prompt_template_hash
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid constraint snapshot identity'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_result_artifacts(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS result_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                attempt_id TEXT NOT NULL,
+                source_input_snapshot_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL CHECK (length(artifact_type) BETWEEN 1 AND 96),
+                schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+                raw_content_ref_id TEXT NOT NULL UNIQUE,
+                display_content_ref_id TEXT UNIQUE,
+                display_content_hash TEXT,
+                structured_payload_ref_id TEXT UNIQUE,
+                structured_payload_hash TEXT,
+                source_novel_id TEXT NOT NULL,
+                source_chapter_id TEXT,
+                source_draft_id TEXT,
+                source_draft_version INTEGER,
+                source_base_content_hash TEXT,
+                content_hash TEXT NOT NULL CHECK (
+                    length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                content_length INTEGER NOT NULL CHECK (content_length >= 0),
+                processing_status TEXT NOT NULL CHECK (processing_status IN (
+                    'raw','parsing','valid','valid_with_warnings','invalid'
+                )),
+                parent_artifact_id TEXT,
+                derivation_type TEXT,
+                created_at TEXT NOT NULL,
+                CHECK (
+                    (display_content_ref_id IS NULL AND display_content_hash IS NULL) OR
+                    (display_content_ref_id IS NOT NULL AND length(display_content_hash) = 64 AND
+                     display_content_hash NOT GLOB '*[^0-9a-f]*')
+                ),
+                CHECK (
+                    (structured_payload_ref_id IS NULL AND structured_payload_hash IS NULL) OR
+                    (structured_payload_ref_id IS NOT NULL AND length(structured_payload_hash) = 64 AND
+                     structured_payload_hash NOT GLOB '*[^0-9a-f]*')
+                ),
+                CHECK (
+                    (source_draft_id IS NULL AND source_draft_version IS NULL AND source_base_content_hash IS NULL) OR
+                    (source_draft_id IS NOT NULL AND source_draft_version >= 1 AND
+                     length(source_base_content_hash) = 64 AND source_base_content_hash NOT GLOB '*[^0-9a-f]*')
+                ),
+                CHECK (
+                    (parent_artifact_id IS NULL AND derivation_type IS NULL) OR
+                    (parent_artifact_id IS NOT NULL AND length(derivation_type) BETWEEN 1 AND 96)
+                ),
+                CHECK (display_content_ref_id IS NULL OR display_content_ref_id <> raw_content_ref_id),
+                FOREIGN KEY (task_id, attempt_id) REFERENCES ai_task_attempts(task_id, attempt_id)
+                    ON DELETE RESTRICT,
+                FOREIGN KEY (task_id, source_input_snapshot_id)
+                    REFERENCES ai_input_snapshots(task_id, snapshot_id) ON DELETE RESTRICT,
+                FOREIGN KEY (raw_content_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT,
+                FOREIGN KEY (display_content_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT,
+                FOREIGN KEY (structured_payload_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT,
+                FOREIGN KEY (task_id, parent_artifact_id) REFERENCES result_artifacts(task_id, artifact_id)
+                    ON DELETE RESTRICT,
+                UNIQUE(task_id, artifact_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_result_artifacts_task_created
+                ON result_artifacts(task_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_result_artifacts_attempt
+                ON result_artifacts(task_id, attempt_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_result_artifacts_status_hash
+                ON result_artifacts(processing_status, content_hash);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_result_artifacts_attempt_root
+                ON result_artifacts(attempt_id) WHERE parent_artifact_id IS NULL;
+            CREATE TRIGGER IF NOT EXISTS trg_result_artifacts_immutable_content
+                BEFORE UPDATE OF artifact_id, task_id, attempt_id, source_input_snapshot_id,
+                    artifact_type, schema_version, raw_content_ref_id, display_content_ref_id,
+                    display_content_hash, structured_payload_ref_id, structured_payload_hash,
+                    source_novel_id, source_chapter_id, source_draft_id, source_draft_version,
+                    source_base_content_hash, content_hash, content_length, parent_artifact_id,
+                    derivation_type, created_at
+                ON result_artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_result_artifacts_immutable_delete
+                BEFORE DELETE ON result_artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_result_artifacts_status_edges
+                BEFORE UPDATE OF processing_status ON result_artifacts
+                WHEN NOT (
+                    (OLD.processing_status = 'raw' AND NEW.processing_status IN (
+                        'parsing','valid','valid_with_warnings','invalid'
+                    )) OR
+                    (OLD.processing_status = 'parsing' AND NEW.processing_status IN (
+                        'valid','valid_with_warnings','invalid'
+                    ))
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal artifact status transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_result_artifacts_validate_insert
+                BEFORE INSERT ON result_artifacts
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM ai_tasks t
+                    JOIN ai_input_snapshots s ON s.task_id = t.task_id
+                    WHERE t.task_id = NEW.task_id
+                      AND t.current_attempt_id = NEW.attempt_id
+                      AND t.status = 'validating'
+                      AND t.expected_artifact_type = NEW.artifact_type
+                      AND t.expected_artifact_schema_version = NEW.schema_version
+                      AND s.snapshot_id = NEW.source_input_snapshot_id
+                      AND t.novel_id = NEW.source_novel_id
+                      AND t.chapter_id IS NEW.source_chapter_id
+                      AND s.source_draft_id IS NEW.source_draft_id
+                      AND s.source_draft_version IS NEW.source_draft_version
+                      AND s.base_content_hash IS NEW.source_base_content_hash
+                ) OR NOT EXISTS (
+                    SELECT 1 FROM large_text_documents d
+                    WHERE d.id = NEW.raw_content_ref_id AND d.target_type = 'result_artifact'
+                      AND d.target_id = NEW.artifact_id AND d.field_name = 'raw_content'
+                      AND d.status = 'ready' AND d.content_sha256 = NEW.content_hash
+                      AND d.total_chars = NEW.content_length
+                ) OR (
+                    NEW.display_content_ref_id IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM large_text_documents d
+                        WHERE d.id = NEW.display_content_ref_id AND d.target_type = 'result_artifact'
+                          AND d.target_id = NEW.artifact_id AND d.field_name = 'display_content'
+                          AND d.status = 'ready' AND d.content_sha256 = NEW.display_content_hash
+                    )
+                ) OR (
+                    NEW.structured_payload_ref_id IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM large_text_documents d
+                        WHERE d.id = NEW.structured_payload_ref_id AND d.target_type = 'result_artifact'
+                          AND d.target_id = NEW.artifact_id AND d.field_name = 'structured_payload'
+                          AND d.status = 'ready' AND d.content_sha256 = NEW.structured_payload_hash
+                    )
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid artifact identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_large_text_documents_immutable_update
+                BEFORE UPDATE ON large_text_documents
+                WHEN OLD.id IN (
+                    SELECT body_ref_id FROM ai_input_snapshots
+                    UNION SELECT compiled_context_ref_id FROM ai_context_snapshots
+                    UNION SELECT prompt_template_ref_id FROM ai_constraint_snapshots
+                    UNION SELECT raw_content_ref_id FROM result_artifacts
+                    UNION SELECT display_content_ref_id FROM result_artifacts WHERE display_content_ref_id IS NOT NULL
+                    UNION SELECT structured_payload_ref_id FROM result_artifacts WHERE structured_payload_ref_id IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'immutable referenced AI document'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_large_text_documents_immutable_delete
+                BEFORE DELETE ON large_text_documents
+                WHEN OLD.id IN (
+                    SELECT body_ref_id FROM ai_input_snapshots
+                    UNION SELECT compiled_context_ref_id FROM ai_context_snapshots
+                    UNION SELECT prompt_template_ref_id FROM ai_constraint_snapshots
+                    UNION SELECT raw_content_ref_id FROM result_artifacts
+                    UNION SELECT display_content_ref_id FROM result_artifacts WHERE display_content_ref_id IS NOT NULL
+                    UNION SELECT structured_payload_ref_id FROM result_artifacts WHERE structured_payload_ref_id IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'immutable referenced AI document'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_large_text_chunks_immutable_insert
+                BEFORE INSERT ON large_text_chunks
+                WHEN NEW.document_id IN (
+                    SELECT body_ref_id FROM ai_input_snapshots
+                    UNION SELECT compiled_context_ref_id FROM ai_context_snapshots
+                    UNION SELECT prompt_template_ref_id FROM ai_constraint_snapshots
+                    UNION SELECT raw_content_ref_id FROM result_artifacts
+                    UNION SELECT display_content_ref_id FROM result_artifacts WHERE display_content_ref_id IS NOT NULL
+                    UNION SELECT structured_payload_ref_id FROM result_artifacts WHERE structured_payload_ref_id IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'immutable referenced AI chunks'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_large_text_chunks_immutable_update
+                BEFORE UPDATE ON large_text_chunks
+                WHEN OLD.document_id IN (
+                    SELECT body_ref_id FROM ai_input_snapshots
+                    UNION SELECT compiled_context_ref_id FROM ai_context_snapshots
+                    UNION SELECT prompt_template_ref_id FROM ai_constraint_snapshots
+                    UNION SELECT raw_content_ref_id FROM result_artifacts
+                    UNION SELECT display_content_ref_id FROM result_artifacts WHERE display_content_ref_id IS NOT NULL
+                    UNION SELECT structured_payload_ref_id FROM result_artifacts WHERE structured_payload_ref_id IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'immutable referenced AI chunks'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_ai_large_text_chunks_immutable_delete
+                BEFORE DELETE ON large_text_chunks
+                WHEN OLD.document_id IN (
+                    SELECT body_ref_id FROM ai_input_snapshots
+                    UNION SELECT compiled_context_ref_id FROM ai_context_snapshots
+                    UNION SELECT prompt_template_ref_id FROM ai_constraint_snapshots
+                    UNION SELECT raw_content_ref_id FROM result_artifacts
+                    UNION SELECT display_content_ref_id FROM result_artifacts WHERE display_content_ref_id IS NOT NULL
+                    UNION SELECT structured_payload_ref_id FROM result_artifacts WHERE structured_payload_ref_id IS NOT NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'immutable referenced AI chunks'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_artifact_validation_issues(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS artifact_validation_issues (
+                issue_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                validation_run_id TEXT NOT NULL CHECK (length(validation_run_id) BETWEEN 1 AND 160),
+                issue_index INTEGER NOT NULL CHECK (issue_index >= 0),
+                severity TEXT NOT NULL CHECK (severity IN ('warning','error')),
+                code TEXT NOT NULL CHECK (length(code) BETWEEN 1 AND 96),
+                message TEXT NOT NULL CHECK (length(message) BETWEEN 1 AND 1024),
+                json_path TEXT CHECK (json_path IS NULL OR length(json_path) <= 512),
+                details_json TEXT CHECK (details_json IS NULL OR length(details_json) <= 8192),
+                validator_version TEXT NOT NULL CHECK (length(validator_version) BETWEEN 1 AND 96),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (artifact_id) REFERENCES result_artifacts(artifact_id) ON DELETE RESTRICT,
+                UNIQUE(artifact_id, validation_run_id, issue_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifact_validation_artifact
+                ON artifact_validation_issues(artifact_id, validation_run_id, issue_index);
+            CREATE INDEX IF NOT EXISTS idx_artifact_validation_code
+                ON artifact_validation_issues(code, created_at);
+            CREATE TRIGGER IF NOT EXISTS trg_artifact_validation_issues_append_only_update
+                BEFORE UPDATE ON artifact_validation_issues BEGIN SELECT RAISE(ABORT, 'append-only issue'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_artifact_validation_issues_append_only_delete
+                BEFORE DELETE ON artifact_validation_issues BEGIN SELECT RAISE(ABORT, 'append-only issue'); END;",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 11] = [
+        (
+            "001_schema_migrations",
+            "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
+        ),
+        (
+            "002_workspace_recovery_snapshots",
+            "7b3d51eb4fedcdac62b04d427746c8990a43d1ce98a1e80ea2f4b3e2429ee739",
+        ),
+        (
+            "003_draft_save_operations",
+            "62d442e75b5bdf0fb1e1149d454cce9611f42221185bb7b5e16eab762c77e1ec",
+        ),
+        (
+            "004_large_text_integrity",
+            "6397a9245892ad2b77472f203055f9e1f13ceb90f30b60d4062f4fb007d2d15b",
+        ),
+        (
+            "005_ai_tasks",
+            "86f8285a333d77c05ff07556a7d8a35f5d6f28ad0a21ecd9ede45b03a9cb9d9f",
+        ),
+        (
+            "006_ai_task_attempts",
+            "9bf5adc5683e5e2c4384c299e30e782ca604f059df2acb244742ae329d1a7406",
+        ),
+        (
+            "007_ai_input_snapshots",
+            "096e07deccdd9c6ce202cfefd729f38cf5a6d899aece4cac7dc097028136107c",
+        ),
+        (
+            "008_ai_context_snapshots",
+            "38a009d092f26ccb6f6860f1697fdf6b1f6432293b12e975f0980b2f7d270db8",
+        ),
+        (
+            "009_ai_constraint_snapshots",
+            "20cff44a9ea326ca0bd05f3c2d1a3bb3d13692754142b6948b22051b0757398d",
+        ),
+        (
+            "010_result_artifacts",
+            "10d26a27702fb70b1a22b17bc775f1e17527bd5d431ca6fdd23276596ae79e58",
+        ),
+        (
+            "011_artifact_validation_issues",
+            "0232fec8a74c153c5f5aa0004a8a61f823e2b0b6dddf1928eda9e78fab20ec67",
+        ),
+    ];
+
+    fn run_migrations_through(connection: &mut Connection, count: usize) -> Result<(), AppError> {
+        for migration in migrations().into_iter().take(count) {
+            let transaction = connection.transaction().map_err(AppError::database)?;
+            create_ledger(&transaction)?;
+            let expected_checksum = checksum(migration.definition);
+            let existing_checksum = transaction
+                .query_row(
+                    "SELECT checksum FROM schema_migrations WHERE migration_id = ?1",
+                    params![migration.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(AppError::database)?;
+            if let Some(actual_checksum) = existing_checksum {
+                if actual_checksum != expected_checksum {
+                    return Err(AppError::new(
+                        codes::DATABASE_TRANSACTION_FAILED,
+                        "数据库迁移校验失败",
+                        false,
+                    ));
+                }
+            } else {
+                (migration.apply)(&transaction)?;
+                transaction
+                    .execute(
+                        "INSERT INTO schema_migrations
+                            (migration_id, version, checksum, applied_at)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            migration.id,
+                            "2.2.0",
+                            expected_checksum,
+                            Utc::now().to_rfc3339()
+                        ],
+                    )
+                    .map_err(AppError::database)?;
+            }
+            transaction.commit().map_err(AppError::database)?;
+        }
+        Ok(())
+    }
 
     fn legacy_schema(connection: &Connection) -> rusqlite::Result<()> {
         connection.execute_batch(
@@ -295,10 +981,13 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let migrations = list_applied(&connection)?;
-        assert_eq!(migrations.len(), 4);
-        assert_eq!(migrations[0].migration_id, "001_schema_migrations");
-        assert_eq!(migrations[3].migration_id, "004_large_text_integrity");
-        assert!(migrations.iter().all(|item| item.checksum.len() == 64));
+        assert_eq!(migrations.len(), EXPECTED_MIGRATION_CHECKSUMS.len());
+        for (applied, (expected_id, expected_checksum)) in
+            migrations.iter().zip(EXPECTED_MIGRATION_CHECKSUMS)
+        {
+            assert_eq!(applied.migration_id, expected_id);
+            assert_eq!(applied.checksum, expected_checksum);
+        }
         Ok(())
     }
 
@@ -356,6 +1045,293 @@ mod tests {
             "chapter_drafts",
             "content_hash"
         )?);
+        Ok(())
+    }
+
+    #[test]
+    fn db17_m1_schema_has_all_tables_indexes_triggers_and_clean_foreign_keys(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        for table in [
+            "ai_tasks",
+            "ai_task_attempts",
+            "ai_input_snapshots",
+            "ai_context_snapshots",
+            "ai_constraint_snapshots",
+            "result_artifacts",
+            "artifact_validation_issues",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing M1 table {table}");
+        }
+        for index in [
+            "idx_ai_tasks_novel_status_created",
+            "uq_ai_task_attempts_one_live",
+            "idx_ai_input_snapshots_source",
+            "idx_result_artifacts_task_created",
+            "uq_result_artifacts_attempt_root",
+            "idx_artifact_validation_artifact",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                params![index],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing M1 index {index}");
+        }
+        for trigger in [
+            "trg_ai_tasks_validate_target_insert",
+            "trg_ai_task_attempts_status_edges",
+            "trg_ai_input_snapshots_immutable_update",
+            "trg_ai_context_snapshots_immutable_delete",
+            "trg_ai_constraint_snapshots_validate_insert",
+            "trg_result_artifacts_validate_insert",
+            "trg_ai_large_text_chunks_immutable_update",
+            "trg_artifact_validation_issues_append_only_delete",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                params![trigger],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing M1 trigger {trigger}");
+        }
+        let foreign_key_errors = connection
+            .prepare("PRAGMA foreign_key_check")?
+            .query_map([], |_| Ok(()))?
+            .count();
+        assert_eq!(foreign_key_errors, 0);
+        let integrity: String =
+            connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        assert_eq!(integrity, "ok");
+        Ok(())
+    }
+
+    #[test]
+    fn db18_failed_current_migration_rolls_back_without_forging_ledger(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        connection.execute_batch("CREATE TABLE ai_task_attempts (broken_column TEXT);")?;
+        assert!(run_migrations(&mut connection).is_err());
+        let applied = list_applied(&connection)?;
+        assert_eq!(
+            applied.last().map(|item| item.migration_id.as_str()),
+            Some("005_ai_tasks")
+        );
+        assert!(applied
+            .iter()
+            .all(|item| item.migration_id != "006_ai_task_attempts"));
+        let malformed_columns: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('ai_task_attempts')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(malformed_columns, 1);
+        Ok(())
+    }
+
+    fn table_columns(connection: &Connection, table: &str) -> rusqlite::Result<Vec<String>> {
+        let quoted = table.replace('"', "\"\"");
+        let mut statement = connection.prepare(&format!("PRAGMA table_info(\"{quoted}\")"))?;
+        let columns = statement
+            .query_map([], |row| row.get(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(columns)
+    }
+
+    #[test]
+    fn db19_upgrade_preserves_legacy_rows_and_business_table_shapes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            "CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                content TEXT NOT NULL, version_no INTEGER NOT NULL, is_adopted INTEGER NOT NULL,
+                large_text_ref_id TEXT, content_hash TEXT
+             );
+             CREATE TABLE chapters (id TEXT PRIMARY KEY, adopted_draft_id TEXT);
+             CREATE TABLE quality_check_reports (id TEXT PRIMARY KEY, report_json TEXT);
+             CREATE TABLE ai_task_records (id TEXT PRIMARY KEY, status TEXT, result_text TEXT);
+             CREATE TABLE generation_jobs (id TEXT PRIMARY KEY, status TEXT);
+             INSERT INTO chapter_drafts VALUES
+                ('draft-a','novel-a','chapter-a','legacy adopted body',3,1,NULL,'hash-a');
+             INSERT INTO chapters VALUES ('chapter-a','draft-a');
+             INSERT INTO quality_check_reports VALUES ('report-a','legacy report');
+             INSERT INTO ai_task_records VALUES ('legacy-task','succeeded','legacy result');
+             INSERT INTO generation_jobs VALUES ('legacy-job','completed');",
+        )?;
+        let draft_columns_before = table_columns(&connection, "chapter_drafts")?;
+        let report_columns_before = table_columns(&connection, "quality_check_reports")?;
+        run_migrations(&mut connection)?;
+        assert_eq!(
+            table_columns(&connection, "chapter_drafts")?,
+            draft_columns_before
+        );
+        assert_eq!(
+            table_columns(&connection, "quality_check_reports")?,
+            report_columns_before
+        );
+        let adopted: String = connection.query_row(
+            "SELECT adopted_draft_id FROM chapters WHERE id='chapter-a'",
+            [],
+            |row| row.get(0),
+        )?;
+        let legacy_result: String = connection.query_row(
+            "SELECT result_text FROM ai_task_records WHERE id='legacy-task'",
+            [],
+            |row| row.get(0),
+        )?;
+        let legacy_job: String = connection.query_row(
+            "SELECT status FROM generation_jobs WHERE id='legacy-job'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(adopted, "draft-a");
+        assert_eq!(legacy_result, "legacy result");
+        assert_eq!(legacy_job, "completed");
+        Ok(())
+    }
+
+    #[test]
+    fn db20_new_migration_checksum_conflict_fails_closed() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        connection.execute(
+            "UPDATE schema_migrations SET checksum='tampered' WHERE migration_id='010_result_artifacts'",
+            [],
+        )?;
+        let error = run_migrations(&mut connection).expect_err("new checksum mismatch must fail");
+        assert_eq!(error.code, codes::DATABASE_TRANSACTION_FAILED);
+        assert_eq!(
+            error
+                .details
+                .as_ref()
+                .and_then(|value| value["migrationId"].as_str()),
+            Some("010_result_artifacts")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn db21_full_empty_database_initializes_and_restarts_idempotently(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        crate::db::create_tables(&mut connection)?;
+        let first = list_applied(&connection)?;
+        crate::db::create_tables(&mut connection)?;
+        assert_eq!(list_applied(&connection)?, first);
+        assert_eq!(first.len(), 11);
+        Ok(())
+    }
+
+    #[test]
+    fn db22_m1_sql_schema_fingerprint_is_frozen() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+        run_migrations(&mut connection)?;
+        let mut statement = connection.prepare(
+            "SELECT type, name, sql FROM sqlite_master
+             WHERE sql IS NOT NULL AND (
+                name IN ('ai_tasks','ai_task_attempts','ai_input_snapshots',
+                         'ai_context_snapshots','ai_constraint_snapshots',
+                         'result_artifacts','artifact_validation_issues')
+                OR name GLOB 'idx_ai_*'
+                OR name GLOB 'uq_ai_*'
+                OR name GLOB 'idx_result_artifacts_*'
+                OR name GLOB 'uq_result_artifacts_*'
+                OR name GLOB 'idx_artifact_validation_*'
+                OR name GLOB 'trg_ai_*'
+                OR name GLOB 'trg_result_artifacts_*'
+                OR name GLOB 'trg_artifact_validation_*'
+             )
+             ORDER BY type ASC, name ASC",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(format!(
+                    "{}\n{}\n{}\n",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let fingerprint = checksum(&rows.concat());
+        assert_eq!(
+            fingerprint,
+            "8e34fe774ff2490325eab1654e5118230e77279e58beed325a5e09c4f320835e"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires AI_NOVEL_STUDIO_MIGRATION_DB to point at an isolated database copy"]
+    fn db23_external_v221_copy_upgrades_without_business_row_or_shape_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::var("AI_NOVEL_STUDIO_MIGRATION_DB")?;
+        let mut connection = Connection::open(path)?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        run_migrations_through(&mut connection, 4)?;
+        let business_tables = [
+            "novels",
+            "chapters",
+            "chapter_drafts",
+            "quality_check_reports",
+            "ai_task_records",
+            "generation_jobs",
+        ];
+        let before = business_tables
+            .iter()
+            .map(|table| {
+                let quoted = table.replace('"', "\"\"");
+                let count = connection.query_row(
+                    &format!("SELECT COUNT(*) FROM \"{quoted}\""),
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                Ok::<_, rusqlite::Error>((*table, count, table_columns(&connection, table)?))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let fk_before = connection
+            .prepare("PRAGMA foreign_key_check")?
+            .query_map([], |_| Ok(()))?
+            .count();
+        run_migrations(&mut connection)?;
+        let once = list_applied(&connection)?;
+        run_migrations(&mut connection)?;
+        assert_eq!(list_applied(&connection)?, once);
+        assert_eq!(once.len(), 11);
+        for (table, expected_count, expected_columns) in before {
+            let quoted = table.replace('"', "\"\"");
+            let actual_count =
+                connection.query_row(&format!("SELECT COUNT(*) FROM \"{quoted}\""), [], |row| {
+                    row.get::<_, i64>(0)
+                })?;
+            assert_eq!(
+                actual_count, expected_count,
+                "row count changed for {table}"
+            );
+            assert_eq!(table_columns(&connection, table)?, expected_columns);
+        }
+        let fk_after = connection
+            .prepare("PRAGMA foreign_key_check")?
+            .query_map([], |_| Ok(()))?
+            .count();
+        assert_eq!(fk_after, fk_before);
+        let integrity: String =
+            connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        assert_eq!(integrity, "ok");
         Ok(())
     }
 }

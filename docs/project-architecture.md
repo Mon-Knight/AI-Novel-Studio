@@ -213,4 +213,21 @@ ai-novel-studio/
 
 ---
 
+## 12. v2.3.0 执行事实层扩展
+
+Rust 后端新增三组明确边界：
+
+```text
+domain/       状态枚举、合法状态边、Task / Artifact 类型白名单
+repositories/ 参数化 SQLite 读写与 CAS，不包含 UI 或 Provider 调用
+services/     canonical hash、归属验证、事务、重放、校验与脱敏
+commands/     受控 Tauri IPC，仅负责锁定连接和映射稳定 AppError
+```
+
+前端只新增 `types/ai-task.ts`、`types/result-artifact.ts` 与 `services/ai-tasks/aiTaskRuntimeService.ts` 薄 facade。M1 不修改任何现有 AI 面板或生产 Provider 入口，不引入浏览器 LocalStorage 假持久化。
+
+完整设计见 [`architecture/ai-execution-facts.md`](architecture/ai-execution-facts.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**

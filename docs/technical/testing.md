@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.2.1（工作区竞态可靠性热修）
-> 适用范围：正文变更动态回归、Vitest / React 组件测试、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
+> 当前版本：v2.3.0（Agent 执行事实层 M1）
+> 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.2.1，测试体系在既有正文安全、备份恢复、请求取消、质量历史和章节上下文一致性基础上，增加工作区恢复、统一离开保护、正式迁移账本，以及采用/保存、跨会话恢复候选和原生关闭拒绝的动态竞态验证：
+截至 v2.3.0，测试体系在既有正文安全、备份恢复、请求取消、质量历史、章节上下文和工作区可靠性基础上，增加统一执行事实的迁移、事务、CAS、幂等重放、不可变大文本、脱敏与跨重启读取验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -27,7 +27,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.2.x 动态测试入口
+## 2. v2.2.x～v2.3.0 动态测试入口
 
 ### 2.1 工作区可靠性专项
 
@@ -306,6 +306,41 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
 GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+
+### 2.12 v2.3.0 执行事实层专项
+
+```powershell
+# 005～011、空库、升级、checksum、回滚、schema fingerprint
+cargo test migrations::tests -- --nocapture
+
+# Task / Attempt / Snapshot / Artifact / Issue、重放与重启读取
+cargo test services:: -- --nocapture
+
+# 常规 Rust/SQLite 全量
+cargo test
+
+# 使用真实用户数据库的隔离副本；默认 ignored，绝不直接迁移源文件
+$env:AI_NOVEL_STUDIO_MIGRATION_DB = '<isolated-copy>\ai-novel-studio.db'
+cargo test db23_external_v221_copy_upgrades_without_business_row_or_shape_changes -- --ignored
+```
+
+专项动态矩阵至少证明：
+
+| 编号 | 场景 | 必须结果 |
+|------|------|----------|
+| M1-DB01 | 空库与 v2.2.1 升级 | ledger 到 011；业务表零改形、旧行零变化 |
+| M1-DB02 | 重复启动与新旧 checksum 冲突 | 幂等；任一 checksum 漂移 fail closed |
+| M1-DB03 | 当前 migration / Snapshot 插入故障 | 当前事务回滚，不留下 Task、document 或 chunk |
+| M1-TASK01 | 相同/不同 operationId payload | 同 hash 返回同一 Task；不同 hash 拒绝 |
+| M1-TASK02 | 双 queue / claim、跨 Task Attempt | 同身份重放；不同身份或跨 Task 拒绝；最多一个 live Attempt |
+| M1-TASK03 | retry、cancel、late response | 历史 Attempt 保留；迟到响应不创建 Artifact |
+| M1-ART01 | 合法、warning、malformed、超长 raw | 完整 raw 可校验读取；Task 终态与 Issue 正确 |
+| M1-ART02 | Artifact 重放、raw mismatch、未知契约 | 同身份返回同 Artifact；变化请求 fail closed 且无残留 document |
+| M1-IMM01 | Snapshot / Artifact / Issue / 大文本篡改 | UPDATE、DELETE 及追加 chunk 全部拒绝 |
+| M1-READ01 | 文件数据库关闭再打开 | Task、Attempts、三 Snapshot、Artifacts、Issues 全部完整读取 |
+| M1-SEC01 | API Key、Bearer、rawBody metadata | 写入前拒绝；普通日志无正文、Prompt 或 Provider body |
+
+本版本没有修改生产 Provider Adapter，因此不执行真实 API 测试。真实额度留给 v2.3.1 统一执行管线，并限制为一次低输出连接/只读验收。
 
 ---
 

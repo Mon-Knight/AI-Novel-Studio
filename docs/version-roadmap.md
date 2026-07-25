@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.2.1（工作区竞态可靠性热修）
+> 当前版本：v2.3.0（Agent 执行事实层 M1）
 
 ---
 
@@ -365,11 +365,28 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 明确不在本版本处理：Provider 协议、真实 AI 调用、统一 Task / Artifact、自动续跑、Planner、Memory、Multi-Agent 和自主写入。
 
-### v2.2.1 之后
+### v2.3.0 单一版本目标
 
-- 在 execution lease、attempt / operation ID、基础正文 revision / hash 和副作用幂等键完备后，再设计可证明安全的自动续跑。
-- 随后分批收敛其他 AI 工具的取消接入、原生窗口关闭恢复与更完整的组件 / 桌面 E2E。
-- 通用自动放置和更高自主度 Agent 能力必须在正文变更安全门及对应动态回归稳定后再扩展。
+本版本只建立后续 Agent 化能力共同依赖的统一执行事实层：
+
+1. 新增 AiTask、AiTaskAttempt、三类 Snapshot、ResultArtifact 和 ArtifactValidationIssue 七类持久模型；Legacy AI 记录原样保留且不伪造新事实。
+2. Task 与三类 Snapshot 在一个 SQLite 事务中创建；Rust canonical requestHash 完整覆盖目标、schema、正文/上下文/Prompt hash、compiler/budget 与预期 Artifact 契约。
+3. Attempt 通过联合身份、state revision CAS、单 Task 单 live Attempt、一次性 Provider 身份和稳定重放隔离并发、重试、取消与迟到响应。
+4. Artifact 来源由持久 Task / Input Snapshot 派生，raw hash/length 与 Provider response identity 强绑定；解析失败仍保存完整原始结果。
+5. Snapshot、Artifact、ValidationIssue 以及它们引用的大文本建立引用后不可篡改；普通 JSON 和日志不保存正文、Prompt、Provider raw body 或凭据。
+6. 受控 IPC 和前端薄 facade 支持应用重启后读取 Task、全部 Attempts、三类 Snapshot、全部 Artifacts 与 Issues；浏览器模式不伪造 SQLite 持久层。
+7. 空库、v2.2.1、真实用户数据库隔离副本、重复启动、checksum 冲突、事务回滚、并发、重放、不可变和重启读取均由动态测试证明。
+
+明确不在本版本处理：生产 Provider Adapter 迁移、真实 AI 调用、Planner、Memory、Tool Registry、自动续跑、Placement / ApplyPlan、Multi-Agent、UI 重做和 Agent 自主写入。
+
+### v2.3.0 之后
+
+- v2.3.1：Provider Adapter 与统一执行管线；先迁移连接测试和一个只读入口，并进行一次低输出真实 API 验收。
+- v2.3.2：PlacementProposal、ApplyPlan、ArtifactTargetLink 与单目标安全应用；保持用户确认、version/hash 冲突保护和副作用幂等。
+- v2.4.x：Context / Constraint Compiler 与 Tool Registry，形成可复现来源、预算和 schema 工具边界。
+- v2.5.x：Planner、execution lease、checkpoint、显式重试与跨重启恢复。
+- v2.6.x：长期 Memory、连续性与质量 Verification，形成受审核的单 Agent 章节闭环。
+- v3.x：Multi-Agent Orchestrator、专业创作 Agent、Artifact 交接、冲突处理和自主逐章推进。
 
 ---
 
@@ -383,7 +400,7 @@ v2.x 后续 Planner / Tool Calling / Memory / Verification
 v3.x    Multi-Agent / 自主创作
 ```
 
-进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.2.1 当前只处理工作区竞态可靠性热修。
+进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.3.0 当前只完成可追踪、可重放、可恢复读取的执行事实基础。
 
 ---
 

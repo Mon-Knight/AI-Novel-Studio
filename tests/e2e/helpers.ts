@@ -9,6 +9,8 @@ export interface Diagnostics {
   foreignKeysEnabled?: boolean;
   journalMode?: string;
   schemaReady?: boolean;
+  migrationCount?: number;
+  latestMigrationId?: string;
   counts?: Record<string, number>;
   webviewNetwork?: {
     installed?: boolean;

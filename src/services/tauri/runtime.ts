@@ -25,7 +25,8 @@ export async function tauriInvoke<T>(
   }
 
   if (command.includes('ai_task')) {
-    console.log('[TAURI_RUNTIME] invoke', { command, args });
+    // Snapshot bodies, prompts and provider metadata must never enter ordinary logs.
+    console.log('[TAURI_RUNTIME] invoke', { command });
   }
   return invoke<T>(command, args);
 }

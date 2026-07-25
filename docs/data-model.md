@@ -2238,3 +2238,59 @@ chapter summary
 ## 28.5 浏览器回退补偿
 
 浏览器开发模式没有 SQLite 事务。保存同一 bundle 或采用新正文并过期旧上下文前，必须拍摄相关 LocalStorage 集合快照；任一分步写入失败时恢复全部快照，并把原错误返回调用方。补偿回滚只用于开发回退，不能作为桌面端原子性通过证据。
+
+---
+
+# 29. v2.3.0 AI 执行事实模型
+
+v2.3.0 新增独立于 Legacy `AiTaskRecord` / `generation_jobs` 的持久执行事实层。旧记录不迁移、不回填，也不能被解释成拥有并不存在的 Snapshot 或 Artifact。
+
+## 29.1 AiTask
+
+`AiTask` 冻结任务类型、作品/章节/草稿 scope、三类 Snapshot ID、traceId、operationId、requestHashVersion、canonical requestHash 及预期 Artifact type/schema。Task 身份字段不可变；状态与当前 Attempt / 结果 Artifact 通过 CAS 和数据库触发器更新。
+
+Task 创建必须满足：
+
+- `system` scope 只允许连接测试；其他 scope 的 Novel、Chapter、Draft 归属由 Rust 和 SQLite 双重验证。
+- Task 与 Input / Context / Constraint Snapshot 在一个事务中创建。
+- 相同 operationId 仅在完整 requestHash 相同时重放。
+- `completed` 必须绑定同 Task、同当前 Attempt 且为 `valid` / `valid_with_warnings` 的 Artifact。
+
+## 29.2 AiTaskAttempt
+
+Attempt 使用 `(taskId, attemptId)` 联合身份及单 Task 递增 `attemptNumber`。同一 Task 最多一个 live Attempt（`queued`、`running`、`cancel_requested`）。Provider、Model 与 providerRequestId 一次性绑定；响应只保存白名单 metadata，不保存 raw body。
+
+Attempt 失败是否允许重试由持久 `error.retryable` 决定。重试创建新 Attempt，不复活或改写旧 Attempt。
+
+## 29.3 三类 Snapshot
+
+| 模型 | 结构化字段 | 完整大文本 | 来源身份 |
+|------|------------|------------|----------|
+| `AiInputSnapshot` | schema、inputType、payload | input body | sourceDraftId/version/base hash |
+| `AiContextSnapshot` | source manifest、budget、compilerVersion | compiled context | manifest 内稳定来源引用 |
+| `AiConstraintSnapshot` | constraints、template identity、provider options | prompt template body | template id/version/hash |
+
+三类 Snapshot 整行不可更新或删除。其大文本 document/chunks 在 Snapshot 建立引用后同样不可变。`contentHash` 是包含 schema、结构化字段和大文本 SHA-256 的 canonical 聚合 hash。
+
+## 29.4 ResultArtifact
+
+ResultArtifact 保存：
+
+- Task / Attempt / Input Snapshot 联合来源；
+- Artifact type/schema；
+- raw、display、structured payload 的大文本引用与 hash；
+- Novel / Chapter / Draft / version / base hash 的权威副本；
+- contentHash、字符长度、processingStatus；
+- 可选父 Artifact 与 derivation identity（M1 只读保留，尚未开放写入）。
+
+来源字段只能从持久 Task 与 Input Snapshot 派生。raw hash/length 必须与 Attempt 的 Provider response metadata 完全相同。Artifact 身份、正文、来源与派生字段不可原地修改，整行不可删除；只有受控 processingStatus 合法边可更新。
+
+## 29.5 ArtifactValidationIssue
+
+ValidationIssue 按 `(artifactId, validationRunId, issueIndex)` 稳定排序，只允许追加。message/details 受长度、凭据和正文泄漏限制；完整 Provider body 始终保存在 Artifact raw 大文本中，不复制到 Issue 或普通日志。
+
+## 29.6 关系与删除语义
+
+M1 内部关系使用 `ON DELETE RESTRICT`，执行事实不能因上层清理级联丢失。Task 目标使用不可变字符串身份和创建时归属验证，不向既有业务表增加外键或来源列，避免改变草稿删除、质量历史或当前生产 AI 流程。
+
+详细状态机、安全边界与 IPC 见 [`architecture/ai-execution-facts.md`](architecture/ai-execution-facts.md)。

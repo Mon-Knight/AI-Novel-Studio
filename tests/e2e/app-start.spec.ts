@@ -13,6 +13,10 @@ describe('desktop startup', () => {
     await assertCleanDiagnostics();
     const diagnostics = await bridgeDiagnostics();
     expect(diagnostics.databasePath).toContain('ai-novel-studio.db');
+    expect(diagnostics.migrationCount).toBe(11);
+    expect(diagnostics.latestMigrationId).toBe('011_artifact_validation_issues');
     expect(diagnostics.counts?.novels).toBe(0);
+    expect(diagnostics.counts?.executionTasks).toBe(0);
+    expect(diagnostics.counts?.resultArtifacts).toBe(0);
   });
 });

@@ -25,11 +25,13 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.2.1**
+**当前版本：v2.3.0**
 
-**阶段：工作区可靠性热修 — 采用/保存竞态、恢复候选幂等与原生关闭保护**
+**阶段：Agent 执行事实层 M1 — Task、Attempt、Snapshot、Artifact 持久化基础**
 
-v2.2.1 在 v2.2.0 基础上关闭三个窄竞态：采用与保存交错时可信接收后端派生的新候选；恢复快照清理失败后跨会话复用已提交候选，且 replay 目标失效时保留 completed operation 与恢复快照；原生关闭调用失败后撤销一次性 bypass，下一次关闭仍受 Leave Guard 保护。
+v2.3.0 在不迁移现有生产 AI 入口的前提下，新增统一、持久、可重放的 AI 执行事实层：Task 与三类 Snapshot 原子创建，Attempt 使用 CAS 隔离并发执行，Provider 原始结果以不可变 ResultArtifact 保存，ValidationIssue 只追加，并可在应用重启后完整读取。
+
+本版本不开放 Planner、Memory、自动续跑、Placement / ApplyPlan、Multi-Agent 或 Agent 自主写入；旧 `ai_task_records` 与 `generation_jobs` 继续作为 Legacy 记录保留。Provider Adapter 未修改，因此本版本不调用真实 AI API。
 
 本版本不增加新的 AI 自动写入范围，也不引入未来 Agent 功能；重点是让现有写作工作台在并发、异常退出、数据库故障和长正文损坏场景下保持可恢复、可验证。
 

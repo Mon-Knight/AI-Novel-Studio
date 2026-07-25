@@ -18,7 +18,7 @@
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
-| [version-roadmap.md](version-roadmap.md) | 当前权威版本路线图 | ✅ v2.2.1 已同步 |
+| [version-roadmap.md](version-roadmap.md) | 当前权威版本路线图 | ✅ v2.3.0 已同步 |
 | [module-boundaries.md](module-boundaries.md) | 模块边界定义 | ✅ 已有 |
 | [development-rules.md](development-rules.md) | 开发规则总览 | ✅ 已有 |
 | [agent-task-rules.md](project/agent-task-rules.md) | Agent 任务执行规则 | 🚧 占位，待后续细化 |
@@ -31,8 +31,10 @@
 | [architecture.md](technical/architecture.md) | 项目架构总览 | 🚧 占位，待后续细化 |
 | [database.md](technical/database.md) | 数据库设计与迁移 | 🚧 占位，待后续细化 |
 | [desktop-build.md](technical/desktop-build.md) | 桌面端构建指南 | 🚧 占位，待后续细化 |
-| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.2.1 已补充 |
+| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.3.0 已补充 |
+| [ai-execution-facts.md](architecture/ai-execution-facts.md) | v2.3.0 Task / Snapshot / Artifact 执行事实架构 | ✅ 已冻结并实现 |
 | [desktop-e2e.md](technical/desktop-e2e.md) | Windows 真实 Tauri E2E、隔离与排障 | ✅ v2.1.7+ 持续适用 |
+| [v2.3.0 M1 验收报告](audit/phase-3/08-v2.3.0-m1-acceptance.md) | 执行事实层发布门禁与安装包证据 | ✅ 通过 |
 | [api-routes.md](technical/api-routes.md) | API 路由说明 | 🚧 占位，待后续细化 |
 | [deployment.md](technical/deployment.md) | 部署说明 | 🚧 占位，待后续细化 |
 

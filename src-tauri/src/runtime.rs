@@ -6,8 +6,8 @@ use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "e2e")]
-use rusqlite::{params, OptionalExtension};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::params;
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 
 const E2E_FLAG: &str = "AI_NOVEL_STUDIO_E2E";
@@ -19,7 +19,7 @@ const DATABASE_FILE: &str = "ai-novel-studio.db";
 const DATABASE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const DATABASE_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 
-const REQUIRED_E2E_TABLES: [&str; 9] = [
+const REQUIRED_E2E_TABLES: [&str; 17] = [
     "novels",
     "volumes",
     "chapters",
@@ -29,6 +29,14 @@ const REQUIRED_E2E_TABLES: [&str; 9] = [
     "generation_step_results",
     "quality_check_items",
     "quality_issue_states",
+    "schema_migrations",
+    "ai_tasks",
+    "ai_task_attempts",
+    "ai_input_snapshots",
+    "ai_context_snapshots",
+    "ai_constraint_snapshots",
+    "result_artifacts",
+    "artifact_validation_issues",
 ];
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -39,6 +47,8 @@ pub struct E2eDiagnosticsCounts {
     pub chapters: i64,
     pub chapter_drafts: i64,
     pub ai_tasks: i64,
+    pub execution_tasks: i64,
+    pub result_artifacts: i64,
     pub generation_jobs: i64,
     pub generation_steps: i64,
     pub adopted_drafts: i64,
@@ -55,6 +65,8 @@ pub struct E2eDiagnostics {
     pub foreign_keys_enabled: bool,
     pub journal_mode: String,
     pub schema_ready: bool,
+    pub migration_count: i64,
+    pub latest_migration_id: Option<String>,
     pub counts: E2eDiagnosticsCounts,
 }
 
@@ -373,6 +385,8 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         chapters: count_rows(conn, "chapters")?,
         chapter_drafts: count_rows(conn, "chapter_drafts")?,
         ai_tasks: count_rows(conn, "ai_task_records")?,
+        execution_tasks: count_rows(conn, "ai_tasks")?,
+        result_artifacts: count_rows(conn, "result_artifacts")?,
         generation_jobs: count_rows(conn, "generation_jobs")?,
         generation_steps: count_rows(conn, "generation_step_results")?,
         adopted_drafts: if table_exists(conn, "chapter_drafts")? {
@@ -388,6 +402,19 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
     };
 
     append_e2e_log_at(&data_dir, "diagnostics: complete");
+    let migration_count = count_rows(conn, "schema_migrations")?;
+    let latest_migration_id = if table_exists(conn, "schema_migrations")? {
+        conn.query_row(
+            "SELECT migration_id FROM schema_migrations ORDER BY migration_id DESC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("failed to inspect migration ledger: {error}"))?
+    } else {
+        None
+    };
+
     Ok(E2eDiagnostics {
         enabled: true,
         data_dir: data_dir.to_string_lossy().into_owned(),
@@ -397,6 +424,8 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         foreign_keys_enabled,
         journal_mode,
         schema_ready,
+        migration_count,
+        latest_migration_id,
         counts,
     })
 }
@@ -838,6 +867,31 @@ mod tests {
             CREATE TABLE generation_step_results (id TEXT PRIMARY KEY);
             CREATE TABLE quality_check_items (id TEXT PRIMARY KEY);
             CREATE TABLE quality_issue_states (id TEXT PRIMARY KEY);
+            CREATE TABLE schema_migrations (
+                migration_id TEXT PRIMARY KEY,
+                version TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );
+            CREATE TABLE ai_tasks (task_id TEXT PRIMARY KEY);
+            CREATE TABLE ai_task_attempts (attempt_id TEXT PRIMARY KEY);
+            CREATE TABLE ai_input_snapshots (snapshot_id TEXT PRIMARY KEY);
+            CREATE TABLE ai_context_snapshots (snapshot_id TEXT PRIMARY KEY);
+            CREATE TABLE ai_constraint_snapshots (snapshot_id TEXT PRIMARY KEY);
+            CREATE TABLE result_artifacts (artifact_id TEXT PRIMARY KEY);
+            CREATE TABLE artifact_validation_issues (issue_id TEXT PRIMARY KEY);
+            INSERT INTO schema_migrations (migration_id, version, checksum, applied_at) VALUES
+                ('001_generation_checkpoint_facts', '2.0.4', 'checksum-001', '2026-07-26T00:00:00Z'),
+                ('002_workspace_recovery_snapshots', '2.2.0', 'checksum-002', '2026-07-26T00:00:00Z'),
+                ('003_draft_operation_results', '2.2.0', 'checksum-003', '2026-07-26T00:00:00Z'),
+                ('004_draft_operation_dispositions', '2.2.1', 'checksum-004', '2026-07-26T00:00:00Z'),
+                ('005_ai_tasks', '2.3.0', 'checksum-005', '2026-07-26T00:00:00Z'),
+                ('006_ai_task_attempts', '2.3.0', 'checksum-006', '2026-07-26T00:00:00Z'),
+                ('007_ai_input_snapshots', '2.3.0', 'checksum-007', '2026-07-26T00:00:00Z'),
+                ('008_ai_context_snapshots', '2.3.0', 'checksum-008', '2026-07-26T00:00:00Z'),
+                ('009_ai_constraint_snapshots', '2.3.0', 'checksum-009', '2026-07-26T00:00:00Z'),
+                ('010_result_artifacts', '2.3.0', 'checksum-010', '2026-07-26T00:00:00Z'),
+                ('011_artifact_validation_issues', '2.3.0', 'checksum-011', '2026-07-26T00:00:00Z');
             INSERT INTO novels (id) VALUES ('novel-1');
             INSERT INTO chapter_drafts (id, is_adopted) VALUES ('draft-1', 1), ('draft-2', 0);
             ",
@@ -862,6 +916,13 @@ mod tests {
         assert_eq!(diagnostics.counts.novels, 1);
         assert_eq!(diagnostics.counts.chapter_drafts, 2);
         assert_eq!(diagnostics.counts.adopted_drafts, 1);
+        assert_eq!(diagnostics.migration_count, 11);
+        assert_eq!(
+            diagnostics.latest_migration_id.as_deref(),
+            Some("011_artifact_validation_issues")
+        );
+        assert_eq!(diagnostics.counts.execution_tasks, 0);
+        assert_eq!(diagnostics.counts.result_artifacts, 0);
 
         drop(conn);
         fs::remove_dir_all(data_dir).unwrap();

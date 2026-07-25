@@ -1,5 +1,38 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.3.0 (2026-07-26) - Agent 执行事实层 M1
+
+### 新增
+
+- 新增 `AiTask`、`AiTaskAttempt`、`AiInputSnapshot`、`AiContextSnapshot`、`AiConstraintSnapshot`、`ResultArtifact` 与 `ArtifactValidationIssue` 七类持久执行事实。
+- 新增 SQLite migration 005～011；仅增加表、索引和触发器，不修改 `chapter_drafts`、`quality_check_reports` 或其他既有业务表，也不回填或伪造 Legacy Snapshot。
+- Task 创建由 Rust 计算 canonical requestHash，完整覆盖请求契约版本、目标、预期 Artifact、三类 Snapshot schema、正文/上下文/Prompt hash、compiler/budget 与白名单 Provider 选项；`operationId + requestHash` 支持权威重放。
+- Task 与三类 Snapshot、对应大文本 document/chunks 在单个 `IMMEDIATE` 事务内创建；Snapshot 及其引用的大文本建立引用后禁止更新或删除。
+- Attempt 新增单 Task 单活跃执行约束、状态与 revision CAS、Provider 身份一次性绑定、重试、取消、迟到响应隔离，以及提交结果未知后的幂等重放。
+- ResultArtifact 与持久 Input Snapshot、Task、Attempt、预期类型/schema 和 Provider responseHash/length 强绑定；原始、展示与结构化结果均复用大文本完整性层，解析失败仍保留完整原始响应。
+- ArtifactValidationIssue 使用稳定 run/index 顺序且只追加；错误和 Provider metadata 采用字段白名单、大小限制与凭据检测，不保存完整正文、Prompt、headers 或授权数据。
+- 新增受控 Tauri IPC、React/TypeScript 领域类型和桌面端薄 facade；浏览器开发模式不伪造持久 Task / Artifact。
+- 新增重启读取接口，可完整读取 Task、全部 Attempt、三类 Snapshot 正文、全部 Artifact 及 ValidationIssue 历史。
+
+### 可靠性与兼容性
+
+- `ai_task_records`、`generation_jobs` 与所有既有业务数据保持原样并继续作为 Legacy 使用；现有生产 AI 入口尚未迁移到新执行管线。
+- migration 动态覆盖空库、重复启动、旧/新 checksum 冲突、当前 migration 回滚、v2.2.1 业务表形状与行数保持、外键检查、SQLite integrity check 及真实用户数据库隔离副本升级。
+- queue、claim、Provider success/failure、取消和根 Artifact 均支持提交成功但 IPC 响应丢失后的同身份重放；变更后的重放请求 fail closed。
+- 普通日志不再输出新 AI Task IPC 参数，避免正文、Prompt、上下文或 Provider metadata 泄漏。
+
+### 版本边界
+
+- 本版本是后续 Provider Adapter、Tool Registry、Planner、Memory、恢复执行与 Multi-Agent 的执行事实基础，但不代表这些能力已经实现。
+- 本版本不实现自动续跑、Placement / ApplyPlan、正式正文自动写入、UI 重做或 Multi-Agent；不修改生产 Provider Adapter，因此不调用真实 AI API。
+
+### 验证
+
+- Rust/SQLite 常规全量测试 133/133；另以真实用户数据库的隔离副本执行 v2.2.1 基线补齐、M1 升级、重复启动、业务行数/字段形状与完整性验证 1/1。
+- `npm test` 通过：Node 16/16、tsx 44/44；`npm run lint` 0 error（保留 1 条既有 React Hooks warning）；`npm run build` 通过。
+- migration、Task/Attempt、Artifact、不可变大文本、重试幂等与文件数据库重启读取专项动态测试全部通过；未调用真实 AI API。
+- Windows Tauri 启动 smoke 1/1、完整桌面 E2E 11/11、生产构建与 MSI/NSIS 打包全部通过；最终产物大小和 SHA-256 记录于 v2.3.0 发布说明。
+
 ## v2.2.1 (2026-07-26) - 工作区竞态可靠性热修
 
 ### 修复

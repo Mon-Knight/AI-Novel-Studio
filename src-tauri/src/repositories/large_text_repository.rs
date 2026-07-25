@@ -321,7 +321,20 @@ pub fn delete_if_unreferenced(connection: &Connection, document_id: &str) -> Res
             |row| row.get(0),
         )
         .map_err(AppError::database)?;
-    if draft_references == 0 && recovery_references == 0 {
+    let ai_references: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM ai_input_snapshots WHERE body_ref_id = ?1) +
+                (SELECT COUNT(*) FROM ai_context_snapshots WHERE compiled_context_ref_id = ?1) +
+                (SELECT COUNT(*) FROM ai_constraint_snapshots WHERE prompt_template_ref_id = ?1) +
+                (SELECT COUNT(*) FROM result_artifacts
+                 WHERE raw_content_ref_id = ?1 OR display_content_ref_id = ?1
+                    OR structured_payload_ref_id = ?1)",
+            params![document_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if draft_references == 0 && recovery_references == 0 && ai_references == 0 {
         connection
             .execute(
                 "DELETE FROM large_text_documents WHERE id = ?1",
