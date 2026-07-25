@@ -40,6 +40,7 @@ type AtomicSaveRecord = {
   traceId?: string;
   trace_id?: string;
   draft?: unknown;
+  disposition?: unknown;
   contentHash?: string;
   content_hash?: string;
   contentLength?: number;
@@ -280,7 +281,7 @@ async function normalizeAtomicSave(
     novelId: string;
     chapterId: string;
     draftId?: string;
-    allowNewDraftId?: boolean;
+    draftVersion?: number;
     content: string;
     contentHash: string;
   },
@@ -299,13 +300,27 @@ async function normalizeAtomicSave(
   const returnedHash = record.contentHash ?? record.content_hash;
   const returnedLength = toNumber(record.contentLength ?? record.content_length, -1);
   const draft = normalizeDraft(record.draft);
+  const disposition = record.disposition;
+  let dispositionMatches = false;
+  if (draft) {
+    if (!expected.draftId) {
+      dispositionMatches = disposition === 'created_new';
+    } else if (disposition === 'updated_existing') {
+      dispositionMatches = draft.id === expected.draftId
+        && (expected.draftVersion === undefined || draft.versionNo === expected.draftVersion);
+    } else if (disposition === 'forked_from_adopted') {
+      dispositionMatches = draft.id !== expected.draftId
+        && (expected.draftVersion === undefined || draft.versionNo > expected.draftVersion);
+    }
+  }
   if (returnedOperationId !== expected.operationId
     || returnedHash !== expected.contentHash
     || returnedLength !== unicodeScalarLength(expected.content)
     || !draft
     || draft.novelId !== expected.novelId
     || draft.chapterId !== expected.chapterId
-    || (expected.draftId && !expected.allowNewDraftId && draft.id !== expected.draftId)) {
+    || draft.isAdopted
+    || !dispositionMatches) {
     throw {
       code: 'DOCUMENT_HASH_MISMATCH',
       message: '原子保存返回的正文身份校验失败。',
@@ -387,7 +402,16 @@ export const draftVersionService = {
       'create', input.novelId, input.chapterId, currentContentHash, input.source,
       input.title ?? '', input.aiTaskId ?? '', input.note ?? '',
     ]);
-    const operationId = operationIdFor(operationKey);
+    const explicitOperationId = input.operationId?.trim();
+    if (input.operationId !== undefined && !explicitOperationId) {
+      throw {
+        code: 'OPERATION_PAYLOAD_CONFLICT',
+        message: '显式 operationId 不能为空。',
+        retryable: false,
+        traceId,
+      };
+    }
+    const operationId = explicitOperationId ?? operationIdFor(operationKey);
     onProgress?.({ stage: 'finalizing', percent: 20, message: '正在原子保存正文…' });
     try {
       const raw = await dbCall<unknown>('save_chapter_draft_atomic', {
@@ -413,7 +437,7 @@ export const draftVersionService = {
         content: input.content,
         contentHash: currentContentHash,
       });
-      pendingOperationIds.delete(operationKey);
+      if (!explicitOperationId) pendingOperationIds.delete(operationKey);
       onProgress?.({ stage: 'done', percent: 100, message: '正文已保存' });
       return draft;
     } catch (error) {
@@ -548,7 +572,7 @@ export const draftVersionService = {
         novelId: persisted.novelId,
         chapterId,
         draftId: id,
-        allowNewDraftId: persisted.isAdopted,
+        draftVersion: persisted.versionNo,
         content,
         contentHash: currentContentHash,
       });

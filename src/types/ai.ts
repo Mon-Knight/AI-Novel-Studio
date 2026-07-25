@@ -171,6 +171,8 @@ export interface CreateChapterDraftInput {
   chapterId: string;
   content: string;
   source: DraftSource;
+  /** Optional durable idempotency identity for cross-session workflows. */
+  operationId?: string;
   title?: string;
   aiTaskId?: string;
   note?: string;

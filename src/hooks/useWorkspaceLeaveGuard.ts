@@ -223,8 +223,23 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
         reason: 'window_close',
         continueAction: async () => {
           bypassCloseGuardRef.current = true;
-          await appWindow.close();
+          try {
+            await appWindow.close();
+          } catch (error) {
+            // close() can reject before Tauri emits the recursive close event.
+            // Never leave the one-shot bypass armed for the next user request.
+            bypassCloseGuardRef.current = false;
+            throw error;
+          }
         },
+      }).catch((error) => {
+        // The document-guard path converts continueAction failures into
+        // save_failed. Goal-only preflight closes execute directly and can
+        // reject, so contain and record that promise here as well.
+        bypassCloseGuardRef.current = false;
+        logWorkspaceError('window_close_failed', error, {
+          traceId: createTraceId('window-close'),
+        });
       });
     }).then((stop) => {
       if (disposed) stop();

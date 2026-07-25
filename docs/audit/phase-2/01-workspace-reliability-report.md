@@ -141,6 +141,7 @@ DATABASE_COMMIT_UNKNOWN
 OPERATION_ALREADY_COMPLETED
 OPERATION_IN_PROGRESS
 OPERATION_PAYLOAD_CONFLICT
+OPERATION_REPLAY_TARGET_INVALID
 WORKSPACE_LEAVE_CANCELLED
 WORKSPACE_SAVE_FAILED
 WINDOW_CLOSE_BLOCKED
@@ -218,7 +219,7 @@ WINDOW_CLOSE_BLOCKED
 
 `draft_save_operations.operation_id` 是数据库主键，请求的目标身份、基础身份、正文 hash、字数、来源和标题共同生成稳定 request hash：
 
-- 相同 operationId、相同请求且已完成：返回第一次持久化的真实结果，并标记 idempotent replay；
+- 相同 operationId、相同请求且已完成：先权威重读目标并校验全部持久化身份；目标仍与首次结果一致时返回真实结果并标记 idempotent replay；目标已删除、漂移或损坏时返回 `OPERATION_REPLAY_TARGET_INVALID`，completed operation 保持不可变；
 - 相同 operationId、不同请求：返回 `OPERATION_PAYLOAD_CONFLICT`；
 - 状态为 `started`：返回可重试的 `OPERATION_IN_PROGRESS`；
 - 新保存：operation 与正文、chunks、草稿引用在同一事务内完成。
@@ -325,3 +326,13 @@ v2.2.0 实现已达到代码合入和发布候选条件：核心写入、读取�
 - 恢复内容另存候选提交后，即使快照清理失败也保持已提交成功语义并提示无需重复另存，清理可安全重试。
 
 协调后 Rust 测试总数由原实现分支记录的 29 个增长到 103 个；最终验证证据统一记录在第 13 节。以上协调测试和完整桌面 E2E 均未调用真实 AI API。v2.2.0 未修改 Provider 请求协议，因此真实 API 额度保留给后续实际涉及 Tool Calling、Planner 执行或 Multi-Agent handoff 的最小验收场景。
+
+## 18. v2.2.1 发布后竞态热修（2026-07-26）
+
+v2.2.0 tag 推送后的最终竞态复核确认了三个更窄的 TOCTOU / 失败恢复窗口。v2.2.1 保留 v2.2.0 的数据库结构和功能边界，只关闭以下缺口：
+
+1. 保存前权威读取仍可能早于采用事务。Rust 原子保存现在根据事务内状态返回 `created_new`、`updated_existing` 或 `forked_from_adopted`；前端只有在 disposition、目标、版本、正文 hash/长度和 operationId 全部一致时才接受变化后的 draft ID。v2.2.0 已完成 operation 仅在字段缺失时根据请求/结果身份补出 disposition，显式未知或伪造值失败关闭。
+2. recovery 候选在提交后、快照删除前存在进程退出窗口。v2.2.1 用作品、章节、基础草稿身份和恢复正文 hash 派生持久 operationId；重进时先按目标、固定 note、完整正文和 SHA-256 查找已提交候选，存在时只重试快照清理。completed replay 还会权威重读当前草稿；目标已被删除、修改或损坏时拒绝陈旧 DTO，保持首次 operation 记录和恢复快照不变。
+3. `appWindow.close()` 可能在递归 close 事件前拒绝。v2.2.1 在拒绝时撤销一次性 bypass，并收口 goal-only Promise；第二次原生关闭仍会 `preventDefault()` 并重新进入 Leave Guard。
+
+最终证据：前端工作区可靠性 15/15、恢复 12/12、长正文 7/7，Rust 111/111（含采用先提交与保存先提交两个顺序），完整 Windows Tauri E2E 11/11，MSI 与 NSIS 均构建成功。该热修没有修改 Provider/Tool Calling/Agent handoff，因此没有调用真实 AI API。

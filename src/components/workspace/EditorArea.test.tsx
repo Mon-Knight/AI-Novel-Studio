@@ -9,6 +9,7 @@ const vite = await createServer({
 });
 const editorModule = await vite.ssrLoadModule('/src/components/workspace/EditorArea.tsx');
 const resolveEditorDraftContent = editorModule.resolveEditorDraftContent as typeof import('./EditorArea').resolveEditorDraftContent;
+const isDraftSaveResultForDocument = editorModule.isDraftSaveResultForDocument as typeof import('./EditorArea').isDraftSaveResultForDocument;
 
 after(async () => {
   await vite.close();
@@ -68,4 +69,25 @@ test('a verified chapter with no draft clears the editor instead of retaining an
     chapterId: 'chapter-empty',
     draft: null,
   }), { action: 'replace', content: '', draft: null });
+});
+
+test('a backend-verified adopted fork is accepted by document ownership instead of a stale draft id', () => {
+  const forkedDraft: ChapterDraft = {
+    ...completeDraft,
+    id: 'draft-forked-after-adoption',
+    novelId: 'novel-a',
+    chapterId: 'chapter-b',
+    versionNo: completeDraft.versionNo + 1,
+  };
+
+  assert.equal(isDraftSaveResultForDocument(
+    forkedDraft,
+    'novel-a',
+    'chapter-b',
+  ), true);
+  assert.equal(isDraftSaveResultForDocument(
+    forkedDraft,
+    'novel-a',
+    'chapter-other',
+  ), false);
 });

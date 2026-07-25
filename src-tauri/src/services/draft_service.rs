@@ -59,10 +59,28 @@ pub struct SaveChapterDraftAtomicOutput {
     pub operation_id: String,
     pub trace_id: String,
     pub draft: AtomicDraftDto,
+    #[serde(default)]
+    pub disposition: SaveChapterDraftDisposition,
     pub content_hash: String,
     pub content_length: usize,
     pub storage_mode: String,
     pub idempotent_replay: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SaveChapterDraftDisposition {
+    CreatedNew,
+    UpdatedExisting,
+    ForkedFromAdopted,
+    #[serde(skip_deserializing)]
+    LegacyUnknown,
+}
+
+impl Default for SaveChapterDraftDisposition {
+    fn default() -> Self {
+        Self::LegacyUnknown
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -187,6 +205,19 @@ fn map_draft(record: draft_repository::DraftRecord, content: String) -> AtomicDr
     }
 }
 
+fn disposition_from_result_identity(
+    requested_draft_id: Option<&str>,
+    saved_draft_id: &str,
+) -> SaveChapterDraftDisposition {
+    match requested_draft_id {
+        None => SaveChapterDraftDisposition::CreatedNew,
+        Some(requested) if requested == saved_draft_id => {
+            SaveChapterDraftDisposition::UpdatedExisting
+        }
+        Some(_) => SaveChapterDraftDisposition::ForkedFromAdopted,
+    }
+}
+
 pub fn save_chapter_draft_atomic_with_cleanup<F>(
     connection: &mut Connection,
     input: SaveChapterDraftAtomicInput,
@@ -243,19 +274,21 @@ where
         .map_err(|error| add_context(error.into()))?;
     let existing_operation = transaction
         .query_row(
-            "SELECT request_hash, status, result_json FROM draft_save_operations WHERE operation_id = ?1",
+            "SELECT request_hash, status, result_json, draft_id
+             FROM draft_save_operations WHERE operation_id = ?1",
             params![operation_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             },
         )
         .optional()
         .map_err(|error| add_context(error.into()))?;
-    if let Some((stored_hash, status, result_json)) = existing_operation {
+    if let Some((stored_hash, status, result_json, stored_draft_id)) = existing_operation {
         if stored_hash != operation_request_hash {
             return Err(add_context(AppError::new(
                 codes::OPERATION_PAYLOAD_CONFLICT,
@@ -272,27 +305,135 @@ where
                         false,
                     ))
                 })?;
-            output.idempotent_replay = true;
-            transaction.commit().map_err(|error| {
-                add_context(
-                    AppError::new(codes::DATABASE_COMMIT_UNKNOWN, "数据库提交状态未知", true)
-                        .with_details(serde_json::json!({ "sqliteError": error.to_string() })),
-                )
-            })?;
-            if let Err(cleanup_error) = cleanup() {
-                log_workspace_event(WorkspaceLogEvent {
-                    level: "warn",
-                    event: "draft_save_post_commit_cleanup_failed",
-                    trace_id: Some(&trace_id),
-                    operation_id: Some(&operation_id),
-                    novel_id: Some(&input.novel_id),
-                    chapter_id: Some(&input.chapter_id),
-                    draft_id: Some(&output.draft.id),
-                    error_code: None,
-                    metadata: Some(serde_json::json!({ "maintenanceError": cleanup_error })),
-                });
+            let result_disposition =
+                disposition_from_result_identity(input.draft_id.as_deref(), &output.draft.id);
+            if output.disposition == SaveChapterDraftDisposition::LegacyUnknown {
+                // v2.2.0 operation rows predate the explicit disposition. The
+                // old atomic writer could only change an update target ID when
+                // the target had become adopted, so its persisted identities
+                // are sufficient to upgrade the replay result safely.
+                output.disposition = result_disposition;
+            } else if output.disposition != result_disposition {
+                return Err(add_context(AppError::new(
+                    codes::DATABASE_TRANSACTION_FAILED,
+                    "已完成操作的写入类型与草稿身份不一致",
+                    false,
+                )));
             }
-            return Ok(output);
+
+            let persisted_draft = draft_repository::find_draft(&transaction, &output.draft.id)
+                .map_err(add_context)?;
+            let verified_content = match persisted_draft.as_ref() {
+                Some(draft) => match load_full_content(&transaction, draft) {
+                    Ok(content) => Some(content),
+                    Err(error)
+                        if matches!(
+                            error.code.as_str(),
+                            codes::LARGE_TEXT_HASH_MISMATCH
+                                | codes::LARGE_TEXT_CHUNK_MISSING
+                                | codes::LARGE_TEXT_CONTENT_UNAVAILABLE
+                                | codes::LARGE_TEXT_REFERENCE_INVALID
+                        ) =>
+                    {
+                        None
+                    }
+                    Err(error) => return Err(add_context(error)),
+                },
+                None => None,
+            };
+            let expected_storage_mode =
+                if input.content.len() > large_text_repository::LARGE_TEXT_THRESHOLD_BYTES {
+                    "chunked"
+                } else {
+                    "inline"
+                };
+            let replay_is_authoritative =
+                match (persisted_draft.as_ref(), verified_content.as_ref()) {
+                    (Some(draft), Some(content)) => {
+                        stored_draft_id.as_deref() == Some(output.draft.id.as_str())
+                            && output.operation_id == operation_id
+                            && draft.id == output.draft.id
+                            && draft.novel_id == input.novel_id
+                            && draft.chapter_id == input.chapter_id
+                            && draft.title == output.draft.title
+                            && draft.source == output.draft.source
+                            && draft.version_no == output.draft.version_no
+                            && draft.word_count == output.draft.word_count
+                            && draft.is_adopted == output.draft.is_adopted
+                            && draft.ai_task_id == output.draft.ai_task_id
+                            && draft.note == output.draft.note
+                            && draft.large_text_ref_id == output.draft.large_text_ref_id
+                            && draft.created_at == output.draft.created_at
+                            && draft.updated_at == output.draft.updated_at
+                            && content.content == input.content
+                            && content.content == output.draft.content
+                            && content
+                                .content_hash
+                                .eq_ignore_ascii_case(&input.current_content_hash)
+                            && content
+                                .content_hash
+                                .eq_ignore_ascii_case(&output.content_hash)
+                            && content.content_length == input.content.chars().count()
+                            && content.content_length == output.content_length
+                            && output.storage_mode == expected_storage_mode
+                    }
+                    _ => false,
+                };
+
+            if replay_is_authoritative {
+                let persisted_draft = persisted_draft.expect("authoritative replay has a draft");
+                let verified_content =
+                    verified_content.expect("authoritative replay has verified content");
+                output.draft = map_draft(persisted_draft, verified_content.content);
+                output.content_hash = verified_content.content_hash;
+                output.content_length = verified_content.content_length;
+                output.idempotent_replay = true;
+                transaction.commit().map_err(|error| {
+                    add_context(
+                        AppError::new(codes::DATABASE_COMMIT_UNKNOWN, "数据库提交状态未知", true)
+                            .with_details(serde_json::json!({ "sqliteError": error.to_string() })),
+                    )
+                })?;
+                if let Err(cleanup_error) = cleanup() {
+                    log_workspace_event(WorkspaceLogEvent {
+                        level: "warn",
+                        event: "draft_save_post_commit_cleanup_failed",
+                        trace_id: Some(&trace_id),
+                        operation_id: Some(&operation_id),
+                        novel_id: Some(&input.novel_id),
+                        chapter_id: Some(&input.chapter_id),
+                        draft_id: Some(&output.draft.id),
+                        error_code: None,
+                        metadata: Some(serde_json::json!({ "maintenanceError": cleanup_error })),
+                    });
+                }
+                return Ok(output);
+            }
+
+            log_workspace_event(WorkspaceLogEvent {
+                level: "warn",
+                event: "draft_save_replay_target_invalid",
+                trace_id: Some(&trace_id),
+                operation_id: Some(&operation_id),
+                novel_id: Some(&input.novel_id),
+                chapter_id: Some(&input.chapter_id),
+                draft_id: Some(&output.draft.id),
+                error_code: Some(codes::OPERATION_REPLAY_TARGET_INVALID),
+                metadata: Some(serde_json::json!({
+                    "action": "preserve_completed_operation",
+                })),
+            });
+            return Err(add_context(
+                AppError::new(
+                    codes::OPERATION_REPLAY_TARGET_INVALID,
+                    "已完成操作的持久化草稿已不存在或发生变化",
+                    false,
+                )
+                .with_details(serde_json::json!({
+                    "draftId": output.draft.id,
+                    "operationStatus": "completed",
+                })),
+            ));
         }
         if status == "started" {
             return Err(add_context(AppError::new(
@@ -370,11 +511,15 @@ where
         None
     };
 
-    // Adopted versions are immutable history. Editing one creates a new candidate version.
-    let create_new_version = existing_draft
-        .as_ref()
-        .map(|draft| draft.is_adopted)
-        .unwrap_or(true);
+    // Adopted versions are immutable history. The disposition records the
+    // decision made from the authoritative row inside this transaction, so a
+    // caller never has to infer it from a stale preflight read.
+    let disposition = match existing_draft.as_ref() {
+        None => SaveChapterDraftDisposition::CreatedNew,
+        Some(draft) if draft.is_adopted => SaveChapterDraftDisposition::ForkedFromAdopted,
+        Some(_) => SaveChapterDraftDisposition::UpdatedExisting,
+    };
+    let create_new_version = disposition != SaveChapterDraftDisposition::UpdatedExisting;
     let draft_id = if create_new_version {
         uuid::Uuid::new_v4().to_string()
     } else {
@@ -493,6 +638,7 @@ where
         operation_id: operation_id.clone(),
         trace_id: trace_id.clone(),
         draft: map_draft(saved_record, input.content.clone()),
+        disposition,
         content_hash: actual_hash,
         content_length: input.content.chars().count(),
         storage_mode: if use_large_text { "chunked" } else { "inline" }.to_string(),
@@ -654,9 +800,13 @@ mod tests {
         request.ai_task_id = Some("task-a".to_string());
         request.note = Some("constraint snapshot".to_string());
 
-        let output =
-            save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+        let output = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
 
+        assert_eq!(output.disposition, SaveChapterDraftDisposition::CreatedNew);
+        assert_eq!(
+            serde_json::to_value(output.disposition)?,
+            serde_json::json!("created_new")
+        );
         assert_eq!(output.draft.ai_task_id.as_deref(), Some("task-a"));
         assert_eq!(output.draft.note.as_deref(), Some("constraint snapshot"));
         let persisted: (Option<String>, Option<String>) = connection.query_row(
@@ -666,6 +816,34 @@ mod tests {
         )?;
         assert_eq!(persisted.0.as_deref(), Some("task-a"));
         assert_eq!(persisted.1.as_deref(), Some("constraint snapshot"));
+        Ok(())
+    }
+
+    #[test]
+    fn update_reports_updated_existing_disposition() -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let created = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("op-create-for-update", "基础正文".to_string()),
+            || Ok(()),
+        )?;
+        let mut request = input("op-update-existing", "修改正文".to_string());
+        request.draft_id = Some(created.draft.id.clone());
+        request.draft_version = Some(created.draft.version_no);
+        request.base_content_hash = Some(created.content_hash);
+
+        let updated = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+
+        assert_eq!(
+            updated.disposition,
+            SaveChapterDraftDisposition::UpdatedExisting
+        );
+        assert_eq!(updated.draft.id, created.draft.id);
+        assert_eq!(updated.draft.version_no, created.draft.version_no);
+        assert_eq!(
+            serde_json::to_value(updated.disposition)?,
+            serde_json::json!("updated_existing")
+        );
         Ok(())
     }
 
@@ -777,10 +955,199 @@ mod tests {
         let second = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
         assert!(!first.idempotent_replay);
         assert!(second.idempotent_replay);
+        assert_eq!(first.disposition, SaveChapterDraftDisposition::CreatedNew);
+        assert_eq!(second.disposition, first.disposition);
         assert_eq!(first.draft.id, second.draft.id);
         assert_eq!(count(&connection, "large_text_documents")?, 1);
         assert_eq!(count(&connection, "chapter_drafts")?, 1);
         assert_eq!(count(&connection, "draft_save_operations")?, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn completed_create_rejects_a_deleted_replay_target() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut connection = test_connection()?;
+        let request = input("op-rebuild-deleted", "恢复正文".to_string());
+        let first =
+            save_chapter_draft_atomic_with_cleanup(&mut connection, request.clone(), || Ok(()))?;
+        connection.execute(
+            "DELETE FROM chapter_drafts WHERE id = ?1",
+            params![first.draft.id],
+        )?;
+
+        let error = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))
+            .expect_err("a deleted completed result must not replay or rebuild");
+
+        assert_eq!(error.code, codes::OPERATION_REPLAY_TARGET_INVALID);
+        assert!(!error.retryable);
+        assert_eq!(count(&connection, "chapter_drafts")?, 0);
+        assert_eq!(count(&connection, "draft_save_operations")?, 1);
+        let (stored_draft_id, status): (String, String) = connection.query_row(
+            "SELECT draft_id, status FROM draft_save_operations
+             WHERE operation_id = 'op-rebuild-deleted'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(stored_draft_id, first.draft.id);
+        assert_eq!(status, "completed");
+        Ok(())
+    }
+
+    #[test]
+    fn completed_create_rejects_a_corrupt_replay_target() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut connection = test_connection()?;
+        let content = "恢复长正文".repeat(50_000);
+        let request = input("op-rebuild-corrupt", content.clone());
+        let first =
+            save_chapter_draft_atomic_with_cleanup(&mut connection, request.clone(), || Ok(()))?;
+        connection.execute(
+            "UPDATE large_text_chunks SET content = 'corrupt'
+             WHERE document_id = ?1 AND chunk_index = 0",
+            params![first.draft.large_text_ref_id],
+        )?;
+
+        let error = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))
+            .expect_err("a corrupt completed result must not replay or rebuild");
+
+        assert_eq!(error.code, codes::OPERATION_REPLAY_TARGET_INVALID);
+        assert!(!error.retryable);
+        assert_eq!(count(&connection, "chapter_drafts")?, 1);
+        assert_eq!(count(&connection, "draft_save_operations")?, 1);
+        let (stored_draft_id, status): (String, String) = connection.query_row(
+            "SELECT draft_id, status FROM draft_save_operations
+             WHERE operation_id = 'op-rebuild-corrupt'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(stored_draft_id, first.draft.id);
+        assert_eq!(status, "completed");
+        Ok(())
+    }
+
+    fn remove_stored_disposition(
+        connection: &Connection,
+        operation_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let stored: String = connection.query_row(
+            "SELECT result_json FROM draft_save_operations WHERE operation_id = ?1",
+            params![operation_id],
+            |row| row.get(0),
+        )?;
+        let mut legacy_result: serde_json::Value = serde_json::from_str(&stored)?;
+        legacy_result
+            .as_object_mut()
+            .expect("saved result is an object")
+            .remove("disposition");
+        connection.execute(
+            "UPDATE draft_save_operations SET result_json = ?1 WHERE operation_id = ?2",
+            params![legacy_result.to_string(), operation_id],
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn v220_created_new_replay_is_upgraded_with_an_explicit_disposition(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let request = input("op-legacy-create-replay", "正文".to_string());
+        let first =
+            save_chapter_draft_atomic_with_cleanup(&mut connection, request.clone(), || Ok(()))?;
+        remove_stored_disposition(&connection, &request.operation_id)?;
+
+        let replay = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+
+        assert!(replay.idempotent_replay);
+        assert_eq!(replay.draft.id, first.draft.id);
+        assert_eq!(replay.disposition, SaveChapterDraftDisposition::CreatedNew);
+        Ok(())
+    }
+
+    #[test]
+    fn v220_updated_existing_replay_is_upgraded_with_an_explicit_disposition(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let created = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("op-legacy-update-base", "旧正文".to_string()),
+            || Ok(()),
+        )?;
+        let mut request = input("op-legacy-update-replay", "新正文".to_string());
+        request.draft_id = Some(created.draft.id.clone());
+        request.draft_version = Some(created.draft.version_no);
+        request.base_content_hash = Some(created.content_hash);
+        let first =
+            save_chapter_draft_atomic_with_cleanup(&mut connection, request.clone(), || Ok(()))?;
+        remove_stored_disposition(&connection, &request.operation_id)?;
+
+        let replay = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+
+        assert!(replay.idempotent_replay);
+        assert_eq!(replay.draft.id, first.draft.id);
+        assert_eq!(
+            replay.disposition,
+            SaveChapterDraftDisposition::UpdatedExisting
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn v220_forked_replay_is_upgraded_with_an_explicit_disposition(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let created = save_chapter_draft_atomic_with_cleanup(
+            &mut connection,
+            input("op-legacy-fork-base", "采用正文".to_string()),
+            || Ok(()),
+        )?;
+        connection.execute(
+            "UPDATE chapter_drafts SET is_adopted = 1 WHERE id = ?1",
+            params![created.draft.id],
+        )?;
+        let mut request = input("op-legacy-fork-replay", "采用后编辑".to_string());
+        request.draft_id = Some(created.draft.id.clone());
+        request.draft_version = Some(created.draft.version_no);
+        request.base_content_hash = Some(created.content_hash);
+        let first =
+            save_chapter_draft_atomic_with_cleanup(&mut connection, request.clone(), || Ok(()))?;
+        remove_stored_disposition(&connection, &request.operation_id)?;
+
+        let replay = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+
+        assert!(replay.idempotent_replay);
+        assert_eq!(replay.draft.id, first.draft.id);
+        assert_ne!(replay.draft.id, created.draft.id);
+        assert_eq!(
+            replay.disposition,
+            SaveChapterDraftDisposition::ForkedFromAdopted
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_legacy_disposition_is_rejected_as_corrupt_result(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        let request = input("op-explicit-legacy-disposition", "正文".to_string());
+        save_chapter_draft_atomic_with_cleanup(&mut connection, request.clone(), || Ok(()))?;
+        let stored: String = connection.query_row(
+            "SELECT result_json FROM draft_save_operations WHERE operation_id = ?1",
+            params![request.operation_id],
+            |row| row.get(0),
+        )?;
+        let mut corrupt_result: serde_json::Value = serde_json::from_str(&stored)?;
+        corrupt_result["disposition"] = serde_json::json!("legacy_unknown");
+        connection.execute(
+            "UPDATE draft_save_operations SET result_json = ?1 WHERE operation_id = ?2",
+            params![corrupt_result.to_string(), request.operation_id],
+        )?;
+
+        let error = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))
+            .expect_err("an explicit legacy marker must not be treated as a missing v2.2.0 field");
+
+        assert_eq!(error.code, codes::DATABASE_TRANSACTION_FAILED);
+        assert_eq!(count(&connection, "chapter_drafts")?, 1);
         Ok(())
     }
 
@@ -843,21 +1210,35 @@ mod tests {
     }
 
     #[test]
-    fn adopted_draft_is_never_overwritten_in_place() -> Result<(), Box<dyn std::error::Error>> {
+    fn adoption_after_preflight_reports_trusted_fork() -> Result<(), Box<dyn std::error::Error>> {
         let mut connection = test_connection()?;
-        let original_hash = large_text_repository::sha256("已采用正文");
+        let original_hash = large_text_repository::sha256("采用前正文");
         connection.execute(
             "INSERT INTO chapter_drafts
              (id, novel_id, chapter_id, content, source, version_no, word_count, is_adopted,
               content_hash, created_at, updated_at)
-             VALUES ('adopted', 'novel-a', 'chapter-a', '已采用正文', 'manual', 1, 5, 1, ?1, 'now', 'now')",
+             VALUES ('adopted', 'novel-a', 'chapter-a', '采用前正文', 'manual', 1, 5, 0, ?1, 'now', 'now')",
             params![original_hash],
+        )?;
+        // The client has already captured version 1/hash above. Adoption wins
+        // after that preflight but before the atomic save transaction begins.
+        connection.execute(
+            "UPDATE chapter_drafts SET is_adopted = 1 WHERE id = 'adopted'",
+            [],
         )?;
         let mut request = input("op-adopted", "候选修改".to_string());
         request.draft_id = Some("adopted".to_string());
         request.draft_version = Some(1);
         request.base_content_hash = Some(original_hash);
         let saved = save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+        assert_eq!(
+            saved.disposition,
+            SaveChapterDraftDisposition::ForkedFromAdopted
+        );
+        assert_eq!(
+            serde_json::to_value(saved.disposition)?,
+            serde_json::json!("forked_from_adopted")
+        );
         assert_ne!(saved.draft.id, "adopted");
         assert_eq!(saved.draft.version_no, 2);
         let original: (String, i64) = connection.query_row(
@@ -865,7 +1246,7 @@ mod tests {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        assert_eq!(original, ("已采用正文".to_string(), 1));
+        assert_eq!(original, ("采用前正文".to_string(), 1));
         Ok(())
     }
 }

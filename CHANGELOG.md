@@ -1,5 +1,26 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.2.1 (2026-07-26) - 工作区竞态可靠性热修
+
+### 修复
+
+- 原子草稿保存结果新增可信 `disposition`，明确区分新建、原地更新和“采用竞态后派生新候选”；前端不再依据事务前的陈旧 `isAdopted` / draft ID 误报已提交保存失败。
+- v2.2.0 已完成 operation 仅在 `disposition` 字段缺失时按请求/结果 ID 兼容升级；显式未知或伪造值直接拒绝，三种合法写入类型均有旧记录重放回归。
+- 冲突恢复内容使用基于快照身份的持久 operationId，并在跨会话重试时按目标、note、完整正文与 SHA-256 识别已提交候选；completed replay 返回前重新权威读取目标，目标已删除、漂移或损坏时保持原 operation 不变并拒绝陈旧成功，恢复快照不会被误清理。
+- Tauri 原生 `close()` 拒绝时立即撤销一次性 bypass；下一次关闭仍进入 Leave Guard，goal-only 预检路径也不再产生未处理 Promise rejection。
+
+### 版本边界
+
+- 本版本只修复 v2.2.0 发布后审查确认的三条竞态，不扩展 AI Provider、Planner、Memory、Multi-Agent 或自主写入能力。
+- 本版本不调用真实 AI API；真实额度保留给实际修改 Provider、Tool Calling 或 Agent handoff 的后续里程碑。
+
+### 验证
+
+- `npm run lint` 通过：0 error，保留 1 条既有 React Hooks warning；`npm run build` 通过，211 modules。
+- `npm test` 通过：Node 16/16、tsx 44/44；组件 5/5、工作区可靠性 15/15、恢复 12/12、长正文 7/7、正文安全门 5/5、迁移 1/1。
+- Rust/SQLite 全套 111/111，包含“采用先提交”和“保存先提交”两个竞态顺序；完整 Windows Tauri E2E 11 个独立 spec 全部通过。
+- `npm run tauri:build` 同时生成 v2.2.1 MSI 与 NSIS 安装包。
+
 ## v2.2.0 (2026-07-26) - 工作区可靠性与基础设施收口
 
 ### 新增

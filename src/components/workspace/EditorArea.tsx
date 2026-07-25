@@ -62,6 +62,21 @@ export function resolveEditorDraftContent(input: {
   return { action: 'replace', content: input.draft.content, draft: input.draft };
 }
 
+/**
+ * The persistence service has already verified whether an update kept its ID
+ * or atomically forked because adoption won the race. At the editor boundary
+ * only live document ownership is checked; comparing against the preflight
+ * draft ID would reject that valid fork using stale adoption state.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function isDraftSaveResultForDocument(
+  draft: ChapterDraft | null | undefined,
+  novelId: string,
+  chapterId: string,
+): draft is ChapterDraft {
+  return Boolean(draft && draft.novelId === novelId && draft.chapterId === chapterId);
+}
+
 export type EditorCommandType = 'save' | 'format' | 'adopt-current';
 
 export interface EditorCommandRequest {
@@ -443,13 +458,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
           });
         },
       );
-      const expectedUpdatedDraftId = currentDraft && !currentDraft.isAdopted
-        ? currentDraft.id
-        : undefined;
-      if (!savedDraft
-        || savedDraft.novelId !== requestNovelId
-        || savedDraft.chapterId !== requestChapterId
-        || (expectedUpdatedDraftId && savedDraft.id !== expectedUpdatedDraftId)) {
+      if (!isDraftSaveResultForDocument(savedDraft, requestNovelId, requestChapterId)) {
         throw new Error('草稿保存结果与当前章节不一致');
       }
       const liveDocument = liveDocumentRef.current;

@@ -44,6 +44,7 @@ import {
   validateDocumentApplication,
   validateDraftDocumentTarget,
 } from '../../features/workspace/documentSafety';
+import { persistRecoveryCandidate } from '../../features/workspace/recoveryCandidate';
 import { hashTextContent } from '../../utils/contentHash';
 import { useWorkspaceRecovery } from '../../hooks/useWorkspaceRecovery';
 import { useWorkspaceLeaveGuard } from '../../hooks/useWorkspaceLeaveGuard';
@@ -996,21 +997,7 @@ function WritingWorkspacePage() {
     const snapshot = recoveryPrompt.snapshot;
     setRecoveryBusy(true);
     try {
-      const saved = await draftVersionService.create({
-        novelId: snapshot.novelId,
-        chapterId: snapshot.chapterId,
-        title: activeChapter?.title,
-        content: snapshot.recoveryContent,
-        source: 'user_edited',
-        note: '由冲突恢复快照另存',
-      });
-      if (saved.novelId !== snapshot.novelId || saved.chapterId !== snapshot.chapterId) {
-        throw {
-          code: 'RECOVERY_CONTENT_INVALID',
-          message: '候选草稿返回的目标身份不一致。',
-          retryable: false,
-        };
-      }
+      const { draft: saved, reused } = await persistRecoveryCandidate(snapshot);
       try {
         await clearRecovery({ novelId: snapshot.novelId, chapterId: snapshot.chapterId });
       } catch (cleanupError) {
@@ -1023,13 +1010,13 @@ function WritingWorkspacePage() {
         dismissRecoveryPrompt();
         await showInfo({
           title: '候选草稿已保存',
-          message: `恢复内容已保存为草稿 v${saved.versionNo}，但恢复快照暂未清理；无需重复另存。`,
+          message: `恢复内容${reused ? '已对应' : '已保存为'}草稿 v${saved.versionNo}，但恢复快照暂未清理；再次操作只会重试清理，不会重复另存。`,
         });
         return;
       }
       await showInfo({
-        title: '已另存为候选草稿',
-        message: `恢复内容已保存为草稿 v${saved.versionNo}，当前正文未被覆盖。`,
+        title: reused ? '候选草稿已存在' : '已另存为候选草稿',
+        message: `恢复内容${reused ? '已对应' : '已保存为'}草稿 v${saved.versionNo}，当前正文未被覆盖。`,
       });
     } catch (error) {
       const normalized = logWorkspaceError('recovery_save_as_draft_failed', error, {
@@ -1041,7 +1028,7 @@ function WritingWorkspacePage() {
     } finally {
       setRecoveryBusy(false);
     }
-  }, [activeChapter?.title, clearRecovery, dismissRecoveryPrompt, recoveryPrompt]);
+  }, [clearRecovery, dismissRecoveryPrompt, recoveryPrompt]);
 
   return (
     <div

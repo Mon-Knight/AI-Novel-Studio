@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.2.0（工作区可靠性与基础设施收口）
+> 当前版本：v2.2.1（工作区竞态可靠性热修）
 > 适用范围：正文变更动态回归、Vitest / React 组件测试、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.2.0，测试体系在既有正文安全、备份恢复、请求取消、质量历史和章节上下文一致性基础上，增加工作区恢复、统一离开保护、正式迁移账本与 React 动态故障验证：
+截至 v2.2.1，测试体系在既有正文安全、备份恢复、请求取消、质量历史和章节上下文一致性基础上，增加工作区恢复、统一离开保护、正式迁移账本，以及采用/保存、跨会话恢复候选和原生关闭拒绝的动态竞态验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -27,7 +27,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.2.0 动态测试入口
+## 2. v2.2.x 动态测试入口
 
 ### 2.1 工作区可靠性专项
 
@@ -43,8 +43,9 @@ npm run test:migrations
 
 - `components`：正文不可用状态与恢复对话框。
 - `workspace-reliability`：T01～T07、T12，覆盖快速切章、保存/取消、Hash 路由与 Tauri 关闭防重入。
-- `workspace-recovery`：T09～T11，覆盖 debounce、StrictMode、恢复冲突、内存恢复和精确清理。
-- `large-text-integrity`：前端 fail-closed / operation 重试与 Rust DB04～DB11。
+- `workspace-reliability` 在 v2.2.1 额外覆盖 close reject 后撤销 bypass、第二次关闭重新阻断，以及 goal-only close 拒绝的 Promise 收口。
+- `workspace-recovery`：T09～T11，覆盖 debounce、StrictMode、恢复冲突、内存恢复、精确清理、清理失败后的跨会话候选复用，以及 completed replay 目标被删除或损坏时的失败关闭。
+- `large-text-integrity`：前端 fail-closed / operation 重试 / 采用竞态 disposition 与 Rust DB04～DB11；Rust 集成回归分别执行采用先提交和保存先提交两个顺序，并核对最终草稿、章节指针与 operation 状态。
 - `migrations`：AppError 契约与 Rust DB01～DB03、DB15～DB16。
 
 `components` 与 `workspace-reliability` 只运行各自定向 Vitest。其余三个入口先运行定向 Vitest，再检查所需 Rust 测试的完整名称是否各自唯一存在，最后运行全量 Rust 测试；因此它们不是 Rust 过滤命令。Cargo 测试发现为 0、名称歧义或任一全量 Rust 回归失败均不得被当作通过。
@@ -448,7 +449,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - Windows 桌面自动化采用 WebdriverIO + Tauri Driver，不计划用 Playwright 浏览器页面或截图式 Computer Use 替代真实 Tauri E2E。
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
-- `operationId` 的数据库级重放与提交后清理故障已由 service 测试证明；真实 IPC 进程在提交边界被强制终止时的端到端对账仍需继续补充。
+- `operationId` 的数据库级重放、completed 目标权威复验与提交后清理故障已由 service 测试证明；真实 IPC 进程在提交边界被强制终止时的端到端对账仍需继续补充。
 - 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消与质量历史不可变重放已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - v2.1.8 已把章节总结、上下文和角色状态的桌面事实源收敛到 SQLite；旧缓存清理仍发生在 SQLite 提交之后，因此只能通过明确 ID 映射、warning 和幂等重试保证安全，不宣称跨存储 ACID。

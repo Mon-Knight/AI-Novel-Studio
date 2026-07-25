@@ -89,6 +89,7 @@ describe('draft persistence reliability facade', () => {
         contentLength: (input.content as string).length,
         storageMode: 'inline',
         idempotentReplay: false,
+        disposition: 'created_new',
         draft: persistedDraft({
           id: 'draft-created',
           content: '待保存完整正文',
@@ -111,6 +112,41 @@ describe('draft persistence reliability facade', () => {
     expect(draft.id).toBe('draft-created');
     expect(draft.content).toBe('待保存完整正文');
     expect(draft.contentState?.status).toBe('ready');
+  });
+
+  it('uses a caller-provided durable operationId for a recovery candidate', async () => {
+    const operationId = `recovery-candidate-${'a'.repeat(64)}`;
+    runtimeMocks.invoke.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      expect(command).toBe('save_chapter_draft_atomic');
+      const input = args.input as Record<string, unknown>;
+      expect(input.operationId).toBe(operationId);
+      return {
+        operationId,
+        traceId: input.traceId,
+        contentHash: input.currentContentHash,
+        contentLength: Array.from(String(input.content)).length,
+        storageMode: 'inline',
+        idempotentReplay: false,
+        disposition: 'created_new',
+        draft: persistedDraft({
+          id: 'draft-recovery',
+          content: String(input.content),
+          largeTextRefId: undefined,
+          note: '由冲突恢复快照另存',
+        }),
+      };
+    });
+
+    const saved = await draftVersionService.create({
+      novelId: 'novel-a',
+      chapterId: 'chapter-a',
+      content: '恢复正文',
+      source: 'user_edited',
+      note: '由冲突恢复快照另存',
+      operationId,
+    });
+
+    expect(saved.id).toBe('draft-recovery');
   });
 
   it('uses Unicode scalar length and reuses operationId when the same update is retried', async () => {
@@ -148,6 +184,7 @@ describe('draft persistence reliability facade', () => {
         contentLength: Array.from(content).length,
         storageMode: 'inline',
         idempotentReplay: false,
+        disposition: 'updated_existing',
         draft: persistedDraft({ content, largeTextRefId: undefined }),
       };
     });
@@ -177,7 +214,7 @@ describe('draft persistence reliability facade', () => {
     }));
   });
 
-  it('accepts a new candidate id when adoption commits during editing', async () => {
+  it('accepts a trusted fork when adoption commits after the authoritative preflight read', async () => {
     const baseContent = '采用前正文';
     const editedContent = '采用期间继续编辑的正文';
     const baseHash = await computeContentSha256(baseContent);
@@ -193,7 +230,7 @@ describe('draft persistence reliability facade', () => {
           persistedDraft({
             content: baseContent,
             largeTextRefId: undefined,
-            isAdopted: true,
+            isAdopted: false,
           }),
         ];
       }
@@ -208,6 +245,7 @@ describe('draft persistence reliability facade', () => {
         contentLength: Array.from(editedContent).length,
         storageMode: 'inline',
         idempotentReplay: false,
+        disposition: 'forked_from_adopted',
         draft: persistedDraft({
           id: 'draft-after-adoption',
           content: editedContent,
@@ -235,5 +273,45 @@ describe('draft persistence reliability facade', () => {
     expect(saved.id).toBe('draft-after-adoption');
     expect(saved.isAdopted).toBe(false);
     expect(saved.content).toBe(editedContent);
+  });
+
+  it('rejects a changed update id unless the backend explicitly reports an adopted fork', async () => {
+    const baseContent = '保存前正文';
+    const editedContent = '保存后的正文';
+    const baseHash = await computeContentSha256(baseContent);
+    runtimeMocks.invoke.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      if (command === 'get_drafts_by_chapter_id') {
+        return [persistedDraft({ content: baseContent, largeTextRefId: undefined })];
+      }
+      expect(command).toBe('save_chapter_draft_atomic');
+      const input = args.input as Record<string, unknown>;
+      return {
+        operationId: input.operationId,
+        traceId: input.traceId,
+        contentHash: input.currentContentHash,
+        contentLength: Array.from(editedContent).length,
+        storageMode: 'inline',
+        idempotentReplay: false,
+        disposition: 'updated_existing',
+        draft: persistedDraft({
+          id: 'untrusted-new-id',
+          content: editedContent,
+          largeTextRefId: undefined,
+        }),
+      };
+    });
+    const base = persistedDraft({
+      content: baseContent,
+      contentState: {
+        status: 'ready',
+        content: baseContent,
+        contentHash: baseHash,
+        contentLength: Array.from(baseContent).length,
+      },
+    });
+
+    await expect(draftVersionService.update(
+      'draft-a', 'chapter-a', editedContent, 'user_edited', undefined, base as any,
+    )).rejects.toEqual(expect.objectContaining({ code: 'DOCUMENT_HASH_MISMATCH' }));
   });
 });

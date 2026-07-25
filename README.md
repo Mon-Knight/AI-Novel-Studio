@@ -25,11 +25,11 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.2.0**
+**当前版本：v2.2.1**
 
-**阶段：工作区可靠性 — 原子正文、恢复快照、全局离开保护与正式迁移账本**
+**阶段：工作区可靠性热修 — 采用/保存竞态、恢复候选幂等与原生关闭保护**
 
-v2.2.0 在 v2.1.8 可靠性基线上补齐持久化和桌面生命周期：长正文分片、草稿引用与幂等操作在同一 SQLite 事务中提交；完整正文读取失败时进入不可编辑状态；未保存正文持久为独立恢复快照；Hash 路由、程序导航和 Tauri 窗口关闭共用一个 Leave Guard。
+v2.2.1 在 v2.2.0 基础上关闭三个窄竞态：采用与保存交错时可信接收后端派生的新候选；恢复快照清理失败后跨会话复用已提交候选，且 replay 目标失效时保留 completed operation 与恢复快照；原生关闭调用失败后撤销一次性 bypass，下一次关闭仍受 Leave Guard 保护。
 
 本版本不增加新的 AI 自动写入范围，也不引入未来 Agent 功能；重点是让现有写作工作台在并发、异常退出、数据库故障和长正文损坏场景下保持可恢复、可验证。
 
@@ -185,7 +185,8 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | v2.1.6 | 已完成：章节工程真实 AI 请求取消闭环 |
 | v2.1.7 | 已完成：章节质量历史不可变快照与原子重放 |
 | v2.1.8 | 已完成：章节上下文持久化一致性闭环 |
-| v2.2.0 | **当前：工作区可靠性与基础设施收口** |
+| v2.2.0 | 已完成：工作区可靠性与基础设施收口 |
+| v2.2.1 | **当前：工作区竞态可靠性热修** |
 | v2.x | 后续：跨重启自动续跑、统一 AI 任务、约束验证与 Agent 能力增强 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
@@ -241,7 +242,7 @@ npm run test
 # 正文变更安全门动态测试
 npm run test:workspace-safety
 
-# v2.2.0 定向 Vitest；后三项同时执行全量 Rust 回归
+# v2.2.x 定向 Vitest；后三项同时执行全量 Rust 回归
 npm run test:components
 npm run test:workspace-reliability
 npm run test:workspace-recovery
@@ -310,6 +311,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 | 项目管理 | [docs/project/](docs/project/) |
 | 技术文档 | [docs/technical/](docs/technical/) |
 | Windows 桌面 E2E | [docs/technical/desktop-e2e.md](docs/technical/desktop-e2e.md) |
+| v2.2.1 发布说明 | [docs/release-notes-v2.2.1.md](docs/release-notes-v2.2.1.md) |
 | v2.2.0 发布说明 | [docs/release-notes-v2.2.0.md](docs/release-notes-v2.2.0.md) |
 | v2.1.8 发布说明 | [docs/release-notes-v2.1.8.md](docs/release-notes-v2.1.8.md) |
 | 设计文档 | [docs/design/](docs/design/) |

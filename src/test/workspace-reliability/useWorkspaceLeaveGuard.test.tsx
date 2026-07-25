@@ -237,6 +237,25 @@ describe('workspace leave guard', () => {
     await waitFor(() => expect(tauriHarness.close).toHaveBeenCalledTimes(1));
   });
 
+  it('re-arms the native close guard when the close command rejects', async () => {
+    tauriHarness.close.mockRejectedValueOnce(new Error('native close failed'));
+    const user = userEvent.setup();
+    renderWithMemoryRouter(<GuardHarness save={async () => true} />);
+    await waitFor(() => expect(tauriHarness.closeHandler).not.toBeNull());
+
+    const firstEvent = { preventDefault: vi.fn() };
+    act(() => tauriHarness.closeHandler?.(firstEvent));
+    await user.click(await screen.findByRole('button', { name: '保存并继续' }));
+    await waitFor(() => expect(tauriHarness.close).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('workspace-leave-dialog')).toBeNull());
+
+    const secondEvent = { preventDefault: vi.fn() };
+    act(() => tauriHarness.closeHandler?.(secondEvent));
+
+    expect(secondEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId('workspace-leave-dialog')).toBeTruthy();
+  });
+
   it('T12 allows only one decision across chapter and close requests', async () => {
     const discard = vi.fn(async () => undefined);
     const user = userEvent.setup();
@@ -315,6 +334,31 @@ describe('workspace leave guard', () => {
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('workspace-leave-dialog')).toBeNull();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('contains a rejected goal-only close and guards the next close request', async () => {
+    const preflight = vi.fn(async () => true);
+    tauriHarness.close.mockRejectedValueOnce(new Error('native close failed'));
+    renderWithMemoryRouter(
+      <GuardHarness
+        save={async () => true}
+        shouldGuard={false}
+        shouldPreflight
+        preflight={preflight}
+      />,
+    );
+    await waitFor(() => expect(tauriHarness.closeHandler).not.toBeNull());
+
+    const firstEvent = { preventDefault: vi.fn() };
+    act(() => tauriHarness.closeHandler?.(firstEvent));
+    await waitFor(() => expect(tauriHarness.close).toHaveBeenCalledTimes(1));
+
+    const secondEvent = { preventDefault: vi.fn() };
+    act(() => tauriHarness.closeHandler?.(secondEvent));
+
+    expect(secondEvent.preventDefault).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(tauriHarness.close).toHaveBeenCalledTimes(2));
   });
 
   it('does not discard chapter-goal edits for an in-place draft adoption', async () => {

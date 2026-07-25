@@ -7554,6 +7554,119 @@ mod tests {
     }
 
     #[test]
+    fn atomic_save_commit_before_adoption_keeps_one_authoritative_draft(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::repositories::large_text_repository;
+        use crate::services::draft_service::{
+            save_chapter_draft_atomic_with_cleanup, SaveChapterDraftAtomicInput,
+            SaveChapterDraftDisposition,
+        };
+
+        let mut conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE novels (
+                 id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL, deleted_at TEXT
+             );
+             CREATE TABLE chapters (
+                 id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL,
+                 adopted_draft_id TEXT, word_count INTEGER NOT NULL DEFAULT 0,
+                 status TEXT NOT NULL DEFAULT 'editing', created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL, deleted_at TEXT
+             );
+             CREATE TABLE ai_task_records (id TEXT PRIMARY KEY);
+             CREATE TABLE chapter_drafts (
+                 id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                 title TEXT, content TEXT NOT NULL DEFAULT '', source TEXT NOT NULL,
+                 version_no INTEGER NOT NULL, word_count INTEGER NOT NULL DEFAULT 0,
+                 is_adopted INTEGER NOT NULL DEFAULT 0, ai_task_id TEXT, note TEXT,
+                 large_text_ref_id TEXT, content_hash TEXT, created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
+             CREATE TABLE chapter_summaries (
+                 id TEXT PRIMARY KEY, chapter_id TEXT NOT NULL,
+                 is_expired INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+             );
+             CREATE TABLE context_records (
+                 id TEXT PRIMARY KEY, chapter_id TEXT NOT NULL,
+                 is_expired INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+             );
+             INSERT INTO novels (id, title, created_at, updated_at)
+             VALUES ('novel-a', 'Novel A', 'now', 'now');
+             INSERT INTO chapters
+                 (id, novel_id, title, adopted_draft_id, word_count, status, created_at, updated_at)
+             VALUES ('chapter-a', 'novel-a', 'Chapter A', NULL, 0, 'editing', 'now', 'now');",
+        )?;
+        crate::migrations::run_migrations(&mut conn)?;
+        let base_content = "保存前正文";
+        let base_hash = large_text_repository::sha256(base_content);
+        conn.execute(
+            "INSERT INTO chapter_drafts
+                 (id, novel_id, chapter_id, title, content, source, version_no, word_count,
+                  is_adopted, content_hash, created_at, updated_at)
+             VALUES ('draft-a', 'novel-a', 'chapter-a', 'Draft', ?1, 'user_edited', 1,
+                     5, 0, ?2, 'now', 'now')",
+            params![base_content, base_hash],
+        )?;
+        let saved_content = "保存先提交、随后采用的正文".to_string();
+        let saved_hash = large_text_repository::sha256(&saved_content);
+        let save = save_chapter_draft_atomic_with_cleanup(
+            &mut conn,
+            SaveChapterDraftAtomicInput {
+                operation_id: "op-save-before-adopt".to_string(),
+                trace_id: Some("trace-save-before-adopt".to_string()),
+                novel_id: "novel-a".to_string(),
+                chapter_id: "chapter-a".to_string(),
+                draft_id: Some("draft-a".to_string()),
+                draft_version: Some(1),
+                base_content_hash: Some(base_hash),
+                current_content_hash: saved_hash,
+                content: saved_content.clone(),
+                word_count: None,
+                source: "user_edited".to_string(),
+                title: Some("Draft".to_string()),
+                ai_task_id: None,
+                note: None,
+                staging_session_id: None,
+            },
+            || Ok(()),
+        )?;
+
+        assert_eq!(
+            save.disposition,
+            SaveChapterDraftDisposition::UpdatedExisting
+        );
+        assert_eq!(save.draft.id, "draft-a");
+        assert!(!save.draft.is_adopted);
+        let adopted = adopt_chapter_draft_internal(&mut conn, &save.draft.id, "chapter-a")?;
+
+        assert_eq!(adopted.id, save.draft.id);
+        assert_eq!(adopted.content, saved_content);
+        assert!(adopted.is_adopted);
+        let (draft_count, adopted_count): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), SUM(CASE WHEN is_adopted = 1 THEN 1 ELSE 0 END)
+             FROM chapter_drafts WHERE chapter_id = 'chapter-a'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!((draft_count, adopted_count), (1, 1));
+        let chapter = get_test_chapter_state(&conn, "chapter-a")?;
+        assert_eq!(chapter.0.as_deref(), Some("draft-a"));
+        assert_eq!(chapter.1, count_words(&saved_content));
+        assert_eq!(chapter.2, "adopted");
+        let (operation_draft_id, operation_status): (String, String) = conn.query_row(
+            "SELECT draft_id, status FROM draft_save_operations
+             WHERE operation_id = 'op-save-before-adopt'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(operation_draft_id, "draft-a");
+        assert_eq!(operation_status, "completed");
+        Ok(())
+    }
+
+    #[test]
     fn adopt_chapter_draft_updates_pointer_and_chapter_metadata(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = Connection::open_in_memory()?;
