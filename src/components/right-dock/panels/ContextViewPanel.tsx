@@ -14,6 +14,7 @@ import { checkVolumeCompletion, collectVolumeChapterContexts, volumeSummaryAiSer
 import { runWithLoading } from '../../../lib/runWithLoading';
 import ContextRecordList from '../../context-records/ContextRecordList';
 import ContextRecordForm from '../../context-records/ContextRecordForm';
+import { describeUnknownError } from '../../../utils/errorMessage';
 
 interface ContextViewPanelProps {
   novelId?: string;
@@ -38,6 +39,7 @@ function classifyRecord(r: ContextRecord): ContextCategory {
 function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
   const [records, setRecords] = useState<ContextRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [activeTab, setActiveTab] = useState<ContextCategory | 'all'>('all');
 
@@ -52,6 +54,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
   const load = useCallback(async () => {
     if (!novelId) return;
     setLoading(true);
+    setLoadError('');
     try {
       const recs = await contextRecordService.getByNovelId(novelId);
       // 预加载卷和章节（用于卷上下文 tab）
@@ -75,8 +78,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
         if (r.contextType === 'volume_summary' && r.volumeId && !r.isExpired) {
           const check = checks[r.volumeId];
           if (check && !check.completed) {
-            r.isExpired = true;
-            await contextRecordService.update(r.id, { isExpired: true }).catch(() => {});
+            await contextRecordService.update(r.id, { isExpired: true });
             changed = true;
           }
         }
@@ -87,26 +89,47 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
       } else {
         setRecords(recs);
       }
-    } catch (e) { console.error(e); }
+    } catch (error) {
+      console.error(error);
+      setLoadError(describeUnknownError(error, '上下文读取或状态同步失败'));
+    }
     finally { setLoading(false); }
   }, [novelId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
-    await contextRecordService.setActive(id, isActive);
-    setRecords((prev) => prev.map((r) => r.id === id ? { ...r, isActive } : r));
+    setLoadError('');
+    try {
+      await contextRecordService.setActive(id, isActive);
+      setRecords((prev) => prev.map((r) => r.id === id ? { ...r, isActive } : r));
+    } catch (error) {
+      console.error(error);
+      setLoadError(describeUnknownError(error, '上下文启用状态保存失败'));
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await contextRecordService.remove(id);
-    setRecords((prev) => prev.filter((r) => r.id !== id));
+    setLoadError('');
+    try {
+      await contextRecordService.remove(id);
+      setRecords((prev) => prev.filter((r) => r.id !== id));
+    } catch (error) {
+      console.error(error);
+      setLoadError(describeUnknownError(error, '上下文删除失败'));
+    }
   };
 
   const handleAdd = async (input: any) => {
-    await contextRecordService.create(input);
-    setShowForm(false);
-    await load();
+    setLoadError('');
+    try {
+      await contextRecordService.create(input);
+      setShowForm(false);
+      await load();
+    } catch (error) {
+      console.error(error);
+      setLoadError(describeUnknownError(error, '上下文保存失败'));
+    }
   };
 
   // 生成卷上下文
@@ -159,23 +182,32 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
       result.nextVolumeHook ? `**下卷衔接**：${result.nextVolumeHook}` : '',
     ].filter(Boolean).join('\n\n');
 
-    await contextRecordService.create({
-      novelId,
-      volumeId: volume.id,
-      contextType: 'volume_summary',
-      title: result.summaryTitle || `${volume.title} 卷总结`,
-      content,
-      importance: 5,
-      isActive: true,
-    });
+    setGenError((prev) => ({ ...prev, [volume.id]: '' }));
+    try {
+      await contextRecordService.create({
+        novelId,
+        volumeId: volume.id,
+        contextType: 'volume_summary',
+        title: result.summaryTitle || `${volume.title} 卷总结`,
+        content,
+        importance: 5,
+        isActive: true,
+      });
 
-    // 刷新
-    setGenResult((prev) => {
-      const next = { ...prev };
-      delete next[volume.id];
-      return next;
-    });
-    await load();
+      // 刷新
+      setGenResult((prev) => {
+        const next = { ...prev };
+        delete next[volume.id];
+        return next;
+      });
+      await load();
+    } catch (error) {
+      console.error(error);
+      setGenError((prev) => ({
+        ...prev,
+        [volume.id]: describeUnknownError(error, '卷上下文保存失败'),
+      }));
+    }
   };
 
   const filteredRecords = activeTab === 'all'
@@ -189,6 +221,11 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
 
   return (
     <div>
+      {loadError && (
+        <div className="panel-section" role="alert" data-testid="error-notice" style={{ color: 'var(--color-error)', fontSize: 12 }}>
+          {loadError}
+        </div>
+      )}
       <div className="panel-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <div className="panel-section-title" style={{ marginBottom: 0 }}>

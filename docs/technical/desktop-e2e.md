@@ -117,6 +117,7 @@ tests/e2e/
   generation-job-cancel.spec.ts
   restart-task-recovery.spec.ts
   quality-history-replay.spec.ts
+  chapter-context-persistence.spec.ts
   helpers.ts
   wdio.conf.ts
 scripts/e2e/run-e2e.ts
@@ -167,7 +168,7 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 `.github/workflows/windows-desktop-e2e.yml` 在固定的 `windows-2022` GitHub-hosted runner 上运行两层门禁：
 
 - Pull Request 和 `main` 分支 push：先运行前端测试、Lint、前端构建、Rust check / test 与无安装包的生产 Tauri 构建，再执行真实窗口 E2E smoke。
-- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行十个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
+- `v*` 发布标签、每周定时和手工触发：通过同一质量门后执行十一个真实桌面场景；手工触发还可选择 `full-three` 连续执行三轮。
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
@@ -191,7 +192,7 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-运行器先构建一次 suite 应用；十个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
+运行器先构建一次 suite 应用；十一个 spec 随后逐个在独立应用进程、数据库和 WebView2 profile 中执行。
 
 ### 4.3 定向单场景复测
 
@@ -311,6 +312,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | AI 候选 | `ai-generate`、`ai-generate-submit`、`candidate-review`、`candidate-content`、`candidate-constraints`、`candidate-replace`、`candidate-apply` |
 | 章节工程任务 | `chapter-engineering`、`engineering-panel`、`engineering-tab-jobs`、`generation-job-start`、`generation-job-cancel`、`generation-job-status`、`generation-job-step`、`generation-job-recovery` |
 | 质量检查与历史 | `quality-check`、`quality-history`、`quality-history-select`、`quality-history-readonly`、`quality-report`、`quality-issue` |
+| 章节上下文 | `chapter-summary`、`chapter-summary-panel`、`chapter-summary-generate`、`chapter-summary-save`、`chapter-summary-record`、`generation-context-count` |
 | 确认与保护 | `generation-preflight`、`apply-confirm`、`leave-guard`、`dialog-confirm`、`dialog-cancel` |
 | 结果与恢复 | `error-notice`、`success-notice`、`recovery-dialog`、`recovery-dismiss` |
 
@@ -334,6 +336,7 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 | `generation-job-cancel.spec.ts` | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态 |
 | `restart-task-recovery.spec.ts` | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI |
 | `quality-history-replay.spec.ts` | 从空库经 UI 创建作品、卷章和正文；连续执行两次固定 Mock 质检，重启真实应用后回放两份报告；断言 report / draft / content hash / AI Task 绑定、item ID 隔离、历史只读与当前计数一致 |
+| `chapter-context-persistence.spec.ts` | 从 UI 采用正文并原子保存章节上下文；重启后逐值核对总结及上下文稳定 ID；采用新正文触发总结和关联记录原子过期，再次重启后断言生成上下文计数为零 |
 
 这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收、隔离库故障注入和 E2E-only Mock pause / release，不替换正常业务写入流程；pause gate 不调用网络，也不直接修改数据库。
 

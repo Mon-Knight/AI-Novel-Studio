@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.1.7（章节质量历史不可变快照与原子重放）
+> 当前版本：v2.1.8（章节上下文持久化一致性闭环）
 > 适用范围：正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.1.7，测试体系在正文安全、项目备份恢复和 Windows 真实桌面 E2E 上增加质量历史不可变快照、原子保存、迟到竞态、AI Task 强绑定与应用重启重放验证：
+截至 v2.1.8，测试体系在既有正文安全、备份恢复、请求取消和质量历史基础上，增加章节上下文 SQLite 单一事实源、稳定 ID、原子 bundle、旧缓存幂等迁移、浏览器补偿回滚与真实应用重启验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -214,13 +214,41 @@ npm run test:e2e -- --spec quality-history-replay
 
 LocalStorage 回退测试使用同一 completed 过滤、report 次序、snapshot `sortOrder`、独立 workflow state、幂等 Task 和迟到竞态契约，并覆盖旧 item 状态合成。它只验证浏览器开发回退，真实发布门禁仍以 Rust / SQLite 和 Windows Tauri E2E 为准。
 
-### 2.9 Windows 真实桌面 E2E
+### 2.9 v2.1.8 章节上下文持久化一致性
+
+```powershell
+npm run test
+
+cd src-tauri
+cargo test
+cd ..
+
+npm run test:e2e -- --spec chapter-context-persistence
+```
+
+| 编号 | 场景 | 预期 |
+|------|------|------|
+| CTX01 | 调用方指定上下文 UUID 后创建、读取、更新、过期和删除 | SQLite 与返回 DTO 始终使用同一 ID；更新未命中或归属错误明确失败 |
+| CTX02 | Tauri IPC 在创建、更新或查询时失败 | 错误向上传播，旧 LocalStorage 集合不新增、不改写，也不返回伪成功 DTO |
+| CTX03 | summary、context、character state 或 chapter status 的第 N 步失败 | 同一 SQLite 事务整体回滚，不留下半完成总结或 `summarized` 终态 |
+| CTX04 | 作品、章节、已采用草稿或角色归属不一致 | bundle 在任何业务写入前拒绝，相关作品数据保持不变 |
+| CTX05 | 同一作品存在多章及同章历史总结 | 以章节次序和 `updated_at / created_at / id` 稳定排序，每次查询都确定性选择同一份每章最新总结 |
+| CTX06 | 旧 LocalStorage 与 SQLite 存在同 ID、不同 ID 镜像、重复或歧义记录 | 迁移幂等；唯一镜像映射而不复制；歧义保留并 warning；提交失败不清理缓存 |
+| CTX07 | 浏览器 LocalStorage bundle 中途写入失败 | 恢复总结、上下文和角色状态全部快照，错误返回调用方 |
+| CTX08 | 已有总结后采用另一版正文，或事务中途注入失败 | 正文采用、章节状态、总结与上下文过期同事务提交或整体回滚；重采同一正文不误过期 |
+| CTX09 | 旧角色状态插入或确定性匹配，但 `characters.current_state` 陈旧 | 同一迁移事务按 `created_at DESC, id DESC` 重算当前状态，重复迁移仍能修复且不复制历史 |
+| CTX10 | 浏览器采用新正文时上下文过期写入失败 | 草稿采用状态、总结和上下文集合全部恢复到采用前快照，错误返回调用方 |
+| CTX-E2E | UI 保存上下文后重启，采用新正文后不打开总结面板即读取和生成，再次重启 | 同一 SQLite 记录和 ID 重启后可见；采用返回时旧记录已过期；生成来源计数立即为零且重启后不反弹；零外网、零前端错误、零残留进程 |
+
+Node 测试负责区分 Tauri 与浏览器运行模式并验证“桌面失败绝不写缓存”和浏览器补偿；Rust 测试负责 SQLite 事务、归属、稳定 ID、查询及迁移；真实桌面 E2E 只通过 React、Tauri IPC 和隔离 SQLite 完成业务写入。三层证据不可互相替代。
+
+### 2.10 Windows 真实桌面 E2E
 
 ```powershell
 # 启动、窗口、迁移和前端异常冒烟测试
 npm run test:e2e:smoke
 
-# 十个独立桌面核心流程
+# 全部独立桌面核心流程
 npm run test:e2e
 
 # 定向运行一个独立场景（扩展名可省略）
@@ -249,12 +277,13 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 | `generation-job-cancel.spec.ts` | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
 | `restart-task-recovery.spec.ts` | 暂停 Mock AI、真实进程重启、恢复对话框、同一任务安全终结及二次启动幂等 |
 | `quality-history-replay.spec.ts` | 连续两次固定 Mock 质检，重启真实应用后分别回放两份不可变报告，校验只读历史、Task 追溯、稳定 item ID 与当前计数 |
+| `chapter-context-persistence.spec.ts` | 保存章节总结与上下文后重启，校验稳定 ID 和同一内容；持久化过期后再次重启，证明后续生成不再读取该记录 |
 
 测试通过 `data-testid`、元素状态、HashRouter 和 Tauri IPC 定位与断言，不使用中文文本、CSS 类、DOM 层级、屏幕坐标或截图识别。`frontend-diagnostics.json`、WebdriverIO、driver / Rust 日志、数据库位置和进程清理结果都会写入诊断目录；失败时在会话仍可访问的前提下尽力追加 DOM、当前路由和截图。
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行十条桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ---
 
@@ -288,13 +317,16 @@ scripts/agent-workflow/check_ai_task_delete.ps1
 - SQLite 多步写入失败时会整体回滚。
 - 取消、超时、进程重启和桌面 WebView 生命周期行为正确。
 
-因此，静态检查通过只能作为补充证据，不能单独满足 v2.1.1 发布验收。
+因此，静态检查通过只能作为补充证据，不能单独满足任何版本的发布验收。
 
 ---
 
 ## 4. 基础构建与质量命令
 
 ```powershell
+# npm / Cargo / Tauri / UI 与当前文档版本同步
+npm run test:version-sync
+
 # ESLint
 npm run lint
 
@@ -307,7 +339,7 @@ cargo check
 cd ..
 
 # Tauri 完整构建
-npm run tauri build
+npm run tauri:build
 ```
 
 项目辅助脚本：
@@ -316,6 +348,8 @@ npm run tauri build
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.ps1
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
+
+`verify_project.ps1` 会顺序运行版本同步、Node 测试、ESLint、前端构建、静态补充检查、AI Task 删除和项目备份运行时测试、`cargo check`、完整 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
 
 辅助脚本不替代第 2 节的定向动态测试。发布汇报必须逐项记录真实命令、退出码与失败信息，不能只写“综合验证通过”。
 
@@ -389,6 +423,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - DB08“前端超时但 Rust 随后提交”的 operation ID 查询与幂等恢复仍需专项动态验证。
 - 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消与质量历史不可变重放已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
+- v2.1.8 已把章节总结、上下文和角色状态的桌面事实源收敛到 SQLite；旧缓存清理仍发生在 SQLite 提交之后，因此只能通过明确 ID 映射、warning 和幂等重试保证安全，不宣称跨存储 ACID。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。
 
 发布结论必须准确区分“已由自动化证明”“仅手动验证”和“尚未覆盖”。

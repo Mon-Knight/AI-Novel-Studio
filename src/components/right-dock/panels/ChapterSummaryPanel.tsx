@@ -1,19 +1,18 @@
 /**
  * AI Novel Studio - 章节总结查看面板 (v1.7.13 升级为章节上下文)
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterSummary, ChapterSummarizeResult, ChapterSummaryValidation } from '../../../types/chapterSummary';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
-import { contextRecordService } from '../../../services/context/contextRecordService';
-import { characterStateService } from '../../../services/context/characterStateService';
-import { chapterRepository } from '../../../services/database/chapterRepository';
+import { chapterContextPersistenceService } from '../../../services/context/chapterContextPersistenceService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeService';
 import { validateSummary, hashContent } from '../../../services/ai/summaryValidator';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { formatDateTime } from '../../../utils/date';
 import { runWithLoading } from '../../../lib/runWithLoading';
+import type { ChapterDraft } from '../../../types/ai';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
@@ -30,21 +29,30 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   const [genResult, setGenResult] = useState<ChapterSummarizeResult | null>(null);
   const [validation, setValidation] = useState<ChapterSummaryValidation | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [adoptedDraft, setAdoptedDraft] = useState<any>(null);
+  const [adoptedDraft, setAdoptedDraft] = useState<ChapterDraft | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!chapter?.id) return;
+    const requestId = ++loadRequestIdRef.current;
     setLoading(true);
+    setGenError('');
     try {
       const s = await chapterSummaryService.getByChapterId(chapter.id);
+      if (requestId !== loadRequestIdRef.current) return;
       if (s) {
-        setSummary(s);
         // 检查是否过期：对比当前草稿版本
-        const draft = await draftVersionService.getLatestByChapterId(chapter.id).catch(() => null);
-        if (draft && s.draftVersion && draft.versionNo !== s.draftVersion) {
+        const draft = await draftVersionService.getAdoptedByChapterId(chapter.id);
+        if (requestId !== loadRequestIdRef.current) return;
+        const adoptedDraftChanged = !draft || s.adoptedDraftId !== draft.id;
+        const adoptedVersionChanged = Boolean(
+          draft && s.draftVersion && draft.versionNo !== s.draftVersion,
+        );
+        if (adoptedDraftChanged || adoptedVersionChanged) {
           // 版本不匹配，标记过期
           if (!s.isExpired) {
             await chapterSummaryService.markExpired(chapter.id);
+            if (requestId !== loadRequestIdRef.current) return;
             s.isExpired = true;
           }
         }
@@ -52,18 +60,48 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
       } else {
         setSummary(null);
       }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (error: any) {
+      if (requestId !== loadRequestIdRef.current) return;
+      console.error(error);
+      setSummary(null);
+      setGenError(error?.message || '章节上下文读取或过期同步失败');
+    }
+    finally {
+      if (requestId === loadRequestIdRef.current) setLoading(false);
+    }
   }, [chapter?.id]);
 
-  useEffect(() => { load(); }, [load]);
+  const chapterRevision = chapter
+    ? `${chapter.id}:${chapter.adoptedDraftId ?? ''}:${chapter.updatedAt}`
+    : null;
+
+  useEffect(() => {
+    setSummary(null);
+    setAdoptedDraft(null);
+    setGenResult(null);
+    setValidation(null);
+    setSaveSuccess(false);
+    setGenError('');
+    if (chapterRevision) void load();
+    else setLoading(false);
+    return () => {
+      loadRequestIdRef.current += 1;
+    };
+  }, [chapterRevision, load]);
 
   // AI 生成章节总结 → 自动校验
   const handleGenerateSummary = async () => {
     if (!novelId || !chapter) return;
 
-    let draft;
-    try { draft = await draftVersionService.getLatestByChapterId(chapter.id); } catch { /* ignore */ }
+    let draft: ChapterDraft | null;
+    try {
+      draft = await draftVersionService.getAdoptedByChapterId(chapter.id);
+    } catch (error: any) {
+      console.error(error);
+      setAdoptedDraft(null);
+      setGenError(error?.message || '读取当前采用正文失败，请重试。');
+      return;
+    }
     setAdoptedDraft(draft);
 
     if (!draft?.content || draft.content.trim().length < 10) {
@@ -125,58 +163,64 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
         async ({ setMessage, setStage }) => {
           const contentHash = adoptedDraft ? hashContent(adoptedDraft.content) : undefined;
 
-          setStage('保存章节总结……');
-          const newSummary = await chapterSummaryService.create({
-            novelId, chapterId: chapter.id,
-            volumeId: chapter.volumeId,
+          setStage('原子保存章节上下文……');
+          setMessage('正在一次提交总结、上下文记录、角色状态和章节状态……');
+          const saved = await chapterContextPersistenceService.save({
+            novelId,
+            chapterId: chapter.id,
             adoptedDraftId: adoptedDraft?.id || '',
-            summary: genResult.summary,
-            keyEvents: genResult.keyEvents,
-            characterChanges: genResult.characterChanges as any,
-            relationshipChanges: genResult.relationshipChanges as any,
-            newForeshadows: genResult.newForeshadows,
-            resolvedForeshadows: genResult.resolvedForeshadows,
-            nextChapterHints: genResult.nextChapterHints,
-            coreEvents: genResult.coreEvents,
-            protagonistStateChange: genResult.protagonistStateChange,
-            importantCharacterChanges: genResult.importantCharacterChanges,
-            settingChanges: genResult.settingChanges,
-            newLocations: genResult.newLocations,
-            newItemsOrAbilities: genResult.newItemsOrAbilities,
-            foreshadowing: genResult.foreshadowing,
-            unresolvedQuestions: genResult.unresolvedQuestions,
-            factsMustRemember: genResult.factsMustRemember,
-            nextChapterHook: genResult.nextChapterHook,
-            validationStatus: validation?.passed ? 'passed' : validation ? 'failed' : 'pending',
-            validationResult: validation || undefined,
-            enabled: validation?.safeToContext !== false,
-            contentHash,
-            draftVersion: adoptedDraft?.versionNo,
+            summary: {
+              novelId, chapterId: chapter.id,
+              volumeId: chapter.volumeId,
+              adoptedDraftId: adoptedDraft?.id || '',
+              summary: genResult.summary,
+              keyEvents: genResult.keyEvents,
+              characterChanges: genResult.characterChanges as any,
+              relationshipChanges: genResult.relationshipChanges as any,
+              newForeshadows: genResult.newForeshadows,
+              resolvedForeshadows: genResult.resolvedForeshadows,
+              nextChapterHints: genResult.nextChapterHints,
+              coreEvents: genResult.coreEvents,
+              protagonistStateChange: genResult.protagonistStateChange,
+              importantCharacterChanges: genResult.importantCharacterChanges,
+              settingChanges: genResult.settingChanges,
+              newLocations: genResult.newLocations,
+              newItemsOrAbilities: genResult.newItemsOrAbilities,
+              foreshadowing: genResult.foreshadowing,
+              unresolvedQuestions: genResult.unresolvedQuestions,
+              factsMustRemember: genResult.factsMustRemember,
+              nextChapterHook: genResult.nextChapterHook,
+              validationStatus: validation?.passed ? 'passed' : validation ? 'failed' : 'pending',
+              validationResult: validation || undefined,
+              enabled: validation?.safeToContext !== false,
+              contentHash,
+              draftVersion: adoptedDraft?.versionNo,
+            },
+            contextRecords: genResult.contextRecords.map((record) => ({
+              ...record,
+              novelId,
+              chapterId: chapter.id,
+              volumeId: chapter.volumeId,
+              isActive: validation?.safeToContext !== false,
+              contentHash,
+              draftVersion: adoptedDraft?.versionNo,
+            })),
+            characterStates: genResult.characterChanges.flatMap((change) => (
+              change.characterId ? [{
+                novelId,
+                characterId: change.characterId,
+                chapterId: chapter.id,
+                stateSummary: change.stateSummary,
+                relationshipChanges: change.relationshipChanges,
+                goalChanges: change.goalChanges,
+                location: change.location,
+                healthState: change.healthState,
+                knowledgeState: change.knowledgeState,
+              }] : []
+            )),
           });
 
-          // 保存上下文记录
-          setMessage('正在保存上下文记录……');
-          const contextInputs = genResult.contextRecords.map((cr) => ({
-            ...cr, novelId, chapterId: chapter.id, volumeId: chapter.volumeId,
-            contentHash, draftVersion: adoptedDraft?.versionNo,
-          }));
-          await contextRecordService.createBatch(contextInputs).catch(() => {});
-
-          // 保存角色状态
-          setStage('保存角色状态……');
-          for (const cc of genResult.characterChanges) {
-            if (cc.characterId) {
-              await characterStateService.create({
-                novelId, characterId: cc.characterId, chapterId: chapter.id,
-                stateSummary: cc.stateSummary, relationshipChanges: cc.relationshipChanges,
-                goalChanges: cc.goalChanges, location: cc.location,
-                healthState: cc.healthState, knowledgeState: cc.knowledgeState,
-              }).catch(() => {});
-            }
-          }
-          await chapterRepository.update(chapter.id, { status: 'summarized' }).catch(() => {});
-
-          setSummary(newSummary);
+          setSummary(saved.summary);
           setSaveSuccess(true);
           setGenResult(null); setValidation(null);
           setTimeout(() => setSaveSuccess(false), 3000);
@@ -195,7 +239,12 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
   if (loading) return <div style={{ padding: 16, color: 'var(--color-text-muted)' }}>加载中...</div>;
 
   return (
-    <div>
+    <div
+      data-testid="chapter-summary-panel"
+      data-chapter-id={chapter.id}
+      data-summary-id={summary?.id || ''}
+      data-summary-expired={summary?.isExpired ? 'true' : 'false'}
+    >
       {/* AI 模式状态 */}
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
         <div className="panel-section-title">🤖 AI 状态</div>
@@ -209,6 +258,16 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           </>
         )}
       </div>
+
+      {genError && (
+        <div
+          className="panel-section"
+          data-testid="chapter-summary-error"
+          style={{ fontSize: 12, color: 'var(--color-error)' }}
+        >
+          {genError}
+        </div>
+      )}
 
       {/* 过期提示 */}
       {summary?.isExpired && (
@@ -229,13 +288,13 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           </div>
           <button
             className="btn btn-primary btn-sm"
+            data-testid="chapter-summary-generate"
             onClick={handleGenerateSummary}
             disabled={genLoading}
             style={{ width: '100%', marginBottom: 6 }}
           >
             {genLoading ? '⏳ AI 正在分析正文...' : '📝 生成章节上下文'}
           </button>
-          {genError && <div style={{ fontSize: 12, color: 'var(--color-error)' }}>{genError}</div>}
         </div>
       )}
 
@@ -284,7 +343,13 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
             </div>
           )}
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn btn-primary btn-sm" onClick={handleSaveSummary} disabled={genLoading} style={{ flex: 1 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              data-testid="chapter-summary-save"
+              onClick={handleSaveSummary}
+              disabled={genLoading}
+              style={{ flex: 1 }}
+            >
               {genLoading ? '⏳ 保存中...' : '💾 确认保存'}
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => { setGenResult(null); setValidation(null); }} style={{ flex: 1 }}>
@@ -297,7 +362,7 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
       {/* 保存成功提示 */}
       {saveSuccess && (
         <div style={{ fontSize: 12, color: 'var(--color-success)', textAlign: 'center', padding: 8 }}>
-          ✅ 章节上下文已保存成功！
+          <span data-testid="chapter-summary-save-success">✅ 章节上下文已保存成功！</span>
         </div>
       )}
 
@@ -323,7 +388,12 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
             )}
           </div>
 
-          <div className="panel-section">
+          <div
+            className="panel-section"
+            data-testid="chapter-summary-record"
+            data-summary-id={summary.id}
+            data-summary-expired={summary.isExpired ? 'true' : 'false'}
+          >
             <div className="panel-section-title">📋 章节摘要</div>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>{summary.summary}</div>
           </div>
@@ -380,8 +450,14 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
             <button
               className={`btn btn-sm ${summary.enabled ? 'btn-secondary' : 'btn-primary'}`}
               onClick={async () => {
-                await chapterSummaryService.setEnabled(summary.id, !summary.enabled);
-                setSummary({ ...summary, enabled: !summary.enabled });
+                setGenError('');
+                try {
+                  await chapterSummaryService.setEnabled(summary.id, !summary.enabled);
+                  setSummary({ ...summary, enabled: !summary.enabled });
+                } catch (error: any) {
+                  console.error(error);
+                  setGenError(error?.message || '章节上下文启用状态保存失败');
+                }
               }}
             >
               {summary.enabled ? '⏸ 停用' : '📌 启用'}

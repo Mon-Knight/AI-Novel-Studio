@@ -582,11 +582,11 @@ function CheckPanel({
 
       // 标记旧章节上下文和卷上下文过期
       if (comparison.isBetter) {
-        await chapterSummaryService.markExpired(chapter.id).catch(() => {});
-        const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
+        await chapterSummaryService.markExpired(chapter.id);
+        const allRecords = await contextRecordService.getByNovelId(novelId);
         for (const r of allRecords) {
           if (r.contextType === 'volume_summary' && r.volumeId === chapter.volumeId && !r.isExpired) {
-            await contextRecordService.update(r.id, { isExpired: true }).catch(() => {});
+            await contextRecordService.update(r.id, { isExpired: true });
           }
         }
       }

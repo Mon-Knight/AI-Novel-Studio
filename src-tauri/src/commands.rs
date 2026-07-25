@@ -1,7 +1,7 @@
 use crate::db::{get_connection, get_database_path};
 use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 // ==================== Novel ====================
 
@@ -1365,6 +1365,14 @@ fn adopt_chapter_draft_internal(
         .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
 
     let word_count = validate_live_draft_target_internal(&transaction, draft_id, chapter_id)?;
+    let previous_adopted_draft_id = transaction
+        .query_row(
+            "SELECT adopted_draft_id FROM chapters WHERE id = ?1 AND deleted_at IS NULL",
+            params![chapter_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map_err(|e| format!("adopt_previous_draft_lookup_failed: {}", e))?;
+    let adopted_draft_changed = previous_adopted_draft_id.as_deref() != Some(draft_id);
 
     transaction
         .execute(
@@ -1393,6 +1401,10 @@ fn adopt_chapter_draft_internal(
             "adopt_chapter_conflict: expected one chapter for id={}, affected_rows={}",
             chapter_id, chapter_rows
         ));
+    }
+
+    if adopted_draft_changed {
+        expire_chapter_context_rows(&transaction, chapter_id, &now)?;
     }
 
     let adopted = get_draft_by_id_and_chapter_internal(&transaction, draft_id, chapter_id)
@@ -4743,7 +4755,7 @@ pub fn save_quality_check_result(
 
 // ==================== Chapter Summary ====================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChapterSummaryDto {
     pub id: String,
@@ -4779,7 +4791,7 @@ pub struct ChapterSummaryDto {
     pub updated_at: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveChapterSummaryInput {
     pub id: Option<String>,
@@ -4848,78 +4860,122 @@ fn map_chapter_summary_row(row: &rusqlite::Row) -> rusqlite::Result<ChapterSumma
     })
 }
 
+fn chapter_summary_select_sql() -> &'static str {
+    "SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries"
+}
+
 /// 保存章节总结（创建或更新）
 #[tauri::command]
 pub fn save_chapter_summary(input: SaveChapterSummaryInput) -> Result<ChapterSummaryDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let enabled = input.enabled.unwrap_or(true) as i64;
-
-    if let Some(ref existing_id) = input.id {
-        conn.execute(
-            "UPDATE chapter_summaries SET volume_id=?1, summary=?2, key_events=?3, character_changes=?4, relationship_changes=?5, new_foreshadows=?6, resolved_foreshadows=?7, next_chapter_hints=?8, core_events=?9, protagonist_state_change=?10, important_character_changes=?11, setting_changes=?12, new_locations=?13, new_items_or_abilities=?14, foreshadowing=?15, unresolved_questions=?16, facts_must_remember=?17, next_chapter_hook=?18, validation_status=?19, validation_result=?20, enabled=?21, content_hash=?22, draft_version=?23, is_expired=0, updated_at=?24 WHERE id=?25",
-            params![
-                &input.volume_id, &input.summary, &input.key_events, &input.character_changes,
-                &input.relationship_changes, &input.new_foreshadows, &input.resolved_foreshadows,
-                &input.next_chapter_hints, &input.core_events, &input.protagonist_state_change,
-                &input.important_character_changes, &input.setting_changes, &input.new_locations,
-                &input.new_items_or_abilities, &input.foreshadowing, &input.unresolved_questions,
-                &input.facts_must_remember, &input.next_chapter_hook, &input.validation_status,
-                &input.validation_result, &enabled, &input.content_hash, &input.draft_version,
-                &now, existing_id,
-            ],
-        ).map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE id=?1").map_err(|e| e.to_string())?;
-        stmt.query_row(params![existing_id], map_chapter_summary_row)
-            .map_err(|e| e.to_string())
-    } else {
-        let new_id = uuid::Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO chapter_summaries (id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,0,?28,?29,?29)",
-            params![
-                &new_id, &input.novel_id, &input.chapter_id, &input.volume_id,
-                &input.adopted_draft_id, &input.summary, &input.key_events, &input.character_changes,
-                &input.relationship_changes, &input.new_foreshadows, &input.resolved_foreshadows,
-                &input.next_chapter_hints, &input.core_events, &input.protagonist_state_change,
-                &input.important_character_changes, &input.setting_changes, &input.new_locations,
-                &input.new_items_or_abilities, &input.foreshadowing, &input.unresolved_questions,
-                &input.facts_must_remember, &input.next_chapter_hook, &input.validation_status,
-                &input.validation_result, &enabled, &input.content_hash, &input.draft_version,
-                &input.ai_task_id, &now,
-            ],
-        ).map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE id=?1").map_err(|e| e.to_string())?;
-        stmt.query_row(params![&new_id], map_chapter_summary_row)
-            .map_err(|e| e.to_string())
-    }
+    validate_summary_ownership(&conn, &input, true)?;
+    upsert_chapter_summary(&conn, &input, &now)
 }
 
 /// 按章节获取总结
-#[tauri::command]
-pub fn get_chapter_summary(chapter_id: String) -> Result<Option<ChapterSummaryDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, adopted_draft_id, summary, key_events, character_changes, relationship_changes, new_foreshadows, resolved_foreshadows, next_chapter_hints, core_events, protagonist_state_change, important_character_changes, setting_changes, new_locations, new_items_or_abilities, foreshadowing, unresolved_questions, facts_must_remember, next_chapter_hook, validation_status, validation_result, enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at FROM chapter_summaries WHERE chapter_id=?1 LIMIT 1").map_err(|e| e.to_string())?;
-    stmt.query_row(params![&chapter_id], map_chapter_summary_row)
+fn get_chapter_summary_internal(
+    conn: &Connection,
+    chapter_id: &str,
+) -> Result<Option<ChapterSummaryDto>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "{} WHERE chapter_id=?1 ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1",
+            chapter_summary_select_sql()
+        ))
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![chapter_id], map_chapter_summary_row)
         .optional()
         .map_err(|e| e.to_string())
 }
 
-/// 标记章节总结过期
 #[tauri::command]
-pub fn mark_chapter_summaries_expired(chapter_id: String) -> Result<(), String> {
+pub fn get_chapter_summary(chapter_id: String) -> Result<Option<ChapterSummaryDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    get_chapter_summary_internal(&conn, &chapter_id)
+}
+
+/// Return every summary for a novel in chapter order.  The explicit tie-breakers
+/// make this stable even for legacy databases that contain duplicate summaries.
+fn get_chapter_summaries_by_novel_internal(
+    conn: &Connection,
+    novel_id: &str,
+) -> Result<Vec<ChapterSummaryDto>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT summary.id, summary.novel_id, summary.chapter_id, summary.volume_id,
+                    summary.adopted_draft_id, summary.summary, summary.key_events,
+                    summary.character_changes, summary.relationship_changes,
+                    summary.new_foreshadows, summary.resolved_foreshadows,
+                    summary.next_chapter_hints, summary.core_events,
+                    summary.protagonist_state_change, summary.important_character_changes,
+                    summary.setting_changes, summary.new_locations,
+                    summary.new_items_or_abilities, summary.foreshadowing,
+                    summary.unresolved_questions, summary.facts_must_remember,
+                    summary.next_chapter_hook, summary.validation_status,
+                    summary.validation_result, summary.enabled, summary.content_hash,
+                    summary.draft_version, summary.is_expired, summary.ai_task_id,
+                    summary.created_at, summary.updated_at
+             FROM chapter_summaries AS summary
+             LEFT JOIN chapters AS chapter ON chapter.id = summary.chapter_id
+             WHERE summary.novel_id = ?1
+             ORDER BY CASE WHEN chapter.order_index IS NULL THEN 1 ELSE 0 END ASC,
+                      chapter.order_index ASC, summary.chapter_id ASC,
+                      summary.updated_at DESC, summary.created_at DESC, summary.id DESC",
+        )
+        .map_err(|error| format!("chapter_summary_list_prepare_failed: {error}"))?;
+    let summaries = statement
+        .query_map(params![novel_id], map_chapter_summary_row)
+        .map_err(|error| format!("chapter_summary_list_query_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("chapter_summary_list_read_failed: {error}"))?;
+    Ok(summaries)
+}
+
+#[tauri::command]
+pub fn get_chapter_summaries_by_novel(novel_id: String) -> Result<Vec<ChapterSummaryDto>, String> {
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    get_chapter_summaries_by_novel_internal(&conn, &novel_id)
+}
+
+/// 标记章节总结过期
+fn expire_chapter_context_rows(
+    conn: &Connection,
+    chapter_id: &str,
+    updated_at: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE chapter_summaries SET is_expired = 1, updated_at = ?1 WHERE chapter_id = ?2",
-        params![chrono::Utc::now().to_rfc3339(), &chapter_id],
+        params![updated_at, chapter_id],
     )
-    .map_err(|e| e.to_string())?;
-    // 同时标记关联的 context_records 过期
+    .map_err(|error| format!("chapter_summary_expire_failed: {error}"))?;
     conn.execute(
         "UPDATE context_records SET is_expired = 1, updated_at = ?1 WHERE chapter_id = ?2",
-        params![chrono::Utc::now().to_rfc3339(), &chapter_id],
+        params![updated_at, chapter_id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|error| format!("chapter_context_records_expire_failed: {error}"))?;
     Ok(())
+}
+
+fn mark_chapter_context_expired_internal(
+    conn: &mut Connection,
+    chapter_id: &str,
+) -> Result<(), String> {
+    validate_uuid("chapter_summary_chapter_id", chapter_id)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("chapter_context_expire_transaction_failed: {error}"))?;
+    expire_chapter_context_rows(&transaction, chapter_id, &now)?;
+    transaction
+        .commit()
+        .map_err(|error| format!("chapter_context_expire_commit_failed: {error}"))
+}
+
+#[tauri::command]
+pub fn mark_chapter_summaries_expired(chapter_id: String) -> Result<(), String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    mark_chapter_context_expired_internal(&mut conn, &chapter_id)
 }
 
 /// 更新章节总结启用状态
@@ -4936,7 +4992,7 @@ pub fn update_chapter_summary_enabled(id: String, enabled: bool) -> Result<(), S
 
 // ==================== Context Records ====================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextRecordDto {
     pub id: String,
@@ -4955,7 +5011,7 @@ pub struct ContextRecordDto {
     pub updated_at: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveContextRecordInput {
     pub id: Option<String>,
@@ -4990,60 +5046,318 @@ fn map_context_record_row(row: &rusqlite::Row) -> rusqlite::Result<ContextRecord
     })
 }
 
+fn context_record_select_sql() -> &'static str {
+    "SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records"
+}
+
+fn validate_uuid(field: &str, value: &str) -> Result<(), String> {
+    uuid::Uuid::parse_str(value)
+        .map(|_| ())
+        .map_err(|_| format!("{field}_invalid_uuid"))
+}
+
+fn validate_context_type(context_type: &str) -> Result<(), String> {
+    const TYPES: [&str; 8] = [
+        "chapter_summary",
+        "volume_summary",
+        "character_state",
+        "foreshadow",
+        "rule",
+        "relationship",
+        "plot_progress",
+        "other",
+    ];
+    if TYPES.contains(&context_type) {
+        Ok(())
+    } else {
+        Err("context_record_type_invalid".to_string())
+    }
+}
+
+fn validate_context_record_input(
+    conn: &Connection,
+    input: &SaveContextRecordInput,
+) -> Result<(), String> {
+    if let Some(id) = input.id.as_deref() {
+        validate_uuid("context_record_id", id)?;
+    }
+    validate_uuid("context_record_novel_id", &input.novel_id)?;
+    if let Some(chapter_id) = input.chapter_id.as_deref() {
+        validate_uuid("context_record_chapter_id", chapter_id)?;
+    }
+    if let Some(volume_id) = input.volume_id.as_deref() {
+        validate_uuid("context_record_volume_id", volume_id)?;
+    }
+    validate_context_type(&input.context_type)?;
+    if input.title.trim().is_empty() {
+        return Err("context_record_title_required".to_string());
+    }
+    let importance = input.importance.unwrap_or(3);
+    if !(1..=5).contains(&importance) {
+        return Err("context_record_importance_out_of_range".to_string());
+    }
+    if input.draft_version.is_some_and(|version| version < 0) {
+        return Err("context_record_draft_version_invalid".to_string());
+    }
+
+    let novel_exists = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM novels WHERE id = ?1 AND deleted_at IS NULL)",
+            params![&input.novel_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("context_record_novel_read_failed: {error}"))?;
+    if !novel_exists {
+        return Err("context_record_novel_not_found".to_string());
+    }
+
+    let mut chapter_volume_id = None;
+    if let Some(chapter_id) = input.chapter_id.as_deref() {
+        chapter_volume_id = conn
+            .query_row(
+                "SELECT volume_id FROM chapters
+                 WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL",
+                params![chapter_id, &input.novel_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| format!("context_record_chapter_read_failed: {error}"))?
+            .ok_or_else(|| "context_record_chapter_ownership_mismatch".to_string())?;
+    }
+    if let Some(volume_id) = input.volume_id.as_deref() {
+        let volume_exists = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM volumes
+                 WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL)",
+                params![volume_id, &input.novel_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| format!("context_record_volume_read_failed: {error}"))?;
+        if !volume_exists {
+            return Err("context_record_volume_ownership_mismatch".to_string());
+        }
+        if input.chapter_id.is_some() && chapter_volume_id.as_deref() != Some(volume_id) {
+            return Err("context_record_chapter_volume_mismatch".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn save_context_records_internal(
+    conn: &mut Connection,
+    inputs: &[SaveContextRecordInput],
+) -> Result<Vec<ContextRecordDto>, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("context_record_transaction_failed: {error}"))?;
+    let mut ids = Vec::with_capacity(inputs.len());
+
+    for input in inputs {
+        validate_context_record_input(&transaction, input)?;
+        let id = input
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let importance = input.importance.unwrap_or(3);
+        let is_active = input.is_active.unwrap_or(true);
+        transaction
+            .execute(
+                "INSERT INTO context_records
+                 (id, novel_id, chapter_id, volume_id, context_type, title, content,
+                  importance, is_active, is_expired, content_hash, draft_version,
+                  created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?12, ?12)",
+                params![
+                    &id,
+                    &input.novel_id,
+                    &input.chapter_id,
+                    &input.volume_id,
+                    &input.context_type,
+                    &input.title,
+                    &input.content,
+                    importance,
+                    i64::from(is_active),
+                    &input.content_hash,
+                    &input.draft_version,
+                    &now,
+                ],
+            )
+            .map_err(|error| format!("context_record_insert_failed: {error}"))?;
+        ids.push(id);
+    }
+
+    let mut results = Vec::with_capacity(ids.len());
+    for id in &ids {
+        results.push(
+            transaction
+                .query_row(
+                    &format!("{} WHERE id = ?1", context_record_select_sql()),
+                    params![id],
+                    map_context_record_row,
+                )
+                .map_err(|error| format!("context_record_read_after_insert_failed: {error}"))?,
+        );
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("context_record_commit_failed: {error}"))?;
+    Ok(results)
+}
+
 /// 批量保存上下文记录
 #[tauri::command]
 pub fn save_context_records(
     inputs: Vec<SaveContextRecordInput>,
 ) -> Result<Vec<ContextRecordDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut results = Vec::new();
-
-    for input in inputs {
-        let new_id = uuid::Uuid::new_v4().to_string();
-        let importance = input.importance.unwrap_or(3);
-        let is_active = input.is_active.unwrap_or(true);
-
-        conn.execute(
-            "INSERT INTO context_records (id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11,?12,?12)",
-            params![
-                &new_id, &input.novel_id, &input.chapter_id, &input.volume_id,
-                &input.context_type, &input.title, &input.content, &importance,
-                &(is_active as i64), &input.content_hash, &input.draft_version, &now,
-            ],
-        ).map_err(|e| e.to_string())?;
-
-        let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records WHERE id=?1").map_err(|e| e.to_string())?;
-        results.push(
-            stmt.query_row(params![&new_id], map_context_record_row)
-                .map_err(|e| e.to_string())?,
-        );
-    }
-    Ok(results)
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    save_context_records_internal(&mut conn, &inputs)
 }
 
 /// 获取作品的所有上下文记录
-#[tauri::command]
-pub fn get_context_records(novel_id: String) -> Result<Vec<ContextRecordDto>, String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, novel_id, chapter_id, volume_id, context_type, title, content, importance, is_active, is_expired, content_hash, draft_version, created_at, updated_at FROM context_records WHERE novel_id=?1 ORDER BY created_at DESC").map_err(|e| e.to_string())?;
+fn get_context_records_internal(
+    conn: &Connection,
+    novel_id: &str,
+) -> Result<Vec<ContextRecordDto>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "{} WHERE novel_id=?1 ORDER BY created_at DESC, id DESC",
+            context_record_select_sql()
+        ))
+        .map_err(|e| e.to_string())?;
     let items = stmt
-        .query_map(params![&novel_id], map_context_record_row)
+        .query_map(params![novel_id], map_context_record_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     Ok(items)
 }
 
+#[tauri::command]
+pub fn get_context_records(novel_id: String) -> Result<Vec<ContextRecordDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    get_context_records_internal(&conn, &novel_id)
+}
+
+#[tauri::command]
+pub fn get_context_record(id: String) -> Result<Option<ContextRecordDto>, String> {
+    validate_uuid("context_record_id", &id)?;
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    conn.query_row(
+        &format!("{} WHERE id = ?1", context_record_select_sql()),
+        params![id],
+        map_context_record_row,
+    )
+    .optional()
+    .map_err(|error| format!("context_record_read_failed: {error}"))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateContextRecordInput {
+    pub novel_id: String,
+    pub chapter_id: Option<String>,
+    pub volume_id: Option<String>,
+    pub context_type: String,
+    pub title: String,
+    pub content: String,
+    pub importance: i64,
+    pub is_active: bool,
+    pub is_expired: bool,
+    pub content_hash: Option<String>,
+    pub draft_version: Option<i64>,
+}
+
+fn update_context_record_internal(
+    conn: &Connection,
+    id: &str,
+    input: &UpdateContextRecordInput,
+) -> Result<ContextRecordDto, String> {
+    validate_uuid("context_record_id", id)?;
+    let validation_input = SaveContextRecordInput {
+        id: Some(id.to_string()),
+        novel_id: input.novel_id.clone(),
+        chapter_id: input.chapter_id.clone(),
+        volume_id: input.volume_id.clone(),
+        context_type: input.context_type.clone(),
+        title: input.title.clone(),
+        content: input.content.clone(),
+        importance: Some(input.importance),
+        is_active: Some(input.is_active),
+        content_hash: input.content_hash.clone(),
+        draft_version: input.draft_version,
+    };
+    validate_context_record_input(conn, &validation_input)?;
+    let owner = conn
+        .query_row(
+            "SELECT novel_id FROM context_records WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("context_record_ownership_read_failed: {error}"))?
+        .ok_or_else(|| "context_record_not_found".to_string())?;
+    if owner != input.novel_id {
+        return Err("context_record_ownership_mismatch".to_string());
+    }
+    let affected = conn
+        .execute(
+            "UPDATE context_records
+             SET chapter_id = ?1, volume_id = ?2, context_type = ?3, title = ?4,
+                 content = ?5, importance = ?6, is_active = ?7, is_expired = ?8,
+                 content_hash = ?9, draft_version = ?10, updated_at = ?11
+             WHERE id = ?12 AND novel_id = ?13",
+            params![
+                &input.chapter_id,
+                &input.volume_id,
+                &input.context_type,
+                &input.title,
+                &input.content,
+                input.importance,
+                i64::from(input.is_active),
+                i64::from(input.is_expired),
+                &input.content_hash,
+                input.draft_version,
+                chrono::Utc::now().to_rfc3339(),
+                id,
+                &input.novel_id,
+            ],
+        )
+        .map_err(|error| format!("context_record_update_failed: {error}"))?;
+    if affected != 1 {
+        return Err("context_record_update_conflict".to_string());
+    }
+    conn.query_row(
+        &format!("{} WHERE id = ?1", context_record_select_sql()),
+        params![id],
+        map_context_record_row,
+    )
+    .map_err(|error| format!("context_record_read_after_update_failed: {error}"))
+}
+
+#[tauri::command]
+pub fn update_context_record(
+    id: String,
+    input: UpdateContextRecordInput,
+) -> Result<ContextRecordDto, String> {
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    update_context_record_internal(&conn, &id, &input)
+}
+
 /// 更新上下文记录启用状态
 #[tauri::command]
 pub fn update_context_record_active(id: String, is_active: bool) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE context_records SET is_active = ?1, updated_at = ?2 WHERE id = ?3",
-        params![is_active as i64, chrono::Utc::now().to_rfc3339(), &id],
-    )
-    .map_err(|e| e.to_string())?;
+    validate_uuid("context_record_id", &id)?;
+    let affected = conn
+        .execute(
+            "UPDATE context_records SET is_active = ?1, updated_at = ?2 WHERE id = ?3",
+            params![is_active as i64, chrono::Utc::now().to_rfc3339(), &id],
+        )
+        .map_err(|e| e.to_string())?;
+    if affected != 1 {
+        return Err("context_record_not_found".to_string());
+    }
     Ok(())
 }
 
@@ -5051,9 +5365,1332 @@ pub fn update_context_record_active(id: String, is_active: bool) -> Result<(), S
 #[tauri::command]
 pub fn delete_context_record(id: String) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM context_records WHERE id = ?1", params![&id])
-        .map_err(|e| e.to_string())?;
+    validate_uuid("context_record_id", &id)?;
+    let affected = conn
+        .execute("DELETE FROM context_records WHERE id = ?1", params![&id])
+        .map_err(|error| format!("context_record_delete_failed: {error}"))?;
+    if affected != 1 {
+        return Err("context_record_not_found".to_string());
+    }
     Ok(())
+}
+
+// ==================== Chapter Context Persistence ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterStateDto {
+    pub id: String,
+    pub novel_id: String,
+    pub character_id: String,
+    pub chapter_id: Option<String>,
+    pub state_summary: String,
+    pub relationship_changes: Option<String>,
+    pub goal_changes: Option<String>,
+    pub location: Option<String>,
+    pub health_state: Option<String>,
+    pub knowledge_state: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCharacterStateInput {
+    pub id: Option<String>,
+    pub novel_id: String,
+    pub character_id: String,
+    pub chapter_id: Option<String>,
+    pub state_summary: String,
+    pub relationship_changes: Option<String>,
+    pub goal_changes: Option<String>,
+    pub location: Option<String>,
+    pub health_state: Option<String>,
+    pub knowledge_state: Option<String>,
+}
+
+fn character_state_select_sql() -> &'static str {
+    "SELECT id, novel_id, character_id, chapter_id, state_summary, relationship_changes, goal_changes, location, health_state, knowledge_state, created_at FROM character_states"
+}
+
+fn map_character_state_row(row: &rusqlite::Row) -> rusqlite::Result<CharacterStateDto> {
+    Ok(CharacterStateDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        character_id: row.get(2)?,
+        chapter_id: row.get(3)?,
+        state_summary: row.get(4)?,
+        relationship_changes: row.get(5)?,
+        goal_changes: row.get(6)?,
+        location: row.get(7)?,
+        health_state: row.get(8)?,
+        knowledge_state: row.get(9)?,
+        created_at: row.get(10)?,
+    })
+}
+
+fn validate_summary_ownership(
+    conn: &Connection,
+    input: &SaveChapterSummaryInput,
+    require_current_adopted_draft: bool,
+) -> Result<(), String> {
+    if let Some(id) = input.id.as_deref() {
+        validate_uuid("chapter_summary_id", id)?;
+    }
+    validate_uuid("chapter_summary_novel_id", &input.novel_id)?;
+    validate_uuid("chapter_summary_chapter_id", &input.chapter_id)?;
+    validate_uuid("chapter_summary_adopted_draft_id", &input.adopted_draft_id)?;
+    if let Some(volume_id) = input.volume_id.as_deref() {
+        validate_uuid("chapter_summary_volume_id", volume_id)?;
+    }
+    if input.summary.trim().is_empty() {
+        return Err("chapter_summary_content_required".to_string());
+    }
+    if input.draft_version.is_some_and(|version| version < 0) {
+        return Err("chapter_summary_draft_version_invalid".to_string());
+    }
+    let novel_exists = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM novels WHERE id = ?1 AND deleted_at IS NULL)",
+            params![&input.novel_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("chapter_summary_novel_read_failed: {error}"))?;
+    if !novel_exists {
+        return Err("chapter_summary_novel_not_found".to_string());
+    }
+    let chapter = conn
+        .query_row(
+            "SELECT volume_id, adopted_draft_id FROM chapters
+             WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL",
+            params![&input.chapter_id, &input.novel_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("chapter_summary_chapter_read_failed: {error}"))?
+        .ok_or_else(|| "chapter_summary_chapter_ownership_mismatch".to_string())?;
+    if input.volume_id.is_some() && input.volume_id != chapter.0 {
+        return Err("chapter_summary_volume_ownership_mismatch".to_string());
+    }
+    if require_current_adopted_draft
+        && chapter.1.as_deref() != Some(input.adopted_draft_id.as_str())
+    {
+        return Err("chapter_summary_adopted_draft_mismatch".to_string());
+    }
+    let draft_is_valid = conn
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM chapter_drafts
+                WHERE id = ?1 AND novel_id = ?2 AND chapter_id = ?3
+                  AND (?4 = 0 OR is_adopted = 1)
+             )",
+            params![
+                &input.adopted_draft_id,
+                &input.novel_id,
+                &input.chapter_id,
+                i64::from(require_current_adopted_draft)
+            ],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("chapter_summary_draft_read_failed: {error}"))?;
+    if !draft_is_valid {
+        return Err("chapter_summary_adopted_draft_ownership_mismatch".to_string());
+    }
+    Ok(())
+}
+
+fn validate_character_state_input(
+    conn: &Connection,
+    input: &SaveCharacterStateInput,
+) -> Result<(), String> {
+    if let Some(id) = input.id.as_deref() {
+        validate_uuid("character_state_id", id)?;
+    }
+    validate_uuid("character_state_novel_id", &input.novel_id)?;
+    validate_uuid("character_state_character_id", &input.character_id)?;
+    if let Some(chapter_id) = input.chapter_id.as_deref() {
+        validate_uuid("character_state_chapter_id", chapter_id)?;
+    }
+    if input.state_summary.trim().is_empty() {
+        return Err("character_state_summary_required".to_string());
+    }
+    let character_exists = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM characters
+             WHERE id = ?1 AND novel_id = ?2 AND is_active = 1)",
+            params![&input.character_id, &input.novel_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("character_state_character_read_failed: {error}"))?;
+    if !character_exists {
+        return Err("character_state_character_ownership_mismatch".to_string());
+    }
+    if let Some(chapter_id) = input.chapter_id.as_deref() {
+        let chapter_exists = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chapters
+                 WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL)",
+                params![chapter_id, &input.novel_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| format!("character_state_chapter_read_failed: {error}"))?;
+        if !chapter_exists {
+            return Err("character_state_chapter_ownership_mismatch".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn upsert_chapter_summary(
+    conn: &Connection,
+    input: &SaveChapterSummaryInput,
+    now: &str,
+) -> Result<ChapterSummaryDto, String> {
+    let selected_existing_id = if let Some(id) = input.id.as_deref() {
+        conn.query_row(
+            "SELECT novel_id, chapter_id FROM chapter_summaries WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("chapter_summary_existing_read_failed: {error}"))?
+        .map(|ownership| {
+            if ownership.0 != input.novel_id || ownership.1 != input.chapter_id {
+                Err("chapter_summary_ownership_mismatch".to_string())
+            } else {
+                Ok(id.to_string())
+            }
+        })
+        .transpose()?
+    } else {
+        conn.query_row(
+            "SELECT id FROM chapter_summaries
+             WHERE novel_id = ?1 AND chapter_id = ?2
+             ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1",
+            params![&input.novel_id, &input.chapter_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("chapter_summary_existing_read_failed: {error}"))?
+    };
+    let id = selected_existing_id
+        .or_else(|| input.id.clone())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let enabled = i64::from(input.enabled.unwrap_or(true));
+
+    let exists = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM chapter_summaries WHERE id = ?1)",
+            params![&id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("chapter_summary_exists_read_failed: {error}"))?;
+    if exists {
+        let affected = conn
+            .execute(
+                "UPDATE chapter_summaries SET
+                    volume_id = ?1, summary = ?2, key_events = ?3,
+                    character_changes = ?4, relationship_changes = ?5,
+                    new_foreshadows = ?6, resolved_foreshadows = ?7,
+                    next_chapter_hints = ?8, core_events = ?9,
+                    protagonist_state_change = ?10, important_character_changes = ?11,
+                    setting_changes = ?12, new_locations = ?13,
+                    new_items_or_abilities = ?14, foreshadowing = ?15,
+                    unresolved_questions = ?16, facts_must_remember = ?17,
+                    next_chapter_hook = ?18, validation_status = ?19,
+                    validation_result = ?20, enabled = ?21, content_hash = ?22,
+                    draft_version = ?23, is_expired = 0, ai_task_id = ?24,
+                    updated_at = ?25, adopted_draft_id = ?29
+                 WHERE id = ?26 AND novel_id = ?27 AND chapter_id = ?28
+                ",
+                params![
+                    &input.volume_id,
+                    &input.summary,
+                    &input.key_events,
+                    &input.character_changes,
+                    &input.relationship_changes,
+                    &input.new_foreshadows,
+                    &input.resolved_foreshadows,
+                    &input.next_chapter_hints,
+                    &input.core_events,
+                    &input.protagonist_state_change,
+                    &input.important_character_changes,
+                    &input.setting_changes,
+                    &input.new_locations,
+                    &input.new_items_or_abilities,
+                    &input.foreshadowing,
+                    &input.unresolved_questions,
+                    &input.facts_must_remember,
+                    &input.next_chapter_hook,
+                    &input.validation_status,
+                    &input.validation_result,
+                    enabled,
+                    &input.content_hash,
+                    input.draft_version,
+                    &input.ai_task_id,
+                    now,
+                    &id,
+                    &input.novel_id,
+                    &input.chapter_id,
+                    &input.adopted_draft_id,
+                ],
+            )
+            .map_err(|error| format!("chapter_summary_update_failed: {error}"))?;
+        if affected != 1 {
+            return Err("chapter_summary_update_conflict".to_string());
+        }
+    } else {
+        conn.execute(
+            "INSERT INTO chapter_summaries
+             (id, novel_id, chapter_id, volume_id, adopted_draft_id, summary,
+              key_events, character_changes, relationship_changes, new_foreshadows,
+              resolved_foreshadows, next_chapter_hints, core_events,
+              protagonist_state_change, important_character_changes, setting_changes,
+              new_locations, new_items_or_abilities, foreshadowing, unresolved_questions,
+              facts_must_remember, next_chapter_hook, validation_status, validation_result,
+              enabled, content_hash, draft_version, is_expired, ai_task_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
+                     ?24, ?25, ?26, ?27, 0, ?28, ?29, ?29)",
+            params![
+                &id,
+                &input.novel_id,
+                &input.chapter_id,
+                &input.volume_id,
+                &input.adopted_draft_id,
+                &input.summary,
+                &input.key_events,
+                &input.character_changes,
+                &input.relationship_changes,
+                &input.new_foreshadows,
+                &input.resolved_foreshadows,
+                &input.next_chapter_hints,
+                &input.core_events,
+                &input.protagonist_state_change,
+                &input.important_character_changes,
+                &input.setting_changes,
+                &input.new_locations,
+                &input.new_items_or_abilities,
+                &input.foreshadowing,
+                &input.unresolved_questions,
+                &input.facts_must_remember,
+                &input.next_chapter_hook,
+                &input.validation_status,
+                &input.validation_result,
+                enabled,
+                &input.content_hash,
+                input.draft_version,
+                &input.ai_task_id,
+                now,
+            ],
+        )
+        .map_err(|error| format!("chapter_summary_insert_failed: {error}"))?;
+    }
+    conn.query_row(
+        &format!("{} WHERE id = ?1", chapter_summary_select_sql()),
+        params![id],
+        map_chapter_summary_row,
+    )
+    .map_err(|error| format!("chapter_summary_read_after_write_failed: {error}"))
+}
+
+fn upsert_bundle_context_record(
+    conn: &Connection,
+    input: &SaveContextRecordInput,
+    now: &str,
+) -> Result<ContextRecordDto, String> {
+    let id = input
+        .id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let importance = input.importance.unwrap_or(3);
+    let is_active = input.is_active.unwrap_or(true);
+    let owner = conn
+        .query_row(
+            "SELECT novel_id, chapter_id FROM context_records WHERE id = ?1",
+            params![&id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("context_record_existing_read_failed: {error}"))?;
+    if let Some(owner) = owner {
+        if owner.0 != input.novel_id || owner.1 != input.chapter_id {
+            return Err("context_record_ownership_mismatch".to_string());
+        }
+        let affected = conn
+            .execute(
+                "UPDATE context_records SET volume_id = ?1, context_type = ?2, title = ?3,
+                    content = ?4, importance = ?5, is_active = ?6, is_expired = 0,
+                    content_hash = ?7, draft_version = ?8, updated_at = ?9
+                 WHERE id = ?10 AND novel_id = ?11",
+                params![
+                    &input.volume_id,
+                    &input.context_type,
+                    &input.title,
+                    &input.content,
+                    importance,
+                    i64::from(is_active),
+                    &input.content_hash,
+                    input.draft_version,
+                    now,
+                    &id,
+                    &input.novel_id,
+                ],
+            )
+            .map_err(|error| format!("context_record_bundle_update_failed: {error}"))?;
+        if affected != 1 {
+            return Err("context_record_bundle_update_conflict".to_string());
+        }
+    } else {
+        conn.execute(
+            "INSERT INTO context_records
+             (id, novel_id, chapter_id, volume_id, context_type, title, content,
+              importance, is_active, is_expired, content_hash, draft_version,
+              created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, ?12, ?12)",
+            params![
+                &id,
+                &input.novel_id,
+                &input.chapter_id,
+                &input.volume_id,
+                &input.context_type,
+                &input.title,
+                &input.content,
+                importance,
+                i64::from(is_active),
+                &input.content_hash,
+                input.draft_version,
+                now,
+            ],
+        )
+        .map_err(|error| format!("context_record_bundle_insert_failed: {error}"))?;
+    }
+    conn.query_row(
+        &format!("{} WHERE id = ?1", context_record_select_sql()),
+        params![id],
+        map_context_record_row,
+    )
+    .map_err(|error| format!("context_record_bundle_read_failed: {error}"))
+}
+
+fn upsert_bundle_character_state(
+    conn: &Connection,
+    input: &SaveCharacterStateInput,
+    now: &str,
+) -> Result<CharacterStateDto, String> {
+    let id = input
+        .id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let owner = conn
+        .query_row(
+            "SELECT novel_id, character_id, chapter_id FROM character_states WHERE id = ?1",
+            params![&id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("character_state_existing_read_failed: {error}"))?;
+    if let Some(owner) = owner {
+        if owner.0 != input.novel_id || owner.1 != input.character_id || owner.2 != input.chapter_id
+        {
+            return Err("character_state_ownership_mismatch".to_string());
+        }
+        let affected = conn
+            .execute(
+                "UPDATE character_states SET state_summary = ?1, relationship_changes = ?2,
+                    goal_changes = ?3, location = ?4, health_state = ?5,
+                    knowledge_state = ?6
+                 WHERE id = ?7 AND novel_id = ?8 AND character_id = ?9",
+                params![
+                    &input.state_summary,
+                    &input.relationship_changes,
+                    &input.goal_changes,
+                    &input.location,
+                    &input.health_state,
+                    &input.knowledge_state,
+                    &id,
+                    &input.novel_id,
+                    &input.character_id,
+                ],
+            )
+            .map_err(|error| format!("character_state_bundle_update_failed: {error}"))?;
+        if affected != 1 {
+            return Err("character_state_bundle_update_conflict".to_string());
+        }
+    } else {
+        conn.execute(
+            "INSERT INTO character_states
+             (id, novel_id, character_id, chapter_id, state_summary,
+              relationship_changes, goal_changes, location, health_state,
+              knowledge_state, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                &id,
+                &input.novel_id,
+                &input.character_id,
+                &input.chapter_id,
+                &input.state_summary,
+                &input.relationship_changes,
+                &input.goal_changes,
+                &input.location,
+                &input.health_state,
+                &input.knowledge_state,
+                now,
+            ],
+        )
+        .map_err(|error| format!("character_state_bundle_insert_failed: {error}"))?;
+    }
+    let character_affected = conn
+        .execute(
+            "UPDATE characters SET current_state = ?1, updated_at = ?2
+             WHERE id = ?3 AND novel_id = ?4 AND is_active = 1",
+            params![
+                &input.state_summary,
+                now,
+                &input.character_id,
+                &input.novel_id
+            ],
+        )
+        .map_err(|error| format!("character_current_state_update_failed: {error}"))?;
+    if character_affected != 1 {
+        return Err("character_current_state_update_conflict".to_string());
+    }
+    conn.query_row(
+        &format!("{} WHERE id = ?1", character_state_select_sql()),
+        params![id],
+        map_character_state_row,
+    )
+    .map_err(|error| format!("character_state_bundle_read_failed: {error}"))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveChapterContextBundleInput {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub adopted_draft_id: String,
+    pub summary: SaveChapterSummaryInput,
+    #[serde(default)]
+    pub context_records: Vec<SaveContextRecordInput>,
+    #[serde(default)]
+    pub character_states: Vec<SaveCharacterStateInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveChapterContextBundleResult {
+    pub summary: ChapterSummaryDto,
+    pub context_records: Vec<ContextRecordDto>,
+    pub character_states: Vec<CharacterStateDto>,
+    pub chapter_status: String,
+}
+
+fn save_chapter_context_bundle_internal(
+    conn: &mut Connection,
+    input: &SaveChapterContextBundleInput,
+) -> Result<SaveChapterContextBundleResult, String> {
+    validate_uuid("chapter_context_novel_id", &input.novel_id)?;
+    validate_uuid("chapter_context_chapter_id", &input.chapter_id)?;
+    validate_uuid("chapter_context_adopted_draft_id", &input.adopted_draft_id)?;
+    if input.summary.novel_id != input.novel_id
+        || input.summary.chapter_id != input.chapter_id
+        || input.summary.adopted_draft_id != input.adopted_draft_id
+    {
+        return Err("chapter_context_summary_identity_mismatch".to_string());
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("chapter_context_transaction_failed: {error}"))?;
+    validate_summary_ownership(&transaction, &input.summary, true)?;
+    for context in &input.context_records {
+        if context.novel_id != input.novel_id
+            || context.chapter_id.as_deref() != Some(input.chapter_id.as_str())
+        {
+            return Err("chapter_context_record_identity_mismatch".to_string());
+        }
+        validate_context_record_input(&transaction, context)?;
+    }
+    for state in &input.character_states {
+        if state.novel_id != input.novel_id
+            || state.chapter_id.as_deref() != Some(input.chapter_id.as_str())
+        {
+            return Err("chapter_context_character_state_identity_mismatch".to_string());
+        }
+        validate_character_state_input(&transaction, state)?;
+    }
+
+    let summary = upsert_chapter_summary(&transaction, &input.summary, &now)?;
+    let mut contexts = Vec::with_capacity(input.context_records.len());
+    for context in &input.context_records {
+        contexts.push(upsert_bundle_context_record(&transaction, context, &now)?);
+    }
+    let mut character_states = Vec::with_capacity(input.character_states.len());
+    for state in &input.character_states {
+        character_states.push(upsert_bundle_character_state(&transaction, state, &now)?);
+    }
+    let affected = transaction
+        .execute(
+            "UPDATE chapters SET status = 'summarized', updated_at = ?1
+             WHERE id = ?2 AND novel_id = ?3 AND adopted_draft_id = ?4
+               AND deleted_at IS NULL",
+            params![
+                &now,
+                &input.chapter_id,
+                &input.novel_id,
+                &input.adopted_draft_id
+            ],
+        )
+        .map_err(|error| format!("chapter_context_status_update_failed: {error}"))?;
+    if affected != 1 {
+        return Err("chapter_context_status_update_conflict".to_string());
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("chapter_context_commit_failed: {error}"))?;
+    Ok(SaveChapterContextBundleResult {
+        summary,
+        context_records: contexts,
+        character_states,
+        chapter_status: "summarized".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn save_chapter_context_bundle(
+    input: SaveChapterContextBundleInput,
+) -> Result<SaveChapterContextBundleResult, String> {
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    save_chapter_context_bundle_internal(&mut conn, &input)
+}
+
+#[tauri::command]
+pub fn get_chapter_summary_by_id(id: String) -> Result<Option<ChapterSummaryDto>, String> {
+    validate_uuid("chapter_summary_id", &id)?;
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    conn.query_row(
+        &format!("{} WHERE id = ?1", chapter_summary_select_sql()),
+        params![id],
+        map_chapter_summary_row,
+    )
+    .optional()
+    .map_err(|error| format!("chapter_summary_read_failed: {error}"))
+}
+
+#[tauri::command]
+pub fn delete_chapter_summary(id: String) -> Result<(), String> {
+    validate_uuid("chapter_summary_id", &id)?;
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    let affected = conn
+        .execute("DELETE FROM chapter_summaries WHERE id = ?1", params![id])
+        .map_err(|error| format!("chapter_summary_delete_failed: {error}"))?;
+    if affected != 1 {
+        return Err("chapter_summary_not_found".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_character_states_by_character(
+    character_id: String,
+) -> Result<Vec<CharacterStateDto>, String> {
+    validate_uuid("character_state_character_id", &character_id)?;
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    let mut statement = conn
+        .prepare(&format!(
+            "{} WHERE character_id = ?1 ORDER BY created_at DESC, id DESC",
+            character_state_select_sql()
+        ))
+        .map_err(|error| format!("character_state_list_prepare_failed: {error}"))?;
+    let states = statement
+        .query_map(params![character_id], map_character_state_row)
+        .map_err(|error| format!("character_state_list_query_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("character_state_list_read_failed: {error}"))?;
+    Ok(states)
+}
+
+#[tauri::command]
+pub fn get_character_states_by_chapter(
+    chapter_id: String,
+) -> Result<Vec<CharacterStateDto>, String> {
+    validate_uuid("character_state_chapter_id", &chapter_id)?;
+    let conn = get_connection().lock().map_err(|error| error.to_string())?;
+    let mut statement = conn
+        .prepare(&format!(
+            "{} WHERE chapter_id = ?1 ORDER BY created_at DESC, id DESC",
+            character_state_select_sql()
+        ))
+        .map_err(|error| format!("character_state_list_prepare_failed: {error}"))?;
+    let states = statement
+        .query_map(params![chapter_id], map_character_state_row)
+        .map_err(|error| format!("character_state_list_query_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("character_state_list_read_failed: {error}"))?;
+    Ok(states)
+}
+
+#[tauri::command]
+pub fn save_character_state(input: SaveCharacterStateInput) -> Result<CharacterStateDto, String> {
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("character_state_transaction_failed: {error}"))?;
+    validate_character_state_input(&transaction, &input)?;
+    let state = upsert_bundle_character_state(&transaction, &input, &now)?;
+    transaction
+        .commit()
+        .map_err(|error| format!("character_state_commit_failed: {error}"))?;
+    Ok(state)
+}
+
+#[tauri::command]
+pub fn delete_character_state(id: String) -> Result<(), String> {
+    validate_uuid("character_state_id", &id)?;
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("character_state_delete_transaction_failed: {error}"))?;
+    let identity = transaction
+        .query_row(
+            "SELECT novel_id, character_id FROM character_states WHERE id = ?1",
+            params![&id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("character_state_delete_read_failed: {error}"))?
+        .ok_or_else(|| "character_state_not_found".to_string())?;
+    let affected = transaction
+        .execute("DELETE FROM character_states WHERE id = ?1", params![&id])
+        .map_err(|error| format!("character_state_delete_failed: {error}"))?;
+    if affected != 1 {
+        return Err("character_state_delete_conflict".to_string());
+    }
+    let latest_state = transaction
+        .query_row(
+            "SELECT state_summary FROM character_states
+             WHERE novel_id = ?1 AND character_id = ?2
+             ORDER BY created_at DESC, id DESC LIMIT 1",
+            params![&identity.0, &identity.1],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("character_state_latest_read_failed: {error}"))?;
+    let character_affected = transaction
+        .execute(
+            "UPDATE characters SET current_state = ?1, updated_at = ?2
+             WHERE id = ?3 AND novel_id = ?4",
+            params![
+                &latest_state,
+                chrono::Utc::now().to_rfc3339(),
+                &identity.1,
+                &identity.0
+            ],
+        )
+        .map_err(|error| format!("character_state_current_reconcile_failed: {error}"))?;
+    if character_affected != 1 {
+        return Err("character_state_character_missing".to_string());
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("character_state_delete_commit_failed: {error}"))?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyChapterSummaryInput {
+    #[serde(flatten)]
+    pub data: SaveChapterSummaryInput,
+    pub is_expired: Option<bool>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyContextRecordInput {
+    #[serde(flatten)]
+    pub data: SaveContextRecordInput,
+    pub is_expired: Option<bool>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyCharacterStateInput {
+    #[serde(flatten)]
+    pub data: SaveCharacterStateInput,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyMigrationEntityCounts {
+    pub inserted: usize,
+    pub matched: usize,
+    pub skipped: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrateLegacyChapterContextInput {
+    #[serde(default)]
+    pub chapter_summaries: Vec<LegacyChapterSummaryInput>,
+    #[serde(default)]
+    pub context_records: Vec<LegacyContextRecordInput>,
+    #[serde(default)]
+    pub character_states: Vec<LegacyCharacterStateInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrateLegacyChapterContextResult {
+    pub chapter_summaries: LegacyMigrationEntityCounts,
+    pub context_records: LegacyMigrationEntityCounts,
+    pub character_states: LegacyMigrationEntityCounts,
+    pub id_map: BTreeMap<String, String>,
+    pub warnings: Vec<String>,
+}
+
+fn migration_timestamp(value: Option<&str>, fallback: &str) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn table_has_id(conn: &Connection, table: &str, id: &str) -> Result<bool, String> {
+    let sql = match table {
+        "chapter_summaries" => "SELECT EXISTS(SELECT 1 FROM chapter_summaries WHERE id = ?1)",
+        "context_records" => "SELECT EXISTS(SELECT 1 FROM context_records WHERE id = ?1)",
+        "character_states" => "SELECT EXISTS(SELECT 1 FROM character_states WHERE id = ?1)",
+        _ => return Err("legacy_migration_unknown_table".to_string()),
+    };
+    conn.query_row(sql, params![id], |row| row.get::<_, bool>(0))
+        .map_err(|error| format!("legacy_migration_id_read_failed: {error}"))
+}
+
+fn choose_migration_id(
+    conn: &Connection,
+    table: &str,
+    source_id: Option<&str>,
+) -> Result<String, String> {
+    if let Some(source_id) = source_id {
+        if uuid::Uuid::parse_str(source_id).is_ok() && !table_has_id(conn, table, source_id)? {
+            return Ok(source_id.to_string());
+        }
+    }
+    Ok(uuid::Uuid::new_v4().to_string())
+}
+
+fn select_legacy_candidate(
+    candidates: Vec<(String, String, String)>,
+    source_id: Option<&str>,
+    created_at: Option<&str>,
+    updated_at: Option<&str>,
+) -> Result<Option<String>, ()> {
+    if let Some(source_id) = source_id {
+        if let Some(candidate) = candidates.iter().find(|candidate| candidate.0 == source_id) {
+            return Ok(Some(candidate.0.clone()));
+        }
+    }
+    match candidates.len() {
+        0 => Ok(None),
+        1 => Ok(Some(candidates[0].0.clone())),
+        _ => {
+            let timestamps: Vec<_> = candidates
+                .iter()
+                .filter(|candidate| {
+                    created_at.is_none_or(|value| candidate.1 == value)
+                        && updated_at.is_none_or(|value| candidate.2 == value)
+                })
+                .collect();
+            if timestamps.len() == 1 {
+                Ok(Some(timestamps[0].0.clone()))
+            } else {
+                Err(())
+            }
+        }
+    }
+}
+
+fn legacy_summary_matches(dto: &ChapterSummaryDto, input: &LegacyChapterSummaryInput) -> bool {
+    dto.novel_id == input.data.novel_id
+        && dto.chapter_id == input.data.chapter_id
+        && dto.volume_id == input.data.volume_id
+        && dto.adopted_draft_id == input.data.adopted_draft_id
+        && dto.summary == input.data.summary
+        && dto.key_events == input.data.key_events
+        && dto.character_changes == input.data.character_changes
+        && dto.relationship_changes == input.data.relationship_changes
+        && dto.new_foreshadows == input.data.new_foreshadows
+        && dto.resolved_foreshadows == input.data.resolved_foreshadows
+        && dto.next_chapter_hints == input.data.next_chapter_hints
+        && dto.core_events == input.data.core_events
+        && dto.protagonist_state_change == input.data.protagonist_state_change
+        && dto.important_character_changes == input.data.important_character_changes
+        && dto.setting_changes == input.data.setting_changes
+        && dto.new_locations == input.data.new_locations
+        && dto.new_items_or_abilities == input.data.new_items_or_abilities
+        && dto.foreshadowing == input.data.foreshadowing
+        && dto.unresolved_questions == input.data.unresolved_questions
+        && dto.facts_must_remember == input.data.facts_must_remember
+        && dto.next_chapter_hook == input.data.next_chapter_hook
+        && dto.validation_status == input.data.validation_status
+        && dto.validation_result == input.data.validation_result
+        && dto.enabled == input.data.enabled.unwrap_or(true)
+        && dto.content_hash == input.data.content_hash
+        && dto.draft_version == input.data.draft_version
+        && dto.is_expired == input.is_expired.unwrap_or(false)
+        && dto.ai_task_id == input.data.ai_task_id
+}
+
+fn legacy_context_matches(dto: &ContextRecordDto, input: &LegacyContextRecordInput) -> bool {
+    dto.novel_id == input.data.novel_id
+        && dto.chapter_id == input.data.chapter_id
+        && dto.volume_id == input.data.volume_id
+        && dto.context_type == input.data.context_type
+        && dto.title == input.data.title
+        && dto.content == input.data.content
+        && dto.importance == input.data.importance.unwrap_or(3)
+        && dto.is_active == input.data.is_active.unwrap_or(true)
+        && dto.is_expired == input.is_expired.unwrap_or(false)
+        && dto.content_hash == input.data.content_hash
+        && dto.draft_version == input.data.draft_version
+}
+
+fn legacy_character_state_matches(
+    dto: &CharacterStateDto,
+    input: &LegacyCharacterStateInput,
+) -> bool {
+    dto.novel_id == input.data.novel_id
+        && dto.character_id == input.data.character_id
+        && dto.chapter_id == input.data.chapter_id
+        && dto.state_summary == input.data.state_summary
+        && dto.relationship_changes == input.data.relationship_changes
+        && dto.goal_changes == input.data.goal_changes
+        && dto.location == input.data.location
+        && dto.health_state == input.data.health_state
+        && dto.knowledge_state == input.data.knowledge_state
+}
+
+fn load_summary_candidates(
+    conn: &Connection,
+    input: &LegacyChapterSummaryInput,
+) -> Result<Vec<(String, String, String)>, String> {
+    let mut statement = conn
+        .prepare(&format!(
+            "{} WHERE novel_id = ?1 AND chapter_id = ?2",
+            chapter_summary_select_sql()
+        ))
+        .map_err(|error| format!("legacy_summary_candidates_prepare_failed: {error}"))?;
+    let rows = statement
+        .query_map(
+            params![&input.data.novel_id, &input.data.chapter_id],
+            map_chapter_summary_row,
+        )
+        .map_err(|error| format!("legacy_summary_candidates_query_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("legacy_summary_candidates_read_failed: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| legacy_summary_matches(row, input))
+        .map(|row| (row.id, row.created_at, row.updated_at))
+        .collect())
+}
+
+fn load_context_candidates(
+    conn: &Connection,
+    input: &LegacyContextRecordInput,
+) -> Result<Vec<(String, String, String)>, String> {
+    let mut statement = conn
+        .prepare(&format!(
+            "{} WHERE novel_id = ?1",
+            context_record_select_sql()
+        ))
+        .map_err(|error| format!("legacy_context_candidates_prepare_failed: {error}"))?;
+    let rows = statement
+        .query_map(params![&input.data.novel_id], map_context_record_row)
+        .map_err(|error| format!("legacy_context_candidates_query_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("legacy_context_candidates_read_failed: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| legacy_context_matches(row, input))
+        .map(|row| (row.id, row.created_at, row.updated_at))
+        .collect())
+}
+
+fn load_character_state_candidates(
+    conn: &Connection,
+    input: &LegacyCharacterStateInput,
+) -> Result<Vec<(String, String, String)>, String> {
+    let mut statement = conn
+        .prepare(&format!(
+            "{} WHERE novel_id = ?1 AND character_id = ?2",
+            character_state_select_sql()
+        ))
+        .map_err(|error| format!("legacy_character_candidates_prepare_failed: {error}"))?;
+    let rows = statement
+        .query_map(
+            params![&input.data.novel_id, &input.data.character_id],
+            map_character_state_row,
+        )
+        .map_err(|error| format!("legacy_character_candidates_query_failed: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("legacy_character_candidates_read_failed: {error}"))?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| legacy_character_state_matches(row, input))
+        .map(|row| (row.id, row.created_at.clone(), row.created_at))
+        .collect())
+}
+
+fn push_migration_warning(
+    result: &mut MigrateLegacyChapterContextResult,
+    entity: &str,
+    index: usize,
+    source_id: Option<&str>,
+    reason: &str,
+) {
+    result.warnings.push(format!(
+        "{entity}[{index}] id={}: {reason}",
+        source_id.unwrap_or("<missing>")
+    ));
+}
+
+fn migrate_legacy_chapter_context_internal(
+    conn: &mut Connection,
+    input: &MigrateLegacyChapterContextInput,
+) -> Result<MigrateLegacyChapterContextResult, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("legacy_context_transaction_failed: {error}"))?;
+    let mut result = MigrateLegacyChapterContextResult::default();
+    let mut affected_characters: HashSet<(String, String)> = HashSet::new();
+
+    for (index, item) in input.chapter_summaries.iter().enumerate() {
+        let source_id = item.data.id.as_deref();
+        let mut validation = item.data.clone();
+        validation.id = None;
+        if let Err(error) = validate_summary_ownership(&transaction, &validation, false) {
+            result.chapter_summaries.skipped += 1;
+            push_migration_warning(&mut result, "chapterSummaries", index, source_id, &error);
+            continue;
+        }
+        let candidates = load_summary_candidates(&transaction, item)?;
+        match select_legacy_candidate(
+            candidates,
+            source_id,
+            item.created_at.as_deref(),
+            item.updated_at.as_deref(),
+        ) {
+            Ok(Some(id)) => {
+                result.chapter_summaries.matched += 1;
+                if let Some(source_id) = source_id {
+                    result.id_map.insert(source_id.to_string(), id);
+                }
+            }
+            Err(()) => {
+                result.chapter_summaries.skipped += 1;
+                push_migration_warning(
+                    &mut result,
+                    "chapterSummaries",
+                    index,
+                    source_id,
+                    "ambiguous_fingerprint_and_timestamps",
+                );
+            }
+            Ok(None) => {
+                let id = choose_migration_id(&transaction, "chapter_summaries", source_id)?;
+                let created_at = migration_timestamp(item.created_at.as_deref(), &now);
+                let updated_at = migration_timestamp(item.updated_at.as_deref(), &created_at);
+                transaction
+                    .execute(
+                        "INSERT INTO chapter_summaries
+                     (id, novel_id, chapter_id, volume_id, adopted_draft_id, summary,
+                      key_events, character_changes, relationship_changes, new_foreshadows,
+                      resolved_foreshadows, next_chapter_hints, core_events,
+                      protagonist_state_change, important_character_changes, setting_changes,
+                      new_locations, new_items_or_abilities, foreshadowing, unresolved_questions,
+                      facts_must_remember, next_chapter_hook, validation_status, validation_result,
+                      enabled, content_hash, draft_version, is_expired, ai_task_id,
+                      created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                             ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
+                             ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
+                        params![
+                            &id,
+                            &item.data.novel_id,
+                            &item.data.chapter_id,
+                            &item.data.volume_id,
+                            &item.data.adopted_draft_id,
+                            &item.data.summary,
+                            &item.data.key_events,
+                            &item.data.character_changes,
+                            &item.data.relationship_changes,
+                            &item.data.new_foreshadows,
+                            &item.data.resolved_foreshadows,
+                            &item.data.next_chapter_hints,
+                            &item.data.core_events,
+                            &item.data.protagonist_state_change,
+                            &item.data.important_character_changes,
+                            &item.data.setting_changes,
+                            &item.data.new_locations,
+                            &item.data.new_items_or_abilities,
+                            &item.data.foreshadowing,
+                            &item.data.unresolved_questions,
+                            &item.data.facts_must_remember,
+                            &item.data.next_chapter_hook,
+                            &item.data.validation_status,
+                            &item.data.validation_result,
+                            i64::from(item.data.enabled.unwrap_or(true)),
+                            &item.data.content_hash,
+                            item.data.draft_version,
+                            i64::from(item.is_expired.unwrap_or(false)),
+                            &item.data.ai_task_id,
+                            &created_at,
+                            &updated_at,
+                        ],
+                    )
+                    .map_err(|error| format!("legacy_summary_insert_failed: {error}"))?;
+                result.chapter_summaries.inserted += 1;
+                if let Some(source_id) = source_id {
+                    result.id_map.insert(source_id.to_string(), id);
+                }
+            }
+        }
+    }
+
+    for (index, item) in input.context_records.iter().enumerate() {
+        let source_id = item.data.id.as_deref();
+        let mut validation = item.data.clone();
+        validation.id = None;
+        if let Err(error) = validate_context_record_input(&transaction, &validation) {
+            result.context_records.skipped += 1;
+            push_migration_warning(&mut result, "contextRecords", index, source_id, &error);
+            continue;
+        }
+        let candidates = load_context_candidates(&transaction, item)?;
+        match select_legacy_candidate(
+            candidates,
+            source_id,
+            item.created_at.as_deref(),
+            item.updated_at.as_deref(),
+        ) {
+            Ok(Some(id)) => {
+                result.context_records.matched += 1;
+                if let Some(source_id) = source_id {
+                    result.id_map.insert(source_id.to_string(), id);
+                }
+            }
+            Err(()) => {
+                result.context_records.skipped += 1;
+                push_migration_warning(
+                    &mut result,
+                    "contextRecords",
+                    index,
+                    source_id,
+                    "ambiguous_fingerprint_and_timestamps",
+                );
+            }
+            Ok(None) => {
+                let id = choose_migration_id(&transaction, "context_records", source_id)?;
+                let created_at = migration_timestamp(item.created_at.as_deref(), &now);
+                let updated_at = migration_timestamp(item.updated_at.as_deref(), &created_at);
+                transaction
+                    .execute(
+                        "INSERT INTO context_records
+                     (id, novel_id, chapter_id, volume_id, context_type, title, content,
+                      importance, is_active, is_expired, content_hash, draft_version,
+                      created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                        params![
+                            &id,
+                            &item.data.novel_id,
+                            &item.data.chapter_id,
+                            &item.data.volume_id,
+                            &item.data.context_type,
+                            &item.data.title,
+                            &item.data.content,
+                            item.data.importance.unwrap_or(3),
+                            i64::from(item.data.is_active.unwrap_or(true)),
+                            i64::from(item.is_expired.unwrap_or(false)),
+                            &item.data.content_hash,
+                            item.data.draft_version,
+                            &created_at,
+                            &updated_at,
+                        ],
+                    )
+                    .map_err(|error| format!("legacy_context_insert_failed: {error}"))?;
+                result.context_records.inserted += 1;
+                if let Some(source_id) = source_id {
+                    result.id_map.insert(source_id.to_string(), id);
+                }
+            }
+        }
+    }
+
+    for (index, item) in input.character_states.iter().enumerate() {
+        let source_id = item.data.id.as_deref();
+        let mut validation = item.data.clone();
+        validation.id = None;
+        let ownership_result = (|| {
+            validate_uuid("character_state_novel_id", &validation.novel_id)?;
+            validate_uuid("character_state_character_id", &validation.character_id)?;
+            if let Some(chapter_id) = validation.chapter_id.as_deref() {
+                validate_uuid("character_state_chapter_id", chapter_id)?;
+            }
+            let character_exists = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM characters WHERE id = ?1 AND novel_id = ?2)",
+                    params![&validation.character_id, &validation.novel_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(|error| format!("legacy_character_ownership_read_failed: {error}"))?;
+            if !character_exists {
+                return Err("character_state_character_ownership_mismatch".to_string());
+            }
+            if let Some(chapter_id) = validation.chapter_id.as_deref() {
+                let chapter_exists = transaction
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM chapters
+                         WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL)",
+                        params![chapter_id, &validation.novel_id],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(|error| format!("legacy_character_chapter_read_failed: {error}"))?;
+                if !chapter_exists {
+                    return Err("character_state_chapter_ownership_mismatch".to_string());
+                }
+            }
+            if validation.state_summary.trim().is_empty() {
+                return Err("character_state_summary_required".to_string());
+            }
+            Ok(())
+        })();
+        if let Err(error) = ownership_result {
+            result.character_states.skipped += 1;
+            push_migration_warning(&mut result, "characterStates", index, source_id, &error);
+            continue;
+        }
+        let candidates = load_character_state_candidates(&transaction, item)?;
+        let reconciled = match select_legacy_candidate(
+            candidates,
+            source_id,
+            item.created_at.as_deref(),
+            item.created_at.as_deref(),
+        ) {
+            Ok(Some(id)) => {
+                result.character_states.matched += 1;
+                if let Some(source_id) = source_id {
+                    result.id_map.insert(source_id.to_string(), id);
+                }
+                true
+            }
+            Err(()) => {
+                result.character_states.skipped += 1;
+                push_migration_warning(
+                    &mut result,
+                    "characterStates",
+                    index,
+                    source_id,
+                    "ambiguous_fingerprint_and_timestamp",
+                );
+                false
+            }
+            Ok(None) => {
+                let id = choose_migration_id(&transaction, "character_states", source_id)?;
+                let created_at = migration_timestamp(item.created_at.as_deref(), &now);
+                transaction
+                    .execute(
+                        "INSERT INTO character_states
+                     (id, novel_id, character_id, chapter_id, state_summary,
+                      relationship_changes, goal_changes, location, health_state,
+                      knowledge_state, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        params![
+                            &id,
+                            &item.data.novel_id,
+                            &item.data.character_id,
+                            &item.data.chapter_id,
+                            &item.data.state_summary,
+                            &item.data.relationship_changes,
+                            &item.data.goal_changes,
+                            &item.data.location,
+                            &item.data.health_state,
+                            &item.data.knowledge_state,
+                            &created_at,
+                        ],
+                    )
+                    .map_err(|error| format!("legacy_character_state_insert_failed: {error}"))?;
+                result.character_states.inserted += 1;
+                if let Some(source_id) = source_id {
+                    result.id_map.insert(source_id.to_string(), id);
+                }
+                true
+            }
+        };
+        if reconciled {
+            affected_characters
+                .insert((item.data.novel_id.clone(), item.data.character_id.clone()));
+        }
+    }
+
+    let mut affected_characters: Vec<_> = affected_characters.into_iter().collect();
+    affected_characters.sort();
+    for (novel_id, character_id) in affected_characters {
+        let latest_state = transaction
+            .query_row(
+                "SELECT state_summary FROM character_states
+                 WHERE novel_id = ?1 AND character_id = ?2
+                 ORDER BY created_at DESC, id DESC LIMIT 1",
+                params![&novel_id, &character_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("legacy_character_latest_state_read_failed: {error}"))?
+            .ok_or_else(|| "legacy_character_latest_state_missing".to_string())?;
+        let affected = transaction
+            .execute(
+                "UPDATE characters SET current_state = ?1, updated_at = ?2
+                 WHERE id = ?3 AND novel_id = ?4",
+                params![&latest_state, &now, &character_id, &novel_id],
+            )
+            .map_err(|error| format!("legacy_character_current_state_update_failed: {error}"))?;
+        if affected != 1 {
+            return Err("legacy_character_current_state_update_conflict".to_string());
+        }
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("legacy_context_commit_failed: {error}"))?;
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn migrate_legacy_chapter_context(
+    input: MigrateLegacyChapterContextInput,
+) -> Result<MigrateLegacyChapterContextResult, String> {
+    let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
+    migrate_legacy_chapter_context_internal(&mut conn, &input)
 }
 
 // ==================== Quality Fix Runs ====================
@@ -5426,6 +7063,20 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE chapter_summaries (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                is_expired INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE context_records (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                is_expired INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
             ",
         )
     }
@@ -5515,6 +7166,33 @@ mod tests {
             "SELECT adopted_draft_id, word_count, status, updated_at FROM chapters WHERE id = ?1",
             params![id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+    }
+
+    fn insert_test_chapter_context(conn: &Connection, chapter_id: &str) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO chapter_summaries (id, chapter_id, is_expired, updated_at)
+             VALUES (?1, ?2, 0, 'before')",
+            params![format!("summary-{chapter_id}"), chapter_id],
+        )?;
+        conn.execute(
+            "INSERT INTO context_records (id, chapter_id, is_expired, updated_at)
+             VALUES (?1, ?2, 0, 'before')",
+            params![format!("context-{chapter_id}"), chapter_id],
+        )?;
+        Ok(())
+    }
+
+    fn get_test_chapter_context_expired(
+        conn: &Connection,
+        chapter_id: &str,
+    ) -> rusqlite::Result<(i64, i64)> {
+        conn.query_row(
+            "SELECT
+                (SELECT is_expired FROM chapter_summaries WHERE chapter_id = ?1),
+                (SELECT is_expired FROM context_records WHERE chapter_id = ?1)",
+            params![chapter_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
     }
 
@@ -5868,6 +7546,95 @@ mod tests {
         assert_eq!(chapter.1, count_words("新的正式正文"));
         assert_eq!(chapter.2, "adopted");
         assert_ne!(chapter.3, "before");
+        Ok(())
+    }
+
+    #[test]
+    fn adopting_different_draft_expires_summary_and_context_atomically(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "old body", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "new body", false)?;
+        insert_test_chapter_context(&conn, "chapter-a")?;
+
+        adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")?;
+
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 0);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 1);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-new")
+        );
+        assert_eq!(
+            get_test_chapter_context_expired(&conn, "chapter-a")?,
+            (1, 1)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn readopting_same_draft_keeps_summary_and_context_valid(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-current"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-current", "chapter-a", "same body", true)?;
+        insert_test_chapter_context(&conn, "chapter-a")?;
+        conn.execute_batch(
+            "CREATE TRIGGER reject_unexpected_context_expiration
+             BEFORE UPDATE OF is_expired ON context_records
+             BEGIN SELECT RAISE(ABORT, 'same draft must not expire context'); END;",
+        )?;
+
+        adopt_chapter_draft_internal(&mut conn, "draft-current", "chapter-a")?;
+
+        assert_eq!(get_test_draft_adopted(&conn, "draft-current")?, 1);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-current")
+        );
+        assert_eq!(
+            get_test_chapter_context_expired(&conn, "chapter-a")?,
+            (0, 0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn adoption_and_context_expiration_roll_back_together_on_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "old body", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "new body", false)?;
+        insert_test_chapter_context(&conn, "chapter-a")?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_context_expiration_during_adoption
+             BEFORE UPDATE OF is_expired ON context_records WHEN NEW.is_expired = 1
+             BEGIN SELECT RAISE(ABORT, 'forced context expiration failure'); END;",
+        )?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")
+            .expect_err("context expiration failure must roll back adoption");
+
+        assert!(
+            error.starts_with("chapter_context_records_expire_failed:"),
+            "{error}"
+        );
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
+        let chapter = get_test_chapter_state(&conn, "chapter-a")?;
+        assert_eq!(chapter.0.as_deref(), Some("draft-old"));
+        assert_eq!(chapter.1, 3);
+        assert_eq!(chapter.2, "adopted");
+        assert_eq!(chapter.3, "before");
+        assert_eq!(
+            get_test_chapter_context_expired(&conn, "chapter-a")?,
+            (0, 0)
+        );
         Ok(())
     }
 
@@ -6370,7 +8137,11 @@ mod tests {
         for action in ["single", "batch", "clear"] {
             let conn = Connection::open_in_memory()?;
             create_runtime_ai_task_table(&conn)?;
-            for task_id in ["quality-task-protected", "quality-task-free-a", "quality-task-free-b"] {
+            for task_id in [
+                "quality-task-protected",
+                "quality-task-free-a",
+                "quality-task-free-b",
+            ] {
                 insert_runtime_ai_task(&conn, task_id)?;
             }
             conn.execute(
@@ -6983,6 +8754,793 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         assert_eq!(state, ("pending".to_string(), 0));
+        Ok(())
+    }
+
+    fn create_chapter_context_test_database() -> rusqlite::Result<Connection> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE novels (
+                id TEXT PRIMARY KEY,
+                deleted_at TEXT
+            );
+            CREATE TABLE volumes (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                deleted_at TEXT
+            );
+            CREATE TABLE chapters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                volume_id TEXT,
+                adopted_draft_id TEXT,
+                status TEXT NOT NULL,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+            CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                is_adopted INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE characters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                current_state TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE character_states (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                character_id TEXT NOT NULL,
+                chapter_id TEXT,
+                state_summary TEXT NOT NULL DEFAULT '',
+                relationship_changes TEXT,
+                goal_changes TEXT,
+                location TEXT,
+                health_state TEXT,
+                knowledge_state TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE chapter_summaries (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                volume_id TEXT,
+                adopted_draft_id TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                key_events TEXT,
+                character_changes TEXT,
+                relationship_changes TEXT,
+                new_foreshadows TEXT,
+                resolved_foreshadows TEXT,
+                next_chapter_hints TEXT,
+                core_events TEXT,
+                protagonist_state_change TEXT,
+                important_character_changes TEXT,
+                setting_changes TEXT,
+                new_locations TEXT,
+                new_items_or_abilities TEXT,
+                foreshadowing TEXT,
+                unresolved_questions TEXT,
+                facts_must_remember TEXT,
+                next_chapter_hook TEXT,
+                validation_status TEXT,
+                validation_result TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                content_hash TEXT,
+                draft_version INTEGER,
+                is_expired INTEGER NOT NULL DEFAULT 0,
+                ai_task_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE context_records (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT,
+                volume_id TEXT,
+                context_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                importance INTEGER NOT NULL DEFAULT 3,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                is_expired INTEGER NOT NULL DEFAULT 0,
+                content_hash TEXT,
+                draft_version INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            ",
+        )?;
+        Ok(conn)
+    }
+
+    struct ChapterContextFixture {
+        novel_id: String,
+        volume_id: String,
+        chapter_id: String,
+        draft_id: String,
+        character_id: String,
+    }
+
+    fn seed_chapter_context_fixture(
+        conn: &Connection,
+        suffix: u128,
+        order_index: i64,
+    ) -> rusqlite::Result<ChapterContextFixture> {
+        let novel_id = uuid::Uuid::from_u128(suffix * 16 + 1).to_string();
+        let volume_id = uuid::Uuid::from_u128(suffix * 16 + 2).to_string();
+        let chapter_id = uuid::Uuid::from_u128(suffix * 16 + 3).to_string();
+        let draft_id = uuid::Uuid::from_u128(suffix * 16 + 4).to_string();
+        let character_id = uuid::Uuid::from_u128(suffix * 16 + 5).to_string();
+        conn.execute("INSERT INTO novels (id) VALUES (?1)", params![&novel_id])?;
+        conn.execute(
+            "INSERT INTO volumes (id, novel_id) VALUES (?1, ?2)",
+            params![&volume_id, &novel_id],
+        )?;
+        conn.execute(
+            "INSERT INTO chapters
+             (id, novel_id, volume_id, adopted_draft_id, status, order_index, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'adopted', ?5, 'before')",
+            params![&chapter_id, &novel_id, &volume_id, &draft_id, order_index],
+        )?;
+        conn.execute(
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, is_adopted)
+             VALUES (?1, ?2, ?3, 1)",
+            params![&draft_id, &novel_id, &chapter_id],
+        )?;
+        conn.execute(
+            "INSERT INTO characters (id, novel_id, current_state, updated_at)
+             VALUES (?1, ?2, 'before', 'before')",
+            params![&character_id, &novel_id],
+        )?;
+        Ok(ChapterContextFixture {
+            novel_id,
+            volume_id,
+            chapter_id,
+            draft_id,
+            character_id,
+        })
+    }
+
+    fn test_summary_input(
+        fixture: &ChapterContextFixture,
+        id: Option<String>,
+        summary: &str,
+    ) -> SaveChapterSummaryInput {
+        SaveChapterSummaryInput {
+            id,
+            novel_id: fixture.novel_id.clone(),
+            chapter_id: fixture.chapter_id.clone(),
+            volume_id: Some(fixture.volume_id.clone()),
+            adopted_draft_id: fixture.draft_id.clone(),
+            summary: summary.to_string(),
+            key_events: None,
+            character_changes: None,
+            relationship_changes: None,
+            new_foreshadows: None,
+            resolved_foreshadows: None,
+            next_chapter_hints: None,
+            core_events: None,
+            protagonist_state_change: None,
+            important_character_changes: None,
+            setting_changes: None,
+            new_locations: None,
+            new_items_or_abilities: None,
+            foreshadowing: None,
+            unresolved_questions: None,
+            facts_must_remember: None,
+            next_chapter_hook: None,
+            validation_status: Some("passed".to_string()),
+            validation_result: None,
+            enabled: Some(true),
+            content_hash: Some("hash".to_string()),
+            draft_version: Some(1),
+            ai_task_id: None,
+        }
+    }
+
+    fn test_context_input(
+        fixture: &ChapterContextFixture,
+        id: Option<String>,
+        title: &str,
+        content: &str,
+    ) -> SaveContextRecordInput {
+        SaveContextRecordInput {
+            id,
+            novel_id: fixture.novel_id.clone(),
+            chapter_id: Some(fixture.chapter_id.clone()),
+            volume_id: Some(fixture.volume_id.clone()),
+            context_type: "chapter_summary".to_string(),
+            title: title.to_string(),
+            content: content.to_string(),
+            importance: Some(4),
+            is_active: Some(true),
+            content_hash: Some("hash".to_string()),
+            draft_version: Some(1),
+        }
+    }
+
+    fn test_character_state_input(
+        fixture: &ChapterContextFixture,
+        id: Option<String>,
+        summary: &str,
+    ) -> SaveCharacterStateInput {
+        SaveCharacterStateInput {
+            id,
+            novel_id: fixture.novel_id.clone(),
+            character_id: fixture.character_id.clone(),
+            chapter_id: Some(fixture.chapter_id.clone()),
+            state_summary: summary.to_string(),
+            relationship_changes: Some("closer".to_string()),
+            goal_changes: None,
+            location: Some("harbor".to_string()),
+            health_state: None,
+            knowledge_state: Some("secret".to_string()),
+        }
+    }
+
+    #[test]
+    fn context_batch_preserves_provided_ids_and_rolls_back_nth_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let fixture = seed_chapter_context_fixture(&conn, 1, 0)?;
+        let provided_id = uuid::Uuid::new_v4().to_string();
+        let saved = save_context_records_internal(
+            &mut conn,
+            &[test_context_input(
+                &fixture,
+                Some(provided_id.clone()),
+                "provided",
+                "first",
+            )],
+        )?;
+        assert_eq!(saved[0].id, provided_id);
+
+        let invalid_id_error = save_context_records_internal(
+            &mut conn,
+            &[test_context_input(
+                &fixture,
+                Some("not-a-uuid".to_string()),
+                "invalid",
+                "must not persist",
+            )],
+        )
+        .unwrap_err();
+        assert_eq!(invalid_id_error, "context_record_id_invalid_uuid");
+
+        conn.execute_batch(
+            "CREATE TRIGGER fail_context_insert
+             BEFORE INSERT ON context_records WHEN NEW.title = 'explode'
+             BEGIN SELECT RAISE(ABORT, 'injected nth failure'); END;",
+        )?;
+        let before: i64 =
+            conn.query_row("SELECT COUNT(*) FROM context_records", [], |row| row.get(0))?;
+        let inputs = vec![
+            test_context_input(
+                &fixture,
+                Some(uuid::Uuid::new_v4().to_string()),
+                "will rollback",
+                "second",
+            ),
+            test_context_input(
+                &fixture,
+                Some(uuid::Uuid::new_v4().to_string()),
+                "explode",
+                "third",
+            ),
+        ];
+        assert!(save_context_records_internal(&mut conn, &inputs).is_err());
+        let after: i64 =
+            conn.query_row("SELECT COUNT(*) FROM context_records", [], |row| row.get(0))?;
+        assert_eq!(after, before);
+        Ok(())
+    }
+
+    #[test]
+    fn context_update_rejects_cross_novel_ownership() -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let owner = seed_chapter_context_fixture(&conn, 2, 0)?;
+        let attacker = seed_chapter_context_fixture(&conn, 3, 0)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        save_context_records_internal(
+            &mut conn,
+            &[test_context_input(
+                &owner,
+                Some(id.clone()),
+                "original",
+                "safe",
+            )],
+        )?;
+        let update = UpdateContextRecordInput {
+            novel_id: attacker.novel_id.clone(),
+            chapter_id: Some(attacker.chapter_id.clone()),
+            volume_id: Some(attacker.volume_id.clone()),
+            context_type: "chapter_summary".to_string(),
+            title: "hijacked".to_string(),
+            content: "unsafe".to_string(),
+            importance: 5,
+            is_active: false,
+            is_expired: true,
+            content_hash: None,
+            draft_version: None,
+        };
+        assert_eq!(
+            update_context_record_internal(&conn, &id, &update).unwrap_err(),
+            "context_record_ownership_mismatch"
+        );
+        assert_eq!(
+            update_context_record_internal(&conn, &uuid::Uuid::new_v4().to_string(), &update)
+                .unwrap_err(),
+            "context_record_not_found"
+        );
+        let unchanged: (String, String) = conn.query_row(
+            "SELECT novel_id, title FROM context_records WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(unchanged, (owner.novel_id, "original".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn chapter_context_bundle_is_atomic_and_updates_all_owned_state(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let fixture = seed_chapter_context_fixture(&conn, 4, 0)?;
+        let summary_id = uuid::Uuid::new_v4().to_string();
+        let context_id = uuid::Uuid::new_v4().to_string();
+        let state_id = uuid::Uuid::new_v4().to_string();
+        let input = SaveChapterContextBundleInput {
+            novel_id: fixture.novel_id.clone(),
+            chapter_id: fixture.chapter_id.clone(),
+            adopted_draft_id: fixture.draft_id.clone(),
+            summary: test_summary_input(&fixture, Some(summary_id.clone()), "bundle summary"),
+            context_records: vec![test_context_input(
+                &fixture,
+                Some(context_id.clone()),
+                "bundle context",
+                "remember",
+            )],
+            character_states: vec![test_character_state_input(
+                &fixture,
+                Some(state_id.clone()),
+                "after chapter",
+            )],
+        };
+        let result = save_chapter_context_bundle_internal(&mut conn, &input)?;
+        assert_eq!(result.summary.id, summary_id);
+        assert_eq!(result.context_records[0].id, context_id);
+        assert_eq!(result.character_states[0].id, state_id);
+        assert_eq!(result.chapter_status, "summarized");
+        let persisted: (String, String) = conn.query_row(
+            "SELECT chapter.status, character.current_state
+             FROM chapters AS chapter JOIN characters AS character ON character.novel_id = chapter.novel_id
+             WHERE chapter.id = ?1 AND character.id = ?2",
+            params![&fixture.chapter_id, &fixture.character_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(
+            persisted,
+            ("summarized".to_string(), "after chapter".to_string())
+        );
+
+        let rollback_fixture = seed_chapter_context_fixture(&conn, 5, 0)?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_bundle_second_context
+             BEFORE INSERT ON context_records WHEN NEW.title = 'bundle explode'
+             BEGIN SELECT RAISE(ABORT, 'injected bundle failure'); END;",
+        )?;
+        let rollback_input = SaveChapterContextBundleInput {
+            novel_id: rollback_fixture.novel_id.clone(),
+            chapter_id: rollback_fixture.chapter_id.clone(),
+            adopted_draft_id: rollback_fixture.draft_id.clone(),
+            summary: test_summary_input(
+                &rollback_fixture,
+                Some(uuid::Uuid::new_v4().to_string()),
+                "must rollback",
+            ),
+            context_records: vec![
+                test_context_input(
+                    &rollback_fixture,
+                    Some(uuid::Uuid::new_v4().to_string()),
+                    "first bundle context",
+                    "first",
+                ),
+                test_context_input(
+                    &rollback_fixture,
+                    Some(uuid::Uuid::new_v4().to_string()),
+                    "bundle explode",
+                    "second",
+                ),
+            ],
+            character_states: vec![],
+        };
+        assert!(save_chapter_context_bundle_internal(&mut conn, &rollback_input).is_err());
+        let counts: (i64, i64) = conn.query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM chapter_summaries WHERE novel_id = ?1),
+                (SELECT COUNT(*) FROM context_records WHERE novel_id = ?1)",
+            params![&rollback_fixture.novel_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(counts, (0, 0));
+        let rollback_status: String = conn.query_row(
+            "SELECT status FROM chapters WHERE id = ?1",
+            params![&rollback_fixture.chapter_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(rollback_status, "adopted");
+        Ok(())
+    }
+
+    #[test]
+    fn chapter_context_expiration_rolls_back_summary_when_record_update_fails(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let fixture = seed_chapter_context_fixture(&conn, 9, 0)?;
+        upsert_chapter_summary(
+            &conn,
+            &test_summary_input(
+                &fixture,
+                Some(uuid::Uuid::new_v4().to_string()),
+                "expiration summary",
+            ),
+            "before",
+        )?;
+        save_context_records_internal(
+            &mut conn,
+            &[test_context_input(
+                &fixture,
+                Some(uuid::Uuid::new_v4().to_string()),
+                "expiration context",
+                "remember",
+            )],
+        )?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_context_expiration
+             BEFORE UPDATE OF is_expired ON context_records WHEN NEW.is_expired = 1
+             BEGIN SELECT RAISE(ABORT, 'injected expiration failure'); END;",
+        )?;
+
+        assert!(mark_chapter_context_expired_internal(&mut conn, &fixture.chapter_id).is_err());
+        let rolled_back: (i64, i64) = conn.query_row(
+            "SELECT
+                (SELECT is_expired FROM chapter_summaries WHERE chapter_id = ?1),
+                (SELECT is_expired FROM context_records WHERE chapter_id = ?1)",
+            params![&fixture.chapter_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(rolled_back, (0, 0));
+
+        conn.execute_batch("DROP TRIGGER fail_context_expiration;")?;
+        mark_chapter_context_expired_internal(&mut conn, &fixture.chapter_id)?;
+        let expired: (i64, i64) = conn.query_row(
+            "SELECT
+                (SELECT is_expired FROM chapter_summaries WHERE chapter_id = ?1),
+                (SELECT is_expired FROM context_records WHERE chapter_id = ?1)",
+            params![&fixture.chapter_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(expired, (1, 1));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_context_migration_is_idempotent_and_reconciles_dual_write_mirror(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let fixture = seed_chapter_context_fixture(&conn, 6, 0)?;
+        let summary_id = uuid::Uuid::new_v4().to_string();
+        let context_id = uuid::Uuid::new_v4().to_string();
+        let mirror_source_id = uuid::Uuid::new_v4().to_string();
+        let mirror_database_id = uuid::Uuid::new_v4().to_string();
+        let state_id = uuid::Uuid::new_v4().to_string();
+        let mirror = test_context_input(
+            &fixture,
+            Some(mirror_source_id.clone()),
+            "dual mirror",
+            "same fingerprint",
+        );
+        conn.execute(
+            "INSERT INTO context_records
+             (id, novel_id, chapter_id, volume_id, context_type, title, content,
+              importance, is_active, is_expired, content_hash, draft_version,
+              created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, ?11, 'db-time', 'db-time')",
+            params![
+                &mirror_database_id,
+                &mirror.novel_id,
+                &mirror.chapter_id,
+                &mirror.volume_id,
+                &mirror.context_type,
+                &mirror.title,
+                &mirror.content,
+                mirror.importance,
+                i64::from(mirror.is_active.unwrap_or(true)),
+                &mirror.content_hash,
+                mirror.draft_version,
+            ],
+        )?;
+        let migration = MigrateLegacyChapterContextInput {
+            chapter_summaries: vec![LegacyChapterSummaryInput {
+                data: test_summary_input(&fixture, Some(summary_id.clone()), "legacy summary"),
+                is_expired: Some(false),
+                created_at: Some("legacy-time".to_string()),
+                updated_at: Some("legacy-time".to_string()),
+            }],
+            context_records: vec![
+                LegacyContextRecordInput {
+                    data: test_context_input(
+                        &fixture,
+                        Some(context_id.clone()),
+                        "new legacy context",
+                        "new fingerprint",
+                    ),
+                    is_expired: Some(false),
+                    created_at: Some("legacy-time".to_string()),
+                    updated_at: Some("legacy-time".to_string()),
+                },
+                LegacyContextRecordInput {
+                    data: mirror,
+                    is_expired: Some(false),
+                    created_at: Some("local-time".to_string()),
+                    updated_at: Some("local-time".to_string()),
+                },
+            ],
+            character_states: vec![LegacyCharacterStateInput {
+                data: test_character_state_input(&fixture, Some(state_id.clone()), "legacy state"),
+                created_at: Some("legacy-time".to_string()),
+            }],
+        };
+        let first = migrate_legacy_chapter_context_internal(&mut conn, &migration)?;
+        assert_eq!(first.chapter_summaries.inserted, 1);
+        assert_eq!(first.context_records.inserted, 1);
+        assert_eq!(first.context_records.matched, 1);
+        assert_eq!(first.character_states.inserted, 1);
+        assert_eq!(first.id_map.get(&summary_id), Some(&summary_id));
+        assert_eq!(first.id_map.get(&context_id), Some(&context_id));
+        assert_eq!(
+            first.id_map.get(&mirror_source_id),
+            Some(&mirror_database_id)
+        );
+        assert_eq!(first.id_map.get(&state_id), Some(&state_id));
+
+        let second = migrate_legacy_chapter_context_internal(&mut conn, &migration)?;
+        assert_eq!(second.chapter_summaries.matched, 1);
+        assert_eq!(second.context_records.matched, 2);
+        assert_eq!(second.character_states.matched, 1);
+        assert_eq!(second.chapter_summaries.inserted, 0);
+        assert_eq!(second.context_records.inserted, 0);
+        assert_eq!(second.character_states.inserted, 0);
+        let counts: (i64, i64, i64) = conn.query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM chapter_summaries WHERE novel_id = ?1),
+                (SELECT COUNT(*) FROM context_records WHERE novel_id = ?1),
+                (SELECT COUNT(*) FROM character_states WHERE novel_id = ?1)",
+            params![&fixture.novel_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(counts, (1, 2, 1));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_migration_reconciles_character_current_state_using_stable_latest_order(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let fixture = seed_chapter_context_fixture(&conn, 10, 0)?;
+        let lower_id = "00000000-0000-0000-0000-00000000ca01".to_string();
+        let higher_id = "00000000-0000-0000-0000-00000000ca02".to_string();
+        let tied_created_at = "2026-07-26T08:00:00Z";
+        conn.execute(
+            "INSERT INTO character_states
+             (id, novel_id, character_id, chapter_id, state_summary,
+              relationship_changes, goal_changes, location, health_state,
+              knowledge_state, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'stable latest state', NULL, NULL, NULL, NULL, NULL, ?5)",
+            params![
+                &higher_id,
+                &fixture.novel_id,
+                &fixture.character_id,
+                &fixture.chapter_id,
+                tied_created_at
+            ],
+        )?;
+        conn.execute(
+            "UPDATE characters SET current_state = 'stale state' WHERE id = ?1",
+            params![&fixture.character_id],
+        )?;
+        let migration = MigrateLegacyChapterContextInput {
+            chapter_summaries: vec![],
+            context_records: vec![],
+            character_states: vec![LegacyCharacterStateInput {
+                data: test_character_state_input(
+                    &fixture,
+                    Some(lower_id.clone()),
+                    "lower id state",
+                ),
+                created_at: Some(tied_created_at.to_string()),
+            }],
+        };
+
+        let first = migrate_legacy_chapter_context_internal(&mut conn, &migration)?;
+        assert_eq!(first.character_states.inserted, 1);
+        let current_after_insert: String = conn.query_row(
+            "SELECT current_state FROM characters WHERE id = ?1",
+            params![&fixture.character_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(current_after_insert, "stable latest state");
+
+        conn.execute(
+            "UPDATE characters SET current_state = 'stale again' WHERE id = ?1",
+            params![&fixture.character_id],
+        )?;
+        let second = migrate_legacy_chapter_context_internal(&mut conn, &migration)?;
+        assert_eq!(second.character_states.matched, 1);
+        assert_eq!(second.character_states.inserted, 0);
+        let current_after_match: String = conn.query_row(
+            "SELECT current_state FROM characters WHERE id = ?1",
+            params![&fixture.character_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(current_after_match, "stable latest state");
+        let state_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM character_states WHERE character_id = ?1",
+            params![&fixture.character_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(state_count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_context_migration_skips_ambiguous_mirrors_without_deletion(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = create_chapter_context_test_database()?;
+        let fixture = seed_chapter_context_fixture(&conn, 7, 0)?;
+        let base = test_context_input(&fixture, None, "ambiguous", "same");
+        for (id, timestamp) in [
+            (uuid::Uuid::new_v4().to_string(), "first"),
+            (uuid::Uuid::new_v4().to_string(), "second"),
+        ] {
+            conn.execute(
+                "INSERT INTO context_records
+                 (id, novel_id, chapter_id, volume_id, context_type, title, content,
+                  importance, is_active, is_expired, content_hash, draft_version,
+                  created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 4, 1, 0, ?8, 1, ?9, ?9)",
+                params![
+                    id,
+                    &base.novel_id,
+                    &base.chapter_id,
+                    &base.volume_id,
+                    &base.context_type,
+                    &base.title,
+                    &base.content,
+                    &base.content_hash,
+                    timestamp,
+                ],
+            )?;
+        }
+        let source_id = uuid::Uuid::new_v4().to_string();
+        let mut legacy_data = base;
+        legacy_data.id = Some(source_id.clone());
+        let migration = MigrateLegacyChapterContextInput {
+            chapter_summaries: vec![],
+            context_records: vec![LegacyContextRecordInput {
+                data: legacy_data,
+                is_expired: Some(false),
+                created_at: None,
+                updated_at: None,
+            }],
+            character_states: vec![],
+        };
+        let result = migrate_legacy_chapter_context_internal(&mut conn, &migration)?;
+        assert_eq!(result.context_records.skipped, 1);
+        assert!(result.warnings[0].contains("ambiguous_fingerprint_and_timestamps"));
+        assert!(!result.id_map.contains_key(&source_id));
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM context_records WHERE novel_id = ?1",
+            params![fixture.novel_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn context_and_summary_queries_have_stable_tie_breakers(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = create_chapter_context_test_database()?;
+        let later_chapter = seed_chapter_context_fixture(&conn, 8, 2)?;
+        let earlier_chapter = ChapterContextFixture {
+            novel_id: later_chapter.novel_id.clone(),
+            volume_id: later_chapter.volume_id.clone(),
+            chapter_id: uuid::Uuid::new_v4().to_string(),
+            draft_id: uuid::Uuid::new_v4().to_string(),
+            character_id: later_chapter.character_id.clone(),
+        };
+        conn.execute(
+            "INSERT INTO chapters
+             (id, novel_id, volume_id, adopted_draft_id, status, order_index, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'adopted', 1, 'before')",
+            params![
+                &earlier_chapter.chapter_id,
+                &earlier_chapter.novel_id,
+                &earlier_chapter.volume_id,
+                &earlier_chapter.draft_id
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, is_adopted)
+             VALUES (?1, ?2, ?3, 1)",
+            params![
+                &earlier_chapter.draft_id,
+                &earlier_chapter.novel_id,
+                &earlier_chapter.chapter_id
+            ],
+        )?;
+        let low_summary_id = "00000000-0000-0000-0000-00000000ff01".to_string();
+        let high_summary_id = "00000000-0000-0000-0000-00000000ff02".to_string();
+        upsert_chapter_summary(
+            &conn,
+            &test_summary_input(&later_chapter, Some(low_summary_id.clone()), "lower tie"),
+            "same-time",
+        )?;
+        upsert_chapter_summary(
+            &conn,
+            &test_summary_input(&later_chapter, Some(high_summary_id.clone()), "higher tie"),
+            "same-time",
+        )?;
+        let early_summary_id = uuid::Uuid::new_v4().to_string();
+        upsert_chapter_summary(
+            &conn,
+            &test_summary_input(
+                &earlier_chapter,
+                Some(early_summary_id.clone()),
+                "earlier chapter",
+            ),
+            "same-time",
+        )?;
+        assert_eq!(
+            get_chapter_summary_internal(&conn, &later_chapter.chapter_id)?
+                .expect("summary")
+                .id,
+            high_summary_id
+        );
+        let summaries = get_chapter_summaries_by_novel_internal(&conn, &later_chapter.novel_id)?;
+        assert_eq!(summaries[0].id, early_summary_id);
+        assert_eq!(summaries[1].id, high_summary_id);
+        assert_eq!(summaries[2].id, low_summary_id);
+
+        for id in [
+            "00000000-0000-0000-0000-00000000ee01",
+            "00000000-0000-0000-0000-00000000ee02",
+        ] {
+            conn.execute(
+                "INSERT INTO context_records
+                 (id, novel_id, chapter_id, volume_id, context_type, title, content,
+                  importance, is_active, is_expired, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 'other', 'tie', 'tie', 3, 1, 0, 'same-time', 'same-time')",
+                params![
+                    id,
+                    &later_chapter.novel_id,
+                    &later_chapter.chapter_id,
+                    &later_chapter.volume_id
+                ],
+            )?;
+        }
+        let contexts = get_context_records_internal(&conn, &later_chapter.novel_id)?;
+        assert_eq!(contexts[0].id, "00000000-0000-0000-0000-00000000ee02");
+        assert_eq!(contexts[1].id, "00000000-0000-0000-0000-00000000ee01");
         Ok(())
     }
 

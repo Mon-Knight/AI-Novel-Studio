@@ -46,6 +46,7 @@ const allSpecs = [
   'generation-job-cancel.spec.ts',
   'restart-task-recovery.spec.ts',
   'quality-history-replay.spec.ts',
+  'chapter-context-persistence.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 

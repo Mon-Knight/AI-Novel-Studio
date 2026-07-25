@@ -40,6 +40,13 @@ export const E2E_FIXTURES = {
     volumeTitle: 'E2E Quality History Volume',
     chapterTitle: 'E2E Quality History Chapter',
   },
+  chapterContextPersistence: {
+    projectTitle: 'E2E Chapter Context Persistence Project',
+    volumeTitle: 'E2E Chapter Context Persistence Volume',
+    chapterTitle: 'E2E Chapter Context Persistence Chapter',
+    adoptedContent: '主角进入关键场景，重要冲突被触发，并获得新的线索。主角经历本章事件后目标更明确，与同伴信任上升，准备追查下一条线索。关键线索背后仍有隐藏势力，下一章将承接本章线索继续推进调查和冲突。',
+    revisedContent: '主角离开旧场景，在雨夜港口发现第二条线索。重要冲突转向新的对手，主角与同伴重新约定目标，并决定在下一章追踪隐藏势力。',
+  },
 } as const;
 
 const LARGE_TEXT_MINIMUM_BYTES = 120 * 1024;

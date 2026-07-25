@@ -2,7 +2,7 @@
 
 > 文件：`.github/workflows-docs/workflow-script-usage.md`
 > 版本：v1.0.44
-> 用途：说明 4 个 Agent Workflow PowerShell 脚本的用途和使用方法
+> 用途：说明 Agent Workflow 核心与专项 PowerShell 脚本的用途和使用方法
 
 ---
 
@@ -10,10 +10,16 @@
 
 ```text
 scripts/agent-workflow/
-├── verify_project.ps1       # 统一项目验证入口
-├── check_docs_sync.ps1      # 检查关键文档是否存在和同步
-├── run_feature_workflow.ps1 # Agent 功能开发前后引导
-└── release_workflow.ps1     # 发布前检查（不自动发布）
+├── verify_project.ps1                 # 统一项目验证入口
+├── check_docs_sync.ps1                # 检查关键文档是否存在和同步
+├── check_version_sync.ps1             # 检查版本元数据与发布文档一致性
+├── check_quality_workspace.ps1        # 质量工作台静态检查
+├── check_setting_suggestions.ps1      # 设定建议静态检查
+├── check_ai_task_delete.ps1           # AI Task 删除静态检查
+├── runtime_check_ai_task_delete.ps1   # AI Task 删除 Rust 动态检查
+├── runtime_check_project_backup.ps1   # 完整项目备份 Rust 动态检查
+├── run_feature_workflow.ps1           # Agent 功能开发前后引导
+└── release_workflow.ps1               # 发布前检查（不自动发布）
 ```
 
 ---
@@ -30,15 +36,19 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ### 输出格式
 ```
-[verify_project] cargo check: PASS
+[verify_project] npm run test:version-sync: PASS
+[verify_project] npm run test: PASS
+[verify_project] npm run lint: PASS
 [verify_project] npm run build: PASS
-[verify_project] npm run tauri build: PASS
-[verify_project] pytest: SKIPPED (not configured)
+[verify_project] cargo check: PASS
+[verify_project] cargo test: PASS
+[verify_project] npm run test:e2e: PASS
+[verify_project] npm run tauri:build: PASS
 [verify_project] git status: CLEAN
 ```
 
 ### 说明
-- 每一步输出 `PASS / FAIL / SKIPPED`
+- 命令步骤输出 `PASS / FAIL`，Git 工作树步骤输出 `CLEAN / DIRTY`
 - 失败步骤显示具体命令
 - 最终输出验证摘要
 
@@ -103,11 +113,12 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/release_workflow
 ```
 
 ### 流程
-1. 检查 `CHANGELOG.md` 是否包含当前版本
-2. 检查 `README.md` 是否更新
-3. 运行 `verify_project.ps1`
-4. 检查 `git status`
-5. 输出是否可以创建 tag 的建议
+1. 运行 `check_version_sync.ps1` 检查全部版本来源
+2. 检查 `CHANGELOG.md` 是否包含当前版本
+3. 检查 `README.md` 是否更新
+4. 运行 `verify_project.ps1`
+5. 检查 `git status`
+6. 输出是否可以创建 tag 的建议
 
 ### 禁止
 - 不自动创建 tag

@@ -18,12 +18,14 @@ import OutlineEditorPage from './pages/OutlineEditor/OutlineEditorPage';
 import SettingSuggestionsPage from './pages/SettingSuggestions/SettingSuggestionsPage';
 import E2eDialogHost from './components/common/E2eDialogHost';
 import StartupRecoveryDialog, { type StartupRecoveryState } from './components/common/StartupRecoveryDialog';
+import StartupContextMigrationDialog, { type StartupContextMigrationState } from './components/common/StartupContextMigrationDialog';
 
 interface AppProps {
   startupRecovery: StartupRecoveryState;
+  startupContextMigration: StartupContextMigrationState;
 }
 
-function App({ startupRecovery }: AppProps) {
+function App({ startupRecovery, startupContextMigration }: AppProps) {
   const globalLoading = useGlobalLoadingModal(1200);
 
   return (
@@ -64,6 +66,7 @@ function App({ startupRecovery }: AppProps) {
       />
       <E2eDialogHost />
       <StartupRecoveryDialog recovery={startupRecovery} />
+      <StartupContextMigrationDialog migration={startupContextMigration} />
     </ErrorBoundary>
   );
 }

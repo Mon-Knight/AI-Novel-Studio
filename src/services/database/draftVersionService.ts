@@ -3,9 +3,10 @@
  * Tauri 桌面端使用 SQLite，浏览器开发态使用 localStorage。
  * 支持大文本分片保存（超过 100KB 自动使用分片管道）。
  */
-import { dbCall, lsGet, lsSet, generateId, nowISO } from '../database/db';
+import { dbCall, lsGet, generateId, nowISO } from '../database/db';
 import { abortLargeTextSave, uploadLargeTextChunks } from '../largeTextSave';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
+import { chapterSummaryService } from '../context/chapterSummaryService';
 import { shouldUseLargeTextSave } from '../../types/largeTextSave';
 import type { ChapterDraft, CreateChapterDraftInput, DraftSource } from '../../types/ai';
 import type { LargeTextSaveProgress } from '../../types/largeTextSave';
@@ -103,13 +104,11 @@ function normalizeDrafts(items: unknown): ChapterDraft[] {
 }
 
 function getLocalDrafts(chapterId: string): ChapterDraft[] {
-  const drafts = normalizeDrafts(lsGet<unknown>(draftsKey(chapterId)));
-  lsSet(draftsKey(chapterId), drafts);
-  return drafts;
+  return normalizeDrafts(lsGet<unknown>(draftsKey(chapterId)));
 }
 
 function saveLocalDrafts(chapterId: string, drafts: ChapterDraft[]): void {
-  lsSet(draftsKey(chapterId), drafts);
+  localStorage.setItem(draftsKey(chapterId), JSON.stringify(drafts));
 }
 
 /**
@@ -381,15 +380,19 @@ export const draftVersionService = {
   },
 
   async adopt(draftId: string, chapterId: string): Promise<ChapterDraft> {
+    let localDraftSnapshot: string | null = null;
+    let localAdoptedDraftChanged = false;
     const draft = await dbCall<unknown | null>(
       'adopt_chapter_draft',
       { draftId, chapterId },
       () => {
+        localDraftSnapshot = localStorage.getItem(draftsKey(chapterId));
         const drafts = getLocalDrafts(chapterId);
         const target = drafts.find((draft) => draft.id === draftId);
         if (!target) {
           throw new Error('draft_adopt_target_mismatch: 草稿不存在或不属于当前章节');
         }
+        localAdoptedDraftChanged = drafts.find((item) => item.isAdopted)?.id !== draftId;
         let adopted: ChapterDraft | null = null;
 
         const updated = drafts.map((d) => {
@@ -407,6 +410,22 @@ export const draftVersionService = {
     const normalized = normalizeDraft(draft);
     if (!normalized || normalized.id !== draftId || normalized.chapterId !== chapterId || !normalized.isAdopted) {
       throw new Error('draft_adopt_conflict: 正文采用结果无效');
+    }
+
+    if (!isTauriRuntime() && localAdoptedDraftChanged) {
+      try {
+        await chapterSummaryService.markExpired(chapterId);
+      } catch (error) {
+        try {
+          if (localDraftSnapshot === null) localStorage.removeItem(draftsKey(chapterId));
+          else localStorage.setItem(draftsKey(chapterId), localDraftSnapshot);
+        } catch (rollbackError) {
+          const rollbackFailure = new Error('正文采用后的上下文过期失败，且草稿采用状态未能完整回滚。');
+          Object.assign(rollbackFailure, { cause: error, rollbackError });
+          throw rollbackFailure;
+        }
+        throw error;
+      }
     }
     return hydrateDraft(normalized);
   },

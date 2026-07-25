@@ -5,6 +5,7 @@ import { HashRouter } from 'react-router-dom';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
 import { generationJobService } from './services/generation/generationJobService';
+import { legacyChapterContextMigrationService } from './services/context/legacyChapterContextMigrationService';
 import { tauriInvoke } from './services/tauri/runtime';
 import { describeUnknownError } from './utils/errorMessage';
 import './styles/variables.css';
@@ -79,6 +80,24 @@ async function applySystemAccentColor() {
 }
 
 async function bootstrapApplication() {
+  let startupContextMigration;
+  try {
+    startupContextMigration = await legacyChapterContextMigrationService.migrate();
+  } catch (error) {
+    const message = describeUnknownError(error, '旧章节上下文迁移失败');
+    console.error('[STARTUP_CONTEXT_MIGRATION_FAILED]', { message });
+    startupContextMigration = {
+      performed: false,
+      chapterSummaries: { inserted: 0, matched: 0, skipped: 0 },
+      contextRecords: { inserted: 0, matched: 0, skipped: 0 },
+      characterStates: { inserted: 0, matched: 0, skipped: 0 },
+      idMap: {},
+      warnings: [],
+      localRecordsRemoved: { chapterSummaries: 0, contextRecords: 0, characterStates: 0 },
+      error: message,
+    };
+  }
+
   let startupRecovery;
   try {
     startupRecovery = await generationJobService.recoverInterruptedAtStartup();
@@ -97,7 +116,10 @@ async function bootstrapApplication() {
     <React.StrictMode>
       <HashRouter>
         <ToastProvider>
-          <App startupRecovery={startupRecovery} />
+          <App
+            startupRecovery={startupRecovery}
+            startupContextMigration={startupContextMigration}
+          />
         </ToastProvider>
       </HashRouter>
     </React.StrictMode>,

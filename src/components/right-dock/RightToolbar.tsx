@@ -56,6 +56,10 @@ function RightToolbar({ activePanel, onTogglePanel, onRunCommand }: RightToolbar
                 ? 'ai-generate'
                 : btn.kind === 'panel' && btn.id === 'engineering'
                   ? 'chapter-engineering'
+                  : btn.kind === 'panel' && btn.id === 'chapter-summary'
+                    ? 'chapter-summary'
+                    : btn.kind === 'panel' && btn.id === 'context-view'
+                      ? 'context-view'
                   : btn.kind === 'panel' && btn.id === 'check'
                     ? 'quality-check'
                 : undefined}

@@ -20,6 +20,7 @@ import { runWithLoading } from '../../../lib/runWithLoading';
 import { checkOutlineCompliance } from '../../../services/ai/outlineComplianceChecker';
 import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionService';
 import { hashTextContent } from '../../../utils/contentHash';
+import { describeUnknownError } from '../../../utils/errorMessage';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 
 function namesText(names: string[]): string {
@@ -190,13 +191,21 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   const [showContext, setShowContext] = useState(false);
 
   // v0.8.0 上下文加载状态
-  const [contextCount, setContextCount] = useState(0);
+  const [contextCount, setContextCount] = useState<number | null>(null);
+  const [contextLoadError, setContextLoadError] = useState('');
 
   useEffect(() => {
     if (novelId) {
+      setContextLoadError('');
       contextRecordService.getForGeneration({ novelId, maxCount: 15 })
-        .then((records) => setContextCount(records.length))
-        .catch(() => setContextCount(0));
+        .then((records) => {
+          setContextCount(records.length);
+          setContextLoadError('');
+        })
+        .catch((error) => {
+          setContextCount(null);
+          setContextLoadError(describeUnknownError(error, '无法读取持久化上下文'));
+        });
     }
   }, [novelId]);
 
@@ -232,8 +241,14 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
         if (!cancelled) {
           setContextSummary(ctx);
           setPromptDebug(null);
+          setContextLoadError('');
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        if (!cancelled) {
+          setContextSummary(null);
+          setContextLoadError(describeUnknownError(error, '无法构建章节生成上下文'));
+        }
+      }
     };
     refresh();
     return () => { cancelled = true; };
@@ -257,7 +272,10 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       setContextSummary(ctx);
       setPromptDebug(request.promptDebug ?? null);
       setShowContext(true);
-    } catch { /* ignore */ }
+      setContextLoadError('');
+    } catch (error) {
+      setContextLoadError(describeUnknownError(error, '无法预览章节生成上下文'));
+    }
   }, [novelId, chapter, selectedStyleId, selectedOutputId, wordCountDraft]);
 
   const handleGenerate = async (options?: { retryMissingPoints?: OutlineKeyPoint[] }) => {
@@ -705,13 +723,23 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
       <div className="panel-section">
         <div className="panel-section-title">📦 上下文加载状态</div>
         <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-          <div>已加载上下文：<strong>{contextCount}</strong> 条</div>
+          <div
+            data-testid="generation-context-count"
+            data-context-count={contextCount === null ? 'error' : String(contextCount)}
+          >
+            已加载上下文：<strong>{contextCount === null ? '读取失败' : contextCount}</strong>{contextCount === null ? '' : ' 条'}
+          </div>
+          {contextLoadError && (
+            <div role="alert" data-testid="error-notice" style={{ color: 'var(--color-error)', marginTop: 2 }}>
+              {contextLoadError}
+            </div>
+          )}
           {contextCount === 0 && (
             <div style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
               暂无前文上下文记录，可先在已采用章节中生成总结
             </div>
           )}
-          {contextCount > 0 && (
+          {contextCount !== null && contextCount > 0 && (
             <div style={{ color: 'var(--color-success)', marginTop: 2 }}>
               ✅ 下一章生成时将自动加载以上下文摘要
             </div>

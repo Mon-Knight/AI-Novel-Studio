@@ -32,6 +32,11 @@ function ContextRecordList({ records, onToggleActive, onDelete, onAdd, compact }
       {records.map((r) => (
         <div
           key={r.id}
+          data-testid="context-record"
+          data-record-id={r.id}
+          data-context-type={r.contextType}
+          data-active={r.isActive ? 'true' : 'false'}
+          data-expired={r.isExpired ? 'true' : 'false'}
           style={{
             padding: compact ? 6 : 10,
             marginBottom: compact ? 4 : 6,
@@ -56,6 +61,7 @@ function ContextRecordList({ records, onToggleActive, onDelete, onAdd, compact }
                 </span>
                 <span style={{ fontWeight: 500, fontSize: 13 }}>{r.title}</span>
                 {!r.isActive && <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>[已停用]</span>}
+                {r.isExpired && <span style={{ fontSize: 10, color: 'var(--color-warning)' }}>[已过期]</span>}
               </div>
               {compact ? (
                 <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{r.content.slice(0, 60)}…</div>
@@ -71,7 +77,12 @@ function ContextRecordList({ records, onToggleActive, onDelete, onAdd, compact }
             {!compact && (
               <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                 {onToggleActive && (
-                  <button className="btn btn-text btn-sm" onClick={(e) => { e.stopPropagation(); onToggleActive(r.id, !r.isActive); }}>
+                  <button
+                    className="btn btn-text btn-sm"
+                    data-testid="context-record-toggle"
+                    data-record-id={r.id}
+                    onClick={(e) => { e.stopPropagation(); onToggleActive(r.id, !r.isActive); }}
+                  >
                     {r.isActive ? '停用' : '启用'}
                   </button>
                 )}

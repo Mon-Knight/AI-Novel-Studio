@@ -1,13 +1,85 @@
 # verify_project.ps1
 # AI Novel Studio - Unified Project Verification
 # Version: derived from package.json
-# Purpose: Run all build and verification steps, output unified summary
+# Purpose: Run the complete release-quality verification matrix.
 
-$ErrorActionPreference = "Continue"
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path "$ScriptDir\..\.."
-$package = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-$CURRENT_VERSION = $package.version
+$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+$package = Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$CURRENT_VERSION = [string]$package.version
+$Results = @()
+
+function Resolve-Executable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Candidates
+    )
+
+    foreach ($candidate in $Candidates) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command) {
+            return $command.Source
+        }
+    }
+
+    throw "Required executable was not found: $($Candidates -join ', ')"
+}
+
+function Add-VerificationResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Step,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("PASS", "FAIL", "CLEAN", "DIRTY")]
+        [string]$Status
+    )
+
+    $script:Results += [pscustomobject]@{
+        Step = $Step
+        Status = $Status
+    }
+}
+
+function Invoke-VerificationStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+        [string[]]$Arguments = @()
+    )
+
+    Write-Host "[verify_project] Running $Name..." -ForegroundColor Yellow
+    Push-Location $WorkingDirectory
+    try {
+        & $Executable @Arguments
+        $exitCode = $LASTEXITCODE
+        if ($null -eq $exitCode) {
+            $exitCode = 0
+        }
+
+        if ($exitCode -eq 0) {
+            Write-Host "[verify_project] ${Name}: PASS" -ForegroundColor Green
+            Add-VerificationResult -Step $Name -Status "PASS"
+        } else {
+            Write-Host "[verify_project] ${Name}: FAIL (exit code $exitCode)" -ForegroundColor Red
+            Add-VerificationResult -Step $Name -Status "FAIL"
+        }
+    } catch {
+        Write-Host "[verify_project] ${Name}: FAIL" -ForegroundColor Red
+        Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+        Add-VerificationResult -Step $Name -Status "FAIL"
+    } finally {
+        Pop-Location
+    }
+    Write-Host ""
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AI Novel Studio - Project Verification" -ForegroundColor Cyan
@@ -15,166 +87,50 @@ Write-Host "  Version: v$CURRENT_VERSION" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-$Results = @()
-
-# Step 1: cargo check
-Write-Host "[verify_project] Running cargo check..." -ForegroundColor Yellow
-Push-Location "$ProjectRoot\src-tauri"
 try {
-    $cargoOutput = cargo check 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[verify_project] cargo check: PASS" -ForegroundColor Green
-        $Results += @{ Step = "cargo check"; Status = "PASS" }
-    } else {
-        Write-Host "[verify_project] cargo check: FAIL" -ForegroundColor Red
-        Write-Host "  Exit code: $LASTEXITCODE" -ForegroundColor Red
-        $Results += @{ Step = "cargo check"; Status = "FAIL" }
-    }
+    $npm = Resolve-Executable -Candidates @("npm.cmd", "npm")
 } catch {
-    Write-Host "[verify_project] cargo check: FAIL (exception)" -ForegroundColor Red
-    Write-Host "  $_" -ForegroundColor Red
-    $Results += @{ Step = "cargo check"; Status = "FAIL" }
-} finally {
-    Pop-Location
+    $npm = "npm.cmd"
 }
-Write-Host ""
 
-# Step 2: npm run build
-Write-Host "[verify_project] Running npm run build..." -ForegroundColor Yellow
-Push-Location $ProjectRoot
 try {
-    $npmBuildOutput = npm run build 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[verify_project] npm run build: PASS" -ForegroundColor Green
-        $Results += @{ Step = "npm run build"; Status = "PASS" }
-    } else {
-        Write-Host "[verify_project] npm run build: FAIL" -ForegroundColor Red
-        Write-Host "  Exit code: $LASTEXITCODE" -ForegroundColor Red
-        $Results += @{ Step = "npm run build"; Status = "FAIL" }
-    }
+    $cargo = Resolve-Executable -Candidates @("cargo.exe", "cargo")
 } catch {
-    Write-Host "[verify_project] npm run build: FAIL (exception)" -ForegroundColor Red
-    Write-Host "  $_" -ForegroundColor Red
-    $Results += @{ Step = "npm run build"; Status = "FAIL" }
-} finally {
-    Pop-Location
+    $cargoFallback = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
+    $cargo = if (Test-Path -LiteralPath $cargoFallback) { $cargoFallback } else { "cargo.exe" }
 }
-Write-Host ""
 
-# Project backup runtime regression
-Write-Host "[verify_project] Running npm run test:project-backup..." -ForegroundColor Yellow
-Push-Location $ProjectRoot
-try {
-    $projectBackupOutput = npm run test:project-backup 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[verify_project] npm run test:project-backup: PASS" -ForegroundColor Green
-        $Results += @{ Step = "npm run test:project-backup"; Status = "PASS" }
-    } else {
-        Write-Host "[verify_project] npm run test:project-backup: FAIL" -ForegroundColor Red
-        $Results += @{ Step = "npm run test:project-backup"; Status = "FAIL" }
+if (Test-Path -LiteralPath $cargo) {
+    $cargoDirectory = Split-Path -Parent $cargo
+    $pathEntries = @($env:PATH -split ';')
+    if ($cargoDirectory -and $cargoDirectory -notin $pathEntries) {
+        $env:PATH = "$cargoDirectory;$env:PATH"
     }
-} catch {
-    Write-Host "[verify_project] npm run test:project-backup: FAIL (exception)" -ForegroundColor Red
-    $Results += @{ Step = "npm run test:project-backup"; Status = "FAIL" }
-} finally {
-    Pop-Location
 }
-Write-Host ""
 
-# Step 3: setting suggestions static regression
-Write-Host "[verify_project] Running npm run test:setting-suggestions..." -ForegroundColor Yellow
-Push-Location $ProjectRoot
-try {
-    $settingSuggestionOutput = npm run test:setting-suggestions 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[verify_project] npm run test:setting-suggestions: PASS" -ForegroundColor Green
-        $Results += @{ Step = "npm run test:setting-suggestions"; Status = "PASS" }
-    } else {
-        Write-Host "[verify_project] npm run test:setting-suggestions: FAIL" -ForegroundColor Red
-        Write-Host "  Exit code: $LASTEXITCODE" -ForegroundColor Red
-        $Results += @{ Step = "npm run test:setting-suggestions"; Status = "FAIL" }
-    }
-} catch {
-    Write-Host "[verify_project] npm run test:setting-suggestions: FAIL (exception)" -ForegroundColor Red
-    Write-Host "  $_" -ForegroundColor Red
-    $Results += @{ Step = "npm run test:setting-suggestions"; Status = "FAIL" }
-} finally {
-    Pop-Location
+$npmSteps = @(
+    @{ Name = "npm run test:version-sync"; Arguments = @("run", "test:version-sync") },
+    @{ Name = "npm run test"; Arguments = @("run", "test") },
+    @{ Name = "npm run lint"; Arguments = @("run", "lint") },
+    @{ Name = "npm run build"; Arguments = @("run", "build") },
+    @{ Name = "npm run test:quality-workspace"; Arguments = @("run", "test:quality-workspace") },
+    @{ Name = "npm run test:setting-suggestions"; Arguments = @("run", "test:setting-suggestions") },
+    @{ Name = "npm run test:ai-tasks-delete"; Arguments = @("run", "test:ai-tasks-delete") },
+    @{ Name = "npm run test:project-backup"; Arguments = @("run", "test:project-backup") }
+)
+
+foreach ($step in $npmSteps) {
+    Invoke-VerificationStep -Name $step.Name -WorkingDirectory $ProjectRoot -Executable $npm -Arguments $step.Arguments
 }
-Write-Host ""
 
-# Step 4: npm run tauri build
-Write-Host "[verify_project] Running npm run tauri build..." -ForegroundColor Yellow
-Push-Location $ProjectRoot
-try {
-    $tauriBuildOutput = npm run tauri build 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[verify_project] npm run tauri build: PASS" -ForegroundColor Green
-        $Results += @{ Step = "npm run tauri build"; Status = "PASS" }
-    } else {
-        Write-Host "[verify_project] npm run tauri build: FAIL" -ForegroundColor Red
-        Write-Host "  Exit code: $LASTEXITCODE" -ForegroundColor Red
-        $Results += @{ Step = "npm run tauri build"; Status = "FAIL" }
-    }
-} catch {
-    Write-Host "[verify_project] npm run tauri build: FAIL (exception)" -ForegroundColor Red
-    Write-Host "  $_" -ForegroundColor Red
-    $Results += @{ Step = "npm run tauri build"; Status = "FAIL" }
-} finally {
-    Pop-Location
-}
-Write-Host ""
+Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("check")
+Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test")
 
-# Step 5: pytest (if available)
-Write-Host "[verify_project] Checking pytest..." -ForegroundColor Yellow
-$pytestAvailable = Get-Command pytest -ErrorAction SilentlyContinue
-if ($pytestAvailable) {
-    Push-Location $ProjectRoot
-    try {
-        $pytestOutput = pytest 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[verify_project] pytest: PASS" -ForegroundColor Green
-            $Results += @{ Step = "pytest"; Status = "PASS" }
-        } else {
-            Write-Host "[verify_project] pytest: FAIL" -ForegroundColor Red
-            $Results += @{ Step = "pytest"; Status = "FAIL" }
-        }
-    } catch {
-        Write-Host "[verify_project] pytest: FAIL (exception)" -ForegroundColor Red
-        $Results += @{ Step = "pytest"; Status = "FAIL" }
-    } finally {
-        Pop-Location
-    }
-} else {
-    Write-Host "[verify_project] pytest: SKIPPED (not configured)" -ForegroundColor DarkYellow
-    $Results += @{ Step = "pytest"; Status = "SKIPPED" }
-}
-Write-Host ""
+# The complete desktop suite is a release gate, not a substitute for Node or Rust tests.
+Invoke-VerificationStep -Name "npm run test:e2e" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e")
+Invoke-VerificationStep -Name "npm run tauri:build" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "tauri:build")
 
-# Step 6: git status
-Write-Host "[verify_project] Checking git status..." -ForegroundColor Yellow
-Push-Location $ProjectRoot
-try {
-    $gitStatus = git status --short 2>&1
-    if ($gitStatus -and $gitStatus.Trim().Length -gt 0) {
-        Write-Host "[verify_project] git status: DIRTY" -ForegroundColor Yellow
-        Write-Host "  Modified files:" -ForegroundColor Yellow
-        $gitStatus | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
-        $Results += @{ Step = "git status"; Status = "DIRTY" }
-    } else {
-        Write-Host "[verify_project] git status: CLEAN" -ForegroundColor Green
-        $Results += @{ Step = "git status"; Status = "CLEAN" }
-    }
-} catch {
-    Write-Host "[verify_project] git status: FAIL (not a git repo?)" -ForegroundColor Red
-    $Results += @{ Step = "git status"; Status = "FAIL" }
-} finally {
-    Pop-Location
-}
-Write-Host ""
-
-# Step 7: Check all checklists exist
-Write-Host "[verify_project] Checking checklists..." -ForegroundColor Yellow
+Write-Host "[verify_project] Checking required checklists..." -ForegroundColor Yellow
 $checklistFiles = @(
     ".github/checklists/feature-development.checklist.md",
     ".github/checklists/release.checklist.md",
@@ -185,32 +141,53 @@ $checklistFiles = @(
     ".github/checklists/tauri-build.checklist.md",
     ".github/checklists/bugfix.checklist.md"
 )
-$missingChecklists = @()
-foreach ($file in $checklistFiles) {
-    $fullPath = Join-Path $ProjectRoot $file
-    if (-not (Test-Path $fullPath)) {
-        $missingChecklists += $file
-        Write-Host "  [MISSING] $file" -ForegroundColor Red
-    }
-}
+$missingChecklists = @($checklistFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ProjectRoot $_)) })
 if ($missingChecklists.Count -eq 0) {
-    Write-Host "[verify_project] checklists: ALL PRESENT" -ForegroundColor Green
-    $Results += @{ Step = "checklists"; Status = "PASS" }
+    Write-Host "[verify_project] required checklists: PASS" -ForegroundColor Green
+    Add-VerificationResult -Step "required checklists" -Status "PASS"
 } else {
-    Write-Host "[verify_project] checklists: $($missingChecklists.Count) MISSING" -ForegroundColor Red
-    $Results += @{ Step = "checklists"; Status = "FAIL" }
+    $missingChecklists | ForEach-Object { Write-Host "  [MISSING] $_" -ForegroundColor Red }
+    Add-VerificationResult -Step "required checklists" -Status "FAIL"
 }
 Write-Host ""
 
-# Summary
+# A release-quality run must finish from a clean tree. release_workflow.ps1 repeats
+# this check so that a dirty tree can never receive a release recommendation.
+Write-Host "[verify_project] Checking git status..." -ForegroundColor Yellow
+Push-Location $ProjectRoot
+try {
+    $gitStatus = @(git status --short 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $gitStatus | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+        Add-VerificationResult -Step "git status" -Status "FAIL"
+    } elseif ($gitStatus.Count -gt 0) {
+        Write-Host "[verify_project] git status: DIRTY" -ForegroundColor Red
+        $gitStatus | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+        Add-VerificationResult -Step "git status" -Status "DIRTY"
+    } else {
+        Write-Host "[verify_project] git status: CLEAN" -ForegroundColor Green
+        Add-VerificationResult -Step "git status" -Status "CLEAN"
+    }
+} catch {
+    Write-Host "[verify_project] git status: FAIL" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Add-VerificationResult -Step "git status" -Status "FAIL"
+} finally {
+    Pop-Location
+}
+Write-Host ""
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Verification Summary" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 $allPassed = $true
 foreach ($result in $Results) {
-    $color = if ($result.Status -eq "PASS" -or $result.Status -eq "CLEAN") { "Green" }
-             elseif ($result.Status -eq "SKIPPED") { "DarkYellow" }
-             else { "Red"; $allPassed = $false }
+    $color = if ($result.Status -in @("PASS", "CLEAN")) {
+        "Green"
+    } else {
+        $allPassed = $false
+        "Red"
+    }
     Write-Host "  [$($result.Status)] $($result.Step)" -ForegroundColor $color
 }
 
@@ -218,7 +195,7 @@ Write-Host ""
 if ($allPassed) {
     Write-Host "  Overall: ALL CHECKS PASSED" -ForegroundColor Green
 } else {
-    Write-Host "  Overall: SOME CHECKS FAILED" -ForegroundColor Red
+    Write-Host "  Overall: RELEASE BLOCKED" -ForegroundColor Red
 }
 Write-Host "========================================" -ForegroundColor Cyan
 

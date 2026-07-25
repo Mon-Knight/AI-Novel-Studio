@@ -2148,3 +2148,93 @@ report ownership / AI Task / duplicate key validation
 ## 27.5 完整备份
 
 `schemaVersion: 3` 导出 `quality_issue_states`。schema 2 导入仍被支持，但必须在恢复事务内按每个 `(chapter_id, issue_key)` 的 item `updated_at DESC, rowid DESC` 合成旧模型最后保存的可变状态，并按 `report_id` 分组补齐缺失的 `sort_order`，不得依赖导入后重启再修复。
+
+---
+
+# 28. v2.1.8 章节上下文持久化一致性
+
+v2.1.8 不修改 SQLite 表结构，而是收紧现有 `chapter_summaries`、`context_records`、`character_states`、`characters` 与 `chapters` 的写入和读取边界。本节高于第 8 节的早期示例；后续修改章节上下文链路时必须保持这些约束。
+
+## 28.1 桌面端单一事实源
+
+```text
+Tauri 桌面模式 -> SQLite 是唯一事实源
+浏览器开发模式 -> LocalStorage 回退
+```
+
+- 运行在 Tauri 中时，章节总结、上下文记录和角色状态的读取、创建、更新、过期与删除都必须通过 Rust IPC 落到 SQLite。
+- 任一 IPC 失败必须向上传播。不得在 `catch` 中改写 LocalStorage、返回伪造 DTO 或继续显示保存成功。
+- LocalStorage 只承担浏览器开发回退和旧数据迁移输入，不是桌面端 SQLite 的镜像或第二权威副本。
+
+## 28.2 稳定身份与查询规则
+
+`context_records.id` 是跨前端、IPC 和 SQLite 的稳定 UUID：
+
+```text
+调用方生成 id
+-> Rust 校验 id 与作品 / 章节 / 分卷归属
+-> SQLite 使用同一 id 插入或更新
+-> read-back 返回同一 id
+```
+
+禁止 Rust 丢弃有效的调用方 ID 后生成新 ID。更新必须按 ID 命中恰好一条已有记录，且不得改变其 `novel_id`；未命中或归属不一致返回明确错误。
+
+章节总结按作品查询时，底层记录使用以下稳定次序：
+
+```text
+章节 order_index ASC
+-> chapter_id ASC
+-> updated_at DESC
+-> created_at DESC
+-> id DESC
+```
+
+服务层据此为每个章节选择最新总结。已过期或已禁用记录是否参与生成，必须由调用场景显式过滤，不能依赖 LocalStorage 中的旧值。
+
+## 28.3 章节上下文原子 bundle
+
+用户确认章节总结时，以下数据属于一个业务提交：
+
+```text
+chapter summary
++ context records
++ character state history
++ characters.current_state
++ chapters.status = summarized
+```
+
+桌面端必须在单个 SQLite `IMMEDIATE` 事务中完成：
+
+```text
+校验 novel / chapter / adopted draft 归属
+-> 校验每条 context record 与 character state 归属
+-> upsert chapter summary
+-> upsert every context record（保留输入 ID）
+-> upsert every character state
+-> 同步 characters.current_state
+-> 以 adopted_draft_id 条件更新 chapter 为 summarized
+-> read back authoritative DTOs
+-> commit
+```
+
+任一校验、写入、read-back 或终态更新失败都必须回滚全部数据。只有事务提交后，界面才能报告总结保存成功。单独的 CRUD 命令仍可用于明确的编辑、过期和删除操作，但不得重新拆分总结确认这一业务事务。
+
+当 `chapters.adopted_draft_id` 从旧正文切换到另一版正文时，正文采用事务还必须同时将该章已有 `chapter_summaries` 与 `context_records` 标为过期；采用返回成功后不得再依赖总结面板或其他 UI 懒触发修复。重采同一 `adopted_draft_id` 不应误过期当前上下文。任何过期写入失败都必须连同草稿采用状态、章节正式指针和章节状态整体回滚。
+
+## 28.4 旧 LocalStorage 数据迁移
+
+旧版可能同时留下 SQLite 与 LocalStorage 记录，且双写时期的 ID 可能不同。迁移遵循：
+
+1. 优先按有效且完全相同的 ID 匹配。
+2. ID 不同的旧镜像只能按作品、章节、实体内容和稳定时间字段进行确定性匹配。
+3. 唯一匹配时记录源 ID 到 SQLite ID 的映射；无匹配时使用有效源 ID 或新 UUID 插入。
+4. 多个候选无法唯一判定时不得猜测、覆盖或删除；保留 LocalStorage 记录并返回 warning。
+5. 总结、上下文和角色状态的迁移在一个 SQLite 事务中提交；已插入或确定性匹配的角色状态按 `created_at DESC, id DESC` 重算并同步 `characters.current_state`。提交失败时 LocalStorage 不变。
+6. 提交成功后只清理迁移结果已明确映射的记录；缓存清理失败返回 warning，SQLite 结果保持已提交。
+7. 重复运行迁移必须按精确 ID 或确定性镜像匹配返回已有记录，不得产生副本。
+
+该流程不是 SQLite 与 LocalStorage 之间的分布式 ACID 事务。安全边界是“先提交 SQLite，再按明确映射清理缓存；失败可幂等重试”。
+
+## 28.5 浏览器回退补偿
+
+浏览器开发模式没有 SQLite 事务。保存同一 bundle 或采用新正文并过期旧上下文前，必须拍摄相关 LocalStorage 集合快照；任一分步写入失败时恢复全部快照，并把原错误返回调用方。补偿回滚只用于开发回退，不能作为桌面端原子性通过证据。

@@ -6,7 +6,7 @@ import { contextRecordService, buildContextSummary } from '../context/contextRec
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { volumeRepository } from '../database/volumeRepository';
 import { chapterRepository } from '../database/chapterRepository';
-import { dbCall } from '../database/db';
+import { dbCall, getDbMode } from '../database/db';
 import type { ContextRecord } from '../../types/context';
 import type { ChapterSummary } from '../../types/chapterSummary';
 
@@ -47,6 +47,7 @@ function addLog(log: ContextReadLog): void {
   readLogs.unshift(log);
   if (readLogs.length > 50) readLogs.length = 50;
   // v1.7.17 持久化到 SQLite
+  if (getDbMode() !== 'tauri') return;
   dbCall('save_context_read_log', {
     input: {
       id: log.id, novelId: log.novelId, taskType: log.taskType,
@@ -55,7 +56,9 @@ function addLog(log: ContextReadLog): void {
       skippedContextIds: JSON.stringify(log.skippedContextIds),
       warnings: JSON.stringify(log.warnings),
     },
-  }).catch(() => {});
+  }).catch((error) => {
+    console.warn('[ContextReader] failed to persist context read log', { error });
+  });
 }
 
 /** 获取最近的上下文读取日志 */
@@ -91,7 +94,7 @@ export async function getContextForChapterTask(params: {
   }
 
   // 2. 相邻章节上下文
-  const allChapters = await chapterRepository.getByNovelId(novelId).catch(() => []);
+  const allChapters = await chapterRepository.getByNovelId(novelId);
   const currentChapter = allChapters.find((c) => c.id === chapterId);
   if (currentChapter) {
     const adjacentIds = getAdjacentChapterIds(allChapters, currentChapter.chapterNumber, volumeId);
@@ -107,7 +110,7 @@ export async function getContextForChapterTask(params: {
   const volumeContexts: ContextRecord[] = [];
   const resolvedVolumeId = volumeId || currentChapter?.volumeId;
   if (resolvedVolumeId) {
-    const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
+    const allRecords = await contextRecordService.getByNovelId(novelId);
     const volRecords = allRecords.filter(
       (r) => r.contextType === 'volume_summary' && r.volumeId === resolvedVolumeId && r.isActive && !r.isExpired,
     );
@@ -121,7 +124,7 @@ export async function getContextForChapterTask(params: {
   }
 
   // 4. 手动上下文
-  const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
+  const allRecords = await contextRecordService.getByNovelId(novelId);
   const chapterContexts: ContextRecord[] = chapterSummaries.map((s) => ({
     id: s.id, novelId: s.novelId, chapterId: s.chapterId, volumeId: s.volumeId,
     contextType: 'chapter_summary' as const, title: `第${currentChapter?.chapterNumber || '?'}章上下文`,
@@ -163,7 +166,7 @@ export async function getContextForVolumeTask(params: {
   const usedIds: string[] = [];
 
   // 1. 卷下所有章节上下文
-  const allChapters = await chapterRepository.getByNovelId(novelId).catch(() => []);
+  const allChapters = await chapterRepository.getByNovelId(novelId);
   const volChapters = allChapters.filter((c) => c.volumeId === volumeId);
   const chapterSummaries: ChapterSummary[] = [];
   for (const ch of volChapters) {
@@ -179,17 +182,17 @@ export async function getContextForVolumeTask(params: {
   }));
 
   // 2. 当前卷上下文
-  const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
+  const allRecords = await contextRecordService.getByNovelId(novelId);
   const volumeContexts = allRecords.filter(
     (r) => r.contextType === 'volume_summary' && r.volumeId === volumeId && r.isActive && !r.isExpired,
   );
   for (const vr of volumeContexts) usedIds.push(vr.id);
 
   // 3. 前一卷上下文
-  const currentVol = (await volumeRepository.getByNovelId(novelId).catch(() => []))
+  const currentVol = (await volumeRepository.getByNovelId(novelId))
     .find((v) => v.id === volumeId);
   if (currentVol) {
-    const allVolumes = await volumeRepository.getByNovelId(novelId).catch(() => []);
+    const allVolumes = await volumeRepository.getByNovelId(novelId);
     const prevVol = allVolumes.find((v) => v.orderIndex === currentVol.orderIndex - 1);
     if (prevVol) {
       const prevRecords = allRecords.filter(
@@ -224,7 +227,7 @@ export async function getContextForBookTask(params: {
   const { novelId, taskType } = params;
   const warnings: string[] = [];
 
-  const allRecords = await contextRecordService.getByNovelId(novelId).catch(() => []);
+  const allRecords = await contextRecordService.getByNovelId(novelId);
 
   // 1. 所有启用卷上下文
   const volumeContexts = allRecords.filter(

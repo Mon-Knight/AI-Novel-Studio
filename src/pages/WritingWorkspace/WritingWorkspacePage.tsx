@@ -23,8 +23,7 @@ import { draftVersionService } from '../../services/database/draftVersionService
 import { createVolumeForNovel, createFirstVolumeAndChapter, createChapterInVolume } from '../../services/chapters/chapterCreationService';
 import { chapterSummarizeService } from '../../services/ai/chapterSummarizeService';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
-import { contextRecordService } from '../../services/context/contextRecordService';
-import { characterStateService } from '../../services/context/characterStateService';
+import { chapterContextPersistenceService } from '../../services/context/chapterContextPersistenceService';
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
@@ -577,16 +576,32 @@ function WritingWorkspacePage() {
     });
   }, []);
 
-  // v0.8.0 章节总结相关处理
-  const checkSummaryExists = useCallback(async (chapterId: string) => {
-    if (!chapterId) return;
-    const existing = await chapterSummaryService.getByChapterId(chapterId);
-    setSummaryExists(!!existing);
-  }, []);
-
   useEffect(() => {
-    if (activeChapterId) checkSummaryExists(activeChapterId);
-  }, [activeChapterId, checkSummaryExists]);
+    let cancelled = false;
+    if (!activeChapterId) {
+      setSummaryExists(false);
+      return undefined;
+    }
+
+    void chapterSummaryService.getByChapterId(activeChapterId).then(
+      (existing) => {
+        if (!cancelled) setSummaryExists(!!existing);
+      },
+      (error: unknown) => {
+        console.error('[WritingWorkspace] failed to read chapter summary state', error);
+        if (!cancelled) {
+          setSummaryExists(false);
+          void showError({
+            title: '章节上下文读取失败',
+            message: error instanceof Error ? error.message : '无法读取当前章节的上下文状态。',
+            testId: 'error-notice',
+          });
+        }
+      },
+    );
+
+    return () => { cancelled = true; };
+  }, [activeChapterId]);
 
   const handleGenerateSummary = useCallback(async () => {
     if (!novelId || !activeChapter || !currentDraft) return;
@@ -610,41 +625,65 @@ function WritingWorkspacePage() {
   const handleSaveSummary = useCallback(async (edited: ChapterSummarizeResult) => {
     if (!novelId || !activeChapter || !currentDraft) return;
     try {
-      // 保存章节总结
-      await chapterSummaryService.create({
-        novelId, chapterId: activeChapter.id, adoptedDraftId: currentDraft.id,
-        summary: edited.summary, keyEvents: edited.keyEvents,
-        characterChanges: edited.characterChanges as any,
-        relationshipChanges: edited.relationshipChanges as any,
-        newForeshadows: edited.newForeshadows,
-        resolvedForeshadows: edited.resolvedForeshadows,
-        nextChapterHints: edited.nextChapterHints,
+      const contentHash = hashTextContent(currentDraft.content);
+      await chapterContextPersistenceService.save({
+        novelId,
+        chapterId: activeChapter.id,
+        adoptedDraftId: currentDraft.id,
+        summary: {
+          novelId,
+          chapterId: activeChapter.id,
+          volumeId: activeChapter.volumeId,
+          adoptedDraftId: currentDraft.id,
+          summary: edited.summary,
+          keyEvents: edited.keyEvents,
+          characterChanges: edited.characterChanges as any,
+          relationshipChanges: edited.relationshipChanges as any,
+          newForeshadows: edited.newForeshadows,
+          resolvedForeshadows: edited.resolvedForeshadows,
+          nextChapterHints: edited.nextChapterHints,
+          coreEvents: edited.coreEvents,
+          protagonistStateChange: edited.protagonistStateChange,
+          importantCharacterChanges: edited.importantCharacterChanges,
+          settingChanges: edited.settingChanges,
+          newLocations: edited.newLocations,
+          newItemsOrAbilities: edited.newItemsOrAbilities,
+          foreshadowing: edited.foreshadowing,
+          unresolvedQuestions: edited.unresolvedQuestions,
+          factsMustRemember: edited.factsMustRemember,
+          nextChapterHook: edited.nextChapterHook,
+          contentHash,
+          draftVersion: currentDraft.versionNo,
+        },
+        contextRecords: edited.contextRecords.map((record) => ({
+          ...record,
+          novelId,
+          chapterId: activeChapter.id,
+          volumeId: activeChapter.volumeId,
+          contentHash,
+          draftVersion: currentDraft.versionNo,
+        })),
+        characterStates: edited.characterChanges.flatMap((change) => (
+          change.characterId ? [{
+            novelId, characterId: change.characterId, chapterId: activeChapter.id,
+            stateSummary: change.stateSummary,
+            relationshipChanges: change.relationshipChanges,
+            goalChanges: change.goalChanges,
+            location: change.location,
+            healthState: change.healthState,
+            knowledgeState: change.knowledgeState,
+          }] : []
+        )),
       });
-      // 保存上下文记录
-      for (const cr of edited.contextRecords) {
-        await contextRecordService.create({ ...cr, novelId, chapterId: activeChapter.id });
-      }
-      // 保存角色状态
-      for (const cc of edited.characterChanges) {
-        if (cc.characterId) {
-          await characterStateService.create({
-            novelId, characterId: cc.characterId, chapterId: activeChapter.id,
-            stateSummary: cc.stateSummary, relationshipChanges: cc.relationshipChanges,
-            goalChanges: cc.goalChanges, location: cc.location,
-            healthState: cc.healthState, knowledgeState: cc.knowledgeState,
-          });
-        }
-      }
-      // 更新章节状态为 summarized
-      await chapterRepository.update(activeChapter.id, { status: 'summarized' });
       setChapters((prev) => prev.map((c) => c.id === activeChapter.id ? { ...c, status: 'summarized' } : c));
+      bumpContextVersion();
       setSummaryDialogOpen(false);
       setSummaryExists(true);
       setSummaryResult(null);
     } catch (e: any) {
       setSummaryError(e.message || '保存失败');
     }
-  }, [novelId, activeChapter, currentDraft]);
+  }, [novelId, activeChapter, currentDraft, bumpContextVersion]);
 
   const handleRegenerateSummary = useCallback(async () => {
     setSummaryError('');

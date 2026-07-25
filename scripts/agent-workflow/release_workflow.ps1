@@ -18,8 +18,25 @@ Write-Host ""
 
 $allOk = $true
 
-# Step 1: Check CHANGELOG.md contains current version
-Write-Host "[Step 1/5] Checking CHANGELOG.md for v$CURRENT_VERSION..." -ForegroundColor Yellow
+# Step 1: Check every user-visible and build-time version source.
+Write-Host "[Step 1/6] Checking version consistency..." -ForegroundColor Yellow
+$versionScript = "$ProjectRoot\scripts\agent-workflow\check_version_sync.ps1"
+if (Test-Path $versionScript) {
+    & powershell -ExecutionPolicy Bypass -File $versionScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [FAIL] Version metadata is inconsistent." -ForegroundColor Red
+        $allOk = $false
+    } else {
+        Write-Host "  [OK] Version metadata is consistent." -ForegroundColor Green
+    }
+} else {
+    Write-Host "  [FAIL] check_version_sync.ps1 not found!" -ForegroundColor Red
+    $allOk = $false
+}
+Write-Host ""
+
+# Step 2: Check CHANGELOG.md contains current version
+Write-Host "[Step 2/6] Checking CHANGELOG.md for v$CURRENT_VERSION..." -ForegroundColor Yellow
 $changelogPath = Join-Path $ProjectRoot "CHANGELOG.md"
 if (Test-Path $changelogPath) {
     $changelogContent = Get-Content $changelogPath -Raw
@@ -36,8 +53,8 @@ if (Test-Path $changelogPath) {
 }
 Write-Host ""
 
-# Step 2: Check README.md is updated
-Write-Host "[Step 2/5] Checking README.md..." -ForegroundColor Yellow
+# Step 3: Check README.md is updated
+Write-Host "[Step 3/6] Checking README.md..." -ForegroundColor Yellow
 $readmePath = Join-Path $ProjectRoot "README.md"
 if (Test-Path $readmePath) {
     $readmeContent = Get-Content $readmePath -Raw
@@ -58,8 +75,8 @@ if (Test-Path $readmePath) {
 }
 Write-Host ""
 
-# Step 3: Run verify_project.ps1
-Write-Host "[Step 3/5] Running verify_project.ps1..." -ForegroundColor Yellow
+# Step 4: Run verify_project.ps1
+Write-Host "[Step 4/6] Running verify_project.ps1..." -ForegroundColor Yellow
 $verifyScript = "$ProjectRoot\scripts\agent-workflow\verify_project.ps1"
 if (Test-Path $verifyScript) {
     & powershell -ExecutionPolicy Bypass -File $verifyScript
@@ -75,22 +92,23 @@ if (Test-Path $verifyScript) {
 }
 Write-Host ""
 
-# Step 4: Check git status
-Write-Host "[Step 4/5] Checking git status..." -ForegroundColor Yellow
+# Step 5: Check git status
+Write-Host "[Step 5/6] Checking git status..." -ForegroundColor Yellow
 Push-Location $ProjectRoot
 $gitStatus = git status --short 2>&1
 Pop-Location
 if ($gitStatus -and $gitStatus.Trim().Length -gt 0) {
-    Write-Host "  [WARN] Working tree is DIRTY. Uncommitted changes:" -ForegroundColor Yellow
-    $gitStatus | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
-    Write-Host "         Please commit all changes before release." -ForegroundColor Yellow
+    Write-Host "  [FAIL] Working tree is DIRTY. Uncommitted changes:" -ForegroundColor Red
+    $gitStatus | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+    Write-Host "         A release tag must never be recommended from a dirty tree." -ForegroundColor Red
+    $allOk = $false
 } else {
     Write-Host "  [OK] Working tree is CLEAN." -ForegroundColor Green
 }
 Write-Host ""
 
-# Step 5: Release recommendation
-Write-Host "[Step 5/5] Release recommendation..." -ForegroundColor Yellow
+# Step 6: Release recommendation
+Write-Host "[Step 6/6] Release recommendation..." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Release Recommendation" -ForegroundColor Cyan
