@@ -32,7 +32,7 @@
 | [database.md](technical/database.md) | 数据库设计与迁移 | 🚧 占位，待后续细化 |
 | [desktop-build.md](technical/desktop-build.md) | 桌面端构建指南 | 🚧 占位，待后续细化 |
 | [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.2.0 已补充 |
-| [desktop-e2e.md](technical/desktop-e2e.md) | Windows 真实 Tauri E2E、隔离与排障 | ✅ v2.2.0 已补充 |
+| [desktop-e2e.md](technical/desktop-e2e.md) | Windows 真实 Tauri E2E、隔离与排障 | ✅ v2.1.7+ 持续适用 |
 | [api-routes.md](technical/api-routes.md) | API 路由说明 | 🚧 占位，待后续细化 |
 | [deployment.md](technical/deployment.md) | 部署说明 | 🚧 占位，待后续细化 |
 

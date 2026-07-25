@@ -186,7 +186,7 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | v2.1.7 | 已完成：章节质量历史不可变快照与原子重放 |
 | v2.1.8 | 已完成：章节上下文持久化一致性闭环 |
 | v2.2.0 | **当前：工作区可靠性与基础设施收口** |
-| v2.x | 后续：任务恢复、约束验证与 Agent 能力增强 |
+| v2.x | 后续：跨重启自动续跑、统一 AI 任务、约束验证与 Agent 能力增强 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
@@ -235,11 +235,18 @@ npm run test:e2e -- --spec candidate-review-apply
 # 定向复测章节上下文保存、重启、过期与生成排除
 npm run test:e2e -- --spec chapter-context-persistence
 
-# 全部前端正文安全动态测试（Node 原生 test runner）
+# v2.1.8 及此前 Node / tsx 动态回归
 npm run test
 
 # 正文变更安全门动态测试
 npm run test:workspace-safety
+
+# v2.2.0 定向 Vitest；后三项同时执行全量 Rust 回归
+npm run test:components
+npm run test:workspace-reliability
+npm run test:workspace-recovery
+npm run test:large-text-integrity
+npm run test:migrations
 
 # Rust / SQLite 命令安全测试
 cd src-tauri

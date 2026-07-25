@@ -90,6 +90,15 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
       if (verifiedDraft.id !== draft.id || verifiedDraft.chapterId !== chapterId || !verifiedDraft.isAdopted) {
         throw new Error('正文采用结果与目标章节不一致');
       }
+      // Adoption is authoritative once the transaction commits, but the user
+      // may have continued editing while that IPC was in flight. Re-check the
+      // live editor before replacing it with the adopted version.
+      if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) {
+        setMsg(`v${draft.versionNo} 已采用，当前未保存正文已保留`);
+        await load();
+        setTimeout(() => setMsg(''), 3000);
+        return;
+      }
       onDraftAdopted?.(verifiedDraft);
       setMsg(`v${draft.versionNo} 已采用`);
       await load();

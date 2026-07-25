@@ -85,6 +85,9 @@ Assert-RegexVersion "docs/version-roadmap.md current version" $roadmap '(?m)^>\s
 $testing = Read-Utf8Text "docs/technical/testing.md"
 Assert-RegexVersion "docs/technical/testing.md current version" $testing '(?m)^>\s*[^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
 
+$docsIndex = Read-Utf8Text "docs/README.md"
+Assert-RegexVersion "docs/README.md testing index version" $docsIndex '(?m)^\|\s*\[testing\.md\][^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
+
 $releaseNotesPath = "docs/release-notes-v$expected.md"
 $releaseNotes = Read-Utf8Text $releaseNotesPath
 Assert-RegexVersion "$releaseNotesPath heading" $releaseNotes '(?m)^#\s+AI Novel Studio v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected

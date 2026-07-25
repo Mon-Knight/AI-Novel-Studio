@@ -20,6 +20,23 @@
 - 正式保存成功后精确清理当前章节恢复快照；提交后的临时缓存清理失败只记录维护 warning，不误报保存失败。
 - Tauri 关闭权限收敛为最小 `window-close` allowlist，关闭确认采用一次性 bypass 防止递归。
 
+### v2.1.8 协调修复
+
+- 原子草稿保存完整保留 `aiTaskId` 与 `note` 溯源字段，并将二者纳入 operation 请求 hash；同一 `operationId` 携带不同来源元数据时不再误判为可幂等重放。
+- 更新草稿前重新读取 SQLite 权威采用状态；目标草稿已采用时只读且创建新候选版本，采用事务在途期间产生的新编辑不会被迟到的采用回调覆盖。
+- 旧 `commit_large_text_draft_create` / `commit_large_text_draft_update` 写 IPC 从 Tauri 注册表移除，遗留入口也固定 fail-closed，所有长正文草稿写入必须经过 `save_chapter_draft_atomic`。
+- 损坏或无法完整读取的正文进入专用 `unavailable` 安全态，只允许重试、查看草稿历史或返回章节列表；preview 不进入编辑器与 AI 上下文。
+- Leave Guard 统一为“保存并继续 / 放弃并继续 / 取消”三选项，并把章节目标 dirty 纳入同一预检、导航与原生关闭防重入流程。
+- 收紧采用、创建章节与恢复快照的异步竞态：提交后的权威结果保留，但迟到回调不得切换目标、覆盖新编辑或吞掉恢复错误。
+- 浏览器 recovery 写入后执行内容回读确认、删除后执行不存在确认；LocalStorage 写删失败显式返回，不再伪装成功。
+- 恢复内容另存候选一旦提交即视为成功；随后快照清理失败只告警并保留可重试清理语义，不诱导用户重复创建候选。
+
+### 验证
+
+- `npm test`：Node 16/16、tsx 动态回归 43/43；工作区可靠性 13/13、恢复 10/10、大文本完整性 5/5，三组专项均同时通过 Rust 103/103。
+- Windows Tauri 完整 E2E 共 11 个独立 spec 全部通过；`npm run tauri:build` 成功并同时生成 MSI 与 NSIS 安装包。
+- 保留 1 条既有 React Hooks warning、9 条既有 Rust unused/dead-code warning，以及既有 Vite 动静态 import 与 500 KiB chunk warning；本轮没有调用真实 AI API。
+
 ### 兼容性
 
 - 保留旧基线初始化和普通草稿读取；旧大文本 draft/chapter/null target 形式通过草稿引用做兼容校验。

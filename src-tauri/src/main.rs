@@ -162,8 +162,6 @@ fn main() {
             large_text_save::create_large_text_save_session,
             large_text_save::append_large_text_chunk,
             large_text_save::finalize_large_text_save,
-            large_text_save::commit_large_text_draft_create,
-            large_text_save::commit_large_text_draft_update,
             large_text_save::abort_large_text_save,
             large_text_save::cleanup_expired_large_text_save_sessions,
             large_text_save::read_large_text_content,

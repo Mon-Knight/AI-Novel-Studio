@@ -13,6 +13,8 @@ import { getAppErrorUserMessage, normalizeAppError } from '../types/appError';
 
 interface UseWorkspaceLeaveGuardOptions {
   shouldGuard: boolean;
+  shouldPreflight?: boolean;
+  preflight?: () => Promise<boolean>;
   contentAvailable: boolean;
   save: () => Promise<boolean>;
   discard: () => Promise<void>;
@@ -32,6 +34,7 @@ interface ActiveLeave {
 export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
   const optionsRef = useRef(options);
   const activeRef = useRef<ActiveLeave | null>(null);
+  const preflightPendingRef = useRef(false);
   const bypassCloseGuardRef = useRef(false);
   const handledBlockedLocationRef = useRef('');
   const [activeRequest, setActiveRequest] = useState<PendingWorkspaceLeave | null>(null);
@@ -40,7 +43,7 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
   optionsRef.current = options;
 
   const blocker = useBlocker(useCallback<BlockerFunction>(({ currentLocation, nextLocation }) => {
-    if (!optionsRef.current.shouldGuard) return false;
+    if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return false;
     return `${currentLocation.pathname}${currentLocation.search}${currentLocation.hash}`
       !== `${nextLocation.pathname}${nextLocation.search}${nextLocation.hash}`;
   }, []));
@@ -48,11 +51,7 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
   const requestWorkspaceLeave = useCallback(async (
     request: WorkspaceLeaveRequest,
   ): Promise<LeaveDecision> => {
-    if (!optionsRef.current.shouldGuard) {
-      await request.continueAction?.();
-      return 'proceed';
-    }
-    if (activeRef.current) {
+    if (activeRef.current || preflightPendingRef.current) {
       logWorkspaceWarning('leave_request_ignored_while_deciding', {
         traceId: createTraceId('leave-ignored'),
         reason: request.reason,
@@ -60,6 +59,30 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
         targetChapterId: request.targetChapterId,
       });
       return 'cancel';
+    }
+
+    const requiresPreflight = request.reason !== 'draft_adopt' && request.reason !== 'draft_restore';
+    if (optionsRef.current.shouldPreflight && requiresPreflight) {
+      preflightPendingRef.current = true;
+      try {
+        const approved = await optionsRef.current.preflight?.();
+        if (approved !== true) return 'cancel';
+      } catch (error) {
+        logWorkspaceError('leave_preflight_failed', error, {
+          traceId: createTraceId('leave-preflight'),
+          reason: request.reason,
+          targetNovelId: request.targetNovelId,
+          targetChapterId: request.targetChapterId,
+        });
+        return 'cancel';
+      } finally {
+        preflightPendingRef.current = false;
+      }
+    }
+
+    if (!optionsRef.current.shouldGuard) {
+      await request.continueAction?.();
+      return 'proceed';
     }
 
     // Capture the latest edit in its original target before asking the user.
@@ -193,7 +216,7 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
         bypassCloseGuardRef.current = false;
         return;
       }
-      if (!optionsRef.current.shouldGuard) return;
+      if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return;
       event.preventDefault();
       if (activeRef.current) return;
       void requestWorkspaceLeave({

@@ -258,6 +258,20 @@ async function hydrateDraftContent(draft: ChapterDraft): Promise<ChapterDraft> {
   }
 }
 
+async function getAuthoritativeDraftById(
+  chapterId: string,
+  draftId: string,
+): Promise<ChapterDraft | null> {
+  const traceId = createTraceId('draft-authoritative-read');
+  const raw = await dbCall<unknown[]>(
+    'get_drafts_by_chapter_id',
+    { chapterId, traceId },
+    () => getLocalDrafts(chapterId),
+  );
+  const target = normalizeDrafts(raw).find((draft) => draft.id === draftId);
+  return target ? hydrateDraftContent(target) : null;
+}
+
 async function normalizeAtomicSave(
   raw: unknown,
   expected: {
@@ -370,7 +384,8 @@ export const draftVersionService = {
     const traceId = createTraceId('draft-save');
     const currentContentHash = await computeContentSha256(input.content);
     const operationKey = JSON.stringify([
-      'create', input.novelId, input.chapterId, currentContentHash, input.source, input.title ?? '',
+      'create', input.novelId, input.chapterId, currentContentHash, input.source,
+      input.title ?? '', input.aiTaskId ?? '', input.note ?? '',
     ]);
     const operationId = operationIdFor(operationKey);
     onProgress?.({ stage: 'finalizing', percent: 20, message: '正在原子保存正文…' });
@@ -384,9 +399,11 @@ export const draftVersionService = {
           currentContentHash,
           content: input.content,
           wordCount: countTextWords(input.content),
-          source: input.source,
-          title: input.title,
-        },
+           source: input.source,
+           title: input.title,
+           aiTaskId: input.aiTaskId,
+           note: input.note,
+         },
       });
       const draft = await normalizeAtomicSave(raw, {
         operationId,
@@ -429,21 +446,34 @@ export const draftVersionService = {
           retryable: false,
         };
       }
+      const current = drafts[index];
+      const timestamp = nowISO();
       const updated: ChapterDraft = {
-        ...drafts[index],
+        ...current,
+        id: current.isAdopted ? generateId() : current.id,
         content,
         source,
+        versionNo: current.isAdopted
+          ? drafts.reduce((max, item) => Math.max(max, item.versionNo), 0) + 1
+          : current.versionNo,
         wordCount: countTextWords(content),
+        isAdopted: false,
+        aiTaskId: current.isAdopted ? undefined : current.aiTaskId,
+        note: current.isAdopted ? undefined : current.note,
         contentState: await readyState(content),
-        updatedAt: nowISO(),
+        createdAt: current.isAdopted ? timestamp : current.createdAt,
+        updatedAt: timestamp,
       };
-      drafts[index] = updated;
+      if (current.isAdopted) drafts.push(updated);
+      else drafts[index] = updated;
       saveLocalDrafts(chapterId, drafts);
       return updated;
     }
 
-    const persisted = baseDraft
-      ?? (await this.getByChapterId(chapterId)).find((draft) => draft.id === id);
+    // Refresh the authoritative row even when the editor supplies a base.
+    // Adoption can commit while the IPC is in flight, making the editor's
+    // isAdopted flag stale without changing the正文 hash or version number.
+    const persisted = await getAuthoritativeDraftById(chapterId, id);
     if (!persisted) {
       throw {
         code: 'TARGET_DRAFT_NOT_FOUND',
@@ -457,6 +487,27 @@ export const draftVersionService = {
         message: '保存基线与目标草稿不一致。',
         retryable: false,
       };
+    }
+    if (baseDraft) {
+      if (baseDraft.id !== persisted.id
+        || baseDraft.novelId !== persisted.novelId
+        || baseDraft.chapterId !== persisted.chapterId
+        || baseDraft.versionNo !== persisted.versionNo) {
+        throw {
+          code: 'DOCUMENT_VERSION_CONFLICT',
+          message: '保存基线与数据库草稿版本不一致。',
+          retryable: false,
+        };
+      }
+      if (baseDraft.contentState?.status === 'ready'
+        && persisted.contentState?.status === 'ready'
+        && baseDraft.contentState.contentHash !== persisted.contentState.contentHash) {
+        throw {
+          code: 'DOCUMENT_HASH_MISMATCH',
+          message: '数据库正文已在保存前发生变化。',
+          retryable: false,
+        };
+      }
     }
     if (persisted.contentState?.status !== 'ready') {
       throw persisted.contentState?.error ?? {

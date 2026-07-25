@@ -107,6 +107,7 @@ pub struct LargeTextDocumentDto {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct CommitLargeTextDraftCreateInput {
     pub session_id: String,
     pub draft_id: String,
@@ -120,6 +121,7 @@ pub struct CommitLargeTextDraftCreateInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct CommitLargeTextDraftUpdateInput {
     pub session_id: String,
     pub draft_id: String,
@@ -129,6 +131,7 @@ pub struct CommitLargeTextDraftUpdateInput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct CommitLargeTextDraftOutput {
     pub draft: ChapterDraftDto,
     pub cleanup_warning: Option<String>,
@@ -601,6 +604,7 @@ pub(crate) fn delete_unreferenced_draft_large_text(
         .map_err(|error| format!("large_text_orphan_cleanup_failed: {}", error))
 }
 
+#[allow(dead_code)]
 fn commit_large_text_draft_create_internal(
     connection: &mut Connection,
     prepared: &PreparedLargeText,
@@ -683,6 +687,7 @@ fn commit_large_text_draft_create_internal(
     Ok(draft)
 }
 
+#[allow(dead_code)]
 fn commit_large_text_draft_update_internal(
     connection: &mut Connection,
     prepared: &PreparedLargeText,
@@ -751,31 +756,21 @@ fn commit_large_text_draft_update_internal(
 }
 
 #[tauri::command]
+#[allow(dead_code)]
 pub fn commit_large_text_draft_create(
-    input: CommitLargeTextDraftCreateInput,
+    _input: CommitLargeTextDraftCreateInput,
 ) -> Result<CommitLargeTextDraftOutput, String> {
-    let prepared = prepare_large_text_from_cache(&input.session_id)?;
-    let mut connection = get_connection().lock().map_err(|error| error.to_string())?;
-    let draft = commit_large_text_draft_create_internal(&mut connection, &prepared, &input)?;
-    let cleanup_warning = cleanup_after_commit(&input.session_id);
-    Ok(CommitLargeTextDraftOutput {
-        draft,
-        cleanup_warning,
-    })
+    let _ = &_input.session_id;
+    Err("WORKSPACE_SAVE_FAILED: legacy large-text draft create is disabled; use save_chapter_draft_atomic".to_string())
 }
 
 #[tauri::command]
+#[allow(dead_code)]
 pub fn commit_large_text_draft_update(
-    input: CommitLargeTextDraftUpdateInput,
+    _input: CommitLargeTextDraftUpdateInput,
 ) -> Result<CommitLargeTextDraftOutput, String> {
-    let prepared = prepare_large_text_from_cache(&input.session_id)?;
-    let mut connection = get_connection().lock().map_err(|error| error.to_string())?;
-    let draft = commit_large_text_draft_update_internal(&mut connection, &prepared, &input)?;
-    let cleanup_warning = cleanup_after_commit(&input.session_id);
-    Ok(CommitLargeTextDraftOutput {
-        draft,
-        cleanup_warning,
-    })
+    let _ = &_input.session_id;
+    Err("WORKSPACE_SAVE_FAILED: legacy large-text draft update is disabled; use save_chapter_draft_atomic".to_string())
 }
 
 #[tauri::command]
@@ -1134,6 +1129,24 @@ mod tests {
                 row.get(0)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn legacy_large_text_draft_write_commands_fail_closed() {
+        let create_error = commit_large_text_draft_create(create_input("draft-disabled"))
+            .err()
+            .expect("legacy create must be rejected");
+        assert!(create_error.contains("WORKSPACE_SAVE_FAILED"));
+
+        let update_error = commit_large_text_draft_update(CommitLargeTextDraftUpdateInput {
+            session_id: "session-disabled".to_string(),
+            draft_id: "draft-disabled".to_string(),
+            chapter_id: "chapter-1".to_string(),
+            source: Some("user_edited".to_string()),
+        })
+        .err()
+        .expect("legacy update must be rejected");
+        assert!(update_error.contains("WORKSPACE_SAVE_FAILED"));
     }
 
     #[test]

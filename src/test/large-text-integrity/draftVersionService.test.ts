@@ -10,6 +10,7 @@ vi.mock('../../services/tauri/runtime', () => ({
 }));
 
 import { draftVersionService } from '../../services/database/draftVersionService';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 
 function persistedDraft(overrides: Record<string, unknown> = {}) {
   return {
@@ -114,16 +115,21 @@ describe('draft persistence reliability facade', () => {
 
   it('uses Unicode scalar length and reuses operationId when the same update is retried', async () => {
     const content = '正文🙂重试';
+    const baseContent = '旧正文';
+    const baseHash = await computeContentSha256(baseContent);
     const operationIds: string[] = [];
     let attempt = 0;
     runtimeMocks.invoke.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      if (command === 'get_drafts_by_chapter_id') {
+        return [persistedDraft({ content: baseContent, largeTextRefId: undefined })];
+      }
       expect(command).toBe('save_chapter_draft_atomic');
       const input = args.input as Record<string, unknown>;
       operationIds.push(String(input.operationId));
       expect(input).toEqual(expect.objectContaining({
         draftId: 'draft-a',
         draftVersion: 2,
-        baseContentHash: 'base-content-sha256',
+        baseContentHash: baseHash,
         content,
       }));
       attempt += 1;
@@ -147,11 +153,11 @@ describe('draft persistence reliability facade', () => {
     });
 
     const base = persistedDraft({
-      content: '旧正文',
+      content: baseContent,
       contentState: {
         status: 'ready',
-        content: '旧正文',
-        contentHash: 'base-content-sha256',
+        content: baseContent,
+        contentHash: baseHash,
         contentLength: 3,
       },
     });
@@ -169,5 +175,65 @@ describe('draft persistence reliability facade', () => {
       status: 'ready',
       contentLength: Array.from(content).length,
     }));
+  });
+
+  it('accepts a new candidate id when adoption commits during editing', async () => {
+    const baseContent = '采用前正文';
+    const editedContent = '采用期间继续编辑的正文';
+    const baseHash = await computeContentSha256(baseContent);
+    runtimeMocks.invoke.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      if (command === 'get_drafts_by_chapter_id') {
+        return [
+          persistedDraft({
+            id: 'unrelated-history',
+            content: 'unrelated preview',
+            largeTextRefId: 'unrelated-document',
+            versionNo: 1,
+          }),
+          persistedDraft({
+            content: baseContent,
+            largeTextRefId: undefined,
+            isAdopted: true,
+          }),
+        ];
+      }
+      expect(command).toBe('save_chapter_draft_atomic');
+      const input = args.input as Record<string, unknown>;
+      expect(input.draftId).toBe('draft-a');
+      expect(input.baseContentHash).toBe(baseHash);
+      return {
+        operationId: input.operationId,
+        traceId: input.traceId,
+        contentHash: input.currentContentHash,
+        contentLength: Array.from(editedContent).length,
+        storageMode: 'inline',
+        idempotentReplay: false,
+        draft: persistedDraft({
+          id: 'draft-after-adoption',
+          content: editedContent,
+          largeTextRefId: undefined,
+          versionNo: 3,
+          isAdopted: false,
+        }),
+      };
+    });
+    const staleEditorBase = persistedDraft({
+      content: baseContent,
+      isAdopted: false,
+      contentState: {
+        status: 'ready',
+        content: baseContent,
+        contentHash: baseHash,
+        contentLength: Array.from(baseContent).length,
+      },
+    });
+
+    const saved = await draftVersionService.update(
+      'draft-a', 'chapter-a', editedContent, 'user_edited', undefined, staleEditorBase as any,
+    );
+
+    expect(saved.id).toBe('draft-after-adoption');
+    expect(saved.isAdopted).toBe(false);
+    expect(saved.content).toBe(editedContent);
   });
 });

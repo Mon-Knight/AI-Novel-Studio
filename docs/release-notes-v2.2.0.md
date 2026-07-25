@@ -38,4 +38,4 @@ v2.2.0 在 v2.1.8 的正文、任务、质量历史和章节上下文安全基�
 
 ## 版本边界
 
-本版本不实现统一 AI Task / ResultArtifact、自动续跑、Planner、Memory、Verification、Multi-Agent 或 Agent 自主写入。浏览器 LocalStorage 仅用于开发回退，不替代桌面 SQLite 事务事实源。
+本版本不实现统一 AI Task / Artifact（含 ResultArtifact）、自动续跑、Planner、Memory、Verification、Multi-Agent 或 Agent 自主写入。浏览器 LocalStorage 仅用于开发回退，不替代桌面 SQLite 事务事实源。

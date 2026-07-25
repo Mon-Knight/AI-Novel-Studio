@@ -1,7 +1,7 @@
 # AI Novel Studio v2.2.0 工作区可靠性审计报告
 
 > 版本：v2.2.0
-> 分支：`feat/v2.2.0-workspace-reliability`
+> 分支：原实现 `feat/v2.2.0-workspace-reliability`，协调发布候选 `codex/v2.2.0-reconcile`
 > 审计日期：2026-07-11
 > 范围：迁移账本、结构化错误、正文原子保存与完整性读取、恢复快照、全局 Leave Guard、有限后端分层和动态回归测试
 
@@ -252,31 +252,33 @@ PowerShell 测试入口先验证目标测试实际被发现，拒绝零测试假
 |---|---|
 | `npm run lint` | 通过；0 error，保留 1 条既有 React Hooks warning |
 | `npm run build` | 通过；TypeScript 与 Vite production build 成功 |
-| `npm run test` | 通过，5/5 |
+| `npm test` | 通过；Node 16/16，tsx 动态回归 43/43 |
 | `npm run test:workspace-safety` | 通过，5/5 |
 | `npm run test:components` | 通过，5/5 |
-| `npm run test:workspace-reliability` | 通过，10/10 |
-| `npm run test:workspace-recovery` | 通过，前端 8/8，Rust 全套 29/29 |
-| `npm run test:large-text-integrity` | 通过，前端 4/4，Rust 全套 29/29 |
-| `npm run test:migrations` | 通过，前端 1/1，Rust 全套 29/29 |
+| `npm run test:workspace-reliability` | 通过，前端 13/13，Rust 103/103 |
+| `npm run test:workspace-recovery` | 通过，前端 10/10，Rust 103/103 |
+| `npm run test:large-text-integrity` | 通过，前端 5/5，Rust 103/103 |
+| `npm run test:migrations` | 通过，前端 1/1，Rust 103/103 |
 | `npm run test:ai-tasks-delete` | 通过；静态检查与运行时 1/1 |
 | `npm run test:setting-suggestions` | 通过 |
 | `npm run test:quality-workspace` | 通过 |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | 通过，29/29 |
-| `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` | 通过，29/29 |
-| `cargo check --manifest-path src-tauri/Cargo.toml` | 通过，保留 10 条既有 Rust warning |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | 通过，103/103 |
+| `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` | 通过，103/103 |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | 通过，保留 9 条既有 Rust warning |
+| `npm run test:e2e` | 通过；Windows Tauri 完整套件 11 个独立 spec 全部通过 |
+| `npm run test:version-sync` | 通过 |
+| `scripts/agent-workflow/check_docs_sync.ps1` | 通过 |
 | `git diff --check` | 通过 |
-| `git status` | 已检查；仅保留本任务修改，工作区按要求未提交 |
-| `npm run tauri build` | 前端和 Rust release 编译通过；本机 WiX `light.exe` 因 Windows Installer Service 不可访问而在 MSI ICE 校验失败 |
-| `npx tauri build --bundles nsis` | 通过；生成 `AI Novel Studio_2.2.0_x64-setup.exe` |
+| `npm run tauri:build` | 通过；前端、Rust release、MSI 与 NSIS 打包均成功 |
 
-NSIS 产物路径：
+安装包产物路径：
 
 ```text
 src-tauri/target/release/bundle/nsis/AI Novel Studio_2.2.0_x64-setup.exe
+src-tauri/target/release/bundle/msi/AI Novel Studio_2.2.0_x64_en-US.msi
 ```
 
-验证未调用真实 AI，也未访问真实用户数据库；Rust 数据库测试全部使用内存 SQLite，前端使用 fake service/repository。
+验证未调用真实 AI，也未访问真实用户数据库；Rust 数据库测试使用隔离测试数据库，前端使用 fake service/repository，Windows Tauri E2E 使用隔离 SQLite、Mock Provider 与独立 WebView2 数据目录。
 
 ## 14. 旧数据库兼容情况
 
@@ -289,22 +291,15 @@ src-tauri/target/release/bundle/nsis/AI Novel Studio_2.2.0_x64-setup.exe
 
 ## 15. 保留风险
 
-1. 当前机器的 Windows Installer Service 不可访问，导致全目标 `npm run tauri build` 在 MSI 的 ICE 校验阶段出现 `LGHT0217/LGHT0216`；NSIS v2.2.0 已成功生成。MSI 必须在 Windows Installer 服务正常的发布机或 CI 上重跑。
-2. 任务书中的八组桌面手工场景未连接真实用户库执行；自动化已使用临时数据库和故障注入覆盖核心时序，正式发布前仍应在一次性测试配置目录中完成 UI 冒烟。
-3. 保留既有 1 条 ESLint Hooks warning、10 条 Rust unused/dead-code warning、Vite 动静态 import 与 500 KiB chunk warning；本任务没有扩大范围清理它们。
-4. 浏览器开发模式的 recovery 使用 localStorage，不能提供 SQLite transaction 等级保证；桌面 Tauri 路径是本版本的发布主路径。
-5. 本版本没有统一全部历史 command、AI 任务模型或所有错误，只收口正文保存、读取、恢复、迁移和离开保护。
+1. 保留既有 1 条 ESLint Hooks warning、9 条 Rust unused/dead-code warning、Vite 动静态 import 与 500 KiB chunk warning；本任务没有扩大范围清理它们。
+2. 浏览器开发模式的 recovery 使用 localStorage，不能提供 SQLite transaction 等级保证；桌面 Tauri 路径是本版本的发布主路径。
+3. 本版本没有统一全部历史 command、AI 任务模型或所有错误，只收口正文保存、读取、恢复、迁移和离开保护。
 
 ## 16. 是否适合发布
 
-v2.2.0 实现已达到代码合入和候选发布条件：核心写入、读取、恢复、离开保护、迁移与故障注入测试均通过，且已生成可安装的 v2.2.0 NSIS 包。
+v2.2.0 实现已达到代码合入和发布候选条件：核心写入、读取、恢复、离开保护、迁移、故障注入与 Windows Tauri 11 个独立 E2E spec 全部通过，`npm run tauri:build` 已同时生成可安装的 MSI 与 NSIS 包。原报告中的 WiX 服务阻断和“尚需 MSI / 八组手工场景才可发布”结论已经由本轮协调验证解除。
 
-不建议在未完成以下两项前直接宣布正式发布：
-
-1. 在 Windows Installer 服务正常的发布环境重跑全目标 `npm run tauri build`，确认 MSI 与 NSIS 同时生成；
-2. 使用一次性测试数据库完成任务书八组桌面手工场景。
-
-本任务未执行 commit、push、tag 或正式发布。
+正式发布仍需遵循项目发布流程并确保最终工作树干净；Git 提交、tag 与远端状态以实际仓库记录为准，不作为本节重复声明的功能或构建证据。
 
 ## 17. 基于 v2.1.8 的协调结果（2026-07-26）
 
@@ -318,20 +313,15 @@ v2.2.0 实现已达到代码合入和候选发布条件：核心写入、读取�
 - 长文本读取继续执行 v2.1.4 的完整性保护，并改由 Repository/Service 层返回稳定 `AppError` 错误码；
 - 数据库初始化、备份恢复和历史 Rust 测试调用方均已适配可变连接及正式迁移账本。
 
-协调后 Rust 测试总数由原实现分支记录的 29 个增长到 101 个。当前发布候选证据为：
+本轮协调还关闭了以下发布阻断缺口：
 
-| 命令 | 协调后结果 |
-|---|---|
-| `npm run lint` | 通过；0 error，1 条既有 React Hooks warning |
-| `npm run build` | 通过；210 modules |
-| `npm run test:workspace-reliability` | 通过，前端 10/10，Rust 101/101 |
-| `npm run test:workspace-recovery` | 通过，前端 8/8，Rust 101/101 |
-| `npm run test:large-text-integrity` | 通过，前端 4/4，Rust 101/101 |
-| `npm run test:migrations` | 通过，前端 1/1，Rust 101/101 |
-| `npm run test:components` | 通过，5/5 |
-| `npm test` | 通过；Node 16/16，TypeScript 动态回归 43/43 |
-| `npm run test:version-sync` | 通过 |
-| `scripts/agent-workflow/check_docs_sync.ps1` | 通过 |
-| `git diff --check` | 通过 |
+- 原子草稿 DTO、Repository 与数据库写入完整保留 `aiTaskId` / `note`；二者进入前后端稳定 operation hash，来源元数据变化不再错误复用旧幂等结果。
+- 草稿更新前强制刷新 SQLite 权威采用状态，已采用目标保持只读并创建新候选；采用提交后若编辑器已经继续修改，只刷新权威列表而不覆盖新正文。
+- 旧长文本 create/update 写 IPC 从 invoke handler 移除，遗留函数固定返回 `WORKSPACE_SAVE_FAILED`，无法绕过 `save_chapter_draft_atomic`。
+- 损坏正文使用专用 `unavailable` 安全态与稳定操作入口；preview 不进入 textarea、正文 snapshot 或 AI 上下文。
+- 正文 dirty 与章节目标 dirty 共用三选项 Leave Guard；章节切换、创建、Hash/历史/程序导航和 Tauri 关闭共享同一防重入决策。
+- 采用、创建章节和恢复内容的在途操作重新核对实时章节与编辑器状态；权威提交保留，但迟到完成不得切换当前目标或覆盖新编辑。
+- browser recovery 写入后回读校验、删除后确认不存在；写删失败均显式返回，不能把 LocalStorage 失败报告成成功。
+- 恢复内容另存候选提交后，即使快照清理失败也保持已提交成功语义并提示无需重复另存，清理可安全重试。
 
-以上协调测试没有调用真实 AI API。v2.2.0 未修改 Provider 请求协议，因此真实 API 额度保留给后续实际涉及 Tool Calling、Planner 执行或多 Agent handoff 的最小验收场景。
+协调后 Rust 测试总数由原实现分支记录的 29 个增长到 103 个；最终验证证据统一记录在第 13 节。以上协调测试和完整桌面 E2E 均未调用真实 AI API。v2.2.0 未修改 Provider 请求协议，因此真实 API 额度保留给后续实际涉及 Tool Calling、Planner 执行或 Multi-Agent handoff 的最小验收场景。

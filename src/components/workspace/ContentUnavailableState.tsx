@@ -30,11 +30,28 @@ function ContentUnavailableState({
         当前预览仅用于识别草稿，不代表完整正文。
       </p>
       <div className="content-unavailable-actions">
-        <button className="btn btn-primary btn-sm" onClick={onRetry} disabled={retrying || !state.retryable}>
+        <button
+          className="btn btn-primary btn-sm"
+          data-testid="content-unavailable-retry"
+          onClick={onRetry}
+          disabled={retrying || !state.retryable}
+        >
           {retrying ? '正在读取…' : '重新读取正文'}
         </button>
-        {onOpenHistory && <button className="btn btn-secondary btn-sm" onClick={onOpenHistory}>打开草稿历史</button>}
-        {onBackToChapters && <button className="btn btn-secondary btn-sm" onClick={onBackToChapters}>返回章节列表</button>}
+        {onOpenHistory && (
+          <button
+            className="btn btn-secondary btn-sm"
+            data-testid="content-unavailable-history"
+            onClick={onOpenHistory}
+          >打开草稿历史</button>
+        )}
+        {onBackToChapters && (
+          <button
+            className="btn btn-secondary btn-sm"
+            data-testid="content-unavailable-back"
+            onClick={onBackToChapters}
+          >返回章节列表</button>
+        )}
       </div>
       <details className="content-unavailable-details">
         <summary>查看错误详情</summary>

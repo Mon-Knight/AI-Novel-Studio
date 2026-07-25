@@ -47,15 +47,15 @@ npm run test:migrations
 - `large-text-integrity`：前端 fail-closed / operation 重试与 Rust DB04～DB11。
 - `migrations`：AppError 契约与 Rust DB01～DB03、DB15～DB16。
 
-PowerShell 聚合脚本会先检查完整 Rust 测试名是否真实存在，再运行 Cargo；Cargo 过滤命中 0 个测试不得被当作通过。
+`components` 与 `workspace-reliability` 只运行各自定向 Vitest。其余三个入口先运行定向 Vitest，再检查所需 Rust 测试的完整名称是否各自唯一存在，最后运行全量 Rust 测试；因此它们不是 Rust 过滤命令。Cargo 测试发现为 0、名称歧义或任一全量 Rust 回归失败均不得被当作通过。
 
-### 2.2 全部现有前端安全原语动态测试
+### 2.2 v2.1.8 及此前 Node / tsx 回归集合
 
 ```powershell
 npm run test
 ```
 
-该命令要求 Node.js >= 22.6，使用原生 `node:test` 和 `--experimental-strip-types` 直接执行生产安全模块，不新增测试依赖。类型剔除不代替 `tsc` 类型检查。
+该命令要求 Node.js >= 22.6，先使用原生 `node:test` 与 `--experimental-strip-types`，再使用 `tsx --test` 执行 v2.1.8 及此前的生产安全回归。它不包含 `src/test/**` 下的 v2.2.0 Vitest 用例；v2.2.0 必须同时运行 2.1 节列出的五个专项入口。类型剔除不代替 `tsc` 类型检查。
 
 ### 2.3 正文变更安全门定向测试
 
@@ -94,13 +94,13 @@ cargo test commands::tests -- --nocapture
 cd ..
 ```
 
-v2.2.0 新增 DB01～DB16 覆盖迁移账本、checksum 冲突、长正文事务回滚、operation 幂等、提交后清理、fail-closed 读取、恢复隔离、旧库升级和错误序列化。以下 v2.1.1 用例继续作为回归保留：
+v2.2.0 新增测试覆盖迁移账本、checksum 冲突、长正文事务回滚、operation 幂等、提交后清理、fail-closed 读取、恢复隔离、旧库升级和错误序列化。跨版本场景编号只用于文档分组，Rust 完整测试名是唯一权威标识；迁移组记为 `MIG-DB01`～`MIG-DB03`、`MIG-DB15`～`MIG-DB16`，原子保存组记为 `SAVE-DB04`～`SAVE-DB11`。以下 v2.1.1 用例继续作为回归保留：
 
 | 编号 | 场景 | 预期 |
 |------|------|------|
-| DB01 | 采用不存在的草稿 | 返回 `target_not_found`，原正式草稿不变 |
-| DB02 | 采用其他章节的草稿 | 返回 `target_mismatch`，两章正式草稿均不变 |
-| DB03 | 草稿更新影响 0 行 | 返回明确冲突，原正文不变 |
+| ADOPT-DB01 | 采用不存在的草稿 | 返回 `target_not_found`，原正式草稿不变 |
+| ADOPT-DB02 | 采用其他章节的草稿 | 返回 `target_mismatch`，两章正式草稿均不变 |
+| ADOPT-DB03 | 草稿更新影响 0 行 | 返回明确冲突，原正文不变 |
 | DB-ADOPT | 正式采用中途失败 | 单一事务整体回滚，不出现 0 个或多个正式草稿 |
 | DB-META | 正式采用成功 | 草稿、章节正式指针与章节元数据保持一致 |
 | AI-TASK | AI 任务删除 | 使用完整临时 Schema 清理可删除任务的子表引用；completed 质量报告引用的 Task 在单删、批量和清空时均受保护，混合操作整体拒绝 |
@@ -125,7 +125,7 @@ npm run test:ai-tasks-delete:runtime
 
 组合入口先执行静态契约，再执行运行时测试；运行时入口必须传播内部 `cargo test` 的失败退出码。
 
-### 2.4 v2.1.2 完整项目备份恢复测试
+### 2.5 v2.1.2 完整项目备份恢复测试
 
 ```powershell
 npm run test:project-backup
@@ -142,7 +142,7 @@ npm run test:project-backup
 
 该组测试证明 SQLite 范围内的事务恢复和全量数据比较；它不替代浏览器 LocalStorage 与 Tauri 的跨存储端到端测试。
 
-### 2.5 v2.1.4 大文本正文安全测试
+### 2.6 v2.1.4 大文本正文安全测试
 
 ```powershell
 cd src-tauri
@@ -154,16 +154,16 @@ npx tsx --test src/components/workspace/EditorArea.test.tsx
 
 | 编号 | 场景 | 预期 |
 |------|------|------|
-| DB04 | 整文 SHA-256 不匹配 | 校验失败，document、chunks、draft 均无新增 |
-| DB05 | 数据库已提交但缓存清理失败 | 正文保持 committed，返回 cleanup warning，不报告为可盲重试失败 |
-| DB06 | draft create / update 在 document 写入后失败 | 同事务整体回滚，不留下新 document 或错误引用 |
-| DB07 | 缺片、片 hash / 元数据错误或已存 chunk 损坏 | 保存或读取失败，不返回预览全文 |
+| LEGACY-LT-DB04 | 整文 SHA-256 不匹配 | 校验失败，document、chunks、draft 均无新增 |
+| LEGACY-LT-DB05 | 数据库已提交但缓存清理失败 | 正文保持 committed，返回 cleanup warning，不报告为可盲重试失败 |
+| LEGACY-LT-DB06 | draft create / update 在 document 写入后失败 | 同事务整体回滚，不留下新 document 或错误引用 |
+| LEGACY-LT-DB07 | 缺片、片 hash / 元数据错误或已存 chunk 损坏 | 保存或读取失败，不返回预览全文 |
 | DB-LIFECYCLE | 连续更新、转小文本、删除草稿 | 旧 document 仅在不再被引用时删除，chunks 级联清理 |
 | DB-UNICODE | 中文、emoji、CRLF | 全文、Unicode 字符数、UTF-8 字节数和完整字数一致 |
 
 编辑器模块测试覆盖 loading / error 时保留已知安全内容、只接受归属当前作品章节的完整草稿，以及已验证无草稿章节的安全清空。它通过 Vite SSR 加载真实 `EditorArea` 模块，不以源码字符串匹配代替行为。
 
-### 2.6 v2.1.5 任务重启恢复测试
+### 2.7 v2.1.5 任务重启恢复测试
 
 ```powershell
 cd src-tauri
@@ -185,7 +185,7 @@ npm run test:e2e -- --spec restart-task-recovery
 
 恢复测试只证明 `generation_jobs` 的安全中断结算，不证明不确定步骤可以自动续跑。E2E pause gate 只存在于 `VITE_AI_NOVEL_STUDIO_E2E=1` 的专用前端构建中，生产构建不可用。
 
-### 2.7 v2.1.6 在途请求取消测试
+### 2.8 v2.1.6 在途请求取消测试
 
 ```powershell
 npm run test
@@ -209,7 +209,7 @@ npm run test:e2e -- --spec generation-job-cancel
 
 Rust loopback 只绑定 `127.0.0.1`，测试构建显式绕过系统代理，不访问互联网；生产代理行为不变。真实桌面取消 spec 使用强制 Mock Provider，因此负责验证 React、AbortSignal、Rust/SQLite 任务终态与 WebView 生命周期，不用它替代真实 socket 关闭测试。
 
-### 2.8 v2.1.7 质量历史原子快照与重放
+### 2.9 v2.1.7 质量历史原子快照与重放
 
 ```powershell
 npm run test
@@ -235,7 +235,7 @@ npm run test:e2e -- --spec quality-history-replay
 
 LocalStorage 回退测试使用同一 completed 过滤、report 次序、snapshot `sortOrder`、独立 workflow state、幂等 Task 和迟到竞态契约，并覆盖旧 item 状态合成。它只验证浏览器开发回退，真实发布门禁仍以 Rust / SQLite 和 Windows Tauri E2E 为准。
 
-### 2.9 v2.1.8 章节上下文持久化一致性
+### 2.10 v2.1.8 章节上下文持久化一致性
 
 ```powershell
 npm run test
@@ -263,7 +263,7 @@ npm run test:e2e -- --spec chapter-context-persistence
 
 Node 测试负责区分 Tauri 与浏览器运行模式并验证“桌面失败绝不写缓存”和浏览器补偿；Rust 测试负责 SQLite 事务、归属、稳定 ID、查询及迁移；真实桌面 E2E 只通过 React、Tauri IPC 和隔离 SQLite 完成业务写入。三层证据不可互相替代。
 
-### 2.10 Windows 真实桌面 E2E
+### 2.11 Windows 真实桌面 E2E
 
 ```powershell
 # 启动、窗口、迁移和前端异常冒烟测试

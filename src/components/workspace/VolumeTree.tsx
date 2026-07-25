@@ -97,7 +97,9 @@ function VolumeTree({
       setNewChapterVolumeId('');
       ensureExpanded(volumeId);
     } catch (e: any) {
-      await showError({ title: '创建章节失败', message: e?.message || '未知错误', testId: 'error-notice' });
+      if (e?.code !== 'WORKSPACE_LEAVE_CANCELLED') {
+        await showError({ title: '创建章节失败', message: e?.message || '未知错误', testId: 'error-notice' });
+      }
     } finally {
       setCreating(false);
     }
@@ -315,7 +317,11 @@ function VolumeTree({
 
       {/* 新建章节弹窗 */}
       {showNewChapter && (
-        <div className="modal-overlay" data-testid="chapter-create-dialog" onClick={() => setShowNewChapter(false)}>
+        <div
+          className="modal-overlay"
+          data-testid="chapter-create-dialog"
+          onClick={() => { if (!creating) setShowNewChapter(false); }}
+        >
           <div className="modal-dialog" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">📝 新建章节</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -323,7 +329,7 @@ function VolumeTree({
                 <div>
                   <label className="panel-field-label">所属分卷</label>
                   <select className="form-input" data-testid="chapter-volume-select" value={newChapterVolumeId || volumes[0]?.id || ''}
-                    onChange={(e) => setNewChapterVolumeId(e.target.value)} style={{ width: '100%' }}>
+                    onChange={(e) => setNewChapterVolumeId(e.target.value)} disabled={creating} style={{ width: '100%' }}>
                     {volumes.map((v) => (
                       <option key={v.id} value={v.id}>{v.title}</option>
                     ))}
@@ -335,10 +341,10 @@ function VolumeTree({
                 <input type="text" className="form-input" data-testid="chapter-title-input" value={newChapterTitle}
                   onChange={(e) => setNewChapterTitle(e.target.value)}
                   placeholder="例如：第2章" style={{ width: '100%' }}
-                  autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()} />
+                  disabled={creating} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()} />
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => setShowNewChapter(false)}>取消</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowNewChapter(false)} disabled={creating}>取消</button>
                 <button className="btn btn-primary btn-sm" data-testid="chapter-create-submit" onClick={handleCreateChapter} disabled={creating || !newChapterTitle.trim()}>
                   {creating ? '创建中...' : '创建'}
                 </button>

@@ -107,7 +107,18 @@ export const workspaceRecoveryService = {
         updatedAt: now,
       };
       lsSet(keyOf(input), snapshot);
-      return snapshot;
+      const persisted = getLocal(input);
+      if (!persisted
+        || persisted.recoveryContentHash !== snapshot.recoveryContentHash
+        || persisted.recoveryContent !== snapshot.recoveryContent) {
+        throw {
+          code: 'RECOVERY_CONTENT_INVALID',
+          message: '浏览器恢复快照未能持久化。',
+          retryable: true,
+          traceId: input.traceId,
+        };
+      }
+      return persisted;
     };
     try {
       const raw = await dbCall<unknown>(
@@ -135,7 +146,17 @@ export const workspaceRecoveryService = {
       await dbCall<unknown>(
         'delete_workspace_recovery_snapshot',
         { input: { ...target, traceId } },
-        () => lsRemove(keyOf(target)),
+        () => {
+          lsRemove(keyOf(target));
+          if (getLocal(target) !== null) {
+            throw {
+              code: 'RECOVERY_CONTENT_INVALID',
+              message: '浏览器恢复快照未能删除。',
+              retryable: true,
+              traceId,
+            };
+          }
+        },
       );
     } catch (error) {
       const normalized = normalizeAppError(error, '清理恢复快照失败。', { traceId });

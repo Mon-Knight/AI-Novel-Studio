@@ -239,6 +239,15 @@ function WritingWorkspacePage() {
       : null,
   });
 
+  const confirmDiscardChapterGoal = useCallback(async () => {
+    if (!chapterGoalDirtyRef.current) return true;
+    return await confirmInfo({
+      title: '未保存修改',
+      message: '本章目标有未保存修改，离开后这些修改不会进入正文生成。是否继续？',
+      testId: 'leave-guard',
+    });
+  }, []);
+
   const {
     requestWorkspaceLeave,
     dialog: leaveGuardDialog,
@@ -247,6 +256,8 @@ function WritingWorkspacePage() {
       || (contentAvailable
         && editorSnapshot.chapterId === activeChapterId
         && editorSnapshot.isDirty),
+    shouldPreflight: chapterGoalDirty,
+    preflight: confirmDiscardChapterGoal,
     contentAvailable,
     save: async () => {
       const expectedNovelId = activeNovelIdRef.current;
@@ -395,11 +406,6 @@ function WritingWorkspacePage() {
     return () => { cancelled = true; };
   }, [novelId, searchParams, commitActiveChapter, loadChapterDraft]);
 
-  const confirmDiscardChapterGoal = useCallback(async () => {
-    if (!chapterGoalDirtyRef.current) return true;
-    return await confirmInfo({ title: '未保存修改', message: '本章目标有未保存修改，切换后这些修改不会进入正文生成。是否继续？', testId: 'leave-guard' });
-  }, []);
-
   const confirmEditorLeave = useCallback(async () => {
     const decision = await requestWorkspaceLeave({ reason: 'draft_adopt' });
     return decision === 'proceed';
@@ -407,7 +413,6 @@ function WritingWorkspacePage() {
 
   const handleSelectChapter = useCallback(async (chapterId: string) => {
     if (chapterId === activeChapterIdRef.current) return;
-    if (!(await confirmDiscardChapterGoal())) return;
     await requestWorkspaceLeave({
       reason: 'chapter_switch',
       targetNovelId: activeNovelIdRef.current,
@@ -415,12 +420,11 @@ function WritingWorkspacePage() {
       continueAction: async () => {
         setChapterGoalDirty(false);
         chapterGoalDirtyRef.current = false;
-        commitActiveChapter(chapterId);
         // 面板保持挂载，但正文相关面板将读取新的安全状态。
-        await loadChapterDraft(chapterId);
+        await loadChapterDraft(chapterId, true);
       },
     });
-  }, [commitActiveChapter, confirmDiscardChapterGoal, loadChapterDraft, requestWorkspaceLeave]);
+  }, [loadChapterDraft, requestWorkspaceLeave]);
 
   const retryChapterDraftLoad = useCallback(() => {
     if (chapterDocumentLoad.status !== 'error') return;
@@ -859,13 +863,13 @@ function WritingWorkspacePage() {
   // v1.0.20 VolumeTree 回调：创建章节（统一服务 + 反查 + 刷新）
   const handleCreateChapter = useCallback(async (volumeId: string, title: string) => {
     if (!novelId) throw new Error('novelId 缺失');
-    if (!(await confirmDiscardChapterGoal())) return;
-    await requestWorkspaceLeave({
+    const decision = await requestWorkspaceLeave({
       reason: 'chapter_create',
       targetNovelId: novelId,
       continueAction: async () => {
-        setChapterGoalDirty(false);
-        chapterGoalDirtyRef.current = false;
+        const guardedChapterId = activeChapterIdRef.current;
+        const guardedSnapshot = { ...editorSnapshotRef.current };
+        const guardedGoalDirty = chapterGoalDirtyRef.current;
         console.info('[Workspace] handleCreateChapter, volumeId=', volumeId, 'title=', title);
         const result = volumeId
           ? await createChapterInVolume(novelId, volumeId, title)
@@ -874,43 +878,99 @@ function WritingWorkspacePage() {
         // no chapter is created before the leave decision completes.
         setVolumes(await volumeRepository.getByNovelId(novelId));
         setChapters(await chapterRepository.getByNovelId(novelId));
-        commitActiveChapter(result.chapter.id);
-        setLoadState('ready');
-        setCurrentDraft(result.draft);
-        currentDraftRef.current = result.draft;
-        chapterDocumentBlockedRef.current = false;
-        setChapterDocumentLoad({ status: 'ready', chapterId: result.chapter.id });
-        setContentLoadError(null);
-        setDraftWordCount(0);
-        setIsDirty(false);
-        console.info('[Workspace] handleCreateChapter done, chapterId=', result.chapter.id);
+        const activateCreatedChapter = () => {
+          setChapterGoalDirty(false);
+          chapterGoalDirtyRef.current = false;
+          commitActiveChapter(result.chapter.id);
+          setLoadState('ready');
+          setCurrentDraft(result.draft);
+          currentDraftRef.current = result.draft;
+          chapterDocumentBlockedRef.current = false;
+          setChapterDocumentLoad({ status: 'ready', chapterId: result.chapter.id });
+          setContentLoadError(null);
+          setDraftWordCount(0);
+          setIsDirty(false);
+          console.info('[Workspace] handleCreateChapter done, chapterId=', result.chapter.id);
+        };
+
+        if (activeChapterIdRef.current !== guardedChapterId) {
+          await showInfo({
+            title: '新章节已创建',
+            message: '创建期间当前章节已经切换。新章节已保留在目录中，未覆盖当前编辑器。',
+          });
+          return;
+        }
+        const liveSnapshot = editorSnapshotRef.current;
+        const editorChangedSinceGuard = liveSnapshot.chapterId !== guardedSnapshot.chapterId
+          || liveSnapshot.draftId !== guardedSnapshot.draftId
+          || liveSnapshot.draftVersion !== guardedSnapshot.draftVersion
+          || liveSnapshot.contentHash !== guardedSnapshot.contentHash
+          || liveSnapshot.isDirty !== guardedSnapshot.isDirty;
+        const goalChangedSinceGuard = chapterGoalDirtyRef.current !== guardedGoalDirty;
+        if (editorChangedSinceGuard || goalChangedSinceGuard) {
+          const followupDecision = await requestWorkspaceLeave({
+            reason: 'chapter_create',
+            targetNovelId: novelId,
+            targetChapterId: result.chapter.id,
+            continueAction: activateCreatedChapter,
+          });
+          if (followupDecision === 'save_failed') {
+            throw new Error('新章节已创建，但切换前保存当前工作区失败。');
+          }
+          if (followupDecision !== 'proceed') {
+            await showInfo({
+              title: '新章节已创建',
+              message: '已保留创建期间的新编辑内容；新章节可从左侧目录打开。',
+            });
+          }
+          return;
+        }
+        activateCreatedChapter();
       },
     });
-  }, [commitActiveChapter, confirmDiscardChapterGoal, novelId, requestWorkspaceLeave]);
+    if (decision === 'cancel') {
+      throw { code: 'WORKSPACE_LEAVE_CANCELLED', message: '已取消创建章节。' };
+    }
+    if (decision === 'save_failed') {
+      throw new Error('创建章节后的工作区切换失败，请刷新章节列表确认结果后再重试。');
+    }
+  }, [commitActiveChapter, novelId, requestWorkspaceLeave]);
 
   const handleRestoreRecovery = useCallback(async () => {
     if (recoveryPrompt.status !== 'available') return;
     const snapshot = recoveryPrompt.snapshot;
-    await requestWorkspaceLeave({
-      reason: 'draft_restore',
-      targetNovelId: snapshot.novelId,
-      targetChapterId: snapshot.chapterId,
-      continueAction: () => {
-        const restored = editorRef.current?.restoreRecovery(
-          snapshot.recoveryContent,
-          snapshot.selectionStart,
-          snapshot.selectionEnd,
-        );
-        if (!restored) {
-          throw {
-            code: 'RECOVERY_BASE_CONFLICT',
-            message: '当前正文状态不允许恢复。',
-            retryable: false,
-          };
-        }
-        dismissRecoveryPrompt();
-      },
-    });
+    try {
+      const decision = await requestWorkspaceLeave({
+        reason: 'draft_restore',
+        targetNovelId: snapshot.novelId,
+        targetChapterId: snapshot.chapterId,
+        continueAction: () => {
+          const restored = editorRef.current?.restoreRecovery(
+            snapshot.recoveryContent,
+            snapshot.selectionStart,
+            snapshot.selectionEnd,
+          );
+          if (!restored) {
+            throw {
+              code: 'RECOVERY_BASE_CONFLICT',
+              message: '当前正文状态不允许恢复。',
+              retryable: false,
+            };
+          }
+          dismissRecoveryPrompt();
+        },
+      });
+      if (decision === 'save_failed') {
+        await showError({ title: '恢复失败', message: '当前工作区无法安全切换到恢复内容。' });
+      }
+    } catch (error) {
+      const normalized = logWorkspaceError('recovery_restore_failed', error, {
+        traceId: createTraceId('recovery-restore'),
+        novelId: snapshot.novelId,
+        chapterId: snapshot.chapterId,
+      });
+      await showError({ title: '恢复失败', message: normalized.message });
+    }
   }, [dismissRecoveryPrompt, recoveryPrompt, requestWorkspaceLeave]);
 
   const handleDiscardRecovery = useCallback(async () => {
@@ -951,7 +1011,22 @@ function WritingWorkspacePage() {
           retryable: false,
         };
       }
-      await clearRecovery({ novelId: snapshot.novelId, chapterId: snapshot.chapterId });
+      try {
+        await clearRecovery({ novelId: snapshot.novelId, chapterId: snapshot.chapterId });
+      } catch (cleanupError) {
+        logWorkspaceError('recovery_candidate_post_commit_cleanup_failed', cleanupError, {
+          traceId: createTraceId('recovery-candidate-cleanup'),
+          novelId: snapshot.novelId,
+          chapterId: snapshot.chapterId,
+          draftId: saved.id,
+        });
+        dismissRecoveryPrompt();
+        await showInfo({
+          title: '候选草稿已保存',
+          message: `恢复内容已保存为草稿 v${saved.versionNo}，但恢复快照暂未清理；无需重复另存。`,
+        });
+        return;
+      }
       await showInfo({
         title: '已另存为候选草稿',
         message: `恢复内容已保存为草稿 v${saved.versionNo}，当前正文未被覆盖。`,
@@ -966,7 +1041,7 @@ function WritingWorkspacePage() {
     } finally {
       setRecoveryBusy(false);
     }
-  }, [activeChapter?.title, clearRecovery, recoveryPrompt]);
+  }, [activeChapter?.title, clearRecovery, dismissRecoveryPrompt, recoveryPrompt]);
 
   return (
     <div

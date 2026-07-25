@@ -42,6 +42,8 @@ interface GuardHarnessProps {
   save: () => Promise<boolean>;
   discard?: () => Promise<void>;
   shouldGuard?: boolean;
+  shouldPreflight?: boolean;
+  preflight?: () => Promise<boolean>;
   contentAvailable?: boolean;
 }
 
@@ -49,11 +51,15 @@ function GuardHarness({
   save,
   discard = async () => undefined,
   shouldGuard = true,
+  shouldPreflight = false,
+  preflight,
   contentAvailable = true,
 }: GuardHarnessProps) {
   const [continued, setContinued] = useState<string[]>([]);
   const guard = useWorkspaceLeaveGuard({
     shouldGuard,
+    shouldPreflight,
+    preflight,
     contentAvailable,
     save,
     discard,
@@ -66,11 +72,18 @@ function GuardHarness({
       continueAction: () => setContinued((items) => [...items, chapterId]),
     });
   };
+  const requestAdoption = () => {
+    void guard.requestWorkspaceLeave({
+      reason: 'draft_adopt',
+      continueAction: () => setContinued((items) => [...items, 'adopt']),
+    });
+  };
 
   return (
     <div>
       <button onClick={() => requestChapter('chapter-b')}>切换 B</button>
       <button onClick={() => requestChapter('chapter-c')}>切换 C</button>
+      <button onClick={requestAdoption}>采用草稿</button>
       <div data-testid="continued">{continued.join(',')}</div>
       {guard.dialog}
     </div>
@@ -258,5 +271,67 @@ describe('workspace leave guard', () => {
     await waitFor(() => expect(screen.getByTestId('continued').textContent).toBe('chapter-b'));
     expect(save).not.toHaveBeenCalled();
     expect(discard).not.toHaveBeenCalled();
+  });
+
+  it('guards a non-document dirty state before a chapter switch', async () => {
+    const preflight = vi.fn(async () => false);
+    const save = vi.fn(async () => true);
+    const user = userEvent.setup();
+    renderWithMemoryRouter(
+      <GuardHarness
+        save={save}
+        shouldGuard={false}
+        shouldPreflight
+        preflight={preflight}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '切换 B' }));
+
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('continued').textContent).toBe('');
+    expect(screen.queryByTestId('workspace-leave-dialog')).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('runs a goal-only preflight for native close without offering a document save', async () => {
+    const preflight = vi.fn(async () => true);
+    const save = vi.fn(async () => true);
+    renderWithMemoryRouter(
+      <GuardHarness
+        save={save}
+        shouldGuard={false}
+        shouldPreflight
+        preflight={preflight}
+      />,
+    );
+    await waitFor(() => expect(tauriHarness.closeHandler).not.toBeNull());
+    const event = { preventDefault: vi.fn() };
+
+    act(() => tauriHarness.closeHandler?.(event));
+
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(tauriHarness.close).toHaveBeenCalledTimes(1));
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('workspace-leave-dialog')).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('does not discard chapter-goal edits for an in-place draft adoption', async () => {
+    const preflight = vi.fn(async () => true);
+    const user = userEvent.setup();
+    renderWithMemoryRouter(
+      <GuardHarness
+        save={async () => true}
+        shouldGuard={false}
+        shouldPreflight
+        preflight={preflight}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '采用草稿' }));
+
+    await waitFor(() => expect(screen.getByTestId('continued').textContent).toBe('adopt'));
+    expect(preflight).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,8 @@ pub struct DraftRecord {
     pub version_no: i64,
     pub word_count: i64,
     pub is_adopted: bool,
+    pub ai_task_id: Option<String>,
+    pub note: Option<String>,
     pub large_text_ref_id: Option<String>,
     pub content_hash: Option<String>,
     pub created_at: String,
@@ -78,7 +80,8 @@ pub fn find_draft(
     connection
         .query_row(
             "SELECT id, novel_id, chapter_id, title, content, source, version_no,
-                    word_count, is_adopted, large_text_ref_id, content_hash, created_at, updated_at
+                    word_count, is_adopted, ai_task_id, note, large_text_ref_id, content_hash,
+                    created_at, updated_at
              FROM chapter_drafts WHERE id = ?1",
             params![draft_id],
             |row| {
@@ -92,10 +95,12 @@ pub fn find_draft(
                     version_no: row.get(6)?,
                     word_count: row.get(7)?,
                     is_adopted: row.get::<_, i64>(8)? != 0,
-                    large_text_ref_id: row.get(9)?,
-                    content_hash: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    ai_task_id: row.get(9)?,
+                    note: row.get(10)?,
+                    large_text_ref_id: row.get(11)?,
+                    content_hash: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
                 })
             },
         )
@@ -124,6 +129,8 @@ pub fn insert_draft(
     source: &str,
     version_no: i64,
     word_count: i64,
+    ai_task_id: Option<&str>,
+    note: Option<&str>,
     large_text_ref_id: Option<&str>,
     content_hash: &str,
     now: &str,
@@ -132,8 +139,8 @@ pub fn insert_draft(
         .execute(
             "INSERT INTO chapter_drafts
                 (id, novel_id, chapter_id, title, content, source, version_no, word_count,
-                 is_adopted, large_text_ref_id, content_hash, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, ?11, ?11)",
+                 is_adopted, ai_task_id, note, large_text_ref_id, content_hash, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, ?11, ?12, ?13, ?13)",
             params![
                 id,
                 novel_id,
@@ -143,6 +150,8 @@ pub fn insert_draft(
                 source,
                 version_no,
                 word_count,
+                ai_task_id,
+                note,
                 large_text_ref_id,
                 content_hash,
                 now

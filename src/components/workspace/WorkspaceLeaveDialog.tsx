@@ -46,14 +46,29 @@ function WorkspaceLeaveDialog({
         {errorMessage && <div className="workspace-leave-error" role="alert">{errorMessage}</div>}
         <div className="workspace-leave-actions">
           {!saveDisabled && (
-            <button className="btn btn-primary" onClick={onSave} disabled={busy}>
+            <button
+              className="btn btn-primary"
+              data-testid="workspace-leave-save"
+              onClick={onSave}
+              disabled={busy}
+            >
               {busy ? '正在处理…' : '保存并继续'}
             </button>
           )}
-          <button className={saveDisabled ? 'btn btn-primary' : 'btn btn-danger'} onClick={onDiscard} disabled={busy}>
+          <button
+            className={saveDisabled ? 'btn btn-primary' : 'btn btn-danger'}
+            data-testid="workspace-leave-discard"
+            onClick={onDiscard}
+            disabled={busy}
+          >
             {saveDisabled ? '继续离开' : '放弃修改并继续'}
           </button>
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>取消</button>
+          <button
+            className="btn btn-secondary"
+            data-testid="workspace-leave-cancel"
+            onClick={onCancel}
+            disabled={busy}
+          >取消</button>
         </div>
       </div>
     </div>

@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { workspaceRecoveryService } from '../../services/workspace/workspaceRecoveryService';
 
 describe('browser recovery repository fallback', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     localStorage.clear();
   });
 
@@ -66,5 +67,37 @@ describe('browser recovery repository fallback', () => {
       { novelId: 'novel-b', chapterId: 'chapter-b1' },
       'read-b1',
     )).resolves.toEqual(expect.objectContaining({ recoveryContent: 'chapter-b1' }));
+  });
+
+  it('fails closed when browser storage rejects a recovery write', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota exceeded', 'QuotaExceededError');
+    });
+
+    await expect(workspaceRecoveryService.upsert({
+      traceId: 'trace-write-failure',
+      novelId: 'novel-a',
+      chapterId: 'chapter-a1',
+      recoveryContent: 'must persist',
+      recoveryContentHash: 'hash-write-failure',
+    })).rejects.toMatchObject({ code: 'RECOVERY_CONTENT_INVALID', retryable: true });
+  });
+
+  it('fails closed when browser storage rejects recovery deletion', async () => {
+    const target = { novelId: 'novel-a', chapterId: 'chapter-a1' };
+    await workspaceRecoveryService.upsert({
+      ...target,
+      traceId: 'trace-delete-seed',
+      recoveryContent: 'keep until deletion is confirmed',
+      recoveryContentHash: 'hash-delete-failure',
+    });
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('storage unavailable', 'InvalidStateError');
+    });
+
+    await expect(workspaceRecoveryService.delete(target, 'trace-delete-failure'))
+      .rejects.toMatchObject({ code: 'RECOVERY_CONTENT_INVALID', retryable: true });
+    await expect(workspaceRecoveryService.get(target, 'trace-read-after-delete-failure'))
+      .resolves.toEqual(expect.objectContaining({ recoveryContentHash: 'hash-delete-failure' }));
   });
 });

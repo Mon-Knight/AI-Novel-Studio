@@ -27,6 +27,10 @@ pub struct SaveChapterDraftAtomicInput {
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
+    pub ai_task_id: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
     pub staging_session_id: Option<String>,
 }
 
@@ -42,6 +46,8 @@ pub struct AtomicDraftDto {
     pub version_no: i64,
     pub word_count: i64,
     pub is_adopted: bool,
+    pub ai_task_id: Option<String>,
+    pub note: Option<String>,
     pub large_text_ref_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -122,6 +128,8 @@ fn request_hash(input: &SaveChapterDraftAtomicInput) -> String {
         "contentLength": input.content.len(),
         "source": input.source,
         "title": input.title,
+        "aiTaskId": input.ai_task_id,
+        "note": input.note,
     });
     large_text_repository::sha256(&canonical.to_string())
 }
@@ -171,6 +179,8 @@ fn map_draft(record: draft_repository::DraftRecord, content: String) -> AtomicDr
         version_no: record.version_no,
         word_count: record.word_count,
         is_adopted: record.is_adopted,
+        ai_task_id: record.ai_task_id,
+        note: record.note,
         large_text_ref_id: record.large_text_ref_id,
         created_at: record.created_at,
         updated_at: record.updated_at,
@@ -398,6 +408,21 @@ where
         .word_count
         .filter(|provided| *provided == server_word_count)
         .unwrap_or(server_word_count);
+    let ai_task_id = match input
+        .ai_task_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(candidate) => transaction
+            .query_row(
+                "SELECT id FROM ai_task_records WHERE id = ?1",
+                params![candidate],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| add_context(error.into()))?,
+        None => None,
+    };
 
     if !create_new_version {
         let affected = draft_repository::update_draft(
@@ -435,6 +460,8 @@ where
             &input.source,
             version,
             calculated_word_count,
+            ai_task_id.as_deref(),
+            input.note.as_deref(),
             document_id.as_deref(),
             &actual_hash,
             &now,
@@ -579,6 +606,7 @@ mod tests {
                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, title TEXT NOT NULL,
                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
              );
+             CREATE TABLE ai_task_records (id TEXT PRIMARY KEY);
              CREATE TABLE chapter_drafts (
                  id TEXT PRIMARY KEY, novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
                  title TEXT, content TEXT NOT NULL DEFAULT '', source TEXT NOT NULL,
@@ -611,8 +639,34 @@ mod tests {
             word_count: None,
             source: "user_edited".to_string(),
             title: Some("Draft".to_string()),
+            ai_task_id: None,
+            note: None,
             staging_session_id: None,
         }
+    }
+
+    #[test]
+    fn ai_task_provenance_and_note_are_preserved_by_atomic_create(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = test_connection()?;
+        connection.execute("INSERT INTO ai_task_records (id) VALUES ('task-a')", [])?;
+        let mut request = input("op-provenance", "candidate content".to_string());
+        request.ai_task_id = Some("task-a".to_string());
+        request.note = Some("constraint snapshot".to_string());
+
+        let output =
+            save_chapter_draft_atomic_with_cleanup(&mut connection, request, || Ok(()))?;
+
+        assert_eq!(output.draft.ai_task_id.as_deref(), Some("task-a"));
+        assert_eq!(output.draft.note.as_deref(), Some("constraint snapshot"));
+        let persisted: (Option<String>, Option<String>) = connection.query_row(
+            "SELECT ai_task_id, note FROM chapter_drafts WHERE id = ?1",
+            params![output.draft.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(persisted.0.as_deref(), Some("task-a"));
+        assert_eq!(persisted.1.as_deref(), Some("constraint snapshot"));
+        Ok(())
     }
 
     fn count(connection: &Connection, table: &str) -> rusqlite::Result<i64> {

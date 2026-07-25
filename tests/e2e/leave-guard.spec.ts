@@ -8,6 +8,7 @@ import {
   createProjectThroughUi,
   findTestIdByAttribute,
   openWorkspace,
+  waitForTestId,
   waitForTestIdAttribute,
   waitForTestIdMissing,
 } from './helpers';
@@ -29,20 +30,18 @@ describe('unsaved document leave guard', () => {
 
     const secondChapter = await findTestIdByAttribute('chapter-item', 'data-chapter-id', secondChapterId);
     await secondChapter.click();
-    await waitForTestIdAttribute('leave-guard', 'data-dialog-tone', 'info');
-    await clickTestId('dialog-cancel');
-    await waitForTestIdAttribute('leave-guard', 'data-dialog-tone', 'danger');
-    await clickTestId('dialog-cancel');
-    await waitForTestIdMissing('leave-guard');
+    await waitForTestId('workspace-leave-dialog');
+    await clickTestId('workspace-leave-cancel');
+    await waitForTestIdMissing('workspace-leave-dialog');
 
     expect(await editor.getValue()).toContain(content);
     expect(await editor.getAttribute('data-dirty')).toBe('true');
     expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', firstChapterId)).getAttribute('data-active')).toBe('true');
 
     await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', secondChapterId)).click();
-    await waitForTestIdAttribute('leave-guard', 'data-dialog-tone', 'info');
-    await clickTestId('dialog-confirm');
-    await waitForTestIdMissing('leave-guard');
+    await waitForTestId('workspace-leave-dialog');
+    await clickTestId('workspace-leave-save');
+    await waitForTestIdMissing('workspace-leave-dialog');
     await waitForTestIdAttribute('chapter-editor', 'data-chapter-id', secondChapterId);
     expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', secondChapterId)).getAttribute('data-active')).toBe('true');
 
@@ -64,11 +63,9 @@ describe('unsaved document leave guard', () => {
     await reopenedEditor.setValue(discardedContent);
     expect(await reopenedEditor.getAttribute('data-dirty')).toBe('true');
     await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', secondChapterId)).click();
-    await waitForTestIdAttribute('leave-guard', 'data-dialog-tone', 'info');
-    await clickTestId('dialog-cancel');
-    await waitForTestIdAttribute('leave-guard', 'data-dialog-tone', 'danger');
-    await clickTestId('dialog-confirm');
-    await waitForTestIdMissing('leave-guard');
+    await waitForTestId('workspace-leave-dialog');
+    await clickTestId('workspace-leave-discard');
+    await waitForTestIdMissing('workspace-leave-dialog');
     await waitForTestIdAttribute('chapter-editor', 'data-chapter-id', secondChapterId);
 
     const draftsAfterDiscard = await bridgeCall<Array<{ id: string; chapterId: string; content: string }>>('get_drafts_by_chapter_id', { chapterId: firstChapterId });

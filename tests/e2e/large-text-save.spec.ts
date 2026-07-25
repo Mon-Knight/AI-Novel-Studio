@@ -163,7 +163,7 @@ describe('large-text chapter safety', () => {
     expect(adoptedState.contentSha256).toBe(sha256(canonicalContent));
   });
 
-  it('fails closed on a corrupted chunk and does not replace the safe editor with a preview', async () => {
+  it('fails closed on a corrupted chunk without exposing its preview as editable content', async () => {
     const projectId = await createProjectThroughUi(E2E_FIXTURES.largeText.corruptionProjectTitle);
     await openWorkspace(projectId);
     const volumeId = await createVolumeThroughUi(E2E_FIXTURES.largeText.volumeTitle);
@@ -186,11 +186,9 @@ describe('large-text chapter safety', () => {
     }
 
     const safeChapterId = await createChapterThroughUi(E2E_FIXTURES.largeText.safeChapterTitle, volumeId);
-    const safeCanonicalContent = await fillTextareaTestId('chapter-editor', E2E_FIXTURES.largeText.safeContent);
+    await fillTextareaTestId('chapter-editor', E2E_FIXTURES.largeText.safeContent);
     await clickTestId('chapter-save');
-    const safeEditor = await waitForSavedDraft(safeChapterId);
-    const safeDraftId = await safeEditor.getAttribute('data-draft-id');
-    if (!safeDraftId) throw new Error('Safe draft did not expose data-draft-id');
+    await waitForSavedDraft(safeChapterId);
 
     const corruption = await bridgeCall<CorruptLargeTextChunkResult>(
       'corrupt_e2e_large_text_chunk',
@@ -205,15 +203,13 @@ describe('large-text chapter safety', () => {
 
     const damagedChapter = await findTestIdByAttribute('chapter-item', 'data-chapter-id', damagedChapterId);
     await damagedChapter.click();
-    await waitForTestIdAttribute('error-notice', 'data-chapter-id', damagedChapterId);
-    await browser.waitUntil(async () => {
-      const currentEditor = await browser.$('[data-testid="chapter-editor"]');
-      return await currentEditor.getAttribute('data-chapter-id') === safeChapterId
-        && await currentEditor.getAttribute('data-draft-id') === safeDraftId
-        && await currentEditor.getValue() === safeCanonicalContent;
-    }, { timeout: 30000, timeoutMsg: 'safe editor content changed after the corrupted chapter read failed' });
-    expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', damagedChapterId)).getAttribute('data-active')).not.toBe('true');
-    expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', safeChapterId)).getAttribute('data-active')).toBe('true');
+    await waitForTestId('content-unavailable-state');
+    expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', damagedChapterId)).getAttribute('data-active')).toBe('true');
+    expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', safeChapterId)).getAttribute('data-active')).not.toBe('true');
+    expect(await browser.$('[data-testid="chapter-editor"]').isExisting()).toBe(false);
+
+    await clickTestId('content-unavailable-history');
+    await waitForTestIdAttribute('draft-history-item', 'data-draft-id', draftId);
 
     const stateAfterFailedLoad = await bridgeCall<LargeTextDraftState>(
       'get_e2e_large_text_draft_state',
@@ -221,8 +217,8 @@ describe('large-text chapter safety', () => {
     );
     expect(stateAfterFailedLoad).toEqual(stateBeforeCorruption);
 
-    // The handled integrity error is expected in this fault-injection case. Clear it so
-    // WDIO's global health gate can still detect any later, unrelated console failure.
+    // The unavailable state is expected in this fault-injection case. Clear any
+    // captured diagnostics so the global health gate still detects later failures.
     await bridgeClearDiagnostics();
   });
 });
