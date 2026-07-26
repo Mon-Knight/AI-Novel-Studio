@@ -19,7 +19,7 @@ const DATABASE_FILE: &str = "ai-novel-studio.db";
 const DATABASE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const DATABASE_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 
-const REQUIRED_E2E_TABLES: [&str; 17] = [
+const REQUIRED_E2E_TABLES: [&str; 20] = [
     "novels",
     "volumes",
     "chapters",
@@ -37,6 +37,9 @@ const REQUIRED_E2E_TABLES: [&str; 17] = [
     "ai_constraint_snapshots",
     "result_artifacts",
     "artifact_validation_issues",
+    "placement_proposals",
+    "apply_plans",
+    "artifact_target_links",
 ];
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -49,6 +52,9 @@ pub struct E2eDiagnosticsCounts {
     pub ai_tasks: i64,
     pub execution_tasks: i64,
     pub result_artifacts: i64,
+    pub placement_proposals: i64,
+    pub apply_plans: i64,
+    pub artifact_target_links: i64,
     pub generation_jobs: i64,
     pub generation_steps: i64,
     pub adopted_drafts: i64,
@@ -387,6 +393,9 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         ai_tasks: count_rows(conn, "ai_task_records")?,
         execution_tasks: count_rows(conn, "ai_tasks")?,
         result_artifacts: count_rows(conn, "result_artifacts")?,
+        placement_proposals: count_rows(conn, "placement_proposals")?,
+        apply_plans: count_rows(conn, "apply_plans")?,
+        artifact_target_links: count_rows(conn, "artifact_target_links")?,
         generation_jobs: count_rows(conn, "generation_jobs")?,
         generation_steps: count_rows(conn, "generation_step_results")?,
         adopted_drafts: if table_exists(conn, "chapter_drafts")? {
@@ -880,6 +889,9 @@ mod tests {
             CREATE TABLE ai_constraint_snapshots (snapshot_id TEXT PRIMARY KEY);
             CREATE TABLE result_artifacts (artifact_id TEXT PRIMARY KEY);
             CREATE TABLE artifact_validation_issues (issue_id TEXT PRIMARY KEY);
+            CREATE TABLE placement_proposals (proposal_id TEXT PRIMARY KEY);
+            CREATE TABLE apply_plans (plan_id TEXT PRIMARY KEY);
+            CREATE TABLE artifact_target_links (link_id TEXT PRIMARY KEY);
             INSERT INTO schema_migrations (migration_id, version, checksum, applied_at) VALUES
                 ('001_generation_checkpoint_facts', '2.0.4', 'checksum-001', '2026-07-26T00:00:00Z'),
                 ('002_workspace_recovery_snapshots', '2.2.0', 'checksum-002', '2026-07-26T00:00:00Z'),
@@ -891,7 +903,10 @@ mod tests {
                 ('008_ai_context_snapshots', '2.3.0', 'checksum-008', '2026-07-26T00:00:00Z'),
                 ('009_ai_constraint_snapshots', '2.3.0', 'checksum-009', '2026-07-26T00:00:00Z'),
                 ('010_result_artifacts', '2.3.0', 'checksum-010', '2026-07-26T00:00:00Z'),
-                ('011_artifact_validation_issues', '2.3.0', 'checksum-011', '2026-07-26T00:00:00Z');
+                ('011_artifact_validation_issues', '2.3.0', 'checksum-011', '2026-07-26T00:00:00Z'),
+                ('012_placement_proposals', '2.3.2', 'checksum-012', '2026-07-26T00:00:00Z'),
+                ('013_apply_plans', '2.3.2', 'checksum-013', '2026-07-26T00:00:00Z'),
+                ('014_artifact_target_links', '2.3.2', 'checksum-014', '2026-07-26T00:00:00Z');
             INSERT INTO novels (id) VALUES ('novel-1');
             INSERT INTO chapter_drafts (id, is_adopted) VALUES ('draft-1', 1), ('draft-2', 0);
             ",
@@ -916,13 +931,16 @@ mod tests {
         assert_eq!(diagnostics.counts.novels, 1);
         assert_eq!(diagnostics.counts.chapter_drafts, 2);
         assert_eq!(diagnostics.counts.adopted_drafts, 1);
-        assert_eq!(diagnostics.migration_count, 11);
+        assert_eq!(diagnostics.migration_count, 14);
         assert_eq!(
             diagnostics.latest_migration_id.as_deref(),
-            Some("011_artifact_validation_issues")
+            Some("014_artifact_target_links")
         );
         assert_eq!(diagnostics.counts.execution_tasks, 0);
         assert_eq!(diagnostics.counts.result_artifacts, 0);
+        assert_eq!(diagnostics.counts.placement_proposals, 0);
+        assert_eq!(diagnostics.counts.apply_plans, 0);
+        assert_eq!(diagnostics.counts.artifact_target_links, 0);
 
         drop(conn);
         fs::remove_dir_all(data_dir).unwrap();

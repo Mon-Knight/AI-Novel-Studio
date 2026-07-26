@@ -2294,3 +2294,36 @@ ValidationIssue 按 `(artifactId, validationRunId, issueIndex)` 稳定排序，�
 M1 内部关系使用 `ON DELETE RESTRICT`，执行事实不能因上层清理级联丢失。Task 目标使用不可变字符串身份和创建时归属验证，不向既有业务表增加外键或来源列，避免改变草稿删除、质量历史或当前生产 AI 流程。
 
 详细状态机、安全边界与 IPC 见 [`architecture/ai-execution-facts.md`](architecture/ai-execution-facts.md)。
+
+---
+
+# 30. v2.3.2 Safe Apply 模型
+
+v2.3.2 新增三类持久事实，把有效 `setting_candidates@1` Artifact 的单个候选安全创建为正式 `world_settings` 行。该模型不允许 AI 直接写业务表，也不为浏览器回退伪造 SQLite 事实。
+
+## 30.1 PlacementProposal
+
+Proposal 绑定 `artifactId + candidateIndex + candidateHash`，并冻结 proposal type、目标作品、预分配 targetId、目标不存在的 version 0/hash、单个 effect payload、proposalHash 与创建时间。同一 Artifact 候选只能对应一个 Proposal；整行禁止 UPDATE 和 DELETE。
+
+## 30.2 ApplyPlan
+
+Plan 与 Proposal 一对一，冻结 operationId、planHash、目标前置条件和 effect payload。当前只允许一个 `create_world_setting` effect，状态边为：
+
+```text
+awaiting_confirmation → applying → applied
+                              └──→ conflict
+```
+
+从 awaiting 进入 applying 时必须同时记录 `confirmedBy=user` 与确认时间，且只允许记录一次。身份和计划内容不可变；状态使用 revision CAS，Plan 不允许删除。
+
+## 30.3 ArtifactTargetLink
+
+成功应用创建一条 `created_from` 链接，绑定 Artifact、Proposal、ApplyPlan 与正式 target，保存 target version 1 和完整业务对象 hash。Link 整行不可更新或删除；同一 Plan、Proposal 或 target 不能重复链接。
+
+## 30.4 原子性、冲突与重放
+
+用户确认后的 world_setting、ArtifactTargetLink 和 Plan applied 必须在同一个 SQLite `IMMEDIATE` 事务中提交。预分配 targetId 已存在时 Plan 进入 conflict 且不覆盖目标；中途任一写入失败时确认、目标、链接和状态整体回滚。
+
+相同 `planId + operationId + expectedPlanHash` 重放 applied 计划时必须重新读取目标和 Link，并校验目标完整 hash。目标被修改、删除或链接不一致时返回 `PLACEMENT_TARGET_CHANGED`，不能返回陈旧成功。提交状态未知时前端只以相同身份重放，不生成新 operationId。
+
+详细契约见 [`architecture/safe-apply.md`](architecture/safe-apply.md)。

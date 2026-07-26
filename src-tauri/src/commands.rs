@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 pub mod ai_tasks;
 pub mod artifacts;
 pub mod drafts;
+pub mod placements;
 pub mod recovery;
 
 // ==================== Novel ====================

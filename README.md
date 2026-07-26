@@ -25,15 +25,15 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.3.1**
+**当前版本：v2.3.2**
 
-**阶段：Provider Adapter 与统一执行管线 — 首批生产入口迁移**
+**阶段：Safe Apply — AI 候选到正式业务对象的受控落地**
 
-v2.3.1 将设置中心连接测试和“设定补充候选”接入统一 Provider Adapter。桌面端一次调用会形成 Task、Attempt、三类 Snapshot、Provider 响应身份和不可变 ResultArtifact；提交未知只重放持久化步骤，不重复消耗 Provider 请求。设定候选仍需用户点击确认后才进入正式设定库。
+v2.3.2 为 `setting_candidates` Artifact 建立不可变 `PlacementProposal`、单目标 `ApplyPlan` 和 `ArtifactTargetLink`。候选生成后只准备应用计划；只有用户点击确认，桌面端才会在一个 SQLite 事务中创建一条正式世界设定、来源链接并将计划标记为 applied。
 
-本版本不开放 Planner、Memory、自动续跑、Placement / ApplyPlan、Multi-Agent 或 Agent 自主写入；未迁移入口继续使用 Legacy 记录。浏览器开发回退可以临时执行 Provider，但不会伪造 SQLite Task / Artifact。
+应用前校验 Artifact、候选、Proposal、Plan 和目标不存在的 version/hash 前置条件；相同 operationId 重放返回首次目标，不重复写入，目标碰撞或已应用目标变化时失败关闭。浏览器临时候选不能伪造持久 Proposal/Plan，也不显示正式采用按钮。
 
-本版本不增加新的 AI 自动写入范围，也不引入未来 Agent 功能；重点是让现有写作工作台在并发、异常退出、数据库故障和长正文损坏场景下保持可恢复、可验证。
+本版本只开放“创建一条世界设定”这一种用户确认副作用，不开放 Planner、Memory、自动续跑、Multi-Agent 或 Agent 自主写入；其他生产 AI 入口保持原样。
 
 ---
 
@@ -56,6 +56,7 @@ v2.3.1 将设置中心连接测试和“设定补充候选”接入统一 Provid
 - **异常恢复快照**：dirty 正文按章节 debounce 持久化，恢复内容不占草稿版本，基线冲突时只能对比、复制、导出或另存候选。
 - **统一离开保护**：章节操作、Hash 路由、历史导航、程序导航和 Tauri 关闭统一提供保存、放弃、取消决策并防重入。
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
+- **AI 候选安全应用**：设定候选通过不可变 Proposal/Plan、显式用户确认、目标 version/hash、单事务副作用和 Artifact 来源链接进入正式设定库。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。

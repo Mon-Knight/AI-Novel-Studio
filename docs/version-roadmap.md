@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.3.1（Provider Adapter 与统一执行管线）
+> 当前版本：v2.3.2（Safe Apply：单目标安全应用）
 
 ---
 
@@ -392,9 +392,21 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 明确不在本版本处理：其他生产 AI 入口迁移、业务对象来源链接、Placement / ApplyPlan、Planner、Memory、Tool Registry、自动续跑、Multi-Agent、UI 重做或 Agent 自主写入。
 
-### v2.3.1 之后
+### v2.3.2 单一版本目标
 
-- v2.3.2：PlacementProposal、ApplyPlan、ArtifactTargetLink 与单目标安全应用；保持用户确认、version/hash 冲突保护和副作用幂等。
+本版本只建立 `setting_candidates` Artifact 到一条正式世界设定的安全应用边界：
+
+1. 每条可用候选建立不可变 `PlacementProposal`，绑定 Artifact、候选 index/hash、预分配目标和目标不存在的 version/hash 前置条件。
+2. 每个 Proposal 建立一个只包含 `create world_setting` 副作用的 `ApplyPlan`；计划内容不可变，状态只能按合法边推进。
+3. 用户点击确认时记录 `confirmedBy=user` 与确认时间；世界设定、`ArtifactTargetLink` 和 Plan applied 状态在同一 SQLite 事务中提交。
+4. 相同 operationId 重放返回首次目标和链接，不重复创建业务对象；目标 ID 碰撞记录 conflict，不覆盖已有数据。
+5. 已应用目标重放时重新校验完整业务对象 hash；目标被修改、删除或来源链接异常时返回稳定错误并失败关闭。
+6. 浏览器 ephemeral 候选不伪造 Proposal、Plan 或 TargetLink，也不能进入正式采用路径。
+
+明确不在本版本处理：其他 Artifact 类型或 AI 入口迁移、批量/多目标 Apply、Planner、Memory、Tool Registry、自动续跑、Multi-Agent、UI 重做或 Agent 自主写入。
+
+### v2.3.2 之后
+
 - v2.4.x：Context / Constraint Compiler 与 Tool Registry，形成可复现来源、预算和 schema 工具边界。
 - v2.5.x：Planner、execution lease、checkpoint、显式重试与跨重启恢复。
 - v2.6.x：长期 Memory、连续性与质量 Verification，形成受审核的单 Agent 章节闭环。
@@ -412,7 +424,7 @@ v2.x 后续 Planner / Tool Calling / Memory / Verification
 v3.x    Multi-Agent / 自主创作
 ```
 
-进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.3.1 当前只在 v2.3.0 事实层上迁移首批 Provider 入口。
+进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.3.2 当前只开放用户确认后的单目标 Safe Apply。
 
 ---
 

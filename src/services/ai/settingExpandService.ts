@@ -7,6 +7,8 @@ import { executeAiTask } from './aiExecutionPipeline';
 import { extractJsonObject } from './jsonUtils';
 import { novelRepository } from '../database/novelRepository';
 import { settingRepository } from '../database/settingRepository';
+import { placementRuntimeService } from '../placements/placementRuntimeService';
+import type { PlacementBundle } from '../../types/placement';
 
 export interface SettingSuggestion {
   name: string;
@@ -15,6 +17,7 @@ export interface SettingSuggestion {
   usageInChapter?: string;
   risk?: string;
   rawText?: string;
+  placement?: PlacementBundle;
 }
 
 interface SettingCandidatePayload {
@@ -98,9 +101,27 @@ export const settingExpandService = {
     });
     const parsed = execution.structuredPayloadJson as SettingCandidatePayload | undefined;
     const suggestions = Array.isArray(parsed?.settings)
-      ? parsed.settings.filter((item) => item.name && item.description)
+      ? parsed.settings
+          .map((item, candidateIndex) => ({ item, candidateIndex }))
+          .filter(({ item }) => item.name && item.description)
       : [];
-    if (suggestions.length > 0) return suggestions;
+    if (suggestions.length > 0) {
+      const artifact = execution.artifactBundle?.artifact;
+      if (!artifact) return suggestions.map(({ item }) => item);
+      const prepared = await Promise.all(suggestions.map(async ({ item, candidateIndex }) => {
+        const placement = await placementRuntimeService.prepare({
+          artifactId: artifact.artifactId,
+          candidateIndex,
+          expectedArtifactHash: artifact.contentHash,
+        });
+        return {
+          ...item,
+          ...(placement.candidateJson as unknown as SettingSuggestion),
+          placement,
+        };
+      }));
+      return prepared;
+    }
     return [{
       name: 'AI 原始返回',
       category: 'other',

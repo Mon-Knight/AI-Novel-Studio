@@ -251,4 +251,22 @@ API Key 与 Base URL 只传给 Adapter，不进入事实层。桌面端使用 SQ
 
 ---
 
+## 14. v2.3.2 Safe Apply
+
+设定候选从只读 Artifact 进入受控业务写入：
+
+```text
+setting_candidates Artifact
+→ PlacementProposal（候选与目标前置条件）
+→ ApplyPlan（单个 create world_setting effect）
+→ 用户显式确认
+→ SQLite 单事务：world_setting + ArtifactTargetLink + Plan applied
+```
+
+Proposal 与 Plan 内容由 canonical SHA-256 绑定且不可原地修改。目标不存在以 version 0/hash 表示；应用后链接保存 version 1/hash。相同 operationId 可安全重放，碰撞和已应用目标漂移失败关闭。浏览器回退不伪造持久应用事实。
+
+完整设计见 [`architecture/safe-apply.md`](architecture/safe-apply.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**

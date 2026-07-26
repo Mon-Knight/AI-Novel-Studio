@@ -1,5 +1,35 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.3.2 (2026-07-26) - Safe Apply 单目标安全应用
+
+### 新增
+
+- 新增 SQLite migration 012～014：`placement_proposals`、`apply_plans` 与 `artifact_target_links`，只增加安全应用事实，不修改既有业务表结构。
+- `setting_candidates@1` 的每条有效候选可建立不可变 PlacementProposal 和一对一 ApplyPlan，绑定 Artifact、候选 index/hash、预分配 targetId、目标不存在 version/hash 与单个 `create_world_setting` effect。
+- 用户点击确认时记录 `confirmedBy=user` 和确认时间；世界设定、ArtifactTargetLink 与 Plan applied 状态在同一个 SQLite `IMMEDIATE` 事务中提交。
+- 新增受控 Tauri IPC、Rust domain/repository/service、TypeScript 类型与前端薄 facade；提交状态未知只以相同 operationId/planHash 重放。
+
+### 安全与可靠性
+
+- Proposal 整行不可更新或删除；Plan 身份与 effect 不可变、状态仅允许 awaiting → applying → applied/conflict；TargetLink 整行不可更新或删除。
+- targetId 碰撞时记录 conflict 并保留已有目标；任一中途写入失败时确认、world_setting、Link 和状态转换整体回滚。
+- applied 重放重新读取目标与 Link，并校验包含结构化数据和时间身份的完整目标 SHA-256；目标删除、修改或来源异常时返回 `PLACEMENT_TARGET_CHANGED`。
+- 相同操作重放返回首次 world_setting 与 TargetLink，不重复创建副作用；不同 operationId 或 planHash 失败关闭。
+- 浏览器 ephemeral 候选不伪造 Proposal/Plan/Link，也不显示正式采用按钮；桌面应用错误保留稳定结构化冲突提示。
+
+### 验证
+
+- `npm test`：Node 16/16、tsx 53/53；Rust/SQLite 137/137，另 1 项真实用户数据库隔离测试按设计 ignored。
+- Safe Apply Rust 动态覆盖只读准备、幂等重放、用户确认、目标碰撞、事务故障回滚、不可变与目标漂移；TypeScript 覆盖 commit-unknown 相同身份重放和普通冲突不重放。
+- `npm run lint` 0 error（保留 1 条既有 React Hooks warning）；TypeScript + Vite production build 通过。
+- Windows Tauri 完整 E2E 12/12；Safe Apply 桌面场景证明 3 个 Proposal/Plan、确认前零正式写入、确认后仅 1 个 world_setting/TargetLink，重放不重复写入。
+- Tauri production build 通过并生成 v2.3.2 MSI/NSIS；最终大小与 SHA-256 记录于发布说明和验收报告。
+- 本版本没有修改 Provider 网络协议或请求参数，未再次调用真实 API；v2.3.1 的单次真实尝试结论保持不变。
+
+### 版本边界
+
+- 本版本只支持一条设定候选创建一条世界设定，不实现其他 Artifact 类型、批量/多目标 Apply、Planner、Memory、Tool Registry、自动续跑、Multi-Agent 或 Agent 自主写入。
+
 ## v2.3.1 (2026-07-26) - Provider Adapter 与统一执行管线
 
 ### 新增

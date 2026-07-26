@@ -54,8 +54,40 @@ interface WorldSettingView {
   novelId: string;
 }
 
+interface PlacementBundleView {
+  proposal: {
+    proposalId: string;
+    artifactId: string;
+    candidateIndex: number;
+    expectedTargetVersion: number;
+    expectedTargetHash: string;
+    proposalHash: string;
+  };
+  plan: {
+    planId: string;
+    operationId: string;
+    planHash: string;
+    status: string;
+    confirmedBy?: string;
+  };
+  candidateJson: { name?: string };
+}
+
+interface ApplyPlacementResultView {
+  plan: PlacementBundleView['plan'];
+  link: {
+    linkId: string;
+    artifactId: string;
+    targetId: string;
+    targetVersion: number;
+    targetHash: string;
+  };
+  worldSetting: WorldSettingView;
+  replayed: boolean;
+}
+
 describe('tracked Provider pipeline', () => {
-  it('persists one Mock setting-candidate Task and does not apply candidates automatically', async () => {
+  it('prepares read-only plans and applies one setting only after explicit confirmation', async () => {
     const projectId = await createProjectThroughUi('E2E Provider Pipeline');
     await openWorkspace(projectId);
     const chapterId = await createFirstChapterThroughUi();
@@ -115,10 +147,77 @@ describe('tracked Provider pipeline', () => {
       novelId: projectId,
     });
     expect(settingsAfter).toEqual(settingsBefore);
+    const suggestionElements = await browser.$$('[data-testid="setting-suggestion"]');
+    const proposalIds: Array<string | null> = [];
+    for (let index = 0; index < suggestionElements.length; index += 1) {
+      proposalIds.push(await suggestionElements[index].getAttribute('data-proposal-id'));
+    }
+    expect(proposalIds.every(Boolean)).toBe(true);
+    expect(new Set(proposalIds).size).toBe(3);
+    const placements = await Promise.all(proposalIds.map((proposalId) => (
+      bridgeCall<PlacementBundleView>('get_placement_proposal', {
+        input: { proposalId },
+      })
+    )));
+    expect(placements.every((placement) => placement.plan.status === 'awaiting_confirmation')).toBe(true);
+    expect(placements.every((placement) => placement.proposal.expectedTargetVersion === 0)).toBe(true);
+    expect(placements.every((placement) => placement.proposal.expectedTargetHash.length === 64)).toBe(true);
+    expect(placements.every((placement) => placement.proposal.proposalHash.length === 64)).toBe(true);
     expect(await browser.$$('[data-testid="setting-suggestion-adopt"]')).toHaveLength(3);
+
+    const preparedDiagnostics = await bridgeDiagnostics();
+    expect(preparedDiagnostics.counts?.executionTasks).toBe(1);
+    expect(preparedDiagnostics.counts?.resultArtifacts).toBe(1);
+    expect(preparedDiagnostics.counts?.placementProposals).toBe(3);
+    expect(preparedDiagnostics.counts?.applyPlans).toBe(3);
+    expect(preparedDiagnostics.counts?.artifactTargetLinks).toBe(0);
+
+    const firstPlacement = placements[0];
+    const adoptButtons = await browser.$$('[data-testid="setting-suggestion-adopt"]');
+    await adoptButtons[0].waitForClickable({ timeout: 30000 });
+    await adoptButtons[0].click();
+    await browser.waitUntil(async () => {
+      const settings = await bridgeCall<WorldSettingView[]>('get_world_settings', {
+        novelId: projectId,
+      });
+      return settings.length === settingsBefore.length + 1;
+    }, {
+      timeout: 30000,
+      timeoutMsg: 'Confirmed placement did not create one world setting',
+    });
+    await browser.waitUntil(async () => (
+      await browser.$$('[data-testid="setting-suggestion"]')
+    ).length === 2, {
+      timeout: 30000,
+      timeoutMsg: 'Applied setting candidate remained in the review list',
+    });
+
+    const appliedPlacement = await bridgeCall<PlacementBundleView>('get_placement_proposal', {
+      input: { proposalId: firstPlacement.proposal.proposalId },
+    });
+    expect(appliedPlacement.plan.status).toBe('applied');
+    expect(appliedPlacement.plan.confirmedBy).toBe('user');
+    const replay = await bridgeCall<ApplyPlacementResultView>('apply_placement_plan', {
+      input: {
+        planId: firstPlacement.plan.planId,
+        operationId: firstPlacement.plan.operationId,
+        expectedPlanHash: firstPlacement.plan.planHash,
+      },
+    });
+    expect(replay.replayed).toBe(true);
+    expect(replay.link.artifactId).toBe(artifact.artifact.artifactId);
+    expect(replay.link.targetVersion).toBe(1);
+    expect(replay.link.targetHash).toHaveLength(64);
+    const settingsAfterReplay = await bridgeCall<WorldSettingView[]>('get_world_settings', {
+      novelId: projectId,
+    });
+    expect(settingsAfterReplay).toHaveLength(settingsBefore.length + 1);
 
     const diagnostics = await bridgeDiagnostics();
     expect(diagnostics.counts?.executionTasks).toBe(1);
     expect(diagnostics.counts?.resultArtifacts).toBe(1);
+    expect(diagnostics.counts?.placementProposals).toBe(3);
+    expect(diagnostics.counts?.applyPlans).toBe(3);
+    expect(diagnostics.counts?.artifactTargetLinks).toBe(1);
   });
 });

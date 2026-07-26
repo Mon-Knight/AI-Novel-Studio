@@ -18,7 +18,7 @@
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
-| [version-roadmap.md](version-roadmap.md) | 当前权威版本路线图 | ✅ v2.3.1 已同步 |
+| [version-roadmap.md](version-roadmap.md) | 当前权威版本路线图 | ✅ v2.3.2 已同步 |
 | [module-boundaries.md](module-boundaries.md) | 模块边界定义 | ✅ 已有 |
 | [development-rules.md](development-rules.md) | 开发规则总览 | ✅ 已有 |
 | [agent-task-rules.md](project/agent-task-rules.md) | Agent 任务执行规则 | 🚧 占位，待后续细化 |
@@ -31,11 +31,13 @@
 | [architecture.md](technical/architecture.md) | 项目架构总览 | 🚧 占位，待后续细化 |
 | [database.md](technical/database.md) | 数据库设计与迁移 | 🚧 占位，待后续细化 |
 | [desktop-build.md](technical/desktop-build.md) | 桌面端构建指南 | 🚧 占位，待后续细化 |
-| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.3.1 已补充 |
+| [testing.md](technical/testing.md) | 测试策略与用例 | ✅ v2.3.2 已补充 |
 | [ai-execution-facts.md](architecture/ai-execution-facts.md) | v2.3.0 Task / Snapshot / Artifact 执行事实架构 | ✅ 已冻结并实现 |
 | [provider-execution-pipeline.md](architecture/provider-execution-pipeline.md) | v2.3.1 Provider Adapter 与首批入口迁移 | ✅ 已实现 |
+| [safe-apply.md](architecture/safe-apply.md) | v2.3.2 Proposal / Plan / TargetLink 单目标安全应用 | ✅ 已实现 |
 | [desktop-e2e.md](technical/desktop-e2e.md) | Windows 真实 Tauri E2E、隔离与排障 | ✅ v2.1.7+ 持续适用 |
 | [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md) | Provider 发布门禁、真实 API 尝试与安装包证据 | ✅ 已记录 |
+| [v2.3.2 Safe Apply 验收报告](audit/phase-3/10-v2.3.2-safe-apply-acceptance.md) | 安全应用不变量、桌面 E2E 与安装包证据 | ✅ 已记录 |
 | [v2.3.0 M1 验收报告](audit/phase-3/08-v2.3.0-m1-acceptance.md) | 执行事实层发布门禁与安装包证据 | ✅ 通过 |
 | [api-routes.md](technical/api-routes.md) | API 路由说明 | 🚧 占位，待后续细化 |
 | [deployment.md](technical/deployment.md) | 部署说明 | 🚧 占位，待后续细化 |
@@ -67,6 +69,7 @@
 | [module-boundaries.md](module-boundaries.md) | 模块边界文档 |
 | [development-rules.md](development-rules.md) | 开发规则 |
 | [development-skills.md](development-skills.md) | 开发辅助 Skills 总览 |
+| [release-notes-v2.3.2.md](release-notes-v2.3.2.md) | v2.3.2 Safe Apply 发布说明 |
 | [release-notes-v2.3.1.md](release-notes-v2.3.1.md) | v2.3.1 Provider Adapter 与统一执行管线发布说明 |
 | [release-notes-v2.3.0.md](release-notes-v2.3.0.md) | v2.3.0 Agent 执行事实层发布说明 |
 | [release-notes-v2.2.1.md](release-notes-v2.2.1.md) | v2.2.1 工作区竞态可靠性热修发布说明 |

@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.3.1（Provider Adapter 与统一执行管线）
+> 当前版本：v2.3.2（Safe Apply：单目标安全应用）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.3.1，测试体系在统一执行事实的迁移、事务、CAS、不可变与重启读取基础上，增加 Provider 单次派发、提交未知重放、浏览器 ephemeral 边界、连接测试和设定候选桌面闭环：
+截至 v2.3.2，测试体系在统一执行事实和 Provider 单次派发基础上，增加 Proposal/Plan 不可变、用户确认、目标冲突、事务回滚、副作用幂等、来源链接和已应用目标漂移验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -27,7 +27,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.2.x～v2.3.1 动态测试入口
+## 2. v2.2.x～v2.3.2 动态测试入口
 
 ### 2.1 工作区可靠性专项
 
@@ -368,6 +368,35 @@ npm run test:e2e -- --spec provider-pipeline-setting
 | PA-REAL | 真实 API 连接测试 | 只调用一次、`maxTokens = 8`、响应为 `OK`，并形成 system Task 与 generic_text Artifact |
 
 真实 API 验收不进入自动化套件，不读取或输出完整 API Key，不连续重试。若配置缺失或 Provider 外部失败，必须如实记录为未通过，不能用 Mock 结果替代。
+
+### 2.14 v2.3.2 Safe Apply 专项
+
+```powershell
+# 前端提交未知重放边界
+npx tsx --test --test-concurrency=1 src/services/placements/placementRuntimeService.test.ts
+
+# Rust Proposal / Plan / Link、事务与冲突测试
+cargo test --manifest-path src-tauri/Cargo.toml placement_service
+
+# 真实 Tauri + Mock Provider + SQLite 用户确认闭环
+npm run test:e2e -- --spec provider-pipeline-setting
+```
+
+专项动态矩阵：
+
+| 编号 | 场景 | 必须结果 |
+|------|------|----------|
+| SA01 | 准备同一 Artifact 候选两次 | 返回同一 Proposal/Plan；正式设定与 TargetLink 均为 0 |
+| SA02 | 用户确认单目标计划 | 同事务创建一条 world_setting、一条 TargetLink，并将 Plan 标记 applied |
+| SA03 | 相同 operationId 或提交未知重放 | 返回首次目标和链接；副作用数量保持 1 |
+| SA04 | 预分配 targetId 已存在 | 记录 conflict；不得覆盖已有世界设定 |
+| SA05 | Link 插入故障 | world_setting、Link、确认与状态转换全部回滚 |
+| SA06 | Proposal/Plan/Link 篡改或删除 | SQLite 触发器或 canonical hash 校验拒绝 |
+| SA07 | 已应用目标被修改或删除 | 重放返回 `PLACEMENT_TARGET_CHANGED`，不得返回陈旧成功 |
+| SA08 | 浏览器 ephemeral 候选 | 不创建持久 Placement 事实，不显示正式采用按钮 |
+| SA-E2E | 桌面候选显式确认 | 确认前正式设定不变；确认后仅一个候选落地，3 Plan / 1 Link 可诊断 |
+
+v2.3.2 不修改 Provider 网络协议或请求参数，因此不重复消耗真实 API；Provider 链路继续由 v2.3.1 的单次真实尝试记录和本版 Mock 桌面回归覆盖。
 
 ---
 

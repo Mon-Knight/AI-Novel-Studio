@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { settingRepository } from '../../../services/database/settingRepository';
 import { protagonistRepository } from '../../../services/database/protagonistRepository';
 import { settingExpandService, type SettingSuggestion } from '../../../services/ai/settingExpandService';
+import { placementRuntimeService } from '../../../services/placements/placementRuntimeService';
+import { getAppErrorUserMessage, normalizeAppError } from '../../../types/appError';
 import type { WorldSetting, RuleSystem } from '../../../types/setting';
 import type { Protagonist } from '../../../types/protagonist';
 import type { Chapter } from '../../../types/chapter';
@@ -17,6 +19,7 @@ function SettingPanel({ novelId, chapter }: SettingPanelProps) {
   const [protagonist, setProtagonist] = useState<Protagonist | null>(null);
   const [suggestions, setSuggestions] = useState<SettingSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [applyingProposalId, setApplyingProposalId] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -50,20 +53,28 @@ function SettingPanel({ novelId, chapter }: SettingPanelProps) {
   };
 
   const handleAdoptSuggestion = async (suggestion: SettingSuggestion) => {
-    if (!novelId) return;
-    const content = [
-      suggestion.description,
-      suggestion.usageInChapter ? `\n本章用途：${suggestion.usageInChapter}` : '',
-      suggestion.risk ? `\n风险提示：${suggestion.risk}` : '',
-    ].filter(Boolean).join('\n');
-    const saved = await settingRepository.saveWorldSetting(null, {
-      novelId,
-      title: suggestion.name,
-      content,
-      isActive: true,
-    });
-    setWorldSettings((prev) => [...prev, saved]);
-    setSuggestions((prev) => prev.filter((item) => item.name !== suggestion.name));
+    if (!novelId || !suggestion.placement) return;
+    const { proposal, plan } = suggestion.placement;
+    setApplyingProposalId(proposal.proposalId);
+    setError('');
+    try {
+      const result = await placementRuntimeService.apply({
+        planId: plan.planId,
+        operationId: plan.operationId,
+        expectedPlanHash: plan.planHash,
+      });
+      setWorldSettings((prev) => [
+        ...prev.filter((item) => item.id !== result.worldSetting.id),
+        result.worldSetting,
+      ]);
+      setSuggestions((prev) => prev.filter(
+        (item) => item.placement?.proposal.proposalId !== proposal.proposalId,
+      ));
+    } catch (e: unknown) {
+      setError(getAppErrorUserMessage(normalizeAppError(e, '安全应用设定失败')));
+    } finally {
+      setApplyingProposalId('');
+    }
   };
 
   return (
@@ -75,17 +86,20 @@ function SettingPanel({ novelId, chapter }: SettingPanelProps) {
         </button>
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 8 }}>{error}</div>}
         {suggestions.map((item, index) => (
-          <div key={`${item.name}-${index}`} data-testid="setting-suggestion" data-setting-name={item.name} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
+          <div key={item.placement?.proposal.proposalId ?? `${item.name}-${index}`} data-testid="setting-suggestion" data-setting-name={item.name} data-proposal-id={item.placement?.proposal.proposalId} data-plan-status={item.placement?.plan.status} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
             <div className="panel-field-label">{item.name}{item.category ? ` · ${item.category}` : ''}</div>
             <div className="panel-field-value" style={{ fontSize: 12, fontWeight: 400, whiteSpace: 'pre-wrap' }}>
               {item.rawText || item.description}
             </div>
             {item.usageInChapter && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-text-muted)' }}>本章用途：{item.usageInChapter}</div>}
             {item.risk && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-warning)' }}>风险：{item.risk}</div>}
-            {!item.rawText && (
-              <button data-testid="setting-suggestion-adopt" className="btn btn-primary btn-sm" onClick={() => handleAdoptSuggestion(item)} style={{ marginTop: 6 }}>
-                确认加入设定库
+            {!item.rawText && item.placement && (
+              <button data-testid="setting-suggestion-adopt" className="btn btn-primary btn-sm" onClick={() => handleAdoptSuggestion(item)} disabled={Boolean(applyingProposalId)} style={{ marginTop: 6 }}>
+                {applyingProposalId === item.placement.proposal.proposalId ? '安全应用中...' : '确认加入设定库'}
               </button>
+            )}
+            {!item.rawText && !item.placement && (
+              <div className="text-sm text-muted" style={{ marginTop: 6 }}>浏览器临时候选不能写入正式设定，请在桌面版确认采用。</div>
             )}
           </div>
         ))}
