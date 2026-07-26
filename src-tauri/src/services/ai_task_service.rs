@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const PRODUCTION_TOOL_REGISTRY_HASH: &str =
-    "c03ae58009cfb47b84f85dbb907b427cd1d659149af0a6133ec6898e8de4a0a5";
+    "846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -22,6 +22,7 @@ import { reviseChapterByOutline } from '../../../services/ai/chapterRevisionServ
 import { hashTextContent } from '../../../utils/contentHash';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
+import { ChapterReadinessPlanCard } from '../../../features/agent-planner/ChapterReadinessPlanCard';
 
 function namesText(names: string[]): string {
   return names.length > 0 ? names.join('、') : '无';
@@ -703,6 +704,8 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
 
   return (
     <div>
+      <ChapterReadinessPlanCard novelId={novelId} chapterId={chapter.id} />
+
       {/* AI 设置状态 */}
       <div className="panel-section">
         <div className="panel-section-title">AI 状态</div>

@@ -48,6 +48,7 @@ const allSpecs = [
   'restart-task-recovery.spec.ts',
   'quality-history-replay.spec.ts',
   'chapter-context-persistence.spec.ts',
+  'chapter-readiness-planner.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 

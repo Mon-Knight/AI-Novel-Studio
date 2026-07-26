@@ -55,6 +55,8 @@ export async function readChapterOutline(
           novelId: chapter.novelId,
           volumeId: chapter.volumeId,
           title: chapter.title,
+          outline: chapter.outline ?? "",
+          goal: chapter.goal ?? "",
           status: chapter.status,
           targetWordCount: chapter.targetWordCount,
           wordCount: chapter.wordCount,

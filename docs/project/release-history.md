@@ -6,6 +6,9 @@
 
 ## 最新版本
 
+- **v2.5.0** — Chapter Readiness Planner Runtime、lease/checkpoint、显式重试与跨重启恢复
+- **v2.4.0** — Context / Constraint Compiler 与 Tool Registry
+- **v2.3.2** — Safe Apply 单目标安全应用
 - **v1.7.11** — 发布收尾、本地构建产物清理与安装包验证
 - **v1.7.10** — 候选设定采纳与测试补齐
 - **v1.7.9** — 设定库 AI 推演基础版

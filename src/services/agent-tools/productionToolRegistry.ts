@@ -11,6 +11,7 @@ import {
   readStyleProfile,
 } from '../../agent-tools/style-tools';
 import {
+  checkChapterReadiness,
   verifyOutlineCompliance,
   verifyStyleCompliance,
 } from '../../agent-tools/verification-tools';
@@ -38,6 +39,45 @@ const resultSchema: ToolJsonSchema = {
       maxItems: 100,
       items: { type: 'string', maxLength: 1000 },
     },
+  },
+};
+
+const readinessResultSchema: ToolJsonSchema = {
+  type: 'object',
+  required: ['ok', 'data'],
+  additionalProperties: false,
+  properties: {
+    ok: { enum: [true] },
+    data: {
+      type: 'object',
+      required: ['ready', 'score', 'missing', 'warnings', 'summary'],
+      additionalProperties: false,
+      properties: {
+        ready: { type: 'boolean' },
+        score: { type: 'integer', minimum: 0, maximum: 100 },
+        missing: {
+          type: 'array',
+          maxItems: 20,
+          items: {
+            type: 'object',
+            required: ['code', 'label', 'blocking'],
+            additionalProperties: false,
+            properties: {
+              code: { type: 'string', minLength: 1, maxLength: 80 },
+              label: { type: 'string', minLength: 1, maxLength: 200 },
+              blocking: { type: 'boolean' },
+            },
+          },
+        },
+        warnings: {
+          type: 'array',
+          maxItems: 100,
+          items: { type: 'string', maxLength: 1000 },
+        },
+        summary: { type: 'string', minLength: 1, maxLength: 2000 },
+      },
+    },
+    source: { type: 'string', maxLength: 160 },
   },
 };
 
@@ -82,6 +122,23 @@ function descriptor(
 }
 
 const definitions: ToolDefinition[] = [
+  {
+    descriptor: {
+      ...descriptor({
+        name: 'verification.check_readiness',
+        description: '确定性检查章节生成所需上下文是否准备完成，不调用外部 AI。',
+        inputSchema: objectSchema(
+          { novelId: idSchema, chapterId: idSchema },
+          ['novelId', 'chapterId'],
+        ),
+        permissions: ['novel.read', 'chapter.read', 'style.read', 'verification.execute'],
+        scope: 'chapter',
+        timeoutMs: 30_000,
+      }),
+      outputSchema: readinessResultSchema,
+    },
+    handler: (args, context) => checkChapterReadiness(contextFrom(args, context)),
+  },
   {
     descriptor: descriptor({
       name: 'novel.read_context',

@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.4.0（Context / Constraint Compiler 与 Tool Registry）
+> 当前版本：v2.5.0（Chapter Readiness Planner Runtime）
 
 ---
 
@@ -419,9 +419,23 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 明确不在本版本处理：Planner、execution lease、checkpoint、自动重试/续跑、跨重启计划恢复、长期 Memory、新增业务副作用工具、Multi-Agent、UI 重做或 Agent 自主写入。
 
-### v2.4.0 之后
+### v2.5.0 单一版本目标
 
-- v2.5.x：Planner、execution lease、checkpoint、显式重试与跨重启恢复。
+本版本只建立正式、持久、可恢复的章节准备度计划：
+
+1. Rust 权威构造 `chapter_readiness_plan_v1` 六步稳定 DAG；Plan 创建以 operationId + canonical requestHash 幂等，前端不能提交任意计划。
+2. migration 015～020 持久化 Plan、Step、依赖、append-only Attempt、execution lease 与 append-only Checkpoint，身份和合法状态边由 SQLite 约束与 trigger 保护。
+3. 每个 Step 绑定生产 Registry hash、Tool identity、input/output schema hash、权限、scope、arguments/hash；TypeScript Executor 在每次 claim 前复验完整契约。
+4. Rust lease 保存 owner、单调 epoch、expiresAt 与 token SHA-256；原始 token 只瞬时交给 Executor，同 Plan 同时最多一个 active lease。
+5. 工具失败形成单个 failed Attempt 并进入 `waiting_retry`，不自动重试；只有显式用户 retry operation 才创建后续 Attempt。
+6. 应用启动把中断 Attempt 标为 abandoned、Plan/Step 标为 waiting_retry、lease 标为 expired，并记录 `automaticReplay=false` checkpoint，不静默重放 Tool。
+7. 新增 `verification.check_readiness@1`，生产 Registry 共九个只读/本地验证工具；工作台卡片可创建、运行、查看和显式继续计划。
+8. 浏览器开发模式不伪造持久 Plan；本地只读链路不改 Prompt/Provider 协议，因此本版不调用真实 API。
+
+明确不在本版本处理：长期 Memory、正文副作用、动态 Planner、自动重试/续跑、Multi-Agent、Agent 自主写入或 UI 重做。
+
+### v2.5.0 之后
+
 - v2.6.x：长期 Memory、连续性与质量 Verification，形成受审核的单 Agent 章节闭环。
 - v3.x：Multi-Agent Orchestrator、专业创作 Agent、Artifact 交接、冲突处理和自主逐章推进。
 
@@ -433,11 +447,12 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 v1.0.44 Agent Workflow Runtime 最小闭环 ✅
 v1.0.45 项目开发辅助 Skills 增强版 ✅
 v1.0.46 Tool Layer 接入真实项目读取 ✅
-v2.x 后续 Planner / Tool Calling / Memory / Verification
+v2.5.0 持久 Planner / Tool Calling / lease / checkpoint ✅
+v2.6.x 后续 Memory / Continuity / Verification
 v3.x    Multi-Agent / 自主创作
 ```
 
-进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.4.0 只开放编译协议和 Registry 边界，生产 Provider 的工具 allowlist 仍为空。
+进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.5.0 只开放一个固定章节准备计划的本地只读执行；生产 Provider 的工具 allowlist 仍为空，Memory 与受审核章节闭环尚未实现。
 
 ---
 

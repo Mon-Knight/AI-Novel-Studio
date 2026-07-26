@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "2.3.2";
+const MIGRATION_VERSION: &str = "2.5.0";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 14] {
+fn migrations() -> [Migration; 20] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -93,6 +93,36 @@ fn migrations() -> [Migration; 14] {
             id: "014_artifact_target_links",
             definition: "artifact_target_links_v1(artifact,proposal,apply_plan,world_setting_target,created_from,target_version_hash,created,unique_proposal_plan_target,validated_identity,applied_requires_link,immutable_no_delete)",
             apply: apply_artifact_target_links,
+        },
+        Migration {
+            id: "015_agent_plans",
+            definition: "agent_plans_v1(operation_request_idempotency,chapter_readiness_planner,registry_scope,status_revision,result_error,timestamps,validated_chapter_scope,immutable_identity,no_delete,status_edges)",
+            apply: apply_agent_plans,
+        },
+        Migration {
+            id: "016_agent_plan_steps",
+            definition: "agent_plan_steps_v1(plan_order,tool_registry_identity,input_output_schema_hashes,permissions_scope,canonical_arguments_hash,status_revision,output_hash,error,timestamps,registry_scope_validation,immutable_identity,no_delete,status_edges)",
+            apply: apply_agent_plan_steps,
+        },
+        Migration {
+            id: "017_agent_plan_step_dependencies",
+            definition: "agent_plan_step_dependencies_v1(plan_step_dependency,stable_order,same_plan_validation,append_only)",
+            apply: apply_agent_plan_step_dependencies,
+        },
+        Migration {
+            id: "018_agent_plan_step_attempts",
+            definition: "agent_plan_step_attempts_v1(plan_step_attempt_number,lease_epoch,status,output_hash,error,timestamps,one_running_attempt,validated_step_identity,immutable_identity,append_only_terminalization)",
+            apply: apply_agent_plan_step_attempts,
+        },
+        Migration {
+            id: "019_agent_execution_leases",
+            definition: "agent_execution_leases_v1(plan_epoch,owner,sha256_token_hash,expiry,status,timestamps,one_active_lease,monotonic_epoch,attempt_lease_validation,immutable_identity,no_delete,status_edges)",
+            apply: apply_agent_execution_leases,
+        },
+        Migration {
+            id: "020_agent_plan_checkpoints",
+            definition: "agent_plan_checkpoints_v1(plan_sequence,event,optional_step_attempt,status_snapshot,payload_hash,created,monotonic_sequence,validated_identity,append_only)",
+            apply: apply_agent_plan_checkpoints,
         },
     ]
 }
@@ -1085,11 +1115,423 @@ fn apply_artifact_target_links(transaction: &Transaction<'_>) -> Result<(), AppE
         .map_err(AppError::database)
 }
 
+fn apply_agent_plans(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_plans (
+                plan_id TEXT PRIMARY KEY CHECK (length(plan_id) BETWEEN 1 AND 160),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 160),
+                request_hash TEXT NOT NULL CHECK (
+                    length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                contract_version TEXT NOT NULL CHECK (contract_version = 'agent_plan_v1'),
+                planner_id TEXT NOT NULL CHECK (planner_id = 'chapter_readiness_plan_v1'),
+                planner_version INTEGER NOT NULL CHECK (planner_version = 1),
+                registry_hash TEXT NOT NULL CHECK (
+                    length(registry_hash) = 64 AND registry_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                chapter_id TEXT NOT NULL CHECK (length(chapter_id) BETWEEN 1 AND 160),
+                status TEXT NOT NULL CHECK (
+                    status IN ('ready','running','waiting_retry','completed','failed','cancelled')
+                ),
+                state_revision INTEGER NOT NULL DEFAULT 0 CHECK (state_revision >= 0),
+                result_json TEXT CHECK (
+                    result_json IS NULL OR (json_valid(result_json) AND json_type(result_json) = 'object')
+                ),
+                error_json TEXT CHECK (
+                    error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')
+                ),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                CHECK (
+                    (status = 'completed' AND result_json IS NOT NULL AND error_json IS NULL
+                        AND completed_at IS NOT NULL) OR
+                    (status = 'failed' AND result_json IS NULL AND error_json IS NOT NULL
+                        AND completed_at IS NOT NULL) OR
+                    (status = 'cancelled' AND result_json IS NULL AND completed_at IS NOT NULL) OR
+                    (status IN ('ready','running','waiting_retry') AND result_json IS NULL
+                        AND completed_at IS NULL)
+                ),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_plans_chapter_created
+                ON agent_plans(chapter_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_agent_plans_status_updated
+                ON agent_plans(status, updated_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_plans_operation_request
+                ON agent_plans(operation_id, request_hash);
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plans_validate_scope
+                BEFORE INSERT ON agent_plans
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM chapters c JOIN novels n ON n.id = c.novel_id
+                    WHERE c.id = NEW.chapter_id AND c.novel_id = NEW.novel_id
+                      AND c.deleted_at IS NULL AND n.deleted_at IS NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid agent plan chapter scope'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plans_immutable_identity
+                BEFORE UPDATE OF plan_id, operation_id, request_hash, contract_version,
+                    planner_id, planner_version, registry_hash, novel_id, chapter_id, created_at
+                ON agent_plans
+                BEGIN SELECT RAISE(ABORT, 'immutable agent plan identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plans_status_edges
+                BEFORE UPDATE OF status ON agent_plans
+                WHEN OLD.status <> NEW.status AND NOT (
+                    (OLD.status = 'ready' AND NEW.status IN ('running','cancelled')) OR
+                    (OLD.status = 'running' AND NEW.status IN
+                        ('waiting_retry','completed','failed','cancelled')) OR
+                    (OLD.status = 'waiting_retry' AND NEW.status IN ('running','cancelled'))
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal agent plan transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plans_no_delete
+                BEFORE DELETE ON agent_plans
+                BEGIN SELECT RAISE(ABORT, 'durable agent plan'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_agent_plan_steps(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_plan_steps (
+                step_id TEXT PRIMARY KEY CHECK (length(step_id) BETWEEN 1 AND 160),
+                plan_id TEXT NOT NULL,
+                step_key TEXT NOT NULL CHECK (length(step_key) BETWEEN 1 AND 100),
+                ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 1000),
+                title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 300),
+                tool_name TEXT NOT NULL CHECK (length(tool_name) BETWEEN 2 AND 96),
+                tool_version TEXT NOT NULL CHECK (length(tool_version) BETWEEN 1 AND 6),
+                tool_identity TEXT NOT NULL CHECK (tool_identity = tool_name || '@' || tool_version),
+                registry_hash TEXT NOT NULL CHECK (
+                    length(registry_hash) = 64 AND registry_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                input_schema_hash TEXT NOT NULL CHECK (
+                    length(input_schema_hash) = 64 AND input_schema_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                output_schema_hash TEXT NOT NULL CHECK (
+                    length(output_schema_hash) = 64 AND output_schema_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                permissions_json TEXT NOT NULL CHECK (
+                    json_valid(permissions_json) AND json_type(permissions_json) = 'array'
+                    AND length(permissions_json) <= 4096
+                ),
+                scope TEXT NOT NULL CHECK (scope IN ('system','novel','chapter','draft')),
+                arguments_json TEXT NOT NULL CHECK (
+                    json_valid(arguments_json) AND json_type(arguments_json) = 'object'
+                    AND length(arguments_json) <= 65536
+                ),
+                arguments_hash TEXT NOT NULL CHECK (
+                    length(arguments_hash) = 64 AND arguments_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending','running','waiting_retry','completed','failed','cancelled')
+                ),
+                state_revision INTEGER NOT NULL DEFAULT 0 CHECK (state_revision >= 0),
+                output_json TEXT CHECK (output_json IS NULL OR json_valid(output_json)),
+                output_hash TEXT CHECK (
+                    output_hash IS NULL OR (
+                        length(output_hash) = 64 AND output_hash NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                error_json TEXT CHECK (
+                    error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')
+                ),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                CHECK (
+                    (status = 'completed' AND output_json IS NOT NULL AND output_hash IS NOT NULL
+                        AND error_json IS NULL AND completed_at IS NOT NULL) OR
+                    (status = 'failed' AND output_json IS NULL AND output_hash IS NULL
+                        AND error_json IS NOT NULL AND completed_at IS NOT NULL) OR
+                    (status = 'waiting_retry' AND output_json IS NULL AND output_hash IS NULL
+                        AND error_json IS NOT NULL AND completed_at IS NULL) OR
+                    (status = 'cancelled' AND output_json IS NULL AND output_hash IS NULL
+                        AND completed_at IS NOT NULL) OR
+                    (status IN ('pending','running') AND output_json IS NULL
+                        AND output_hash IS NULL AND completed_at IS NULL)
+                ),
+                FOREIGN KEY (plan_id) REFERENCES agent_plans(plan_id) ON DELETE RESTRICT,
+                UNIQUE(plan_id, step_key),
+                UNIQUE(plan_id, ordinal)
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_plan_steps_plan_status
+                ON agent_plan_steps(plan_id, status, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_agent_plan_steps_tool
+                ON agent_plan_steps(tool_identity, registry_hash);
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_steps_validate_plan
+                BEFORE INSERT ON agent_plan_steps
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM agent_plans p
+                    WHERE p.plan_id = NEW.plan_id AND p.registry_hash = NEW.registry_hash
+                      AND json_extract(NEW.arguments_json, '$.novelId') = p.novel_id
+                      AND (
+                        NEW.scope = 'novel' OR
+                        json_extract(NEW.arguments_json, '$.chapterId') = p.chapter_id
+                      )
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid agent plan step scope'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_steps_immutable_identity
+                BEFORE UPDATE OF step_id, plan_id, step_key, ordinal, title, tool_name,
+                    tool_version, tool_identity, registry_hash, input_schema_hash,
+                    output_schema_hash, permissions_json, scope, arguments_json,
+                    arguments_hash, created_at
+                ON agent_plan_steps
+                BEGIN SELECT RAISE(ABORT, 'immutable agent plan step identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_steps_status_edges
+                BEFORE UPDATE OF status ON agent_plan_steps
+                WHEN OLD.status <> NEW.status AND NOT (
+                    (OLD.status = 'pending' AND NEW.status IN
+                        ('running','waiting_retry','cancelled')) OR
+                    (OLD.status = 'running' AND NEW.status IN
+                        ('waiting_retry','completed','failed','cancelled')) OR
+                    (OLD.status = 'waiting_retry' AND NEW.status IN ('pending','cancelled'))
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal agent plan step transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_steps_no_delete
+                BEFORE DELETE ON agent_plan_steps
+                BEGIN SELECT RAISE(ABORT, 'durable agent plan step'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_agent_plan_step_dependencies(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_plan_step_dependencies (
+                plan_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                depends_on_step_id TEXT NOT NULL,
+                dependency_ordinal INTEGER NOT NULL CHECK (dependency_ordinal BETWEEN 1 AND 1000),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (step_id, depends_on_step_id),
+                UNIQUE(step_id, dependency_ordinal),
+                CHECK (step_id <> depends_on_step_id),
+                FOREIGN KEY (plan_id) REFERENCES agent_plans(plan_id) ON DELETE RESTRICT,
+                FOREIGN KEY (step_id) REFERENCES agent_plan_steps(step_id) ON DELETE RESTRICT,
+                FOREIGN KEY (depends_on_step_id) REFERENCES agent_plan_steps(step_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_plan_dependencies_plan
+                ON agent_plan_step_dependencies(plan_id, step_id, dependency_ordinal);
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_dependencies_validate_insert
+                BEFORE INSERT ON agent_plan_step_dependencies
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM agent_plan_steps child
+                    JOIN agent_plan_steps parent ON parent.step_id = NEW.depends_on_step_id
+                    WHERE child.step_id = NEW.step_id
+                      AND child.plan_id = NEW.plan_id AND parent.plan_id = NEW.plan_id
+                      AND parent.ordinal < child.ordinal
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid agent plan dependency'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_dependencies_append_only_update
+                BEFORE UPDATE ON agent_plan_step_dependencies
+                BEGIN SELECT RAISE(ABORT, 'immutable agent plan dependency'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_dependencies_append_only_delete
+                BEFORE DELETE ON agent_plan_step_dependencies
+                BEGIN SELECT RAISE(ABORT, 'durable agent plan dependency'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_agent_plan_step_attempts(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_plan_step_attempts (
+                attempt_id TEXT PRIMARY KEY CHECK (length(attempt_id) BETWEEN 1 AND 160),
+                plan_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+                lease_id TEXT NOT NULL CHECK (length(lease_id) BETWEEN 1 AND 160),
+                lease_epoch INTEGER NOT NULL CHECK (lease_epoch >= 1),
+                status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','abandoned')),
+                output_json TEXT CHECK (output_json IS NULL OR json_valid(output_json)),
+                output_hash TEXT CHECK (
+                    output_hash IS NULL OR (
+                        length(output_hash) = 64 AND output_hash NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                error_json TEXT CHECK (
+                    error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')
+                ),
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                CHECK (
+                    (status = 'running' AND output_json IS NULL AND output_hash IS NULL
+                        AND error_json IS NULL AND finished_at IS NULL) OR
+                    (status = 'succeeded' AND output_json IS NOT NULL AND output_hash IS NOT NULL
+                        AND error_json IS NULL AND finished_at IS NOT NULL) OR
+                    (status IN ('failed','abandoned') AND output_json IS NULL
+                        AND output_hash IS NULL AND error_json IS NOT NULL
+                        AND finished_at IS NOT NULL)
+                ),
+                FOREIGN KEY (plan_id) REFERENCES agent_plans(plan_id) ON DELETE RESTRICT,
+                FOREIGN KEY (step_id) REFERENCES agent_plan_steps(step_id) ON DELETE RESTRICT,
+                UNIQUE(step_id, attempt_number)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_plan_attempts_one_running
+                ON agent_plan_step_attempts(step_id) WHERE status = 'running';
+            CREATE INDEX IF NOT EXISTS idx_agent_plan_attempts_plan_started
+                ON agent_plan_step_attempts(plan_id, started_at);
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_attempts_validate_step
+                BEFORE INSERT ON agent_plan_step_attempts
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM agent_plan_steps s
+                    WHERE s.step_id = NEW.step_id AND s.plan_id = NEW.plan_id
+                      AND s.status = 'running'
+                ) OR NEW.attempt_number <> COALESCE((
+                    SELECT MAX(a.attempt_number) + 1 FROM agent_plan_step_attempts a
+                    WHERE a.step_id = NEW.step_id
+                ), 1)
+                BEGIN SELECT RAISE(ABORT, 'invalid agent plan attempt'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_attempts_immutable_identity
+                BEFORE UPDATE OF attempt_id, plan_id, step_id, attempt_number, lease_id,
+                    lease_epoch, started_at
+                ON agent_plan_step_attempts
+                BEGIN SELECT RAISE(ABORT, 'immutable agent plan attempt identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_attempts_status_edges
+                BEFORE UPDATE OF status ON agent_plan_step_attempts
+                WHEN OLD.status <> NEW.status AND NOT (
+                    OLD.status = 'running' AND NEW.status IN ('succeeded','failed','abandoned')
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal agent plan attempt transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_attempts_no_delete
+                BEFORE DELETE ON agent_plan_step_attempts
+                BEGIN SELECT RAISE(ABORT, 'durable agent plan attempt'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_agent_execution_leases(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_execution_leases (
+                lease_id TEXT PRIMARY KEY CHECK (length(lease_id) BETWEEN 1 AND 160),
+                plan_id TEXT NOT NULL,
+                epoch INTEGER NOT NULL CHECK (epoch >= 1),
+                owner_id TEXT NOT NULL CHECK (length(owner_id) BETWEEN 1 AND 160),
+                token_hash TEXT NOT NULL CHECK (
+                    length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                expires_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('active','released','expired')),
+                acquired_at TEXT NOT NULL,
+                released_at TEXT,
+                CHECK (
+                    (status = 'active' AND released_at IS NULL) OR
+                    (status IN ('released','expired') AND released_at IS NOT NULL)
+                ),
+                FOREIGN KEY (plan_id) REFERENCES agent_plans(plan_id) ON DELETE RESTRICT,
+                UNIQUE(plan_id, epoch)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_execution_leases_one_active
+                ON agent_execution_leases(plan_id) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_agent_execution_leases_expiry
+                ON agent_execution_leases(status, expires_at);
+            CREATE TRIGGER IF NOT EXISTS trg_agent_execution_leases_monotonic_epoch
+                BEFORE INSERT ON agent_execution_leases
+                WHEN NEW.epoch <> COALESCE((
+                    SELECT MAX(l.epoch) + 1 FROM agent_execution_leases l
+                    WHERE l.plan_id = NEW.plan_id
+                ), 1)
+                BEGIN SELECT RAISE(ABORT, 'invalid agent lease epoch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_execution_leases_immutable_identity
+                BEFORE UPDATE OF lease_id, plan_id, epoch, owner_id, token_hash,
+                    expires_at, acquired_at
+                ON agent_execution_leases
+                BEGIN SELECT RAISE(ABORT, 'immutable agent lease identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_execution_leases_status_edges
+                BEFORE UPDATE OF status ON agent_execution_leases
+                WHEN OLD.status <> NEW.status AND NOT (
+                    OLD.status = 'active' AND NEW.status IN ('released','expired')
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal agent lease transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_execution_leases_no_delete
+                BEFORE DELETE ON agent_execution_leases
+                BEGIN SELECT RAISE(ABORT, 'durable agent lease'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_attempts_validate_lease
+                BEFORE INSERT ON agent_plan_step_attempts
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM agent_execution_leases l
+                    WHERE l.lease_id = NEW.lease_id AND l.plan_id = NEW.plan_id
+                      AND l.epoch = NEW.lease_epoch AND l.status = 'active'
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid agent attempt lease'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_agent_plan_checkpoints(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS agent_plan_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY CHECK (length(checkpoint_id) BETWEEN 1 AND 160),
+                plan_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL CHECK (sequence >= 1),
+                event_type TEXT NOT NULL CHECK (
+                    event_type IN ('plan_created','lease_acquired','step_claimed',
+                        'step_completed','step_failed','retry_authorized',
+                        'lease_released','interrupted_recovered','plan_cancelled')
+                ),
+                step_id TEXT,
+                attempt_id TEXT,
+                plan_status TEXT NOT NULL CHECK (
+                    plan_status IN ('ready','running','waiting_retry','completed','failed','cancelled')
+                ),
+                step_status TEXT CHECK (
+                    step_status IS NULL OR step_status IN
+                        ('pending','running','waiting_retry','completed','failed','cancelled')
+                ),
+                payload_json TEXT NOT NULL CHECK (
+                    json_valid(payload_json) AND json_type(payload_json) = 'object'
+                    AND length(payload_json) <= 65536
+                ),
+                payload_hash TEXT NOT NULL CHECK (
+                    length(payload_hash) = 64 AND payload_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (plan_id) REFERENCES agent_plans(plan_id) ON DELETE RESTRICT,
+                FOREIGN KEY (step_id) REFERENCES agent_plan_steps(step_id) ON DELETE RESTRICT,
+                FOREIGN KEY (attempt_id) REFERENCES agent_plan_step_attempts(attempt_id)
+                    ON DELETE RESTRICT,
+                UNIQUE(plan_id, sequence)
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_plan_checkpoints_plan_sequence
+                ON agent_plan_checkpoints(plan_id, sequence);
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_checkpoints_monotonic_sequence
+                BEFORE INSERT ON agent_plan_checkpoints
+                WHEN NEW.sequence <> COALESCE((
+                    SELECT MAX(c.sequence) + 1 FROM agent_plan_checkpoints c
+                    WHERE c.plan_id = NEW.plan_id
+                ), 1)
+                BEGIN SELECT RAISE(ABORT, 'invalid agent checkpoint sequence'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_checkpoints_validate_identity
+                BEFORE INSERT ON agent_plan_checkpoints
+                WHEN (NEW.step_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM agent_plan_steps s
+                    WHERE s.step_id = NEW.step_id AND s.plan_id = NEW.plan_id
+                )) OR (NEW.attempt_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM agent_plan_step_attempts a
+                    WHERE a.attempt_id = NEW.attempt_id AND a.plan_id = NEW.plan_id
+                      AND (NEW.step_id IS NULL OR a.step_id = NEW.step_id)
+                ))
+                BEGIN SELECT RAISE(ABORT, 'invalid agent checkpoint identity'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_checkpoints_append_only_update
+                BEFORE UPDATE ON agent_plan_checkpoints
+                BEGIN SELECT RAISE(ABORT, 'immutable agent checkpoint'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_agent_plan_checkpoints_append_only_delete
+                BEFORE DELETE ON agent_plan_checkpoints
+                BEGIN SELECT RAISE(ABORT, 'durable agent checkpoint'); END;",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 14] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 20] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -1145,6 +1587,30 @@ mod tests {
         (
             "014_artifact_target_links",
             "168fb1e5d289cd1a1fd0b4fdc01e2e229c54d7634762130789412d190207a4f0",
+        ),
+        (
+            "015_agent_plans",
+            "717a12104caaded6d71f868e0ea0b67c80df5a0fea5d43962c5b1449a7895283",
+        ),
+        (
+            "016_agent_plan_steps",
+            "4893dbcbbb70025eb567ebe3d1ef6b7cb661c23013dc37b2f72e9dc0c2c57e4e",
+        ),
+        (
+            "017_agent_plan_step_dependencies",
+            "8c529cce5b3b8279d5dd20f3c289d654c4e8ff54150b42594dbdba1ef3f52e85",
+        ),
+        (
+            "018_agent_plan_step_attempts",
+            "fbd7fec3b8f47eaf0f0f0e3f03771d729d54a3b649328cd78c0fa98bb22e8506",
+        ),
+        (
+            "019_agent_execution_leases",
+            "bcf2233f99cc29a124f08d719bbb2c6311e4261e064c43e4b80085f53cafcfc1",
+        ),
+        (
+            "020_agent_plan_checkpoints",
+            "4341b1035cd13cf6dca38397377d45575363bee98ffdad746d02862764607045",
         ),
     ];
 
@@ -1471,7 +1937,7 @@ mod tests {
         let first = list_applied(&connection)?;
         crate::db::create_tables(&mut connection)?;
         assert_eq!(list_applied(&connection)?, first);
-        assert_eq!(first.len(), 14);
+        assert_eq!(first.len(), 20);
         Ok(())
     }
 
@@ -1551,7 +2017,7 @@ mod tests {
         let once = list_applied(&connection)?;
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, once);
-        assert_eq!(once.len(), 11);
+        assert_eq!(once.len(), 20);
         for (table, expected_count, expected_columns) in before {
             let quoted = table.replace('"', "\"\"");
             let actual_count =
@@ -1572,6 +2038,69 @@ mod tests {
         let integrity: String =
             connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         assert_eq!(integrity, "ok");
+        Ok(())
+    }
+
+    #[test]
+    fn db24_planner_schema_has_durable_facts_and_no_plaintext_lease_token(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        crate::db::create_tables(&mut connection)?;
+        for table in [
+            "agent_plans",
+            "agent_plan_steps",
+            "agent_plan_step_dependencies",
+            "agent_plan_step_attempts",
+            "agent_execution_leases",
+            "agent_plan_checkpoints",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing planner table {table}");
+        }
+        for index in [
+            "idx_agent_plans_chapter_created",
+            "idx_agent_plan_steps_plan_status",
+            "uq_agent_plan_attempts_one_running",
+            "uq_agent_execution_leases_one_active",
+            "idx_agent_plan_checkpoints_plan_sequence",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                params![index],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing planner index {index}");
+        }
+        for trigger in [
+            "trg_agent_plans_status_edges",
+            "trg_agent_plan_steps_immutable_identity",
+            "trg_agent_plan_dependencies_append_only_delete",
+            "trg_agent_plan_attempts_status_edges",
+            "trg_agent_execution_leases_monotonic_epoch",
+            "trg_agent_plan_checkpoints_append_only_update",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                params![trigger],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing planner trigger {trigger}");
+        }
+        let columns = table_columns(&connection, "agent_execution_leases")?;
+        assert!(columns.iter().any(|column| column == "token_hash"));
+        assert!(!columns.iter().any(|column| column == "token"));
+        assert_eq!(
+            connection
+                .prepare("PRAGMA foreign_key_check")?
+                .query_map([], |_| Ok(()))?
+                .count(),
+            0
+        );
         Ok(())
     }
 }

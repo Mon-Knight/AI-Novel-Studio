@@ -290,4 +290,22 @@ Tool Registry 当前注册八个真实只读/本地验证工具。每个工具�
 
 ---
 
+## 16. v2.5.0 Chapter Readiness Planner Runtime
+
+v2.5.0 在 Compiler / Registry 之上增加第一个正式持久 Planner：
+
+```text
+Writing Workspace
+  → TypeScript Planner Executor（只按持久 DAG 调度）
+  → Rust Plan State Machine + execution lease
+  → production Tool Registry（六个只读步骤）
+  → SQLite Plan / Step / Attempt / Lease / Checkpoint
+```
+
+Rust 构造并冻结 `chapter_readiness_plan_v1`，前端不能提交任意计划；Executor 每次 claim 前复验 Registry、schema、权限、scope、参数 hash 和依赖。应用重启时 running Attempt 被标记 `abandoned`，Plan/Step 进入 `waiting_retry`，不自动重放 Tool。浏览器模式不伪造持久计划。
+
+完整设计见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**

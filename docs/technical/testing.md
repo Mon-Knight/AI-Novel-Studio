@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.4.0（Context / Constraint Compiler 与 Tool Registry）
+> 当前版本：v2.5.0（Chapter Readiness Planner Runtime）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.4.0，测试体系在执行事实与 Safe Apply 基础上，增加编译确定性、来源漂移、预算截断、Prompt/Registry identity、Provider message 关系、schema/权限/scope/副作用工具策略与后端绕过失败关闭验证：
+截至 v2.5.0，测试体系在执行事实、Safe Apply 与 Compiler/Registry 基础上，增加持久 DAG、operation/request 幂等、lease token hash、单活动 epoch、Attempt/Checkpoint append-only、显式 retry 与重启后禁止自动重放验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -429,6 +429,34 @@ npm run test:e2e -- --spec provider-pipeline-setting
 
 v2.4.0 修改了正式 Prompt 与 Provider messages 编译路径，因此发布前只执行一次低输出真实连接测试。自动化仍默认使用 Mock 与 E2E 网络阻断，绝不从日志或产物读取/输出 API Key。
 
+### 2.16 v2.5.0 Planner Runtime 专项
+
+```powershell
+npx tsx --test --test-concurrency=1 `
+  src/services/agent-tools/toolRegistry.test.ts `
+  src/services/agent-planner/agentPlanRuntimeService.test.ts
+
+cargo test --manifest-path src-tauri/Cargo.toml agent_plan_service::tests
+cargo test --manifest-path src-tauri/Cargo.toml migrations::tests::db24
+npm run test:e2e -- --spec chapter-readiness-planner
+```
+
+| 编号 | 场景 | 必须结果 |
+|------|------|----------|
+| PL01 | 相同 operationId + 相同请求创建 | 返回同一 Plan；不同请求失败关闭 |
+| PL02 | 创建固定计划 | 恰好六个 Step、八条依赖，identity/schema/权限/scope/参数 hash 冻结 |
+| PL03 | 并发获取 lease | 同 Plan 最多一个 active lease，epoch 单调 |
+| PL04 | 检查 SQLite lease | 只有 token SHA-256，无明文 token 字段或值 |
+| PL05 | 按依赖完成六步 | 六个 succeeded Attempt、Plan completed、最终 readiness result 可读 |
+| PL06 | Tool 执行失败 | 只追加一个 failed Attempt，Plan/Step waiting_retry，不自动重试 |
+| PL07 | 应用重启恢复 | running Attempt abandoned、lease expired、Plan/Step waiting_retry、零 Tool 重放 |
+| PL08 | 显式继续 | 写入 user retry checkpoint，原 Attempt 不变，下一 claim 才产生新 Attempt |
+| PL09 | 篡改持久 schema/参数/依赖 | claim 前拒绝，Tool handler 调用次数为 0 |
+| PL10 | 浏览器开发模式 | 明确提示仅桌面可用，不创建 LocalStorage Plan |
+| PL-E2E | Windows 工作台运行计划 | 六个真实本地 Tool 各运行一次，SQLite 事实和 Checkpoint 顺序可验证，网络请求为 0 |
+
+v2.5.0 不修改 Prompt、Provider messages 或 Provider Adapter；真实 API 不属于本地只读 Planner 的必要验收，因此本版不发起真实 API 请求。
+
 ---
 
 ## 3. 静态文本契约检查
@@ -570,9 +598,9 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - 当前动态测试已证明会话级幂等 claim / release、`generation_jobs` 重启后的安全终结，以及其中正文生成和质量检查请求的真实取消；跨重启自动续跑和其他 AI 工具仍需要各自的取消、attempt / operation 记录与副作用幂等协议。
 - Windows 桌面自动化采用 WebdriverIO + Tauri Driver，不计划用 Playwright 浏览器页面或截图式 Computer Use 替代真实 Tauri E2E。
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
-- 当前产品没有名为 `Artifact`、`PlacementProposal` 或 `ApplyPlan` 的持久化实体；候选测试只按现有模型验证草稿、AI 任务、目标 / 基础正文绑定、采用状态和幂等，不能把这些等价约束写成不存在的实体状态。
+- v2.3.0+ 已具有 Artifact，v2.3.2 已具有 PlacementProposal / ApplyPlan；测试必须读取真实 SQLite 事实，不能以 UI 文案或旧 AiTaskRecord 代替。
 - `operationId` 的数据库级重放、completed 目标权威复验与提交后清理故障已由 service 测试证明；真实 IPC 进程在提交边界被强制终止时的端到端对账仍需继续补充。
-- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消与质量历史不可变重放已由 Rust / SQLite 和真实 Tauri 故障场景覆盖；自动续跑和持久正文锁定模型尚未纳入本版本自动化门槛。
+- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消、质量历史不可变重放与 v2.5.0 Planner 显式恢复已由 Rust / SQLite 和真实 Tauri 场景覆盖；自动续跑、长期 Memory 和正文副作用仍不在本版本能力中。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - v2.1.8 已把章节总结、上下文和角色状态的桌面事实源收敛到 SQLite；旧缓存清理仍发生在 SQLite 提交之后，因此只能通过明确 ID 映射、warning 和幂等重试保证安全，不宣称跨存储 ACID。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。

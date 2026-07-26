@@ -84,15 +84,16 @@ test('registry manifest and hash are deterministic across definition order', asy
   assert.equal(reread.registryHash, rightManifest.registryHash);
 });
 
-test('production registry exposes eight executable read/verification contracts and no hidden writes', async () => {
+test('production registry exposes nine executable read/verification contracts and no hidden writes', async () => {
   const { productionToolRegistry } = await import('./productionToolRegistry');
   const manifest = await productionToolRegistry.getManifest();
-  assert.equal(manifest.tools.length, 8);
+  assert.equal(manifest.tools.length, 9);
   assert.equal(
     manifest.registryHash,
-    'c03ae58009cfb47b84f85dbb907b427cd1d659149af0a6133ec6898e8de4a0a5',
+    '846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871',
   );
-  assert.equal(new Set(manifest.tools.map((tool) => `${tool.name}@${tool.version}`)).size, 8);
+  assert.equal(new Set(manifest.tools.map((tool) => `${tool.name}@${tool.version}`)).size, 9);
+  assert.equal(manifest.tools.some((tool) => tool.name === 'verification.check_readiness'), true);
   assert.equal(manifest.tools.every((tool) => tool.sideEffect === 'none'), true);
   assert.equal(manifest.tools.every((tool) => tool.confirmationPolicy === 'never'), true);
   assert.equal(manifest.tools.some((tool) => tool.name === 'chapter.save_candidate_draft'), false);

@@ -1,8 +1,8 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v1.0.44  
-> 用途：说明 Agent Workflow Runtime 最小闭环的设计和使用
+> 版本：v2.5.0
+> 用途：说明历史 Planner Lite 与正式 Chapter Readiness Planner Runtime 的边界
 
 ---
 
@@ -55,16 +55,16 @@ Agent Workflow Runtime 是一套轻量级的开发辅助系统，包含：
 
 ---
 
-## 3. 当前只是最小闭环，不是完整 Autonomous Agent
+## 3. 当前能力边界
 
 | 能力 | 当前状态 | 后续计划 |
 |------|---------|---------|
 | 规则检查 | ✅ 脚本 + 清单 | v2.x 自动化 |
 | 构建验证 | ✅ 脚本化 | CI/CD 集成 |
-| 任务规划 | ⚠️ 固定 workflow | v2.x 动态规划 |
-| Tool Calling | ❌ 占位 | v1.0.46+ 接入 |
-| 实时执行 | ❌ 无 | v2.x |
-| Memory | ❌ 无 | v2.x |
+| 任务规划 | ✅ 一个正式固定持久 DAG | v2.6+ 扩展受审核章节闭环 |
+| Tool Calling | ✅ 九个只读/本地验证 Tool | 后续按副作用确认边界扩展 |
+| 实时执行 | ✅ lease + Attempt + Checkpoint | 不自动续跑 |
+| Memory | ❌ 无 | v2.6.x |
 | Multi-Agent | ❌ 无 | v3.x |
 
 ---
@@ -101,7 +101,7 @@ Agent 或开发者在对应用场景下：
 
 ---
 
-## 6. Planner Lite 当前能做什么
+## 6. Planner Lite 的历史定位
 
 `planner-lite.ts` 中的 `createChapterGenerationWorkflow()` 函数：
 
@@ -110,22 +110,15 @@ Agent 或开发者在对应用场景下：
 - 任务之间定义了 `dependsOn` 依赖关系
 - **不执行任何真实 AI 调用或数据库操作**
 
-这是一个为未来 Planner 准备的参考结构。
+这是一个历史参考结构，不执行 Tool、不持久化，也不是 v2.5.0 的正式 Planner。
 
 ---
 
-## 7. Tool Layer 当前只是占位
+## 7. 正式 Tool Registry 与 Planner Runtime
 
-所有 `src/agent-tools/` 中的函数当前都返回：
+v1.0.46 已把读取 Tool 接入真实项目数据；v2.4.0 使用 `tool_registry_v1` 冻结 schema、权限、scope 与副作用策略；v2.5.0 新增 `verification.check_readiness@1` 和正式 `chapter_readiness_plan_v1`。
 
-```ts
-{ ok: false, error: "Tool 'xxx' is not yet implemented (v1.0.44 placeholder)" }
-```
-
-这为后续版本定义了接口契约：
-- 输入类型已确定
-- 输出类型已确定为 `AgentToolResult<T>`
-- 后续只需填充实现
+正式计划、Step、Attempt、lease 与 Checkpoint 保存在 SQLite。应用重启后中断计划进入 `waiting_retry`，只有用户显式继续才创建新 Attempt。详细设计见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。
 
 ---
 

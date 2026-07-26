@@ -56,6 +56,8 @@ pub fn init_database() {
         .expect("Failed to set pragmas");
 
     create_tables(&mut connection).expect("Failed to create tables");
+    crate::services::agent_plan_service::recover_interrupted_plans(&mut connection)
+        .expect("Failed to recover interrupted Agent Plans");
 
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");

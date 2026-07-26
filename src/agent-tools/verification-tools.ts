@@ -13,6 +13,118 @@ interface VerificationDetail {
   message: string;
 }
 
+export interface ChapterReadinessMissingItem {
+  code: string;
+  label: string;
+  blocking: boolean;
+}
+
+export interface ChapterReadinessResult {
+  ready: boolean;
+  score: number;
+  missing: ChapterReadinessMissingItem[];
+  warnings: string[];
+  summary: string;
+}
+
+function objectData(result: AgentToolResult): Record<string, unknown> | undefined {
+  return result.ok && result.data && typeof result.data === "object"
+    ? result.data as Record<string, unknown>
+    : undefined;
+}
+
+/**
+ * 对章节生成所需的本地事实执行确定性准备度检查。
+ *
+ * 该工具只读取当前作品数据，不调用 Provider、不生成正文、不写业务表。
+ * Planner 会把结果作为最终只读 checkpoint 保存，用户仍决定是否进入生成。
+ */
+export async function checkChapterReadiness(
+  context: AgentToolContext
+): Promise<AgentToolResult<ChapterReadinessResult>> {
+  const novelId = resolveNovelId(context);
+  const chapterId = context.chapterId;
+  if (!novelId || !chapterId) {
+    return errorResult("章节准备度检查需要作品 ID 和章节 ID", {
+      source: "tool-layer",
+    });
+  }
+
+  try {
+    const [projectResult, outlineResult, contextResult, styleResult, outputResult] =
+      await Promise.all([
+        import("./project-tools").then(({ readProjectContext }) =>
+          readProjectContext({ novelId, chapterId, dryRun: true })),
+        import("./chapter-tools").then(({ readChapterOutline }) =>
+          readChapterOutline({ novelId, chapterId, dryRun: true })),
+        import("./chapter-tools").then(({ readChapterContext }) =>
+          readChapterContext({ novelId, chapterId, dryRun: true })),
+        import("./style-tools").then(({ readStyleProfile }) =>
+          readStyleProfile({ novelId, chapterId, dryRun: true })),
+        import("./style-tools").then(({ readOutputControl }) =>
+          readOutputControl({ novelId, chapterId, dryRun: true })),
+      ]);
+
+    const project = objectData(projectResult);
+    const outline = objectData(outlineResult);
+    const chapterContext = objectData(contextResult);
+    const style = objectData(styleResult);
+    const output = objectData(outputResult);
+    const missing: ChapterReadinessMissingItem[] = [];
+    const warnings = [
+      ...(projectResult.warnings ?? []),
+      ...(outlineResult.warnings ?? []),
+      ...(contextResult.warnings ?? []),
+      ...(styleResult.warnings ?? []),
+      ...(outputResult.warnings ?? []),
+    ];
+
+    const chapter = outline?.chapter as Record<string, unknown> | undefined;
+    const projectNovel = project?.novel as Record<string, unknown> | undefined;
+    if (!projectNovel || !chapterContext?.chapter) {
+      missing.push({ code: "core_context", label: "作品或章节上下文", blocking: true });
+    }
+    if (!chapter || typeof chapter.outline !== "string" || !chapter.outline.trim()) {
+      missing.push({ code: "chapter_outline", label: "章节大纲", blocking: true });
+    }
+    const worldSettings = project?.worldSettings;
+    if (!Array.isArray(worldSettings) || worldSettings.length === 0) {
+      missing.push({ code: "world_setting", label: "世界设定", blocking: true });
+    }
+    const protagonists = project?.protagonists;
+    if (!Array.isArray(protagonists) || protagonists.length === 0) {
+      missing.push({ code: "protagonist", label: "主角设定", blocking: true });
+    }
+    if (style?.hasActiveStyle !== true) {
+      missing.push({ code: "style_profile", label: "风格方案", blocking: false });
+    }
+    const outputCount = typeof output?.count === "number" ? output.count : 0;
+    if (outputCount === 0) {
+      missing.push({ code: "output_profile", label: "输出控制方案", blocking: false });
+    }
+
+    const blockingCount = missing.filter((item) => item.blocking).length;
+    const optionalCount = missing.length - blockingCount;
+    const score = Math.max(0, 100 - blockingCount * 25 - optionalCount * 10);
+    const ready = blockingCount === 0;
+    const summary = ready
+      ? optionalCount === 0
+        ? "章节生成所需的核心上下文、风格和输出控制均已准备。"
+        : `核心上下文已准备，仍有 ${optionalCount} 项可选配置建议补充。`
+      : `尚缺少 ${blockingCount} 项生成前必需信息，请先补齐后再生成正文。`;
+
+    return successResult(
+      { ready, score, missing, warnings: [...new Set(warnings)], summary },
+      { source: "database" },
+    );
+  } catch (err) {
+    return errorResult(
+      `章节准备度检查失败: ${err instanceof Error ? err.message : String(err)}`,
+      { source: "database" },
+    );
+  }
+}
+
 /**
  * 验证大纲符合度（基础非 AI 检查）
  *

@@ -1,7 +1,7 @@
 {
   "name": "ai-novel-studio",
   "private": true,
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"
@@ -14,7 +14,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
-    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs src/services/tauri/e2eBridgeSecurity.test.mjs && tsx --test --test-concurrency=1 scripts/e2e/artifact-sanitizer.test.ts src/services/context/chapterContextPersistence.test.ts src/components/workspace/EditorArea.test.tsx src/features/quality/qualityRequestSafety.test.ts src/services/generation/generationJobService.test.ts src/services/ai/aiCancellation.test.ts src/services/ai/compilation/executionContractCompiler.test.ts src/services/ai/aiExecutionPipeline.test.ts src/services/agent-tools/toolRegistry.test.ts src/services/placements/placementRuntimeService.test.ts src/services/quality/qualityCheckService.test.ts",
+    "test": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs src/services/backup/projectBackupService.test.mjs src/services/tauri/e2eBridgeSecurity.test.mjs && tsx --test --test-concurrency=1 scripts/e2e/artifact-sanitizer.test.ts src/services/context/chapterContextPersistence.test.ts src/components/workspace/EditorArea.test.tsx src/features/quality/qualityRequestSafety.test.ts src/services/generation/generationJobService.test.ts src/services/ai/aiCancellation.test.ts src/services/ai/compilation/executionContractCompiler.test.ts src/services/ai/aiExecutionPipeline.test.ts src/services/agent-tools/toolRegistry.test.ts src/services/agent-planner/agentPlanRuntimeService.test.ts src/services/placements/placementRuntimeService.test.ts src/services/quality/qualityCheckService.test.ts",
     "test:workspace-safety": "node --experimental-strip-types --test src/features/workspace/documentSafety.test.mjs",
     "test:components": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite components",
     "test:workspace-reliability": "powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/run_workspace_test_suite.ps1 -Suite workspace-reliability",

@@ -2355,3 +2355,59 @@ v2.4.0 不新增表或 migration，继续复用 v2.3.0 三类不可变 Snapshot�
 `compilationHash` canonical 覆盖 scope、预期 Artifact、requestBodyHash、taskInput、Context manifest/budget、Constraint payload、Prompt hash 和 Provider options。Rust 在 Task/Snapshot 事务开始前复算该 hash，并验证固定 Prompt hash、实际 Provider messages、预算、来源类型、Registry identity 与任务策略；任何不一致都不得创建部分执行事实。
 
 详细协议见 [`architecture/context-constraint-tool-registry.md`](architecture/context-constraint-tool-registry.md)。
+
+---
+
+# 32. v2.5.0 Chapter Readiness Planner 持久事实
+
+v2.5.0 新增 migration 015～020。所有表只服务正式 `chapter_readiness_plan_v1`，不替代既有 `generation_jobs`、`AiTask` 或 Safe Apply Plan。
+
+## 32.1 `agent_plans`
+
+Plan 冻结 `operationId/requestHash`、契约版本、Planner identity、Registry hash 与 Novel/Chapter scope。状态为：
+
+```text
+ready / running / waiting_retry / completed / failed / cancelled
+```
+
+相同 operationId 只有在 canonical requestHash 完全相同时才能重放。completed 必须有 readiness result；failed 必须有安全错误；身份字段不可更新或删除。
+
+## 32.2 `agent_plan_steps` 与依赖
+
+每个 Step 冻结稳定 key/ordinal、Tool identity、input/output schema hash、权限、scope、arguments JSON/hash。`agent_plan_step_dependencies` 只允许同 Plan 内由前序 Step 指向后序 Step，整行 append-only。
+
+Step 状态为：
+
+```text
+pending / running / waiting_retry / completed / failed / cancelled
+```
+
+completed 保存本地 Tool output canonical JSON 与 SHA-256；输出不得含疑似凭据。
+
+## 32.3 `agent_plan_step_attempts`
+
+每次 claim 为 Step 追加单调 `attemptNumber`，同一 Step 同时最多一个 running Attempt。状态为：
+
+```text
+running → succeeded / failed / abandoned
+```
+
+Attempt 绑定 lease id/epoch。失败、恢复和再次执行都不得复活旧 Attempt。
+
+## 32.4 `agent_execution_leases`
+
+每个 Plan 同时最多一个 active lease，每次获取使用单调 epoch。持久字段只包含 owner、`tokenHash`、expiresAt 和状态；原始 token 不入库：
+
+```text
+active → released / expired
+```
+
+## 32.5 `agent_plan_checkpoints`
+
+Checkpoint 按 Plan 单调 sequence 追加，记录 plan/step/attempt identity、状态快照、安全 payload 与 payload hash。Checkpoint 不允许 UPDATE/DELETE，不保存正文、凭据或 lease 原始 token。
+
+## 32.6 恢复与删除语义
+
+启动恢复把 running Attempt 标为 abandoned，Plan/Step 标为 waiting_retry，活动 lease 标为 expired，并追加 `automaticReplay=false` checkpoint。Plan 六类事实使用 `ON DELETE RESTRICT` 与 no-delete trigger，不能随章节清理或历史任务删除而丢失。
+
+完整契约见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。

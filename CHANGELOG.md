@@ -1,5 +1,40 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.5.0 (2026-07-26) - Chapter Readiness Planner Runtime
+
+### 新增
+
+- 新增正式 `chapter_readiness_plan_v1` 六步只读 DAG：作品上下文、章节大纲、章节上下文、风格方案、输出控制与确定性准备度检查。
+- 新增 015～020 六条独立 migration，持久化 Agent Plan、Step、依赖、append-only Step Attempt、execution lease 与 append-only Checkpoint。
+- 新增 Rust 权威计划状态机和 11 个 Tauri 命令，覆盖幂等创建、读取、列表、租约获取/释放、claim、完成、失败、显式重试、取消和中断恢复。
+- 新增 `verification.check_readiness@1` 本地工具；输出冻结 `ready/score/missing/warnings/summary`，不调用 Provider、不生成或修改正文。
+- 写作工作台 AI 生成面板新增“章节准备计划”卡片，可创建、运行、查看六步状态、展示准备度结果并显式继续中断步骤。
+- 新增 Planner Runtime TypeScript 动态测试、Rust 状态机/迁移测试和真实 Windows Tauri E2E 场景。
+
+### 安全与可靠性
+
+- 每个 Step 冻结 Tool Registry identity、input/output schema hash、权限、scope、canonical 参数与参数 hash；前端每次 claim 前复验完整契约。
+- Rust lease 使用单 Plan 单活动 epoch；明文 token 只瞬时返回执行器，SQLite 仅保存 SHA-256，过期、owner、epoch 和 token 均在状态变更前验证。
+- 工具失败只追加一个 failed Attempt，不自动重试；显式 `authorize_retry` 记录 `confirmedBy=user` checkpoint 后才把步骤恢复为 pending。
+- 应用启动时把所有中断 running Plan 恢复为 `waiting_retry`，running Attempt 标记 `abandoned`、活动 lease 标记 expired，绝不静默重放工具。
+- 浏览器开发模式不使用 LocalStorage 伪造持久 Planner；Plan Runtime 只在桌面 SQLite 模式开放。
+- 工具输出只在本地持久化并记录 canonical hash，拒绝疑似凭据；普通日志不输出工具参数、结果正文或 lease token。
+
+### 变更
+
+- 生产 Tool Registry 从八个工具增至九个，hash 更新为 `846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871`；既有生产 Provider 策略仍保持 `allowedTools=[]`。
+- 版本统一更新为 `2.5.0`，同步 README、路线图、架构、数据模型、测试说明、发布说明和验收报告。
+
+### 验证
+
+- `npm test`：Node 16/16、tsx 67/67；Rust/SQLite 143/143，另 1 项真实隔离数据库迁移测试按设计 ignored。
+- Planner/Registry 专项 8/8，TypeScript production build 通过；Windows Tauri E2E 与安装包证据记录于发布说明和验收报告。
+- 本版只新增本地只读 Tool Calling，不修改 Prompt 或 Provider 请求协议，因此按用户约束不再次调用真实 API。
+
+### 版本边界
+
+- 本版本不实现长期 Memory、正文生成/应用副作用、自动重试/续跑、动态 Planner、Multi-Agent、Agent 自主写入或 UI 重做。
+
 ## v2.4.0 (2026-07-26) - Context / Constraint Compiler 与 Tool Registry
 
 ### 新增

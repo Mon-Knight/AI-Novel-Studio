@@ -25,15 +25,15 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.4.0**
+**当前版本：v2.5.0**
 
-**阶段：Compiler & Tool Registry — 可复现 AI 请求与受控工具边界**
+**阶段：Chapter Readiness Planner Runtime — 可恢复的持久只读计划**
 
-v2.4.0 建立正式 `Context Compiler`、`Constraint Compiler` 与版本化 `Tool Registry`。连接测试和“设定补充”不再由调用方拼接 Provider messages 或伪造 Snapshot，而是从稳定来源、预算、Prompt 模板、Provider identity 和工具策略编译出同一份可验证执行契约。
+v2.5.0 在 v2.4.0 Compiler / Tool Registry 基础上建立正式 `chapter_readiness_plan_v1`。计划、六个稳定步骤、依赖、每次 Attempt、Rust execution lease 和 append-only Checkpoint 全部保存在 SQLite；每一步绑定 Registry identity、input/output schema hash、权限、scope 与 canonical 参数 hash。
 
-桌面 Rust 在创建 Task 前复算 Context/Constraint/Input hash、预算、模板、消息与 Registry identity；当前两个生产入口固定 `allowedTools=[]`。Registry 注册八个真实只读/本地验证工具，冻结 input/output schema、权限、scope、超时与副作用策略；未来副作用工具必须由权威持久计划复验用户确认，不能信任调用方自报。
+工作台可创建、运行、查看并显式继续章节准备计划。工具失败只形成一个 Attempt；应用重启会把中断执行恢复为 `waiting_retry` 并标记 Attempt `abandoned`，绝不静默重放。租约明文 token 只瞬时交给执行器，SQLite 仅保存 SHA-256。生产 Registry 新增 `verification.check_readiness@1`，九个工具仍全部只读或本地验证。
 
-本版本不新增数据库表，不开放 Planner、Memory、自动续跑、Multi-Agent 或 Agent 自主工具调用；v2.3.2 Safe Apply 的单目标用户确认边界保持不变，其他生产 AI 入口仍按后续独立版本迁移。
+本版本不实现长期 Memory、正文副作用、自动续跑、Multi-Agent 或 Agent 自主写入。章节准备链路不调用 Provider，因此本版不消耗真实 API；下一独立版本进入 v2.6.x Memory、连续性与受审核单 Agent 章节闭环。
 
 ---
 
@@ -58,7 +58,9 @@ v2.4.0 建立正式 `Context Compiler`、`Constraint Compiler` 与版本化 `Too
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
 - **AI 候选安全应用**：设定候选通过不可变 Proposal/Plan、显式用户确认、目标 version/hash、单事务副作用和 Artifact 来源链接进入正式设定库。
 - **正式 Context / Constraint Compiler**：按稳定来源身份、固定 UTF-8 预算、Prompt hash、Provider identity 和 canonical compilation hash 生成可复现请求，并由 Rust 在 Task 创建前失败关闭验证。
-- **版本化 Tool Registry**：八个真实读取/本地验证工具具备冻结 schema、权限、novel/chapter/draft scope、超时和副作用声明；当前生产 Provider 请求尚不允许模型调用工具。
+- **版本化 Tool Registry**：九个真实读取/本地验证工具具备冻结 schema、权限、novel/chapter/draft scope、超时和副作用声明；当前生产 Provider 请求尚不允许模型调用工具。
+- **持久章节准备计划**：固定六步 DAG 由 SQLite 保存并在执行前复验 Registry/schema/权限/scope/参数 hash；Attempt 与 Checkpoint 可追踪，租约防止并发执行。
+- **显式恢复与重试**：中断运行在启动时进入 `waiting_retry`，原 Attempt 标记 `abandoned`；只有用户明确点击继续才创建新 Attempt，不自动重放工具。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。
@@ -191,8 +193,9 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | v2.1.7 | 已完成：章节质量历史不可变快照与原子重放 |
 | v2.1.8 | 已完成：章节上下文持久化一致性闭环 |
 | v2.2.0 | 已完成：工作区可靠性与基础设施收口 |
-| v2.2.1 | **当前：工作区竞态可靠性热修** |
-| v2.x | 后续：跨重启自动续跑、统一 AI 任务、约束验证与 Agent 能力增强 |
+| v2.2.1～v2.4.0 | 已完成：可靠性热修、执行事实、Provider、Safe Apply、Compiler 与 Tool Registry |
+| v2.5.0 | **当前：持久 Chapter Readiness Planner、lease/checkpoint、显式重试与重启恢复** |
+| v2.6.x | 后续：长期 Memory、连续性与受审核单 Agent 章节闭环 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
