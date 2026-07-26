@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.3.2（Safe Apply：单目标安全应用）
+> 当前版本：v2.4.0（Context / Constraint Compiler 与 Tool Registry）
 
 ---
 
@@ -405,9 +405,22 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 明确不在本版本处理：其他 Artifact 类型或 AI 入口迁移、批量/多目标 Apply、Planner、Memory、Tool Registry、自动续跑、Multi-Agent、UI 重做或 Agent 自主写入。
 
-### v2.3.2 之后
+### v2.4.0 单一版本目标
 
-- v2.4.x：Context / Constraint Compiler 与 Tool Registry，形成可复现来源、预算和 schema 工具边界。
+本版本只建立可复现 AI 编译协议与受控工具注册边界：
+
+1. 正式 `Context Compiler` 冻结来源 type/id/version/origin/hash、稳定顺序、缺失来源、截断状态和 UTF-8 bytes/3 预算；同一输入必须跨调用得到相同 Context 与 manifest hash。
+2. 正式 `Constraint Compiler` 冻结 Artifact/response schema、业务约束、Prompt template identity/hash、Provider options 与 Tool Registry policy。
+3. `compiled_ai_execution_v1` 把实际 Provider messages、三类 schema v2 Snapshot、requestBodyHash 与 compilationHash 绑定为一个契约；API Key 和 Base URL 不得进入契约。
+4. 连接测试和“设定补充”迁移到正式编译策略；后端创建 Task 前复算 Context、Constraint、Input、模板、消息、预算和 Registry identity，篡改失败关闭。
+5. 版本化 `tool_registry_v1` 注册八个真实读取/本地验证工具，验证 name/version、input/output schema、allowlist、权限、scope、超时与副作用策略。
+6. 当前生产 Provider 任务固定 `allowedTools=[]`；副作用工具必须声明用户确认策略并由权威持久计划复验确认字段，调用方自报不能直接授权执行。
+7. 不新增数据库 migration，复用三类 Snapshot 的 `schemaVersion=2` 和既有不可变大文本存储。
+
+明确不在本版本处理：Planner、execution lease、checkpoint、自动重试/续跑、跨重启计划恢复、长期 Memory、新增业务副作用工具、Multi-Agent、UI 重做或 Agent 自主写入。
+
+### v2.4.0 之后
+
 - v2.5.x：Planner、execution lease、checkpoint、显式重试与跨重启恢复。
 - v2.6.x：长期 Memory、连续性与质量 Verification，形成受审核的单 Agent 章节闭环。
 - v3.x：Multi-Agent Orchestrator、专业创作 Agent、Artifact 交接、冲突处理和自主逐章推进。
@@ -424,7 +437,7 @@ v2.x 后续 Planner / Tool Calling / Memory / Verification
 v3.x    Multi-Agent / 自主创作
 ```
 
-进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.3.2 当前只开放用户确认后的单目标 Safe Apply。
+进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.4.0 只开放编译协议和 Registry 边界，生产 Provider 的工具 allowlist 仍为空。
 
 ---
 

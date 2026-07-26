@@ -22,6 +22,8 @@ export * from './outline';
 export * from './settingSuggestion';
 export * from './chapterEngineering';
 export * from './generationContext';
+export * from './aiCompilation';
+export * from './toolRegistry';
 export * from './generationJob';
 export * from './ai-task';
 export * from './result-artifact';

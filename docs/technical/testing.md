@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.3.2（Safe Apply：单目标安全应用）
+> 当前版本：v2.4.0（Context / Constraint Compiler 与 Tool Registry）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.3.2，测试体系在统一执行事实和 Provider 单次派发基础上，增加 Proposal/Plan 不可变、用户确认、目标冲突、事务回滚、副作用幂等、来源链接和已应用目标漂移验证：
+截至 v2.4.0，测试体系在执行事实与 Safe Apply 基础上，增加编译确定性、来源漂移、预算截断、Prompt/Registry identity、Provider message 关系、schema/权限/scope/副作用工具策略与后端绕过失败关闭验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -27,7 +27,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.2.x～v2.3.2 动态测试入口
+## 2. v2.2.x～v2.4.0 动态测试入口
 
 ### 2.1 工作区可靠性专项
 
@@ -397,6 +397,37 @@ npm run test:e2e -- --spec provider-pipeline-setting
 | SA-E2E | 桌面候选显式确认 | 确认前正式设定不变；确认后仅一个候选落地，3 Plan / 1 Link 可诊断 |
 
 v2.3.2 不修改 Provider 网络协议或请求参数，因此不重复消耗真实 API；Provider 链路继续由 v2.3.1 的单次真实尝试记录和本版 Mock 桌面回归覆盖。
+
+### 2.15 v2.4.0 Compiler / Tool Registry 专项
+
+```powershell
+npx tsx --test --test-concurrency=1 `
+  src/services/ai/compilation/executionContractCompiler.test.ts `
+  src/services/ai/aiExecutionPipeline.test.ts `
+  src/services/agent-tools/toolRegistry.test.ts
+
+cargo test --manifest-path src-tauri/Cargo.toml task0 -- --test-threads=1
+npm run test:e2e -- --spec provider-pipeline-setting
+```
+
+专项动态矩阵：
+
+| 编号 | 场景 | 必须结果 |
+|------|------|----------|
+| CC01 | 相同来源乱序与 JSON key 乱序 | compiled context、manifest 与 compilationHash 完全一致 |
+| CC02 | Context 超过预算 | 按固定 estimator 确定性截断/省略；必需来源无空间时失败关闭 |
+| CC03 | 来源版本、内容或集合漂移 | 分别报告 changed、missing、unexpected，不伪报一致 |
+| CC04 | Prompt / Context / request / compilation hash 篡改 | 前端管线或 Rust Task 创建前拒绝，不留下 Task/Snapshot |
+| CC05 | 改写 Artifact type 试图绕过编译 | Rust 仍按生产 taskType 强制正式契约并拒绝 |
+| TR01 | Registry 定义顺序变化 | manifest 顺序与 registryHash 不变 |
+| TR02 | Registry 返回对象被调用方修改 | 再次读取仍返回冻结权威 manifest |
+| TR03 | 工具未列入 allowlist、权限不足或跨 scope | handler 调用次数保持 0，返回稳定错误码 |
+| TR04 | input/output 不符合 schema | 执行前或返回后拒绝，不持久化伪结果 |
+| TR05 | 副作用工具只有调用方自报确认 | 必须由定义方复验持久计划证据，否则不得执行 |
+| CC-E2E | Windows 设定候选完整闭环 | schema v2 Snapshot、来源 ID/hash、预算、模板与 Registry hash 可读取，Safe Apply 不回归 |
+| CC-REAL | 真实 API 连接测试 | 仅一次、最大 8 tokens；成功或外部失败均如实记录，不重试、不用 Mock 替代 |
+
+v2.4.0 修改了正式 Prompt 与 Provider messages 编译路径，因此发布前只执行一次低输出真实连接测试。自动化仍默认使用 Mock 与 E2E 网络阻断，绝不从日志或产物读取/输出 API Key。
 
 ---
 

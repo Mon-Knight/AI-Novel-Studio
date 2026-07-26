@@ -1,5 +1,35 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.4.0 (2026-07-26) - Context / Constraint Compiler 与 Tool Registry
+
+### 新增
+
+- 新增 `compiled_ai_execution_v1` / `compiled_ai_request_v1` 正式执行契约，以及 schema v2 Input、Context、Constraint Snapshot 协议。
+- 新增 `context_compiler_v1`：冻结来源 type/id/version/origin/hash、缺失来源、确定性顺序与截断状态，并使用 `utf8_bytes_div3_v1` 记录完整预算。
+- 新增 `constraint_compiler_v1`：冻结预期 Artifact、response schema、业务约束/hash、Prompt template identity/hash、Provider options 与 Tool Registry policy。
+- 新增版本化 `tool_registry_v1`，注册八个真实项目读取/本地验证工具；每个工具声明 input/output schema、权限、scope、超时、副作用与确认策略。
+- 新增独立 `prompts/system_connection_test.md` 与 `prompts/setting_expand.md`；连接测试和设定补充成为首批正式编译生产入口。
+
+### 安全与可靠性
+
+- `executeAiTask` 不再接受调用方自拼 Provider request 或三类 Snapshot；同一编译契约同时驱动实际派发与持久执行事实。
+- Rust 在创建 Task 前复算 requestBodyHash、compilationHash、Context hash/预算、Constraint hash、固定 Prompt hash、Provider messages 和冻结 Registry hash；改写 Artifact type 也不能绕过正式验证。
+- 来源与 Registry 使用区域设置无关的固定排序；设定来源按 createdAt/id 稳定整理，避免不同电脑对相同事实产生不同 hash。
+- Registry manifest 返回隔离副本，调用方不能篡改缓存权威值；allowlist、权限、参数/输出 schema 与 novel/chapter/draft scope 在 handler 前后动态验证。
+- 副作用工具不能信任调用方自报确认，必须携带 confirmedBy/userConfirmedAt/planId/operationId/planHash，并由 ToolDefinition 权威复验；当前生产 Registry 没有副作用工具，Provider 策略固定 `allowedTools=[]`。
+- 不新增数据库 migration；复用既有不可变 Snapshot 与大文本表，v2.3.2 Safe Apply 边界保持不变。
+
+### 验证
+
+- Compiler / Provider / Registry 专项 18/18；`npm test` Node 16/16、tsx 64/64；Rust/SQLite 139/139，另 1 项隔离数据库测试按设计 ignored。
+- `npm run lint` 0 error（保留 1 条既有 React Hooks warning）；TypeScript + Vite production build 通过，231 modules。
+- Rust 正式契约额外覆盖 Artifact 绕过、Registry identity 篡改、Context budget、Prompt 与来源 manifest 篡改；本版修改的 Rust 文件通过独立 rustfmt check。
+- Windows Tauri E2E、单次 8-token 真实 API 尝试与 production 安装包证据记录于发布说明和验收报告。
+
+### 版本边界
+
+- 本版本不实现 Planner、execution lease、checkpoint、自动续跑、跨重启计划恢复、长期 Memory、新增业务副作用工具、Multi-Agent、UI 重做或 Agent 自主写入。
+
 ## v2.3.2 (2026-07-26) - Safe Apply 单目标安全应用
 
 ### 新增

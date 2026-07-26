@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AiSettings } from '../../types/ai';
+import type { CompiledAiExecutionContractV1 } from '../../types/aiCompilation';
 import type {
   AiTask,
   AiTaskAttempt,
@@ -20,6 +21,7 @@ import {
   type ExecuteAiTaskInput,
 } from './aiExecutionPipeline';
 import { createProviderAdapter, type ProviderAdapter } from './providerAdapter';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 
 const settings: AiSettings = {
   runtimeMode: 'api',
@@ -167,24 +169,98 @@ function executionInput(): ExecuteAiTaskInput {
     taskType: 'connection_test',
     scopeType: 'system',
     novelId: 'system',
+    settings,
+    compilation: { sources: [], taskInput: { purpose: 'test' } },
+  };
+}
+
+async function compiledContract(
+  providerId = 'deepseek',
+  model = 'test-model',
+): Promise<CompiledAiExecutionContractV1> {
+  const promptTemplateBody = 'Reply OK only.';
+  const messages = [
+    { role: 'system' as const, content: promptTemplateBody },
+    { role: 'user' as const, content: 'hi' },
+  ];
+  const requestBodyHash = await computeContentSha256(JSON.stringify({ messages }));
+  const promptTemplateHash = await computeContentSha256(promptTemplateBody);
+  const emptyContextHash = await computeContentSha256('');
+  return {
+    contractVersion: 'compiled_ai_execution_v1',
+    taskType: 'connection_test',
     expectedArtifactType: 'generic_text',
+    expectedArtifactSchemaVersion: 1,
     request: {
       taskType: 'connection_test',
-      messages: [
-        { role: 'system', content: 'Reply OK only.' },
-        { role: 'user', content: 'hi' },
-      ],
+      messages,
       temperature: 0.1,
       maxTokens: 8,
     },
-    settings,
-    inputType: 'connection_test_messages_v1',
-    inputPayloadJson: { purpose: 'test' },
-    sourceManifestJson: { sources: [] },
-    compiledContext: 'Reply OK only.',
-    promptTemplateId: 'system/connection_test',
-    promptTemplateVersion: '1',
-    promptTemplateBody: 'Reply OK only.',
+    inputType: 'compiled_provider_messages_v1',
+    inputPayloadJson: {
+      contractVersion: 'compiled_ai_request_v1',
+      taskType: 'connection_test',
+      messageCount: 2,
+      requestBodyHash,
+      compilationHash: 'f'.repeat(64),
+      taskInput: { purpose: 'test' },
+    },
+    contextSnapshot: {
+      schemaVersion: 2,
+      compilerVersion: 'context_compiler_v1',
+      compiledContext: '',
+      sourceManifestJson: {
+        contractVersion: 'context_manifest_v1',
+        compilerVersion: 'context_compiler_v1',
+        tokenEstimator: 'utf8_bytes_div3_v1',
+        compiledContextHash: emptyContextHash,
+        missingSourceTypes: [],
+        sources: [],
+      },
+      budgetJson: {
+        contractVersion: 'context_budget_v1',
+        tokenEstimator: 'utf8_bytes_div3_v1',
+        modelContextTokens: 512,
+        reservedOutputTokens: 8,
+        fixedMessageTokens: 300,
+        availableContextTokens: 204,
+        compiledContextTokens: 0,
+        compiledContextChars: 0,
+        compiledContextBytes: 0,
+        includedSourceCount: 0,
+        truncatedSourceCount: 0,
+        omittedSourceCount: 0,
+      },
+    },
+    constraintSnapshot: {
+      schemaVersion: 2,
+      compilerVersion: 'constraint_compiler_v1',
+      payloadJson: {
+        contractVersion: 'constraint_payload_v1',
+        compilerVersion: 'constraint_compiler_v1',
+        taskType: 'connection_test',
+        expectedArtifact: { type: 'generic_text', schemaVersion: 1 },
+        responseSchema: 'exact_text_ok_v1',
+        constraints: { exactText: 'OK' },
+        constraintsHash: 'e'.repeat(64),
+        toolPolicy: {
+          registryVersion: 'tool_registry_v1',
+          registryHash: 'd'.repeat(64),
+          allowedTools: [],
+        },
+      },
+      promptTemplateId: 'system/connection_test',
+      promptTemplateVersion: '2',
+      promptTemplateHash,
+      promptTemplateBody,
+      providerOptionsJson: {
+        providerId,
+        model,
+        temperature: 0.1,
+        maxTokens: 8,
+      },
+    },
   };
 }
 
@@ -196,6 +272,7 @@ function dependencies(
   return {
     runtime,
     createAdapter: () => adapter,
+    compileContract: (input) => compiledContract(input.providerId, input.modelId),
     isTauriRuntime: () => isTauriRuntime,
     createId: () => 'operation-1',
   };
@@ -236,8 +313,48 @@ test('tracked pipeline persists safe snapshots, response identity and one artifa
   const persistedTask = JSON.stringify(observations.created);
   assert.equal(persistedTask.includes(settings.apiKey), false);
   assert.equal(persistedTask.includes(settings.baseUrl), false);
+  assert.equal(observations.created?.inputSnapshot.schemaVersion, 2);
+  assert.equal(observations.created?.inputSnapshot.inputType, 'compiled_provider_messages_v1');
+  assert.equal(observations.created?.contextSnapshot.schemaVersion, 2);
+  assert.equal(observations.created?.contextSnapshot.compilerVersion, 'context_compiler_v1');
+  assert.equal(observations.created?.constraintSnapshot.schemaVersion, 2);
+  assert.equal(
+    (observations.created?.constraintSnapshot.payloadJson as Record<string, unknown>)
+      .compilerVersion,
+    'constraint_compiler_v1',
+  );
   assert.equal(observations.created?.constraintSnapshot.providerOptionsJson.providerId, 'deepseek');
   assert.equal(observations.created?.constraintSnapshot.providerOptionsJson.maxTokens, 8);
+});
+
+test('pipeline rejects a compiled contract with changed task or provider identity before persistence', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  let providerCalls = 0;
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute() {
+      providerCalls += 1;
+      return {
+        text: 'OK',
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        durationMs: 1,
+      };
+    },
+  };
+  const injected = dependencies(createRuntime(observations), adapter);
+  injected.compileContract = async () => ({
+    ...await compiledContract('other-provider', 'test-model'),
+    taskType: 'setting_expand',
+  });
+  await assert.rejects(
+    () => executeAiTask(executionInput(), injected),
+    (error: unknown) => error instanceof AiExecutionError
+      && error.code === 'AI_COMPILATION_INPUT_INVALID',
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(observations.created, undefined);
 });
 
 test('commit-unknown replay does not dispatch the provider twice', async () => {

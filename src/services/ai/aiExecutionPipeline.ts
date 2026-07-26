@@ -1,4 +1,8 @@
-import type { AiGenerateRequest, AiSettings } from '../../types/ai';
+import type { AiSettings } from '../../types/ai';
+import type {
+  AiExecutionCompilationInput,
+  CompiledAiExecutionContractV1,
+} from '../../types/aiCompilation';
 import type {
   AiTask,
   AiTaskAttempt,
@@ -9,7 +13,6 @@ import type {
 import type {
   CreateResultArtifactInput,
   ResultArtifactBundle,
-  ResultArtifactType,
 } from '../../types/result-artifact';
 import {
   normalizeAppError,
@@ -38,20 +41,9 @@ export interface ExecuteAiTaskInput {
   novelId: string;
   chapterId?: string;
   draftId?: string;
-  expectedArtifactType: ResultArtifactType;
-  expectedArtifactSchemaVersion?: number;
   targetHintJson?: unknown;
-  request: AiGenerateRequest;
   settings: AiSettings;
-  inputType: string;
-  inputPayloadJson?: unknown;
-  sourceManifestJson?: unknown;
-  compiledContext?: string;
-  compilerVersion?: string;
-  constraintPayloadJson?: unknown;
-  promptTemplateId: string;
-  promptTemplateVersion: string;
-  promptTemplateBody?: string;
+  compilation: AiExecutionCompilationInput;
   parseStructuredPayload?: (text: string) => unknown | undefined;
   signal?: AbortSignal;
 }
@@ -81,6 +73,19 @@ interface RuntimePort {
 export interface AiExecutionDependencies {
   runtime: RuntimePort;
   createAdapter: (settings: AiSettings) => ProviderAdapter;
+  compileContract: (input: {
+    taskType: AiTaskType;
+    scope: {
+      scopeType: CreateAiTaskInput['scopeType'];
+      novelId: string;
+      chapterId?: string;
+      draftId?: string;
+    };
+    compilation: AiExecutionCompilationInput;
+    settings: AiSettings;
+    providerId: string;
+    modelId: string;
+  }) => Promise<CompiledAiExecutionContractV1>;
   isTauriRuntime: () => boolean;
   createId: () => string;
 }
@@ -88,6 +93,12 @@ export interface AiExecutionDependencies {
 const defaultDependencies: AiExecutionDependencies = {
   runtime: aiTaskRuntimeService,
   createAdapter: createProviderAdapter,
+  compileContract: async (input) => {
+    const { compileProductionAiExecution } = await import(
+      './compilation/productionCompilationRegistry'
+    );
+    return compileProductionAiExecution(input);
+  },
   isTauriRuntime: isTauri,
   createId: () => globalThis.crypto?.randomUUID?.()
     ?? `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -209,13 +220,6 @@ function unicodeLength(value: string): number {
   return Array.from(value).length;
 }
 
-function systemMessages(request: AiGenerateRequest): string {
-  return request.messages
-    .filter((message) => message.role === 'system')
-    .map((message) => message.content)
-    .join('\n\n');
-}
-
 function safeStructuredPayload(
   parser: ExecuteAiTaskInput['parseStructuredPayload'],
   text: string,
@@ -321,15 +325,35 @@ async function replayCompletedTask(
 
 async function buildTaskInput(
   input: ExecuteAiTaskInput,
+  contract: CompiledAiExecutionContractV1,
   adapter: ProviderAdapter,
   operationId: string,
 ): Promise<CreateAiTaskInput> {
-  const serializedMessages = JSON.stringify({ messages: input.request.messages });
-  const promptTemplateBody = input.promptTemplateBody ?? systemMessages(input.request);
-  const promptTemplateHash = await requireSha256(promptTemplateBody);
-  const maxTokens = input.request.maxTokens ?? input.settings.maxTokens ?? 8000;
-  const temperature = input.request.temperature ?? input.settings.temperature ?? 0.7;
-  const compiledContext = input.compiledContext ?? systemMessages(input.request);
+  if (contract.contractVersion !== 'compiled_ai_execution_v1'
+    || contract.taskType !== input.taskType
+    || contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId
+    || contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId) {
+    throw new AiExecutionError({
+      code: 'AI_COMPILATION_INPUT_INVALID',
+      message: '编译契约与 Task 或 Provider identity 不一致。',
+      retryable: false,
+    });
+  }
+  const serializedMessages = JSON.stringify({ messages: contract.request.messages });
+  const requestBodyHash = await requireSha256(serializedMessages);
+  const promptTemplateHash = await requireSha256(
+    contract.constraintSnapshot.promptTemplateBody,
+  );
+  const compiledContextHash = await requireSha256(contract.contextSnapshot.compiledContext);
+  if (requestBodyHash !== contract.inputPayloadJson.requestBodyHash
+    || promptTemplateHash !== contract.constraintSnapshot.promptTemplateHash
+    || compiledContextHash !== contract.contextSnapshot.sourceManifestJson.compiledContextHash) {
+    throw new AiExecutionError({
+      code: 'AI_COMPILATION_INPUT_INVALID',
+      message: '编译契约 hash 校验失败。',
+      retryable: false,
+    });
+  }
 
   return {
     operationId,
@@ -339,49 +363,30 @@ async function buildTaskInput(
     chapterId: input.chapterId,
     draftId: input.draftId,
     scopeType: input.scopeType,
-    expectedArtifactType: input.expectedArtifactType,
-    expectedArtifactSchemaVersion: input.expectedArtifactSchemaVersion ?? 1,
+    expectedArtifactType: contract.expectedArtifactType,
+    expectedArtifactSchemaVersion: contract.expectedArtifactSchemaVersion,
     targetHintJson: input.targetHintJson,
     inputSnapshot: {
-      schemaVersion: 1,
-      inputType: input.inputType,
-      payloadJson: {
-        ...(input.inputPayloadJson
-          && typeof input.inputPayloadJson === 'object'
-          && !Array.isArray(input.inputPayloadJson)
-          ? input.inputPayloadJson as Record<string, unknown>
-          : {}),
-        messageCount: input.request.messages.length,
-      },
+      schemaVersion: 2,
+      inputType: contract.inputType,
+      payloadJson: contract.inputPayloadJson,
       body: serializedMessages,
     },
     contextSnapshot: {
-      schemaVersion: 1,
-      sourceManifestJson: input.sourceManifestJson ?? { sources: [] },
-      compiledContext,
-      budgetJson: {
-        messageCount: input.request.messages.length,
-        compiledContextChars: unicodeLength(compiledContext),
-        maxTokens,
-      },
-      compilerVersion: input.compilerVersion ?? 'provider_messages_v1',
+      schemaVersion: contract.contextSnapshot.schemaVersion,
+      sourceManifestJson: contract.contextSnapshot.sourceManifestJson,
+      compiledContext: contract.contextSnapshot.compiledContext,
+      budgetJson: contract.contextSnapshot.budgetJson,
+      compilerVersion: contract.contextSnapshot.compilerVersion,
     },
     constraintSnapshot: {
-      schemaVersion: 1,
-      payloadJson: input.constraintPayloadJson ?? {
-        messageRoles: input.request.messages.map((message) => message.role),
-        expectedArtifactType: input.expectedArtifactType,
-      },
-      promptTemplateId: input.promptTemplateId,
-      promptTemplateVersion: input.promptTemplateVersion,
+      schemaVersion: contract.constraintSnapshot.schemaVersion,
+      payloadJson: contract.constraintSnapshot.payloadJson,
+      promptTemplateId: contract.constraintSnapshot.promptTemplateId,
+      promptTemplateVersion: contract.constraintSnapshot.promptTemplateVersion,
       promptTemplateHash,
-      promptTemplateBody,
-      providerOptionsJson: {
-        providerId: adapter.providerId,
-        model: adapter.modelId,
-        temperature,
-        maxTokens,
-      },
+      promptTemplateBody: contract.constraintSnapshot.promptTemplateBody,
+      providerOptionsJson: contract.constraintSnapshot.providerOptionsJson,
     },
   };
 }
@@ -419,10 +424,38 @@ export async function executeAiTask(
   const adapter = dependencies.createAdapter(input.settings);
   const operationId = input.operationId ?? dependencies.createId();
   const traceId = input.traceId ?? operationId;
+  let contract: CompiledAiExecutionContractV1;
+  try {
+    contract = await dependencies.compileContract({
+      taskType: input.taskType,
+      scope: {
+        scopeType: input.scopeType,
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        draftId: input.draftId,
+      },
+      compilation: input.compilation,
+      settings: input.settings,
+      providerId: adapter.providerId,
+      modelId: adapter.modelId,
+    });
+    if (contract.contractVersion !== 'compiled_ai_execution_v1'
+      || contract.taskType !== input.taskType
+      || contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId
+      || contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId) {
+      throw new AiExecutionError({
+        code: 'AI_COMPILATION_INPUT_INVALID',
+        message: '编译契约与 Task 或 Provider identity 不一致。',
+        retryable: false,
+      });
+    }
+  } catch (error) {
+    throw mapProviderError(error, { traceId, operationId });
+  }
 
   if (!dependencies.isTauriRuntime()) {
     try {
-      const provider = await adapter.execute(input.request, { signal: input.signal });
+      const provider = await adapter.execute(contract.request, { signal: input.signal });
       throwIfAiRequestCancelled(input.signal);
       return {
         persistence: 'ephemeral_browser',
@@ -439,7 +472,7 @@ export async function executeAiTask(
   let attemptId: string | undefined;
   let providerCompleted = false;
   try {
-    const taskInput = await buildTaskInput({ ...input, traceId }, adapter, operationId);
+    const taskInput = await buildTaskInput({ ...input, traceId }, contract, adapter, operationId);
     task = await withCommitReplay(() => dependencies.runtime.create(taskInput));
     const completedReplay = await replayCompletedTask(dependencies.runtime, task);
     if (completedReplay) return completedReplay;
@@ -454,7 +487,7 @@ export async function executeAiTask(
       providerRequestId,
     }));
 
-    const provider = await adapter.execute(input.request, {
+    const provider = await adapter.execute(contract.request, {
       signal: input.signal,
       requestId: providerRequestId,
     });
@@ -485,8 +518,8 @@ export async function executeAiTask(
     const artifactInput: CreateResultArtifactInput = {
       taskId: task.taskId,
       attemptId: providerRequestId,
-      artifactType: input.expectedArtifactType,
-      schemaVersion: input.expectedArtifactSchemaVersion ?? 1,
+      artifactType: contract.expectedArtifactType,
+      schemaVersion: contract.expectedArtifactSchemaVersion,
       rawContent: provider.text,
       structuredPayloadJson,
     };

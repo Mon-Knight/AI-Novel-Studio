@@ -2,13 +2,27 @@
  * AI Novel Studio - AI setting expansion service.
  */
 import { aiSettingsService } from './aiClient';
-import { buildSettingExpandPrompt } from './promptBuilder';
 import { executeAiTask } from './aiExecutionPipeline';
 import { extractJsonObject } from './jsonUtils';
+import type { AiContextSourceInput, AiContextSourceType } from '../../types/aiCompilation';
+import { chapterRepository } from '../database/chapterRepository';
 import { novelRepository } from '../database/novelRepository';
 import { settingRepository } from '../database/settingRepository';
 import { placementRuntimeService } from '../placements/placementRuntimeService';
 import type { PlacementBundle } from '../../types/placement';
+
+function compareStableText(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function compareCreatedIdentity(
+  left: { createdAt: string; id: string },
+  right: { createdAt: string; id: string },
+): number {
+  return compareStableText(left.createdAt, right.createdAt)
+    || compareStableText(left.id, right.id);
+}
 
 export interface SettingSuggestion {
   name: string;
@@ -46,56 +60,125 @@ export const settingExpandService = {
     signal?: AbortSignal;
   }): Promise<SettingSuggestion[]> {
     const settings = aiSettingsService.getSettings();
-    const [novel, worldSettings, ruleSystems] = await Promise.all([
+    const [novel, worldSettings, ruleSystems, chapter] = await Promise.all([
       novelRepository.getById(input.novelId),
       settingRepository.getWorldSettings(input.novelId).catch(() => []),
       settingRepository.getRuleSystems(input.novelId).catch(() => []),
+      input.chapterId
+        ? chapterRepository.getById(input.chapterId)
+        : Promise.resolve(null),
     ]);
+    if (!novel) throw new Error('目标作品不存在，无法编译设定候选上下文。');
+    if (input.chapterId && (!chapter || chapter.novelId !== input.novelId)) {
+      throw new Error('目标章节不存在或不属于当前作品。');
+    }
 
-    const activeWorld = worldSettings.find((item) => item.isActive) || worldSettings[0];
-    const activeRules = ruleSystems.filter((item) => item.isActive);
-    const request = buildSettingExpandPrompt({
-      novelTitle: novel?.title || '未命名作品',
-      novelGenre: novel?.genre,
-      worldBackground: activeWorld?.content?.slice(0, 1200),
-      ruleSystems: activeRules.map((item) => `《${item.title}》${item.content}`).join('\n').slice(0, 2000),
-      chapterTitle: input.chapterTitle || '当前章节',
-      chapterOutline: input.chapterOutline,
+    const orderedWorldSettings = [...worldSettings].sort(compareCreatedIdentity);
+    const activeWorld = orderedWorldSettings.find((item) => item.isActive)
+      || orderedWorldSettings[0];
+    const activeRules = ruleSystems
+      .filter((item) => item.isActive)
+      .sort(compareCreatedIdentity);
+    const sources: AiContextSourceInput[] = [
+      {
+        sourceType: 'novel',
+        sourceId: novel.id,
+        sourceVersion: novel.updatedAt,
+        origin: 'sqlite',
+        label: '作品基础',
+        content: [
+          `作品：《${novel.title}》`,
+          novel.genre ? `题材：${novel.genre}` : '',
+          novel.description ? `简介：${novel.description}` : '',
+          novel.worldBackground ? `世界背景：${novel.worldBackground}` : '',
+        ].filter(Boolean).join('\n'),
+        order: 10,
+        priority: 100,
+        required: true,
+        maxTokens: 2_000,
+      },
+    ];
+    if (activeWorld) {
+      sources.push({
+        sourceType: 'world_setting',
+        sourceId: activeWorld.id,
+        sourceVersion: activeWorld.updatedAt,
+        origin: 'sqlite',
+        label: `世界设定：${activeWorld.title}`,
+        content: activeWorld.content,
+        order: 20,
+        priority: 90,
+        maxTokens: 2_000,
+      });
+    }
+    activeRules.forEach((rule, index) => {
+      sources.push({
+        sourceType: 'rule_system',
+        sourceId: rule.id,
+        sourceVersion: rule.updatedAt,
+        origin: 'sqlite',
+        label: `规则体系：${rule.title}`,
+        content: [
+          rule.category ? `分类：${rule.category}` : '',
+          rule.content,
+          rule.forbiddenRules ? `禁止规则：${rule.forbiddenRules}` : '',
+        ].filter(Boolean).join('\n'),
+        order: 30 + index,
+        priority: 80,
+        maxTokens: 1_500,
+      });
     });
-
-    const systemPrompt = request.messages
-      .filter((message) => message.role === 'system')
-      .map((message) => message.content)
-      .join('\n\n');
+    if (chapter) {
+      sources.push({
+        sourceType: 'chapter',
+        sourceId: chapter.id,
+        sourceVersion: chapter.updatedAt,
+        origin: 'sqlite',
+        label: `当前章节：${chapter.title}`,
+        content: [
+          chapter.outline ? `章节大纲：${chapter.outline}` : '',
+          chapter.goal ? `章节目标：${chapter.goal}` : '',
+        ].filter(Boolean).join('\n') || `章节：${chapter.title}`,
+        order: 50,
+        priority: 95,
+        maxTokens: 2_000,
+      });
+    } else if (input.chapterTitle || input.chapterOutline) {
+      sources.push({
+        sourceType: 'request_context',
+        sourceId: 'setting_expand_request',
+        sourceVersion: '1',
+        origin: 'request',
+        label: '本次章节请求',
+        content: [
+          input.chapterTitle ? `当前章节：${input.chapterTitle}` : '',
+          input.chapterOutline ? `章节大纲：${input.chapterOutline}` : '',
+        ].filter(Boolean).join('\n'),
+        order: 50,
+        priority: 95,
+        maxTokens: 2_000,
+      });
+    }
+    const missingSourceTypes: AiContextSourceType[] = [
+      ...(!activeWorld ? ['world_setting' as const] : []),
+      ...(activeRules.length === 0 ? ['rule_system' as const] : []),
+      ...(!chapter && !input.chapterTitle && !input.chapterOutline ? ['chapter' as const] : []),
+    ];
     const execution = await executeAiTask({
       taskType: 'setting_expand',
       scopeType: input.chapterId ? 'chapter' : 'novel',
       novelId: input.novelId,
       chapterId: input.chapterId,
-      expectedArtifactType: 'setting_candidates',
-      request,
       settings,
-      inputType: 'setting_expand_messages_v1',
-      inputPayloadJson: {
-        chapterId: input.chapterId,
-        chapterTitle: input.chapterTitle,
+      compilation: {
+        sources,
+        missingSourceTypes,
+        taskInput: {
+          chapterId: input.chapterId,
+          hasRequestChapterTitle: Boolean(input.chapterTitle),
+          hasRequestChapterOutline: Boolean(input.chapterOutline),
+        },
       },
-      sourceManifestJson: {
-        sources: [
-          { type: 'novel', id: novel?.id ?? input.novelId },
-          ...worldSettings.map((item) => ({ type: 'world_setting', id: item.id })),
-          ...activeRules.map((item) => ({ type: 'rule_system', id: item.id })),
-        ],
-      },
-      compiledContext: systemPrompt,
-      compilerVersion: 'setting_expand_prompt_v1',
-      constraintPayloadJson: {
-        responseSchema: 'setting_candidates_v1',
-        candidateOnly: true,
-      },
-      promptTemplateId: 'setting/expand',
-      promptTemplateVersion: '1',
-      promptTemplateBody: systemPrompt,
       parseStructuredPayload: parseSettingCandidatePayload,
       signal: input.signal,
     });

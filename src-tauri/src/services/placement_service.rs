@@ -761,7 +761,7 @@ mod tests {
     use super::*;
     use crate::repositories::large_text_repository;
     use crate::services::ai_task_service::{
-        self, tests::connection, tests::system_task_input, ClaimAiTaskAttemptInput,
+        self, tests::connection, tests::formal_setting_task_input, ClaimAiTaskAttemptInput,
     };
     use crate::services::artifact_service::CreateResultArtifactInput;
     use rusqlite::params;
@@ -797,10 +797,7 @@ mod tests {
             ]
         });
         let raw = ai_fact_security::canonical_json(&structured)?;
-        let mut task_input = system_task_input(operation_id, "setting_candidates");
-        task_input.task_type = "setting_expand".to_string();
-        task_input.novel_id = novel_id.to_string();
-        task_input.scope_type = "novel".to_string();
+        let mut task_input = formal_setting_task_input(operation_id, novel_id);
         task_input.target_hint_json = Some(serde_json::json!({"candidateOnly": true}));
         let task = ai_task_service::create_task(connection, task_input)?;
         let queued = ai_task_service::queue_attempt(connection, &task.task_id)?;

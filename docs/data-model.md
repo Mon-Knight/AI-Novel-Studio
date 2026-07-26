@@ -2327,3 +2327,31 @@ awaiting_confirmation → applying → applied
 相同 `planId + operationId + expectedPlanHash` 重放 applied 计划时必须重新读取目标和 Link，并校验目标完整 hash。目标被修改、删除或链接不一致时返回 `PLACEMENT_TARGET_CHANGED`，不能返回陈旧成功。提交状态未知时前端只以相同身份重放，不生成新 operationId。
 
 详细契约见 [`architecture/safe-apply.md`](architecture/safe-apply.md)。
+
+---
+
+# 31. v2.4.0 编译 Snapshot 协议
+
+v2.4.0 不新增表或 migration，继续复用 v2.3.0 三类不可变 Snapshot；正式连接测试和设定补充把 `schemaVersion` 提升为 2，以协议字段区分旧 Snapshot。
+
+## 31.1 Input Snapshot schema 2
+
+`inputType = compiled_provider_messages_v1`，大文本保存实际派发的 `{ messages }`。payload 使用 `compiled_ai_request_v1`，冻结 taskType、messageCount、requestBodyHash、compilationHash 与不含凭据的 taskInput。API Key、Base URL 和 Provider raw response 禁止进入 Snapshot。
+
+## 31.2 Context Snapshot schema 2
+
+`compilerVersion = context_compiler_v1`。`context_manifest_v1` 为每个来源保存 type/id/version/origin、稳定 ordinal、原文 hash/长度/token、included/truncated/omitted 状态及已包含片段 hash；`context_budget_v1` 保存模型窗口、输出保留、固定消息、可用 Context 和最终长度统计。
+
+估算器固定为 `utf8_bytes_div3_v1`。完整 compiled context 作为既有不可变大文本保存，manifest 中的 compiledContextHash 必须与之相同。设定补充至少包含与 Task scope 一致且已进入编译结果的 Novel 来源；chapter scope 还必须包含对应 Chapter 来源。
+
+## 31.3 Constraint Snapshot schema 2
+
+`constraint_compiler_v1` payload 冻结 taskType、预期 Artifact type/schema、response schema、业务 constraints/hash 与 Tool Registry policy。Prompt 模板通过 id/version/hash 与独立大文本保存，Provider options 只包含 provider/model/temperature/maxTokens。
+
+当前 `tool_registry_v1` hash 为 `c03ae58009cfb47b84f85dbb907b427cd1d659149af0a6133ec6898e8de4a0a5`，两个已迁移生产任务的 `allowedTools=[]`。Registry manifest 本身由代码定义并按稳定工具 identity 排序，本版本不新增数据库表存储 Registry。
+
+## 31.4 compilationHash 与后端验证
+
+`compilationHash` canonical 覆盖 scope、预期 Artifact、requestBodyHash、taskInput、Context manifest/budget、Constraint payload、Prompt hash 和 Provider options。Rust 在 Task/Snapshot 事务开始前复算该 hash，并验证固定 Prompt hash、实际 Provider messages、预算、来源类型、Registry identity 与任务策略；任何不一致都不得创建部分执行事实。
+
+详细协议见 [`architecture/context-constraint-tool-registry.md`](architecture/context-constraint-tool-registry.md)。

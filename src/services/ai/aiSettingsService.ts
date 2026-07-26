@@ -4,7 +4,6 @@
 import { lsGet, lsSet } from '../database/db';
 import type { AiSettings } from '../../types/ai';
 import { validateRealAiConfig } from './realAiClient';
-import { buildConnectionTestPrompt } from './promptBuilder';
 import { executeAiTask } from './aiExecutionPipeline';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
@@ -83,27 +82,15 @@ export const aiSettingsService = {
     const normalized = migrateSettings({ ...settings, runtimeMode: 'api' });
     try {
       validateApiSettings(normalized);
-      const request = buildConnectionTestPrompt();
-      const systemPrompt = request.messages
-        .filter((message) => message.role === 'system')
-        .map((message) => message.content)
-        .join('\n\n');
       const result = await executeAiTask({
         taskType: 'connection_test',
         scopeType: 'system',
         novelId: 'system',
-        expectedArtifactType: 'generic_text',
-        request,
         settings: normalized,
-        inputType: 'connection_test_messages_v1',
-        inputPayloadJson: { purpose: 'settings_connection_test' },
-        sourceManifestJson: { sources: [] },
-        compiledContext: systemPrompt,
-        compilerVersion: 'connection_test_v1',
-        constraintPayloadJson: { expectedExactText: 'OK' },
-        promptTemplateId: 'system/connection_test',
-        promptTemplateVersion: '1',
-        promptTemplateBody: systemPrompt,
+        compilation: {
+          sources: [],
+          taskInput: { purpose: 'settings_connection_test' },
+        },
       });
       const valid = result.text.trim() === 'OK'
         && result.artifactBundle?.artifact.processingStatus !== 'invalid';

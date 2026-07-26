@@ -269,4 +269,25 @@ Proposal 与 Plan 内容由 canonical SHA-256 绑定且不可原地修改。目�
 
 ---
 
+## 15. v2.4.0 Context / Constraint Compiler 与 Tool Registry
+
+首批生产入口改为从来源事实编译执行契约：
+
+```text
+SQLite / request 来源
+→ Context Compiler（manifest + budget + compiled context）
+→ Constraint Compiler（template + constraints + provider + tool policy）
+→ compiled_ai_execution_v1（Provider messages + request/compilation hash）
+→ Rust 创建 Task 前权威复算
+→ schema v2 Input / Context / Constraint Snapshot
+```
+
+Context 使用固定 `utf8_bytes_div3_v1` 估算器、稳定代码点顺序和确定性截断。Constraint 将预期 Artifact、response schema、Prompt hash、Provider identity 与 `tool_registry_v1` hash 冻结。连接测试与设定补充的模板正文独立保存在 `prompts/`，Context 不再混入模板 Snapshot。
+
+Tool Registry 当前注册八个真实只读/本地验证工具。每个工具具有版本、input/output schema、权限、novel/chapter/draft scope、超时、sideEffect 与 confirmation policy；生产 Provider 策略本版仍为 `allowedTools=[]`。Rust 冻结当前 Registry hash 并拒绝通过改写 Artifact 契约绕过正式编译。
+
+完整设计见 [`architecture/context-constraint-tool-registry.md`](architecture/context-constraint-tool-registry.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**

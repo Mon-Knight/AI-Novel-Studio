@@ -25,15 +25,15 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.3.2**
+**当前版本：v2.4.0**
 
-**阶段：Safe Apply — AI 候选到正式业务对象的受控落地**
+**阶段：Compiler & Tool Registry — 可复现 AI 请求与受控工具边界**
 
-v2.3.2 为 `setting_candidates` Artifact 建立不可变 `PlacementProposal`、单目标 `ApplyPlan` 和 `ArtifactTargetLink`。候选生成后只准备应用计划；只有用户点击确认，桌面端才会在一个 SQLite 事务中创建一条正式世界设定、来源链接并将计划标记为 applied。
+v2.4.0 建立正式 `Context Compiler`、`Constraint Compiler` 与版本化 `Tool Registry`。连接测试和“设定补充”不再由调用方拼接 Provider messages 或伪造 Snapshot，而是从稳定来源、预算、Prompt 模板、Provider identity 和工具策略编译出同一份可验证执行契约。
 
-应用前校验 Artifact、候选、Proposal、Plan 和目标不存在的 version/hash 前置条件；相同 operationId 重放返回首次目标，不重复写入，目标碰撞或已应用目标变化时失败关闭。浏览器临时候选不能伪造持久 Proposal/Plan，也不显示正式采用按钮。
+桌面 Rust 在创建 Task 前复算 Context/Constraint/Input hash、预算、模板、消息与 Registry identity；当前两个生产入口固定 `allowedTools=[]`。Registry 注册八个真实只读/本地验证工具，冻结 input/output schema、权限、scope、超时与副作用策略；未来副作用工具必须由权威持久计划复验用户确认，不能信任调用方自报。
 
-本版本只开放“创建一条世界设定”这一种用户确认副作用，不开放 Planner、Memory、自动续跑、Multi-Agent 或 Agent 自主写入；其他生产 AI 入口保持原样。
+本版本不新增数据库表，不开放 Planner、Memory、自动续跑、Multi-Agent 或 Agent 自主工具调用；v2.3.2 Safe Apply 的单目标用户确认边界保持不变，其他生产 AI 入口仍按后续独立版本迁移。
 
 ---
 
@@ -57,6 +57,8 @@ v2.3.2 为 `setting_candidates` Artifact 建立不可变 `PlacementProposal`、�
 - **统一离开保护**：章节操作、Hash 路由、历史导航、程序导航和 Tauri 关闭统一提供保存、放弃、取消决策并防重入。
 - **可追踪基础设施**：正式 `schema_migrations` 账本、checksum 校验、结构化 `AppError`、`traceId` 与脱敏本地日志。
 - **AI 候选安全应用**：设定候选通过不可变 Proposal/Plan、显式用户确认、目标 version/hash、单事务副作用和 Artifact 来源链接进入正式设定库。
+- **正式 Context / Constraint Compiler**：按稳定来源身份、固定 UTF-8 预算、Prompt hash、Provider identity 和 canonical compilation hash 生成可复现请求，并由 Rust 在 Task 创建前失败关闭验证。
+- **版本化 Tool Registry**：八个真实读取/本地验证工具具备冻结 schema、权限、novel/chapter/draft scope、超时和副作用声明；当前生产 Provider 请求尚不允许模型调用工具。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。

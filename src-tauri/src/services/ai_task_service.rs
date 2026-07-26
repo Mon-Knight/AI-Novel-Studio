@@ -12,6 +12,9 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+const PRODUCTION_TOOL_REGISTRY_HASH: &str =
+    "c03ae58009cfb47b84f85dbb907b427cd1d659149af0a6133ec6898e8de4a0a5";
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputSnapshotInput {
@@ -198,6 +201,447 @@ fn request_hash(
     }))
 }
 
+fn compilation_error(message: impl Into<String>) -> AppError {
+    AppError::new(codes::AI_COMPILATION_INPUT_INVALID, message.into(), false)
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, AppError> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error(format!("编译契约缺少字符串字段 {key}")))
+}
+
+fn required_i64(value: &Value, key: &str) -> Result<i64, AppError> {
+    value
+        .get(key)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| compilation_error(format!("编译契约缺少整数字段 {key}")))
+}
+
+fn estimated_tokens(text: &str) -> i64 {
+    if text.is_empty() {
+        0
+    } else {
+        ((text.len() + 2) / 3) as i64
+    }
+}
+
+fn requires_formal_compilation(input: &CreateAiTaskInput) -> bool {
+    #[cfg(test)]
+    if input.input_snapshot.input_type == "connection_test_input"
+        && input.context_snapshot.compiler_version == "m1-test-v1"
+    {
+        // Legacy M1 unit fixtures exercise generic Task/Artifact state machines rather than a
+        // production Provider entry. This branch is absent from release builds.
+        return false;
+    }
+    matches!(
+        input.task_type.as_str(),
+        "connection_test" | "setting_expand"
+    )
+}
+
+fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
+    let context = &input.context_snapshot;
+    if context.schema_version != 2 || context.compiler_version != "context_compiler_v1" {
+        return Err(compilation_error(
+            "生产 AI Task 必须使用 schema v2 context_compiler_v1",
+        ));
+    }
+    let manifest = context
+        .source_manifest_json
+        .as_object()
+        .ok_or_else(|| compilation_error("Context source manifest 必须是对象"))?;
+    if manifest.get("contractVersion").and_then(Value::as_str) != Some("context_manifest_v1")
+        || manifest.get("compilerVersion").and_then(Value::as_str) != Some("context_compiler_v1")
+        || manifest.get("tokenEstimator").and_then(Value::as_str) != Some("utf8_bytes_div3_v1")
+    {
+        return Err(compilation_error("Context source manifest identity 无效"));
+    }
+    let compiled_hash = manifest
+        .get("compiledContextHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Context manifest 缺少 compiledContextHash"))?;
+    if !valid_sha256(compiled_hash)
+        || large_text_repository::sha256(&context.compiled_context) != compiled_hash
+    {
+        return Err(compilation_error(
+            "compiledContextHash 与完整编译上下文不一致",
+        ));
+    }
+    let sources = manifest
+        .get("sources")
+        .and_then(Value::as_array)
+        .ok_or_else(|| compilation_error("Context manifest sources 必须是数组"))?;
+    let missing = manifest
+        .get("missingSourceTypes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| compilation_error("Context manifest missingSourceTypes 必须是数组"))?;
+    if sources.len() > 256 || missing.len() > 32 {
+        return Err(compilation_error("Context manifest 来源数量超过限制"));
+    }
+    for source_type in missing {
+        let source_type = source_type
+            .as_str()
+            .ok_or_else(|| compilation_error("missingSourceTypes 必须只包含字符串"))?;
+        if input.task_type == "connection_test"
+            || !matches!(
+                source_type,
+                "novel" | "chapter" | "world_setting" | "rule_system" | "request_context"
+            )
+        {
+            return Err(compilation_error("missingSourceTypes 包含未授权类型"));
+        }
+    }
+    if input.task_type == "connection_test" {
+        if !sources.is_empty() || !context.compiled_context.is_empty() {
+            return Err(compilation_error("连接测试不得包含业务上下文来源"));
+        }
+    }
+
+    let mut included_count = 0_i64;
+    let mut truncated_count = 0_i64;
+    let mut omitted_count = 0_i64;
+    let mut has_novel = false;
+    let mut has_chapter = false;
+    for (index, source) in sources.iter().enumerate() {
+        let source_type = required_str(source, "sourceType")?;
+        let source_id = required_str(source, "sourceId")?;
+        let source_version = required_str(source, "sourceVersion")?;
+        let origin = required_str(source, "origin")?;
+        let status = required_str(source, "status")?;
+        let content_hash = required_str(source, "contentHash")?;
+        ai_fact_security::validate_identifier(source_id, "Context sourceId", 160)?;
+        ai_fact_security::validate_identifier(source_version, "Context sourceVersion", 96)?;
+        if required_i64(source, "ordinal")? != index as i64
+            || !matches!(origin, "sqlite" | "request" | "system")
+            || !valid_sha256(content_hash)
+        {
+            return Err(compilation_error("Context source identity 或 hash 无效"));
+        }
+        for field in [
+            "order",
+            "priority",
+            "originalChars",
+            "originalBytes",
+            "originalTokens",
+            "includedChars",
+            "includedBytes",
+            "includedTokens",
+        ] {
+            if required_i64(source, field)? < 0 {
+                return Err(compilation_error(format!("Context source {field} 无效")));
+            }
+        }
+        match status {
+            "included" => included_count += 1,
+            "truncated" => truncated_count += 1,
+            "omitted_empty" | "omitted_budget" => omitted_count += 1,
+            _ => return Err(compilation_error("Context source status 无效")),
+        }
+        if matches!(status, "included" | "truncated") {
+            let included_hash = required_str(source, "includedHash")?;
+            if !valid_sha256(included_hash) || required_i64(source, "includedChars")? < 1 {
+                return Err(compilation_error(
+                    "已包含 Context source 缺少有效 includedHash",
+                ));
+            }
+        }
+        if input.task_type == "setting_expand" {
+            if !matches!(
+                source_type,
+                "novel" | "chapter" | "world_setting" | "rule_system" | "request_context"
+            ) {
+                return Err(compilation_error("设定补充包含未授权 Context source type"));
+            }
+            if source_type == "novel"
+                && source_id == input.novel_id
+                && matches!(status, "included" | "truncated")
+            {
+                has_novel = true;
+            }
+            if source_type == "chapter"
+                && input.chapter_id.as_deref() == Some(source_id)
+                && matches!(status, "included" | "truncated")
+            {
+                has_chapter = true;
+            }
+        }
+    }
+    if input.task_type == "setting_expand"
+        && (!has_novel || (input.scope_type == "chapter" && !has_chapter))
+    {
+        return Err(AppError::new(
+            codes::AI_CONTEXT_SOURCE_REQUIRED,
+            "设定补充缺少作品或章节必需来源",
+            false,
+        ));
+    }
+
+    let budget = context
+        .budget_json
+        .as_object()
+        .ok_or_else(|| compilation_error("Context budget 必须是对象"))?;
+    if budget.get("contractVersion").and_then(Value::as_str) != Some("context_budget_v1")
+        || budget.get("tokenEstimator").and_then(Value::as_str) != Some("utf8_bytes_div3_v1")
+    {
+        return Err(compilation_error("Context budget identity 无效"));
+    }
+    let model_tokens = required_i64(&context.budget_json, "modelContextTokens")?;
+    let output_tokens = required_i64(&context.budget_json, "reservedOutputTokens")?;
+    let fixed_tokens = required_i64(&context.budget_json, "fixedMessageTokens")?;
+    let available_tokens = required_i64(&context.budget_json, "availableContextTokens")?;
+    let compiled_tokens = required_i64(&context.budget_json, "compiledContextTokens")?;
+    if model_tokens < 128
+        || output_tokens < 1
+        || fixed_tokens < 0
+        || available_tokens != model_tokens - output_tokens - fixed_tokens
+        || compiled_tokens != estimated_tokens(&context.compiled_context)
+        || compiled_tokens > available_tokens
+        || required_i64(&context.budget_json, "compiledContextChars")?
+            != context.compiled_context.chars().count() as i64
+        || required_i64(&context.budget_json, "compiledContextBytes")?
+            != context.compiled_context.len() as i64
+        || required_i64(&context.budget_json, "includedSourceCount")? != included_count
+        || required_i64(&context.budget_json, "truncatedSourceCount")? != truncated_count
+        || required_i64(&context.budget_json, "omittedSourceCount")? != omitted_count
+    {
+        return Err(AppError::new(
+            codes::AI_CONTEXT_BUDGET_EXCEEDED,
+            "Context budget 与编译结果不一致",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError> {
+    let expected_artifact_contract = match input.task_type.as_str() {
+        "connection_test" => ("generic_text", 1),
+        "setting_expand" => ("setting_candidates", 1),
+        _ => return Err(compilation_error("任务没有正式 Constraint 编译策略")),
+    };
+    if input.expected_artifact_type != expected_artifact_contract.0
+        || input.expected_artifact_schema_version != expected_artifact_contract.1
+    {
+        return Err(AppError::new(
+            codes::AI_CONSTRAINT_POLICY_INVALID,
+            "生产 AI Task 的 Artifact 契约与正式编译策略不一致",
+            false,
+        ));
+    }
+    let constraint = &input.constraint_snapshot;
+    if constraint.schema_version != 2 {
+        return Err(compilation_error(
+            "生产 AI Task 必须使用 schema v2 constraint_compiler_v1",
+        ));
+    }
+    let payload = constraint
+        .payload_json
+        .as_object()
+        .ok_or_else(|| compilation_error("Constraint payload 必须是对象"))?;
+    if payload.get("contractVersion").and_then(Value::as_str) != Some("constraint_payload_v1")
+        || payload.get("compilerVersion").and_then(Value::as_str) != Some("constraint_compiler_v1")
+        || payload.get("taskType").and_then(Value::as_str) != Some(input.task_type.as_str())
+    {
+        return Err(compilation_error("Constraint compiler identity 无效"));
+    }
+    let expected = payload
+        .get("expectedArtifact")
+        .and_then(Value::as_object)
+        .ok_or_else(|| compilation_error("Constraint 缺少 expectedArtifact"))?;
+    if expected.get("type").and_then(Value::as_str) != Some(input.expected_artifact_type.as_str())
+        || expected.get("schemaVersion").and_then(Value::as_i64)
+            != Some(input.expected_artifact_schema_version)
+    {
+        return Err(compilation_error("Constraint Artifact 契约与 Task 不一致"));
+    }
+    let constraints = payload
+        .get("constraints")
+        .ok_or_else(|| compilation_error("Constraint 缺少 constraints"))?;
+    let constraints_hash = payload
+        .get("constraintsHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Constraint 缺少 constraintsHash"))?;
+    if !valid_sha256(constraints_hash) || canonical_hash(constraints)? != constraints_hash {
+        return Err(compilation_error("constraintsHash 无效"));
+    }
+    let tool_policy = payload
+        .get("toolPolicy")
+        .and_then(Value::as_object)
+        .ok_or_else(|| compilation_error("Constraint 缺少 Tool Registry policy"))?;
+    let registry_hash = tool_policy
+        .get("registryHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Tool Registry hash 缺失"))?;
+    let allowed_tools = tool_policy
+        .get("allowedTools")
+        .and_then(Value::as_array)
+        .ok_or_else(|| compilation_error("allowedTools 必须是数组"))?;
+    if tool_policy.get("registryVersion").and_then(Value::as_str) != Some("tool_registry_v1")
+        || !valid_sha256(registry_hash)
+        || registry_hash != PRODUCTION_TOOL_REGISTRY_HASH
+        || !allowed_tools.is_empty()
+    {
+        return Err(AppError::new(
+            codes::AI_CONSTRAINT_POLICY_INVALID,
+            "当前 Provider 任务的 Tool Registry policy 无效",
+            false,
+        ));
+    }
+    let provider_options = constraint
+        .provider_options_json
+        .as_object()
+        .ok_or_else(|| compilation_error("Provider options 必须是对象"))?;
+    let max_tokens = provider_options
+        .get("maxTokens")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| compilation_error("Provider maxTokens 无效"))?;
+    let expected_template = if input.task_type == "connection_test" {
+        if payload.get("responseSchema").and_then(Value::as_str) != Some("exact_text_ok_v1")
+            || constraints.get("exactText").and_then(Value::as_str) != Some("OK")
+            || max_tokens != 8
+        {
+            return Err(compilation_error("连接测试 Constraint policy 无效"));
+        }
+        (
+            "system/connection_test",
+            "2",
+            "请只回复 OK。",
+            "5952458e7c12ff1ef5e0a2998396ad3e476858d63a5e0496eefe41313900c4f9",
+        )
+    } else {
+        if payload.get("responseSchema").and_then(Value::as_str) != Some("setting_candidates_v1")
+            || constraints.get("candidateOnly").and_then(Value::as_bool) != Some(true)
+            || constraints
+                .get("mayWriteBusinessData")
+                .and_then(Value::as_bool)
+                != Some(false)
+            || constraints
+                .get("requireExplicitApplyConfirmation")
+                .and_then(Value::as_bool)
+                != Some(true)
+            || max_tokens != 5_000
+        {
+            return Err(compilation_error("设定补充 Constraint policy 无效"));
+        }
+        (
+            "setting/expand",
+            "2",
+            "请为当前章节补充相关设定候选。",
+            "39cc6fa2c4c05076fd01b4fff4e8a33c61273191e697e2553d7b3ac415331c80",
+        )
+    };
+    if constraint.prompt_template_id != expected_template.0
+        || constraint.prompt_template_version != expected_template.1
+        || constraint.prompt_template_hash != expected_template.3
+        || large_text_repository::sha256(&constraint.prompt_template_body) != expected_template.3
+    {
+        return Err(compilation_error("Prompt template identity 无效"));
+    }
+
+    let input_body: Value = serde_json::from_str(&input.input_snapshot.body)
+        .map_err(|_| compilation_error("Input body 不是有效 Provider messages JSON"))?;
+    let messages = input_body
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| compilation_error("Input body 缺少 messages"))?;
+    if messages.len() != 2
+        || messages[0].get("role").and_then(Value::as_str) != Some("system")
+        || messages[1].get("role").and_then(Value::as_str) != Some("user")
+        || messages[1].get("content").and_then(Value::as_str) != Some(expected_template.2)
+    {
+        return Err(compilation_error("Provider messages 与编译策略不一致"));
+    }
+    let expected_system = if input.context_snapshot.compiled_context.is_empty() {
+        constraint.prompt_template_body.clone()
+    } else {
+        format!(
+            "{}\n\n【编译上下文】\n{}",
+            constraint.prompt_template_body, input.context_snapshot.compiled_context
+        )
+    };
+    if messages[0].get("content").and_then(Value::as_str) != Some(expected_system.as_str()) {
+        return Err(compilation_error(
+            "Provider system message 不等于模板与编译上下文",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_formal_input_and_hash(input: &CreateAiTaskInput) -> Result<(), AppError> {
+    let snapshot = &input.input_snapshot;
+    let payload = snapshot
+        .payload_json
+        .as_object()
+        .ok_or_else(|| compilation_error("Input payload 必须是对象"))?;
+    if snapshot.schema_version != 2
+        || snapshot.input_type != "compiled_provider_messages_v1"
+        || payload.get("contractVersion").and_then(Value::as_str) != Some("compiled_ai_request_v1")
+        || payload.get("taskType").and_then(Value::as_str) != Some(input.task_type.as_str())
+        || payload.get("messageCount").and_then(Value::as_i64) != Some(2)
+    {
+        return Err(compilation_error("Input compiler identity 无效"));
+    }
+    let request_body_hash = payload
+        .get("requestBodyHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Input payload 缺少 requestBodyHash"))?;
+    let compilation_hash = payload
+        .get("compilationHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Input payload 缺少 compilationHash"))?;
+    let task_input = payload
+        .get("taskInput")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| compilation_error("Input payload taskInput 必须是对象"))?;
+    if !valid_sha256(request_body_hash)
+        || large_text_repository::sha256(&snapshot.body) != request_body_hash
+        || !valid_sha256(compilation_hash)
+    {
+        return Err(compilation_error(
+            "Input request body 或 compilation hash 无效",
+        ));
+    }
+    let actual_compilation_hash = canonical_hash(&serde_json::json!({
+        "contractVersion": "compiled_ai_execution_v1",
+        "taskType": input.task_type,
+        "scope": {
+            "scopeType": input.scope_type,
+            "novelId": input.novel_id,
+            "chapterId": input.chapter_id,
+            "draftId": input.draft_id,
+        },
+        "expectedArtifactType": input.expected_artifact_type,
+        "expectedArtifactSchemaVersion": input.expected_artifact_schema_version,
+        "requestBodyHash": request_body_hash,
+        "taskInput": task_input,
+        "contextManifest": input.context_snapshot.source_manifest_json,
+        "contextBudget": input.context_snapshot.budget_json,
+        "constraintPayload": input.constraint_snapshot.payload_json,
+        "promptTemplateHash": input.constraint_snapshot.prompt_template_hash,
+        "providerOptions": input.constraint_snapshot.provider_options_json,
+    }))?;
+    if actual_compilation_hash != compilation_hash {
+        return Err(compilation_error("compilationHash 与冻结编译契约不一致"));
+    }
+    Ok(())
+}
+
+fn validate_formal_compilation(input: &CreateAiTaskInput) -> Result<(), AppError> {
+    validate_formal_context(input)?;
+    validate_formal_constraint(input)?;
+    validate_formal_input_and_hash(input)
+}
+
 fn validate_create_input(input: &CreateAiTaskInput) -> Result<(), AppError> {
     ai_fact_security::validate_identifier(&input.operation_id, "operationId", 160)?;
     if input
@@ -325,6 +769,9 @@ fn validate_create_input(input: &CreateAiTaskInput) -> Result<(), AppError> {
         &input.constraint_snapshot.prompt_template_body,
         "Prompt 模板",
     )?;
+    if requires_formal_compilation(input) {
+        validate_formal_compilation(input)?;
+    }
     Ok(())
 }
 
@@ -1275,6 +1722,380 @@ pub(crate) mod tests {
                 provider_options_json: serde_json::json!({"providerId": "mock", "model": "mock-v1", "maxTokens": 32}),
             },
         }
+    }
+
+    pub(crate) fn formal_setting_task_input(
+        operation_id: &str,
+        novel_id: &str,
+    ) -> CreateAiTaskInput {
+        let template = include_str!("../../../prompts/setting_expand.md")
+            .replace("\r\n", "\n")
+            .trim()
+            .to_string();
+        let source_content = "作品：《Safe Apply 测试》";
+        let compiled_context = format!("## 作品基础\n{source_content}");
+        let source_hash = large_text_repository::sha256(source_content);
+        let compiled_hash = large_text_repository::sha256(&compiled_context);
+        let constraints = serde_json::json!({
+            "candidateOnly": true,
+            "minimumCandidates": 3,
+            "maximumCandidates": 8,
+            "mayWriteBusinessData": false,
+            "requireExplicitApplyConfirmation": true,
+        });
+        let constraint_payload = serde_json::json!({
+            "contractVersion": "constraint_payload_v1",
+            "compilerVersion": "constraint_compiler_v1",
+            "taskType": "setting_expand",
+            "expectedArtifact": { "type": "setting_candidates", "schemaVersion": 1 },
+            "responseSchema": "setting_candidates_v1",
+            "constraints": constraints,
+            "constraintsHash": canonical_hash(&constraints).expect("test constraints hash"),
+            "toolPolicy": {
+                "registryVersion": "tool_registry_v1",
+                "registryHash": PRODUCTION_TOOL_REGISTRY_HASH,
+                "allowedTools": [],
+            },
+        });
+        let context_manifest = serde_json::json!({
+            "contractVersion": "context_manifest_v1",
+            "compilerVersion": "context_compiler_v1",
+            "tokenEstimator": "utf8_bytes_div3_v1",
+            "compiledContextHash": compiled_hash,
+            "missingSourceTypes": [],
+            "sources": [{
+                "ordinal": 0,
+                "sourceType": "novel",
+                "sourceId": novel_id,
+                "sourceVersion": "2026-07-26T00:00:00Z",
+                "origin": "sqlite",
+                "label": "作品基础",
+                "order": 10,
+                "priority": 100,
+                "required": true,
+                "contentHash": source_hash,
+                "originalChars": source_content.chars().count(),
+                "originalBytes": source_content.len(),
+                "originalTokens": estimated_tokens(source_content),
+                "status": "included",
+                "includedHash": source_hash,
+                "includedChars": source_content.chars().count(),
+                "includedBytes": source_content.len(),
+                "includedTokens": estimated_tokens(source_content),
+            }],
+        });
+        let context_budget = serde_json::json!({
+            "contractVersion": "context_budget_v1",
+            "tokenEstimator": "utf8_bytes_div3_v1",
+            "modelContextTokens": 16_000,
+            "reservedOutputTokens": 5_000,
+            "fixedMessageTokens": 1_000,
+            "availableContextTokens": 10_000,
+            "compiledContextTokens": estimated_tokens(&compiled_context),
+            "compiledContextChars": compiled_context.chars().count(),
+            "compiledContextBytes": compiled_context.len(),
+            "includedSourceCount": 1,
+            "truncatedSourceCount": 0,
+            "omittedSourceCount": 0,
+        });
+        let provider_options = serde_json::json!({
+            "providerId": "mock",
+            "model": "mock-v1",
+            "temperature": 0.7,
+            "maxTokens": 5_000,
+        });
+        let user_prompt = "请为当前章节补充相关设定候选。";
+        let system_prompt = format!("{template}\n\n【编译上下文】\n{compiled_context}");
+        let input_body = serde_json::to_string(&serde_json::json!({
+            "messages": [
+                { "role": "system", "content": system_prompt },
+                { "role": "user", "content": user_prompt },
+            ],
+        }))
+        .expect("test request body");
+        let request_body_hash = large_text_repository::sha256(&input_body);
+        let task_input = serde_json::json!({ "purpose": "placement_test" });
+        let template_hash = large_text_repository::sha256(&template);
+        let compilation_hash = canonical_hash(&serde_json::json!({
+            "contractVersion": "compiled_ai_execution_v1",
+            "taskType": "setting_expand",
+            "scope": {
+                "scopeType": "novel",
+                "novelId": novel_id,
+                "chapterId": Value::Null,
+                "draftId": Value::Null,
+            },
+            "expectedArtifactType": "setting_candidates",
+            "expectedArtifactSchemaVersion": 1,
+            "requestBodyHash": request_body_hash,
+            "taskInput": task_input,
+            "contextManifest": context_manifest,
+            "contextBudget": context_budget,
+            "constraintPayload": constraint_payload,
+            "promptTemplateHash": template_hash,
+            "providerOptions": provider_options,
+        }))
+        .expect("test compilation hash");
+
+        let mut input = system_task_input(operation_id, "setting_candidates");
+        input.task_type = "setting_expand".to_string();
+        input.novel_id = novel_id.to_string();
+        input.scope_type = "novel".to_string();
+        input.input_snapshot = InputSnapshotInput {
+            schema_version: 2,
+            input_type: "compiled_provider_messages_v1".to_string(),
+            payload_json: serde_json::json!({
+                "contractVersion": "compiled_ai_request_v1",
+                "taskType": "setting_expand",
+                "messageCount": 2,
+                "requestBodyHash": request_body_hash,
+                "compilationHash": compilation_hash,
+                "taskInput": task_input,
+            }),
+            body: input_body,
+            source_draft_id: None,
+            source_draft_version: None,
+            base_content_hash: None,
+        };
+        input.context_snapshot = ContextSnapshotInput {
+            schema_version: 2,
+            source_manifest_json: context_manifest,
+            compiled_context,
+            budget_json: context_budget,
+            compiler_version: "context_compiler_v1".to_string(),
+        };
+        input.constraint_snapshot = ConstraintSnapshotInput {
+            schema_version: 2,
+            payload_json: constraint_payload,
+            prompt_template_id: "setting/expand".to_string(),
+            prompt_template_version: "2".to_string(),
+            prompt_template_hash: template_hash,
+            prompt_template_body: template,
+            provider_options_json: provider_options,
+        };
+        input
+    }
+
+    pub(crate) fn formal_connection_task_input(operation_id: &str) -> CreateAiTaskInput {
+        let template = include_str!("../../../prompts/system_connection_test.md")
+            .replace("\r\n", "\n")
+            .trim()
+            .to_string();
+        let context_manifest = serde_json::json!({
+            "contractVersion": "context_manifest_v1",
+            "compilerVersion": "context_compiler_v1",
+            "tokenEstimator": "utf8_bytes_div3_v1",
+            "compiledContextHash": large_text_repository::sha256(""),
+            "missingSourceTypes": [],
+            "sources": [],
+        });
+        let context_budget = serde_json::json!({
+            "contractVersion": "context_budget_v1",
+            "tokenEstimator": "utf8_bytes_div3_v1",
+            "modelContextTokens": 512,
+            "reservedOutputTokens": 8,
+            "fixedMessageTokens": 400,
+            "availableContextTokens": 104,
+            "compiledContextTokens": 0,
+            "compiledContextChars": 0,
+            "compiledContextBytes": 0,
+            "includedSourceCount": 0,
+            "truncatedSourceCount": 0,
+            "omittedSourceCount": 0,
+        });
+        let constraints = serde_json::json!({
+            "exactText": "OK",
+            "allowMarkdown": false,
+            "allowAdditionalText": false,
+        });
+        let constraint_payload = serde_json::json!({
+            "contractVersion": "constraint_payload_v1",
+            "compilerVersion": "constraint_compiler_v1",
+            "taskType": "connection_test",
+            "expectedArtifact": { "type": "generic_text", "schemaVersion": 1 },
+            "responseSchema": "exact_text_ok_v1",
+            "constraints": constraints,
+            "constraintsHash": canonical_hash(&constraints).expect("test constraints hash"),
+            "toolPolicy": {
+                "registryVersion": "tool_registry_v1",
+                "registryHash": PRODUCTION_TOOL_REGISTRY_HASH,
+                "allowedTools": [],
+            },
+        });
+        let provider_options = serde_json::json!({
+            "providerId": "mock",
+            "model": "Mock",
+            "temperature": 0.0,
+            "maxTokens": 8,
+        });
+        let input_body = serde_json::to_string(&serde_json::json!({
+            "messages": [
+                { "role": "system", "content": template },
+                { "role": "user", "content": "请只回复 OK。" },
+            ],
+        }))
+        .expect("test request body");
+        let request_body_hash = large_text_repository::sha256(&input_body);
+        let task_input = serde_json::json!({ "purpose": "connection_test" });
+        let template_hash = large_text_repository::sha256(&template);
+        let compilation_hash = canonical_hash(&serde_json::json!({
+            "contractVersion": "compiled_ai_execution_v1",
+            "taskType": "connection_test",
+            "scope": {
+                "scopeType": "system",
+                "novelId": "system",
+                "chapterId": Value::Null,
+                "draftId": Value::Null,
+            },
+            "expectedArtifactType": "generic_text",
+            "expectedArtifactSchemaVersion": 1,
+            "requestBodyHash": request_body_hash,
+            "taskInput": task_input,
+            "contextManifest": context_manifest,
+            "contextBudget": context_budget,
+            "constraintPayload": constraint_payload,
+            "promptTemplateHash": template_hash,
+            "providerOptions": provider_options,
+        }))
+        .expect("test compilation hash");
+        let mut input = system_task_input(operation_id, "generic_text");
+        input.input_snapshot = InputSnapshotInput {
+            schema_version: 2,
+            input_type: "compiled_provider_messages_v1".to_string(),
+            payload_json: serde_json::json!({
+                "contractVersion": "compiled_ai_request_v1",
+                "taskType": "connection_test",
+                "messageCount": 2,
+                "requestBodyHash": request_body_hash,
+                "compilationHash": compilation_hash,
+                "taskInput": task_input,
+            }),
+            body: input_body,
+            source_draft_id: None,
+            source_draft_version: None,
+            base_content_hash: None,
+        };
+        input.context_snapshot = ContextSnapshotInput {
+            schema_version: 2,
+            source_manifest_json: context_manifest,
+            compiled_context: String::new(),
+            budget_json: context_budget,
+            compiler_version: "context_compiler_v1".to_string(),
+        };
+        input.constraint_snapshot = ConstraintSnapshotInput {
+            schema_version: 2,
+            payload_json: constraint_payload,
+            prompt_template_id: "system/connection_test".to_string(),
+            prompt_template_version: "2".to_string(),
+            prompt_template_hash: template_hash,
+            prompt_template_body: template,
+            provider_options_json: provider_options,
+        };
+        input
+    }
+
+    #[test]
+    fn task08_formal_compilation_contract_fails_closed_before_task_creation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+        connection.execute(
+            "INSERT INTO novels (id,title,status,created_at,updated_at)
+             VALUES ('novel-compiler','Compiler','draft','2026-07-26T00:00:00Z','2026-07-26T00:00:00Z')",
+            [],
+        )?;
+        let base = formal_setting_task_input("formal-setting", "novel-compiler");
+
+        let mut legacy = base.clone();
+        legacy.operation_id = "formal-legacy".to_string();
+        legacy.input_snapshot.schema_version = 1;
+        let error = create_task(&mut connection, legacy)
+            .expect_err("legacy production compilation must fail");
+        assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
+
+        let mut budget = base.clone();
+        budget.operation_id = "formal-budget".to_string();
+        budget.context_snapshot.budget_json["compiledContextTokens"] = serde_json::json!(0);
+        let error =
+            create_task(&mut connection, budget).expect_err("forged context budget must fail");
+        assert_eq!(error.code, codes::AI_CONTEXT_BUDGET_EXCEEDED);
+
+        let mut template = base.clone();
+        template.operation_id = "formal-template".to_string();
+        template
+            .constraint_snapshot
+            .prompt_template_body
+            .push_str("\nforged");
+        let error =
+            create_task(&mut connection, template).expect_err("forged template body must fail");
+        assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
+
+        let mut tool_policy = base.clone();
+        tool_policy.operation_id = "formal-tool-policy".to_string();
+        tool_policy.constraint_snapshot.payload_json["toolPolicy"]["allowedTools"] =
+            serde_json::json!(["novel.read_context@1"]);
+        let error = create_task(&mut connection, tool_policy)
+            .expect_err("Provider task cannot smuggle a tool allowlist");
+        assert_eq!(error.code, codes::AI_CONSTRAINT_POLICY_INVALID);
+
+        let mut registry_identity = base.clone();
+        registry_identity.operation_id = "formal-registry-identity".to_string();
+        registry_identity.constraint_snapshot.payload_json["toolPolicy"]["registryHash"] =
+            serde_json::json!("a".repeat(64));
+        let error = create_task(&mut connection, registry_identity)
+            .expect_err("Provider task must use the frozen production registry identity");
+        assert_eq!(error.code, codes::AI_CONSTRAINT_POLICY_INVALID);
+
+        let mut artifact_bypass = base.clone();
+        artifact_bypass.operation_id = "formal-artifact-bypass".to_string();
+        artifact_bypass.expected_artifact_type = "generic_text".to_string();
+        let error = create_task(&mut connection, artifact_bypass)
+            .expect_err("changing the Artifact contract cannot bypass formal compilation");
+        assert_eq!(error.code, codes::AI_CONSTRAINT_POLICY_INVALID);
+
+        let mut source = base.clone();
+        source.operation_id = "formal-source".to_string();
+        source.context_snapshot.source_manifest_json["sources"][0]["contentHash"] =
+            serde_json::json!("0".repeat(64));
+        let error = create_task(&mut connection, source)
+            .expect_err("source manifest tampering must fail compilation hash");
+        assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
+
+        let task_count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get(0))?;
+        assert_eq!(task_count, 0);
+        let created = create_task(&mut connection, base)?;
+        assert_eq!(created.status, "ready");
+        let detail = get_task_detail(&connection, &created.task_id)?;
+        assert_eq!(detail.context_snapshot.snapshot.schema_version, 2);
+        assert_eq!(
+            detail.context_snapshot.snapshot.compiler_version,
+            "context_compiler_v1"
+        );
+        assert_eq!(detail.constraint_snapshot.snapshot.schema_version, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn task09_connection_test_uses_formal_empty_context_contract(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+        let created = create_task(
+            &mut connection,
+            formal_connection_task_input("formal-connection"),
+        )?;
+        let detail = get_task_detail(&connection, &created.task_id)?;
+        assert_eq!(detail.task.expected_artifact_type, "generic_text");
+        assert_eq!(detail.input_snapshot.snapshot.schema_version, 2);
+        assert_eq!(detail.context_snapshot.compiled_context, "");
+        assert_eq!(
+            detail.constraint_snapshot.snapshot.prompt_template_version,
+            "2"
+        );
+        assert_eq!(
+            detail.constraint_snapshot.snapshot.provider_options_json["maxTokens"],
+            8
+        );
+        Ok(())
     }
 
     #[test]

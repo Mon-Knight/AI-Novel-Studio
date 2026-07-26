@@ -28,9 +28,43 @@ interface ExecutionTaskDetail {
     status: string;
     responseMetadataJson?: Record<string, unknown>;
   }>;
-  inputSnapshot: { body: string };
-  contextSnapshot: { compiledContext: string };
+  inputSnapshot: {
+    schemaVersion: number;
+    inputType: string;
+    payloadJson: Record<string, unknown>;
+    body: string;
+  };
+  contextSnapshot: {
+    schemaVersion: number;
+    sourceManifestJson: {
+      contractVersion?: string;
+      compilerVersion?: string;
+      compiledContextHash?: string;
+      sources?: Array<{
+        sourceType?: string;
+        sourceId?: string;
+        contentHash?: string;
+        status?: string;
+      }>;
+    };
+    budgetJson: Record<string, unknown>;
+    compilerVersion: string;
+    compiledContext: string;
+  };
   constraintSnapshot: {
+    schemaVersion: number;
+    payloadJson: {
+      contractVersion?: string;
+      compilerVersion?: string;
+      toolPolicy?: {
+        registryVersion?: string;
+        registryHash?: string;
+        allowedTools?: string[];
+      };
+    };
+    promptTemplateId: string;
+    promptTemplateVersion: string;
+    promptTemplateHash: string;
     providerOptionsJson: Record<string, unknown>;
     promptTemplateBody: string;
   };
@@ -125,10 +159,47 @@ describe('tracked Provider pipeline', () => {
     expect(detail.attempts[0].modelId).toBe('Mock');
     expect(detail.attempts[0].providerRequestId).toBe(detail.attempts[0].attemptId);
     expect(detail.attempts[0].responseMetadataJson?.provider).toBe('mock');
-    expect(detail.inputSnapshot.body).toContain('请为本章补充相关设定');
-    expect(detail.contextSnapshot.compiledContext).toContain('世界观构建专家');
+    expect(detail.inputSnapshot.schemaVersion).toBe(2);
+    expect(detail.inputSnapshot.inputType).toBe('compiled_provider_messages_v1');
+    expect(detail.inputSnapshot.payloadJson.contractVersion).toBe('compiled_ai_request_v1');
+    expect(detail.inputSnapshot.payloadJson.requestBodyHash).toHaveLength(64);
+    expect(detail.inputSnapshot.payloadJson.compilationHash).toHaveLength(64);
+    expect(detail.inputSnapshot.body).toContain('请为当前章节补充相关设定候选');
+    expect(detail.inputSnapshot.body).toContain('【编译上下文】');
+    expect(detail.contextSnapshot.schemaVersion).toBe(2);
+    expect(detail.contextSnapshot.compilerVersion).toBe('context_compiler_v1');
+    expect(detail.contextSnapshot.compiledContext).toContain('E2E Provider Pipeline');
+    expect(detail.contextSnapshot.compiledContext).toContain('E2E Chapter');
+    expect(detail.contextSnapshot.compiledContext).not.toContain('世界观构建专家');
+    expect(detail.contextSnapshot.sourceManifestJson.contractVersion).toBe('context_manifest_v1');
+    expect(detail.contextSnapshot.sourceManifestJson.compilerVersion).toBe('context_compiler_v1');
+    expect(detail.contextSnapshot.sourceManifestJson.compiledContextHash).toHaveLength(64);
+    expect(detail.contextSnapshot.sourceManifestJson.sources?.some((source) => (
+      source.sourceType === 'novel'
+      && source.sourceId === projectId
+      && source.contentHash?.length === 64
+      && ['included', 'truncated'].includes(source.status ?? '')
+    ))).toBe(true);
+    expect(detail.contextSnapshot.sourceManifestJson.sources?.some((source) => (
+      source.sourceType === 'chapter' && source.sourceId === chapterId
+    ))).toBe(true);
+    expect(detail.contextSnapshot.budgetJson.contractVersion).toBe('context_budget_v1');
+    expect(detail.contextSnapshot.budgetJson.compiledContextTokens).toBeLessThanOrEqual(
+      detail.contextSnapshot.budgetJson.availableContextTokens as number,
+    );
+    expect(detail.constraintSnapshot.schemaVersion).toBe(2);
+    expect(detail.constraintSnapshot.promptTemplateId).toBe('setting/expand');
+    expect(detail.constraintSnapshot.promptTemplateVersion).toBe('2');
+    expect(detail.constraintSnapshot.promptTemplateHash).toHaveLength(64);
     expect(detail.constraintSnapshot.promptTemplateBody).toContain('世界观构建专家');
+    expect(detail.constraintSnapshot.promptTemplateBody).not.toContain('E2E Provider Pipeline');
+    expect(detail.constraintSnapshot.payloadJson.contractVersion).toBe('constraint_payload_v1');
+    expect(detail.constraintSnapshot.payloadJson.compilerVersion).toBe('constraint_compiler_v1');
+    expect(detail.constraintSnapshot.payloadJson.toolPolicy?.registryVersion).toBe('tool_registry_v1');
+    expect(detail.constraintSnapshot.payloadJson.toolPolicy?.registryHash).toHaveLength(64);
+    expect(detail.constraintSnapshot.payloadJson.toolPolicy?.allowedTools).toEqual([]);
     expect(detail.constraintSnapshot.providerOptionsJson.providerId).toBe('mock');
+    expect(detail.constraintSnapshot.providerOptionsJson.maxTokens).toBe(5000);
     expect(detail.inputSnapshot.body).not.toContain('apiKey');
     expect(detail.inputSnapshot.body).not.toContain('baseUrl');
 
