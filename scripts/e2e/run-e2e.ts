@@ -41,6 +41,7 @@ const allSpecs = [
   'project-edit-save.spec.ts',
   'chapter-save.spec.ts',
   'large-text-save.spec.ts',
+  'provider-pipeline-setting.spec.ts',
   'candidate-review-apply.spec.ts',
   'leave-guard.spec.ts',
   'generation-job-cancel.spec.ts',

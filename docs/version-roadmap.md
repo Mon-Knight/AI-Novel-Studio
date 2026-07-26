@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.3.0（Agent 执行事实层 M1）
+> 当前版本：v2.3.1（Provider Adapter 与统一执行管线）
 
 ---
 
@@ -379,9 +379,21 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 明确不在本版本处理：生产 Provider Adapter 迁移、真实 AI 调用、Planner、Memory、Tool Registry、自动续跑、Placement / ApplyPlan、Multi-Agent、UI 重做和 Agent 自主写入。
 
-### v2.3.0 之后
+### v2.3.1 单一版本目标
 
-- v2.3.1：Provider Adapter 与统一执行管线；先迁移连接测试和一个只读入口，并进行一次低输出真实 API 验收。
+本版本只把第一批生产 AI 调用接到 v2.3.0 执行事实层：
+
+1. 新增统一 Provider Adapter，继续复用现有 Tauri HTTP、超时和可靠取消实现；API Key 与 Base URL 只作为瞬时配置，不进入 Task、Snapshot、Artifact、metadata 或日志。
+2. 桌面执行固定经过 create Task/Snapshots → queue → claim → Provider → response identity → Artifact；提交未知只重放幂等持久化步骤，不自动重复 Provider 网络调用。
+3. 相同 operationId 已完成时直接读取首次 Artifact，不再次调用 Provider；浏览器开发回退明确标记为 ephemeral，不伪造 SQLite 事实。
+4. 设置中心连接测试迁移到 system Task + `generic_text` Artifact，输出预算限制为 8 tokens。
+5. “设定补充”迁移为只读 `setting_candidates` Artifact；候选不会自动写入正式设定，仍由用户显式确认采用。
+6. Mock 桌面 E2E 必须证明 Task、Attempt、三 Snapshot、response metadata、Artifact 与候选未采用边界；真实 API 只执行一次低输出连接验收。
+
+明确不在本版本处理：其他生产 AI 入口迁移、业务对象来源链接、Placement / ApplyPlan、Planner、Memory、Tool Registry、自动续跑、Multi-Agent、UI 重做或 Agent 自主写入。
+
+### v2.3.1 之后
+
 - v2.3.2：PlacementProposal、ApplyPlan、ArtifactTargetLink 与单目标安全应用；保持用户确认、version/hash 冲突保护和副作用幂等。
 - v2.4.x：Context / Constraint Compiler 与 Tool Registry，形成可复现来源、预算和 schema 工具边界。
 - v2.5.x：Planner、execution lease、checkpoint、显式重试与跨重启恢复。
@@ -400,7 +412,7 @@ v2.x 后续 Planner / Tool Calling / Memory / Verification
 v3.x    Multi-Agent / 自主创作
 ```
 
-进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.3.0 当前只完成可追踪、可重放、可恢复读取的执行事实基础。
+进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.3.1 当前只在 v2.3.0 事实层上迁移首批 Provider 入口。
 
 ---
 

@@ -1,5 +1,38 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.3.1 (2026-07-26) - Provider Adapter 与统一执行管线
+
+### 新增
+
+- 新增统一 `ProviderAdapter`，在不持久化 API Key / Base URL 的前提下复用现有 Mock、OpenAI-compatible Tauri HTTP、超时和可靠取消能力。
+- 新增 `executeAiTask` 管线：桌面执行固定创建 Task/Snapshots、queue/claim Attempt、单次派发 Provider、保存 response identity 并创建不可变 Artifact。
+- Provider response hash 使用 SHA-256，字符长度与 Rust Unicode scalar 语义一致；token、finishReason、duration 和本地 dispatch identity 进入白名单 metadata。
+- 新增完成 operation 重放：已存在结果时直接读取首次 Artifact，不重复调用 Provider；`DATABASE_COMMIT_UNKNOWN` 只重放同身份持久化步骤。
+
+### 迁移
+
+- 设置中心连接测试迁移到 system Task + `generic_text` Artifact，提示只允许回复 `OK`，最大输出降为 8 tokens。
+- “设定补充”迁移到 `setting_candidates` Artifact；Mock/真实结果先作为候选展示，只有用户点击“确认加入设定库”才写正式设定。
+- 浏览器开发回退继续允许临时 Provider 运行，但明确返回 ephemeral 结果，不创建 LocalStorage Task、Attempt、Snapshot 或 Artifact。
+
+### 安全与兼容性
+
+- Task 的 Input Snapshot 冻结实际 Provider messages；Context 与 Constraint 保存当前过渡期编译文本、模板身份、预算、来源清单和安全 Provider options。
+- 真实凭据只存在于瞬时 Adapter 配置和既有受控 Tauri 请求参数中，不进入 Snapshot、Artifact、普通日志或 E2E 产物。
+- 修复 Tauri 字符串错误被统一降级为网络错误的问题；鉴权/权限失败与请求参数拒绝现在保留安全后端消息，并分别形成稳定、不可盲重试的错误码。
+- 未迁移 AI 入口继续使用 Legacy `ai_task_records`，不在本版本强行改写质量报告外键或其他业务表。
+
+### 验证
+
+- Provider 管线定向测试 7/7：安全快照、单次派发、提交未知重放、取消、Tauri 字符串错误分类、浏览器 ephemeral、完成结果重放与真实 Mock Adapter。
+- Windows Tauri `provider-pipeline-setting.spec.ts` 1/1：Task completed、Attempt succeeded、Artifact valid，三条候选展示且正式设定行数不变。
+- `npm test`：Node 16/16、tsx 51/51；Rust/SQLite 133/133；Windows Tauri E2E 12/12；`npm run lint` 0 error（保留 1 条既有 React Hooks warning）；前端与 Tauri production build 通过。
+- 真实 API 按约束只执行一次 8-token 连接测试；Provider 返回失败，形成 system Task、三 Snapshot 与 failed Attempt，未创建 Artifact，未重试且未以 Mock 冒充通过。
+
+### 版本边界
+
+- 本版本不实现 Placement / ApplyPlan、自动正式写入、Planner、Memory、Tool Registry、自动续跑或 Multi-Agent；只迁移连接测试和一个只读候选入口。
+
 ## v2.3.0 (2026-07-26) - Agent 执行事实层 M1
 
 ### 新增

@@ -70,6 +70,8 @@ function RightToolbar({ activePanel, onTogglePanel, onRunCommand, documentAvaila
                 ? 'ai-generate'
                 : btn.kind === 'panel' && btn.id === 'engineering'
                   ? 'chapter-engineering'
+                  : btn.kind === 'panel' && btn.id === 'setting'
+                    ? 'setting-tool'
                   : btn.kind === 'panel' && btn.id === 'chapter-summary'
                     ? 'chapter-summary'
                     : btn.kind === 'panel' && btn.id === 'context-view'

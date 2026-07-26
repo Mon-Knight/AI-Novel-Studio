@@ -676,6 +676,6 @@ export function buildConnectionTestPrompt(): AiGenerateRequest {
       systemPrompt('You are an AI assistant. Reply with "OK" only.'),
       userPrompt('hi'),
     ],
-    maxTokens: 50,
+    maxTokens: 8,
   };
 }

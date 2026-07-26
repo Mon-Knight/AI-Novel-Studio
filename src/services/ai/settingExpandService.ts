@@ -1,10 +1,10 @@
 /**
  * AI Novel Studio - AI setting expansion service.
  */
-import { createAiClient, aiSettingsService } from './aiClient';
+import { aiSettingsService } from './aiClient';
 import { buildSettingExpandPrompt } from './promptBuilder';
-import { aiTaskService } from './aiTaskService';
-import { safeJsonParse } from './jsonUtils';
+import { executeAiTask } from './aiExecutionPipeline';
+import { extractJsonObject } from './jsonUtils';
 import { novelRepository } from '../database/novelRepository';
 import { settingRepository } from '../database/settingRepository';
 
@@ -17,12 +17,30 @@ export interface SettingSuggestion {
   rawText?: string;
 }
 
+interface SettingCandidatePayload {
+  settings: SettingSuggestion[];
+}
+
+function parseSettingCandidatePayload(text: string): SettingCandidatePayload | undefined {
+  const json = extractJsonObject(text);
+  if (!json) return undefined;
+  try {
+    const value = JSON.parse(json) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const settings = (value as { settings?: unknown }).settings;
+    return Array.isArray(settings) ? { settings: settings as SettingSuggestion[] } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const settingExpandService = {
   async suggestSettings(input: {
     novelId: string;
     chapterId?: string;
     chapterTitle?: string;
     chapterOutline?: string;
+    signal?: AbortSignal;
   }): Promise<SettingSuggestion[]> {
     const settings = aiSettingsService.getSettings();
     const [novel, worldSettings, ruleSystems] = await Promise.all([
@@ -42,39 +60,52 @@ export const settingExpandService = {
       chapterOutline: input.chapterOutline,
     });
 
-    const task = await aiTaskService.create('setting_expand', {
+    const systemPrompt = request.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n\n');
+    const execution = await executeAiTask({
+      taskType: 'setting_expand',
+      scopeType: input.chapterId ? 'chapter' : 'novel',
       novelId: input.novelId,
       chapterId: input.chapterId,
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `补充设定：${input.chapterTitle || input.chapterOutline || novel?.title || '当前作品'}`,
-    }).catch(() => null);
-
-    try {
-      const client = createAiClient(settings);
-      const response = await client.generate(request);
-      const parsed = safeJsonParse<{ settings: SettingSuggestion[] }>(response.text, { settings: [] });
-
-      const suggestions = Array.isArray(parsed.settings) ? parsed.settings.filter((item) => item.name && item.description) : [];
-      await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: suggestions.length > 0 ? `生成了 ${suggestions.length} 条设定建议` : '模型返回格式不规范，已展示原始文本',
-        tokenInput: response.tokenInput,
-        tokenOutput: response.tokenOutput,
-        tokenTotal: response.tokenTotal,
-      });
-
-      if (suggestions.length > 0) return suggestions;
-      return [{
-        name: 'AI 原始返回',
-        category: 'other',
-        description: response.text.slice(0, 1000),
-        rawText: response.text,
-      }];
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '设定补充失败';
-      if (task) await aiTaskService.markFailed(task.id, message);
-      throw e;
-    }
+      expectedArtifactType: 'setting_candidates',
+      request,
+      settings,
+      inputType: 'setting_expand_messages_v1',
+      inputPayloadJson: {
+        chapterId: input.chapterId,
+        chapterTitle: input.chapterTitle,
+      },
+      sourceManifestJson: {
+        sources: [
+          { type: 'novel', id: novel?.id ?? input.novelId },
+          ...worldSettings.map((item) => ({ type: 'world_setting', id: item.id })),
+          ...activeRules.map((item) => ({ type: 'rule_system', id: item.id })),
+        ],
+      },
+      compiledContext: systemPrompt,
+      compilerVersion: 'setting_expand_prompt_v1',
+      constraintPayloadJson: {
+        responseSchema: 'setting_candidates_v1',
+        candidateOnly: true,
+      },
+      promptTemplateId: 'setting/expand',
+      promptTemplateVersion: '1',
+      promptTemplateBody: systemPrompt,
+      parseStructuredPayload: parseSettingCandidatePayload,
+      signal: input.signal,
+    });
+    const parsed = execution.structuredPayloadJson as SettingCandidatePayload | undefined;
+    const suggestions = Array.isArray(parsed?.settings)
+      ? parsed.settings.filter((item) => item.name && item.description)
+      : [];
+    if (suggestions.length > 0) return suggestions;
+    return [{
+      name: 'AI 原始返回',
+      category: 'other',
+      description: execution.text.slice(0, 1000),
+      rawText: execution.text,
+    }];
   },
 };

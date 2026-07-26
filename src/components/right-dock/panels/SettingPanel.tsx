@@ -70,12 +70,12 @@ function SettingPanel({ novelId, chapter }: SettingPanelProps) {
     <div>
       <div className="panel-section">
         <div className="panel-section-title">AI 设定补充</div>
-        <button className="btn btn-primary btn-sm" onClick={handleSuggestSettings} disabled={loading || !novelId} style={{ width: '100%', marginBottom: 8 }}>
+        <button data-testid="setting-suggest" className="btn btn-primary btn-sm" onClick={handleSuggestSettings} disabled={loading || !novelId} style={{ width: '100%', marginBottom: 8 }}>
           {loading ? '生成中...' : '生成本章设定建议'}
         </button>
         {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginBottom: 8 }}>{error}</div>}
         {suggestions.map((item, index) => (
-          <div key={`${item.name}-${index}`} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
+          <div key={`${item.name}-${index}`} data-testid="setting-suggestion" data-setting-name={item.name} className="panel-field" style={{ marginBottom: 8, border: '1px solid var(--color-primary-light)', padding: 8, borderRadius: 6 }}>
             <div className="panel-field-label">{item.name}{item.category ? ` · ${item.category}` : ''}</div>
             <div className="panel-field-value" style={{ fontSize: 12, fontWeight: 400, whiteSpace: 'pre-wrap' }}>
               {item.rawText || item.description}
@@ -83,7 +83,7 @@ function SettingPanel({ novelId, chapter }: SettingPanelProps) {
             {item.usageInChapter && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-text-muted)' }}>本章用途：{item.usageInChapter}</div>}
             {item.risk && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-warning)' }}>风险：{item.risk}</div>}
             {!item.rawText && (
-              <button className="btn btn-primary btn-sm" onClick={() => handleAdoptSuggestion(item)} style={{ marginTop: 6 }}>
+              <button data-testid="setting-suggestion-adopt" className="btn btn-primary btn-sm" onClick={() => handleAdoptSuggestion(item)} style={{ marginTop: 6 }}>
                 确认加入设定库
               </button>
             )}

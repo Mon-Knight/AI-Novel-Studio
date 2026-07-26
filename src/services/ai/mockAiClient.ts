@@ -5,7 +5,7 @@
 import type { AiGenerateOptions, AiGenerateRequest, AiGenerateResponse, AiClient } from '../../types/ai';
 import { AiRequestCancelledError, throwIfAiRequestCancelled } from './aiCancellation';
 
-const E2E_MODE = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+const E2E_MODE = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
 const E2E_TOKEN_INPUT = 320;
 const E2E_TOKEN_OUTPUT = 640;
 

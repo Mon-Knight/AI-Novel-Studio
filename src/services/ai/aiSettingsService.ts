@@ -3,8 +3,9 @@
  */
 import { lsGet, lsSet } from '../database/db';
 import type { AiSettings } from '../../types/ai';
-import { RealAiClient, validateRealAiConfig } from './realAiClient';
-import { aiTaskService } from './aiTaskService';
+import { validateRealAiConfig } from './realAiClient';
+import { buildConnectionTestPrompt } from './promptBuilder';
+import { executeAiTask } from './aiExecutionPipeline';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 const E2E_ENABLED = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -80,44 +81,44 @@ export const aiSettingsService = {
 
   async testConnection(settings: AiSettings): Promise<{ ok: boolean; message: string }> {
     const normalized = migrateSettings({ ...settings, runtimeMode: 'api' });
-    const task = await aiTaskService.create('connection_test', {
-      runtimeMode: 'api',
-      provider: normalized.provider,
-      modelName: normalized.modelName,
-      inputSummary: '测试设置中心 API 连接',
-    }).catch(() => null);
-
-    const start = Date.now();
     try {
       validateApiSettings(normalized);
-      const client = new RealAiClient({
-        baseUrl: normalized.baseUrl,
-        apiKey: normalized.apiKey,
-        modelName: normalized.modelName,
-        temperature: normalized.temperature,
-        maxTokens: normalized.maxTokens,
-        timeoutSeconds: normalized.timeoutSeconds,
-      });
-
-      const response = await client.generate({
+      const request = buildConnectionTestPrompt();
+      const systemPrompt = request.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n');
+      const result = await executeAiTask({
         taskType: 'connection_test',
-        messages: [{ role: 'user', content: '请只回复 OK，用于测试连接。' }],
-        temperature: 0.1,
-        maxTokens: 100,
+        scopeType: 'system',
+        novelId: 'system',
+        expectedArtifactType: 'generic_text',
+        request,
+        settings: normalized,
+        inputType: 'connection_test_messages_v1',
+        inputPayloadJson: { purpose: 'settings_connection_test' },
+        sourceManifestJson: { sources: [] },
+        compiledContext: systemPrompt,
+        compilerVersion: 'connection_test_v1',
+        constraintPayloadJson: { expectedExactText: 'OK' },
+        promptTemplateId: 'system/connection_test',
+        promptTemplateVersion: '1',
+        promptTemplateBody: systemPrompt,
       });
-
-      const latencyMs = Date.now() - start;
-      await aiTaskService.markSucceeded(task?.id || '', {
-        resultText: response.text,
-        tokenInput: response.tokenInput,
-        tokenOutput: response.tokenOutput,
-        tokenTotal: response.tokenTotal,
-      });
-
-      return { ok: true, message: `连接成功，模型返回：${response.text.slice(0, 40).trim()}（${latencyMs}ms）` };
+      const valid = result.text.trim() === 'OK'
+        && result.artifactBundle?.artifact.processingStatus !== 'invalid';
+      if (!valid) {
+        return {
+          ok: false,
+          message: `连接已建立，但模型未按要求返回 OK：${result.text.slice(0, 40).trim()}`,
+        };
+      }
+      return {
+        ok: true,
+        message: `连接成功，模型返回：${result.text.slice(0, 40).trim()}（${result.provider.durationMs}ms）`,
+      };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e || '连接失败');
-      if (task) await aiTaskService.markFailed(task.id, message);
       return { ok: false, message };
     }
   },

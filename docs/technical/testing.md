@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.3.0（Agent 执行事实层 M1）
+> 当前版本：v2.3.1（Provider Adapter 与统一执行管线）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.3.0，测试体系在既有正文安全、备份恢复、请求取消、质量历史、章节上下文和工作区可靠性基础上，增加统一执行事实的迁移、事务、CAS、幂等重放、不可变大文本、脱敏与跨重启读取验证：
+截至 v2.3.1，测试体系在统一执行事实的迁移、事务、CAS、不可变与重启读取基础上，增加 Provider 单次派发、提交未知重放、浏览器 ephemeral 边界、连接测试和设定候选桌面闭环：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -27,7 +27,7 @@ Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred
 
 ---
 
-## 2. v2.2.x～v2.3.0 动态测试入口
+## 2. v2.2.x～v2.3.1 动态测试入口
 
 ### 2.1 工作区可靠性专项
 
@@ -294,6 +294,7 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 | `project-edit-save.spec.ts` | 修改作品信息，验证保存不挂起、提交且不重复写入 |
 | `chapter-save.spec.ts` | 显式创建卷和章节、保存正文、切换页面并重新打开 |
 | `large-text-save.spec.ts` | 184KB 中文 / emoji / CRLF 正文保存、重开、采用、全文与 SHA 核对，以及损坏分片失败关闭 |
+| `provider-pipeline-setting.spec.ts` | Mock 设定候选经过 Task/Snapshot/Attempt/Artifact 全链路，且未确认前不写入正式设定 |
 | `candidate-review-apply.spec.ts` | Mock AI 候选、约束审查、确认采用、页面字数同步与重复采用幂等 |
 | `leave-guard.spec.ts` | 未保存离开保护的取消、保存并离开及放弃修改分支 |
 | `generation-job-cancel.spec.ts` | 分别暂停正文和质量 Mock AI 后从 UI 取消；唯一 checkpoint、waiter 清理、正文无新草稿、质量保留既有草稿且无 pending 报告，并验证无迟到完成 |
@@ -340,7 +341,33 @@ cargo test db23_external_v221_copy_upgrades_without_business_row_or_shape_change
 | M1-READ01 | 文件数据库关闭再打开 | Task、Attempts、三 Snapshot、Artifacts、Issues 全部完整读取 |
 | M1-SEC01 | API Key、Bearer、rawBody metadata | 写入前拒绝；普通日志无正文、Prompt 或 Provider body |
 
-本版本没有修改生产 Provider Adapter，因此不执行真实 API 测试。真实额度留给 v2.3.1 统一执行管线，并限制为一次低输出连接/只读验收。
+v2.3.0 没有修改生产 Provider Adapter，因此未执行真实 API 测试。
+
+### 2.13 v2.3.1 Provider 管线专项
+
+```powershell
+# Provider 单次派发、提交未知重放、取消、完成结果重放、浏览器 ephemeral
+npx tsx --test --test-concurrency=1 src/services/ai/aiExecutionPipeline.test.ts
+
+# 真实 Tauri + Mock Provider + SQLite 全事实链路
+npm run test:e2e -- --spec provider-pipeline-setting
+```
+
+专项动态矩阵：
+
+| 编号 | 场景 | 必须结果 |
+|------|------|----------|
+| PA01 | Task/Snapshot → queue/claim → Provider → Artifact | 只派发一次 Provider；响应 hash/Unicode 字符长度与 Artifact 一致 |
+| PA02 | 持久化返回 `DATABASE_COMMIT_UNKNOWN` | 仅重放同身份 IPC，不再次调用 Provider |
+| PA03 | AbortSignal / Tauri cancel | Task 与 Attempt 安全取消，不创建迟到 Artifact |
+| PA04 | 已完成 operationId 重放 | 读取首次 Task/Artifact，Provider 调用次数为 0 |
+| PA05 | 浏览器开发回退 | 可以临时运行 Mock/API，但不伪造 Task、Attempt、Snapshot 或 Artifact |
+| PA06 | API Key / Base URL | 只作为瞬时 Adapter 配置；Task 创建参数和持久结果均不包含 |
+| PA07 | Tauri 字符串错误 | 保留已脱敏后端消息；401/403 与 400 分别形成不可盲重试的稳定错误码并安全终结 Attempt |
+| PA-E2E | 设定候选 Mock 桌面闭环 | Task completed、Attempt succeeded、Artifact valid；正式设定行数不变 |
+| PA-REAL | 真实 API 连接测试 | 只调用一次、`maxTokens = 8`、响应为 `OK`，并形成 system Task 与 generic_text Artifact |
+
+真实 API 验收不进入自动化套件，不读取或输出完整 API Key，不连续重试。若配置缺失或 Provider 外部失败，必须如实记录为未通过，不能用 Mock 结果替代。
 
 ---
 

@@ -230,4 +230,25 @@ commands/     受控 Tauri IPC，仅负责锁定连接和映射稳定 AppError
 
 ---
 
+## 13. v2.3.1 Provider 执行管线
+
+首批生产入口使用同一前端服务层编排：
+
+```text
+业务入口
+→ executeAiTask
+→ Task + 三 Snapshot
+→ queue / claim Attempt
+→ ProviderAdapter（Mock 或现有 Tauri HTTP）
+→ response hash / length / metadata
+→ ResultArtifact + ValidationIssue
+→ 只读候选返回 UI
+```
+
+API Key 与 Base URL 只传给 Adapter，不进入事实层。桌面端使用 SQLite 事实；浏览器开发模式只返回明确的 ephemeral 结果。设置候选与正式设定写入仍由独立用户确认动作隔离。
+
+完整设计见 [`architecture/provider-execution-pipeline.md`](architecture/provider-execution-pipeline.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**
