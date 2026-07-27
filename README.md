@@ -25,15 +25,25 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.5.0**
+**当前版本：v2.6.1**
 
-**阶段：Chapter Readiness Planner Runtime — 可恢复的持久只读计划**
+**阶段：文档规范化与版本统一**
 
-v2.5.0 在 v2.4.0 Compiler / Tool Registry 基础上建立正式 `chapter_readiness_plan_v1`。计划、六个稳定步骤、依赖、每次 Attempt、Rust execution lease 和 append-only Checkpoint 全部保存在 SQLite；每一步绑定 Registry identity、input/output schema hash、权限、scope 与 canonical 参数 hash。
+v2.6.1 是 v2.6.0 Memory Facts 系统的文档更新版本，主要完成项目文档规范化和版本号统一工作。
 
-工作台可创建、运行、查看并显式继续章节准备计划。工具失败只形成一个 Attempt；应用重启会把中断执行恢复为 `waiting_retry` 并标记 Attempt `abandoned`，绝不静默重放。租约明文 token 只瞬时交给执行器，SQLite 仅保存 SHA-256。生产 Registry 新增 `verification.check_readiness@1`，九个工具仍全部只读或本地验证。
+**核心能力：**
+- ✅ Chapter Readiness Planner Runtime（v2.5.0）
+- ✅ AI Execution Facts & Compiler（v2.4.0）
+- ✅ Memory Snapshot System（v2.6.0）
+- ✅ Provider Pipeline & Safe Apply（v2.3.x）
 
-本版本不实现长期 Memory、正文副作用、自动续跑、Multi-Agent 或 Agent 自主写入。章节准备链路不调用 Provider，因此本版不消耗真实 API；下一独立版本进入 v2.6.x Memory、连续性与受审核单 Agent 章节闭环。
+**技术栈稳定：**
+- React 18 + TypeScript
+- Tauri 1.x + Rust
+- SQLite + Migrations (001-023)
+- HashRouter + Vite 5
+
+本版本不包含自主生成（Autonomous）功能，该功能规划在 v3.0。
 
 ---
 

@@ -1,5 +1,32 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.6.1 (2026-07-27) - 文档规范化与版本统一
+
+### 说明
+
+本版本为 v2.6.0 Memory Facts 系统的文档更新版本，主要完成项目文档规范化和版本号统一工作。
+
+### 变更
+
+- 统一所有配置文件版本号为 `2.6.1`（package.json、Cargo.toml、tauri.conf.json）
+- 更新 README.md 版本描述和功能列表
+- 补充 CHANGELOG 历史记录
+- 规范化发布历史文档
+
+### 技术栈
+
+- React 18 + TypeScript
+- Tauri 1.x + Rust  
+- SQLite + Migrations (001-023)
+- Chapter Readiness Planner
+- Memory Snapshot System
+
+### 版本边界
+
+本版本不包含自主生成（Autonomous Generation）功能，该功能规划在 v3.0。
+
+---
+
 ## v2.5.0 (2026-07-26) - Chapter Readiness Planner Runtime
 
 ### 新增
