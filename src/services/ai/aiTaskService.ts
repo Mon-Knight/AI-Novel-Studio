@@ -146,6 +146,7 @@ export const aiTaskService = {
   async create(
     taskType: AiTaskType,
     input: {
+      id?: string;
       novelId?: string;
       chapterId?: string;
       modelName?: string;
@@ -156,7 +157,7 @@ export const aiTaskService = {
   ): Promise<AiTaskRecord> {
     const now = nowISO();
     const record: AiTaskRecord = {
-      id: generateId(),
+      id: input.id ?? generateId(),
       novelId: input.novelId,
       chapterId: input.chapterId,
       taskType,

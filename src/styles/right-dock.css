@@ -401,6 +401,25 @@
   margin-top: var(--spacing-sm);
 }
 
+.memory-card__summary {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.memory-card__summary > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.memory-card__summary .is-drifted {
+  color: var(--color-warning, #a15c00);
+}
+
 /* === 章节工程面板 === */
 .engineering-panel {
   display: flex;
@@ -1186,4 +1205,130 @@
   border-color: var(--color-primary);
   background: var(--color-primary-light);
   color: var(--color-primary);
+}
+.autonomous-monitor-page {
+  padding: 28px 32px 48px;
+  overflow: auto;
+}
+
+.autonomous-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 920px;
+  padding: 20px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d9dce5);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(31, 35, 45, 0.08);
+}
+
+.autonomous-panel-header,
+.autonomous-job-meta,
+.autonomous-actions,
+.autonomous-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.autonomous-panel h2,
+.autonomous-panel h3,
+.autonomous-panel p { margin: 0; }
+
+.autonomous-panel-header p,
+.autonomous-empty p,
+.autonomous-log p {
+  margin-top: 4px;
+  color: var(--color-text-secondary, #6a7080);
+  font-size: 13px;
+}
+
+.autonomous-job-card,
+.autonomous-empty,
+.autonomous-thresholds,
+.autonomous-log,
+.autonomous-history {
+  padding: 16px;
+  border: 1px solid var(--color-border, #d9dce5);
+  border-radius: 6px;
+  background: var(--color-surface-subtle, #fafbfc);
+}
+
+.autonomous-progress {
+  height: 8px;
+  margin: 14px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7eaf0;
+}
+
+.autonomous-progress span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent, #3867d6);
+  transition: width 180ms ease;
+}
+
+.autonomous-stat-grid,
+.autonomous-threshold-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  color: var(--color-text-secondary, #6a7080);
+  font-size: 12px;
+}
+
+.autonomous-stat-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text, #242733);
+  font-size: 14px;
+}
+
+.autonomous-threshold-grid { margin-top: 12px; }
+
+.autonomous-threshold-grid label,
+.autonomous-pause-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--color-text-secondary, #6a7080);
+  font-size: 12px;
+}
+
+.autonomous-threshold-grid input,
+.autonomous-pause-reason input {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border, #d9dce5);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--color-text, #242733);
+}
+
+.autonomous-log-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border, #e7e9ef);
+  font-size: 12px;
+}
+
+.autonomous-history-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border, #e7e9ef);
+  color: var(--color-text-secondary, #6a7080);
+  font-size: 13px;
+}
+
+.autonomous-paused-reason,
+.autonomous-panel-error { color: #a65d00; }
+
+@media (max-width: 720px) {
+  .autonomous-monitor-page { padding: 16px; }
+  .autonomous-stat-grid,
+  .autonomous-threshold-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

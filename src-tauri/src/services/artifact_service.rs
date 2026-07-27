@@ -160,6 +160,92 @@ fn validate_structured_target(
     }
 }
 
+fn number_in_range(value: Option<&Value>, min: f64, max: f64) -> bool {
+    value
+        .and_then(Value::as_f64)
+        .is_some_and(|number| number.is_finite() && number >= min && number <= max)
+}
+
+fn non_empty_string(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+}
+
+fn push_schema_error(issues: &mut Vec<ValidationIssue>) {
+    issues.push(issue(
+        "error",
+        "ARTIFACT_RESPONSE_SCHEMA_INVALID",
+        "Provider 返回不符合 Task 冻结的 response schema",
+        None,
+    ));
+}
+
+fn validate_autonomous_response_schema(
+    task_type: &str,
+    structured: Option<&Value>,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    let Some(Value::Object(payload)) = structured else {
+        if matches!(
+            task_type,
+            "outline_generate"
+                | "chapter_summary"
+                | "quality_check"
+                | "continuity_check"
+                | "expert_review"
+        ) {
+            push_schema_error(issues);
+        }
+        return;
+    };
+    let valid = match task_type {
+        "outline_generate" => {
+            non_empty_string(payload.get("overallTheme"))
+                && payload
+                    .get("chapters")
+                    .and_then(Value::as_array)
+                    .is_some_and(|chapters| !chapters.is_empty())
+        }
+        "chapter_summary" => {
+            payload
+                .get("plot_points")
+                .and_then(Value::as_array)
+                .is_some()
+                && payload
+                    .get("characters")
+                    .and_then(Value::as_array)
+                    .is_some()
+                && payload
+                    .get("foreshadowing")
+                    .and_then(Value::as_array)
+                    .is_some()
+                && non_empty_string(payload.get("ending_state"))
+        }
+        "quality_check" => {
+            number_in_range(payload.get("overallScore"), 0.0, 100.0)
+                && non_empty_string(payload.get("summary"))
+                && payload.get("items").and_then(Value::as_array).is_some()
+        }
+        "continuity_check" => {
+            number_in_range(payload.get("score"), 0.0, 100.0)
+                && payload.get("issues").and_then(Value::as_array).is_some()
+        }
+        "expert_review" => {
+            number_in_range(payload.get("score"), 0.0, 100.0)
+                && payload.get("issues").and_then(Value::as_array).is_some()
+                && payload
+                    .get("suggestions")
+                    .and_then(Value::as_array)
+                    .is_some()
+        }
+        _ => true,
+    };
+    if !valid {
+        push_schema_error(issues);
+    }
+}
+
 pub fn create_artifact(
     connection: &mut Connection,
     input: CreateResultArtifactInput,
@@ -322,6 +408,7 @@ pub fn create_artifact(
             None,
         ));
     }
+    validate_autonomous_response_schema(&task.task_type, structured.as_ref(), &mut issues);
     validate_structured_target(structured.as_ref(), task.chapter_id.as_deref(), &mut issues);
     let has_error = issues.iter().any(|item| item.severity == "error");
     let has_warning = issues.iter().any(|item| item.severity == "warning");
@@ -543,6 +630,56 @@ mod tests {
         self, tests::connection, tests::system_task_input, ClaimAiTaskAttemptInput,
     };
     use rusqlite::params;
+
+    #[test]
+    fn autonomous_response_schemas_reject_shape_drift() {
+        let valid_cases = [
+            (
+                "outline_generate",
+                serde_json::json!({"overallTheme":"theme","chapters":[{"order":1}]}),
+            ),
+            (
+                "chapter_summary",
+                serde_json::json!({
+                    "plot_points":[], "characters":[], "foreshadowing":[], "ending_state":"done"
+                }),
+            ),
+            (
+                "quality_check",
+                serde_json::json!({"overallScore":95,"summary":"pass","items":[]}),
+            ),
+            (
+                "continuity_check",
+                serde_json::json!({"score":96,"issues":[]}),
+            ),
+            (
+                "expert_review",
+                serde_json::json!({"score":88,"issues":[],"suggestions":[]}),
+            ),
+        ];
+        for (task_type, payload) in valid_cases {
+            let mut issues = Vec::new();
+            validate_autonomous_response_schema(task_type, Some(&payload), &mut issues);
+            assert!(
+                issues.is_empty(),
+                "{task_type} should accept its frozen shape"
+            );
+        }
+
+        for task_type in [
+            "outline_generate",
+            "chapter_summary",
+            "quality_check",
+            "continuity_check",
+            "expert_review",
+        ] {
+            let mut issues = Vec::new();
+            let drifted = serde_json::json!({});
+            validate_autonomous_response_schema(task_type, Some(&drifted), &mut issues);
+            assert_eq!(issues.len(), 1, "{task_type} must reject shape drift");
+            assert_eq!(issues[0].code, "ARTIFACT_RESPONSE_SCHEMA_INVALID");
+        }
+    }
 
     fn validating_task(
         connection: &mut Connection,

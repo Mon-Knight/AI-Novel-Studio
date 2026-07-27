@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v2.5.0（Chapter Readiness Planner Runtime）
+> 当前版本：v2.12.0（Autonomous Generation Phase 5）
 
 ---
 
@@ -144,6 +144,9 @@ v2.1.7  章节质量历史不可变快照与原子重放
 v2.1.8  章节上下文持久化一致性闭环
 v2.2.0  工作区可靠性与基础设施收口
 v2.2.1  工作区竞态可靠性热修（当前）
+v2.3.0～v2.4.0 执行事实、Provider、Safe Apply、Compiler 与 Tool Registry
+v2.5.0  Chapter Readiness Planner Runtime
+v2.6.0  Chapter Continuity Memory Facts
 ```
 
 ---
@@ -236,7 +239,7 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 | v2.1.7 | 已完成 | 章节质量历史不可变快照与原子重放 | report/items/state 单事务、历史只读回放、迟到竞态保护、AI Task 强绑定、schema 3 备份和真实桌面重启 E2E |
 | v2.1.8 | 已完成 | 章节上下文持久化一致性闭环 | SQLite 桌面单一事实源、稳定上下文 ID、总结 / 上下文 / 角色状态 / 章节终态原子提交、旧缓存幂等迁移与重启 E2E |
 | v2.2.0 | 已完成 | 工作区可靠性与基础设施收口 | 迁移账本、结构化错误、长正文原子保存与完整性读取、恢复快照、全局 Leave Guard、React/SQLite 故障测试 |
-| v2.2.1 | **当前** | **工作区竞态可靠性热修** | 采用/保存 TOCTOU、恢复候选跨会话幂等、原生关闭 bypass 失败回滚 |
+| v2.2.1 | 已完成 | 工作区竞态可靠性热修 | 采用/保存 TOCTOU、恢复候选跨会话幂等、原生关闭 bypass 失败回滚 |
 
 ### v2.1.1 单一版本目标（已完成）
 
@@ -434,9 +437,23 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 
 明确不在本版本处理：长期 Memory、正文副作用、动态 Planner、自动重试/续跑、Multi-Agent、Agent 自主写入或 UI 重做。
 
-### v2.5.0 之后
+### v2.6.0 单一版本目标
 
-- v2.6.x：长期 Memory、连续性与质量 Verification，形成受审核的单 Agent 章节闭环。
+本版本只建立可追溯、可重放的长期 Memory 事实基础：
+
+1. migration 021～022 新增 append-only `memory_snapshots` 与 `memory_snapshot_sources`；完整身份、manifest、memory、统计和预算一致性由 SQLite 约束，整行不可更新或删除。
+2. Rust `structured_memory_compiler_v1` 只从 SQLite 读取目标章节之前的有效章节总结、上下文记录和角色状态；调用方不能提交来源正文或 manifest。
+3. 卷章顺序、lookback、来源优先级与 canonical UTF-8 byte budget 确定；每条来源只能完整纳入或以 `budget` 完整省略，不截断半条事实。
+4. Snapshot 使用 operationId + canonical requestHash 幂等，冻结 source type/id/version/hash、include/omit 决策、完整 memory JSON/hash 和目标章节 rank。
+5. 只读复验重算 stored hash、使用相同编译器重新编译，并报告 changed/missing/unexpected；当前来源变化不得改写历史快照。
+6. 写作工作台提供紧凑 Memory 卡片；浏览器模式不伪造 LocalStorage Memory。真实 Tauri E2E 必须证明前章来源、后章时间边界、SQLite 事实、来源复验和跨重启读取。
+7. 保持 v2.5.0 `tool_registry_v1` 与 Planner 契约不变；本地 Memory 编译不修改 Prompt/Provider，因此本版不发起真实 API 请求。
+
+明确不在本版本处理：向量检索、embedding、知识图谱、Continuity Verification、Memory Tool Calling、动态 Planner、自动续跑、正文副作用、Multi-Agent、Agent 自主写入或 UI 重做。
+
+### v2.6.0 之后
+
+- v2.6.x：Continuity / Quality Verification、版本化 Memory Tool 接入，形成受审核的单 Agent 章节闭环。
 - v3.x：Multi-Agent Orchestrator、专业创作 Agent、Artifact 交接、冲突处理和自主逐章推进。
 
 ---
@@ -448,11 +465,12 @@ v1.0.44 Agent Workflow Runtime 最小闭环 ✅
 v1.0.45 项目开发辅助 Skills 增强版 ✅
 v1.0.46 Tool Layer 接入真实项目读取 ✅
 v2.5.0 持久 Planner / Tool Calling / lease / checkpoint ✅
-v2.6.x 后续 Memory / Continuity / Verification
+v2.6.0 结构化 Memory Snapshot / 来源漂移复验 ✅
+v2.6.x 后续 Continuity / Quality Verification / 受审核单 Agent 闭环
 v3.x    Multi-Agent / 自主创作
 ```
 
-进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.5.0 只开放一个固定章节准备计划的本地只读执行；生产 Provider 的工具 allowlist 仍为空，Memory 与受审核章节闭环尚未实现。
+进入 v2.x 版本号不代表 Planner、Tool Calling、Memory 与 Verification 已全部实现；这些仍按独立版本目标逐步交付。v2.6.0 已建立结构化 Memory Snapshot，但尚未把 Memory 开放给 Provider/Planner，生产 Provider 的工具 allowlist 仍为空，Continuity Verification 与受审核章节闭环尚未实现。
 
 ---
 

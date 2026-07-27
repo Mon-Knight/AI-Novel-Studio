@@ -6,6 +6,7 @@
 
 ## 最新版本
 
+- **v2.6.0** — Chapter Continuity Memory、不可变来源 manifest、确定性预算与漂移复验
 - **v2.5.0** — Chapter Readiness Planner Runtime、lease/checkpoint、显式重试与跨重启恢复
 - **v2.4.0** — Context / Constraint Compiler 与 Tool Registry
 - **v2.3.2** — Safe Apply 单目标安全应用

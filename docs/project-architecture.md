@@ -308,4 +308,22 @@ Rust 构造并冻结 `chapter_readiness_plan_v1`，前端不能提交任意计�
 
 ---
 
+## 17. v2.6.0 Chapter Continuity Memory Facts
+
+v2.6.0 在既有上下文业务资产之上增加派生、不可变的 Memory 事实层：
+
+```text
+chapter_summaries / context_records / character_states
+→ Rust structured_memory_compiler_v1
+→ 稳定时间边界 + 原子来源预算选择
+→ memory_snapshots + memory_snapshot_sources
+→ 只读来源漂移复验
+```
+
+调用方不能提交来源内容；Rust 按卷章稳定顺序只读取目标章节之前的有效来源。Snapshot 冻结 request/manifest/memory hash 与预算决策，业务来源变化只产生 drift，不改写历史。Tool Registry 与 Provider 策略保持 v2.5.0 不变。
+
+完整设计见 [`architecture/chapter-continuity-memory.md`](architecture/chapter-continuity-memory.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**

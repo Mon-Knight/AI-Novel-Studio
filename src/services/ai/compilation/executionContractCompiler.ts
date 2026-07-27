@@ -164,6 +164,7 @@ export async function compileAiExecutionContract(
     ? `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}${contextSnapshot.compiledContext}`
     : promptTemplateBody;
   const request = {
+    taskType: definition.taskType,
     messages: [
       { role: 'system' as const, content: systemMessage },
       { role: 'user' as const, content: userPrompt },

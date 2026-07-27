@@ -13,8 +13,8 @@ describe('desktop startup', () => {
     await assertCleanDiagnostics();
     const diagnostics = await bridgeDiagnostics();
     expect(diagnostics.databasePath).toContain('ai-novel-studio.db');
-    expect(diagnostics.migrationCount).toBe(20);
-    expect(diagnostics.latestMigrationId).toBe('020_agent_plan_checkpoints');
+    expect(diagnostics.migrationCount).toBe(26);
+    expect(diagnostics.latestMigrationId).toBe('026_expert_collaboration_logs');
     expect(diagnostics.counts?.novels).toBe(0);
     expect(diagnostics.counts?.executionTasks).toBe(0);
     expect(diagnostics.counts?.resultArtifacts).toBe(0);

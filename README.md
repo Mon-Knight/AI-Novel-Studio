@@ -25,15 +25,17 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v2.5.0**
+**当前版本：v2.12.0**
 
-**阶段：Chapter Readiness Planner Runtime — 可恢复的持久只读计划**
+**阶段：Autonomous Generation — 多章生成、连续性守护与 Multi-Agent 协作**
 
-v2.5.0 在 v2.4.0 Compiler / Tool Registry 基础上建立正式 `chapter_readiness_plan_v1`。计划、六个稳定步骤、依赖、每次 Attempt、Rust execution lease 和 append-only Checkpoint 全部保存在 SQLite；每一步绑定 Registry identity、input/output schema hash、权限、scope 与 canonical 参数 hash。
+v2.12.0 在 v2.6.0 Memory Facts 的基础上完成 Autonomous Generation Phase 0-5：任务调度、质量门槛、多章生成、自动总结与润色、连续性检查、专家协作和可追溯操作日志。所有自主服务通过统一 Provider Adapter 执行，Mock 模式用于本地与 E2E，API 模式由用户在设置中心显式配置。
 
-工作台可创建、运行、查看并显式继续章节准备计划。工具失败只形成一个 Attempt；应用重启会把中断执行恢复为 `waiting_retry` 并标记 Attempt `abandoned`，绝不静默重放。租约明文 token 只瞬时交给执行器，SQLite 仅保存 SHA-256。生产 Registry 新增 `verification.check_readiness@1`，九个工具仍全部只读或本地验证。
+v2.6.0 在既有章节总结、上下文记录和角色状态之上建立 `memory_snapshot_v1`。Rust 按卷章稳定顺序只选择目标章节之前的有效来源，使用固定 lookback 与 UTF-8 字节预算，把完整来源作为原子单元纳入或省略，并冻结 canonical source manifest、memory JSON 与 SHA-256。
 
-本版本不实现长期 Memory、正文副作用、自动续跑、Multi-Agent 或 Agent 自主写入。章节准备链路不调用 Provider，因此本版不消耗真实 API；下一独立版本进入 v2.6.x Memory、连续性与受审核单 Agent 章节闭环。
+每次快照通过 `operationId + requestHash` 幂等创建，`memory_snapshots` 与 `memory_snapshot_sources` 整行不可更新或删除。来源复验会重新编译同一目标并明确报告 changed、missing、unexpected；旧快照始终保持可读，不被当前业务行变化改写。工作台可创建新快照、查看纳入/预算省略统计并复验来源，浏览器模式不伪造 LocalStorage Memory。
+
+本版本不把 Memory 开放给 Provider 或 Tool Registry，不修改 v2.5.0 冻结 Registry hash，也不实现语义向量检索、连续性 AI 判定、正文副作用、动态 Planner、Multi-Agent 或自主写入。全部编译与复验在本地完成，因此本版不调用真实 API；下一独立版本进入 Continuity Verification。
 
 ---
 
@@ -61,6 +63,8 @@ v2.5.0 在 v2.4.0 Compiler / Tool Registry 基础上建立正式 `chapter_readin
 - **版本化 Tool Registry**：九个真实读取/本地验证工具具备冻结 schema、权限、novel/chapter/draft scope、超时和副作用声明；当前生产 Provider 请求尚不允许模型调用工具。
 - **持久章节准备计划**：固定六步 DAG 由 SQLite 保存并在执行前复验 Registry/schema/权限/scope/参数 hash；Attempt 与 Checkpoint 可追踪，租约防止并发执行。
 - **显式恢复与重试**：中断运行在启动时进入 `waiting_retry`，原 Attempt 标记 `abandoned`；只有用户明确点击继续才创建新 Attempt，不自动重放工具。
+- **长期记忆事实快照**：Rust 从目标章节之前的有效总结、上下文和角色状态编译不可变 Memory，冻结来源身份/version/hash、预算决策、canonical manifest 和 memory hash。
+- **Memory 来源复验**：同一编译器可只读重放并报告 changed / missing / unexpected；历史快照不被来源更新、过期或新增记录覆盖。
 - **角色库**：创建角色、AI 候选推荐、本章出场角色管理。
 - **事件辅助**：章节事件规划、AI 推荐事件、必需 / 禁止事件标记。
 - **风格控制**：风格方案与输出控制方案管理。
@@ -194,8 +198,9 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | v2.1.8 | 已完成：章节上下文持久化一致性闭环 |
 | v2.2.0 | 已完成：工作区可靠性与基础设施收口 |
 | v2.2.1～v2.4.0 | 已完成：可靠性热修、执行事实、Provider、Safe Apply、Compiler 与 Tool Registry |
-| v2.5.0 | **当前：持久 Chapter Readiness Planner、lease/checkpoint、显式重试与重启恢复** |
-| v2.6.x | 后续：长期 Memory、连续性与受审核单 Agent 章节闭环 |
+| v2.5.0 | 已完成：持久 Chapter Readiness Planner、lease/checkpoint、显式重试与重启恢复 |
+| v2.6.0 | **当前：不可变 Memory Snapshot、确定性预算、来源漂移复验与重启读取** |
+| v2.6.x | 后续：Continuity Verification 与受审核单 Agent 章节闭环 |
 | v3.x | Autonomous：Multi-Agent / 自主创作 |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。

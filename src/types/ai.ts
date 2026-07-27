@@ -85,7 +85,11 @@ export type AiTaskType =
   | 'quality_check'
   | 'quality_fix'
   | 'chapter_summarize'
-  | 'context_update';
+  | 'chapter_summary'
+  | 'volume_summary'
+  | 'context_update'
+  | 'continuity_check'
+  | 'expert_review';
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
@@ -134,7 +138,11 @@ export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   quality_check: '质量检查',
   quality_fix: 'AI修稿',
   chapter_summarize: '章节总结',
+  chapter_summary: '章节总结（执行事实）',
+  volume_summary: '分卷总结（执行事实）',
   context_update: '上下文更新',
+  continuity_check: '连续性检查',
+  expert_review: '专家评审',
 };
 
 // ==================== 草稿来源 ====================

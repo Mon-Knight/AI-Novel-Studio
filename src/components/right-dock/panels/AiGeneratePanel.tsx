@@ -23,6 +23,7 @@ import { hashTextContent } from '../../../utils/contentHash';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
 import { ChapterReadinessPlanCard } from '../../../features/agent-planner/ChapterReadinessPlanCard';
+import { ChapterContinuityMemoryCard } from '../../../features/memory/ChapterContinuityMemoryCard';
 
 function namesText(names: string[]): string {
   return names.length > 0 ? names.join('、') : '无';
@@ -705,6 +706,7 @@ function AiGeneratePanel({ novelId, chapter, onGenerated, onAdopted, contextVers
   return (
     <div>
       <ChapterReadinessPlanCard novelId={novelId} chapterId={chapter.id} />
+      <ChapterContinuityMemoryCard novelId={novelId} chapterId={chapter.id} />
 
       {/* AI 设置状态 */}
       <div className="panel-section">

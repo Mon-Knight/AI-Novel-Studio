@@ -110,14 +110,19 @@ function delay(ms?: number, signal?: AbortSignal): Promise<void> {
 /** 从系统提示词中检测任务类型 */
 type MockTaskType =
   | 'chapter_generate'
+  | 'chapter_rewrite'
   | 'character_generate'
   | 'event_suggest'
   | 'setting_expand'
   | 'setting_suggestion_generate'
   | 'quality_check'
   | 'chapter_polish'
+  | 'chapter_summary'
+  | 'continuity_check'
+  | 'expert_review'
   | 'connection_test'
   | 'context_summarize'
+  | 'chapter_summarize'
   | 'outline_generate'
   | 'volume_outline_generate'
   | 'chapter_outline_generate'
@@ -134,6 +139,11 @@ function detectTaskType(messages: { role: string; content: string }[]): MockTask
   if (systemMsg.includes('剧情策划') || systemMsg.includes('关键事件')) return 'event_suggest';
   if (systemMsg.includes('设定库 AI 推演') || systemMsg.includes('生成类型：')) return 'setting_suggestion_generate';
   if (systemMsg.includes('世界观构建') || systemMsg.includes('设定补充')) return 'setting_expand';
+  if (systemMsg.includes('连续性审校') || systemMsg.includes('连续性检查')) return 'continuity_check';
+  if (systemMsg.includes('专家评审') || (systemMsg.includes('专家') && systemMsg.includes('suggestions'))) return 'expert_review';
+  if (systemMsg.includes('结构化章节总结') || systemMsg.includes('章节总结')) return 'chapter_summary';
+  if (systemMsg.includes('完整重写') || systemMsg.includes('重写正文')) return 'chapter_rewrite';
+  if (systemMsg.includes('小说大纲编辑') || systemMsg.includes('章节树')) return 'outline_generate';
   if (systemMsg.includes('编辑和质量审查') || systemMsg.includes('质量检查')) return 'quality_check';
   if (systemMsg.includes('文字编辑') || systemMsg.includes('润色')) return 'chapter_polish';
   if (systemMsg.includes('小说作家') || systemMsg.includes('小说正文') || systemMsg.includes('修稿编辑') || systemMsg.includes('偏离大纲')) return 'chapter_generate';
@@ -253,6 +263,14 @@ function mockQualityCheck(info: ReturnType<typeof extractInfo>): string {
   });
 }
 
+function mockAutonomousQualityCheck(info: ReturnType<typeof extractInfo>): string {
+  return JSON.stringify({
+    overallScore: 96,
+    summary: `本章「${info.chapterTitle}」通过自主质量门禁。`,
+    items: [],
+  });
+}
+
 function mockChapterSummary(info: ReturnType<typeof extractInfo>): string {
   return JSON.stringify({
     summary: `本章《${info.chapterTitle}》推进了主线，并留下后续承接点。`,
@@ -313,6 +331,51 @@ function mockOutlineGenerate(info: ReturnType<typeof extractInfo>): string {
   return `# ${info.novelTitle} 总大纲\n\n主线围绕${info.protagonist}的成长与关键冲突展开，分为开端、升级、反转和终局四个阶段。\n\n## 分卷规划\n1. 第一卷：建立世界规则与主角目标。\n2. 第二卷：扩大冲突，揭示敌对势力。\n3. 第三卷：回收伏笔，完成核心决战。`;
 }
 
+function mockAutonomousOutline(
+  info: ReturnType<typeof extractInfo>,
+  messages: { role: string; content: string }[],
+): string {
+  const combined = messages.map((message) => message.content).join('\n');
+  const requested = Number(combined.match(/生成\s*(\d+)\s*章/)?.[1] ?? 3);
+  const chapterCount = Math.max(1, Math.min(100, Number.isFinite(requested) ? requested : 3));
+  return JSON.stringify({
+    overallTheme: `${info.protagonist}在持续升级的冲突中完成选择与成长。`,
+    chapters: Array.from({ length: chapterCount }, (_, index) => ({
+      order: index + 1,
+      title: `第${index + 1}章 ${index === 0 ? '启程' : `转折${index}`}`,
+      summary: index === 0
+        ? '主角进入核心事件，明确本阶段目标。'
+        : `承接前章线索，推进第 ${index + 1} 个关键冲突。`,
+      plotPoints: [
+        '承接既有事实与人物状态',
+        '推进本章核心冲突',
+        '留下可供下一章承接的明确线索',
+      ],
+    })),
+  });
+}
+
+function mockAutonomousChapterSummary(info: ReturnType<typeof extractInfo>): string {
+  return JSON.stringify({
+    plot_points: ['主角进入关键场景', '核心冲突得到推进', '新的线索被确认'],
+    characters: [{ name: info.protagonist, state: '目标更加明确，准备继续追查线索' }],
+    foreshadowing: ['关键线索背后仍有隐藏势力'],
+    ending_state: '本章冲突暂时告一段落，下一步行动已经明确。',
+  });
+}
+
+function mockContinuityCheck(): string {
+  return JSON.stringify({ score: 96, issues: [] });
+}
+
+function mockExpertReview(): string {
+  return JSON.stringify({
+    score: 88,
+    issues: [],
+    suggestions: ['保持当前人物动机与因果链，下一章继续回收已建立线索。'],
+  });
+}
+
 function mockVolumeOutline(): string {
   return JSON.stringify({
     title: '第一卷：启程',
@@ -347,7 +410,8 @@ function mockStyleAnalyze(): string {
 
 function mockChapterPolish(_info: ReturnType<typeof extractInfo>, messages: { role: string; content: string }[]): string {
   // 从用户消息中提取原文
-  const original = messages.find((m) => m.role === 'system')?.content?.match(/以下是原文：\n\n([\s\S]*?)$/)?.[1] || '（空正文）';
+  const combined = messages.map((message) => message.content).join('\n');
+  const original = combined.match(/(?:原文|以下是原文)：?\s*\n([\s\S]*?)$/)?.[1] || '（空正文）';
 
   const modeText = messages.find((m) => m.role === 'system')?.content?.match(/润色模式：(.+)/)?.[1] || '保持剧情不变，优化表达';
 
@@ -385,16 +449,35 @@ export class MockAiClient implements AiClient {
         text = mockSettingSuggestion(request.messages);
         break;
       case 'quality_check':
-        text = mockQualityCheck(info);
+        text = request.promptTemplateSource === 'autonomous/quality-check'
+          ? mockAutonomousQualityCheck(info)
+          : mockQualityCheck(info);
         break;
       case 'chapter_polish':
         text = mockChapterPolish(info, request.messages);
         break;
+      case 'chapter_rewrite':
+        text = mockChapterPolish(info, request.messages);
+        break;
+      case 'chapter_summary':
+        text = mockAutonomousChapterSummary(info);
+        break;
+      case 'continuity_check':
+        text = mockContinuityCheck();
+        break;
+      case 'expert_review':
+        text = mockExpertReview();
+        break;
       case 'context_summarize':
         text = mockChapterSummary(info);
         break;
+      case 'chapter_summarize':
+        text = mockChapterSummary(info);
+        break;
       case 'outline_generate':
-        text = mockOutlineGenerate(info);
+        text = request.promptTemplateSource === 'autonomous/outline-generate'
+          ? mockAutonomousOutline(info, request.messages)
+          : mockOutlineGenerate(info);
         break;
       case 'volume_outline_generate':
         text = mockVolumeOutline();

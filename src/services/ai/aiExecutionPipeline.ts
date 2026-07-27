@@ -41,6 +41,8 @@ export interface ExecuteAiTaskInput {
   novelId: string;
   chapterId?: string;
   draftId?: string;
+  sourceDraftVersion?: number;
+  baseContentHash?: string;
   targetHintJson?: unknown;
   settings: AiSettings;
   compilation: AiExecutionCompilationInput;
@@ -371,6 +373,9 @@ async function buildTaskInput(
       inputType: contract.inputType,
       payloadJson: contract.inputPayloadJson,
       body: serializedMessages,
+      sourceDraftId: input.draftId,
+      sourceDraftVersion: input.sourceDraftVersion,
+      baseContentHash: input.baseContentHash,
     },
     contextSnapshot: {
       schemaVersion: contract.contextSnapshot.schemaVersion,

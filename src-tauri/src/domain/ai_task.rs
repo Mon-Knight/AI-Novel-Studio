@@ -143,6 +143,8 @@ pub fn is_supported_task_type(value: &str) -> bool {
             | "style_analyze"
             | "quality_check"
             | "quality_fix"
+            | "continuity_check"
+            | "expert_review"
     )
 }
 

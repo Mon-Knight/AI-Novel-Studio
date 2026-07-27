@@ -2411,3 +2411,27 @@ Checkpoint 按 Plan 单调 sequence 追加，记录 plan/step/attempt identity�
 启动恢复把 running Attempt 标为 abandoned，Plan/Step 标为 waiting_retry，活动 lease 标为 expired，并追加 `automaticReplay=false` checkpoint。Plan 六类事实使用 `ON DELETE RESTRICT` 与 no-delete trigger，不能随章节清理或历史任务删除而丢失。
 
 完整契约见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。
+
+---
+
+# 33. v2.6.0 Chapter Continuity Memory 持久事实
+
+v2.6.0 新增 migration 021～022：`memory_snapshots` 与 `memory_snapshot_sources`。两表保存从既有章节总结、上下文记录和角色状态派生的不可变记忆执行事实，不替代或回写这些业务表。
+
+## 33.1 `memory_snapshots`
+
+Snapshot 以 `operationId + canonical requestHash` 幂等，冻结 `memory_snapshot_v1`、`chapter_continuity`、`structured_memory_compiler_v1@1`、Novel/目标 Chapter、稳定目标 rank、lookback、UTF-8 byte budget、完整 source manifest/hash、完整 memory JSON/hash、候选统计和字节数。
+
+SQLite 必须验证：manifest 数量等于 candidateCount；candidateCount 等于 includedCount + omittedCount；memory JSON 的 identity、统计与 items 数量同列值一致；memoryBytes 等于 JSON UTF-8 bytes 且不超过 budget。整行不可 UPDATE/DELETE。
+
+## 33.2 `memory_snapshot_sources`
+
+每条来源按 Snapshot 单调 ordinal 保存 type/id、Novel、可选 Chapter/rank、sourceVersion/hash、included 与 omissionReason。当前只允许 `chapter_summary`、`context_record`、`character_state`；省略原因只允许 `budget`。ordinal 不得超过 Snapshot 的 candidateCount，同一 Snapshot 不得重复 source identity，整行 append-only。
+
+Snapshot/Source 对 Novel 和 Chapter 使用 `ON DELETE RESTRICT`；来源业务行本身不建立外键，允许后续删除或过期后由复验明确报告 missing，而不是级联删除历史证据。
+
+## 33.3 编译与复验
+
+Rust 只读取目标章节之前的有效来源，当前/未来/过期/禁用或与当前 adopted draft 不一致的来源不进入候选集合。预算只允许完整纳入或完整省略，不保存半条事实。复验重算 stored hash、重新编译并报告 changed/missing/unexpected，不原地更新历史快照。
+
+完整契约见 [`architecture/chapter-continuity-memory.md`](architecture/chapter-continuity-memory.md)。

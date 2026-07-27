@@ -6,6 +6,7 @@ import { useGlobalLoadingModal } from './lib/runWithLoading';
 import HomePage from './pages/Home/HomePage';
 import NovelDetailPage from './pages/NovelDetail/NovelDetailPage';
 import WritingWorkspacePage from './pages/WritingWorkspace/WritingWorkspacePage';
+import AutonomousMonitorPage from './pages/AutonomousMonitor/AutonomousMonitorPage';
 import StyleProfilesPage from './pages/StyleProfiles/StyleProfilesPage';
 import SettingsPage from './pages/Settings/SettingsPage';
 import ComingSoonPage from './pages/ComingSoon/ComingSoonPage';
@@ -35,6 +36,7 @@ function App({ startupRecovery, startupContextMigration }: AppProps) {
           <Route path="/" element={<HomePage />} />
           <Route path="/novels/:novelId" element={<NovelDetailPage />} />
           <Route path="/novels/:novelId/workspace" element={<WritingWorkspacePage />} />
+          <Route path="/novels/:novelId/autonomous-monitor" element={<AutonomousMonitorPage />} />
           <Route path="/styles" element={<StyleProfilesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/assets" element={<AssetsPage />} />

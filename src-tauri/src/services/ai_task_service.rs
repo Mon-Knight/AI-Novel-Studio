@@ -234,6 +234,283 @@ fn estimated_tokens(text: &str) -> i64 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FormalScopePolicy {
+    System,
+    Business,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FormalCompilationPolicy {
+    task_type: &'static str,
+    scope: FormalScopePolicy,
+    expected_artifact_type: &'static str,
+    expected_artifact_schema_version: i64,
+    response_schema: &'static str,
+    prompt_template_id: &'static str,
+    prompt_template_version: &'static str,
+    prompt_template_hash: &'static str,
+    user_prompt: &'static str,
+    allowed_source_types: &'static [&'static str],
+    required_source_types: &'static [&'static str],
+    model_context_tokens: i64,
+    max_output_tokens: i64,
+}
+
+fn formal_compilation_policy(task_type: &str) -> Option<FormalCompilationPolicy> {
+    let policy = match task_type {
+        "connection_test" => FormalCompilationPolicy {
+            task_type: "connection_test",
+            scope: FormalScopePolicy::System,
+            expected_artifact_type: "generic_text",
+            expected_artifact_schema_version: 1,
+            response_schema: "exact_text_ok_v1",
+            prompt_template_id: "system/connection_test",
+            prompt_template_version: "2",
+            prompt_template_hash:
+                "5952458e7c12ff1ef5e0a2998396ad3e476858d63a5e0496eefe41313900c4f9",
+            user_prompt: "请只回复 OK。",
+            allowed_source_types: &[],
+            required_source_types: &[],
+            model_context_tokens: 512,
+            max_output_tokens: 8,
+        },
+        "setting_expand" => FormalCompilationPolicy {
+            task_type: "setting_expand",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "setting_candidates",
+            expected_artifact_schema_version: 1,
+            response_schema: "setting_candidates_v1",
+            prompt_template_id: "setting/expand",
+            prompt_template_version: "2",
+            prompt_template_hash:
+                "39cc6fa2c4c05076fd01b4fff4e8a33c61273191e697e2553d7b3ac415331c80",
+            user_prompt: "请为当前章节补充相关设定候选。",
+            allowed_source_types: &[
+                "novel",
+                "chapter",
+                "world_setting",
+                "rule_system",
+                "request_context",
+            ],
+            required_source_types: &["novel"],
+            model_context_tokens: 16_000,
+            max_output_tokens: 5_000,
+        },
+        "outline_generate" => FormalCompilationPolicy {
+            task_type: "outline_generate",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "outline",
+            expected_artifact_schema_version: 1,
+            response_schema: "autonomous_outline_v1",
+            prompt_template_id: "autonomous/outline-generate",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "cbee4b14784a038a201b3bc158e80b3cb5affa79ebc1ce7cd4c505fa17e80ecf",
+            user_prompt: "请生成结构化大纲。",
+            allowed_source_types: &["novel", "outline", "request_context"],
+            required_source_types: &["novel", "request_context"],
+            model_context_tokens: 32_000,
+            max_output_tokens: 16_000,
+        },
+        "chapter_generate" => FormalCompilationPolicy {
+            task_type: "chapter_generate",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "chapter_text",
+            expected_artifact_schema_version: 1,
+            response_schema: "chapter_text_v1",
+            prompt_template_id: "autonomous/chapter-generate",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "d3d731ca1c590da35b82e038dcbc7d2325ba4bd75010779529fcce6f00344288",
+            user_prompt: "请生成完整章节正文。",
+            allowed_source_types: &[
+                "novel",
+                "chapter",
+                "world_setting",
+                "rule_system",
+                "protagonist",
+                "character",
+                "chapter_event",
+                "outline",
+                "context_record",
+                "style_profile",
+                "output_profile",
+                "request_context",
+            ],
+            required_source_types: &["novel", "chapter", "request_context"],
+            model_context_tokens: 64_000,
+            max_output_tokens: 16_000,
+        },
+        "chapter_polish" => FormalCompilationPolicy {
+            task_type: "chapter_polish",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "chapter_text",
+            expected_artifact_schema_version: 1,
+            response_schema: "chapter_text_v1",
+            prompt_template_id: "autonomous/chapter-polish",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "7d51cbe68e7cf6e2b006ecfb7718f9c4104561f0790aecd104bab4741e3f2ca2",
+            user_prompt: "请润色目标草稿。",
+            allowed_source_types: &["novel", "chapter", "draft", "request_context"],
+            required_source_types: &["draft", "request_context"],
+            model_context_tokens: 64_000,
+            max_output_tokens: 16_000,
+        },
+        "chapter_rewrite" => FormalCompilationPolicy {
+            task_type: "chapter_rewrite",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "chapter_text",
+            expected_artifact_schema_version: 1,
+            response_schema: "chapter_text_v1",
+            prompt_template_id: "autonomous/chapter-rewrite",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "7d51cbe68e7cf6e2b006ecfb7718f9c4104561f0790aecd104bab4741e3f2ca2",
+            user_prompt: "请依据约束重写目标草稿。",
+            allowed_source_types: &["novel", "chapter", "draft", "request_context"],
+            required_source_types: &["draft", "request_context"],
+            model_context_tokens: 64_000,
+            max_output_tokens: 16_000,
+        },
+        "chapter_summary" => FormalCompilationPolicy {
+            task_type: "chapter_summary",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "chapter_summary",
+            expected_artifact_schema_version: 1,
+            response_schema: "chapter_summary_v1",
+            prompt_template_id: "autonomous/chapter-summary",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "b9eb6fc78c6e44429041bd774e0bd22ba116b4c9c625776f712a2f4f534ecdbf",
+            user_prompt: "请生成结构化章节总结。",
+            allowed_source_types: &["novel", "chapter", "draft", "request_context"],
+            required_source_types: &["draft", "request_context"],
+            model_context_tokens: 48_000,
+            max_output_tokens: 4_000,
+        },
+        "quality_check" => FormalCompilationPolicy {
+            task_type: "quality_check",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "quality_report",
+            expected_artifact_schema_version: 1,
+            response_schema: "quality_report_v1",
+            prompt_template_id: "autonomous/quality-check",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "2104db1c864fe131e08a15116acb139168bab35bfbbd5acb60556f7f1173632d",
+            user_prompt: "请检查目标草稿质量。",
+            allowed_source_types: &[
+                "novel",
+                "chapter",
+                "draft",
+                "context_record",
+                "request_context",
+            ],
+            required_source_types: &["draft", "request_context"],
+            model_context_tokens: 64_000,
+            max_output_tokens: 6_000,
+        },
+        "continuity_check" => FormalCompilationPolicy {
+            task_type: "continuity_check",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "quality_report",
+            expected_artifact_schema_version: 1,
+            response_schema: "continuity_report_v1",
+            prompt_template_id: "autonomous/continuity-check",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "eb211f939c716d97396ba59b7bc7fac1f3f375b9b4b5d695ab99e8316a9ea916",
+            user_prompt: "请执行连续性检查。",
+            allowed_source_types: &[
+                "novel",
+                "chapter",
+                "draft",
+                "context_record",
+                "request_context",
+            ],
+            required_source_types: &["draft", "request_context"],
+            model_context_tokens: 64_000,
+            max_output_tokens: 5_000,
+        },
+        "expert_review" => FormalCompilationPolicy {
+            task_type: "expert_review",
+            scope: FormalScopePolicy::Business,
+            expected_artifact_type: "quality_report",
+            expected_artifact_schema_version: 1,
+            response_schema: "expert_review_v1",
+            prompt_template_id: "autonomous/expert-review",
+            prompt_template_version: "1",
+            prompt_template_hash:
+                "9bb6de8aef64e4a30d3f0d24de0430bb3469234f62dbc16ce7ee248212f9006a",
+            user_prompt: "请按指定专家职责评审目标草稿。",
+            allowed_source_types: &[
+                "novel",
+                "chapter",
+                "draft",
+                "context_record",
+                "request_context",
+            ],
+            required_source_types: &["draft", "request_context"],
+            model_context_tokens: 64_000,
+            max_output_tokens: 4_000,
+        },
+        _ => return None,
+    };
+    Some(policy)
+}
+
+fn formal_constraints(task_type: &str) -> Option<Value> {
+    match task_type {
+        "connection_test" => Some(serde_json::json!({
+            "exactText": "OK",
+            "allowMarkdown": false,
+            "allowAdditionalText": false,
+        })),
+        "setting_expand" => Some(serde_json::json!({
+            "candidateOnly": true,
+            "minimumCandidates": 3,
+            "maximumCandidates": 8,
+            "mayWriteBusinessData": false,
+            "requireExplicitApplyConfirmation": true,
+        })),
+        "outline_generate" => Some(serde_json::json!({
+            "candidateOnly": true,
+            "requireUserConfirmation": true,
+        })),
+        "chapter_generate" => Some(serde_json::json!({
+            "plainTextOnly": true,
+            "mayAdoptAutomaticallyAfterGates": true,
+        })),
+        "chapter_polish" => Some(serde_json::json!({
+            "plainTextOnly": true,
+            "preserveFacts": true,
+        })),
+        "chapter_rewrite" => Some(serde_json::json!({
+            "plainTextOnly": true,
+            "preserveScope": true,
+        })),
+        "chapter_summary" | "quality_check" | "continuity_check" | "expert_review" => {
+            Some(serde_json::json!({
+                "structuredJsonOnly": true,
+                "sourceDraftBound": true,
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn valid_compilation_identifier(value: &str, max_len: usize) -> bool {
+    let trimmed = value.trim();
+    value == trimmed
+        && !trimmed.is_empty()
+        && trimmed.len() <= max_len
+        && trimmed.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'@' | b'-')
+        })
+}
+
 fn requires_formal_compilation(input: &CreateAiTaskInput) -> bool {
     #[cfg(test)]
     if input.input_snapshot.input_type == "connection_test_input"
@@ -243,13 +520,28 @@ fn requires_formal_compilation(input: &CreateAiTaskInput) -> bool {
         // production Provider entry. This branch is absent from release builds.
         return false;
     }
-    matches!(
-        input.task_type.as_str(),
-        "connection_test" | "setting_expand"
-    )
+    formal_compilation_policy(&input.task_type).is_some()
 }
 
 fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
+    let policy = formal_compilation_policy(&input.task_type)
+        .ok_or_else(|| compilation_error("任务没有正式 Context 编译策略"))?;
+    match policy.scope {
+        FormalScopePolicy::System => {
+            if input.scope_type != "system"
+                || input.novel_id != "system"
+                || input.chapter_id.is_some()
+                || input.draft_id.is_some()
+            {
+                return Err(compilation_error("连接测试必须使用 system scope"));
+            }
+        }
+        FormalScopePolicy::Business => {
+            if input.scope_type == "system" || input.novel_id == "system" {
+                return Err(compilation_error("业务 Provider 任务不得使用 system scope"));
+            }
+        }
+    }
     let context = &input.context_snapshot;
     if context.schema_version != 2 || context.compiler_version != "context_compiler_v1" {
         return Err(compilation_error(
@@ -288,20 +580,19 @@ fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
     if sources.len() > 256 || missing.len() > 32 {
         return Err(compilation_error("Context manifest 来源数量超过限制"));
     }
+    let mut missing_source_types = Vec::with_capacity(missing.len());
     for source_type in missing {
         let source_type = source_type
             .as_str()
             .ok_or_else(|| compilation_error("missingSourceTypes 必须只包含字符串"))?;
-        if input.task_type == "connection_test"
-            || !matches!(
-                source_type,
-                "novel" | "chapter" | "world_setting" | "rule_system" | "request_context"
-            )
+        if !policy.allowed_source_types.contains(&source_type)
+            || missing_source_types.contains(&source_type)
         {
             return Err(compilation_error("missingSourceTypes 包含未授权类型"));
         }
+        missing_source_types.push(source_type);
     }
-    if input.task_type == "connection_test" {
+    if policy.scope == FormalScopePolicy::System {
         if !sources.is_empty() || !context.compiled_context.is_empty() {
             return Err(compilation_error("连接测试不得包含业务上下文来源"));
         }
@@ -312,6 +603,8 @@ fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
     let mut omitted_count = 0_i64;
     let mut has_novel = false;
     let mut has_chapter = false;
+    let mut present_source_types = Vec::with_capacity(sources.len());
+    let mut satisfied_required_types = Vec::new();
     for (index, source) in sources.iter().enumerate() {
         let source_type = required_str(source, "sourceType")?;
         let source_id = required_str(source, "sourceId")?;
@@ -355,26 +648,61 @@ fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
                 ));
             }
         }
-        if input.task_type == "setting_expand" {
-            if !matches!(
-                source_type,
-                "novel" | "chapter" | "world_setting" | "rule_system" | "request_context"
-            ) {
-                return Err(compilation_error("设定补充包含未授权 Context source type"));
-            }
-            if source_type == "novel"
-                && source_id == input.novel_id
-                && matches!(status, "included" | "truncated")
-            {
+        if !policy.allowed_source_types.contains(&source_type) {
+            return Err(compilation_error(format!(
+                "任务 {} 包含未授权 Context source type {source_type}",
+                policy.task_type
+            )));
+        }
+        if source_type == "novel" && source_id != input.novel_id {
+            return Err(compilation_error(
+                "Novel Context source 与 Task scope 不一致",
+            ));
+        }
+        if source_type == "chapter"
+            && input
+                .chapter_id
+                .as_deref()
+                .is_some_and(|chapter_id| source_id != chapter_id)
+        {
+            return Err(compilation_error(
+                "Chapter Context source 与 Task scope 不一致",
+            ));
+        }
+        present_source_types.push(source_type);
+        if policy.required_source_types.contains(&source_type)
+            && required_i64(source, "originalChars")? > 0
+            && !satisfied_required_types.contains(&source_type)
+        {
+            satisfied_required_types.push(source_type);
+        }
+        if matches!(status, "included" | "truncated") {
+            if source_type == "novel" && source_id == input.novel_id {
                 has_novel = true;
             }
-            if source_type == "chapter"
-                && input.chapter_id.as_deref() == Some(source_id)
-                && matches!(status, "included" | "truncated")
-            {
+            if source_type == "chapter" && input.chapter_id.as_deref() == Some(source_id) {
                 has_chapter = true;
             }
         }
+    }
+    if missing_source_types
+        .iter()
+        .any(|source_type| present_source_types.contains(source_type))
+    {
+        return Err(compilation_error(
+            "missingSourceTypes 不得包含 manifest 中已经存在的来源类型",
+        ));
+    }
+    if policy
+        .required_source_types
+        .iter()
+        .any(|source_type| !satisfied_required_types.contains(source_type))
+    {
+        return Err(AppError::new(
+            codes::AI_CONTEXT_SOURCE_REQUIRED,
+            format!("任务 {} 缺少必需 Context source", policy.task_type),
+            false,
+        ));
     }
     if input.task_type == "setting_expand"
         && (!has_novel || (input.scope_type == "chapter" && !has_chapter))
@@ -400,8 +728,8 @@ fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
     let fixed_tokens = required_i64(&context.budget_json, "fixedMessageTokens")?;
     let available_tokens = required_i64(&context.budget_json, "availableContextTokens")?;
     let compiled_tokens = required_i64(&context.budget_json, "compiledContextTokens")?;
-    if model_tokens < 128
-        || output_tokens < 1
+    if model_tokens != policy.model_context_tokens
+        || output_tokens != policy.max_output_tokens
         || fixed_tokens < 0
         || available_tokens != model_tokens - output_tokens - fixed_tokens
         || compiled_tokens != estimated_tokens(&context.compiled_context)
@@ -424,13 +752,10 @@ fn validate_formal_context(input: &CreateAiTaskInput) -> Result<(), AppError> {
 }
 
 fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError> {
-    let expected_artifact_contract = match input.task_type.as_str() {
-        "connection_test" => ("generic_text", 1),
-        "setting_expand" => ("setting_candidates", 1),
-        _ => return Err(compilation_error("任务没有正式 Constraint 编译策略")),
-    };
-    if input.expected_artifact_type != expected_artifact_contract.0
-        || input.expected_artifact_schema_version != expected_artifact_contract.1
+    let policy = formal_compilation_policy(&input.task_type)
+        .ok_or_else(|| compilation_error("任务没有正式 Constraint 编译策略"))?;
+    if input.expected_artifact_type != policy.expected_artifact_type
+        || input.expected_artifact_schema_version != policy.expected_artifact_schema_version
     {
         return Err(AppError::new(
             codes::AI_CONSTRAINT_POLICY_INVALID,
@@ -458,7 +783,9 @@ fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError>
         .get("expectedArtifact")
         .and_then(Value::as_object)
         .ok_or_else(|| compilation_error("Constraint 缺少 expectedArtifact"))?;
-    if expected.get("type").and_then(Value::as_str) != Some(input.expected_artifact_type.as_str())
+    if expected.len() != 2
+        || expected.get("type").and_then(Value::as_str)
+            != Some(input.expected_artifact_type.as_str())
         || expected.get("schemaVersion").and_then(Value::as_i64)
             != Some(input.expected_artifact_schema_version)
     {
@@ -471,7 +798,12 @@ fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError>
         .get("constraintsHash")
         .and_then(Value::as_str)
         .ok_or_else(|| compilation_error("Constraint 缺少 constraintsHash"))?;
-    if !valid_sha256(constraints_hash) || canonical_hash(constraints)? != constraints_hash {
+    let expected_constraints = formal_constraints(policy.task_type)
+        .ok_or_else(|| compilation_error("任务没有冻结业务 Constraint"))?;
+    if !valid_sha256(constraints_hash)
+        || canonical_hash(constraints)? != constraints_hash
+        || constraints != &expected_constraints
+    {
         return Err(compilation_error("constraintsHash 无效"));
     }
     let tool_policy = payload
@@ -486,7 +818,8 @@ fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError>
         .get("allowedTools")
         .and_then(Value::as_array)
         .ok_or_else(|| compilation_error("allowedTools 必须是数组"))?;
-    if tool_policy.get("registryVersion").and_then(Value::as_str) != Some("tool_registry_v1")
+    if tool_policy.len() != 3
+        || tool_policy.get("registryVersion").and_then(Value::as_str) != Some("tool_registry_v1")
         || !valid_sha256(registry_hash)
         || registry_hash != PRODUCTION_TOOL_REGISTRY_HASH
         || !allowed_tools.is_empty()
@@ -501,49 +834,40 @@ fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError>
         .provider_options_json
         .as_object()
         .ok_or_else(|| compilation_error("Provider options 必须是对象"))?;
+    let provider_id = provider_options
+        .get("providerId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Provider providerId 无效"))?;
+    let model = provider_options
+        .get("model")
+        .and_then(Value::as_str)
+        .ok_or_else(|| compilation_error("Provider model 无效"))?;
+    let temperature = provider_options
+        .get("temperature")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| compilation_error("Provider temperature 无效"))?;
     let max_tokens = provider_options
         .get("maxTokens")
         .and_then(Value::as_i64)
         .ok_or_else(|| compilation_error("Provider maxTokens 无效"))?;
-    let expected_template = if input.task_type == "connection_test" {
-        if payload.get("responseSchema").and_then(Value::as_str) != Some("exact_text_ok_v1")
-            || constraints.get("exactText").and_then(Value::as_str) != Some("OK")
-            || max_tokens != 8
-        {
-            return Err(compilation_error("连接测试 Constraint policy 无效"));
-        }
-        (
-            "system/connection_test",
-            "2",
-            "请只回复 OK。",
-            "5952458e7c12ff1ef5e0a2998396ad3e476858d63a5e0496eefe41313900c4f9",
-        )
-    } else {
-        if payload.get("responseSchema").and_then(Value::as_str) != Some("setting_candidates_v1")
-            || constraints.get("candidateOnly").and_then(Value::as_bool) != Some(true)
-            || constraints
-                .get("mayWriteBusinessData")
-                .and_then(Value::as_bool)
-                != Some(false)
-            || constraints
-                .get("requireExplicitApplyConfirmation")
-                .and_then(Value::as_bool)
-                != Some(true)
-            || max_tokens != 5_000
-        {
-            return Err(compilation_error("设定补充 Constraint policy 无效"));
-        }
-        (
-            "setting/expand",
-            "2",
-            "请为当前章节补充相关设定候选。",
-            "39cc6fa2c4c05076fd01b4fff4e8a33c61273191e697e2553d7b3ac415331c80",
-        )
-    };
-    if constraint.prompt_template_id != expected_template.0
-        || constraint.prompt_template_version != expected_template.1
-        || constraint.prompt_template_hash != expected_template.3
-        || large_text_repository::sha256(&constraint.prompt_template_body) != expected_template.3
+    if payload.get("responseSchema").and_then(Value::as_str) != Some(policy.response_schema)
+        || provider_options.len() != 4
+        || !valid_compilation_identifier(provider_id, 160)
+        || !valid_compilation_identifier(model, 160)
+        || !(0.0..=2.0).contains(&temperature)
+        || max_tokens != policy.max_output_tokens
+    {
+        return Err(AppError::new(
+            codes::AI_CONSTRAINT_POLICY_INVALID,
+            "Provider options 或响应策略与正式编译策略不一致",
+            false,
+        ));
+    }
+    if constraint.prompt_template_id != policy.prompt_template_id
+        || constraint.prompt_template_version != policy.prompt_template_version
+        || constraint.prompt_template_hash != policy.prompt_template_hash
+        || large_text_repository::sha256(&constraint.prompt_template_body)
+            != policy.prompt_template_hash
     {
         return Err(compilation_error("Prompt template identity 无效"));
     }
@@ -557,7 +881,7 @@ fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError>
     if messages.len() != 2
         || messages[0].get("role").and_then(Value::as_str) != Some("system")
         || messages[1].get("role").and_then(Value::as_str) != Some("user")
-        || messages[1].get("content").and_then(Value::as_str) != Some(expected_template.2)
+        || messages[1].get("content").and_then(Value::as_str) != Some(policy.user_prompt)
     {
         return Err(compilation_error("Provider messages 与编译策略不一致"));
     }
@@ -1992,6 +2316,370 @@ pub(crate) mod tests {
             provider_options_json: provider_options,
         };
         input
+    }
+
+    const AUTONOMOUS_FORMAL_TASK_TYPES: &[&str] = &[
+        "outline_generate",
+        "chapter_generate",
+        "chapter_polish",
+        "chapter_rewrite",
+        "chapter_summary",
+        "quality_check",
+        "continuity_check",
+        "expert_review",
+    ];
+
+    fn formal_template_body(task_type: &str) -> String {
+        let raw = match task_type {
+            "outline_generate" => include_str!("../../../prompts/autonomous_outline_generate.md"),
+            "chapter_generate" => include_str!("../../../prompts/autonomous_chapter_generate.md"),
+            "chapter_polish" | "chapter_rewrite" => {
+                include_str!("../../../prompts/autonomous_chapter_revision.md")
+            }
+            "chapter_summary" => include_str!("../../../prompts/autonomous_chapter_summary.md"),
+            "quality_check" => include_str!("../../../prompts/autonomous_quality_check.md"),
+            "continuity_check" => {
+                include_str!("../../../prompts/autonomous_continuity_check.md")
+            }
+            "expert_review" => include_str!("../../../prompts/autonomous_expert_review.md"),
+            _ => panic!("missing autonomous template fixture for {task_type}"),
+        };
+        raw.replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .trim()
+            .to_string()
+    }
+
+    fn formal_default_temperature(task_type: &str) -> f64 {
+        match task_type {
+            "outline_generate" | "chapter_rewrite" => 0.7,
+            "chapter_generate" => 0.75,
+            "chapter_polish" => 0.45,
+            "chapter_summary" | "expert_review" => 0.2,
+            "quality_check" | "continuity_check" => 0.1,
+            _ => panic!("missing autonomous temperature fixture for {task_type}"),
+        }
+    }
+
+    fn refresh_formal_compilation_hash(input: &mut CreateAiTaskInput) {
+        let request_body_hash = large_text_repository::sha256(&input.input_snapshot.body);
+        input.input_snapshot.payload_json["requestBodyHash"] =
+            Value::String(request_body_hash.clone());
+        let task_input = input.input_snapshot.payload_json["taskInput"].clone();
+        let compilation_hash = canonical_hash(&serde_json::json!({
+            "contractVersion": "compiled_ai_execution_v1",
+            "taskType": input.task_type,
+            "scope": {
+                "scopeType": input.scope_type,
+                "novelId": input.novel_id,
+                "chapterId": input.chapter_id,
+                "draftId": input.draft_id,
+            },
+            "expectedArtifactType": input.expected_artifact_type,
+            "expectedArtifactSchemaVersion": input.expected_artifact_schema_version,
+            "requestBodyHash": request_body_hash,
+            "taskInput": task_input,
+            "contextManifest": input.context_snapshot.source_manifest_json,
+            "contextBudget": input.context_snapshot.budget_json,
+            "constraintPayload": input.constraint_snapshot.payload_json,
+            "promptTemplateHash": input.constraint_snapshot.prompt_template_hash,
+            "providerOptions": input.constraint_snapshot.provider_options_json,
+        }))
+        .expect("test compilation hash");
+        input.input_snapshot.payload_json["compilationHash"] = Value::String(compilation_hash);
+    }
+
+    fn formal_autonomous_task_input(task_type: &str, operation_id: &str) -> CreateAiTaskInput {
+        let policy = formal_compilation_policy(task_type).expect("registered formal policy");
+        let template = formal_template_body(task_type);
+        let template_hash = large_text_repository::sha256(&template);
+        assert_eq!(
+            template_hash, policy.prompt_template_hash,
+            "Rust policy hash must match the normalized prompt for {task_type}"
+        );
+
+        let (scope_type, chapter_id, draft_id) = match task_type {
+            "outline_generate" => ("novel", None, None),
+            "chapter_generate" => ("chapter", Some("chapter-policy"), None),
+            _ => ("draft", Some("chapter-policy"), Some("draft-policy")),
+        };
+        let mut rendered_sections = Vec::new();
+        let mut manifest_sources = Vec::new();
+        for (ordinal, source_type) in policy.allowed_source_types.iter().enumerate() {
+            let source_id = match *source_type {
+                "novel" => "novel-policy".to_string(),
+                "chapter" => "chapter-policy".to_string(),
+                "draft" => "draft-policy".to_string(),
+                "request_context" => format!("request:{operation_id}"),
+                other => format!("{other}-policy"),
+            };
+            let origin = if *source_type == "request_context" {
+                "request"
+            } else {
+                "sqlite"
+            };
+            let label = format!("{source_type} fixture");
+            let content = format!("正式上下文：{source_type}");
+            let content_hash = large_text_repository::sha256(&content);
+            rendered_sections.push(format!("## {label}\n{content}"));
+            manifest_sources.push(serde_json::json!({
+                "ordinal": ordinal,
+                "sourceType": source_type,
+                "sourceId": source_id,
+                "sourceVersion": "1",
+                "origin": origin,
+                "label": label,
+                "order": ordinal,
+                "priority": 100,
+                "required": policy.required_source_types.contains(source_type),
+                "contentHash": content_hash,
+                "originalChars": content.chars().count(),
+                "originalBytes": content.len(),
+                "originalTokens": estimated_tokens(&content),
+                "status": "included",
+                "includedHash": content_hash,
+                "includedChars": content.chars().count(),
+                "includedBytes": content.len(),
+                "includedTokens": estimated_tokens(&content),
+            }));
+        }
+        let compiled_context = rendered_sections.join("\n\n");
+        let context_manifest = serde_json::json!({
+            "contractVersion": "context_manifest_v1",
+            "compilerVersion": "context_compiler_v1",
+            "tokenEstimator": "utf8_bytes_div3_v1",
+            "compiledContextHash": large_text_repository::sha256(&compiled_context),
+            "missingSourceTypes": [],
+            "sources": manifest_sources,
+        });
+        let fixed_messages = serde_json::to_string(&serde_json::json!({
+            "messages": [
+                {
+                    "role": "system",
+                    "content": format!("{template}\n\n【编译上下文】\n"),
+                },
+                { "role": "user", "content": policy.user_prompt },
+            ],
+        }))
+        .expect("test fixed messages");
+        let fixed_message_tokens = estimated_tokens(&fixed_messages) + 256;
+        let context_budget = serde_json::json!({
+            "contractVersion": "context_budget_v1",
+            "tokenEstimator": "utf8_bytes_div3_v1",
+            "modelContextTokens": policy.model_context_tokens,
+            "reservedOutputTokens": policy.max_output_tokens,
+            "fixedMessageTokens": fixed_message_tokens,
+            "availableContextTokens": policy.model_context_tokens
+                - policy.max_output_tokens
+                - fixed_message_tokens,
+            "compiledContextTokens": estimated_tokens(&compiled_context),
+            "compiledContextChars": compiled_context.chars().count(),
+            "compiledContextBytes": compiled_context.len(),
+            "includedSourceCount": policy.allowed_source_types.len(),
+            "truncatedSourceCount": 0,
+            "omittedSourceCount": 0,
+        });
+        let constraints = formal_constraints(task_type).expect("registered formal constraints");
+        let constraint_payload = serde_json::json!({
+            "contractVersion": "constraint_payload_v1",
+            "compilerVersion": "constraint_compiler_v1",
+            "taskType": task_type,
+            "expectedArtifact": {
+                "type": policy.expected_artifact_type,
+                "schemaVersion": policy.expected_artifact_schema_version,
+            },
+            "responseSchema": policy.response_schema,
+            "constraints": constraints,
+            "constraintsHash": canonical_hash(&constraints).expect("test constraints hash"),
+            "toolPolicy": {
+                "registryVersion": "tool_registry_v1",
+                "registryHash": PRODUCTION_TOOL_REGISTRY_HASH,
+                "allowedTools": [],
+            },
+        });
+        let provider_options = serde_json::json!({
+            "providerId": "mock",
+            "model": "Mock",
+            "temperature": formal_default_temperature(task_type),
+            "maxTokens": policy.max_output_tokens,
+        });
+        let input_body = serde_json::to_string(&serde_json::json!({
+            "messages": [
+                {
+                    "role": "system",
+                    "content": format!("{template}\n\n【编译上下文】\n{compiled_context}"),
+                },
+                { "role": "user", "content": policy.user_prompt },
+            ],
+        }))
+        .expect("test request body");
+        let task_input = serde_json::json!({ "fixture": task_type });
+
+        let mut input = system_task_input(operation_id, policy.expected_artifact_type);
+        input.task_type = task_type.to_string();
+        input.novel_id = "novel-policy".to_string();
+        input.chapter_id = chapter_id.map(str::to_string);
+        input.draft_id = draft_id.map(str::to_string);
+        input.scope_type = scope_type.to_string();
+        input.expected_artifact_schema_version = policy.expected_artifact_schema_version;
+        input.input_snapshot = InputSnapshotInput {
+            schema_version: 2,
+            input_type: "compiled_provider_messages_v1".to_string(),
+            payload_json: serde_json::json!({
+                "contractVersion": "compiled_ai_request_v1",
+                "taskType": task_type,
+                "messageCount": 2,
+                "requestBodyHash": large_text_repository::sha256(&input_body),
+                "compilationHash": "0".repeat(64),
+                "taskInput": task_input,
+            }),
+            body: input_body,
+            source_draft_id: draft_id.map(str::to_string),
+            source_draft_version: draft_id.map(|_| 1),
+            base_content_hash: draft_id.map(|_| large_text_repository::sha256("正式上下文：draft")),
+        };
+        input.context_snapshot = ContextSnapshotInput {
+            schema_version: 2,
+            source_manifest_json: context_manifest,
+            compiled_context,
+            budget_json: context_budget,
+            compiler_version: "context_compiler_v1".to_string(),
+        };
+        input.constraint_snapshot = ConstraintSnapshotInput {
+            schema_version: 2,
+            payload_json: constraint_payload,
+            prompt_template_id: policy.prompt_template_id.to_string(),
+            prompt_template_version: policy.prompt_template_version.to_string(),
+            prompt_template_hash: template_hash,
+            prompt_template_body: template,
+            provider_options_json: provider_options,
+        };
+        refresh_formal_compilation_hash(&mut input);
+        input
+    }
+
+    #[test]
+    fn task10_all_autonomous_tasks_accept_the_registered_formal_contract() {
+        for task_type in AUTONOMOUS_FORMAL_TASK_TYPES {
+            let input =
+                formal_autonomous_task_input(task_type, &format!("formal-autonomous-{task_type}"));
+            assert!(
+                requires_formal_compilation(&input),
+                "{task_type} must enter the formal compilation gate"
+            );
+            validate_create_input(&input)
+                .unwrap_or_else(|error| panic!("{task_type} correct contract rejected: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn task11_each_autonomous_task_rejects_self_consistent_policy_drift() {
+        let mut outline = formal_autonomous_task_input("outline_generate", "drift-outline");
+        outline.expected_artifact_type = "generic_json".to_string();
+        outline.constraint_snapshot.payload_json["expectedArtifact"]["type"] =
+            serde_json::json!("generic_json");
+        refresh_formal_compilation_hash(&mut outline);
+        assert_eq!(
+            validate_create_input(&outline).unwrap_err().code,
+            codes::AI_CONSTRAINT_POLICY_INVALID
+        );
+
+        let mut chapter = formal_autonomous_task_input("chapter_generate", "drift-chapter");
+        chapter.novel_id = "system".to_string();
+        refresh_formal_compilation_hash(&mut chapter);
+        assert_eq!(
+            validate_create_input(&chapter).unwrap_err().code,
+            codes::AI_COMPILATION_INPUT_INVALID
+        );
+
+        let mut polish = formal_autonomous_task_input("chapter_polish", "drift-polish");
+        polish.context_snapshot.source_manifest_json["sources"][0]["sourceType"] =
+            serde_json::json!("context_record");
+        refresh_formal_compilation_hash(&mut polish);
+        assert_eq!(
+            validate_create_input(&polish).unwrap_err().code,
+            codes::AI_COMPILATION_INPUT_INVALID
+        );
+
+        let mut rewrite = formal_autonomous_task_input("chapter_rewrite", "drift-rewrite");
+        let draft_index = rewrite.context_snapshot.source_manifest_json["sources"]
+            .as_array()
+            .expect("sources")
+            .iter()
+            .position(|source| source["sourceType"] == "draft")
+            .expect("draft source");
+        rewrite.context_snapshot.source_manifest_json["sources"][draft_index]["originalChars"] =
+            serde_json::json!(0);
+        refresh_formal_compilation_hash(&mut rewrite);
+        assert_eq!(
+            validate_create_input(&rewrite).unwrap_err().code,
+            codes::AI_CONTEXT_SOURCE_REQUIRED
+        );
+
+        let mut summary = formal_autonomous_task_input("chapter_summary", "drift-summary");
+        let fixed_tokens = summary.context_snapshot.budget_json["fixedMessageTokens"]
+            .as_i64()
+            .expect("fixed tokens");
+        summary.context_snapshot.budget_json["reservedOutputTokens"] = serde_json::json!(4_001);
+        summary.context_snapshot.budget_json["availableContextTokens"] =
+            serde_json::json!(48_000 - 4_001 - fixed_tokens);
+        summary.constraint_snapshot.provider_options_json["maxTokens"] = serde_json::json!(4_001);
+        refresh_formal_compilation_hash(&mut summary);
+        assert_eq!(
+            validate_create_input(&summary).unwrap_err().code,
+            codes::AI_CONTEXT_BUDGET_EXCEEDED
+        );
+
+        let mut quality = formal_autonomous_task_input("quality_check", "drift-quality");
+        quality.constraint_snapshot.payload_json["responseSchema"] =
+            serde_json::json!("quality_report_v2");
+        refresh_formal_compilation_hash(&mut quality);
+        assert_eq!(
+            validate_create_input(&quality).unwrap_err().code,
+            codes::AI_CONSTRAINT_POLICY_INVALID
+        );
+
+        let mut continuity = formal_autonomous_task_input("continuity_check", "drift-continuity");
+        continuity.constraint_snapshot.prompt_template_id =
+            "autonomous/continuity-check-drift".to_string();
+        continuity
+            .constraint_snapshot
+            .prompt_template_body
+            .push_str("\n模板漂移");
+        continuity.constraint_snapshot.prompt_template_hash =
+            large_text_repository::sha256(&continuity.constraint_snapshot.prompt_template_body);
+        let mut messages: Value =
+            serde_json::from_str(&continuity.input_snapshot.body).expect("continuity messages");
+        messages["messages"][0]["content"] = serde_json::json!(format!(
+            "{}\n\n【编译上下文】\n{}",
+            continuity.constraint_snapshot.prompt_template_body,
+            continuity.context_snapshot.compiled_context
+        ));
+        continuity.input_snapshot.body =
+            serde_json::to_string(&messages).expect("drifted continuity messages");
+        refresh_formal_compilation_hash(&mut continuity);
+        assert_eq!(
+            validate_create_input(&continuity).unwrap_err().code,
+            codes::AI_COMPILATION_INPUT_INVALID
+        );
+
+        let mut expert = formal_autonomous_task_input("expert_review", "drift-expert");
+        expert.constraint_snapshot.provider_options_json["topP"] = serde_json::json!(0.9);
+        refresh_formal_compilation_hash(&mut expert);
+        assert_eq!(
+            validate_create_input(&expert).unwrap_err().code,
+            codes::AI_CONSTRAINT_POLICY_INVALID
+        );
+    }
+
+    #[test]
+    fn task12_autonomous_compilation_hash_rejects_drift() {
+        let mut input = formal_autonomous_task_input("outline_generate", "drift-compilation-hash");
+        input.input_snapshot.payload_json["compilationHash"] = serde_json::json!("f".repeat(64));
+        assert_eq!(
+            validate_create_input(&input).unwrap_err().code,
+            codes::AI_COMPILATION_INPUT_INVALID
+        );
     }
 
     #[test]

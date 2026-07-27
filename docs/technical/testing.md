@@ -1,13 +1,13 @@
 # 测试策略与用例
 
-> 当前版本：v2.5.0（Chapter Readiness Planner Runtime）
+> 当前版本：v2.12.0（Autonomous Generation Phase 5）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、正文变更动态回归、Rust / SQLite 故障路径、Windows 真实 Tauri E2E、前端构建、Tauri 编译、静态文本契约与手动桌面验证。
 
 ---
 
 ## 1. 测试分层与通过原则
 
-截至 v2.5.0，测试体系在执行事实、Safe Apply 与 Compiler/Registry 基础上，增加持久 DAG、operation/request 幂等、lease token hash、单活动 epoch、Attempt/Checkpoint append-only、显式 retry 与重启后禁止自动重放验证：
+截至 v2.6.0，测试体系在 Planner Runtime 基础上，增加 Memory operation/request 幂等、时间边界、完整来源预算选择、manifest/memory hash、来源漂移、append-only 表与跨重启读取验证：
 
 ```text
 Node 原生安全原语测试（内建 TypeScript 类型剔除 + 可控 deferred Promise）
@@ -457,6 +457,33 @@ npm run test:e2e -- --spec chapter-readiness-planner
 
 v2.5.0 不修改 Prompt、Provider messages 或 Provider Adapter；真实 API 不属于本地只读 Planner 的必要验收，因此本版不发起真实 API 请求。
 
+### 2.17 v2.6.0 Memory Facts 专项
+
+```powershell
+npx tsx --test --test-concurrency=1 `
+  src/services/memory/memoryPersistenceService.test.ts
+
+cargo test --manifest-path src-tauri/Cargo.toml memory_service::tests -- --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml `
+  migrations::tests::db25_memory_schema_is_append_only_and_scope_bound -- --exact
+npm run test:e2e -- --spec chapter-continuity-memory
+```
+
+| 编号 | 场景 | 必须结果 |
+|------|------|----------|
+| MM01 | 相同 operationId + 相同请求 | 返回同一 Snapshot；不同 lookback/budget/target 冲突 |
+| MM02 | 章节时间边界 | 只读取目标章节之前来源；当前/未来章节为 0 命中 |
+| MM03 | 总结有效性 | 仅当前 adopted draft、enabled、未过期的每章最新总结 |
+| MM04 | Context 有效性 | 仅 active、未过期、作品归属一致的记录；作品级记录允许无 chapterId |
+| MM05 | Character State 有效性 | 仅 active 角色且处于目标之前的状态 |
+| MM06 | 固定预算 | 来源完整纳入或 `budget` 完整省略；memory UTF-8 bytes 不超预算 |
+| MM07 | SQLite 不变量 | manifest/统计/items/bytes 一致，ordinal 不超过 candidateCount，UPDATE/DELETE/事后追加均拒绝 |
+| MM08 | 来源复验 | changed/missing/unexpected 明确报告；历史 Snapshot 不改写 |
+| MM09 | 浏览器开发模式 | 明确拒绝且不创建 LocalStorage Memory |
+| MM-E2E | Windows Memory 闭环 | 前章采纳/总结 → 后章快照 → SQLite 读取/复验 → 真实重启后逐字段一致，外网为 0 |
+
+v2.6.0 不修改 Prompt、Provider messages、Provider Adapter 或 Tool Registry；Memory 编译和复验完全在本地，因此本版不发起真实 API 请求。
+
 ---
 
 ## 3. 静态文本契约检查
@@ -600,7 +627,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - v2.3.0+ 已具有 Artifact，v2.3.2 已具有 PlacementProposal / ApplyPlan；测试必须读取真实 SQLite 事实，不能以 UI 文案或旧 AiTaskRecord 代替。
 - `operationId` 的数据库级重放、completed 目标权威复验与提交后清理故障已由 service 测试证明；真实 IPC 进程在提交边界被强制终止时的端到端对账仍需继续补充。
-- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消、质量历史不可变重放与 v2.5.0 Planner 显式恢复已由 Rust / SQLite 和真实 Tauri 场景覆盖；自动续跑、长期 Memory 和正文副作用仍不在本版本能力中。
+- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消、质量历史不可变重放、Planner 显式恢复与 Memory 跨重启读取已由 Rust / SQLite 和真实 Tauri 场景覆盖；Continuity Verification、自动续跑和正文副作用仍不在本版本能力中。
 - 完整备份的 SQLite 往返已在同一临时项目库中覆盖；SQLite 与 LocalStorage 的跨存储 ACID 不存在，前端补偿撤销尚未由真实 Tauri + 浏览器存储端到端测试覆盖。
 - v2.1.8 已把章节总结、上下文和角色状态的桌面事实源收敛到 SQLite；旧缓存清理仍发生在 SQLite 提交之后，因此只能通过明确 ID 映射、warning 和幂等重试保证安全，不宣称跨存储 ACID。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。

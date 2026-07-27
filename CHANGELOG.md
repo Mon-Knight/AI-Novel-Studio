@@ -1,6 +1,289 @@
 # AI Novel Studio - CHANGELOG
 
+## v2.12.0 (2026-07-27) - Multi-Agent 协作（Phase 5 - 最终阶段）
+
+### 新增
+
+- 新增 `expertAgentSystem.ts`：Multi-Agent 协作系统，支持 6 类专家 Agent（outline/character/setting/logic/polish/quality）独立评审并协商达成共识。
+- 新增 Migration 026：`expert_collaboration_logs` 表，记录每轮每位专家的评审意见（评分、问题、建议）。
+- 新增 `generateChapterWithExperts()`：Multi-Agent 生成流程，初步生成 → 多专家评审 → 协商决策 → 采纳/修订/重新生成。
+- 新增协商机制：计算专家一致性（acceptance rate）、平均分、主要关注点，自动决策 accept/revise/regenerate。
+
+### 核心功能
+
+- **6 类专家 Agent**：
+  1. **Outline Expert（大纲专家）**：评审情节结构、伏笔布局、节奏把握
+  2. **Character Expert（人物专家）**：评审人物性格、对话、情感变化
+  3. **Setting Expert（设定专家）**：评审世界观、规则一致性、场景描写
+  4. **Logic Expert（逻辑专家）**：评审因果关系、时间线、情节合理性
+  5. **Polish Expert（润色专家）**：评审语言表达、文风统一、细节修饰
+  6. **Quality Expert（质量专家）**：综合评估整体质量
+
+- **协商决策规则**：
+  - **Accept（采纳）**：70% 专家同意 && 平均分 ≥ 75
+  - **Revise（修订）**：50-70% 专家同意 || 平均分 60-75
+  - **Regenerate（重新生成）**：< 50% 专家同意 || 平均分 < 60
+
+- **协作流程**：
+  1. 并行调用所有专家独立评审（无交互）
+  2. 收集所有专家意见（评分、问题、建议）
+  3. 计算一致性和主要关注点（至少 2 位专家提到的问题）
+  4. 自动决策并执行（最多 3 轮）
+
+### 数据库变更
+
+- **Migration 026**：新增 `expert_collaboration_logs` 表
+  - 字段：`id`, `novel_id`, `chapter_id`, `draft_id`, `round_number`, `expert_type`, `score` (0-100), `issues_json`, `suggestions_json`, `operation_id`, `created_at`
+  - 索引：`idx_expert_logs_draft`、`idx_expert_logs_chapter_round`、`idx_expert_logs_novel_created`
+
+### 技术设计
+
+- **并行评审**：使用 `Promise.all()` 并发调用所有专家，减少等待时间
+- **共识计算**：基于 acceptance rate 和 average score 自动决策，提取至少 2 位专家提到的主要关注点
+- **协作日志**：每轮每位专家的意见完整记录，可追溯协商过程
+- **Phase 5 占位**：专家评审返回模拟结果（70-90 分随机），预留真实 AI Provider 集成接口
+
+### 版本边界
+
+Phase 5 建立 Multi-Agent 协作基础架构，专家评审为占位实现（预留 Provider 接口），完整实现需集成真实 AI 调用。Phase 5 是自主生成系统的最终阶段。
+
+---
+
+## 自主生成系统完整演进路线（Phase 0-5）
+
+### Phase 0 (v2.7.0) - 基础架构
+- 单章自主生成流程（锁定 → 生成 → 质量检查 → 采纳）
+- 质量评分引擎（六维度加权）
+- 自主任务调度器
+
+### Phase 1 (v2.8.0) - 质量自动化
+- 自动质量检查与评分
+- 自动润色（语言问题修复）
+- Token 消耗聚合与成本计算
+- 完整决策树（通过 → 采纳，语言问题 → 润色，逻辑问题 → 重试）
+
+### Phase 2 (v2.9.0) - 多章生成
+- 多章顺序生成主循环
+- 暂停/恢复机制
+- 自动章节总结生成
+- 错误处理策略（跳过 vs 暂停）
+
+### Phase 3 (v2.10.0) - 大纲与并发
+- 自动大纲生成（创意 → 完整章节列表）
+- 多章并发生成（最多 3 章并发）
+- 动态调度与章节锁
+- 真实 AI 润色/总结/质量检查集成架构
+
+### Phase 4 (v2.11.0) - 连续性守护
+- 连续性检查（人物、设定、时间线、逻辑）
+- 矛盾检测与评分
+- 集成到生成流程（采纳后自动检查）
+- 严重问题警告机制
+
+### Phase 5 (v2.12.0) - Multi-Agent 协作
+- 6 类专家 Agent 分工评审
+- 协商机制（并行评审 → 计算共识 → 自动决策）
+- 协作日志与可追溯性
+- Multi-Agent 生成流程
+
+---
+
+## 完整功能矩阵
+
+| 功能 | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
+|------|---------|---------|---------|---------|---------|---------|
+| 单章生成 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 质量检查 | ✅ | ✅ 自动 | ✅ | ✅ | ✅ | ✅ |
+| 自动润色 | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Token 统计 | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 多章顺序 | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| 章节总结 | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| 自动大纲 | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| 多章并发 | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| 连续性检查 | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Multi-Agent | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+---
+
+## 后续优化方向
+
+Phase 5 完成后，后续可优化：
+- 集成真实 AI Provider 到所有占位实现
+- 优化 Token 消耗（缓存、增量更新）
+- 实现修订和重新生成逻辑（Phase 5 当前为简化）
+- 用户可配置专家组合和决策规则
+- 协商过程可视化与人工干预
+
+---
+
+## v2.11.0 (2026-07-27) - 连续性守护（Phase 4）
+
+### 新增
+
+- 新增 `continuitySentinelService.ts`：连续性守护服务，检查章节间连续性（人物、设定、时间线、逻辑），检测矛盾并生成报告。
+- 新增 Migration 025：`continuity_checks` 表，存储连续性检查结果（评分、状态、问题列表、前置章节引用）。
+- 增强 `autonomousOrchestrator.ts`：在章节采纳后自动执行连续性检查（仅非第一章），检测严重问题时记录警告。
+- 新增 `_getPreviousChapters()` 辅助方法：获取前 N 章用于连续性检查（默认前 3 章）。
+
+### 核心功能
+
+- **连续性检查**：`checkContinuity()` 检查四个维度：
+  1. **人物连续性**：性格、关系、能力、外貌是否一致
+  2. **设定连续性**：世界观、规则、地理、物品是否一致
+  3. **时间线连续性**：事件顺序、时间跨度是否合理
+  4. **情节逻辑**：因果关系、伏笔回收、动机合理性
+- **连续性评分**：0-100 分，计算状态（passed/warning/failed）
+- **问题分级**：critical/high/medium/low，严重问题触发警告日志
+- **优化策略**：优先使用章节总结（减少 Token 消耗），仅在无总结时读取完整内容
+
+### 数据库变更
+
+- **Migration 025**：新增 `continuity_checks` 表
+  - 字段：`id`, `novel_id`, `chapter_id`, `check_type` ('character'/'setting'/'timeline'/'logic'/'full'), `score` (0-100), `status` ('passed'/'warning'/'failed'), `issues_json`, `previous_chapter_ids`, `operation_id`, `created_at`
+  - 索引：`idx_continuity_checks_chapter`、`idx_continuity_checks_novel_created`
+
+### 技术设计
+
+- **集成时机**：在质量检查通过并采纳章节后执行连续性检查，第一章跳过。
+- **检查范围**：检查前 3 章（可配置），平衡准确性和 Token 消耗。
+- **问题处理**：Phase 4 仅记录警告，不阻止生成流程（Phase 5 可选择严格模式）。
+- **Prompt 设计**：要求 JSON 输出，包含评分、问题列表（type/severity/description/evidence/suggestion）。
+
+### 版本边界
+
+Phase 4 建立连续性检查基础架构，AI 检查为占位实现（预留 Provider 集成接口），Phase 5 将集成真实 AI 并实现 Multi-Agent 协作。
+
+---
+
+## v2.10.0 (2026-07-27) - 自动大纲生成 + 多章并发（Phase 3）
+
+### 新增
+
+- 新增 `autoOutlineService.ts`：自动大纲生成服务，从用户简单创意（标题 + 简介）自动生成完整章节大纲（12 章默认）。
+- 新增 `runConcurrentChapterGeneration()`：多章并发生成主循环，支持最多 3 章并发，动态调度（完成一章立即开始下一章）。
+- 增强 `autoPolishService.ts`：实现真实 AI 润色集成（读取草稿 → 调用 Provider → 保存新草稿），Phase 3 为占位实现。
+- 增强 `autoSummaryService.ts`：实现真实章节总结生成（情节要点、角色、伏笔、结尾状态），Phase 3 为占位实现。
+- 增强 `autoQualityCheckService.ts`：实现轮询等待质量检查完成（120 秒超时，2 秒轮询间隔）。
+
+### 核心功能
+
+- **自动大纲生成**：`generateOutlineFromIdea()` 接受用户创意，返回完整章节列表（标题 + 摘要 + 情节要点），自动保存到数据库。
+- **多章并发生成**：`runConcurrentChapterGeneration()` 并发生成多章（并发度 3），章节锁防止冲突，动态调度确保资源利用最大化。
+- **并发控制机制**：
+  - 章节锁 TTL：10 分钟（防止死锁）
+  - 获取锁失败的章节放回队列末尾重试
+  - 支持任务暂停/取消（等待所有运行中任务完成后退出）
+- **真实 AI 集成架构**：润色、总结、质量检查服务均实现真实 AI 调用骨架（Phase 3 为占位，预留 Provider 集成接口）。
+
+### 技术设计
+
+- **并发调度算法**：使用 `Map<chapterId, Promise>` 追踪运行中任务，`Promise.race()` 等待任意任务完成，动态补充新任务。
+- **大纲生成 Prompt**：要求 JSON 输出，包含整体主题、章节列表（order/title/summary/plotPoints），确保起承转合结构。
+- **轮询机制**：质量检查等待采用 2 秒轮询间隔，120 秒超时，检查报告状态（completed/failed）。
+- **错误隔离**：单章生成失败不影响其他并发任务，失败章节记录日志后继续。
+
+### 性能优化
+
+- 并发上限：3（避免 API 限流）
+- 章节锁 TTL：10 分钟
+- 质量检查轮询：2 秒间隔，120 秒超时
+- 锁获取失败重试：2 秒延迟
+
+### 版本边界
+
+Phase 3 建立自动大纲生成和多章并发基础架构，真实 AI 调用为占位实现（预留接口），Phase 4-5 将集成真实 Provider 并实现连续性守护和 Multi-Agent 协作。
+
+---
+
+## v2.9.0 (2026-07-27) - 自动生成 + 质量闭环（Phase 2）
+
+### 新增
+
+- 新增 `autoSummaryService.ts`：自动章节总结服务，每章生成完成后自动生成总结，为后续章节提供连续性上下文。
+- 新增 Migration 024：`chapter_summaries` 表，存储自动生成或手动编辑的章节总结。
+- 增强 `autonomousOrchestrator.ts`：实现多章顺序生成主循环 `runMultiChapterGeneration()`，支持按章节顺序自动生成、暂停/恢复、错误跳过。
+- 增强 `autonomousJobService.ts`：添加 `getThresholds()` 便捷方法，简化质量阈值获取。
+
+### 核心功能
+
+- **多章顺序生成**：`runMultiChapterGeneration()` 按章节顺序自动生成多章，每章完成后自动进入下一章，支持从暂停点恢复。
+- **自动章节总结**：每章采纳后自动生成总结（Phase 2 简化实现为占位，Phase 3 将集成真实 AI）。
+- **暂停/恢复机制**：用户可随时暂停任务，修改质量阈值后恢复，Orchestrator 每章开始前检查任务状态。
+- **错误处理策略**：质量问题→暂停等待人工，其他错误→跳过该章节继续下一章。
+- **进度跟踪**：实时更新 `current_chapter_id`、`completed_chapters`、`progress_text`。
+
+### 数据库变更
+
+- **Migration 024**：新增 `chapter_summaries` 表
+  - 字段：`id`, `novel_id`, `chapter_id`, `draft_id`, `summary_text`, `summary_type` ('auto_generated' | 'manual'), `operation_id`, `created_at`, `updated_at`
+  - 索引：`idx_chapter_summaries_chapter`、`idx_chapter_summaries_draft`、`idx_chapter_summaries_novel_created`
+
+### 技术设计
+
+- **多章循环架构**：主循环 `runMultiChapterGeneration()` 调用 `_runSingleChapterWithRetry()`，每章最多重试 `maxRetryAttempts` 次。
+- **章节总结占位**：`autoSummaryService` 当前生成占位总结，Phase 3 将调用 AI Provider 生成真实总结（情节要点、角色动作、伏笔、结尾状态）。
+- **状态检查**：每章开始前检查任务状态（paused/cancelled），支持优雅中断。
+
+### 版本边界
+
+Phase 2 建立多章生成和总结生成基础架构，章节总结为占位实现（Phase 3 将集成真实 AI），质量检查和润色复用 Phase 1 实现。
+
+---
+
+## v2.8.0 (2026-07-27) - 质量自动评分与自动润色（Phase 1）
+
+### 新增
+
+- 新增 `autoQualityCheckService.ts`：自动触发质量检查 AI 任务，等待完成并返回评分结果，集成到自主生成编排器。
+- 新增 `autoPolishService.ts`：自动润色修复服务，针对语言/风格问题自动调用润色，仅修复语言表达不改动情节。
+- 新增 `tokenAggregationService.ts`：Token 消耗聚合服务，从 `ai_task_records` 按 operation_id 或 chapter_id 聚合统计，支持多模型成本计算。
+- 增强 `autonomousOrchestrator.ts`：集成质量检查 → 自动润色 → 采纳/重试闭环，决策树：通过→采纳，仅语言问题→润色→采纳，逻辑问题→重新生成。
+- 新增单元测试 `tokenAggregationService.test.ts`：验证 Token 聚合算法和成本计算。
+
+### 技术设计
+
+- **质量检查自动化**：`autoQualityCheckService` 调用现有 `qualityCheckService` 创建报告，等待完成（Phase 1 简化实现，Phase 2 将实现真实轮询）。
+- **自动润色决策**：过滤 `issueType === 'language/style'` 且严重性为 low/medium 的问题，构造润色提示词并调用润色服务。
+- **Token 成本计算**：支持 Claude 3.5 Sonnet/Haiku/Opus 定价，按模型计算输入/输出 Token 成本（USD），聚合到任务级别。
+- **编排器闭环**：质量通过→自动采纳，仅语言问题→自动润色→采纳，有逻辑/设定问题→重试生成，达到最大重试→暂停任务。
+
+### 版本边界
+
+Phase 1 建立质量自动化基础设施，润色服务为占位实现（Phase 2 将集成真实 AI 润色），质量检查假设已由 Chapter Readiness Planner 完成。
+
+---
+
+## v2.7.0 (2026-07-27) - Autonomous Generation Foundation (Phase 0)
+
+### 新增
+
+- 新增 Migration 023：四张自主生成基础表（`autonomous_generation_jobs`、`quality_thresholds`、`autonomous_actions`、`chapter_generation_locks`），含状态机约束、外键与索引。
+- 新增 15 个 Rust Tauri IPC 命令，覆盖自主任务创建/读取/列表、状态转换（pending → running → paused/completed/failed/cancelled）、进度更新、质量阈值 CRUD、操作审计日志和章节锁管理。
+- 新增 TypeScript 类型定义 `src/types/autonomous.ts`，定义 `AutonomousGenerationJob`、`QualityThresholds`、`AutonomousAction` 等核心类型。
+- 新增 `src/services/autonomous/autonomousJobService.ts`：任务全生命周期管理，含质量阈值读写、操作审计日志和章节锁。
+- 新增 `src/services/autonomous/autoQualityService.ts`：质量自动评分引擎，将质量检查报告转换为 `adopt/fix_only/regenerate/pause` 决策，权重矩阵：逻辑/连续性 25%、设定 20%、角色 15%、语言 10%、节奏 5%。
+- 新增 `src/services/autonomous/autonomousOrchestrator.ts`：章节自主生成编排器（Phase 2 骨架），实现生成 → 质量检查 → 自动采纳/重试 的闭环协调流程。
+- 新增 `src/hooks/useAutonomousGeneration.ts`：React Hook，封装任务管理、阈值配置和操作日志。
+- 新增 `src/components/autonomous/AutonomousGenerationPanel.tsx`：自主生成任务控制面板 UI，含进度显示、暂停/恢复/取消控制和操作日志。
+- 新增 `docs/architecture/autonomous-generation-roadmap.md`：完整的自主生成升级路线图，覆盖 Phase 0-5 五个阶段。
+- 新增质量阈值默认配置：总分 70、逻辑/连续性 60-70、最大重试 3 次、最大 Critical Issues 0 个。
+
+### 技术设计
+
+- **状态机保护**：`autonomous_generation_jobs.status` 通过 SQL 触发器保护合法转换路径，终态（completed/failed/cancelled）不可变。
+- **审计可追溯**：所有自动操作通过 `autonomous_actions` 表记录决策依据、质量分数、Token 消耗和耗时，支持完整回溯。
+- **章节锁保护**：`chapter_generation_locks` 防止并发任务写入同一章节，支持 TTL 过期自动清理。
+- **桌面端独占**：自主生成仅在 Tauri SQLite 模式运行，浏览器开发模式明确拒绝。
+- **质量评分加权**：六维度加权平均，关键维度（逻辑、连续性）权重最高，未知类别自动归入语言维度。
+
+### 版本边界
+
+本版本只建立自主生成基础设施，不实现实际 AI 调用、自动大纲生成、连续性守护、并发生成或 Multi-Agent。
+
+---
+
 ## v2.5.0 (2026-07-26) - Chapter Readiness Planner Runtime
+
 
 ### 新增
 

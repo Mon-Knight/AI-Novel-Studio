@@ -1,7 +1,7 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v2.5.0
+> 版本：v2.6.0
 > 用途：说明历史 Planner Lite 与正式 Chapter Readiness Planner Runtime 的边界
 
 ---
@@ -64,7 +64,7 @@ Agent Workflow Runtime 是一套轻量级的开发辅助系统，包含：
 | 任务规划 | ✅ 一个正式固定持久 DAG | v2.6+ 扩展受审核章节闭环 |
 | Tool Calling | ✅ 九个只读/本地验证 Tool | 后续按副作用确认边界扩展 |
 | 实时执行 | ✅ lease + Attempt + Checkpoint | 不自动续跑 |
-| Memory | ❌ 无 | v2.6.x |
+| Memory | ✅ 结构化连续性快照与来源漂移复验 | v2.6.x 接入 Verification / Agent 消费 |
 | Multi-Agent | ❌ 无 | v3.x |
 
 ---
@@ -119,6 +119,8 @@ Agent 或开发者在对应用场景下：
 v1.0.46 已把读取 Tool 接入真实项目数据；v2.4.0 使用 `tool_registry_v1` 冻结 schema、权限、scope 与副作用策略；v2.5.0 新增 `verification.check_readiness@1` 和正式 `chapter_readiness_plan_v1`。
 
 正式计划、Step、Attempt、lease 与 Checkpoint 保存在 SQLite。应用重启后中断计划进入 `waiting_retry`，只有用户显式继续才创建新 Attempt。详细设计见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。
+
+v2.6.0 新增 `memory_snapshot_v1`：Rust 从目标章节之前的有效总结、上下文和角色状态编译不可变 Memory，冻结来源 manifest/hash、完整 memory/hash 与预算决策，并可只读报告来源漂移。它尚未开放给 Provider 或 Planner Tool，详细设计见 [`architecture/chapter-continuity-memory.md`](architecture/chapter-continuity-memory.md)。
 
 ---
 

@@ -58,6 +58,8 @@ pub fn init_database() {
     create_tables(&mut connection).expect("Failed to create tables");
     crate::services::agent_plan_service::recover_interrupted_plans(&mut connection)
         .expect("Failed to recover interrupted Agent Plans");
+    crate::services::autonomous_service::recover_interrupted_jobs(&mut connection)
+        .expect("Failed to recover interrupted Autonomous Jobs");
 
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");

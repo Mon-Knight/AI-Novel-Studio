@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "2.5.0";
+const MIGRATION_VERSION: &str = "2.12.0";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 20] {
+fn migrations() -> [Migration; 26] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -123,6 +123,36 @@ fn migrations() -> [Migration; 20] {
             id: "020_agent_plan_checkpoints",
             definition: "agent_plan_checkpoints_v1(plan_sequence,event,optional_step_attempt,status_snapshot,payload_hash,created,monotonic_sequence,validated_identity,append_only)",
             apply: apply_agent_plan_checkpoints,
+        },
+        Migration {
+            id: "021_memory_snapshots",
+            definition: "memory_snapshots_v1(operation_request_idempotency,chapter_continuity_contract,compiler_identity,novel_target_chapter,lookback_budget,canonical_source_manifest_hash,canonical_memory_hash,count_manifest_consistency,counts_bytes,created,validated_scope,immutable_no_delete)",
+            apply: apply_memory_snapshots,
+        },
+        Migration {
+            id: "022_memory_snapshot_sources",
+            definition: "memory_snapshot_sources_v1(snapshot_ordinal,bounded_complete_ordinal,source_type_identity,novel_chapter_rank,source_version_hash,inclusion_omission,validated_scope,unique_source,append_only)",
+            apply: apply_memory_snapshot_sources,
+        },
+        Migration {
+            id: "023_autonomous_generation",
+            definition: "autonomous_generation_jobs(operation_id_unique,status_machine,progress_tracking,token_budget,timestamps,novel_scope,status_edges_trigger),quality_thresholds(novel_primary_key,score_constraints,retry_config),autonomous_actions(job_chapter_scope,action_audit_log,quality_link),chapter_generation_locks(chapter_primary_key,job_expiry_lock)",
+            apply: apply_autonomous_generation,
+        },
+        Migration {
+            id: "024_chapter_summaries",
+            definition: "chapter_summaries_v1(novel_chapter_draft_scope,summary_content,summary_type,operation_tracking,timestamps)",
+            apply: apply_chapter_summaries,
+        },
+        Migration {
+            id: "025_continuity_checks",
+            definition: "continuity_checks_v1(novel_chapter_scope,check_type,score_status,issues_json,previous_chapters,operation_tracking,timestamp)",
+            apply: apply_continuity_checks,
+        },
+        Migration {
+            id: "026_expert_collaboration_logs",
+            definition: "expert_collaboration_logs_v1(novel_chapter_draft_scope,round_expert,score,opinions_json,operation_tracking,timestamp)",
+            apply: apply_expert_collaboration_logs,
         },
     ]
 }
@@ -1527,11 +1557,419 @@ fn apply_agent_plan_checkpoints(transaction: &Transaction<'_>) -> Result<(), App
         .map_err(AppError::database)
 }
 
+fn apply_memory_snapshots(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_snapshots (
+                snapshot_id TEXT PRIMARY KEY CHECK (length(snapshot_id) BETWEEN 1 AND 160),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 160),
+                request_hash TEXT NOT NULL CHECK (
+                    length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                contract_version TEXT NOT NULL CHECK (contract_version = 'memory_snapshot_v1'),
+                memory_kind TEXT NOT NULL CHECK (memory_kind = 'chapter_continuity'),
+                compiler_id TEXT NOT NULL CHECK (compiler_id = 'structured_memory_compiler_v1'),
+                compiler_version INTEGER NOT NULL CHECK (compiler_version = 1),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                target_chapter_id TEXT NOT NULL CHECK (length(target_chapter_id) BETWEEN 1 AND 160),
+                target_chapter_rank INTEGER NOT NULL CHECK (target_chapter_rank >= 1),
+                lookback_chapters INTEGER NOT NULL CHECK (lookback_chapters BETWEEN 1 AND 100),
+                budget_bytes INTEGER NOT NULL CHECK (budget_bytes BETWEEN 4096 AND 262144),
+                source_manifest_json TEXT NOT NULL CHECK (
+                    json_valid(source_manifest_json) AND json_type(source_manifest_json) = 'array'
+                    AND length(source_manifest_json) <= 2097152
+                ),
+                source_manifest_hash TEXT NOT NULL CHECK (
+                    length(source_manifest_hash) = 64
+                    AND source_manifest_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                memory_json TEXT NOT NULL CHECK (
+                    json_valid(memory_json) AND json_type(memory_json) = 'object'
+                    AND length(memory_json) <= 262144
+                ),
+                memory_hash TEXT NOT NULL CHECK (
+                    length(memory_hash) = 64 AND memory_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
+                included_count INTEGER NOT NULL CHECK (included_count >= 0),
+                omitted_count INTEGER NOT NULL CHECK (omitted_count >= 0),
+                memory_bytes INTEGER NOT NULL CHECK (memory_bytes >= 2),
+                created_at TEXT NOT NULL,
+                CHECK (candidate_count = included_count + omitted_count),
+                CHECK (json_array_length(source_manifest_json) = candidate_count),
+                CHECK (json_extract(memory_json, '$.schemaVersion') = 1),
+                CHECK (json_extract(memory_json, '$.kind') = memory_kind),
+                CHECK (json_extract(memory_json, '$.novelId') = novel_id),
+                CHECK (json_extract(memory_json, '$.targetChapterId') = target_chapter_id),
+                CHECK (json_extract(memory_json, '$.stats.candidateCount') = candidate_count),
+                CHECK (json_extract(memory_json, '$.stats.includedCount') = included_count),
+                CHECK (json_extract(memory_json, '$.stats.omittedCount') = omitted_count),
+                CHECK (json_array_length(json_extract(memory_json, '$.items')) = included_count),
+                CHECK (memory_bytes = length(CAST(memory_json AS BLOB))),
+                CHECK (memory_bytes <= budget_bytes),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT,
+                FOREIGN KEY (target_chapter_id) REFERENCES chapters(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_snapshots_chapter_created
+                ON memory_snapshots(target_chapter_id, created_at DESC, snapshot_id DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_snapshots_novel_created
+                ON memory_snapshots(novel_id, created_at DESC, snapshot_id DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_snapshots_operation_request
+                ON memory_snapshots(operation_id, request_hash);
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshots_validate_scope
+                BEFORE INSERT ON memory_snapshots
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM chapters c JOIN novels n ON n.id = c.novel_id
+                    WHERE c.id = NEW.target_chapter_id AND c.novel_id = NEW.novel_id
+                      AND c.deleted_at IS NULL AND n.deleted_at IS NULL
+                )
+                BEGIN SELECT RAISE(ABORT, 'invalid memory snapshot chapter scope'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshots_immutable_update
+                BEFORE UPDATE ON memory_snapshots
+                BEGIN SELECT RAISE(ABORT, 'immutable memory snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshots_no_delete
+                BEFORE DELETE ON memory_snapshots
+                BEGIN SELECT RAISE(ABORT, 'durable memory snapshot'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_memory_snapshot_sources(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_snapshot_sources (
+                snapshot_id TEXT NOT NULL,
+                source_ordinal INTEGER NOT NULL CHECK (source_ordinal >= 1),
+                source_type TEXT NOT NULL CHECK (
+                    source_type IN ('chapter_summary','context_record','character_state')
+                ),
+                source_id TEXT NOT NULL CHECK (length(source_id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                chapter_id TEXT,
+                chapter_rank INTEGER CHECK (chapter_rank IS NULL OR chapter_rank >= 1),
+                source_version TEXT NOT NULL CHECK (length(source_version) BETWEEN 1 AND 160),
+                source_hash TEXT NOT NULL CHECK (
+                    length(source_hash) = 64 AND source_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                included INTEGER NOT NULL CHECK (included IN (0,1)),
+                omission_reason TEXT CHECK (
+                    omission_reason IS NULL OR omission_reason IN ('budget')
+                ),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (snapshot_id, source_ordinal),
+                UNIQUE(snapshot_id, source_type, source_id),
+                CHECK (
+                    (included = 1 AND omission_reason IS NULL) OR
+                    (included = 0 AND omission_reason IS NOT NULL)
+                ),
+                FOREIGN KEY (snapshot_id) REFERENCES memory_snapshots(snapshot_id)
+                    ON DELETE RESTRICT,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_snapshot_sources_identity
+                ON memory_snapshot_sources(source_type, source_id, snapshot_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_snapshot_sources_chapter
+                ON memory_snapshot_sources(chapter_id, snapshot_id, source_ordinal);
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshot_sources_monotonic_ordinal
+                BEFORE INSERT ON memory_snapshot_sources
+                WHEN NEW.source_ordinal <> COALESCE((
+                    SELECT MAX(s.source_ordinal) + 1 FROM memory_snapshot_sources s
+                    WHERE s.snapshot_id = NEW.snapshot_id
+                ), 1) OR NEW.source_ordinal > COALESCE((
+                    SELECT s.candidate_count FROM memory_snapshots s
+                    WHERE s.snapshot_id = NEW.snapshot_id
+                ), 0)
+                BEGIN SELECT RAISE(ABORT, 'invalid memory source ordinal'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshot_sources_validate_scope
+                BEFORE INSERT ON memory_snapshot_sources
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM memory_snapshots s
+                    WHERE s.snapshot_id = NEW.snapshot_id AND s.novel_id = NEW.novel_id
+                ) OR (NEW.chapter_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM chapters c
+                    WHERE c.id = NEW.chapter_id AND c.novel_id = NEW.novel_id
+                ))
+                BEGIN SELECT RAISE(ABORT, 'invalid memory source scope'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshot_sources_append_only_update
+                BEFORE UPDATE ON memory_snapshot_sources
+                BEGIN SELECT RAISE(ABORT, 'immutable memory source'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_memory_snapshot_sources_append_only_delete
+                BEFORE DELETE ON memory_snapshot_sources
+                BEGIN SELECT RAISE(ABORT, 'durable memory source'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_autonomous_generation(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS autonomous_generation_jobs (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 160),
+                status TEXT NOT NULL CHECK (status IN (
+                    'pending','running','paused','completed','failed','cancelled'
+                )),
+                total_chapters INTEGER NOT NULL CHECK (total_chapters >= 0),
+                completed_chapters INTEGER NOT NULL DEFAULT 0 CHECK (completed_chapters >= 0),
+                current_chapter_id TEXT CHECK (
+                    current_chapter_id IS NULL OR length(current_chapter_id) BETWEEN 1 AND 160
+                ),
+                current_chapter_attempt INTEGER NOT NULL DEFAULT 0 CHECK (current_chapter_attempt >= 0),
+                total_tokens_input INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens_input >= 0),
+                total_tokens_output INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens_output >= 0),
+                estimated_cost_usd REAL NOT NULL DEFAULT 0.0 CHECK (estimated_cost_usd >= 0.0),
+                started_at TEXT,
+                completed_at TEXT,
+                paused_at TEXT,
+                paused_reason TEXT,
+                paused_chapter_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (completed_chapters <= total_chapters),
+                CHECK (
+                    (status = 'pending' AND started_at IS NULL AND completed_at IS NULL AND paused_at IS NULL) OR
+                    (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL AND paused_at IS NULL) OR
+                    (status = 'paused' AND started_at IS NOT NULL AND completed_at IS NULL AND paused_at IS NOT NULL) OR
+                    (status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL) OR
+                    (status IN ('failed','cancelled'))
+                ),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (current_chapter_id) REFERENCES chapters(id) ON DELETE SET NULL,
+                FOREIGN KEY (paused_chapter_id) REFERENCES chapters(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_autonomous_jobs_novel ON autonomous_generation_jobs(novel_id);
+            CREATE INDEX IF NOT EXISTS idx_autonomous_jobs_status ON autonomous_generation_jobs(status);
+            CREATE INDEX IF NOT EXISTS idx_autonomous_jobs_novel_status
+                ON autonomous_generation_jobs(novel_id, status);
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_jobs_status_transition
+                BEFORE UPDATE OF status ON autonomous_generation_jobs
+                FOR EACH ROW
+                WHEN OLD.status <> NEW.status
+                BEGIN
+                    SELECT CASE
+                        WHEN OLD.status = 'pending' AND NEW.status NOT IN ('running','cancelled')
+                        THEN RAISE(ABORT, 'invalid autonomous job transition from pending')
+                        WHEN OLD.status = 'running' AND NEW.status NOT IN ('paused','completed','failed','cancelled')
+                        THEN RAISE(ABORT, 'invalid autonomous job transition from running')
+                        WHEN OLD.status = 'paused' AND NEW.status NOT IN ('running','cancelled')
+                        THEN RAISE(ABORT, 'invalid autonomous job transition from paused')
+                        WHEN OLD.status IN ('completed','failed','cancelled')
+                        THEN RAISE(ABORT, 'cannot transition from terminal state')
+                    END;
+                END;
+
+            CREATE TABLE IF NOT EXISTS quality_thresholds (
+                novel_id TEXT PRIMARY KEY CHECK (length(novel_id) BETWEEN 1 AND 160),
+                min_total_score INTEGER NOT NULL DEFAULT 70
+                    CHECK (min_total_score >= 0 AND min_total_score <= 100),
+                min_logic_score INTEGER NOT NULL DEFAULT 60
+                    CHECK (min_logic_score >= 0 AND min_logic_score <= 100),
+                min_setting_score INTEGER NOT NULL DEFAULT 60
+                    CHECK (min_setting_score >= 0 AND min_setting_score <= 100),
+                min_character_score INTEGER NOT NULL DEFAULT 60
+                    CHECK (min_character_score >= 0 AND min_character_score <= 100),
+                min_continuity_score INTEGER NOT NULL DEFAULT 70
+                    CHECK (min_continuity_score >= 0 AND min_continuity_score <= 100),
+                min_language_score INTEGER NOT NULL DEFAULT 50
+                    CHECK (min_language_score >= 0 AND min_language_score <= 100),
+                min_pacing_score INTEGER NOT NULL DEFAULT 50
+                    CHECK (min_pacing_score >= 0 AND min_pacing_score <= 100),
+                max_retry_attempts INTEGER NOT NULL DEFAULT 3
+                    CHECK (max_retry_attempts >= 1 AND max_retry_attempts <= 10),
+                max_critical_issues INTEGER NOT NULL DEFAULT 0
+                    CHECK (max_critical_issues >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS autonomous_actions (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                job_id TEXT NOT NULL CHECK (length(job_id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                chapter_id TEXT NOT NULL CHECK (length(chapter_id) BETWEEN 1 AND 160),
+                action_type TEXT NOT NULL CHECK (action_type IN (
+                    'auto_generate','auto_quality_check','auto_adopt',
+                    'auto_fix','auto_retry','auto_pause','auto_summary',
+                    'continuity_check','continuity_warning','expert_review','skip_chapter'
+                )),
+                quality_score INTEGER CHECK (
+                    quality_score IS NULL OR (quality_score >= 0 AND quality_score <= 100)
+                ),
+                quality_report_id TEXT CHECK (
+                    quality_report_id IS NULL OR length(quality_report_id) BETWEEN 1 AND 160
+                ),
+                decision_reason TEXT NOT NULL CHECK (length(decision_reason) >= 1),
+                success INTEGER NOT NULL CHECK (success IN (0, 1)),
+                error_message TEXT,
+                tokens_used INTEGER CHECK (tokens_used IS NULL OR tokens_used >= 0),
+                duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (job_id) REFERENCES autonomous_generation_jobs(id) ON DELETE CASCADE,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (quality_report_id) REFERENCES quality_check_reports(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_autonomous_actions_job
+                ON autonomous_actions(job_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_autonomous_actions_chapter
+                ON autonomous_actions(chapter_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_autonomous_actions_type
+                ON autonomous_actions(action_type, created_at);
+
+            CREATE TABLE IF NOT EXISTS chapter_generation_locks (
+                chapter_id TEXT PRIMARY KEY CHECK (length(chapter_id) BETWEEN 1 AND 160),
+                job_id TEXT NOT NULL CHECK (length(job_id) BETWEEN 1 AND 160),
+                locked_by TEXT NOT NULL CHECK (length(locked_by) BETWEEN 1 AND 160),
+                locked_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (job_id) REFERENCES autonomous_generation_jobs(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_generation_locks_expires
+                ON chapter_generation_locks(expires_at);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_chapter_summaries(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS chapter_summaries (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                chapter_id TEXT NOT NULL CHECK (length(chapter_id) BETWEEN 1 AND 160),
+                draft_id TEXT NOT NULL CHECK (length(draft_id) BETWEEN 1 AND 160),
+                summary_text TEXT NOT NULL CHECK (length(summary_text) >= 1),
+                summary_type TEXT NOT NULL DEFAULT 'auto_generated' CHECK (
+                    summary_type IN ('auto_generated', 'manual')
+                ),
+                operation_id TEXT CHECK (
+                    operation_id IS NULL OR length(operation_id) BETWEEN 1 AND 160
+                ),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (draft_id) REFERENCES chapter_drafts(id) ON DELETE CASCADE
+            );",
+        )
+        .map_err(AppError::database)?;
+
+    // The base schema predates migration 024 and names this relationship
+    // `adopted_draft_id`. `CREATE TABLE IF NOT EXISTS` intentionally preserves
+    // that table and its rows, so choose the compatible index column instead of
+    // assuming the migration's standalone `draft_id` shape.
+    if table_has_column(transaction, "chapter_summaries", "chapter_id")? {
+        transaction
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_chapter_summaries_chapter
+                 ON chapter_summaries(chapter_id)",
+                [],
+            )
+            .map_err(AppError::database)?;
+    }
+    if table_has_column(transaction, "chapter_summaries", "novel_id")?
+        && table_has_column(transaction, "chapter_summaries", "created_at")?
+    {
+        transaction
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_chapter_summaries_novel_created
+                 ON chapter_summaries(novel_id, created_at DESC)",
+                [],
+            )
+            .map_err(AppError::database)?;
+    }
+    let draft_column = if table_has_column(transaction, "chapter_summaries", "draft_id")? {
+        Some("draft_id")
+    } else if table_has_column(transaction, "chapter_summaries", "adopted_draft_id")? {
+        Some("adopted_draft_id")
+    } else {
+        None
+    };
+    if let Some(draft_column) = draft_column {
+        transaction
+            .execute(
+                &format!(
+                    "CREATE INDEX IF NOT EXISTS idx_chapter_summaries_draft
+                     ON chapter_summaries({draft_column})"
+                ),
+                [],
+            )
+            .map_err(AppError::database)?;
+    }
+    Ok(())
+}
+
+fn apply_continuity_checks(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS continuity_checks (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                chapter_id TEXT NOT NULL CHECK (length(chapter_id) BETWEEN 1 AND 160),
+                check_type TEXT NOT NULL CHECK (
+                    check_type IN ('character', 'setting', 'timeline', 'logic', 'full')
+                ),
+                score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
+                status TEXT NOT NULL CHECK (status IN ('passed', 'warning', 'failed')),
+                issues_json TEXT,
+                previous_chapter_ids TEXT,
+                operation_id TEXT CHECK (
+                    operation_id IS NULL OR length(operation_id) BETWEEN 1 AND 160
+                ),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_continuity_checks_chapter
+                ON continuity_checks(chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_continuity_checks_novel_created
+                ON continuity_checks(novel_id, created_at DESC);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_expert_collaboration_logs(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS expert_collaboration_logs (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL CHECK (length(novel_id) BETWEEN 1 AND 160),
+                chapter_id TEXT NOT NULL CHECK (length(chapter_id) BETWEEN 1 AND 160),
+                draft_id TEXT NOT NULL CHECK (length(draft_id) BETWEEN 1 AND 160),
+                round_number INTEGER NOT NULL CHECK (round_number >= 1),
+                expert_type TEXT NOT NULL CHECK (
+                    expert_type IN ('outline', 'character', 'setting', 'logic', 'polish', 'quality')
+                ),
+                score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
+                issues_json TEXT,
+                suggestions_json TEXT,
+                operation_id TEXT CHECK (
+                    operation_id IS NULL OR length(operation_id) BETWEEN 1 AND 160
+                ),
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (draft_id) REFERENCES chapter_drafts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_expert_logs_draft
+                ON expert_collaboration_logs(draft_id);
+            CREATE INDEX IF NOT EXISTS idx_expert_logs_chapter_round
+                ON expert_collaboration_logs(chapter_id, round_number);
+            CREATE INDEX IF NOT EXISTS idx_expert_logs_novel_created
+                ON expert_collaboration_logs(novel_id, created_at DESC);",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 20] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 26] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -1611,6 +2049,30 @@ mod tests {
         (
             "020_agent_plan_checkpoints",
             "4341b1035cd13cf6dca38397377d45575363bee98ffdad746d02862764607045",
+        ),
+        (
+            "021_memory_snapshots",
+            "ac1c0cfa095c5c770b502162232b653dd30dcedd3d43fa34bb3aa02bd89f42f5",
+        ),
+        (
+            "022_memory_snapshot_sources",
+            "aecdf3872398b5c919b333a248b641fce993dc0bbae1ed16e90d6fd84181453b",
+        ),
+        (
+            "023_autonomous_generation",
+            "a45d63b2366b13726e001c8c118b11114d8a4a29603e5a92ed9d10148ff9b2d1",
+        ),
+        (
+            "024_chapter_summaries",
+            "806ea370a881dfe3d1e9fe853fec4fb30d7b3f26f491968c55e1369a33b66f5f",
+        ),
+        (
+            "025_continuity_checks",
+            "10524e7b973cd3d7df83e48fb01ce37fc5a988f6edf707c354f3174aca7505af",
+        ),
+        (
+            "026_expert_collaboration_logs",
+            "ab066f948b2469276f4d788f6daf2b13175ab88df4398c37121332e432018219",
         ),
     ];
 
@@ -1937,7 +2399,7 @@ mod tests {
         let first = list_applied(&connection)?;
         crate::db::create_tables(&mut connection)?;
         assert_eq!(list_applied(&connection)?, first);
-        assert_eq!(first.len(), 20);
+        assert_eq!(first.len(), 26);
         Ok(())
     }
 
@@ -2017,7 +2479,7 @@ mod tests {
         let once = list_applied(&connection)?;
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, once);
-        assert_eq!(once.len(), 20);
+        assert_eq!(once.len(), 26);
         for (table, expected_count, expected_columns) in before {
             let quoted = table.replace('"', "\"\"");
             let actual_count =
@@ -2100,6 +2562,115 @@ mod tests {
                 .query_map([], |_| Ok(()))?
                 .count(),
             0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn db25_memory_schema_is_append_only_and_scope_bound(
+        ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        crate::db::create_tables(&mut connection)?;
+        for table in ["memory_snapshots", "memory_snapshot_sources"] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing memory table {table}");
+        }
+        for index in [
+            "idx_memory_snapshots_chapter_created",
+            "uq_memory_snapshots_operation_request",
+            "idx_memory_snapshot_sources_identity",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                params![index],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing memory index {index}");
+        }
+        for trigger in [
+            "trg_memory_snapshots_validate_scope",
+            "trg_memory_snapshots_immutable_update",
+            "trg_memory_snapshots_no_delete",
+            "trg_memory_snapshot_sources_monotonic_ordinal",
+            "trg_memory_snapshot_sources_validate_scope",
+            "trg_memory_snapshot_sources_append_only_update",
+            "trg_memory_snapshot_sources_append_only_delete",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                params![trigger],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing memory trigger {trigger}");
+        }
+        assert_eq!(
+            connection
+                .prepare("PRAGMA foreign_key_check")?
+                .query_map([], |_| Ok(()))?
+                .count(),
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn db26_legacy_chapter_summary_schema_is_preserved_by_migration_024(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            "CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                version_no INTEGER NOT NULL,
+                large_text_ref_id TEXT
+             );
+             CREATE TABLE chapter_summaries (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                adopted_draft_id TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+             );
+             INSERT INTO chapter_drafts
+                (id, novel_id, chapter_id, content, version_no)
+             VALUES ('legacy-draft', 'legacy-novel', 'legacy-chapter', 'legacy body', 1);
+             INSERT INTO chapter_summaries
+                (id, novel_id, chapter_id, adopted_draft_id, summary, created_at, updated_at)
+             VALUES ('legacy-summary', 'legacy-novel', 'legacy-chapter', 'legacy-draft',
+                     'legacy summary', '2026-01-01', '2026-01-01');",
+        )?;
+
+        run_migrations(&mut connection)?;
+
+        let summary: (String, String) = connection.query_row(
+            "SELECT adopted_draft_id, summary FROM chapter_summaries WHERE id='legacy-summary'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(summary, ("legacy-draft".to_string(), "legacy summary".to_string()));
+
+        let index_sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_chapter_summaries_draft'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(index_sql.contains("adopted_draft_id"));
+        assert_eq!(
+            connection.query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM chapter_summaries",
+                [],
+                |row| row.get(0),
+            )?,
+            1
         );
         Ok(())
     }

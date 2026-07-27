@@ -16,7 +16,12 @@ export const qualityCheckAiService = {
   async runCheck(
     input: RunQualityCheckInput,
     aiOptions: AiGenerateOptions = {},
-  ): Promise<QualityCheckResult & { aiTaskId: string }> {
+  ): Promise<QualityCheckResult & {
+    aiTaskId: string;
+    tokenInput: number;
+    tokenOutput: number;
+    tokenTotal: number;
+  }> {
     throwIfAiRequestCancelled(aiOptions.signal);
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId);
@@ -85,7 +90,15 @@ export const qualityCheckAiService = {
         tokenTotal: response.tokenTotal,
       });
 
-      return { ...parsed, aiTaskId: task.id };
+      const tokenInput = response.tokenInput ?? 0;
+      const tokenOutput = response.tokenOutput ?? 0;
+      return {
+        ...parsed,
+        aiTaskId: task.id,
+        tokenInput,
+        tokenOutput,
+        tokenTotal: response.tokenTotal ?? tokenInput + tokenOutput,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '质量检查失败';
       if (isAiRequestCancelled(err) || aiOptions.signal?.aborted) {

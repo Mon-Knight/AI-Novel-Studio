@@ -19,7 +19,7 @@ const DATABASE_FILE: &str = "ai-novel-studio.db";
 const DATABASE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const DATABASE_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 
-const REQUIRED_E2E_TABLES: [&str; 26] = [
+const REQUIRED_E2E_TABLES: [&str; 35] = [
     "novels",
     "volumes",
     "chapters",
@@ -46,6 +46,15 @@ const REQUIRED_E2E_TABLES: [&str; 26] = [
     "agent_plan_step_attempts",
     "agent_execution_leases",
     "agent_plan_checkpoints",
+    "memory_snapshots",
+    "memory_snapshot_sources",
+    "autonomous_generation_jobs",
+    "quality_thresholds",
+    "autonomous_actions",
+    "chapter_generation_locks",
+    "chapter_summaries",
+    "continuity_checks",
+    "expert_collaboration_logs",
 ];
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -65,6 +74,8 @@ pub struct E2eDiagnosticsCounts {
     pub agent_plan_steps: i64,
     pub agent_plan_attempts: i64,
     pub agent_plan_checkpoints: i64,
+    pub memory_snapshots: i64,
+    pub memory_snapshot_sources: i64,
     pub generation_jobs: i64,
     pub generation_steps: i64,
     pub adopted_drafts: i64,
@@ -410,6 +421,8 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         agent_plan_steps: count_rows(conn, "agent_plan_steps")?,
         agent_plan_attempts: count_rows(conn, "agent_plan_step_attempts")?,
         agent_plan_checkpoints: count_rows(conn, "agent_plan_checkpoints")?,
+        memory_snapshots: count_rows(conn, "memory_snapshots")?,
+        memory_snapshot_sources: count_rows(conn, "memory_snapshot_sources")?,
         generation_jobs: count_rows(conn, "generation_jobs")?,
         generation_steps: count_rows(conn, "generation_step_results")?,
         adopted_drafts: if table_exists(conn, "chapter_drafts")? {
@@ -912,6 +925,15 @@ mod tests {
             CREATE TABLE agent_plan_step_attempts (attempt_id TEXT PRIMARY KEY);
             CREATE TABLE agent_execution_leases (lease_id TEXT PRIMARY KEY);
             CREATE TABLE agent_plan_checkpoints (checkpoint_id TEXT PRIMARY KEY);
+            CREATE TABLE memory_snapshots (snapshot_id TEXT PRIMARY KEY);
+            CREATE TABLE memory_snapshot_sources (snapshot_id TEXT PRIMARY KEY);
+            CREATE TABLE autonomous_generation_jobs (id TEXT PRIMARY KEY);
+            CREATE TABLE quality_thresholds (novel_id TEXT PRIMARY KEY);
+            CREATE TABLE autonomous_actions (id TEXT PRIMARY KEY);
+            CREATE TABLE chapter_generation_locks (chapter_id TEXT PRIMARY KEY);
+            CREATE TABLE chapter_summaries (id TEXT PRIMARY KEY);
+            CREATE TABLE continuity_checks (id TEXT PRIMARY KEY);
+            CREATE TABLE expert_collaboration_logs (id TEXT PRIMARY KEY);
             INSERT INTO schema_migrations (migration_id, version, checksum, applied_at) VALUES
                 ('001_generation_checkpoint_facts', '2.0.4', 'checksum-001', '2026-07-26T00:00:00Z'),
                 ('002_workspace_recovery_snapshots', '2.2.0', 'checksum-002', '2026-07-26T00:00:00Z'),
@@ -932,7 +954,13 @@ mod tests {
                 ('017_agent_plan_step_dependencies', '2.5.0', 'checksum-017', '2026-07-26T00:00:00Z'),
                 ('018_agent_plan_step_attempts', '2.5.0', 'checksum-018', '2026-07-26T00:00:00Z'),
                 ('019_agent_execution_leases', '2.5.0', 'checksum-019', '2026-07-26T00:00:00Z'),
-                ('020_agent_plan_checkpoints', '2.5.0', 'checksum-020', '2026-07-26T00:00:00Z');
+                ('020_agent_plan_checkpoints', '2.5.0', 'checksum-020', '2026-07-26T00:00:00Z'),
+                ('021_memory_snapshots', '2.6.0', 'checksum-021', '2026-07-26T00:00:00Z'),
+                ('022_memory_snapshot_sources', '2.6.0', 'checksum-022', '2026-07-26T00:00:00Z'),
+                ('023_autonomous_generation', '2.7.0', 'checksum-023', '2026-07-26T00:00:00Z'),
+                ('024_chapter_summaries', '2.8.0', 'checksum-024', '2026-07-26T00:00:00Z'),
+                ('025_continuity_checks', '2.9.0', 'checksum-025', '2026-07-26T00:00:00Z'),
+                ('026_expert_collaboration_logs', '2.12.0', 'checksum-026', '2026-07-26T00:00:00Z');
             INSERT INTO novels (id) VALUES ('novel-1');
             INSERT INTO chapter_drafts (id, is_adopted) VALUES ('draft-1', 1), ('draft-2', 0);
             ",
@@ -957,10 +985,10 @@ mod tests {
         assert_eq!(diagnostics.counts.novels, 1);
         assert_eq!(diagnostics.counts.chapter_drafts, 2);
         assert_eq!(diagnostics.counts.adopted_drafts, 1);
-        assert_eq!(diagnostics.migration_count, 20);
+        assert_eq!(diagnostics.migration_count, 26);
         assert_eq!(
             diagnostics.latest_migration_id.as_deref(),
-            Some("020_agent_plan_checkpoints")
+            Some("026_expert_collaboration_logs")
         );
         assert_eq!(diagnostics.counts.execution_tasks, 0);
         assert_eq!(diagnostics.counts.result_artifacts, 0);
@@ -971,6 +999,8 @@ mod tests {
         assert_eq!(diagnostics.counts.agent_plan_steps, 0);
         assert_eq!(diagnostics.counts.agent_plan_attempts, 0);
         assert_eq!(diagnostics.counts.agent_plan_checkpoints, 0);
+        assert_eq!(diagnostics.counts.memory_snapshots, 0);
+        assert_eq!(diagnostics.counts.memory_snapshot_sources, 0);
 
         drop(conn);
         fs::remove_dir_all(data_dir).unwrap();

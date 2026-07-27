@@ -169,6 +169,9 @@ function NovelDetailPage() {
             <button className="btn btn-secondary" onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}>
               设定库 AI 推演
             </button>
+            <button className="btn btn-secondary" onClick={() => navigate(`/novels/${novel.id}/autonomous-monitor`)}>
+              自主生成
+            </button>
           </div>
         </div>
       </div>

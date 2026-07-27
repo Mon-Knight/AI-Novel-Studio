@@ -49,6 +49,7 @@ const allSpecs = [
   'quality-history-replay.spec.ts',
   'chapter-context-persistence.spec.ts',
   'chapter-readiness-planner.spec.ts',
+  'chapter-continuity-memory.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 

@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, HashSet};
 pub mod ai_tasks;
 pub mod agent_plans;
 pub mod artifacts;
+pub mod autonomous;
 pub mod drafts;
+pub mod memory;
 pub mod placements;
 pub mod recovery;
 
@@ -1392,18 +1394,14 @@ fn validate_live_draft_target_internal(
     Ok(word_count)
 }
 
-fn adopt_chapter_draft_internal(
-    conn: &mut Connection,
+pub(crate) fn adopt_chapter_draft_in_transaction(
+    conn: &Connection,
     draft_id: &str,
     chapter_id: &str,
+    now: &str,
 ) -> Result<ChapterDraftDto, String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let transaction = conn
-        .transaction()
-        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
-
-    let word_count = validate_live_draft_target_internal(&transaction, draft_id, chapter_id)?;
-    let previous_adopted_draft_id = transaction
+    let word_count = validate_live_draft_target_internal(conn, draft_id, chapter_id)?;
+    let previous_adopted_draft_id = conn
         .query_row(
             "SELECT adopted_draft_id FROM chapters WHERE id = ?1 AND deleted_at IS NULL",
             params![chapter_id],
@@ -1412,16 +1410,16 @@ fn adopt_chapter_draft_internal(
         .map_err(|e| format!("adopt_previous_draft_lookup_failed: {}", e))?;
     let adopted_draft_changed = previous_adopted_draft_id.as_deref() != Some(draft_id);
 
-    transaction
+    conn
         .execute(
             "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
-            params![&now, chapter_id],
+            params![now, chapter_id],
         )
         .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
 
-    let adopted_rows = transaction.execute(
+    let adopted_rows = conn.execute(
         "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3 AND EXISTS (SELECT 1 FROM chapters AS c WHERE c.id = chapter_drafts.chapter_id AND c.novel_id = chapter_drafts.novel_id AND c.deleted_at IS NULL)",
-        params![&now, draft_id, chapter_id],
+        params![now, draft_id, chapter_id],
     ).map_err(|e| format!("adopt_target_update_failed: {}", e))?;
     if adopted_rows != 1 {
         return Err(format!(
@@ -1430,9 +1428,9 @@ fn adopt_chapter_draft_internal(
         ));
     }
 
-    let chapter_rows = transaction.execute(
+    let chapter_rows = conn.execute(
         "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3 WHERE id = ?4 AND deleted_at IS NULL AND novel_id = (SELECT novel_id FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?4)",
-        params![draft_id, word_count, &now, chapter_id],
+        params![draft_id, word_count, now, chapter_id],
     ).map_err(|e| format!("adopt_chapter_update_failed: {}", e))?;
     if chapter_rows != 1 {
         return Err(format!(
@@ -1442,10 +1440,10 @@ fn adopt_chapter_draft_internal(
     }
 
     if adopted_draft_changed {
-        expire_chapter_context_rows(&transaction, chapter_id, &now)?;
+        expire_chapter_context_rows(conn, chapter_id, now)?;
     }
 
-    let adopted = get_draft_by_id_and_chapter_internal(&transaction, draft_id, chapter_id)
+    let adopted = get_draft_by_id_and_chapter_internal(conn, draft_id, chapter_id)
         .map_err(|e| format!("adopt_readback_failed: {}", e))?;
     if !adopted.is_adopted {
         return Err(format!(
@@ -1454,6 +1452,19 @@ fn adopt_chapter_draft_internal(
         ));
     }
 
+    Ok(adopted)
+}
+
+fn adopt_chapter_draft_internal(
+    conn: &mut Connection,
+    draft_id: &str,
+    chapter_id: &str,
+) -> Result<ChapterDraftDto, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
+    let adopted = adopt_chapter_draft_in_transaction(&transaction, draft_id, chapter_id, &now)?;
     transaction
         .commit()
         .map_err(|e| format!("adopt_transaction_commit_failed: {}", e))?;
@@ -2810,8 +2821,48 @@ fn clear_ai_task_records_internal(
 pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRecordDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let id = input.id.clone();
+    let existing_identity: Option<(
+        Option<String>,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = conn
+        .query_row(
+            "SELECT novel_id, chapter_id, task_type, runtime_mode, provider, model_name, input_summary
+             FROM ai_task_records WHERE id = ?1",
+            params![&id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(existing) = existing_identity {
+        let same_identity = existing.0.as_deref() == input.novel_id.as_deref()
+            && existing.1.as_deref() == input.chapter_id.as_deref()
+            && existing.2 == input.task_type
+            && existing.3.as_deref() == input.runtime_mode.as_deref()
+            && existing.4.as_deref() == input.provider.as_deref()
+            && existing.5.as_deref() == input.model_name.as_deref()
+            && existing.6.as_deref() == input.input_summary.as_deref();
+        if !same_identity {
+            return Err("ai_task_record_operation_payload_conflict".to_string());
+        }
+        return get_ai_task_record_by_id_internal(&conn, &id);
+    }
     conn.execute(
-        "INSERT OR REPLACE INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        "INSERT INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         params![
             input.id,
             input.novel_id,
@@ -9756,5 +9807,47 @@ mod tests {
         )?;
         assert_eq!(succeeded, "succeeded");
         Ok(())
+    }
+
+    #[test]
+    fn ai_task_projection_replay_preserves_terminal_state_and_rejects_conflicts() {
+        crate::db::init_test_database();
+        let id = format!("projection-replay-{}", uuid::Uuid::new_v4());
+        let input = |task_type: &str| CreateAiTaskRecordInput {
+            id: id.clone(),
+            novel_id: None,
+            chapter_id: None,
+            task_type: task_type.to_string(),
+            status: "running".to_string(),
+            runtime_mode: Some("mock".to_string()),
+            provider: Some("mock".to_string()),
+            model_name: Some("Mock".to_string()),
+            input_summary: Some("stable projection".to_string()),
+            started_at: Some("2026-07-27T00:00:00Z".to_string()),
+            created_at: "2026-07-27T00:00:00Z".to_string(),
+        };
+
+        create_ai_task_record(input("quality_check")).expect("create projection");
+        mark_ai_task_succeeded(
+            id.clone(),
+            MarkAiTaskSucceededInput {
+                result_text: Some("done".to_string()),
+                prompt_snapshot: None,
+                result_json: Some("{}".to_string()),
+                token_input: Some(10),
+                token_output: Some(20),
+                token_total: Some(30),
+                duration_ms: Some(5),
+                finished_at: "2026-07-27T00:00:01Z".to_string(),
+            },
+        )
+        .expect("complete projection");
+
+        let replay = create_ai_task_record(input("quality_check")).expect("replay projection");
+        assert_eq!(replay.status, "succeeded");
+        assert_eq!(replay.token_total, Some(30));
+
+        let conflict = create_ai_task_record(input("chapter_summary")).unwrap_err();
+        assert_eq!(conflict, "ai_task_record_operation_payload_conflict");
     }
 }

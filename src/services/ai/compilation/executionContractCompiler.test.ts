@@ -104,6 +104,7 @@ test('formal compiler is deterministic across source and JSON key order', async 
   assert.equal(first.contextSnapshot.compiledContext, second.contextSnapshot.compiledContext);
   assert.deepEqual(first.contextSnapshot.sourceManifestJson, second.contextSnapshot.sourceManifestJson);
   assert.equal(first.inputPayloadJson.compilationHash, second.inputPayloadJson.compilationHash);
+  assert.equal(first.request.taskType, definition.taskType);
   assert.equal(first.contextSnapshot.schemaVersion, 2);
   assert.equal(first.constraintSnapshot.schemaVersion, 2);
 });

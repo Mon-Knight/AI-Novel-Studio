@@ -17,7 +17,9 @@ export type AiTaskType =
   | 'volume_summary'
   | 'style_analyze'
   | 'quality_check'
-  | 'quality_fix';
+  | 'quality_fix'
+  | 'continuity_check'
+  | 'expert_review';
 
 export type AiTaskStatus =
   | 'created'

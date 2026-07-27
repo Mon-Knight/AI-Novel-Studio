@@ -1,6 +1,6 @@
 [package]
 name = "ai-novel-studio"
-version = "2.5.0"
+version = "2.12.0"
 description = "AI Novel Studio - Windows 桌面端 AI 小说创作工作台"
 authors = ["Mon-Knight"]
 license = ""
