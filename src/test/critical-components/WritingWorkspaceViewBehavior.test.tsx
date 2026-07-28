@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import WritingWorkspaceView from '../../pages/WritingWorkspace/WritingWorkspaceView';
@@ -52,7 +53,7 @@ vi.mock('../../components/workspace/VolumeTree', () => ({
 }));
 
 vi.mock('../../components/workspace/EditorArea', () => ({
-  default: (props: Record<string, unknown>) => (
+  default: forwardRef<HTMLDivElement, Record<string, unknown>>((props, _ref) => (
     <div data-testid="mock-editor">
       <button
         type="button"
@@ -101,7 +102,7 @@ vi.mock('../../components/workspace/EditorArea', () => ({
         editor-back
       </button>
     </div>
-  ),
+  )),
 }));
 
 vi.mock('../../components/workspace/StatusBar', () => ({
