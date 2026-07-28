@@ -51,7 +51,6 @@ select {
   font-family: var(--font-family);
 }
 
-
 /* 返回按钮 */
 .back-button {
   display: inline-flex;
@@ -66,7 +65,9 @@ select {
   font-size: 13px;
   white-space: nowrap;
 }
-.back-button:hover { background: var(--color-bg-hover, #f3f4f6); }
+.back-button:hover {
+  background: var(--color-bg-hover, #f3f4f6);
+}
 
 /* 通用工具类 */
 .text-muted {
@@ -199,7 +200,7 @@ select {
 
 .btn-primary {
   background-color: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   border-color: var(--color-primary);
 }
 
@@ -220,7 +221,7 @@ select {
 
 .btn-danger {
   background-color: var(--color-error);
-  color: #fff;
+  color: var(--color-on-error);
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -262,18 +263,18 @@ select {
 }
 
 .tag-success {
-  background-color: #e8f5e9;
-  color: var(--color-success);
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
 }
 
 .tag-warning {
-  background-color: #fff3e0;
-  color: var(--color-warning);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning-text);
 }
 
 .tag-error {
-  background-color: #ffebee;
-  color: var(--color-error);
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
 }
 
 /* === 输入框统一 === */

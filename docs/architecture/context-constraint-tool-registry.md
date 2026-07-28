@@ -85,7 +85,7 @@ included | truncated | omitted_empty | omitted_budget
 - Provider id/model/temperature/maxTokens；
 - `tool_registry_v1` hash 与 allowedTools。
 
-连接测试固定输出 `OK`、最大 8 tokens；设定补充固定输出 `setting_candidates@1`，只生成候选且不得直接写业务数据。Prompt 模板位于 `prompts/`，模板、Context 和用户消息彼此分离。
+连接测试固定输出 `OK`、`temperature = 0`、最大 128 tokens，以兼容会先产生推理 token 的 OpenAI-compatible 模型；前端编译器与 Rust 持久化边界共同读取 `src/constants/providerRequestPolicy.json`，避免策略漂移。设定补充固定输出 `setting_candidates@1`，只生成候选且不得直接写业务数据。Prompt 模板位于 `prompts/`，模板、Context 和用户消息彼此分离。
 
 ## 5. 执行契约与 hash
 
@@ -121,16 +121,16 @@ Rust 在打开 Task 创建事务前验证：
 
 ### 7.1 当前生产工具
 
-| identity | scope | 权限 | 副作用 |
-|----------|-------|------|--------|
-| `novel.read_context@1` | novel | novel.read | none |
-| `novel.read_settings@1` | novel | novel.read | none |
-| `chapter.read_outline@1` | chapter | novel.read, chapter.read | none |
-| `chapter.read_context@1` | chapter | novel.read, chapter.read | none |
-| `style.read_profile@1` | novel | novel.read, style.read | none |
-| `style.read_output_control@1` | novel | novel.read, style.read | none |
-| `verification.check_outline@1` | chapter | novel.read, chapter.read, verification.execute | none |
-| `verification.check_style@1` | novel | novel.read, style.read, verification.execute | none |
+| identity                       | scope   | 权限                                           | 副作用 |
+| ------------------------------ | ------- | ---------------------------------------------- | ------ |
+| `novel.read_context@1`         | novel   | novel.read                                     | none   |
+| `novel.read_settings@1`        | novel   | novel.read                                     | none   |
+| `chapter.read_outline@1`       | chapter | novel.read, chapter.read                       | none   |
+| `chapter.read_context@1`       | chapter | novel.read, chapter.read                       | none   |
+| `style.read_profile@1`         | novel   | novel.read, style.read                         | none   |
+| `style.read_output_control@1`  | novel   | novel.read, style.read                         | none   |
+| `verification.check_outline@1` | chapter | novel.read, chapter.read, verification.execute | none   |
+| `verification.check_style@1`   | novel   | novel.read, style.read, verification.execute   | none   |
 
 生产 Registry hash：
 

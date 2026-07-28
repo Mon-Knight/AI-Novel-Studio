@@ -3,7 +3,7 @@
  * 支持：手动编辑、AI 生成、保存、版本管理、设置为采用版本
  */
 import { useState, useEffect, useCallback } from 'react';
-import { runWithLoading } from '../../lib/runWithLoading';
+import { cancelLoadingOperation, runWithLoading } from '../../lib/runWithLoading';
 import {
   masterOutlineService, volumeOutlineService, chapterOutlineService,
   loadOutlineContext,
@@ -13,6 +13,9 @@ import { aiTaskService } from '../../services/ai/aiTaskService';
 import { buildOutlineGeneratePrompt, buildVolumeOutlineGeneratePrompt, buildChapterOutlineGeneratePrompt } from '../../services/ai/promptBuilder';
 import type { OutlineGenerationContext, OutlineType } from '../../types/outline';
 import type { OutlineGeneratePromptContext, VolumeOutlineGeneratePromptContext, ChapterOutlineGeneratePromptContext } from '../../services/ai/promptBuilder';
+import type { AiGenerateResponse } from '../../types/ai';
+import { throwIfAiRequestCancelled } from '../../services/ai/aiCancellation';
+import { settleAiTaskError } from '../../services/ai/aiTaskCancellation';
 
 interface OutlineEditorProps {
   projectId: string;
@@ -38,7 +41,7 @@ function buildChapterPromptContext(
     volumeTitle: chapterTitle,
     chapterCount: 6,
     activeMasterOutline: base.activeMasterOutline,
-    activeVolumeOutline: (base as any).activeVolumeOutline,
+    activeVolumeOutline: base.activeVolumeOutline,
     styleSummary: base.styleSummary,
   };
 }
@@ -112,8 +115,9 @@ function OutlineEditor({
               : '正在读取作品设定、主角背景和世界设定……',
           successMessage: `${typeLabel}生成完成，请检查并保存`,
           errorMessage: `${typeLabel}生成失败`,
+          cancelable: true,
         },
-        async ({ setMessage, setStage }) => {
+        async ({ setMessage, setStage, signal, operationId }) => {
           setStage('正在构建完整上下文……');
           setMessage('正在读取世界背景、主角设定、已有大纲……');
           const ctx = await loadOutlineContext(projectId);
@@ -126,7 +130,7 @@ function OutlineEditor({
           if (outlineType === 'volume' && !ctx.activeMasterOutline) warnings.push('缺少总纲（建议先生成总纲）');
           if (outlineType === 'chapter') {
             if (!ctx.activeMasterOutline) warnings.push('缺少总纲');
-            if (!(ctx as any).activeVolumeOutline) warnings.push('缺少分卷大纲（建议先生成分卷大纲）');
+            if (!ctx.activeVolumeOutline) warnings.push('缺少分卷大纲（建议先生成分卷大纲）');
           }
           if (warnings.length > 0) {
             setStage(`⚠️ ${warnings.join('、')}，将生成简化版`);
@@ -170,15 +174,40 @@ function OutlineEditor({
             outlineType === 'master' ? 'outline_generate' : outlineType === 'volume' ? 'volume_outline_generate' : 'chapter_outline_generate',
             { novelId: projectId, runtimeMode: settings.runtimeMode, provider: settings.provider, modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName, inputSummary: `生成${typeLabel}：${targetTitle || ctx.novelTitle}` },
           ).catch(() => null);
+          const releaseCancellation = task
+            ? aiTaskService.registerActiveExecution(
+                task.id,
+                () => cancelLoadingOperation(operationId),
+              )
+            : () => {};
 
-          const client = createAiClient(settings);
-          const response = await client.generate(request);
-
-          if (task) {
-            await aiTaskService.markSucceeded(task.id, {
-              resultText: response.text,
-              tokenInput: response.tokenInput, tokenOutput: response.tokenOutput, tokenTotal: response.tokenTotal,
+          let response: AiGenerateResponse;
+          try {
+            const client = createAiClient(settings);
+            response = await client.generate(request, {
+              signal,
+              cancel: () => cancelLoadingOperation(operationId),
             });
+            throwIfAiRequestCancelled(signal);
+
+            if (task) {
+              await aiTaskService.markSucceeded(task.id, {
+                resultText: response.text,
+                tokenInput: response.tokenInput,
+                tokenOutput: response.tokenOutput,
+                tokenTotal: response.tokenTotal,
+              });
+            }
+          } catch (error: unknown) {
+            await settleAiTaskError({
+              taskId: task?.id,
+              error,
+              signal,
+              fallbackMessage: `${typeLabel}生成失败`,
+            });
+            throw error;
+          } finally {
+            releaseCancellation();
           }
 
           setContent(response.text);
@@ -188,7 +217,7 @@ function OutlineEditor({
           setMessage(`AI 已生成${typeLabel}，请检查内容后保存`);
         },
       );
-    } catch (e: any) {
+    } catch {
       // 错误已在弹窗显示
     }
   };
@@ -301,7 +330,7 @@ function OutlineEditor({
         </button>
         <button
           className="btn btn-sm"
-          style={{ background: isDirty ? 'var(--color-warning)' : undefined, color: isDirty ? '#fff' : undefined }}
+              style={{ background: isDirty ? 'var(--color-warning)' : undefined, color: isDirty ? 'var(--color-on-primary)' : undefined }}
           onClick={() => handleSave(false)}
         >
           💾 保存{isDirty ? ' *' : ''}
@@ -330,7 +359,7 @@ function OutlineEditor({
       {/* 上下文摘要 */}
       {showContext && context && (
         <div style={{
-          padding: 12, fontSize: 11, background: '#f8fafc', borderRadius: 8,
+          padding: 12, fontSize: 11, background: 'var(--color-bg-hover)', borderRadius: 8,
           border: '1px solid var(--color-border-light)', maxHeight: 180, overflowY: 'auto',
           lineHeight: 1.6,
         }}>

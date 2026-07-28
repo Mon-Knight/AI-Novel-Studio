@@ -19,6 +19,13 @@ const MAX_PENDING_CANCELLATIONS: usize = 128;
 const MAX_RECENTLY_SETTLED_REQUESTS: usize = 128;
 const REQUEST_STATE_TTL: Duration = Duration::from_secs(30);
 const MAX_REQUEST_ID_BYTES: usize = 128;
+const MAX_SSE_FRAME_BYTES: usize = 2_000_000;
+const AI_STREAM_EVENT_NAME: &str = "ai-stream-event";
+const AI_STREAM_INVALID: &str = "AI 调用失败：模型服务返回了无效的流式响应，请检查兼容接口或重试。";
+const AI_STREAM_INTERRUPTED: &str =
+    "AI 调用失败：流式响应在完成标记前中断，当前残片未保存；请重试。";
+const OUTPUT_TOKEN_TRUNCATION_ERROR: &str =
+    "AI 调用失败：模型在输出 Token 上限处停止，响应内容不完整且未采纳；请缩小单次输出或提高最大输出 Token 后重试。";
 
 type AbortCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
@@ -250,7 +257,23 @@ pub struct AiChatCompletionResponse {
     pub token_input: Option<i64>,
     pub token_output: Option<i64>,
     pub total_tokens: Option<i64>,
+    pub finish_reason: Option<String>,
 }
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatStreamEvent {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub request_id: String,
+    pub sequence: Option<u64>,
+    pub text: Option<String>,
+    pub token_input: Option<i64>,
+    pub token_output: Option<i64>,
+    pub token_total: Option<i64>,
+}
+
+type StreamEmitter = Arc<dyn Fn(AiChatStreamEvent) -> Result<(), String> + Send + Sync + 'static>;
 
 fn build_chat_completions_url(base_url: &str) -> String {
     let clean = base_url.trim().trim_end_matches('/').to_string();
@@ -373,6 +396,287 @@ pub async fn ai_chat_completion(
     execute_ai_chat_completion(request, crate::runtime::is_network_blocked()).await
 }
 
+#[tauri::command]
+pub async fn ai_chat_completion_stream(
+    window: tauri::Window,
+    request: AiChatCompletionRequest,
+) -> Result<AiChatCompletionResponse, String> {
+    let emitter: StreamEmitter = Arc::new(move |event| {
+        window
+            .emit(AI_STREAM_EVENT_NAME, event)
+            .map_err(|_| "AI_STREAM_EVENT_EMIT_FAILED".to_string())
+    });
+    execute_ai_chat_completion_stream(request, crate::runtime::is_network_blocked(), emitter).await
+}
+
+async fn execute_ai_chat_completion_stream(
+    request: AiChatCompletionRequest,
+    network_blocked: bool,
+    emitter: StreamEmitter,
+) -> Result<AiChatCompletionResponse, String> {
+    ensure_ai_network_allowed(network_blocked)?;
+    validate_request(&request)?;
+    let request_id = request
+        .request_id
+        .clone()
+        .ok_or_else(|| AI_REQUEST_ID_INVALID.to_string())?;
+    validate_request_id(&request_id)?;
+
+    let mut registration = reserve_request(request_id.clone())?;
+    let task = tauri::async_runtime::spawn(perform_ai_chat_completion_stream(
+        request, request_id, emitter,
+    ));
+    let abort_handle = task.inner().abort_handle();
+    let abort: AbortCallback = Arc::new(move || abort_handle.abort());
+    registration.attach_abort(abort)?;
+
+    let task_result = task.await;
+    if registration.finish() {
+        return Err(AI_REQUEST_CANCELLED.to_string());
+    }
+    match task_result {
+        Ok(result) => result,
+        Err(_) => Err(AI_REQUEST_RUNTIME_FAILED.to_string()),
+    }
+}
+
+#[derive(Default)]
+struct OpenAiSseDecoder {
+    buffer: Vec<u8>,
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn find_sse_boundary(value: &[u8]) -> Option<(usize, usize)> {
+    [
+        (b"\r\n\r\n".as_slice(), 4),
+        (b"\n\n".as_slice(), 2),
+        (b"\r\r".as_slice(), 2),
+    ]
+    .iter()
+    .filter_map(|(needle, length)| find_bytes(value, needle).map(|index| (index, *length)))
+    .min_by_key(|(index, _)| *index)
+}
+
+fn decode_sse_frame(frame: &[u8]) -> Result<Option<String>, String> {
+    let frame = std::str::from_utf8(frame).map_err(|_| AI_STREAM_INVALID.to_string())?;
+    let values: Vec<&str> = frame
+        .split(|character| character == '\n' || character == '\r')
+        .filter_map(|line| {
+            let value = line.strip_prefix("data:")?;
+            Some(value.strip_prefix(' ').unwrap_or(value))
+        })
+        .collect();
+    if values.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(values.join("\n")))
+    }
+}
+
+impl OpenAiSseDecoder {
+    fn push(&mut self, chunk: &[u8]) -> Result<Vec<String>, String> {
+        self.buffer.extend_from_slice(chunk);
+        self.take_frames(false)
+    }
+
+    fn finish(&mut self) -> Result<Vec<String>, String> {
+        self.take_frames(true)
+    }
+
+    fn take_frames(&mut self, flush: bool) -> Result<Vec<String>, String> {
+        if self.buffer.len() > MAX_SSE_FRAME_BYTES {
+            return Err(AI_STREAM_INVALID.to_string());
+        }
+        let mut payloads = Vec::new();
+        while let Some((index, boundary_length)) = find_sse_boundary(&self.buffer) {
+            let frame = self.buffer[..index].to_vec();
+            self.buffer.drain(..index + boundary_length);
+            if let Some(payload) = decode_sse_frame(&frame)? {
+                payloads.push(payload);
+            }
+        }
+        if flush && !self.buffer.iter().all(u8::is_ascii_whitespace) {
+            let frame = std::mem::take(&mut self.buffer);
+            if let Some(payload) = decode_sse_frame(&frame)? {
+                payloads.push(payload);
+            }
+        }
+        Ok(payloads)
+    }
+}
+
+#[derive(Default)]
+struct StreamAggregate {
+    text: String,
+    sequence: u64,
+    saw_done: bool,
+    finish_reason: Option<String>,
+    token_input: Option<i64>,
+    token_output: Option<i64>,
+    token_total: Option<i64>,
+}
+
+fn consume_stream_payload(
+    payload: String,
+    request_id: &str,
+    emitter: &StreamEmitter,
+    aggregate: &mut StreamAggregate,
+) -> Result<(), String> {
+    if payload.trim() == "[DONE]" {
+        aggregate.saw_done = true;
+        return Ok(());
+    }
+    let data: Value = serde_json::from_str(&payload).map_err(|_| AI_STREAM_INVALID.to_string())?;
+    if !data.is_object() || data.get("error").is_some() {
+        return Err(AI_STREAM_INVALID.to_string());
+    }
+
+    if let Some(choice) = data.get("choices").and_then(|choices| choices.get(0)) {
+        if let Some(content) = choice.get("delta").and_then(|delta| delta.get("content")) {
+            if !content.is_null() {
+                let content = content
+                    .as_str()
+                    .ok_or_else(|| AI_STREAM_INVALID.to_string())?;
+                if !content.is_empty() {
+                    aggregate.text.push_str(content);
+                    aggregate.sequence += 1;
+                    emitter(AiChatStreamEvent {
+                        event_type: "delta".to_string(),
+                        request_id: request_id.to_string(),
+                        sequence: Some(aggregate.sequence),
+                        text: Some(content.to_string()),
+                        token_input: None,
+                        token_output: None,
+                        token_total: None,
+                    })?;
+                }
+            }
+        }
+        if let Some(finish_reason) = choice.get("finish_reason") {
+            if !finish_reason.is_null() {
+                let finish_reason = finish_reason
+                    .as_str()
+                    .ok_or_else(|| AI_STREAM_INVALID.to_string())?
+                    .to_string();
+                if finish_reason == "length" {
+                    return Err(OUTPUT_TOKEN_TRUNCATION_ERROR.to_string());
+                }
+                aggregate.finish_reason = Some(finish_reason);
+            }
+        }
+    }
+
+    if let Some(usage) = data.get("usage") {
+        aggregate.token_input = usage.get("prompt_tokens").and_then(Value::as_i64);
+        aggregate.token_output = usage.get("completion_tokens").and_then(Value::as_i64);
+        aggregate.token_total = usage.get("total_tokens").and_then(Value::as_i64);
+        emitter(AiChatStreamEvent {
+            event_type: "usage".to_string(),
+            request_id: request_id.to_string(),
+            sequence: None,
+            text: None,
+            token_input: aggregate.token_input,
+            token_output: aggregate.token_output,
+            token_total: aggregate.token_total,
+        })?;
+    }
+    Ok(())
+}
+
+async fn perform_ai_chat_completion_stream(
+    request: AiChatCompletionRequest,
+    request_id: String,
+    emitter: StreamEmitter,
+) -> Result<AiChatCompletionResponse, String> {
+    let url = build_chat_completions_url(&request.base_url);
+    let timeout_seconds = request.timeout_seconds.unwrap_or(120);
+    let client_builder = Client::builder().timeout(Duration::from_secs(timeout_seconds));
+    #[cfg(test)]
+    let client_builder = client_builder.no_proxy();
+    let client = client_builder
+        .build()
+        .map_err(|_| "AI 调用失败：HTTP 客户端初始化失败。".to_string())?;
+    let body = json!({
+        "model": request.model_name,
+        "messages": request.messages,
+        "temperature": request.temperature.unwrap_or(0.7),
+        "max_tokens": request.max_tokens.unwrap_or(8000),
+        "stream": true,
+    });
+    let mut response = client
+        .post(url)
+        .bearer_auth(request.api_key.trim())
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                format!(
+                    "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
+                    timeout_seconds
+                )
+            } else if error.is_connect() {
+                "AI 调用失败：网络连接失败，请检查 API Base URL、网络连接或代理设置。".to_string()
+            } else {
+                "AI 调用失败：网络请求失败。".to_string()
+            }
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(user_error_from_status(
+            status,
+            &error_body,
+            body["model"].as_str().unwrap_or(""),
+        ));
+    }
+
+    let mut decoder = OpenAiSseDecoder::default();
+    let mut aggregate = StreamAggregate::default();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        if error.is_timeout() {
+            format!(
+                "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
+                timeout_seconds
+            )
+        } else {
+            AI_STREAM_INTERRUPTED.to_string()
+        }
+    })? {
+        for payload in decoder.push(&chunk)? {
+            consume_stream_payload(payload, &request_id, &emitter, &mut aggregate)?;
+        }
+    }
+    for payload in decoder.finish()? {
+        consume_stream_payload(payload, &request_id, &emitter, &mut aggregate)?;
+    }
+    if !aggregate.saw_done && aggregate.finish_reason.is_none() {
+        return Err(AI_STREAM_INTERRUPTED.to_string());
+    }
+    if aggregate.text.trim().is_empty() {
+        return Err("AI 调用失败：模型返回空内容，请检查提示词、模型名称或重试。".into());
+    }
+
+    Ok(AiChatCompletionResponse {
+        text: aggregate.text,
+        raw: json!({
+            "streamed": true,
+            "requestId": request_id,
+            "finishReason": aggregate.finish_reason.clone(),
+        }),
+        token_input: aggregate.token_input,
+        token_output: aggregate.token_output,
+        total_tokens: aggregate.token_total,
+        finish_reason: aggregate.finish_reason,
+    })
+}
+
 async fn execute_ai_chat_completion(
     request: AiChatCompletionRequest,
     network_blocked: bool,
@@ -474,10 +778,17 @@ async fn perform_ai_chat_completion(
         })?;
 
     let status = response.status();
-    let text_body = response
-        .text()
-        .await
-        .map_err(|_| "AI 调用失败：读取响应失败。".to_string())?;
+    let text_body = response.text().await.map_err(|error| {
+        if error.is_timeout() {
+            format!(
+                "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
+                timeout_seconds
+            )
+        } else {
+            "AI 调用失败：上游服务在响应完成前中断连接，请重试；长响应建议缩小单次输出。"
+                .to_string()
+        }
+    })?;
 
     if !status.is_success() {
         return Err(user_error_from_status(
@@ -490,14 +801,22 @@ async fn perform_ai_chat_completion(
     let data: Value = serde_json::from_str(&text_body)
         .map_err(|_| "AI 调用失败：响应不是有效 JSON。".to_string())?;
 
-    let content = data
-        .get("choices")
-        .and_then(|choices| choices.get(0))
+    let first_choice = data.get("choices").and_then(|choices| choices.get(0));
+    let content = first_choice
         .and_then(|choice| choice.get("message"))
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+
+    let finish_reason = first_choice
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    if finish_reason.as_deref() == Some("length") {
+        return Err(OUTPUT_TOKEN_TRUNCATION_ERROR.into());
+    }
 
     if content.trim().is_empty() {
         return Err("AI 调用失败：模型返回空内容，请检查提示词、模型名称或重试。".into());
@@ -515,6 +834,7 @@ async fn perform_ai_chat_completion(
         total_tokens: usage
             .and_then(|u| u.get("total_tokens"))
             .and_then(Value::as_i64),
+        finish_reason,
         raw: data,
     })
 }
@@ -714,6 +1034,41 @@ mod tests {
         (format!("http://{}", address), server_thread)
     }
 
+    fn spawn_partial_response_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback server");
+        let address = listener.local_addr().expect("read loopback address");
+        let server_thread = thread::spawn(move || {
+            let mut stream =
+                accept_with_timeout(&listener, Duration::from_secs(5)).expect("accept request");
+            read_http_request(&mut stream).expect("read request");
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n{",
+                )
+                .expect("write partial response");
+            stream.flush().expect("flush partial response");
+            thread::sleep(Duration::from_secs(2));
+        });
+        (format!("http://{}", address), server_thread)
+    }
+
+    fn spawn_truncated_response_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback server");
+        let address = listener.local_addr().expect("read loopback address");
+        let server_thread = thread::spawn(move || {
+            let mut stream =
+                accept_with_timeout(&listener, Duration::from_secs(5)).expect("accept request");
+            read_http_request(&mut stream).expect("read request");
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n{",
+                )
+                .expect("write truncated response");
+            stream.flush().expect("flush truncated response");
+        });
+        (format!("http://{}", address), server_thread)
+    }
+
     fn assert_listener_has_no_connection(listener: &TcpListener) {
         listener.set_nonblocking(true).unwrap();
         match listener.accept() {
@@ -870,6 +1225,88 @@ mod tests {
     }
 
     #[test]
+    fn sse_decoder_preserves_multibyte_text_across_transport_chunks() {
+        let source = "data: {\"choices\":[{\"delta\":{\"content\":\"你好🌙\"},\"finish_reason\":\"stop\"}]}\r\n\r\ndata: [DONE]\n\n";
+        let mut decoder = OpenAiSseDecoder::default();
+        let mut payloads = Vec::new();
+        for byte in source.as_bytes() {
+            payloads.extend(decoder.push(&[*byte]).unwrap());
+        }
+        payloads.extend(decoder.finish().unwrap());
+        assert_eq!(payloads.len(), 2);
+        assert!(payloads[0].contains("你好🌙"));
+        assert_eq!(payloads[1], "[DONE]");
+    }
+
+    #[test]
+    fn streaming_response_emits_ordered_deltas_and_returns_exact_aggregate() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let response_body = "data: {\"choices\":[{\"delta\":{\"content\":\"你\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"好🌙\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\ndata: [DONE]\n\n";
+        let (base_url, server_thread) = spawn_response_server(response_body);
+        let events = Arc::new(Mutex::new(Vec::<AiChatStreamEvent>::new()));
+        let captured_events = events.clone();
+        let emitter: StreamEmitter = Arc::new(move |event| {
+            captured_events
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(event);
+            Ok(())
+        });
+
+        let response = tauri::async_runtime::block_on(execute_ai_chat_completion_stream(
+            test_request(base_url, Some("stream-normal-response"), 3),
+            false,
+            emitter,
+        ))
+        .unwrap();
+        server_thread.join().unwrap();
+
+        assert_eq!(response.text, "你好🌙");
+        assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(response.total_tokens, Some(10));
+        let events = events.lock().unwrap_or_else(|error| error.into_inner());
+        let deltas: Vec<&AiChatStreamEvent> = events
+            .iter()
+            .filter(|event| event.event_type == "delta")
+            .collect();
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[0].sequence, Some(1));
+        assert_eq!(deltas[0].text.as_deref(), Some("你"));
+        assert_eq!(deltas[1].sequence, Some(2));
+        assert_eq!(deltas[1].text.as_deref(), Some("好🌙"));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == "usage" && event.token_total == Some(10)));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn streaming_response_rejects_unmarked_eof_without_returning_partial_text() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let response_body = "data: {\"choices\":[{\"delta\":{\"content\":\"partial secret\"},\"finish_reason\":null}]}\n\n";
+        let (base_url, server_thread) = spawn_response_server(response_body);
+        let emitter: StreamEmitter = Arc::new(|_| Ok(()));
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion_stream(
+            test_request(base_url, Some("stream-unmarked-eof"), 3),
+            false,
+            emitter,
+        ))
+        .unwrap_err();
+        server_thread.join().unwrap();
+
+        assert_eq!(error, AI_STREAM_INTERRUPTED);
+        assert!(!error.contains("partial secret"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
     fn malformed_success_response_does_not_expose_provider_body() {
         let _serial = TEST_SERIAL
             .lock()
@@ -889,6 +1326,70 @@ mod tests {
         assert_eq!(error, "AI 调用失败：响应不是有效 JSON。");
         assert!(!error.contains(response_body));
         assert!(!error.contains("secret-token"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn non_empty_output_token_truncation_is_discarded_without_exposing_provider_content() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let response_body = r#"{"choices":[{"finish_reason":"length","message":{"content":"partial Bearer private-output","reasoning_content":"Bearer private-reasoning"}}]}"#;
+        let (base_url, server_thread) = spawn_response_server(response_body);
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion(
+            test_request(base_url, Some("truncated-output"), 3),
+            false,
+        ))
+        .unwrap_err();
+
+        server_thread.join().unwrap();
+        assert!(error.contains("输出 Token 上限"));
+        assert!(error.contains("内容不完整且未采纳"));
+        assert!(!error.contains("private-output"));
+        assert!(!error.contains("private-reasoning"));
+        assert!(!error.contains("Bearer"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn response_body_timeout_keeps_timeout_classification() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let (base_url, server_thread) = spawn_partial_response_server();
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion(
+            test_request(base_url, Some("response-body-timeout"), 1),
+            false,
+        ))
+        .unwrap_err();
+
+        server_thread.join().unwrap();
+        assert!(error.contains("请求超时（1 秒）"));
+        assert!(!error.contains("读取响应失败"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn truncated_response_body_reports_upstream_interruption() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let (base_url, server_thread) = spawn_truncated_response_server();
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion(
+            test_request(base_url, Some("truncated-response-body"), 3),
+            false,
+        ))
+        .unwrap_err();
+
+        server_thread.join().unwrap();
+        assert!(error.contains("上游服务在响应完成前中断连接"));
+        assert!(!error.contains("Bearer"));
         assert_eq!(registry_counts(), (0, 0, 1));
     }
 
@@ -982,5 +1483,21 @@ mod tests {
         }
 
         assert_eq!(registry_counts(), (0, 0, MAX_RECENTLY_SETTLED_REQUESTS));
+    }
+
+    #[test]
+    fn recently_settled_request_id_cannot_be_reused_immediately() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let request_id = "recently-settled-reuse";
+
+        let mut registration = reserve_request(request_id.to_string()).unwrap();
+        assert!(!registration.finish());
+
+        let error = reserve_request(request_id.to_string()).err().unwrap();
+        assert_eq!(error, AI_REQUEST_ID_RECENTLY_SETTLED);
+        assert_eq!(registry_counts(), (0, 0, 1));
     }
 }

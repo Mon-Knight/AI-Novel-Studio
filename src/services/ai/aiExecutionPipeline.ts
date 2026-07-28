@@ -10,21 +10,12 @@ import type {
   AiTaskType,
   CreateAiTaskInput,
 } from '../../types/ai-task';
-import type {
-  CreateResultArtifactInput,
-  ResultArtifactBundle,
-} from '../../types/result-artifact';
-import {
-  normalizeAppError,
-  type AppError,
-} from '../../types/appError';
+import type { CreateResultArtifactInput, ResultArtifactBundle } from '../../types/result-artifact';
+import { normalizeAppError, type AppError } from '../../types/appError';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { isTauri } from '../database/db';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
-import {
-  isAiRequestCancelled,
-  throwIfAiRequestCancelled,
-} from './aiCancellation';
+import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
 import {
   createProviderAdapter,
   type ProviderAdapter,
@@ -94,14 +85,13 @@ const defaultDependencies: AiExecutionDependencies = {
   runtime: aiTaskRuntimeService,
   createAdapter: createProviderAdapter,
   compileContract: async (input) => {
-    const { compileProductionAiExecution } = await import(
-      './compilation/productionCompilationRegistry'
-    );
+    const { compileProductionAiExecution } =
+      await import('./compilation/productionCompilationRegistry');
     return compileProductionAiExecution(input);
   },
   isTauriRuntime: isTauri,
-  createId: () => globalThis.crypto?.randomUUID?.()
-    ?? `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  createId: () =>
+    globalThis.crypto?.randomUUID?.() ?? `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`,
 };
 
 export class AiExecutionError extends Error implements AppError {
@@ -143,9 +133,7 @@ function mapProviderError(
   // Tauri 1.x commands may reject with a plain string instead of an Error.
   // Preserve that already-sanitized backend message so HTTP/config failures do
   // not collapse into the generic network bucket.
-  const message = typeof error === 'string' && error.trim()
-    ? error.trim()
-    : normalized.message;
+  const message = typeof error === 'string' && error.trim() ? error.trim() : normalized.message;
   const lower = message.toLowerCase();
   if (lower.includes('cancel') || message.includes('取消')) {
     return new AiExecutionError({
@@ -171,12 +159,14 @@ function mapProviderError(
       ...context,
     });
   }
-  if (/\b(?:401|403)\b/.test(lower)
-    || lower.includes('unauthorized')
-    || lower.includes('forbidden')
-    || message.includes('API Key 无效')
-    || message.includes('无权访问模型')
-    || message.includes('服务拒绝访问')) {
+  if (
+    /\b(?:401|403)\b/.test(lower) ||
+    lower.includes('unauthorized') ||
+    lower.includes('forbidden') ||
+    message.includes('API Key 无效') ||
+    message.includes('无权访问模型') ||
+    message.includes('服务拒绝访问')
+  ) {
     return new AiExecutionError({
       code: 'AI_PROVIDER_AUTHENTICATION_FAILED',
       message,
@@ -195,6 +185,14 @@ function mapProviderError(
   if (/\b5\d\d\b/.test(lower) || message.includes('过载') || message.includes('服务错误')) {
     return new AiExecutionError({
       code: 'AI_PROVIDER_SERVER_ERROR',
+      message,
+      retryable: true,
+      ...context,
+    });
+  }
+  if (message.includes('输出 Token 上限')) {
+    return new AiExecutionError({
+      code: 'AI_PROVIDER_MALFORMED_RESPONSE',
       message,
       retryable: true,
       ...context,
@@ -272,6 +270,30 @@ function providerMetadata(
   if (provider.tokenOutput !== undefined) metadata.tokenOutput = provider.tokenOutput;
   if (provider.tokenTotal !== undefined) metadata.tokenTotal = provider.tokenTotal;
   if (provider.finishReason !== undefined) metadata.finishReason = provider.finishReason;
+  if (provider.usageCost) {
+    const costMetadata: Record<string, unknown> = {
+      costStatus: provider.usageCost.status,
+      costCurrency: provider.usageCost.currency,
+      pricingSource: provider.usageCost.source,
+    };
+    if (provider.usageCost.estimatedCost !== undefined) {
+      costMetadata.costEstimate = provider.usageCost.estimatedCost;
+    }
+    if (provider.usageCost.inputPricePerMillionTokens !== undefined) {
+      costMetadata.inputPricePerMillionTokens = provider.usageCost.inputPricePerMillionTokens;
+    }
+    if (provider.usageCost.outputPricePerMillionTokens !== undefined) {
+      costMetadata.outputPricePerMillionTokens = provider.usageCost.outputPricePerMillionTokens;
+    }
+    if (!usageCostFromMetadata(costMetadata)) {
+      throw new AiExecutionError({
+        code: 'AI_RESPONSE_METADATA_INVALID',
+        message: 'Provider cost metadata is invalid.',
+        retryable: false,
+      });
+    }
+    Object.assign(metadata, costMetadata);
+  }
   return metadata;
 }
 
@@ -281,6 +303,85 @@ function optionalNumber(value: unknown): number | undefined {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+const MAX_COST_METADATA_VALUE = 1_000_000;
+const COST_METADATA_KEYS = [
+  'costStatus',
+  'costCurrency',
+  'pricingSource',
+  'costEstimate',
+  'inputPricePerMillionTokens',
+  'outputPricePerMillionTokens',
+] as const;
+
+function hasOwn(object: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function optionalCostNumber(value: unknown): number | undefined {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_COST_METADATA_VALUE
+    ? value
+    : undefined;
+}
+
+function usageCostFromMetadata(
+  metadata: Record<string, unknown>,
+): ProviderAdapterResult['usageCost'] {
+  if (!COST_METADATA_KEYS.some((key) => hasOwn(metadata, key))) return undefined;
+  const status = optionalString(metadata.costStatus);
+  const source = optionalString(metadata.pricingSource);
+  if (
+    !['complete', 'mock', 'unpriced', 'usage_missing'].includes(status ?? '') ||
+    !['user_configured', 'mock', 'unconfigured'].includes(source ?? '') ||
+    metadata.costCurrency !== 'USD'
+  ) {
+    return undefined;
+  }
+  const estimatedCost = optionalCostNumber(metadata.costEstimate);
+  const inputPricePerMillionTokens = optionalCostNumber(metadata.inputPricePerMillionTokens);
+  const outputPricePerMillionTokens = optionalCostNumber(metadata.outputPricePerMillionTokens);
+  if (
+    (hasOwn(metadata, 'costEstimate') && estimatedCost === undefined) ||
+    (hasOwn(metadata, 'inputPricePerMillionTokens') && inputPricePerMillionTokens === undefined) ||
+    (hasOwn(metadata, 'outputPricePerMillionTokens') && outputPricePerMillionTokens === undefined)
+  ) {
+    return undefined;
+  }
+  const validStatusFields =
+    status === 'complete'
+      ? source === 'user_configured' &&
+        estimatedCost !== undefined &&
+        inputPricePerMillionTokens !== undefined &&
+        outputPricePerMillionTokens !== undefined
+      : status === 'mock'
+        ? source === 'mock' &&
+          estimatedCost === 0 &&
+          inputPricePerMillionTokens === 0 &&
+          outputPricePerMillionTokens === 0
+        : status === 'unpriced'
+          ? source === 'unconfigured' &&
+            estimatedCost === undefined &&
+            (inputPricePerMillionTokens === undefined || outputPricePerMillionTokens === undefined)
+          : status === 'usage_missing' &&
+            source === 'user_configured' &&
+            estimatedCost === undefined &&
+            inputPricePerMillionTokens !== undefined &&
+            outputPricePerMillionTokens !== undefined;
+  if (!validStatusFields) {
+    return undefined;
+  }
+  return {
+    status: status as NonNullable<ProviderAdapterResult['usageCost']>['status'],
+    currency: 'USD',
+    source: source as NonNullable<ProviderAdapterResult['usageCost']>['source'],
+    estimatedCost,
+    inputPricePerMillionTokens,
+    outputPricePerMillionTokens,
+  };
 }
 
 function providerFromReplay(
@@ -296,6 +397,7 @@ function providerFromReplay(
     tokenOutput: optionalNumber(metadata.tokenOutput),
     tokenTotal: optionalNumber(metadata.tokenTotal),
     finishReason: optionalString(metadata.finishReason),
+    usageCost: usageCostFromMetadata(metadata),
     durationMs: optionalNumber(metadata.durationMs) ?? 0,
   };
 }
@@ -329,10 +431,12 @@ async function buildTaskInput(
   adapter: ProviderAdapter,
   operationId: string,
 ): Promise<CreateAiTaskInput> {
-  if (contract.contractVersion !== 'compiled_ai_execution_v1'
-    || contract.taskType !== input.taskType
-    || contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId
-    || contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId) {
+  if (
+    contract.contractVersion !== 'compiled_ai_execution_v1' ||
+    contract.taskType !== input.taskType ||
+    contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId ||
+    contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId
+  ) {
     throw new AiExecutionError({
       code: 'AI_COMPILATION_INPUT_INVALID',
       message: '编译契约与 Task 或 Provider identity 不一致。',
@@ -341,13 +445,13 @@ async function buildTaskInput(
   }
   const serializedMessages = JSON.stringify({ messages: contract.request.messages });
   const requestBodyHash = await requireSha256(serializedMessages);
-  const promptTemplateHash = await requireSha256(
-    contract.constraintSnapshot.promptTemplateBody,
-  );
+  const promptTemplateHash = await requireSha256(contract.constraintSnapshot.promptTemplateBody);
   const compiledContextHash = await requireSha256(contract.contextSnapshot.compiledContext);
-  if (requestBodyHash !== contract.inputPayloadJson.requestBodyHash
-    || promptTemplateHash !== contract.constraintSnapshot.promptTemplateHash
-    || compiledContextHash !== contract.contextSnapshot.sourceManifestJson.compiledContextHash) {
+  if (
+    requestBodyHash !== contract.inputPayloadJson.requestBodyHash ||
+    promptTemplateHash !== contract.constraintSnapshot.promptTemplateHash ||
+    compiledContextHash !== contract.contextSnapshot.sourceManifestJson.compiledContextHash
+  ) {
     throw new AiExecutionError({
       code: 'AI_COMPILATION_INPUT_INVALID',
       message: '编译契约 hash 校验失败。',
@@ -402,18 +506,20 @@ async function cleanupFailedExecution(
     await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
     return;
   }
-  await withCommitReplay(() => runtime.failAttempt(
-    task.taskId,
-    attemptId,
-    {
-      code: error.code,
-      message: error.message,
-      retryable: error.retryable,
-      traceId: task.traceId,
-      operationId: task.operationId,
-    },
-    task.traceId,
-  ));
+  await withCommitReplay(() =>
+    runtime.failAttempt(
+      task.taskId,
+      attemptId,
+      {
+        code: error.code,
+        message: error.message,
+        retryable: error.retryable,
+        traceId: task.traceId,
+        operationId: task.operationId,
+      },
+      task.traceId,
+    ),
+  );
 }
 
 export async function executeAiTask(
@@ -439,10 +545,12 @@ export async function executeAiTask(
       providerId: adapter.providerId,
       modelId: adapter.modelId,
     });
-    if (contract.contractVersion !== 'compiled_ai_execution_v1'
-      || contract.taskType !== input.taskType
-      || contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId
-      || contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId) {
+    if (
+      contract.contractVersion !== 'compiled_ai_execution_v1' ||
+      contract.taskType !== input.taskType ||
+      contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId ||
+      contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId
+    ) {
       throw new AiExecutionError({
         code: 'AI_COMPILATION_INPUT_INVALID',
         message: '编译契约与 Task 或 Provider identity 不一致。',
@@ -476,16 +584,20 @@ export async function executeAiTask(
     task = await withCommitReplay(() => dependencies.runtime.create(taskInput));
     const completedReplay = await replayCompletedTask(dependencies.runtime, task);
     if (completedReplay) return completedReplay;
-    const queued = await withCommitReplay(() => dependencies.runtime.queueAttempt(task!.taskId, traceId));
+    const queued = await withCommitReplay(() =>
+      dependencies.runtime.queueAttempt(task!.taskId, traceId),
+    );
     attemptId = queued.attempt.attemptId;
     const providerRequestId = attemptId;
-    await withCommitReplay(() => dependencies.runtime.claimAttempt({
-      taskId: task!.taskId,
-      attemptId: providerRequestId,
-      providerId: adapter.providerId,
-      modelId: adapter.modelId,
-      providerRequestId,
-    }));
+    await withCommitReplay(() =>
+      dependencies.runtime.claimAttempt({
+        taskId: task!.taskId,
+        attemptId: providerRequestId,
+        providerId: adapter.providerId,
+        modelId: adapter.modelId,
+        providerRequestId,
+      }),
+    );
 
     const provider = await adapter.execute(contract.request, {
       signal: input.signal,
@@ -494,12 +606,14 @@ export async function executeAiTask(
     throwIfAiRequestCancelled(input.signal);
     const responseHash = await requireSha256(provider.text);
     const responseLength = unicodeLength(provider.text);
-    const succeeded = await withCommitReplay(() => dependencies.runtime.markProviderSucceeded(
-      task!.taskId,
-      providerRequestId,
-      providerMetadata(provider, responseHash, responseLength, providerRequestId),
-      traceId,
-    ));
+    const succeeded = await withCommitReplay(() =>
+      dependencies.runtime.markProviderSucceeded(
+        task!.taskId,
+        providerRequestId,
+        providerMetadata(provider, responseHash, responseLength, providerRequestId),
+        traceId,
+      ),
+    );
     providerCompleted = true;
     if (succeeded.task.status !== 'validating') {
       throw new AiExecutionError({
@@ -523,8 +637,8 @@ export async function executeAiTask(
       rawContent: provider.text,
       structuredPayloadJson,
     };
-    const artifactBundle = await withCommitReplay(
-      () => dependencies.runtime.createArtifact(artifactInput),
+    const artifactBundle = await withCommitReplay(() =>
+      dependencies.runtime.createArtifact(artifactInput),
     );
     return {
       persistence: 'sqlite',
@@ -541,11 +655,9 @@ export async function executeAiTask(
       try {
         await cleanupFailedExecution(dependencies.runtime, task, attemptId, mapped);
       } catch (cleanupError) {
-        throw toExecutionError(normalizeAppError(
-          cleanupError,
-          mapped.message,
-          { traceId, operationId },
-        ));
+        throw toExecutionError(
+          normalizeAppError(cleanupError, mapped.message, { traceId, operationId }),
+        );
       }
     }
     throw mapped;

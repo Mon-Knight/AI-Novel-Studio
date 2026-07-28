@@ -30,22 +30,40 @@ function OutlineEditorPage() {
       ]);
       setVolumes(v);
       setChapters(c);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [novelId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const filteredChapters = chapters.filter(
     (c) => c.volumeId === selectedVolumeId || (!selectedVolumeId && !c.volumeId),
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--color-bg-app)' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: 'var(--color-bg-app)',
+      }}
+    >
       {/* 顶部导航 */}
-      <div style={{
-        padding: '12px 20px', background: '#fff', borderBottom: '1px solid var(--color-border)',
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
+      <div
+        style={{
+          padding: '12px 20px',
+          background: 'var(--color-bg-panel)',
+          borderBottom: '1px solid var(--color-border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
         <button className="back-button" onClick={() => navigate(`/novels/${novelId}`)}>
           ← 返回作品
         </button>
@@ -87,7 +105,9 @@ function OutlineEditorPage() {
           >
             <option value="">选择分卷</option>
             {volumes.map((v) => (
-              <option key={v.id} value={v.id}>{v.title}</option>
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
             ))}
           </select>
         )}
@@ -106,7 +126,9 @@ function OutlineEditorPage() {
             >
               <option value="">选择分卷（可选）</option>
               {volumes.map((v) => (
-                <option key={v.id} value={v.id}>{v.title}</option>
+                <option key={v.id} value={v.id}>
+                  {v.title}
+                </option>
               ))}
             </select>
             <select
@@ -123,7 +145,9 @@ function OutlineEditorPage() {
             >
               <option value="">选择章节</option>
               {filteredChapters.map((c) => (
-                <option key={c.id} value={c.id}>{c.title}</option>
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
               ))}
             </select>
           </>

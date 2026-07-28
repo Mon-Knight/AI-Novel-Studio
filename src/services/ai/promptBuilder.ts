@@ -3,6 +3,7 @@
  * 负责为所有 AI 任务类型构建提示词请求
  */
 import type { AiGenerateRequest, AiChatMessage } from '../../types/ai';
+import { CONNECTION_TEST_MAX_OUTPUT_TOKENS } from './providerRequestPolicy';
 
 // ==================== 类型定义 ====================
 
@@ -86,6 +87,14 @@ export interface QualityCheckPromptContext {
   forbiddenBehaviors?: string;
   /** v1.7.15 上下文注入 */
   contextSummary?: string;
+  segment?: {
+    index: number;
+    total: number;
+    startOffset: number;
+    paragraphStart: number;
+    previousContext: string;
+    nextContext: string;
+  };
 }
 
 export interface PolishPromptContext {
@@ -96,6 +105,12 @@ export interface PolishPromptContext {
   polishMode: string;
   customInstruction?: string;
   styleProfile?: string;
+  segment?: {
+    index: number;
+    total: number;
+    previousContext: string;
+    nextContext: string;
+  };
 }
 
 export interface ChapterSummarizePromptContext {
@@ -105,6 +120,23 @@ export interface ChapterSummarizePromptContext {
   adoptedContent: string;
   chapterCharacters?: string;
   chapterEvents?: string;
+  segment?: {
+    index: number;
+    total: number;
+    previousContext: string;
+    nextContext: string;
+  };
+}
+
+export interface ChapterSummarizeReducePromptContext {
+  novelTitle?: string;
+  chapterTitle: string;
+  chapterOutline?: string;
+  sourceSegmentCount: number;
+  reductionPass: number;
+  groupIndex: number;
+  groupTotal: number;
+  partialSummaries: readonly unknown[];
 }
 
 export interface OutlineGeneratePromptContext {
@@ -178,7 +210,9 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
       : '',
     ctx.dualProtagonistSummary ? `## 双主角关系\n${ctx.dualProtagonistSummary}\n` : '',
     '',
-    (ctx.masterOutline || ctx.novelOutline) ? `【当前采用总纲】\n${ctx.masterOutline || ctx.novelOutline}\n` : '',
+    ctx.masterOutline || ctx.novelOutline
+      ? `【当前采用总纲】\n${ctx.masterOutline || ctx.novelOutline}\n`
+      : '',
     '',
     ctx.volumeTitle ? `分卷：${ctx.volumeTitle}` : '',
     ctx.volumeOutline ? `【当前采用分卷大纲】\n${ctx.volumeOutline}` : '',
@@ -215,12 +249,7 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     '',
     ctx.chapterSettings ? `## 本章可用设定\n${ctx.chapterSettings}\n` : '',
     '',
-    ctx.chapterCharacters
-      ? [
-          '【本章出场角色】',
-          ctx.chapterCharacters,
-        ].join('\n')
-      : '',
+    ctx.chapterCharacters ? ['【本章出场角色】', ctx.chapterCharacters].join('\n') : '',
     ctx.requiredCharactersSummary
       ? [
           '【本章必须直接出场角色】',
@@ -238,13 +267,7 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     ctx.previousContext ? `## 前文上下文摘要\n${ctx.previousContext}` : '',
     '',
     // v1.0.36: 输出控制加"必须遵守"
-    ctx.outputProfile
-      ? [
-          '【输出控制（必须遵守）】',
-          ctx.outputProfile,
-          '',
-        ].join('\n')
-      : '',
+    ctx.outputProfile ? ['【输出控制（必须遵守）】', ctx.outputProfile, ''].join('\n') : '',
     ctx.userInstruction ? `特别要求：${ctx.userInstruction}` : '',
     '',
     ctx.draftContent
@@ -252,7 +275,7 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
           '【当前草稿正文（请基于此改写）】',
           '以下是当前章节的草稿正文。请在此基础之上进行改写、优化或重写：',
           '',
-          ctx.draftContent.slice(0, 8000),
+          ctx.draftContent,
           '',
           '改写要求：',
           '- 保持核心剧情、人物关系和关键事件不变',
@@ -269,15 +292,19 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
     '**必须严格使用主角姓名，不得改名。**',
     `字数尽量接近目标字数 ${ctx.targetWordCount} 字。`,
     '如果章节大纲中描述了具体场景或道具，必须如实写入正文。',
-    ...(ctx.protagonistMode === 'dual' ? [
-      '',
-      '## 双主角写作约束：',
-      '- 必须同时考虑两位主角的目标和限制，不能忽略第二主角',
-      '- 不要把第二主角写成普通配角或路人',
-      '- 如果本章涉及双主角关系线，应推进关系冲突或合作',
-      '- 不得违背任一主角的特殊能力限制和行为禁令',
-    ] : []),
-  ].filter(Boolean).join('\n');
+    ...(ctx.protagonistMode === 'dual'
+      ? [
+          '',
+          '## 双主角写作约束：',
+          '- 必须同时考虑两位主角的目标和限制，不能忽略第二主角',
+          '- 不要把第二主角写成普通配角或路人',
+          '- 如果本章涉及双主角关系线，应推进关系冲突或合作',
+          '- 不得违背任一主角的特殊能力限制和行为禁令',
+        ]
+      : []),
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   return {
     taskType: 'chapter_generate',
@@ -287,7 +314,9 @@ export function buildChapterGeneratePrompt(ctx: ChapterGeneratePromptContext): A
 }
 
 /** 构建角色生成请求 */
-export function buildCharacterGeneratePrompt(ctx: CharacterGeneratePromptContext): AiGenerateRequest {
+export function buildCharacterGeneratePrompt(
+  ctx: CharacterGeneratePromptContext,
+): AiGenerateRequest {
   const system = [
     '你是一位专业的小说创作顾问，擅长根据故事背景设计鲜活立体的角色。',
     '',
@@ -325,9 +354,15 @@ export function buildCharacterGeneratePrompt(ctx: CharacterGeneratePromptContext
     '  ]',
     '}',
     '```',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'character_generate', messages: [systemPrompt(system), userPrompt('请为本章推荐候选角色。')], maxTokens: 4000 };
+  return {
+    taskType: 'character_generate',
+    messages: [systemPrompt(system), userPrompt('请为本章推荐候选角色。')],
+    maxTokens: 4000,
+  };
 }
 
 /** 构建事件推荐请求 */
@@ -364,9 +399,15 @@ export function buildEventSuggestPrompt(ctx: EventSuggestPromptContext): AiGener
     '  ]',
     '}',
     '```',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'event_suggest', messages: [systemPrompt(system), userPrompt('请为本章推荐关键事件。')], maxTokens: 4000 };
+  return {
+    taskType: 'event_suggest',
+    messages: [systemPrompt(system), userPrompt('请为本章推荐关键事件。')],
+    maxTokens: 4000,
+  };
 }
 
 /** 构建设定补充请求 */
@@ -398,9 +439,15 @@ export function buildSettingExpandPrompt(ctx: SettingExpandPromptContext): AiGen
     '  ]',
     '}',
     '```',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'setting_expand', messages: [systemPrompt(system), userPrompt('请为本章补充相关设定。')], maxTokens: 5000 };
+  return {
+    taskType: 'setting_expand',
+    messages: [systemPrompt(system), userPrompt('请为本章补充相关设定。')],
+    maxTokens: 5000,
+  };
 }
 
 /** 构建质量检查请求 */
@@ -434,25 +481,39 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
     '    {',
     '      "issueType": "logic / setting_violation / character_behavior / continuity / pacing / style / language / other",',
     '      "severity": "critical / high / medium / low",',
-      '      "title": "问题标题",',
-      '      "description": "问题描述",',
-      '      "evidence": "原文证据（可选）",',
-      '      "suggestion": "修改建议",',
-      '      "quote": "与问题直接相关的原文片段（可选）",',
-      '      "startOffset": 0,',
-      '      "endOffset": 12,',
-      '      "paragraphIndex": 0',
+    '      "title": "问题标题",',
+    '      "description": "问题描述",',
+    '      "evidence": "原文证据（可选）",',
+    '      "suggestion": "修改建议",',
+    '      "quote": "与问题直接相关的原文片段（可选）",',
+    '      "startOffset": 0,',
+    '      "endOffset": 12,',
+    '      "paragraphIndex": 0',
     '    }',
     '  ]',
     '}',
     '```',
     '',
-    '以下是本章正文：',
+    ctx.segment
+      ? `以下是本章第 ${ctx.segment.index + 1}/${ctx.segment.total} 段；问题位置必须相对本段返回，系统会换算到全文。`
+      : '以下是本章正文：',
+    ctx.segment?.previousContext
+      ? `前段衔接（仅供判断，不属于检查正文）：\n${ctx.segment.previousContext}`
+      : '',
+    ctx.segment?.nextContext
+      ? `后段衔接（仅供判断，不属于检查正文）：\n${ctx.segment.nextContext}`
+      : '',
     '',
-    ctx.draftContent.slice(0, 8000),
-  ].filter(Boolean).join('\n');
+    ctx.draftContent,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'quality_check', messages: [systemPrompt(system), userPrompt('请对以上正文进行质量检查。')], maxTokens: 6000 };
+  return {
+    taskType: 'quality_check',
+    messages: [systemPrompt(system), userPrompt('请对以上正文进行质量检查。')],
+    maxTokens: 6000,
+  };
 }
 
 /** 构建润色请求 */
@@ -484,14 +545,63 @@ export function buildChapterPolishPrompt(ctx: PolishPromptContext): AiGenerateRe
     '2. 可以优化用词、句式、段落结构。',
     '3. 不得改变故事走向和角色立场。',
     '',
-    '请直接输出润色后的完整正文，不要写说明性文字。',
+    ctx.segment
+      ? `当前处理第 ${ctx.segment.index + 1}/${ctx.segment.total} 段。只输出当前段的润色结果，不要重复前后衔接文本。`
+      : '请直接输出润色后的完整正文，不要写说明性文字。',
+    ctx.segment?.previousContext
+      ? `前段衔接（只参考，不输出）：\n${ctx.segment.previousContext}`
+      : '',
+    ctx.segment?.nextContext ? `后段衔接（只参考，不输出）：\n${ctx.segment.nextContext}` : '',
     '',
     '以下是原文：',
     '',
-    ctx.draftContent.slice(0, 8000),
-  ].filter(Boolean).join('\n');
+    ctx.draftContent,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'chapter_polish', messages: [systemPrompt(system), userPrompt('请对以上正文进行润色。')], maxTokens: 8000 };
+  return {
+    taskType: 'chapter_polish',
+    messages: [systemPrompt(system), userPrompt('请对以上正文进行润色。')],
+    maxTokens: 8000,
+  };
+}
+
+function chapterSummarizeJsonContract(): string[] {
+  return [
+    '请严格返回 JSON，不要输出解释文字：',
+    '```json',
+    '{',
+    '  "summaryTitle": "本章上下文标题",',
+    '  "summary": "本章摘要，一段话",',
+    '  "keyEvents": ["关键事件1", "关键事件2"],',
+    '  "coreEvents": ["改变后续剧情状态的核心事件"],',
+    '  "protagonistStateChange": "主角相对上一章的实际变化",',
+    '  "importantCharacterChanges": [{ "name": "角色名", "change": "本章确认发生的变化" }],',
+    '  "characterChanges": [',
+    '    { "characterName": "角色名", "stateSummary": "状态变化", "relationshipChanges": "关系变化", "goalChanges": "目标变化", "location": "位置", "healthState": "健康状态", "knowledgeState": "掌握的信息" }',
+    '  ],',
+    '  "relationshipChanges": [',
+    '    { "fromCharacterName": "角色A", "toCharacterName": "角色B", "change": "关系变化" }',
+    '  ],',
+    '  "settingChanges": ["本章确认新增或改变的世界规则与势力事实"],',
+    '  "newLocations": ["正文中首次实际出现的新地点"],',
+    '  "newItemsOrAbilities": ["正文中首次实际出现的新物品或能力"],',
+    '  "newForeshadows": ["新伏笔"],',
+    '  "resolvedForeshadows": ["已回收伏笔"],',
+    '  "foreshadowing": ["仍在生效的伏笔"],',
+    '  "unresolvedQuestions": ["正文尚未回答的问题"],',
+    '  "factsMustRemember": ["后续写作不得违背的已确认事实"],',
+    '  "nextChapterHints": "下一章承接建议",',
+    '  "nextChapterHook": "正文结尾形成的具体钩子",',
+    '  "contextRecords": [',
+    '    { "contextType": "chapter_summary", "title": "记录标题", "content": "需要长期记住的内容", "importance": 4 }',
+    '  ]',
+    '}',
+    '```',
+    '只能记录正文中已经发生或明确出现的内容；不得把大纲计划、推测或下一章建议写成既成事实。',
+    '没有对应变化时返回空数组或空字符串，不得为了填满字段而编造。',
+  ];
 }
 
 /** 构建章节总结请求 */
@@ -504,32 +614,62 @@ export function buildChapterSummarizePrompt(ctx: ChapterSummarizePromptContext):
     ctx.chapterOutline ? `章节大纲：${ctx.chapterOutline}` : '',
     ctx.chapterCharacters ? `本章角色：\n${ctx.chapterCharacters}` : '',
     ctx.chapterEvents ? `本章事件：\n${ctx.chapterEvents}` : '',
+    ctx.segment
+      ? `当前处理原章第 ${ctx.segment.index + 1}/${ctx.segment.total} 个连续分段；必须覆盖当前段开头、中部和结尾。`
+      : '',
+    ctx.segment
+      ? '这里只生成分段事实摘要，最终会按原文顺序归并；不要把前后衔接参考重复记为当前段事实。'
+      : '',
+    ctx.segment?.previousContext
+      ? `前段衔接（仅供判断，不属于当前待总结正文）：\n${ctx.segment.previousContext}`
+      : '',
+    ctx.segment?.nextContext
+      ? `后段衔接（仅供判断，不属于当前待总结正文）：\n${ctx.segment.nextContext}`
+      : '',
     '',
-    '请严格返回 JSON，不要输出解释文字：',
-    '```json',
-    '{',
-    '  "summary": "本章摘要，一段话",',
-    '  "keyEvents": ["关键事件1", "关键事件2"],',
-    '  "characterChanges": [',
-    '    { "characterName": "角色名", "stateSummary": "状态变化", "relationshipChanges": "关系变化", "goalChanges": "目标变化", "location": "位置", "healthState": "健康状态", "knowledgeState": "掌握的信息" }',
-    '  ],',
-    '  "relationshipChanges": [',
-    '    { "fromCharacterName": "角色A", "toCharacterName": "角色B", "change": "关系变化" }',
-    '  ],',
-    '  "newForeshadows": ["新伏笔"],',
-    '  "resolvedForeshadows": ["已回收伏笔"],',
-    '  "nextChapterHints": "下一章承接建议",',
-    '  "contextRecords": [',
-    '    { "contextType": "chapter_summary", "title": "记录标题", "content": "需要长期记住的内容", "importance": 4 }',
-    '  ]',
-    '}',
-    '```',
+    ...chapterSummarizeJsonContract(),
     '',
-    '已采用正文：',
-    ctx.adoptedContent.slice(0, 10000),
-  ].filter(Boolean).join('\n');
+    ctx.segment ? '当前连续分段正文：' : '已采用正文：',
+    ctx.adoptedContent,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'context_summarize', messages: [systemPrompt(system), userPrompt('请总结本章上下文。')], maxTokens: 5000 };
+  return {
+    taskType: 'context_summarize',
+    messages: [systemPrompt(system), userPrompt('请总结本章上下文。')],
+    maxTokens: 5000,
+  };
+}
+
+/** 将按原文顺序生成的分段总结归并为一个完整章节上下文。 */
+export function buildChapterSummarizeReducePrompt(
+  ctx: ChapterSummarizeReducePromptContext,
+): AiGenerateRequest {
+  const system = [
+    '你是长篇小说上下文归并助手。请把按原文顺序排列的分段总结合并为一个完整章节上下文。',
+    '必须保留各分段中互不重复的事件、人物变化、设定、伏笔和长期事实，不得只保留首段或末段。',
+    '相同事实只保留一次；发生演进时按先后关系归纳，最终状态以较后分段为准。',
+    '下一章承接建议和章节结尾钩子以最后一个原文分段为准。',
+    '',
+    ctx.novelTitle ? `作品：${ctx.novelTitle}` : '',
+    `章节：${ctx.chapterTitle}`,
+    ctx.chapterOutline ? `章节大纲（只用于核对，不得写成既成事实）：${ctx.chapterOutline}` : '',
+    `原章共 ${ctx.sourceSegmentCount} 个连续分段。当前为第 ${ctx.reductionPass} 轮归并，第 ${ctx.groupIndex + 1}/${ctx.groupTotal} 组。`,
+    '',
+    ...chapterSummarizeJsonContract(),
+    '',
+    '【按原文顺序排列的分段总结 JSON】',
+    JSON.stringify(ctx.partialSummaries, null, 2),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    taskType: 'context_summarize',
+    messages: [systemPrompt(system), userPrompt('请归并以上分段总结。')],
+    maxTokens: 5000,
+  };
 }
 
 /** 构建作品总大纲请求 */
@@ -547,13 +687,21 @@ export function buildOutlineGeneratePrompt(ctx: OutlineGeneratePromptContext): A
     ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
     '',
     '请返回完整作品总大纲，包含主线、阶段目标、主要冲突、分卷规划和章节方向。可以使用 Markdown，但不要写无关说明。',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'outline_generate', messages: [systemPrompt(system), userPrompt('请生成作品总大纲。')], maxTokens: 8000 };
+  return {
+    taskType: 'outline_generate',
+    messages: [systemPrompt(system), userPrompt('请生成作品总大纲。')],
+    maxTokens: 8000,
+  };
 }
 
 /** 构建分卷大纲请求 */
-export function buildVolumeOutlineGeneratePrompt(ctx: VolumeOutlineGeneratePromptContext): AiGenerateRequest {
+export function buildVolumeOutlineGeneratePrompt(
+  ctx: VolumeOutlineGeneratePromptContext,
+): AiGenerateRequest {
   const system = [
     '你是长篇小说分卷策划。请严格基于当前作品总纲生成一个分卷大纲，要求能直接保存到分卷摘要、目标和主冲突中。',
     `作品：${ctx.novelTitle}`,
@@ -589,13 +737,21 @@ export function buildVolumeOutlineGeneratePrompt(ctx: VolumeOutlineGeneratePromp
     '```json',
     '{ "title": "分卷标题", "summary": "分卷摘要（详细描述本卷从开始到结束的完整故事线）", "goal": "分卷目标（本卷要达成的核心目标）", "mainConflict": "主要冲突（本卷的核心矛盾）" }',
     '```',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'volume_outline_generate', messages: [systemPrompt(system), userPrompt('请生成分卷大纲。')], maxTokens: 4000 };
+  return {
+    taskType: 'volume_outline_generate',
+    messages: [systemPrompt(system), userPrompt('请生成分卷大纲。')],
+    maxTokens: 4000,
+  };
 }
 
 /** 构建章节大纲请求 */
-export function buildChapterOutlineGeneratePrompt(ctx: ChapterOutlineGeneratePromptContext): AiGenerateRequest {
+export function buildChapterOutlineGeneratePrompt(
+  ctx: ChapterOutlineGeneratePromptContext,
+): AiGenerateRequest {
   const system = [
     '你是长篇小说章节大纲策划。请严格基于当前分卷大纲和总纲，为当前分卷生成多个可执行章节大纲。',
     `作品：${ctx.novelTitle}`,
@@ -603,11 +759,7 @@ export function buildChapterOutlineGeneratePrompt(ctx: ChapterOutlineGeneratePro
     '',
     // v1.0.35: 总纲优先
     ctx.activeMasterOutline
-      ? [
-          '【当前采用总纲】',
-          ctx.activeMasterOutline.slice(0, 3000),
-          '',
-        ].join('\n')
+      ? ['【当前采用总纲】', ctx.activeMasterOutline.slice(0, 3000), ''].join('\n')
       : '⚠️ 当前作品尚未设置采用总纲，章节大纲可能与主线脱节。',
     '',
     // v1.0.35: 分卷大纲其次
@@ -663,19 +815,22 @@ export function buildChapterOutlineGeneratePrompt(ctx: ChapterOutlineGeneratePro
     '  ]',
     '}',
     '```',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return { taskType: 'chapter_outline_generate', messages: [systemPrompt(system), userPrompt('请生成章节大纲。')], maxTokens: 7000 };
+  return {
+    taskType: 'chapter_outline_generate',
+    messages: [systemPrompt(system), userPrompt('请生成章节大纲。')],
+    maxTokens: 7000,
+  };
 }
 
 /** 构建连接测试请求 */
 export function buildConnectionTestPrompt(): AiGenerateRequest {
   return {
     taskType: 'connection_test',
-    messages: [
-      systemPrompt('You are an AI assistant. Reply with "OK" only.'),
-      userPrompt('hi'),
-    ],
-    maxTokens: 8,
+    messages: [systemPrompt('You are an AI assistant. Reply with "OK" only.'), userPrompt('hi')],
+    maxTokens: CONNECTION_TEST_MAX_OUTPUT_TOKENS,
   };
 }

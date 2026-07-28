@@ -5,7 +5,7 @@
 项目路径：F:\ai-novel-studio  
 目标平台：Windows 桌面端  
 技术路线：Tauri + React + TypeScript + SQLite  
-开发方式：VS Code + Copilot / Agent 辅助开发  
+开发方式：VS Code + Copilot / Agent 辅助开发
 
 ---
 
@@ -1238,12 +1238,19 @@ prompts/
 
 ```powershell
 git status
+git switch -c codex/v0.1.0-release
 git add .
 git commit -m "feat: initialize AI Novel Studio v0.1.0"
+git push -u origin codex/v0.1.0-release
+
+# PR 审查和门禁通过并合并后
+git switch main
+git pull --ff-only origin main
 git tag v0.1.0
-git push origin main
 git push origin v0.1.0
 ```
+
+当前分支与审查策略以 [`docs/project/git-workflow.md`](project/git-workflow.md) 为准。
 
 不要提交：
 

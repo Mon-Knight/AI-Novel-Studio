@@ -2,6 +2,7 @@
  * AI Novel Studio - AI setting expansion service.
  */
 import { aiSettingsService } from './aiClient';
+import { throwIfAiRequestCancelled } from './aiCancellation';
 import { executeAiTask } from './aiExecutionPipeline';
 import { extractJsonObject } from './jsonUtils';
 import type { AiContextSourceInput, AiContextSourceType } from '../../types/aiCompilation';
@@ -20,8 +21,7 @@ function compareCreatedIdentity(
   left: { createdAt: string; id: string },
   right: { createdAt: string; id: string },
 ): number {
-  return compareStableText(left.createdAt, right.createdAt)
-    || compareStableText(left.id, right.id);
+  return compareStableText(left.createdAt, right.createdAt) || compareStableText(left.id, right.id);
 }
 
 export interface SettingSuggestion {
@@ -59,26 +59,24 @@ export const settingExpandService = {
     chapterOutline?: string;
     signal?: AbortSignal;
   }): Promise<SettingSuggestion[]> {
+    throwIfAiRequestCancelled(input.signal);
     const settings = aiSettingsService.getSettings();
     const [novel, worldSettings, ruleSystems, chapter] = await Promise.all([
       novelRepository.getById(input.novelId),
       settingRepository.getWorldSettings(input.novelId).catch(() => []),
       settingRepository.getRuleSystems(input.novelId).catch(() => []),
-      input.chapterId
-        ? chapterRepository.getById(input.chapterId)
-        : Promise.resolve(null),
+      input.chapterId ? chapterRepository.getById(input.chapterId) : Promise.resolve(null),
     ]);
+    throwIfAiRequestCancelled(input.signal);
     if (!novel) throw new Error('目标作品不存在，无法编译设定候选上下文。');
     if (input.chapterId && (!chapter || chapter.novelId !== input.novelId)) {
       throw new Error('目标章节不存在或不属于当前作品。');
     }
 
     const orderedWorldSettings = [...worldSettings].sort(compareCreatedIdentity);
-    const activeWorld = orderedWorldSettings.find((item) => item.isActive)
-      || orderedWorldSettings[0];
-    const activeRules = ruleSystems
-      .filter((item) => item.isActive)
-      .sort(compareCreatedIdentity);
+    const activeWorld =
+      orderedWorldSettings.find((item) => item.isActive) || orderedWorldSettings[0];
+    const activeRules = ruleSystems.filter((item) => item.isActive).sort(compareCreatedIdentity);
     const sources: AiContextSourceInput[] = [
       {
         sourceType: 'novel',
@@ -91,7 +89,9 @@ export const settingExpandService = {
           novel.genre ? `题材：${novel.genre}` : '',
           novel.description ? `简介：${novel.description}` : '',
           novel.worldBackground ? `世界背景：${novel.worldBackground}` : '',
-        ].filter(Boolean).join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
         order: 10,
         priority: 100,
         required: true,
@@ -122,7 +122,9 @@ export const settingExpandService = {
           rule.category ? `分类：${rule.category}` : '',
           rule.content,
           rule.forbiddenRules ? `禁止规则：${rule.forbiddenRules}` : '',
-        ].filter(Boolean).join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
         order: 30 + index,
         priority: 80,
         maxTokens: 1_500,
@@ -135,10 +137,13 @@ export const settingExpandService = {
         sourceVersion: chapter.updatedAt,
         origin: 'sqlite',
         label: `当前章节：${chapter.title}`,
-        content: [
-          chapter.outline ? `章节大纲：${chapter.outline}` : '',
-          chapter.goal ? `章节目标：${chapter.goal}` : '',
-        ].filter(Boolean).join('\n') || `章节：${chapter.title}`,
+        content:
+          [
+            chapter.outline ? `章节大纲：${chapter.outline}` : '',
+            chapter.goal ? `章节目标：${chapter.goal}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n') || `章节：${chapter.title}`,
         order: 50,
         priority: 95,
         maxTokens: 2_000,
@@ -153,7 +158,9 @@ export const settingExpandService = {
         content: [
           input.chapterTitle ? `当前章节：${input.chapterTitle}` : '',
           input.chapterOutline ? `章节大纲：${input.chapterOutline}` : '',
-        ].filter(Boolean).join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
         order: 50,
         priority: 95,
         maxTokens: 2_000,
@@ -182,6 +189,7 @@ export const settingExpandService = {
       parseStructuredPayload: parseSettingCandidatePayload,
       signal: input.signal,
     });
+    throwIfAiRequestCancelled(input.signal);
     const parsed = execution.structuredPayloadJson as SettingCandidatePayload | undefined;
     const suggestions = Array.isArray(parsed?.settings)
       ? parsed.settings
@@ -191,25 +199,30 @@ export const settingExpandService = {
     if (suggestions.length > 0) {
       const artifact = execution.artifactBundle?.artifact;
       if (!artifact) return suggestions.map(({ item }) => item);
-      const prepared = await Promise.all(suggestions.map(async ({ item, candidateIndex }) => {
+      const prepared: SettingSuggestion[] = [];
+      for (const { item, candidateIndex } of suggestions) {
+        throwIfAiRequestCancelled(input.signal);
         const placement = await placementRuntimeService.prepare({
           artifactId: artifact.artifactId,
           candidateIndex,
           expectedArtifactHash: artifact.contentHash,
         });
-        return {
+        throwIfAiRequestCancelled(input.signal);
+        prepared.push({
           ...item,
           ...(placement.candidateJson as unknown as SettingSuggestion),
           placement,
-        };
-      }));
+        });
+      }
       return prepared;
     }
-    return [{
-      name: 'AI 原始返回',
-      category: 'other',
-      description: execution.text.slice(0, 1000),
-      rawText: execution.text,
-    }];
+    return [
+      {
+        name: 'AI 原始返回',
+        category: 'other',
+        description: execution.text.slice(0, 1000),
+        rawText: execution.text,
+      },
+    ];
   },
 };

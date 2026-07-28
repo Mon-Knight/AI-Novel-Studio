@@ -1,3 +1,4 @@
+import { appLogger } from './observability/appLogger';
 /**
  * AI Novel Studio - 大文本分片保存工具
  *
@@ -151,10 +152,7 @@ function reportFailure(
   };
 }
 
-function reportDone(
-  options: CreateLargeTextSessionOptions,
-  totalChars: number,
-): void {
+function reportDone(options: CreateLargeTextSessionOptions, totalChars: number): void {
   options.onProgress?.({
     stage: 'done',
     percent: 100,
@@ -292,10 +290,9 @@ export async function uploadLargeTextChunks(
         chunkSha256,
       };
 
-      const appendResult = await tauriInvoke<TauriAppendChunkOutput>(
-        'append_large_text_chunk',
-        { input: appendInput },
-      );
+      const appendResult = await tauriInvoke<TauriAppendChunkOutput>('append_large_text_chunk', {
+        input: appendInput,
+      });
 
       const percent = Math.round(((i + 1) / totalChunksCount) * 80); // 上传占 0-80%
 
@@ -345,13 +342,12 @@ export async function saveLargeTextWithChunks(
     }
 
     const finalizeInput: TauriFinalizeInput = { sessionId };
-    const finalizeResult = await tauriInvoke<TauriFinalizeOutput>(
-      'finalize_large_text_save',
-      { input: finalizeInput },
-    );
+    const finalizeResult = await tauriInvoke<TauriFinalizeOutput>('finalize_large_text_save', {
+      input: finalizeInput,
+    });
 
     if (finalizeResult.cleanupWarning) {
-      console.warn('[LARGE_TEXT_CLEANUP_WARNING]', finalizeResult.cleanupWarning);
+      appLogger.warn('[LARGE_TEXT_CLEANUP_WARNING]', finalizeResult.cleanupWarning);
     }
     reportDone(options, finalizeResult.totalChars);
 
@@ -410,7 +406,12 @@ export async function smartSaveText(
       await normalSaveFn();
       return {
         useLargeText: false,
-        result: { success: true, totalChars: charLength(options.content), totalBytes: byteLength(options.content), chunkCount: 0 },
+        result: {
+          success: true,
+          totalChars: charLength(options.content),
+          totalBytes: byteLength(options.content),
+          chunkCount: 0,
+        },
       };
     } catch (error: unknown) {
       return {
@@ -425,6 +426,11 @@ export async function smartSaveText(
 
   return {
     useLargeText: false,
-    result: { success: true, totalChars: charLength(options.content), totalBytes: byteLength(options.content), chunkCount: 0 },
+    result: {
+      success: true,
+      totalChars: charLength(options.content),
+      totalBytes: byteLength(options.content),
+      chunkCount: 0,
+    },
   };
 }

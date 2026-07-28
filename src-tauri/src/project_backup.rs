@@ -1,12 +1,17 @@
 use crate::db::get_connection;
+use crate::services::{
+    ai_fact_security, autonomous_scheduler_service::AutonomousAutomationPolicy,
+    autonomous_story_service,
+};
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{params, params_from_iter, Connection, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const BACKUP_TYPE: &str = "ai_novel_studio_project";
-const BACKUP_SCHEMA_VERSION: u32 = 3;
+const BACKUP_SCHEMA_VERSION: u32 = 9;
 const MIN_SUPPORTED_BACKUP_SCHEMA_VERSION: u32 = 2;
 const SQLITE_BIND_BATCH_SIZE: usize = 900;
 
@@ -69,6 +74,34 @@ const PROJECT_TABLES: &[TableSpec] = &[
         filter: "novel_id = ?1",
     },
     TableSpec {
+        name: "reference_works",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "reference_imports",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "reference_sections",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "memory_documents",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "memory_chunks",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "memory_embeddings",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "memory_retrieval_logs",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
         name: "style_profiles",
         filter: "novel_id = ?1",
     },
@@ -91,6 +124,38 @@ const PROJECT_TABLES: &[TableSpec] = &[
     TableSpec {
         name: "chapter_drafts",
         filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "autonomous_story_plans",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "autonomous_book_runs",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "autonomous_run_leases",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "autonomous_run_chapter_attempts",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "autonomous_run_checkpoints",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "multi_agent_sessions",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "multi_agent_rounds",
+        filter: "session_id IN (SELECT session_id FROM multi_agent_sessions WHERE novel_id = ?1)",
+    },
+    TableSpec {
+        name: "multi_agent_opinions",
+        filter: "session_id IN (SELECT session_id FROM multi_agent_sessions WHERE novel_id = ?1)",
     },
     TableSpec {
         name: "chapter_engineering_states",
@@ -118,6 +183,42 @@ const PROJECT_TABLES: &[TableSpec] = &[
     },
     TableSpec {
         name: "chapter_events",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "factions",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "locations",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "faction_relations",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "location_links",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "character_factions",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "chapter_factions",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "chapter_locations",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "chapter_event_factions",
+        filter: "novel_id = ?1",
+    },
+    TableSpec {
+        name: "chapter_event_locations",
         filter: "novel_id = ?1",
     },
     TableSpec {
@@ -175,12 +276,29 @@ const INSERT_ORDER: &[&str] = &[
     "protagonists",
     "volumes",
     "chapters",
+    LARGE_TEXT_DOCUMENTS,
+    LARGE_TEXT_CHUNKS,
+    "reference_works",
+    "reference_imports",
+    "reference_sections",
     "style_profiles",
     "output_profiles",
     "imported_assets",
     "characters",
     "ai_task_records",
     "chapter_drafts",
+    "memory_documents",
+    "memory_chunks",
+    "memory_embeddings",
+    "memory_retrieval_logs",
+    "autonomous_story_plans",
+    "autonomous_book_runs",
+    "autonomous_run_leases",
+    "autonomous_run_chapter_attempts",
+    "autonomous_run_checkpoints",
+    "multi_agent_sessions",
+    "multi_agent_rounds",
+    "multi_agent_opinions",
     "chapter_engineering_states",
     "chapter_generation_snapshots",
     "generation_jobs",
@@ -188,6 +306,15 @@ const INSERT_ORDER: &[&str] = &[
     "character_states",
     "chapter_characters",
     "chapter_events",
+    "factions",
+    "locations",
+    "faction_relations",
+    "location_links",
+    "character_factions",
+    "chapter_factions",
+    "chapter_locations",
+    "chapter_event_factions",
+    "chapter_event_locations",
     "chapter_summaries",
     "context_records",
     "quality_check_reports",
@@ -199,11 +326,20 @@ const INSERT_ORDER: &[&str] = &[
     "master_outlines",
     "volume_outlines",
     "chapter_outlines",
-    LARGE_TEXT_DOCUMENTS,
-    LARGE_TEXT_CHUNKS,
 ];
 
 const DELETE_ORDER: &[&str] = &[
+    "autonomous_run_checkpoints",
+    "autonomous_run_chapter_attempts",
+    "autonomous_run_leases",
+    "autonomous_book_runs",
+    "memory_embeddings",
+    "memory_chunks",
+    "memory_documents",
+    "memory_retrieval_logs",
+    "reference_sections",
+    "reference_imports",
+    "reference_works",
     LARGE_TEXT_CHUNKS,
     LARGE_TEXT_DOCUMENTS,
     "chapter_outlines",
@@ -217,6 +353,15 @@ const DELETE_ORDER: &[&str] = &[
     "quality_check_reports",
     "context_records",
     "chapter_summaries",
+    "chapter_event_locations",
+    "chapter_event_factions",
+    "chapter_locations",
+    "chapter_factions",
+    "character_factions",
+    "location_links",
+    "faction_relations",
+    "locations",
+    "factions",
     "chapter_events",
     "chapter_characters",
     "character_states",
@@ -224,6 +369,10 @@ const DELETE_ORDER: &[&str] = &[
     "generation_jobs",
     "chapter_generation_snapshots",
     "chapter_engineering_states",
+    "multi_agent_opinions",
+    "multi_agent_rounds",
+    "multi_agent_sessions",
+    "autonomous_story_plans",
     "chapter_drafts",
     "ai_task_records",
     "characters",
@@ -252,12 +401,19 @@ const REFERENCE_COLUMNS: &[&str] = &[
     "output_profile_id",
     "job_id",
     "source_asset_id",
+    "reference_work_id",
+    "reference_import_id",
+    "source_reference_work_id",
+    "source_reference_import_id",
     "related_style_profile_id",
     "first_appearance_chapter_id",
     "character_id",
     "draft_id",
     "report_id",
     "source_draft_id",
+    "input_draft_id",
+    "output_draft_id",
+    "final_draft_id",
     "result_draft_id",
     "target_draft_id",
     "before_report_id",
@@ -268,6 +424,37 @@ const REFERENCE_COLUMNS: &[&str] = &[
     "document_id",
     "target_id",
     "world_id",
+    "session_id",
+    "review_session_id",
+    "opinion_id",
+    "operation_id",
+    "plan_id",
+    "source_id",
+    "chunk_id",
+    "run_id",
+    "lease_id",
+    "attempt_id",
+    "checkpoint_id",
+    "parent_location_id",
+    "source_faction_id",
+    "target_faction_id",
+    "source_location_id",
+    "target_location_id",
+    "faction_id",
+    "location_id",
+    "chapter_event_id",
+];
+
+const IDENTITY_COLUMNS: &[&str] = &[
+    "id",
+    "session_id",
+    "opinion_id",
+    "operation_id",
+    "plan_id",
+    "run_id",
+    "lease_id",
+    "attempt_id",
+    "checkpoint_id",
 ];
 
 // These columns contain structured JSON generated by the application. Their
@@ -279,6 +466,7 @@ const STRUCTURED_JSON_COLUMNS: &[&str] = &[
     "structured_json",
     "parsed_json",
     "raw_config_json",
+    "analysis_metadata_json",
     "chapter_card_json",
     "scene_plan_json",
     "generation_constraints_json",
@@ -312,6 +500,16 @@ const STRUCTURED_JSON_COLUMNS: &[&str] = &[
     "skipped_context_ids",
     "warnings",
     "context_snapshot",
+    "plan_json",
+    "metadata_json",
+    "entity_keys_json",
+    "filters_json",
+    "selected_chunk_ids_json",
+    "score_reasons_json",
+    "policy_json",
+    "payload_json",
+    "decision_json",
+    "error_json",
 ];
 
 fn sql_value_to_json(value: ValueRef<'_>) -> Result<JsonValue, String> {
@@ -454,15 +652,71 @@ fn table_names() -> Vec<&'static str> {
     names
 }
 
+fn is_multi_agent_table(table: &str) -> bool {
+    matches!(
+        table,
+        "multi_agent_sessions" | "multi_agent_rounds" | "multi_agent_opinions"
+    )
+}
+
+fn is_autonomous_story_table(table: &str) -> bool {
+    table == "autonomous_story_plans"
+}
+
+fn is_reference_library_table(table: &str) -> bool {
+    matches!(
+        table,
+        "reference_works" | "reference_imports" | "reference_sections"
+    )
+}
+
+fn is_memory_table(table: &str) -> bool {
+    matches!(
+        table,
+        "memory_documents" | "memory_chunks" | "memory_embeddings" | "memory_retrieval_logs"
+    )
+}
+
+fn is_autonomous_scheduler_table(table: &str) -> bool {
+    matches!(
+        table,
+        "autonomous_book_runs"
+            | "autonomous_run_leases"
+            | "autonomous_run_chapter_attempts"
+            | "autonomous_run_checkpoints"
+    )
+}
+
+fn is_story_asset_table(table: &str) -> bool {
+    matches!(
+        table,
+        "factions"
+            | "locations"
+            | "faction_relations"
+            | "location_links"
+            | "character_factions"
+            | "chapter_factions"
+            | "chapter_locations"
+            | "chapter_event_factions"
+            | "chapter_event_locations"
+    )
+}
+
 fn table_names_for_schema(schema_version: u32) -> Vec<&'static str> {
     table_names()
         .into_iter()
         .filter(|table| schema_version >= 3 || *table != "quality_issue_states")
+        .filter(|table| schema_version >= 4 || !is_multi_agent_table(table))
+        .filter(|table| schema_version >= 5 || !is_autonomous_story_table(table))
+        .filter(|table| schema_version >= 6 || !is_reference_library_table(table))
+        .filter(|table| schema_version >= 7 || !is_memory_table(table))
+        .filter(|table| schema_version >= 8 || !is_autonomous_scheduler_table(table))
+        .filter(|table| schema_version >= 9 || !is_story_asset_table(table))
         .collect()
 }
 
 fn clear_machine_paths(row: &mut BackupRow) {
-    for column in ["cover_path", "file_path"] {
+    for column in ["cover_path", "file_path", "source_file_path"] {
         if row.contains_key(column) {
             row.insert(column.to_string(), JsonValue::Null);
         }
@@ -470,11 +724,13 @@ fn clear_machine_paths(row: &mut BackupRow) {
 }
 
 fn collect_row_ids(rows: &[BackupRow], ids: &mut Vec<String>) {
-    ids.extend(
-        rows.iter()
-            .filter_map(|row| row.get("id").and_then(JsonValue::as_str))
-            .map(str::to_string),
-    );
+    for row in rows {
+        for column in IDENTITY_COLUMNS {
+            if let Some(id) = row.get(*column).and_then(JsonValue::as_str) {
+                ids.push(id.to_string());
+            }
+        }
+    }
 }
 
 fn collect_large_text_reference_ids(rows: &[BackupRow], ids: &mut Vec<String>) {
@@ -504,7 +760,7 @@ pub fn export_project_backup_in_conn(
 
     for spec in PROJECT_TABLES {
         let mut rows = query_rows(conn, spec.name, spec.filter, novel_id)?;
-        if spec.name == "imported_assets" {
+        if matches!(spec.name, "imported_assets" | "reference_imports") {
             for row in &mut rows {
                 clear_machine_paths(row);
             }
@@ -570,13 +826,31 @@ fn validate_row(table: &str, row: &BackupRow, columns: &HashSet<String>) -> Resu
     if row.is_empty() {
         return Err(format!("备份中的 {table} 包含空记录"));
     }
-    if table != LARGE_TEXT_CHUNKS
-        && !row
-            .get("id")
+    let has_non_empty_text = |column: &str| {
+        row.get(column)
             .and_then(JsonValue::as_str)
             .is_some_and(|id| !id.trim().is_empty())
-    {
-        return Err(format!("备份中的 {table} 记录缺少 id"));
+    };
+    let has_valid_identity = match table {
+        LARGE_TEXT_CHUNKS => true,
+        "multi_agent_sessions" => has_non_empty_text("session_id"),
+        "multi_agent_rounds" => {
+            has_non_empty_text("session_id")
+                && row
+                    .get("round_number")
+                    .and_then(JsonValue::as_i64)
+                    .is_some()
+        }
+        "multi_agent_opinions" => has_non_empty_text("opinion_id"),
+        "autonomous_story_plans" => has_non_empty_text("plan_id"),
+        "autonomous_book_runs" => has_non_empty_text("run_id"),
+        "autonomous_run_leases" => has_non_empty_text("lease_id"),
+        "autonomous_run_chapter_attempts" => has_non_empty_text("attempt_id"),
+        "autonomous_run_checkpoints" => has_non_empty_text("checkpoint_id"),
+        _ => has_non_empty_text("id"),
+    };
+    if !has_valid_identity {
+        return Err(format!("备份中的 {table} 记录缺少有效标识"));
     }
     if table == LARGE_TEXT_CHUNKS
         && (!row
@@ -649,15 +923,430 @@ fn validate_backup(conn: &Connection, backup: &ProjectBackup) -> Result<(), Stri
             validate_row(table, row, &columns)?;
         }
     }
+    validate_backup_reference_library(backup)?;
+    validate_backup_memory(backup)?;
     validate_backup_large_text_integrity(backup)?;
+    Ok(())
+}
+
+fn backup_text_hash(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn required_backup_str<'a>(
+    row: &'a BackupRow,
+    column: &str,
+    table: &str,
+) -> Result<&'a str, String> {
+    row.get(column)
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("备份中的 {table}.{column} 无效"))
+}
+
+fn required_backup_i64(row: &BackupRow, column: &str, table: &str) -> Result<i64, String> {
+    row.get(column)
+        .and_then(JsonValue::as_i64)
+        .ok_or_else(|| format!("备份中的 {table}.{column} 无效"))
+}
+
+fn valid_backup_hash(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_backup_reference_library(backup: &ProjectBackup) -> Result<(), String> {
+    if backup.schema_version < 6 {
+        return Ok(());
+    }
+    let works = backup
+        .tables
+        .get("reference_works")
+        .ok_or_else(|| "备份缺少 reference_works".to_string())?;
+    let imports = backup
+        .tables
+        .get("reference_imports")
+        .ok_or_else(|| "备份缺少 reference_imports".to_string())?;
+    let sections = backup
+        .tables
+        .get("reference_sections")
+        .ok_or_else(|| "备份缺少 reference_sections".to_string())?;
+    let novel_id = required_backup_str(&backup.novel, "id", "novels")?;
+    let work_ids = works
+        .iter()
+        .map(|row| {
+            let id = required_backup_str(row, "id", "reference_works")?;
+            if required_backup_str(row, "novel_id", "reference_works")? != novel_id {
+                return Err("备份中的参考作品越过小说作用域".to_string());
+            }
+            if required_backup_i64(row, "revision", "reference_works")? < 1 {
+                return Err("备份中的参考作品 revision 无效".to_string());
+            }
+            Ok(id.to_string())
+        })
+        .collect::<Result<HashSet<_>, String>>()?;
+
+    let documents = backup
+        .tables
+        .get(LARGE_TEXT_DOCUMENTS)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            row.get("id")
+                .and_then(JsonValue::as_str)
+                .map(|id| (id, row))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut import_scope = HashMap::<String, String>::new();
+    let mut versions = HashMap::<String, Vec<i64>>::new();
+    let mut current_counts = HashMap::<String, usize>::new();
+    let mut expected_sections = HashMap::<String, i64>::new();
+    for row in imports {
+        let id = required_backup_str(row, "id", "reference_imports")?;
+        let work_id = required_backup_str(row, "reference_work_id", "reference_imports")?;
+        if !work_ids.contains(work_id)
+            || required_backup_str(row, "novel_id", "reference_imports")? != novel_id
+        {
+            return Err("备份中的参考导入越过作品作用域".to_string());
+        }
+        let version = required_backup_i64(row, "version_no", "reference_imports")?;
+        if version < 1 {
+            return Err("备份中的参考导入版本无效".to_string());
+        }
+        versions
+            .entry(work_id.to_string())
+            .or_default()
+            .push(version);
+        if required_backup_i64(row, "is_current", "reference_imports")? == 1 {
+            *current_counts.entry(work_id.to_string()).or_default() += 1;
+        }
+        let decoded_hash = required_backup_str(row, "decoded_text_sha256", "reference_imports")?;
+        if !valid_backup_hash(decoded_hash) {
+            return Err("备份中的参考导入正文哈希无效".to_string());
+        }
+        if let Some(document_id) = row.get("large_text_ref_id").and_then(JsonValue::as_str) {
+            let document = documents
+                .get(document_id)
+                .ok_or_else(|| "备份中的参考导入缺少大文本正文".to_string())?;
+            if document.get("content_sha256").and_then(JsonValue::as_str) != Some(decoded_hash)
+                || document.get("target_type").and_then(JsonValue::as_str)
+                    != Some("reference_import")
+                || document.get("target_id").and_then(JsonValue::as_str) != Some(id)
+                || document.get("field_name").and_then(JsonValue::as_str) != Some("source_text")
+            {
+                return Err("备份中的参考导入大文本身份不一致".to_string());
+            }
+        } else {
+            let source_text = required_backup_str(row, "source_text", "reference_imports")?;
+            if backup_text_hash(source_text) != decoded_hash {
+                return Err("备份中的参考导入正文已被篡改".to_string());
+            }
+        }
+        import_scope.insert(id.to_string(), work_id.to_string());
+        expected_sections.insert(
+            id.to_string(),
+            required_backup_i64(row, "section_count", "reference_imports")?,
+        );
+    }
+    for work_id in &work_ids {
+        let mut work_versions = versions.remove(work_id).unwrap_or_default();
+        work_versions.sort_unstable();
+        if work_versions
+            != (1..=i64::try_from(work_versions.len()).unwrap_or_default()).collect::<Vec<_>>()
+            || current_counts.get(work_id).copied().unwrap_or_default() != 1
+        {
+            return Err("备份中的参考作品版本序列或当前版本无效".to_string());
+        }
+    }
+
+    let mut section_orders = HashMap::<String, Vec<i64>>::new();
+    for row in sections {
+        let import_id = required_backup_str(row, "reference_import_id", "reference_sections")?;
+        let work_id = required_backup_str(row, "reference_work_id", "reference_sections")?;
+        if import_scope.get(import_id).map(String::as_str) != Some(work_id)
+            || required_backup_str(row, "novel_id", "reference_sections")? != novel_id
+        {
+            return Err("备份中的参考章节越过导入作用域".to_string());
+        }
+        let section_id = required_backup_str(row, "id", "reference_sections")?;
+        let content = required_backup_str(row, "content", "reference_sections")?;
+        let content_hash = required_backup_str(row, "content_hash", "reference_sections")?;
+        if !valid_backup_hash(content_hash) {
+            return Err("备份中的参考章节正文哈希无效".to_string());
+        }
+        let expected_chars = required_backup_i64(row, "char_count", "reference_sections")?;
+        let expected_bytes = required_backup_i64(row, "utf8_byte_count", "reference_sections")?;
+        if let Some(document_id) = row.get("large_text_ref_id").and_then(JsonValue::as_str) {
+            let document = documents
+                .get(document_id)
+                .ok_or_else(|| "备份中的参考章节缺少大文本正文".to_string())?;
+            if document.get("content_sha256").and_then(JsonValue::as_str) != Some(content_hash)
+                || document.get("target_type").and_then(JsonValue::as_str)
+                    != Some("reference_section")
+                || document.get("target_id").and_then(JsonValue::as_str) != Some(section_id)
+                || document.get("field_name").and_then(JsonValue::as_str) != Some("content")
+                || document.get("total_chars").and_then(JsonValue::as_i64) != Some(expected_chars)
+                || document.get("total_bytes").and_then(JsonValue::as_i64) != Some(expected_bytes)
+                || content.chars().count() as i64 > expected_chars
+                || content.len() as i64 > expected_bytes
+            {
+                return Err("备份中的参考章节大文本身份不一致".to_string());
+            }
+        } else if backup_text_hash(content) != content_hash
+            || content.chars().count() as i64 != expected_chars
+            || content.len() as i64 != expected_bytes
+        {
+            return Err("备份中的参考章节正文已被篡改".to_string());
+        }
+        section_orders
+            .entry(import_id.to_string())
+            .or_default()
+            .push(required_backup_i64(
+                row,
+                "order_index",
+                "reference_sections",
+            )?);
+    }
+    for (import_id, expected_count) in expected_sections {
+        let mut orders = section_orders.remove(&import_id).unwrap_or_default();
+        orders.sort_unstable();
+        if orders.len() as i64 != expected_count
+            || orders != (1..=expected_count).collect::<Vec<_>>()
+        {
+            return Err("备份中的参考章节序列不完整".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn backup_vector_hash(vector: &[f32]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update((vector.len() as u64).to_le_bytes());
+    for value in vector {
+        hasher.update(value.to_le_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn validate_backup_memory(backup: &ProjectBackup) -> Result<(), String> {
+    if backup.schema_version < 7 {
+        return Ok(());
+    }
+    let novel_id = required_backup_str(&backup.novel, "id", "novels")?;
+    let documents = backup
+        .tables
+        .get("memory_documents")
+        .ok_or_else(|| "备份缺少 memory_documents".to_string())?;
+    let chunks = backup
+        .tables
+        .get("memory_chunks")
+        .ok_or_else(|| "备份缺少 memory_chunks".to_string())?;
+    let embeddings = backup
+        .tables
+        .get("memory_embeddings")
+        .ok_or_else(|| "备份缺少 memory_embeddings".to_string())?;
+    let logs = backup
+        .tables
+        .get("memory_retrieval_logs")
+        .ok_or_else(|| "备份缺少 memory_retrieval_logs".to_string())?;
+    let chapter_ids = backup
+        .tables
+        .get("chapters")
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get("id").and_then(JsonValue::as_str))
+        .collect::<HashSet<_>>();
+    let adopted_draft_ids = backup
+        .tables
+        .get("chapter_drafts")
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get("id").and_then(JsonValue::as_str))
+        .collect::<HashSet<_>>();
+    let source_tables = [
+        ("adopted_draft", "chapter_drafts"),
+        ("chapter_summary", "chapter_summaries"),
+        ("context_record", "context_records"),
+    ];
+    let source_ids = source_tables
+        .iter()
+        .map(|(source_type, table)| {
+            let ids = backup
+                .tables
+                .get(*table)
+                .into_iter()
+                .flatten()
+                .filter_map(|row| row.get("id").and_then(JsonValue::as_str))
+                .collect::<HashSet<_>>();
+            (*source_type, ids)
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut document_scope = HashMap::<String, (&str, &str)>::new();
+    let mut active_sources = HashSet::<(&str, &str)>::new();
+    for row in documents {
+        let id = required_backup_str(row, "id", "memory_documents")?;
+        if required_backup_str(row, "novel_id", "memory_documents")? != novel_id {
+            return Err("备份中的 Memory 文档越过小说作用域".to_string());
+        }
+        let source_type = required_backup_str(row, "source_type", "memory_documents")?;
+        let source_id = required_backup_str(row, "source_id", "memory_documents")?;
+        if !source_ids
+            .get(source_type)
+            .is_some_and(|ids| ids.contains(source_id))
+        {
+            return Err("备份中的 Memory 来源不存在".to_string());
+        }
+        let source_hash = required_backup_str(row, "source_hash", "memory_documents")?;
+        if !valid_backup_hash(source_hash)
+            || required_backup_i64(row, "source_version", "memory_documents")? < 1
+        {
+            return Err("备份中的 Memory 来源版本或哈希无效".to_string());
+        }
+        let adopted_draft_id = required_backup_str(row, "adopted_draft_id", "memory_documents")?;
+        let chapter_id = required_backup_str(row, "chapter_id", "memory_documents")?;
+        if !adopted_draft_ids.contains(adopted_draft_id) || !chapter_ids.contains(chapter_id) {
+            return Err("备份中的 Memory 采用稿或章节身份无效".to_string());
+        }
+        let status = required_backup_str(row, "status", "memory_documents")?;
+        if !matches!(status, "active" | "invalidated") {
+            return Err("备份中的 Memory 文档状态无效".to_string());
+        }
+        if status == "active" && !active_sources.insert((source_type, source_id)) {
+            return Err("备份中的 Memory 来源存在多个有效版本".to_string());
+        }
+        let metadata = required_backup_str(row, "metadata_json", "memory_documents")?;
+        if !serde_json::from_str::<JsonValue>(metadata).is_ok_and(|value| value.is_object()) {
+            return Err("备份中的 Memory 文档元数据无效".to_string());
+        }
+        document_scope.insert(id.to_string(), (chapter_id, adopted_draft_id));
+    }
+
+    let mut chunk_scope = HashMap::<String, (&str, &str)>::new();
+    let mut ordinals = HashMap::<&str, Vec<i64>>::new();
+    for row in chunks {
+        let id = required_backup_str(row, "id", "memory_chunks")?;
+        if required_backup_str(row, "novel_id", "memory_chunks")? != novel_id {
+            return Err("备份中的 Memory 分块越过小说作用域".to_string());
+        }
+        let document_id = required_backup_str(row, "document_id", "memory_chunks")?;
+        let chapter_id = required_backup_str(row, "chapter_id", "memory_chunks")?;
+        if document_scope.get(document_id).map(|scope| scope.0) != Some(chapter_id) {
+            return Err("备份中的 Memory 分块归属无效".to_string());
+        }
+        let text = required_backup_str(row, "text", "memory_chunks")?;
+        let content_hash = required_backup_str(row, "content_hash", "memory_chunks")?;
+        if backup_text_hash(text) != content_hash
+            || required_backup_i64(row, "token_count", "memory_chunks")? < 1
+        {
+            return Err("备份中的 Memory 分块正文或 Token 统计无效".to_string());
+        }
+        let entity_keys = required_backup_str(row, "entity_keys_json", "memory_chunks")?;
+        let metadata = required_backup_str(row, "metadata_json", "memory_chunks")?;
+        if !serde_json::from_str::<JsonValue>(entity_keys).is_ok_and(|value| value.is_array())
+            || !serde_json::from_str::<JsonValue>(metadata).is_ok_and(|value| value.is_object())
+        {
+            return Err("备份中的 Memory 分块结构化元数据无效".to_string());
+        }
+        ordinals
+            .entry(document_id)
+            .or_default()
+            .push(required_backup_i64(row, "ordinal", "memory_chunks")?);
+        chunk_scope.insert(id.to_string(), (document_id, content_hash));
+    }
+    for values in ordinals.values_mut() {
+        values.sort_unstable();
+        if *values != (0..values.len() as i64).collect::<Vec<_>>() {
+            return Err("备份中的 Memory 分块序号不连续".to_string());
+        }
+    }
+
+    let mut model_dimensions = HashMap::<(&str, &str), i64>::new();
+    for row in embeddings {
+        if required_backup_str(row, "novel_id", "memory_embeddings")? != novel_id {
+            return Err("备份中的 Memory Embedding 越过小说作用域".to_string());
+        }
+        let chunk_id = required_backup_str(row, "chunk_id", "memory_embeddings")?;
+        let chunk_content_hash =
+            required_backup_str(row, "chunk_content_hash", "memory_embeddings")?;
+        if chunk_scope.get(chunk_id).map(|scope| scope.1) != Some(chunk_content_hash) {
+            return Err("备份中的 Memory Embedding 分块哈希无效".to_string());
+        }
+        let provider = required_backup_str(row, "provider", "memory_embeddings")?;
+        let model = required_backup_str(row, "model", "memory_embeddings")?;
+        let dimension = required_backup_i64(row, "dimension", "memory_embeddings")?;
+        if dimension < 1 || dimension > 8192 {
+            return Err("备份中的 Memory Embedding 维度无效".to_string());
+        }
+        if let Some(existing) = model_dimensions.insert((provider, model), dimension) {
+            if existing != dimension {
+                return Err("备份中的同一 Embedding 模型存在多个维度".to_string());
+            }
+        }
+        let vector_json = required_backup_str(row, "vector_json", "memory_embeddings")?;
+        let vector = serde_json::from_str::<Vec<f32>>(vector_json)
+            .map_err(|_| "备份中的 Memory Embedding 向量格式无效".to_string())?;
+        if vector.len() != dimension as usize || vector.iter().any(|value| !value.is_finite()) {
+            return Err("备份中的 Memory Embedding 向量维度无效".to_string());
+        }
+        let norm = vector
+            .iter()
+            .map(|value| f64::from(*value).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let stored_norm = row
+            .get("vector_norm")
+            .and_then(JsonValue::as_f64)
+            .ok_or_else(|| "备份中的 Memory Embedding 范数无效".to_string())?;
+        if norm <= f64::EPSILON
+            || (norm - stored_norm).abs() > 1e-6
+            || backup_vector_hash(&vector)
+                != required_backup_str(row, "vector_hash", "memory_embeddings")?
+        {
+            return Err("备份中的 Memory Embedding 完整性校验失败".to_string());
+        }
+    }
+
+    for row in logs {
+        if required_backup_str(row, "novel_id", "memory_retrieval_logs")? != novel_id {
+            return Err("备份中的 Memory 检索日志越过小说作用域".to_string());
+        }
+        let selected = serde_json::from_str::<Vec<String>>(required_backup_str(
+            row,
+            "selected_chunk_ids_json",
+            "memory_retrieval_logs",
+        )?)
+        .map_err(|_| "备份中的 Memory 检索结果无效".to_string())?;
+        if selected
+            .iter()
+            .any(|chunk_id| !chunk_scope.contains_key(chunk_id))
+        {
+            return Err("备份中的 Memory 检索日志引用未知分块".to_string());
+        }
+        let reasons = serde_json::from_str::<JsonValue>(required_backup_str(
+            row,
+            "score_reasons_json",
+            "memory_retrieval_logs",
+        )?)
+        .map_err(|_| "备份中的 Memory 评分原因无效".to_string())?;
+        if !reasons.is_array() {
+            return Err("备份中的 Memory 评分原因无效".to_string());
+        }
+    }
     Ok(())
 }
 
 fn collect_ids_from_rows(rows: &[BackupRow], ids: &mut HashMap<String, String>) {
     for row in rows {
-        if let Some(id) = row.get("id").and_then(JsonValue::as_str) {
-            ids.entry(id.to_string())
-                .or_insert_with(|| uuid::Uuid::new_v4().to_string());
+        for column in IDENTITY_COLUMNS {
+            if let Some(id) = row.get(*column).and_then(JsonValue::as_str) {
+                ids.entry(id.to_string())
+                    .or_insert_with(|| uuid::Uuid::new_v4().to_string());
+            }
         }
     }
 }
@@ -713,7 +1402,10 @@ fn remap_structured_json(value: &JsonValue, id_map: &HashMap<String, String>) ->
 fn remap_row(row: &BackupRow, id_map: &HashMap<String, String>) -> BackupRow {
     row.iter()
         .map(|(column, value)| {
-            let remapped = if column == "cover_path" || column == "file_path" {
+            let remapped = if matches!(
+                column.as_str(),
+                "cover_path" | "file_path" | "source_file_path"
+            ) {
                 JsonValue::Null
             } else if REFERENCE_COLUMNS.contains(&column.as_str()) {
                 value
@@ -731,6 +1423,187 @@ fn remap_row(row: &BackupRow, id_map: &HashMap<String, String>) -> BackupRow {
         .collect()
 }
 
+fn refresh_restored_autonomous_plan(mut row: BackupRow) -> Result<BackupRow, String> {
+    let plan_json = row
+        .get("plan_json")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "autonomous_story_plans.plan_json is missing".to_string())?;
+    let mut plan = serde_json::from_str::<JsonValue>(plan_json)
+        .map_err(|error| format!("autonomous_story_plans.plan_json is invalid: {error}"))?;
+    let (canonical_plan, plan_hash) =
+        autonomous_story_service::refresh_restored_plan_hashes(&mut plan)
+            .map_err(|error| error.to_string())?;
+    let request_hash = plan
+        .get("requestHash")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "restored autonomous plan requestHash is missing".to_string())?
+        .to_string();
+
+    for (column, plan_key) in [
+        ("plan_id", "planId"),
+        ("operation_id", "operationId"),
+        ("novel_id", "novelId"),
+    ] {
+        if row.get(column).and_then(JsonValue::as_str)
+            != plan.get(plan_key).and_then(JsonValue::as_str)
+        {
+            return Err(format!(
+                "autonomous_story_plans.{column} does not match plan_json.{plan_key}"
+            ));
+        }
+    }
+
+    row.insert("request_hash".to_string(), JsonValue::String(request_hash));
+    row.insert("plan_json".to_string(), JsonValue::String(canonical_plan));
+    row.insert("plan_hash".to_string(), JsonValue::String(plan_hash));
+    Ok(row)
+}
+
+fn canonicalize_backup_json(row: &mut BackupRow, column: &str) -> Result<Option<String>, String> {
+    let Some(value) = row.get(column) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let text = value
+        .as_str()
+        .ok_or_else(|| format!("{column} is not JSON text"))?;
+    let parsed = serde_json::from_str::<JsonValue>(text)
+        .map_err(|error| format!("{column} is invalid JSON: {error}"))?;
+    let canonical = ai_fact_security::canonical_json(&parsed).map_err(|error| error.to_string())?;
+    row.insert(column.to_string(), JsonValue::String(canonical.clone()));
+    Ok(Some(canonical))
+}
+
+fn refresh_restored_scheduler_row(table: &str, mut row: BackupRow) -> Result<BackupRow, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    match table {
+        "autonomous_book_runs" => {
+            let policy_json = canonicalize_backup_json(&mut row, "policy_json")?
+                .ok_or_else(|| "restored scheduler policy is missing".to_string())?;
+            let policy = serde_json::from_str::<AutonomousAutomationPolicy>(&policy_json)
+                .map_err(|error| format!("restored scheduler policy is invalid: {error}"))?;
+            let total_chapters = required_backup_i64(&row, "total_chapters", table)?;
+            policy
+                .validate(total_chapters)
+                .map_err(|error| error.to_string())?;
+            let policy_hash = backup_text_hash(&policy_json);
+            let novel_id = required_backup_str(&row, "novel_id", table)?;
+            let plan_id = required_backup_str(&row, "plan_id", table)?;
+            let request_hash = ai_fact_security::canonical_hash(&serde_json::json!({
+                "novelId": novel_id,
+                "planId": plan_id,
+                "policyHash": policy_hash,
+            }))
+            .map_err(|error| error.to_string())?;
+            row.insert("policy_hash".to_string(), JsonValue::String(policy_hash));
+            row.insert("request_hash".to_string(), JsonValue::String(request_hash));
+            if row.get("status").and_then(JsonValue::as_str) == Some("running") {
+                row.insert(
+                    "status".to_string(),
+                    JsonValue::String("queued".to_string()),
+                );
+                row.insert(
+                    "pause_reason".to_string(),
+                    JsonValue::String("restored_without_active_lease".to_string()),
+                );
+                row.insert("updated_at".to_string(), JsonValue::String(now));
+            }
+        }
+        "autonomous_run_leases" => {
+            row.insert(
+                "status".to_string(),
+                JsonValue::String("expired".to_string()),
+            );
+            row.insert("expires_at".to_string(), JsonValue::String(now.clone()));
+            row.insert("released_at".to_string(), JsonValue::String(now));
+            row.insert(
+                "owner_id".to_string(),
+                JsonValue::String("restored-project".to_string()),
+            );
+            let lease_id = required_backup_str(&row, "lease_id", table)?;
+            row.insert(
+                "token_hash".to_string(),
+                JsonValue::String(backup_text_hash(lease_id)),
+            );
+        }
+        "autonomous_run_chapter_attempts" => {
+            if let Some(decision_json) = canonicalize_backup_json(&mut row, "decision_json")? {
+                row.insert(
+                    "decision_hash".to_string(),
+                    JsonValue::String(backup_text_hash(&decision_json)),
+                );
+            }
+            let _ = canonicalize_backup_json(&mut row, "error_json")?;
+            if row.get("status").and_then(JsonValue::as_str) == Some("claimed") {
+                row.insert(
+                    "status".to_string(),
+                    JsonValue::String("abandoned".to_string()),
+                );
+                row.insert("finished_at".to_string(), JsonValue::String(now));
+                let error = ai_fact_security::canonical_json(&serde_json::json!({
+                    "code": "RESTORED_INTERRUPTED_ATTEMPT",
+                    "retryable": true,
+                }))
+                .map_err(|error| error.to_string())?;
+                row.insert("error_json".to_string(), JsonValue::String(error));
+            }
+        }
+        "autonomous_run_checkpoints" => {
+            let payload_json = canonicalize_backup_json(&mut row, "payload_json")?
+                .ok_or_else(|| "restored scheduler checkpoint payload is missing".to_string())?;
+            row.insert(
+                "payload_hash".to_string(),
+                JsonValue::String(backup_text_hash(&payload_json)),
+            );
+        }
+        _ => {}
+    }
+    Ok(row)
+}
+
+fn order_location_rows(rows: &[BackupRow]) -> Result<Vec<BackupRow>, String> {
+    let all_ids = rows
+        .iter()
+        .filter_map(|row| row.get("id").and_then(JsonValue::as_str))
+        .collect::<HashSet<_>>();
+    let mut pending = rows.to_vec();
+    let mut inserted = HashSet::<String>::new();
+    let mut ordered = Vec::with_capacity(rows.len());
+    while !pending.is_empty() {
+        let before = pending.len();
+        let mut index = 0;
+        while index < pending.len() {
+            let parent = pending[index]
+                .get("parent_location_id")
+                .and_then(JsonValue::as_str)
+                .filter(|value| !value.is_empty());
+            if parent.is_none() || parent.is_some_and(|id| inserted.contains(id)) {
+                let row = pending.remove(index);
+                if let Some(id) = row.get("id").and_then(JsonValue::as_str) {
+                    inserted.insert(id.to_string());
+                }
+                ordered.push(row);
+            } else {
+                index += 1;
+            }
+        }
+        if pending.len() == before {
+            let missing = pending
+                .iter()
+                .filter_map(|row| row.get("parent_location_id").and_then(JsonValue::as_str))
+                .find(|parent| !all_ids.contains(parent));
+            return Err(if missing.is_some() {
+                "备份中的地点引用了缺失的上级地点".to_string()
+            } else {
+                "备份中的地点层级存在循环".to_string()
+            });
+        }
+    }
+    Ok(ordered)
+}
+
 fn insert_rows(
     tx: &Transaction<'_>,
     table: &str,
@@ -738,8 +1611,20 @@ fn insert_rows(
     id_map: &HashMap<String, String>,
 ) -> Result<usize, String> {
     let mut inserted = 0;
-    for row in rows {
+    let ordered_rows = if table == "locations" {
+        order_location_rows(rows)?
+    } else {
+        rows.to_vec()
+    };
+    for row in &ordered_rows {
         let row = remap_row(row, id_map);
+        let row = if is_autonomous_story_table(table) {
+            refresh_restored_autonomous_plan(row)?
+        } else if is_autonomous_scheduler_table(table) {
+            refresh_restored_scheduler_row(table, row)?
+        } else {
+            row
+        };
         let columns = row.keys().cloned().collect::<Vec<_>>();
         let placeholders = std::iter::repeat("?")
             .take(columns.len())
@@ -789,7 +1674,9 @@ fn validate_large_text_parts(
         if chunk_index != expected_index as i64 {
             return Err(format!("大文本 {document_id} 的分片索引不连续"));
         }
-        let actual_chars = content.encode_utf16().count() as i64;
+        // large_text_documents/large_text_chunks persist Unicode scalar counts,
+        // matching Rust `chars()` and the writer/reader integrity contract.
+        let actual_chars = content.chars().count() as i64;
         let actual_bytes = content.len() as i64;
         if char_count != actual_chars || byte_count != actual_bytes {
             return Err(format!("大文本 {document_id} 的分片元数据不一致"));
@@ -1011,6 +1898,30 @@ pub fn restore_project_backup_in_conn(
                 restored_records.insert((*table).to_string(), inserted);
                 continue;
             }
+            None if backup.schema_version < 4 && is_multi_agent_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
+            None if backup.schema_version < 5 && is_autonomous_story_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
+            None if backup.schema_version < 6 && is_reference_library_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
+            None if backup.schema_version < 7 && is_memory_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
+            None if backup.schema_version < 8 && is_autonomous_scheduler_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
+            None if backup.schema_version < 9 && is_story_asset_table(table) => {
+                restored_records.insert((*table).to_string(), 0);
+                continue;
+            }
             None => return Err(format!("备份缺少数据表：{table}")),
         };
         let legacy_quality_rows;
@@ -1071,17 +1982,40 @@ pub fn restore_project_backup_in_conn(
     })
 }
 
-fn ids_from_rows(rows: &[BackupRow]) -> Vec<String> {
+fn ids_from_rows(rows: &[BackupRow], identity_column: &str) -> Vec<String> {
     rows.iter()
         .filter_map(|row| {
-            row.get("id")
+            row.get(identity_column)
                 .and_then(JsonValue::as_str)
                 .map(str::to_string)
         })
         .collect()
 }
 
-fn delete_rows_by_ids(tx: &Transaction<'_>, table: &str, ids: &[String]) -> Result<(), String> {
+fn deletion_identity_column(table: &str) -> &'static str {
+    if is_multi_agent_table(table) {
+        "session_id"
+    } else if is_autonomous_story_table(table) {
+        "plan_id"
+    } else if table == "autonomous_book_runs" {
+        "run_id"
+    } else if table == "autonomous_run_leases" {
+        "lease_id"
+    } else if table == "autonomous_run_chapter_attempts" {
+        "attempt_id"
+    } else if table == "autonomous_run_checkpoints" {
+        "checkpoint_id"
+    } else {
+        "id"
+    }
+}
+
+fn delete_rows_by_ids(
+    tx: &Transaction<'_>,
+    table: &str,
+    identity_column: &str,
+    ids: &[String],
+) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -1090,7 +2024,7 @@ fn delete_rows_by_ids(tx: &Transaction<'_>, table: &str, ids: &[String]) -> Resu
             .take(batch.len())
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!("DELETE FROM {table} WHERE id IN ({placeholders})");
+        let sql = format!("DELETE FROM {table} WHERE {identity_column} IN ({placeholders})");
         let values = batch
             .iter()
             .cloned()
@@ -1126,25 +2060,51 @@ fn delete_large_text_chunks_by_document_ids(
     Ok(())
 }
 
+fn delete_location_rows(tx: &Transaction<'_>, rows: &[BackupRow]) -> Result<(), String> {
+    let ordered = order_location_rows(rows)?;
+    for row in ordered.iter().rev() {
+        let id = required_backup_str(row, "id", "locations")?;
+        tx.execute("DELETE FROM locations WHERE id = ?1", params![id])
+            .map_err(|error| format!("failed to purge locations: {error}"))?;
+    }
+    Ok(())
+}
+
 fn purge_project_in_tx(tx: &Transaction<'_>, novel_id: &str) -> Result<(), String> {
     let backup = export_project_backup_in_conn(&*tx, novel_id)?;
+    tx.execute_batch("DROP TRIGGER IF EXISTS trg_autonomous_run_checkpoints_append_only_delete;")
+        .map_err(|error| format!("进入项目清理维护模式失败：{error}"))?;
     for table in DELETE_ORDER {
         if *table == LARGE_TEXT_CHUNKS {
             let document_ids = backup
                 .tables
                 .get(LARGE_TEXT_DOCUMENTS)
-                .map_or_else(Vec::new, |rows| ids_from_rows(rows));
+                .map_or_else(Vec::new, |rows| ids_from_rows(rows, "id"));
             delete_large_text_chunks_by_document_ids(tx, &document_ids)?;
+        } else if *table == "locations" {
+            let rows = backup
+                .tables
+                .get(*table)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            delete_location_rows(tx, rows)?;
         } else {
+            let identity_column = deletion_identity_column(table);
             let ids = backup
                 .tables
                 .get(*table)
-                .map_or_else(Vec::new, |rows| ids_from_rows(rows));
-            delete_rows_by_ids(tx, table, &ids)?;
+                .map_or_else(Vec::new, |rows| ids_from_rows(rows, identity_column));
+            delete_rows_by_ids(tx, table, identity_column, &ids)?;
         }
     }
     tx.execute("DELETE FROM novels WHERE id = ?1", params![novel_id])
         .map_err(|error| format!("清理作品失败：{error}"))?;
+    tx.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_checkpoints_append_only_delete
+         BEFORE DELETE ON autonomous_run_checkpoints
+         BEGIN SELECT RAISE(ABORT, 'autonomous run checkpoint is append only'); END;",
+    )
+    .map_err(|error| format!("退出项目清理维护模式失败：{error}"))?;
     Ok(())
 }
 
@@ -1175,12 +2135,291 @@ pub fn discard_imported_project_backup(novel_id: String) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn keep_tables_for_declared_schema(backup: &mut ProjectBackup) {
+        let allowed = table_names_for_schema(backup.schema_version)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        backup
+            .tables
+            .retain(|table, _| allowed.contains(table.as_str()));
+    }
+
     fn test_connection() -> Connection {
         let mut conn = Connection::open_in_memory().expect("open in-memory database");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("enable foreign keys");
         crate::db::create_tables(&mut conn).expect("create schema");
         conn
+    }
+
+    fn seed_autonomous_plan(conn: &Connection, novel_id: &str, plan_id: &str, operation_id: &str) {
+        let mut plan = serde_json::json!({
+            "schemaVersion": 1,
+            "planId": plan_id,
+            "operationId": operation_id,
+            "requestHash": "pending",
+            "novelId": novel_id,
+            "status": "running",
+            "stage": "foundation",
+            "revision": 1,
+            "brief": {
+                "premise": "A city forgets one resident every midnight.",
+                "genre": "speculative mystery",
+                "targetChapterCount": 12,
+                "targetWordsPerChapter": 2400,
+                "readerPromise": "escalating clues and costly choices",
+                "endingPreference": "the truth is made public",
+                "constraints": ["every clue must be traceable"]
+            },
+            "volumes": [{ "id": "volume-1" }],
+            "chapters": [{
+                "id": "chapter-1",
+                "chapterNumber": 1,
+                "volumeId": "volume-1",
+                "characterIds": ["character-1"]
+            }],
+            "characters": [{ "id": "character-1" }],
+            "worldElements": [{ "id": "world-1" }],
+            "arcs": [],
+            "conflicts": [],
+            "pacingPhases": [],
+            "pacingCurve": [],
+            "agentRuns": [],
+            "progress": {
+                "completedVolumeIds": [],
+                "currentVolumeIndex": 0,
+                "adoptedChapterNumbers": [],
+                "lastCheckpoint": "foundation"
+            },
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z"
+        });
+        let (plan_json, plan_hash) =
+            autonomous_story_service::refresh_restored_plan_hashes(&mut plan)
+                .expect("prepare autonomous plan fixture");
+        let request_hash = plan["requestHash"]
+            .as_str()
+            .expect("autonomous request hash");
+        conn.execute(
+            "INSERT INTO autonomous_story_plans (
+                plan_id, operation_id, novel_id, request_hash, schema_version,
+                status, stage, revision, target_chapter_count, completed_chapter_count,
+                plan_json, plan_hash, created_at, updated_at
+             ) VALUES (?1,?2,?3,?4,1,'running','foundation',1,12,1,?5,?6,?7,?7)",
+            params![
+                plan_id,
+                operation_id,
+                novel_id,
+                request_hash,
+                plan_json,
+                plan_hash,
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+        .expect("seed autonomous plan");
+    }
+
+    fn seed_minimal_backup_project(conn: &Connection, novel_id: &str) {
+        conn.execute_batch(&format!(
+            "INSERT INTO novels (id, title, status, created_at, updated_at)
+             VALUES ('{novel_id}', 'Backup fixture', 'draft',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO volumes (id, novel_id, title, created_at, updated_at)
+             VALUES ('volume-1', '{novel_id}', 'Volume 1',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO chapters (id, novel_id, volume_id, title, created_at, updated_at)
+             VALUES ('chapter-1', '{novel_id}', 'volume-1', 'Chapter 1',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO characters (id, novel_id, name, created_at, updated_at)
+             VALUES ('character-1', '{novel_id}', 'Character 1',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO chapter_events
+                 (id, novel_id, chapter_id, title, involved_character_ids, created_at, updated_at)
+             VALUES ('event-1', '{novel_id}', 'chapter-1', 'Event 1', '[\"character-1\"]',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');"
+        ))
+        .expect("seed minimal backup project");
+    }
+
+    fn seed_applied_autonomous_plan(conn: &Connection, novel_id: &str) {
+        seed_autonomous_plan(
+            conn,
+            novel_id,
+            "autonomous-plan-1",
+            "autonomous-plan-operation-1",
+        );
+        conn.execute(
+            "UPDATE autonomous_story_plans
+             SET status = 'ready', stage = 'ready', updated_at = ?1, completed_at = ?1
+             WHERE plan_id = 'autonomous-plan-1'",
+            ["2026-01-01T00:01:00Z"],
+        )
+        .expect("advance autonomous plan fixture to ready");
+        conn.execute(
+            "UPDATE autonomous_story_plans
+             SET status = 'applied', stage = 'applied', updated_at = ?1, applied_at = ?1
+             WHERE plan_id = 'autonomous-plan-1'",
+            ["2026-01-01T00:02:00Z"],
+        )
+        .expect("advance autonomous plan fixture to applied");
+    }
+
+    fn seed_running_scheduler_fixture(conn: &Connection, novel_id: &str) {
+        let policy_json = ai_fact_security::canonical_json(&serde_json::json!({
+            "schemaVersion": 1,
+            "mode": "full_auto",
+            "maxChapters": 1,
+            "maxConsecutiveFailures": 3,
+            "maxRetriesPerChapter": 2,
+            "minimumSuccessfulExperts": 2,
+            "minimumAverageScore": 80.0,
+            "minimumAcceptanceRate": 0.75,
+            "autoConfirmAnalysis": true,
+            "dailyTokenBudget": 50000,
+            "bookTokenBudget": 500000,
+            "dailyCostBudgetUsd": 10.0,
+            "bookCostBudgetUsd": 100.0,
+            "runWindow": null
+        }))
+        .expect("canonicalize scheduler policy fixture");
+        let policy_hash = backup_text_hash(&policy_json);
+        let request_hash = ai_fact_security::canonical_hash(&serde_json::json!({
+            "novelId": novel_id,
+            "planId": "autonomous-plan-1",
+            "policyHash": policy_hash,
+        }))
+        .expect("hash scheduler request fixture");
+        let decision_json = ai_fact_security::canonical_json(&serde_json::json!({
+            "action": "generate",
+            "chapterId": "chapter-1",
+            "runId": "scheduler-run-1"
+        }))
+        .expect("canonicalize scheduler decision fixture");
+        let decision_hash = backup_text_hash(&decision_json);
+        let payload_json = ai_fact_security::canonical_json(&serde_json::json!({
+            "attemptId": "scheduler-attempt-1",
+            "chapterId": "chapter-1",
+            "runId": "scheduler-run-1"
+        }))
+        .expect("canonicalize scheduler checkpoint fixture");
+        let payload_hash = backup_text_hash(&payload_json);
+
+        conn.execute(
+            "INSERT INTO autonomous_book_runs
+                (run_id, operation_id, request_hash, novel_id, plan_id, mode,
+                 policy_json, policy_hash, status, state_revision, next_chapter_number,
+                 total_chapters, completed_chapters, token_input, token_output, cost_usd,
+                 usage_day, daily_token_input, daily_token_output, daily_cost_usd,
+                 consecutive_failures, created_at, updated_at, started_at)
+             VALUES
+                ('scheduler-run-1', 'scheduler-run-operation-1', ?1, ?2,
+                 'autonomous-plan-1', 'full_auto', ?3, ?4, 'running', 3, 1, 1,
+                 0, 120, 80, 0.003, '2026-01-01', 120, 80, 0.003, 0,
+                 '2026-01-01T00:03:00Z', '2026-01-01T00:04:00Z',
+                 '2026-01-01T00:03:00Z')",
+            params![request_hash, novel_id, policy_json, policy_hash],
+        )
+        .expect("seed running autonomous scheduler run");
+        conn.execute(
+            "INSERT INTO autonomous_run_leases
+                (lease_id, run_id, novel_id, epoch, owner_id, token_hash, expires_at,
+                 status, acquired_at, renewed_at)
+             VALUES
+                ('scheduler-lease-1', 'scheduler-run-1', ?1, 1, 'source-process', ?2,
+                 '2099-01-01T00:00:00Z', 'active', '2026-01-01T00:03:00Z',
+                 '2026-01-01T00:04:00Z')",
+            params![novel_id, "b".repeat(64)],
+        )
+        .expect("seed active autonomous scheduler lease");
+        conn.execute(
+            "INSERT INTO autonomous_run_chapter_attempts
+                (attempt_id, run_id, novel_id, chapter_id, chapter_number,
+                 attempt_number, operation_id, lease_id, lease_epoch, status,
+                 estimated_tokens, estimated_cost_usd, decision_json, decision_hash,
+                 claimed_at)
+             VALUES
+                ('scheduler-attempt-1', 'scheduler-run-1', ?1, 'chapter-1', 1, 1,
+                 'scheduler-attempt-operation-1', 'scheduler-lease-1', 1, 'claimed',
+                 4000, 0.04, ?2, ?3, '2026-01-01T00:04:00Z')",
+            params![novel_id, decision_json, decision_hash],
+        )
+        .expect("seed claimed autonomous scheduler attempt");
+        conn.execute(
+            "INSERT INTO autonomous_run_checkpoints
+                (checkpoint_id, run_id, novel_id, sequence, event_type, attempt_id,
+                 run_status, payload_json, payload_hash, created_at)
+             VALUES
+                ('scheduler-checkpoint-1', 'scheduler-run-1', ?1, 1,
+                 'chapter_claimed', 'scheduler-attempt-1', 'running', ?2, ?3,
+                 '2026-01-01T00:04:00Z')",
+            params![novel_id, payload_json, payload_hash],
+        )
+        .expect("seed autonomous scheduler checkpoint");
+    }
+
+    fn seed_story_asset_fixture(conn: &Connection, novel_id: &str) {
+        conn.execute_batch(&format!(
+            "INSERT INTO factions
+                (id, novel_id, name, kind, description, goals, revision, created_at, updated_at)
+             VALUES
+                ('faction-a', '{novel_id}', 'Faction A', 'guild', 'First faction',
+                 'Protect the archive', 2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO factions
+                (id, novel_id, name, kind, description, goals, revision, created_at, updated_at)
+             VALUES
+                ('faction-b', '{novel_id}', 'Faction B', 'court', 'Second faction',
+                 'Control the archive', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO locations
+                (id, novel_id, name, kind, description, revision, created_at, updated_at)
+             VALUES
+                ('location-root', '{novel_id}', 'Archive', 'city', 'Root location', 3,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO locations
+                (id, novel_id, name, kind, description, parent_location_id, revision,
+                 created_at, updated_at)
+             VALUES
+                ('location-child', '{novel_id}', 'Vault', 'room', 'Child location',
+                 'location-root', 2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO faction_relations
+                (id, novel_id, source_faction_id, target_faction_id, relation_type,
+                 description, revision, created_at, updated_at)
+             VALUES
+                ('faction-relation-1', '{novel_id}', 'faction-a', 'faction-b', 'rival',
+                 'Compete for access', 2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO location_links
+                (id, novel_id, source_location_id, target_location_id, link_type,
+                 description, revision, created_at, updated_at)
+             VALUES
+                ('location-link-1', '{novel_id}', 'location-root', 'location-child',
+                 'contains', 'Hidden stair', 2, '2026-01-01T00:00:00Z',
+                 '2026-01-01T00:00:00Z');
+             INSERT INTO character_factions
+                (id, novel_id, character_id, faction_id, role, revision, created_at, updated_at)
+             VALUES
+                ('character-faction-1', '{novel_id}', 'character-1', 'faction-a',
+                 'archivist', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO chapter_factions
+                (id, novel_id, chapter_id, faction_id, role, revision, created_at, updated_at)
+             VALUES
+                ('chapter-faction-1', '{novel_id}', 'chapter-1', 'faction-b',
+                 'opposition', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO chapter_locations
+                (id, novel_id, chapter_id, location_id, role, revision, created_at, updated_at)
+             VALUES
+                ('chapter-location-1', '{novel_id}', 'chapter-1', 'location-child',
+                 'primary', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO chapter_event_factions
+                (id, novel_id, chapter_event_id, faction_id, role, revision, created_at, updated_at)
+             VALUES
+                ('event-faction-1', '{novel_id}', 'event-1', 'faction-a', 'instigator',
+                 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO chapter_event_locations
+                (id, novel_id, chapter_event_id, location_id, role, revision, created_at, updated_at)
+             VALUES
+                ('event-location-1', '{novel_id}', 'event-1', 'location-child', 'scene',
+                 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');"
+        ))
+        .expect("seed story asset fixture");
     }
 
     fn seed_full_project(conn: &Connection, novel_id: &str) {
@@ -1195,13 +2434,53 @@ mod tests {
             INSERT INTO protagonists (id, novel_id, name, created_at, updated_at) VALUES ('protagonist-1', '{novel_id}', '主角', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO volumes (id, novel_id, title, created_at, updated_at) VALUES ('volume-1', '{novel_id}', '第一卷', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO chapters (id, novel_id, volume_id, title, created_at, updated_at) VALUES ('chapter-1', '{novel_id}', 'volume-1', '第一章', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-            INSERT INTO style_profiles (id, novel_id, name, created_at, updated_at) VALUES ('style-1', '{novel_id}', '风格', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO reference_works (id, novel_id, title, purpose, description, revision, created_at, updated_at)
+            VALUES ('reference-work-1', '{novel_id}', '参考作品', 'style', '分层分析来源', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO reference_imports (id, reference_work_id, novel_id, version_no, is_current, operation_id, request_hash, file_name, source_file_path, source_format, source_sha256, source_byte_count, detected_encoding, selected_encoding, encoding_source, decoded_text_sha256, decoded_char_count, decoded_utf8_byte_count, source_text, section_count, parser_version, section_plan_sha256, warnings_json, imported_at)
+            VALUES ('reference-import-1', 'reference-work-1', '{novel_id}', 1, 1, 'reference-operation-1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'reference.txt', 'C:/private/reference.txt', 'txt', 'ae2d496ace550ab8a93c285efd3a0a19395715cb3f28c27a714145d3f50cb5cc', 12, 'utf-8', 'utf-8', 'utf8_valid', 'ae2d496ace550ab8a93c285efd3a0a19395715cb3f28c27a714145d3f50cb5cc', 4, 12, '参考正文', 1, 'reference_txt_parser_v1', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '[]', '2026-01-01T00:00:00Z');
+            INSERT INTO reference_sections (id, reference_import_id, reference_work_id, novel_id, order_index, section_kind, title, content, content_hash, char_count, utf8_byte_count, source_start_utf16, source_end_utf16, created_at)
+            VALUES ('reference-section-1', 'reference-import-1', 'reference-work-1', '{novel_id}', 1, 'unstructured', '全文', '参考正文', 'ae2d496ace550ab8a93c285efd3a0a19395715cb3f28c27a714145d3f50cb5cc', 4, 12, 0, 4, '2026-01-01T00:00:00Z');
+            INSERT INTO style_profiles (id, novel_id, name, source_type, source_reference_work_id, source_reference_import_id, source_content_sha256, source_state, analysis_metadata_json, created_at, updated_at)
+            VALUES ('style-1', '{novel_id}', '风格', 'ai_analyzed', 'reference-work-1', 'reference-import-1', 'ae2d496ace550ab8a93c285efd3a0a19395715cb3f28c27a714145d3f50cb5cc', 'available', '{{\"sourceWorkId\":\"reference-work-1\",\"sourceImportId\":\"reference-import-1\"}}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO output_profiles (id, novel_id, name, created_at, updated_at) VALUES ('output-1', '{novel_id}', '输出', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO imported_assets (id, novel_id, file_name, file_path, file_type, asset_type, parsed_json, related_style_profile_id, created_at) VALUES ('asset-1', '{novel_id}', '风格.txt', 'C:\\private\\style.txt', 'text/plain', 'style', '{{\"sourceAssetId\":\"asset-1\",\"styleProfileId\":\"style-1\"}}', 'style-1', '2026-01-01T00:00:00Z');
             INSERT INTO characters (id, novel_id, name, created_at, updated_at) VALUES ('character-1', '{novel_id}', '配角', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-            INSERT INTO ai_task_records (id, novel_id, chapter_id, task_type, created_at) VALUES ('task-1', '{novel_id}', 'chapter-1', 'generate', '2026-01-01T00:00:00Z');
+            INSERT INTO ai_task_records (
+                id, novel_id, chapter_id, task_type, status,
+                token_input, token_output, token_total,
+                input_price_per_million_tokens, output_price_per_million_tokens,
+                cost_estimate, cost_currency, cost_status, pricing_source, created_at
+            ) VALUES (
+                'task-1', '{novel_id}', 'chapter-1', 'generate', 'succeeded',
+                1200, 800, 2000,
+                2.5, 10.0,
+                0.011, 'USD', 'complete', 'user_configured', '2026-01-01T00:00:00Z'
+            );
             INSERT INTO chapter_drafts (id, novel_id, chapter_id, title, content, source, word_count, is_adopted, ai_task_id, large_text_ref_id, created_at, updated_at) VALUES ('draft-1', '{novel_id}', 'chapter-1', '草稿', '预览', 'ai_generated', 6, 1, 'task-1', 'large-1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO chapter_drafts (id, novel_id, chapter_id, title, content, source, word_count, is_adopted, ai_task_id, created_at, updated_at) VALUES ('draft-2', '{novel_id}', 'chapter-1', '协作修订稿', '修订后的正文', 'ai_generated', 6, 0, 'task-1', '2026-01-01T00:01:00Z', '2026-01-01T00:01:00Z');
             UPDATE chapters SET adopted_draft_id = 'draft-1' WHERE id = 'chapter-1';
+            INSERT INTO memory_documents (id, novel_id, source_type, source_id, source_version, source_hash, adopted_draft_id, chapter_id, status, metadata_json, created_at, updated_at)
+            VALUES ('memory-document-1', '{novel_id}', 'adopted_draft', 'draft-1', 1, '8c88207cc65259056f996760035d72ddbd428d97023a3a165a6ad9b81167dd40', 'draft-1', 'chapter-1', 'active', '{{\"kind\":\"scene\"}}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO memory_chunks (id, document_id, novel_id, chapter_id, ordinal, text, token_count, importance, chapter_order_index, temporal_start_chapter, entity_keys_json, metadata_json, content_hash, created_at)
+            VALUES ('memory-chunk-1', 'memory-document-1', '{novel_id}', 'chapter-1', 0, '记忆正文', 8, 0.9, 1, 1, '[\"character-1\"]', '{{\"factType\":\"event\"}}', 'af5f7676318b704dc7fb13d4aae3172e96e6591b4f367be9114774a3fe6861fc', '2026-01-01T00:00:00Z');
+            INSERT INTO memory_embeddings (id, chunk_id, novel_id, provider, model, dimension, vector_json, vector_norm, vector_hash, chunk_content_hash, created_at)
+            VALUES ('memory-embedding-1', 'memory-chunk-1', '{novel_id}', 'fixture', 'embed-v1', 2, '[1.0,0.0]', 1.0, '01655b3a712fa992d2d1b41b16dfae912d48f8a0646436931cf9570cfd0e296e', 'af5f7676318b704dc7fb13d4aae3172e96e6591b4f367be9114774a3fe6861fc', '2026-01-01T00:00:00Z');
+            INSERT INTO memory_retrieval_logs (id, novel_id, query_hash, query_embedding_hash, filters_json, retrieval_mode, embedding_provider, embedding_model, embedding_dimension, fts_available, candidate_count, selected_chunk_ids_json, score_reasons_json, top_k, page_offset, token_budget, used_tokens, created_at)
+            VALUES ('memory-request-1', '{novel_id}', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', '01655b3a712fa992d2d1b41b16dfae912d48f8a0646436931cf9570cfd0e296e', '{{\"chapterId\":\"chapter-1\"}}', 'hybrid', 'fixture', 'embed-v1', 2, 1, 1, '[\"memory-chunk-1\"]', '[{{\"chunkId\":\"memory-chunk-1\",\"score\":{{\"finalScore\":1.0}}}}]', 5, 0, 100, 8, '2026-01-01T00:00:00Z');
+            INSERT INTO multi_agent_sessions (session_id, operation_id, novel_id, chapter_id, source_draft_id, source_draft_version, source_content_hash, expert_types_json, max_rounds, acceptance_threshold, minimum_average_score, minimum_successful_experts, status, current_round, accepted, final_action, final_draft_id, total_tokens_input, total_tokens_output, total_tokens_used, duration_ms, created_at, updated_at, completed_at)
+            VALUES ('session-1', 'operation-1', '{novel_id}', 'chapter-1', 'draft-1', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '[\"outline\",\"quality\"]', 2, 0.8, 80, 2, 'completed', 2, 1, 'accept', 'draft-2', 42, 18, 60, 200, '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z', '2026-01-01T00:02:00Z');
+            INSERT INTO multi_agent_rounds (session_id, round_number, input_draft_id, input_draft_version, input_content_hash, output_draft_id, output_draft_version, output_content_hash, agreed, acceptance_rate, average_score, successful_experts, failed_experts, required_successful_experts, action, major_concerns_json, merged_suggestions_json, tokens_input, tokens_output, tokens_used, duration_ms, started_at, completed_at)
+            VALUES ('session-1', 1, 'draft-1', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'draft-2', 1, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 0, 0.5, 75, 2, 0, 2, 'revise', '[\"节奏偏慢\"]', '[\"收紧冲突\"]', 20, 10, 30, 120, '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z');
+            INSERT INTO multi_agent_rounds (session_id, round_number, input_draft_id, input_draft_version, input_content_hash, agreed, acceptance_rate, average_score, successful_experts, failed_experts, required_successful_experts, action, major_concerns_json, merged_suggestions_json, tokens_input, tokens_output, tokens_used, duration_ms, started_at, completed_at)
+            VALUES ('session-1', 2, 'draft-2', 1, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 1, 1, 90, 2, 0, 2, 'accept', '[]', '[]', 22, 8, 30, 80, '2026-01-01T00:01:00Z', '2026-01-01T00:02:00Z');
+            INSERT INTO multi_agent_opinions (opinion_id, session_id, round_number, expert_type, status, score, accepted, summary, issues_json, suggestions_json, provider, model, ai_task_id, tokens_input, tokens_output, tokens_used, duration_ms)
+            VALUES ('opinion-1', 'session-1', 1, 'outline', 'succeeded', 80, 1, '结构基本成立', '[]', '[\"加强转折\"]', 'mock', 'deterministic', 'task-1', 10, 5, 15, 60);
+            INSERT INTO multi_agent_opinions (opinion_id, session_id, round_number, expert_type, status, score, accepted, summary, issues_json, suggestions_json, provider, model, ai_task_id, tokens_input, tokens_output, tokens_used, duration_ms)
+            VALUES ('opinion-2', 'session-1', 1, 'quality', 'succeeded', 70, 0, '需要修订节奏', '[\"节奏偏慢\"]', '[\"收紧冲突\"]', 'mock', 'deterministic', 'task-1', 10, 5, 15, 60);
+            INSERT INTO multi_agent_opinions (opinion_id, session_id, round_number, expert_type, status, score, accepted, summary, issues_json, suggestions_json, provider, model, ai_task_id, tokens_input, tokens_output, tokens_used, duration_ms)
+            VALUES ('opinion-3', 'session-1', 2, 'outline', 'succeeded', 92, 1, '结构通过', '[]', '[]', 'mock', 'deterministic', 'task-1', 11, 4, 15, 40);
+            INSERT INTO multi_agent_opinions (opinion_id, session_id, round_number, expert_type, status, score, accepted, summary, issues_json, suggestions_json, provider, model, ai_task_id, tokens_input, tokens_output, tokens_used, duration_ms)
+            VALUES ('opinion-4', 'session-1', 2, 'quality', 'succeeded', 88, 1, '质量通过', '[]', '[]', 'mock', 'deterministic', 'task-1', 11, 4, 15, 40);
             INSERT INTO chapter_engineering_states (id, novel_id, volume_id, chapter_id, chapter_card_json, scene_plan_json, created_at, updated_at) VALUES ('engineering-1', '{novel_id}', 'volume-1', 'chapter-1', '{{\"novelId\":\"{novel_id}\",\"chapterId\":\"chapter-1\"}}', '[{{\"characterId\":\"character-1\"}}]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
             INSERT INTO chapter_generation_snapshots (id, novel_id, volume_id, chapter_id, engineering_state_id, style_profile_id, output_profile_id, compiled_context_json, sources_json, created_at) VALUES ('snapshot-1', '{novel_id}', 'volume-1', 'chapter-1', 'engineering-1', 'style-1', 'output-1', '{{\"novelId\":\"{novel_id}\",\"chapterId\":\"chapter-1\",\"volumeId\":\"volume-1\",\"activeEngineeringState\":{{\"id\":\"engineering-1\"}},\"sources\":[{{\"sourceId\":\"style-1\"}}]}}', '[{{\"sourceId\":\"output-1\"}}]', '2026-01-01T00:00:00Z');
             INSERT INTO generation_jobs (id, novel_id, volume_id, chapter_id, job_type, created_at) VALUES ('job-1', '{novel_id}', 'volume-1', 'chapter-1', 'chapter_generation', '2026-01-01T00:00:00Z');
@@ -1228,6 +2507,12 @@ mod tests {
             "
         );
         conn.execute_batch(&sql).expect("seed full project");
+        seed_autonomous_plan(
+            conn,
+            novel_id,
+            "autonomous-plan-1",
+            "autonomous-operation-1",
+        );
     }
 
     fn assert_independent_value_remap(
@@ -1236,6 +2521,22 @@ mod tests {
         id_map: &BTreeMap<String, String>,
         path: &str,
     ) {
+        if path.starts_with("autonomous_story_plans")
+            && (path.ends_with(".request_hash")
+                || path.ends_with(".requestHash")
+                || path.ends_with(".plan_hash"))
+        {
+            let restored_hash = actual.as_str().expect("restored SHA-256 value");
+            assert_eq!(restored_hash.len(), 64, "{path}: invalid SHA-256 length");
+            assert!(
+                restored_hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+                "{path}: invalid SHA-256 format"
+            );
+            assert_ne!(actual, source, "{path}: hash was not refreshed");
+            return;
+        }
         match source {
             JsonValue::String(source_text) => {
                 if let Some(expected_id) = id_map.get(source_text) {
@@ -1363,11 +2664,22 @@ mod tests {
         let mut source = test_connection();
         seed_full_project(&source, "novel-source");
         let backup = export_project_backup_in_conn(&source, "novel-source").expect("export source");
+        assert_eq!(backup.tables["multi_agent_sessions"].len(), 1);
+        assert_eq!(backup.tables["multi_agent_rounds"].len(), 2);
+        assert_eq!(backup.tables["multi_agent_opinions"].len(), 4);
+        assert_eq!(backup.tables["autonomous_story_plans"].len(), 1);
+        assert_eq!(backup.tables["reference_works"].len(), 1);
+        assert_eq!(backup.tables["reference_imports"].len(), 1);
+        assert_eq!(backup.tables["reference_sections"].len(), 1);
         let serialized = serde_json::to_string(&backup).expect("serialize backup");
         assert!(!serialized.contains("must-not-export"));
         assert_eq!(backup.novel.get("cover_path"), Some(&JsonValue::Null));
         assert_eq!(
             backup.tables["imported_assets"][0].get("file_path"),
+            Some(&JsonValue::Null),
+        );
+        assert_eq!(
+            backup.tables["reference_imports"][0].get("source_file_path"),
             Some(&JsonValue::Null),
         );
         let deserialized =
@@ -1411,12 +2723,25 @@ mod tests {
             "protagonist-1",
             "volume-1",
             "chapter-1",
+            "reference-work-1",
+            "reference-import-1",
+            "reference-section-1",
+            "reference-operation-1",
             "style-1",
             "output-1",
             "asset-1",
             "character-1",
             "task-1",
             "draft-1",
+            "draft-2",
+            "session-1",
+            "operation-1",
+            "opinion-1",
+            "opinion-2",
+            "opinion-3",
+            "opinion-4",
+            "autonomous-plan-1",
+            "autonomous-operation-1",
             "engineering-1",
             "snapshot-1",
             "job-1",
@@ -1443,6 +2768,50 @@ mod tests {
             );
         }
         assert_backup_is_independently_remapped(&backup, &actual, &restored.id_map);
+
+        let restored_session_id = restored.id_map.get("session-1").expect("session ID map");
+        let restored_draft_id = restored.id_map.get("draft-2").expect("draft ID map");
+        let (final_draft_id, round_count, accepted): (String, i64, i64) = source
+            .query_row(
+                "SELECT final_draft_id, current_round, accepted FROM multi_agent_sessions WHERE session_id = ?1",
+                params![restored_session_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read restored Multi-Agent session");
+        assert_eq!(final_draft_id, *restored_draft_id);
+        assert_eq!((round_count, accepted), (2, 1));
+        let restored_opinion_count: i64 = source
+            .query_row(
+                "SELECT COUNT(*) FROM multi_agent_opinions WHERE session_id = ?1",
+                params![restored_session_id],
+                |row| row.get(0),
+            )
+            .expect("count restored Multi-Agent opinions");
+        assert_eq!(restored_opinion_count, 4);
+
+        let restored_plan_id = restored
+            .id_map
+            .get("autonomous-plan-1")
+            .expect("autonomous plan ID map");
+        let (stored_request_hash, stored_plan_hash, stored_plan_json): (String, String, String) =
+            source
+                .query_row(
+                    "SELECT request_hash, plan_hash, plan_json
+                     FROM autonomous_story_plans WHERE plan_id = ?1",
+                    params![restored_plan_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("read restored autonomous plan");
+        let restored_plan: JsonValue =
+            serde_json::from_str(&stored_plan_json).expect("parse restored autonomous plan");
+        assert_eq!(restored_plan["requestHash"], stored_request_hash);
+        assert_eq!(restored_plan["novelId"], restored.novel_id);
+        assert_eq!(restored_plan["planId"], *restored_plan_id);
+        let (canonical_plan, expected_plan_hash) =
+            autonomous_story_service::refresh_restored_plan_hashes(&mut restored_plan.clone())
+                .expect("recompute restored autonomous plan hashes");
+        assert_eq!(canonical_plan, stored_plan_json);
+        assert_eq!(expected_plan_hash, stored_plan_hash);
 
         let foreign_key_violations: i64 = source
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -1554,13 +2923,608 @@ mod tests {
     }
 
     #[test]
+    fn project_backup_schema_eight_recovers_interrupted_scheduler_with_fresh_identity_hashes() {
+        let source = test_connection();
+        seed_minimal_backup_project(&source, "novel-source");
+        seed_applied_autonomous_plan(&source, "novel-source");
+        seed_running_scheduler_fixture(&source, "novel-source");
+
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export scheduler");
+        backup.schema_version = 8;
+        keep_tables_for_declared_schema(&mut backup);
+        assert!(!backup.tables.contains_key("factions"));
+        assert_eq!(backup.tables["autonomous_book_runs"].len(), 1);
+        assert_eq!(backup.tables["autonomous_run_leases"].len(), 1);
+        assert_eq!(backup.tables["autonomous_run_chapter_attempts"].len(), 1);
+        assert_eq!(backup.tables["autonomous_run_checkpoints"].len(), 1);
+
+        for (table, column, stale) in [
+            ("autonomous_book_runs", "policy_hash", "1"),
+            ("autonomous_book_runs", "request_hash", "2"),
+            ("autonomous_run_chapter_attempts", "decision_hash", "3"),
+            ("autonomous_run_checkpoints", "payload_hash", "4"),
+        ] {
+            backup
+                .tables
+                .get_mut(table)
+                .and_then(|rows| rows.first_mut())
+                .expect("scheduler backup fixture")
+                .insert(column.to_string(), JsonValue::String(stale.repeat(64)));
+        }
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore schemaVersion 8 scheduler backup");
+        for table in [
+            "autonomous_book_runs",
+            "autonomous_run_leases",
+            "autonomous_run_chapter_attempts",
+            "autonomous_run_checkpoints",
+        ] {
+            assert_eq!(restored.restored_records[table], 1, "{table} row count");
+        }
+        for table in [
+            "factions",
+            "locations",
+            "faction_relations",
+            "location_links",
+            "character_factions",
+            "chapter_factions",
+            "chapter_locations",
+            "chapter_event_factions",
+            "chapter_event_locations",
+        ] {
+            assert_eq!(
+                restored.restored_records[table], 0,
+                "legacy {table} row count"
+            );
+        }
+
+        let restored_run_id = restored
+            .id_map
+            .get("scheduler-run-1")
+            .expect("scheduler run ID map");
+        let restored_plan_id = restored
+            .id_map
+            .get("autonomous-plan-1")
+            .expect("scheduler plan ID map");
+        let restored_chapter_id = restored
+            .id_map
+            .get("chapter-1")
+            .expect("scheduler chapter ID map");
+        let restored_lease_id = restored
+            .id_map
+            .get("scheduler-lease-1")
+            .expect("scheduler lease ID map");
+        let restored_attempt_id = restored
+            .id_map
+            .get("scheduler-attempt-1")
+            .expect("scheduler attempt ID map");
+        let restored_checkpoint_id = restored
+            .id_map
+            .get("scheduler-checkpoint-1")
+            .expect("scheduler checkpoint ID map");
+        for (source_id, restored_id) in [
+            ("scheduler-run-1", restored_run_id),
+            ("scheduler-lease-1", restored_lease_id),
+            ("scheduler-attempt-1", restored_attempt_id),
+            ("scheduler-checkpoint-1", restored_checkpoint_id),
+        ] {
+            assert_ne!(restored_id, source_id, "{source_id} was not remapped");
+        }
+
+        let (run_status, pause_reason, policy_json, policy_hash, request_hash): (
+            String,
+            Option<String>,
+            String,
+            String,
+            String,
+        ) = target
+            .query_row(
+                "SELECT status, pause_reason, policy_json, policy_hash, request_hash
+                 FROM autonomous_book_runs WHERE run_id = ?1",
+                params![restored_run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("read restored scheduler run");
+        assert_eq!(run_status, "queued");
+        assert_eq!(
+            pause_reason.as_deref(),
+            Some("restored_without_active_lease")
+        );
+        let expected_policy_hash = backup_text_hash(&policy_json);
+        assert_eq!(policy_hash, expected_policy_hash);
+        assert_ne!(policy_hash, "1".repeat(64));
+        let expected_request_hash = ai_fact_security::canonical_hash(&serde_json::json!({
+            "novelId": restored.novel_id,
+            "planId": restored_plan_id,
+            "policyHash": policy_hash,
+        }))
+        .expect("recompute restored scheduler request hash");
+        assert_eq!(request_hash, expected_request_hash);
+        assert_ne!(request_hash, "2".repeat(64));
+
+        let (lease_status, lease_owner, lease_token_hash, released_at): (
+            String,
+            String,
+            String,
+            Option<String>,
+        ) = target
+            .query_row(
+                "SELECT status, owner_id, token_hash, released_at
+                 FROM autonomous_run_leases WHERE lease_id = ?1",
+                params![restored_lease_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read restored scheduler lease");
+        assert_eq!(lease_status, "expired");
+        assert_eq!(lease_owner, "restored-project");
+        assert_eq!(lease_token_hash, backup_text_hash(restored_lease_id));
+        assert!(released_at.is_some());
+        let active_lease_count: i64 = target
+            .query_row(
+                "SELECT COUNT(*) FROM autonomous_run_leases WHERE status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count active restored scheduler leases");
+        assert_eq!(active_lease_count, 0);
+
+        let (attempt_status, decision_json, decision_hash, error_json, finished_at): (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+        ) = target
+            .query_row(
+                "SELECT status, decision_json, decision_hash, error_json, finished_at
+                 FROM autonomous_run_chapter_attempts WHERE attempt_id = ?1",
+                params![restored_attempt_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("read restored scheduler attempt");
+        assert_eq!(attempt_status, "abandoned");
+        assert_eq!(decision_hash, backup_text_hash(&decision_json));
+        assert_ne!(decision_hash, "3".repeat(64));
+        let decision: JsonValue =
+            serde_json::from_str(&decision_json).expect("parse restored scheduler decision");
+        assert_eq!(decision["runId"], *restored_run_id);
+        assert_eq!(decision["chapterId"], *restored_chapter_id);
+        let interrupted_error: JsonValue =
+            serde_json::from_str(&error_json).expect("parse restored scheduler error");
+        assert_eq!(interrupted_error["code"], "RESTORED_INTERRUPTED_ATTEMPT");
+        assert_eq!(interrupted_error["retryable"], true);
+        assert!(finished_at.is_some());
+
+        let (payload_json, payload_hash): (String, String) = target
+            .query_row(
+                "SELECT payload_json, payload_hash FROM autonomous_run_checkpoints
+                 WHERE checkpoint_id = ?1",
+                params![restored_checkpoint_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read restored scheduler checkpoint");
+        assert_eq!(payload_hash, backup_text_hash(&payload_json));
+        assert_ne!(payload_hash, "4".repeat(64));
+        let payload: JsonValue =
+            serde_json::from_str(&payload_json).expect("parse restored checkpoint payload");
+        assert_eq!(payload["runId"], *restored_run_id);
+        assert_eq!(payload["attemptId"], *restored_attempt_id);
+        assert_eq!(payload["chapterId"], *restored_chapter_id);
+    }
+
+    #[test]
+    fn project_backup_schema_nine_restores_out_of_order_story_asset_graph() {
+        let source = test_connection();
+        seed_minimal_backup_project(&source, "novel-source");
+        seed_story_asset_fixture(&source, "novel-source");
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export story assets");
+        assert_eq!(backup.schema_version, 9);
+
+        for (table, expected) in [
+            ("factions", 2),
+            ("locations", 2),
+            ("faction_relations", 1),
+            ("location_links", 1),
+            ("character_factions", 1),
+            ("chapter_factions", 1),
+            ("chapter_locations", 1),
+            ("chapter_event_factions", 1),
+            ("chapter_event_locations", 1),
+        ] {
+            assert_eq!(backup.tables[table].len(), expected, "exported {table}");
+        }
+        backup
+            .tables
+            .get_mut("locations")
+            .expect("location backup fixture")
+            .sort_by_key(|row| {
+                usize::from(row.get("id").and_then(JsonValue::as_str) != Some("location-child"))
+            });
+        assert_eq!(backup.tables["locations"][0]["id"], "location-child");
+        assert_eq!(
+            backup.tables["locations"][0]["parent_location_id"],
+            "location-root"
+        );
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore out-of-order story asset graph");
+        for (table, expected) in [
+            ("factions", 2),
+            ("locations", 2),
+            ("faction_relations", 1),
+            ("location_links", 1),
+            ("character_factions", 1),
+            ("chapter_factions", 1),
+            ("chapter_locations", 1),
+            ("chapter_event_factions", 1),
+            ("chapter_event_locations", 1),
+        ] {
+            assert_eq!(
+                restored.restored_records[table], expected,
+                "restored {table}"
+            );
+        }
+
+        let restored_child_id = restored
+            .id_map
+            .get("location-child")
+            .expect("child location ID map");
+        let restored_root_id = restored
+            .id_map
+            .get("location-root")
+            .expect("root location ID map");
+        let restored_parent_id: String = target
+            .query_row(
+                "SELECT parent_location_id FROM locations WHERE id = ?1",
+                params![restored_child_id],
+                |row| row.get(0),
+            )
+            .expect("read restored child location parent");
+        assert_eq!(restored_parent_id, *restored_root_id);
+
+        for (table, left_column, left_source, right_column, right_source) in [
+            (
+                "faction_relations",
+                "source_faction_id",
+                "faction-a",
+                "target_faction_id",
+                "faction-b",
+            ),
+            (
+                "location_links",
+                "source_location_id",
+                "location-root",
+                "target_location_id",
+                "location-child",
+            ),
+            (
+                "character_factions",
+                "character_id",
+                "character-1",
+                "faction_id",
+                "faction-a",
+            ),
+            (
+                "chapter_factions",
+                "chapter_id",
+                "chapter-1",
+                "faction_id",
+                "faction-b",
+            ),
+            (
+                "chapter_locations",
+                "chapter_id",
+                "chapter-1",
+                "location_id",
+                "location-child",
+            ),
+            (
+                "chapter_event_factions",
+                "chapter_event_id",
+                "event-1",
+                "faction_id",
+                "faction-a",
+            ),
+            (
+                "chapter_event_locations",
+                "chapter_event_id",
+                "event-1",
+                "location_id",
+                "location-child",
+            ),
+        ] {
+            let left_id = restored
+                .id_map
+                .get(left_source)
+                .unwrap_or_else(|| panic!("missing ID map for {left_source}"));
+            let right_id = restored
+                .id_map
+                .get(right_source)
+                .unwrap_or_else(|| panic!("missing ID map for {right_source}"));
+            let sql = format!(
+                "SELECT COUNT(*) FROM {table} WHERE {left_column} = ?1 AND {right_column} = ?2"
+            );
+            let relation_count: i64 = target
+                .query_row(&sql, params![left_id, right_id], |row| row.get(0))
+                .unwrap_or_else(|_| panic!("read restored relation from {table}"));
+            assert_eq!(relation_count, 1, "restored relation in {table}");
+        }
+
+        let foreign_key_violations: i64 = target
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .expect("story asset foreign key check");
+        assert_eq!(foreign_key_violations, 0);
+    }
+
+    #[test]
+    fn project_cleanup_removes_scheduler_and_assets_then_restores_checkpoint_trigger() {
+        let mut connection = test_connection();
+        seed_minimal_backup_project(&connection, "novel-source");
+        seed_applied_autonomous_plan(&connection, "novel-source");
+        seed_running_scheduler_fixture(&connection, "novel-source");
+        seed_story_asset_fixture(&connection, "novel-source");
+        let backup = export_project_backup_in_conn(&connection, "novel-source")
+            .expect("export cleanup fixture");
+
+        {
+            let tx = connection
+                .transaction()
+                .expect("start project cleanup transaction");
+            purge_project_in_tx(&tx, "novel-source").expect("purge scheduler and story assets");
+            tx.commit().expect("commit project cleanup transaction");
+        }
+
+        let novel_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM novels", [], |row| row.get(0))
+            .expect("count novels after project cleanup");
+        assert_eq!(novel_count, 0);
+        for table in [
+            "autonomous_story_plans",
+            "autonomous_book_runs",
+            "autonomous_run_leases",
+            "autonomous_run_chapter_attempts",
+            "autonomous_run_checkpoints",
+            "factions",
+            "locations",
+            "faction_relations",
+            "location_links",
+            "character_factions",
+            "chapter_factions",
+            "chapter_locations",
+            "chapter_event_factions",
+            "chapter_event_locations",
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap_or_else(|_| panic!("count {table} after project cleanup"));
+            assert_eq!(count, 0, "project cleanup left {table} rows");
+        }
+        let trigger_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'trigger'
+                   AND name = 'trg_autonomous_run_checkpoints_append_only_delete'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("confirm checkpoint delete trigger was restored");
+        assert_eq!(trigger_count, 1);
+
+        let restored = restore_project_backup_in_conn(&mut connection, &backup)
+            .expect("restore cleanup fixture after purge");
+        let restored_checkpoint_id = restored
+            .id_map
+            .get("scheduler-checkpoint-1")
+            .expect("restored checkpoint ID map");
+        let delete_error = connection
+            .execute(
+                "DELETE FROM autonomous_run_checkpoints WHERE checkpoint_id = ?1",
+                params![restored_checkpoint_id],
+            )
+            .expect_err("restored checkpoint delete trigger must remain active");
+        assert!(delete_error.to_string().contains("append only"));
+    }
+
+    #[test]
+    fn project_backup_autonomous_plans_are_project_isolated() {
+        let source = test_connection();
+        source
+            .execute_batch(
+                "INSERT INTO novels (id,title,status,created_at,updated_at)
+                 VALUES ('novel-source','Source','draft','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
+                 INSERT INTO novels (id,title,status,created_at,updated_at)
+                 VALUES ('novel-other','Other','draft','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');",
+            )
+            .expect("seed isolated novels");
+        seed_autonomous_plan(&source, "novel-source", "plan-source", "operation-source");
+        seed_autonomous_plan(&source, "novel-other", "plan-other", "operation-other");
+
+        let backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export source plan");
+        assert_eq!(backup.schema_version, 9);
+        let plans = &backup.tables["autonomous_story_plans"];
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0]["plan_id"], "plan-source");
+        let serialized = serde_json::to_string(&backup).expect("serialize isolated backup");
+        assert!(!serialized.contains("plan-other"));
+        assert!(!serialized.contains("operation-other"));
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore isolated autonomous plan");
+        assert_eq!(restored.restored_records["autonomous_story_plans"], 1);
+        let restored_plan_count: i64 = target
+            .query_row(
+                "SELECT COUNT(*) FROM autonomous_story_plans WHERE novel_id = ?1",
+                params![restored.novel_id],
+                |row| row.get(0),
+            )
+            .expect("count isolated restored plans");
+        assert_eq!(restored_plan_count, 1);
+    }
+
+    #[test]
+    fn project_backup_schema_four_restores_without_autonomous_plans() {
+        let source = test_connection();
+        seed_full_project(&source, "novel-source");
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export source");
+        backup.schema_version = 4;
+        keep_tables_for_declared_schema(&mut backup);
+        for table in [
+            "autonomous_story_plans",
+            "reference_works",
+            "reference_imports",
+            "reference_sections",
+            "memory_documents",
+            "memory_chunks",
+            "memory_embeddings",
+            "memory_retrieval_logs",
+        ] {
+            backup.tables.remove(table);
+        }
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore schemaVersion 4 backup");
+        assert_eq!(restored.restored_records["autonomous_story_plans"], 0);
+        let count: i64 = target
+            .query_row("SELECT COUNT(*) FROM autonomous_story_plans", [], |row| {
+                row.get(0)
+            })
+            .expect("count restored autonomous plans");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn project_backup_schema_five_restores_without_reference_library() {
+        let source = test_connection();
+        seed_full_project(&source, "novel-source");
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export source");
+        backup.schema_version = 5;
+        keep_tables_for_declared_schema(&mut backup);
+        for table in [
+            "reference_works",
+            "reference_imports",
+            "reference_sections",
+            "memory_documents",
+            "memory_chunks",
+            "memory_embeddings",
+            "memory_retrieval_logs",
+        ] {
+            backup.tables.remove(table);
+        }
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore schemaVersion 5 backup");
+        assert_eq!(restored.restored_records["reference_works"], 0);
+        assert_eq!(restored.restored_records["reference_imports"], 0);
+        assert_eq!(restored.restored_records["reference_sections"], 0);
+    }
+
+    #[test]
+    fn project_backup_schema_six_restores_without_memory_tables() {
+        let source = test_connection();
+        seed_full_project(&source, "novel-source");
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export source");
+        backup.schema_version = 6;
+        keep_tables_for_declared_schema(&mut backup);
+        for table in [
+            "memory_documents",
+            "memory_chunks",
+            "memory_embeddings",
+            "memory_retrieval_logs",
+        ] {
+            backup.tables.remove(table);
+        }
+
+        let mut target = test_connection();
+        let restored = restore_project_backup_in_conn(&mut target, &backup)
+            .expect("restore schemaVersion 6 backup");
+        assert_eq!(restored.restored_records["memory_documents"], 0);
+        assert_eq!(restored.restored_records["memory_chunks"], 0);
+        assert_eq!(restored.restored_records["memory_embeddings"], 0);
+        assert_eq!(restored.restored_records["memory_retrieval_logs"], 0);
+    }
+
+    #[test]
+    fn project_backup_rejects_tampered_reference_content_without_partial_write() {
+        let source = test_connection();
+        seed_full_project(&source, "novel-source");
+        let mut backup =
+            export_project_backup_in_conn(&source, "novel-source").expect("export source");
+        backup
+            .tables
+            .get_mut("reference_sections")
+            .and_then(|rows| rows.first_mut())
+            .expect("reference section fixture")
+            .insert(
+                "content".to_string(),
+                JsonValue::String("篡改正文".to_string()),
+            );
+
+        let mut target = test_connection();
+        let error = restore_project_backup_in_conn(&mut target, &backup)
+            .expect_err("tampered reference content must fail");
+        assert!(error.contains("参考章节正文已被篡改"));
+        let novel_count: i64 = target
+            .query_row("SELECT COUNT(*) FROM novels", [], |row| row.get(0))
+            .expect("count novels after rejected restore");
+        assert_eq!(novel_count, 0);
+    }
+
+    #[test]
     fn project_backup_schema_two_restores_without_quality_state_table() {
         let source = test_connection();
         seed_full_project(&source, "novel-source");
         let mut backup =
             export_project_backup_in_conn(&source, "novel-source").expect("export source");
         backup.schema_version = 2;
-        backup.tables.remove("quality_issue_states");
+        keep_tables_for_declared_schema(&mut backup);
+        for table in [
+            "quality_issue_states",
+            "multi_agent_sessions",
+            "multi_agent_rounds",
+            "multi_agent_opinions",
+            "autonomous_story_plans",
+            "reference_works",
+            "reference_imports",
+            "reference_sections",
+            "memory_documents",
+            "memory_chunks",
+            "memory_embeddings",
+            "memory_retrieval_logs",
+        ] {
+            backup.tables.remove(table);
+        }
         let first_issue = backup
             .tables
             .get_mut("quality_check_items")
@@ -1772,5 +3736,107 @@ mod tests {
             .expect("corrupt source large text");
 
         assert!(export_project_backup_in_conn(&source, "novel-source").is_err());
+    }
+
+    #[test]
+    fn project_backup_round_trips_large_reference_section_content() {
+        let mut source = test_connection();
+        source
+            .execute(
+                "INSERT INTO novels (id, title, created_at, updated_at)
+                 VALUES ('reference-large-source', '大章节备份', 'now', 'now')",
+                [],
+            )
+            .expect("seed reference novel");
+        let content = "参考章节🙂\r\nASCII words\r\n".repeat(12_000);
+        let content_hash = crate::repositories::large_text_repository::sha256(&content);
+        crate::repositories::large_text_repository::insert_document_for_target(
+            &source,
+            "reference-import-document",
+            "reference_import",
+            "reference-import-large",
+            "source_text",
+            Some("reference.txt"),
+            &content,
+            &content_hash,
+            "now",
+        )
+        .expect("store reference import large text");
+        crate::repositories::large_text_repository::insert_document_for_target(
+            &source,
+            "reference-section-document",
+            "reference_section",
+            "reference-section-large",
+            "content",
+            Some("全文"),
+            &content,
+            &content_hash,
+            "now",
+        )
+        .expect("store reference section large text");
+        source
+            .execute(
+                "INSERT INTO reference_works
+                    (id, novel_id, title, purpose, revision, created_at, updated_at)
+                 VALUES ('reference-work-large', 'reference-large-source', '参考作品',
+                         'style', 1, 'now', 'now')",
+                [],
+            )
+            .expect("seed reference work");
+        source
+            .execute(
+                "INSERT INTO reference_imports
+                    (id, reference_work_id, novel_id, version_no, is_current, operation_id,
+                     request_hash, file_name, source_format, source_sha256, source_byte_count,
+                     selected_encoding, encoding_source, decoded_text_sha256,
+                     decoded_char_count, decoded_utf8_byte_count, source_text, large_text_ref_id,
+                     section_count, parser_version, section_plan_sha256, warnings_json, imported_at)
+                 VALUES ('reference-import-large', 'reference-work-large',
+                         'reference-large-source', 1, 1, 'reference-operation-large', ?1,
+                         'reference.txt', 'txt', ?2, ?3, 'utf-8', 'utf8_valid', ?2,
+                         ?4, ?3, ?5, 'reference-import-document', 1,
+                         'reference_txt_parser_v1', ?6, '[]', 'now')",
+                params![
+                    "a".repeat(64),
+                    content_hash,
+                    content.len() as i64,
+                    content.chars().count() as i64,
+                    content.chars().take(4_000).collect::<String>(),
+                    "b".repeat(64),
+                ],
+            )
+            .expect("seed reference import");
+        source
+            .execute(
+                "INSERT INTO reference_sections
+                    (id, reference_import_id, reference_work_id, novel_id, order_index,
+                     section_kind, title, content, large_text_ref_id, content_hash, char_count,
+                     utf8_byte_count, source_start_utf16, source_end_utf16, created_at)
+                 VALUES ('reference-section-large', 'reference-import-large',
+                         'reference-work-large', 'reference-large-source', 1, 'unstructured',
+                         '全文', ?1, 'reference-section-document', ?2, ?3, ?4, 0, ?5, 'now')",
+                params![
+                    content.chars().take(4_000).collect::<String>(),
+                    content_hash,
+                    content.chars().count() as i64,
+                    content.len() as i64,
+                    content.encode_utf16().count() as i64,
+                ],
+            )
+            .expect("seed reference section");
+
+        let backup = export_project_backup_in_conn(&source, "reference-large-source")
+            .expect("export large reference section");
+        let restored = restore_project_backup_in_conn(&mut source, &backup)
+            .expect("restore large reference section");
+        let section = crate::services::reference_library_service::get_section_content(
+            &source,
+            &restored.novel_id,
+            restored.id_map["reference-work-large"].as_str(),
+            restored.id_map["reference-import-large"].as_str(),
+            restored.id_map["reference-section-large"].as_str(),
+        )
+        .expect("read restored large reference section");
+        assert_eq!(section.content, content);
     }
 }

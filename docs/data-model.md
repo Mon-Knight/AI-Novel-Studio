@@ -5,7 +5,7 @@
 项目路径：F:\ai-novel-studio  
 目标平台：Windows 桌面端  
 技术路线：Tauri + React + TypeScript + SQLite  
-开发方式：VS Code + Copilot / Agent 辅助开发  
+开发方式：VS Code + Copilot / Agent 辅助开发
 
 ---
 
@@ -162,6 +162,13 @@ AI Novel Studio 数据模块
 ├─ output_profiles           输出控制方案
 ├─ chapter_summaries         章节总结
 ├─ context_records           上下文记录
+├─ reference_works           独立参考作品
+├─ reference_imports         不可变导入版本
+├─ reference_sections        可重建章节派生记录
+├─ memory_documents          可失效的长期 Memory 来源版本
+├─ memory_chunks             结构化 Memory 片段
+├─ memory_embeddings         显式真实向量
+├─ memory_retrieval_logs     检索审计
 ├─ prompt_templates          提示词模板
 ├─ ai_task_records           AI 任务记录
 ├─ imported_assets           导入文件记录
@@ -196,6 +203,15 @@ chapters 1 ─── N ai_task_records
 novels 1 ─── N context_records
 chapters 1 ─── N context_records
 
+novels 1 ─── N reference_works
+reference_works 1 ─── N reference_imports
+reference_imports 1 ─── N reference_sections
+
+novels 1 ─── N memory_documents
+memory_documents 1 ─── N memory_chunks
+memory_chunks 1 ─── N memory_embeddings
+novels 1 ─── N memory_retrieval_logs
+
 novels 1 ─── N imported_assets
 ```
 
@@ -225,6 +241,17 @@ erDiagram
 
     novels ||--o{ context_records : has
     chapters ||--o{ context_records : produces
+
+    novels ||--o{ reference_works : has
+    reference_works ||--o{ reference_imports : versions
+    reference_imports ||--o{ reference_sections : derives
+
+    novels ||--o{ memory_documents : has
+    chapters ||--o{ memory_documents : scopes
+    chapter_drafts ||--o{ memory_documents : grounds
+    memory_documents ||--o{ memory_chunks : contains
+    memory_chunks ||--o{ memory_embeddings : embeds
+    novels ||--o{ memory_retrieval_logs : audits
 
     novels ||--o{ ai_task_records : has
     chapters ||--o{ ai_task_records : related_to
@@ -318,12 +345,7 @@ SQLite 中可用 `TEXT` 保存时间。
 ## 7.1 小说状态 NovelStatus
 
 ```ts
-export type NovelStatus =
-  | "draft"
-  | "writing"
-  | "paused"
-  | "completed"
-  | "archived";
+export type NovelStatus = 'draft' | 'writing' | 'paused' | 'completed' | 'archived';
 ```
 
 含义：
@@ -342,13 +364,13 @@ archived    已归档
 
 ```ts
 export type ChapterStatus =
-  | "not_started"
-  | "outline_ready"
-  | "draft_generated"
-  | "editing"
-  | "polished"
-  | "adopted"
-  | "summarized";
+  | 'not_started'
+  | 'outline_ready'
+  | 'draft_generated'
+  | 'editing'
+  | 'polished'
+  | 'adopted'
+  | 'summarized';
 ```
 
 含义：
@@ -369,11 +391,7 @@ summarized        已总结
 
 ```ts
 export type DraftSource =
-  | "ai_generated"
-  | "ai_regenerated"
-  | "user_edited"
-  | "ai_polished"
-  | "imported";
+  'ai_generated' | 'ai_regenerated' | 'user_edited' | 'ai_polished' | 'imported';
 ```
 
 含义：
@@ -392,20 +410,20 @@ imported           导入正文
 
 ```ts
 export type AiTaskType =
-  | "setting_structure"
-  | "rule_structure"
-  | "protagonist_structure"
-  | "volume_outline_expand"
-  | "chapter_outline_generate"
-  | "style_analyze"
-  | "character_generate"
-  | "event_suggest"
-  | "chapter_generate"
-  | "chapter_rewrite"
-  | "chapter_polish"
-  | "quality_check"
-  | "chapter_summarize"
-  | "context_update";
+  | 'setting_structure'
+  | 'rule_structure'
+  | 'protagonist_structure'
+  | 'volume_outline_expand'
+  | 'chapter_outline_generate'
+  | 'style_analyze'
+  | 'character_generate'
+  | 'event_suggest'
+  | 'chapter_generate'
+  | 'chapter_rewrite'
+  | 'chapter_polish'
+  | 'quality_check'
+  | 'chapter_summarize'
+  | 'context_update';
 ```
 
 ---
@@ -413,12 +431,7 @@ export type AiTaskType =
 ## 7.5 AI 任务状态 AiTaskStatus
 
 ```ts
-export type AiTaskStatus =
-  | "pending"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled";
+export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 ```
 
 ---
@@ -426,11 +439,7 @@ export type AiTaskStatus =
 ## 7.6 风格来源 StyleSourceType
 
 ```ts
-export type StyleSourceType =
-  | "manual"
-  | "txt_analysis"
-  | "json_import"
-  | "system_default";
+export type StyleSourceType = 'manual' | 'txt_analysis' | 'json_import' | 'system_default';
 ```
 
 ---
@@ -439,12 +448,7 @@ export type StyleSourceType =
 
 ```ts
 export type ChapterEventStatus =
-  | "candidate"
-  | "selected"
-  | "required"
-  | "forbidden"
-  | "adopted"
-  | "discarded";
+  'candidate' | 'selected' | 'required' | 'forbidden' | 'adopted' | 'discarded';
 ```
 
 ---
@@ -461,23 +465,23 @@ export type ChapterEventStatus =
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| title | TEXT | 是 | 作品名称 |
-| subtitle | TEXT | 否 | 副标题 |
-| genre | TEXT | 否 | 题材，例如玄幻、科幻、奇幻、都市 |
-| description | TEXT | 否 | 作品简介 |
-| cover_path | TEXT | 否 | 本地封面路径 |
-| status | TEXT | 是 | draft / writing / paused / completed / archived |
-| current_volume_id | TEXT | 否 | 当前写作分卷 |
-| current_chapter_id | TEXT | 否 | 当前写作章节 |
-| total_word_count | INTEGER | 是 | 总字数 |
-| target_word_count | INTEGER | 否 | 目标总字数 |
-| last_opened_at | TEXT | 否 | 最近打开时间 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
-| deleted_at | TEXT | 否 | 软删除时间 |
+| 字段名             | 类型    | 必填 | 说明                                            |
+| ------------------ | ------- | ---: | ----------------------------------------------- |
+| id                 | TEXT    |   是 | UUID 主键                                       |
+| title              | TEXT    |   是 | 作品名称                                        |
+| subtitle           | TEXT    |   否 | 副标题                                          |
+| genre              | TEXT    |   否 | 题材，例如玄幻、科幻、奇幻、都市                |
+| description        | TEXT    |   否 | 作品简介                                        |
+| cover_path         | TEXT    |   否 | 本地封面路径                                    |
+| status             | TEXT    |   是 | draft / writing / paused / completed / archived |
+| current_volume_id  | TEXT    |   否 | 当前写作分卷                                    |
+| current_chapter_id | TEXT    |   否 | 当前写作章节                                    |
+| total_word_count   | INTEGER |   是 | 总字数                                          |
+| target_word_count  | INTEGER |   否 | 目标总字数                                      |
+| last_opened_at     | TEXT    |   否 | 最近打开时间                                    |
+| created_at         | TEXT    |   是 | 创建时间                                        |
+| updated_at         | TEXT    |   是 | 更新时间                                        |
+| deleted_at         | TEXT    |   否 | 软删除时间                                      |
 
 ## SQLite 建表示例
 
@@ -533,19 +537,19 @@ export interface Novel {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| title | TEXT | 是 | 分卷名称 |
-| summary | TEXT | 否 | 分卷简介 |
-| goal | TEXT | 否 | 分卷目标 |
-| main_conflict | TEXT | 否 | 分卷主要矛盾 |
-| order_index | INTEGER | 是 | 排序 |
-| status | TEXT | 是 | planned / writing / completed |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
-| deleted_at | TEXT | 否 | 软删除时间 |
+| 字段名        | 类型    | 必填 | 说明                          |
+| ------------- | ------- | ---: | ----------------------------- |
+| id            | TEXT    |   是 | UUID 主键                     |
+| novel_id      | TEXT    |   是 | 所属小说                      |
+| title         | TEXT    |   是 | 分卷名称                      |
+| summary       | TEXT    |   否 | 分卷简介                      |
+| goal          | TEXT    |   否 | 分卷目标                      |
+| main_conflict | TEXT    |   否 | 分卷主要矛盾                  |
+| order_index   | INTEGER |   是 | 排序                          |
+| status        | TEXT    |   是 | planned / writing / completed |
+| created_at    | TEXT    |   是 | 创建时间                      |
+| updated_at    | TEXT    |   是 | 更新时间                      |
+| deleted_at    | TEXT    |   否 | 软删除时间                    |
 
 ## SQLite 建表示例
 
@@ -577,7 +581,7 @@ export interface Volume {
   goal?: string;
   mainConflict?: string;
   orderIndex: number;
-  status: "planned" | "writing" | "completed";
+  status: 'planned' | 'writing' | 'completed';
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -596,22 +600,22 @@ export interface Volume {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| volume_id | TEXT | 否 | 所属分卷 |
-| title | TEXT | 是 | 章节标题 |
-| outline | TEXT | 否 | 章节大纲 |
-| goal | TEXT | 否 | 本章目标 |
-| order_index | INTEGER | 是 | 排序 |
-| status | TEXT | 是 | 章节状态 |
-| adopted_draft_id | TEXT | 否 | 已采用正文版本 |
-| word_count | INTEGER | 是 | 当前正式字数 |
-| target_word_count | INTEGER | 否 | 目标字数 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
-| deleted_at | TEXT | 否 | 软删除时间 |
+| 字段名            | 类型    | 必填 | 说明           |
+| ----------------- | ------- | ---: | -------------- |
+| id                | TEXT    |   是 | UUID 主键      |
+| novel_id          | TEXT    |   是 | 所属小说       |
+| volume_id         | TEXT    |   否 | 所属分卷       |
+| title             | TEXT    |   是 | 章节标题       |
+| outline           | TEXT    |   否 | 章节大纲       |
+| goal              | TEXT    |   否 | 本章目标       |
+| order_index       | INTEGER |   是 | 排序           |
+| status            | TEXT    |   是 | 章节状态       |
+| adopted_draft_id  | TEXT    |   否 | 已采用正文版本 |
+| word_count        | INTEGER |   是 | 当前正式字数   |
+| target_word_count | INTEGER |   否 | 目标字数       |
+| created_at        | TEXT    |   是 | 创建时间       |
+| updated_at        | TEXT    |   是 | 更新时间       |
+| deleted_at        | TEXT    |   否 | 软删除时间     |
 
 ## SQLite 建表示例
 
@@ -677,21 +681,21 @@ export interface Chapter {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| chapter_id | TEXT | 是 | 所属章节 |
-| title | TEXT | 否 | 草稿标题 |
-| content | TEXT | 是 | 正文内容 |
-| source | TEXT | 是 | ai_generated / user_edited / ai_polished 等 |
-| version_no | INTEGER | 是 | 版本号 |
-| word_count | INTEGER | 是 | 字数 |
-| is_adopted | INTEGER | 是 | 是否采用，0/1 |
-| ai_task_id | TEXT | 否 | 来源 AI 任务 |
-| note | TEXT | 否 | 用户备注 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名     | 类型    | 必填 | 说明                                        |
+| ---------- | ------- | ---: | ------------------------------------------- |
+| id         | TEXT    |   是 | UUID 主键                                   |
+| novel_id   | TEXT    |   是 | 所属小说                                    |
+| chapter_id | TEXT    |   是 | 所属章节                                    |
+| title      | TEXT    |   否 | 草稿标题                                    |
+| content    | TEXT    |   是 | 正文内容                                    |
+| source     | TEXT    |   是 | ai_generated / user_edited / ai_polished 等 |
+| version_no | INTEGER |   是 | 版本号                                      |
+| word_count | INTEGER |   是 | 字数                                        |
+| is_adopted | INTEGER |   是 | 是否采用，0/1                               |
+| ai_task_id | TEXT    |   否 | 来源 AI 任务                                |
+| note       | TEXT    |   否 | 用户备注                                    |
+| created_at | TEXT    |   是 | 创建时间                                    |
+| updated_at | TEXT    |   是 | 更新时间                                    |
 
 ## SQLite 建表示例
 
@@ -760,16 +764,16 @@ export interface ChapterDraft {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| title | TEXT | 是 | 设定标题 |
-| content | TEXT | 是 | 世界背景正文 |
-| structured_json | TEXT | 否 | AI 结构化整理结果 |
-| is_active | INTEGER | 是 | 是否当前启用 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名          | 类型    | 必填 | 说明              |
+| --------------- | ------- | ---: | ----------------- |
+| id              | TEXT    |   是 | UUID 主键         |
+| novel_id        | TEXT    |   是 | 所属小说          |
+| title           | TEXT    |   是 | 设定标题          |
+| content         | TEXT    |   是 | 世界背景正文      |
+| structured_json | TEXT    |   否 | AI 结构化整理结果 |
+| is_active       | INTEGER |   是 | 是否当前启用      |
+| created_at      | TEXT    |   是 | 创建时间          |
+| updated_at      | TEXT    |   是 | 更新时间          |
 
 ## TypeScript 类型
 
@@ -796,18 +800,18 @@ export interface WorldSetting {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| title | TEXT | 是 | 规则体系名称 |
-| category | TEXT | 否 | magic / technology / cultivation / combat / social 等 |
-| content | TEXT | 是 | 规则内容 |
-| forbidden_rules | TEXT | 否 | 禁止违背内容 |
-| structured_json | TEXT | 否 | AI 结构化结果 |
-| is_active | INTEGER | 是 | 是否启用 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名          | 类型    | 必填 | 说明                                                  |
+| --------------- | ------- | ---: | ----------------------------------------------------- |
+| id              | TEXT    |   是 | UUID 主键                                             |
+| novel_id        | TEXT    |   是 | 所属小说                                              |
+| title           | TEXT    |   是 | 规则体系名称                                          |
+| category        | TEXT    |   否 | magic / technology / cultivation / combat / social 等 |
+| content         | TEXT    |   是 | 规则内容                                              |
+| forbidden_rules | TEXT    |   否 | 禁止违背内容                                          |
+| structured_json | TEXT    |   否 | AI 结构化结果                                         |
+| is_active       | INTEGER |   是 | 是否启用                                              |
+| created_at      | TEXT    |   是 | 创建时间                                              |
+| updated_at      | TEXT    |   是 | 更新时间                                              |
 
 ## TypeScript 类型
 
@@ -816,7 +820,7 @@ export interface RuleSystem {
   id: string;
   novelId: string;
   title: string;
-  category?: "magic" | "technology" | "cultivation" | "combat" | "social" | "other";
+  category?: 'magic' | 'technology' | 'cultivation' | 'combat' | 'social' | 'other';
   content: string;
   forbiddenRules?: string;
   structuredJson?: string;
@@ -838,20 +842,20 @@ export interface RuleSystem {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| name | TEXT | 是 | 主角姓名 |
-| identity | TEXT | 否 | 身份 |
-| personality | TEXT | 否 | 性格 |
-| goal | TEXT | 否 | 长期目标 |
-| special_ability | TEXT | 否 | 特殊能力 |
-| ability_limits | TEXT | 否 | 能力限制 |
-| forbidden_behaviors | TEXT | 否 | 不能做出的行为 |
-| current_state | TEXT | 否 | 当前状态 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名              | 类型 | 必填 | 说明           |
+| ------------------- | ---- | ---: | -------------- |
+| id                  | TEXT |   是 | UUID 主键      |
+| novel_id            | TEXT |   是 | 所属小说       |
+| name                | TEXT |   是 | 主角姓名       |
+| identity            | TEXT |   否 | 身份           |
+| personality         | TEXT |   否 | 性格           |
+| goal                | TEXT |   否 | 长期目标       |
+| special_ability     | TEXT |   否 | 特殊能力       |
+| ability_limits      | TEXT |   否 | 能力限制       |
+| forbidden_behaviors | TEXT |   否 | 不能做出的行为 |
+| current_state       | TEXT |   否 | 当前状态       |
+| created_at          | TEXT |   是 | 创建时间       |
+| updated_at          | TEXT |   是 | 更新时间       |
 
 ## TypeScript 类型
 
@@ -886,25 +890,25 @@ AI 候选角色被用户选择后，才进入正式角色库。
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| name | TEXT | 是 | 角色姓名 |
-| role_type | TEXT | 否 | protagonist / supporting / antagonist / neutral |
-| identity | TEXT | 否 | 身份 |
-| faction | TEXT | 否 | 阵营 |
-| relation_to_protagonist | TEXT | 否 | 与主角关系 |
-| goal | TEXT | 否 | 当前目标 |
-| personality | TEXT | 否 | 性格特点 |
-| behavior_limits | TEXT | 否 | 行为边界 |
-| forbidden_behaviors | TEXT | 否 | 不能做出的行为 |
-| first_appearance_chapter_id | TEXT | 否 | 首次出场章节 |
-| current_state | TEXT | 否 | 当前状态 |
-| source | TEXT | 是 | manual / ai_generated |
-| is_active | INTEGER | 是 | 是否启用 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名                      | 类型    | 必填 | 说明                                            |
+| --------------------------- | ------- | ---: | ----------------------------------------------- |
+| id                          | TEXT    |   是 | UUID 主键                                       |
+| novel_id                    | TEXT    |   是 | 所属小说                                        |
+| name                        | TEXT    |   是 | 角色姓名                                        |
+| role_type                   | TEXT    |   否 | protagonist / supporting / antagonist / neutral |
+| identity                    | TEXT    |   否 | 身份                                            |
+| faction                     | TEXT    |   否 | 阵营                                            |
+| relation_to_protagonist     | TEXT    |   否 | 与主角关系                                      |
+| goal                        | TEXT    |   否 | 当前目标                                        |
+| personality                 | TEXT    |   否 | 性格特点                                        |
+| behavior_limits             | TEXT    |   否 | 行为边界                                        |
+| forbidden_behaviors         | TEXT    |   否 | 不能做出的行为                                  |
+| first_appearance_chapter_id | TEXT    |   否 | 首次出场章节                                    |
+| current_state               | TEXT    |   否 | 当前状态                                        |
+| source                      | TEXT    |   是 | manual / ai_generated                           |
+| is_active                   | INTEGER |   是 | 是否启用                                        |
+| created_at                  | TEXT    |   是 | 创建时间                                        |
+| updated_at                  | TEXT    |   是 | 更新时间                                        |
 
 ## SQLite 建表示例
 
@@ -939,7 +943,7 @@ export interface Character {
   id: string;
   novelId: string;
   name: string;
-  roleType?: "protagonist" | "supporting" | "antagonist" | "neutral";
+  roleType?: 'protagonist' | 'supporting' | 'antagonist' | 'neutral';
   identity?: string;
   faction?: string;
   relationToProtagonist?: string;
@@ -949,7 +953,7 @@ export interface Character {
   forbiddenBehaviors?: string;
   firstAppearanceChapterId?: string;
   currentState?: string;
-  source: "manual" | "ai_generated";
+  source: 'manual' | 'ai_generated';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -976,19 +980,19 @@ export interface Character {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| character_id | TEXT | 是 | 角色 ID |
-| chapter_id | TEXT | 否 | 产生该状态的章节 |
-| state_summary | TEXT | 是 | 状态摘要 |
-| relationship_changes | TEXT | 否 | 关系变化 |
-| goal_changes | TEXT | 否 | 目标变化 |
-| location | TEXT | 否 | 当前地点 |
-| health_state | TEXT | 否 | 身体状态 |
-| knowledge_state | TEXT | 否 | 已知信息 |
-| created_at | TEXT | 是 | 创建时间 |
+| 字段名               | 类型 | 必填 | 说明             |
+| -------------------- | ---- | ---: | ---------------- |
+| id                   | TEXT |   是 | UUID 主键        |
+| novel_id             | TEXT |   是 | 所属小说         |
+| character_id         | TEXT |   是 | 角色 ID          |
+| chapter_id           | TEXT |   否 | 产生该状态的章节 |
+| state_summary        | TEXT |   是 | 状态摘要         |
+| relationship_changes | TEXT |   否 | 关系变化         |
+| goal_changes         | TEXT |   否 | 目标变化         |
+| location             | TEXT |   否 | 当前地点         |
+| health_state         | TEXT |   否 | 身体状态         |
+| knowledge_state      | TEXT |   否 | 已知信息         |
+| created_at           | TEXT |   是 | 创建时间         |
 
 ## TypeScript 类型
 
@@ -1020,18 +1024,18 @@ export interface CharacterState {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| volume_id | TEXT | 否 | 所属分卷 |
-| chapter_id | TEXT | 否 | 所属章节 |
-| outline_type | TEXT | 是 | novel / volume / chapter |
-| title | TEXT | 是 | 大纲标题 |
-| content | TEXT | 是 | 大纲内容 |
-| order_index | INTEGER | 是 | 排序 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名       | 类型    | 必填 | 说明                     |
+| ------------ | ------- | ---: | ------------------------ |
+| id           | TEXT    |   是 | UUID 主键                |
+| novel_id     | TEXT    |   是 | 所属小说                 |
+| volume_id    | TEXT    |   否 | 所属分卷                 |
+| chapter_id   | TEXT    |   否 | 所属章节                 |
+| outline_type | TEXT    |   是 | novel / volume / chapter |
+| title        | TEXT    |   是 | 大纲标题                 |
+| content      | TEXT    |   是 | 大纲内容                 |
+| order_index  | INTEGER |   是 | 排序                     |
+| created_at   | TEXT    |   是 | 创建时间                 |
+| updated_at   | TEXT    |   是 | 更新时间                 |
 
 ## TypeScript 类型
 
@@ -1041,7 +1045,7 @@ export interface Outline {
   novelId: string;
   volumeId?: string;
   chapterId?: string;
-  outlineType: "novel" | "volume" | "chapter";
+  outlineType: 'novel' | 'volume' | 'chapter';
   title: string;
   content: string;
   orderIndex: number;
@@ -1062,21 +1066,21 @@ export interface Outline {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| chapter_id | TEXT | 是 | 所属章节 |
-| title | TEXT | 是 | 事件标题 |
-| description | TEXT | 是 | 事件说明 |
-| involved_character_ids | TEXT | 否 | 涉及角色 ID，JSON 数组 |
-| impact | TEXT | 否 | 剧情影响 |
-| risk | TEXT | 否 | 风险提示 |
-| status | TEXT | 是 | candidate / selected / required / forbidden / adopted / discarded |
-| source | TEXT | 是 | manual / ai_suggested |
-| ai_task_id | TEXT | 否 | 来源 AI 任务 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名                 | 类型 | 必填 | 说明                                                              |
+| ---------------------- | ---- | ---: | ----------------------------------------------------------------- |
+| id                     | TEXT |   是 | UUID 主键                                                         |
+| novel_id               | TEXT |   是 | 所属小说                                                          |
+| chapter_id             | TEXT |   是 | 所属章节                                                          |
+| title                  | TEXT |   是 | 事件标题                                                          |
+| description            | TEXT |   是 | 事件说明                                                          |
+| involved_character_ids | TEXT |   否 | 涉及角色 ID，JSON 数组                                            |
+| impact                 | TEXT |   否 | 剧情影响                                                          |
+| risk                   | TEXT |   否 | 风险提示                                                          |
+| status                 | TEXT |   是 | candidate / selected / required / forbidden / adopted / discarded |
+| source                 | TEXT |   是 | manual / ai_suggested                                             |
+| ai_task_id             | TEXT |   否 | 来源 AI 任务                                                      |
+| created_at             | TEXT |   是 | 创建时间                                                          |
+| updated_at             | TEXT |   是 | 更新时间                                                          |
 
 ## TypeScript 类型
 
@@ -1091,7 +1095,7 @@ export interface ChapterEvent {
   impact?: string;
   risk?: string;
   status: ChapterEventStatus;
-  source: "manual" | "ai_suggested";
+  source: 'manual' | 'ai_suggested';
   aiTaskId?: string;
   createdAt: string;
   updatedAt: string;
@@ -1117,30 +1121,30 @@ export interface ChapterEvent {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 否 | 所属小说；为空表示全局风格 |
-| name | TEXT | 是 | 风格名称 |
-| source_type | TEXT | 是 | manual / txt_analysis / json_import / system_default |
-| source_asset_id | TEXT | 否 | 来源导入文件 |
-| narrative_perspective | TEXT | 否 | 叙事人称 |
-| tone | TEXT | 否 | 文风语气 |
-| pace | TEXT | 否 | 节奏 |
-| sentence_style | TEXT | 否 | 句式特点 |
-| dialogue_ratio | REAL | 否 | 对话比例 |
-| description_ratio | REAL | 否 | 描写比例 |
-| psychological_ratio | REAL | 否 | 心理描写比例 |
-| battle_style | TEXT | 否 | 战斗描写方式 |
-| battle_intensity | TEXT | 否 | 战斗强度 |
-| emotion_tendency | TEXT | 否 | 情绪倾向 |
-| chapter_ending | TEXT | 否 | 章节结尾方式 |
-| forbidden_styles | TEXT | 否 | 禁用写法，JSON 数组 |
-| style_summary | TEXT | 否 | 风格总结 |
-| raw_config_json | TEXT | 否 | 原始配置 JSON |
-| is_active | INTEGER | 是 | 是否启用 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名                | 类型    | 必填 | 说明                                                 |
+| --------------------- | ------- | ---: | ---------------------------------------------------- |
+| id                    | TEXT    |   是 | UUID 主键                                            |
+| novel_id              | TEXT    |   否 | 所属小说；为空表示全局风格                           |
+| name                  | TEXT    |   是 | 风格名称                                             |
+| source_type           | TEXT    |   是 | manual / txt_analysis / json_import / system_default |
+| source_asset_id       | TEXT    |   否 | 来源导入文件                                         |
+| narrative_perspective | TEXT    |   否 | 叙事人称                                             |
+| tone                  | TEXT    |   否 | 文风语气                                             |
+| pace                  | TEXT    |   否 | 节奏                                                 |
+| sentence_style        | TEXT    |   否 | 句式特点                                             |
+| dialogue_ratio        | REAL    |   否 | 对话比例                                             |
+| description_ratio     | REAL    |   否 | 描写比例                                             |
+| psychological_ratio   | REAL    |   否 | 心理描写比例                                         |
+| battle_style          | TEXT    |   否 | 战斗描写方式                                         |
+| battle_intensity      | TEXT    |   否 | 战斗强度                                             |
+| emotion_tendency      | TEXT    |   否 | 情绪倾向                                             |
+| chapter_ending        | TEXT    |   否 | 章节结尾方式                                         |
+| forbidden_styles      | TEXT    |   否 | 禁用写法，JSON 数组                                  |
+| style_summary         | TEXT    |   否 | 风格总结                                             |
+| raw_config_json       | TEXT    |   否 | 原始配置 JSON                                        |
+| is_active             | INTEGER |   是 | 是否启用                                             |
+| created_at            | TEXT    |   是 | 创建时间                                             |
+| updated_at            | TEXT    |   是 | 更新时间                                             |
 
 ## SQLite 建表示例
 
@@ -1220,25 +1224,25 @@ export interface StyleProfile {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 否 | 所属小说；为空表示全局方案 |
-| name | TEXT | 是 | 方案名称 |
-| target_word_count | INTEGER | 否 | 目标字数 |
-| min_word_count | INTEGER | 否 | 最少字数 |
-| max_word_count | INTEGER | 否 | 最多字数 |
-| pace_level | TEXT | 否 | slow / medium / fast |
-| dialogue_ratio | REAL | 否 | 对话比例 |
-| description_ratio | REAL | 否 | 描写比例 |
-| battle_intensity | TEXT | 否 | low / medium / high |
-| emotion_tendency | TEXT | 否 | 情绪倾向 |
-| ending_hook_required | INTEGER | 是 | 是否要求结尾钩子 |
-| extra_requirements | TEXT | 否 | 额外要求 |
-| forbidden_items | TEXT | 否 | 禁止项，JSON 数组 |
-| is_default | INTEGER | 是 | 是否默认 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名               | 类型    | 必填 | 说明                       |
+| -------------------- | ------- | ---: | -------------------------- |
+| id                   | TEXT    |   是 | UUID 主键                  |
+| novel_id             | TEXT    |   否 | 所属小说；为空表示全局方案 |
+| name                 | TEXT    |   是 | 方案名称                   |
+| target_word_count    | INTEGER |   否 | 目标字数                   |
+| min_word_count       | INTEGER |   否 | 最少字数                   |
+| max_word_count       | INTEGER |   否 | 最多字数                   |
+| pace_level           | TEXT    |   否 | slow / medium / fast       |
+| dialogue_ratio       | REAL    |   否 | 对话比例                   |
+| description_ratio    | REAL    |   否 | 描写比例                   |
+| battle_intensity     | TEXT    |   否 | low / medium / high        |
+| emotion_tendency     | TEXT    |   否 | 情绪倾向                   |
+| ending_hook_required | INTEGER |   是 | 是否要求结尾钩子           |
+| extra_requirements   | TEXT    |   否 | 额外要求                   |
+| forbidden_items      | TEXT    |   否 | 禁止项，JSON 数组          |
+| is_default           | INTEGER |   是 | 是否默认                   |
+| created_at           | TEXT    |   是 | 创建时间                   |
+| updated_at           | TEXT    |   是 | 更新时间                   |
 
 ## TypeScript 类型
 
@@ -1250,10 +1254,10 @@ export interface OutputProfile {
   targetWordCount?: number;
   minWordCount?: number;
   maxWordCount?: number;
-  paceLevel?: "slow" | "medium" | "fast";
+  paceLevel?: 'slow' | 'medium' | 'fast';
   dialogueRatio?: number;
   descriptionRatio?: number;
-  battleIntensity?: "low" | "medium" | "high";
+  battleIntensity?: 'low' | 'medium' | 'high';
   emotionTendency?: string;
   endingHookRequired: boolean;
   extraRequirements?: string;
@@ -1274,22 +1278,22 @@ export interface OutputProfile {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| chapter_id | TEXT | 是 | 所属章节 |
-| adopted_draft_id | TEXT | 是 | 来源正文版本 |
-| summary | TEXT | 是 | 章节摘要 |
-| key_events | TEXT | 否 | 关键事件，JSON 数组 |
-| character_changes | TEXT | 否 | 角色变化，JSON |
-| relationship_changes | TEXT | 否 | 关系变化，JSON |
-| new_foreshadows | TEXT | 否 | 新增伏笔，JSON |
-| resolved_foreshadows | TEXT | 否 | 已回收伏笔，JSON |
-| next_chapter_hints | TEXT | 否 | 下一章衔接建议 |
-| ai_task_id | TEXT | 否 | 来源 AI 任务 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名               | 类型 | 必填 | 说明                |
+| -------------------- | ---- | ---: | ------------------- |
+| id                   | TEXT |   是 | UUID 主键           |
+| novel_id             | TEXT |   是 | 所属小说            |
+| chapter_id           | TEXT |   是 | 所属章节            |
+| adopted_draft_id     | TEXT |   是 | 来源正文版本        |
+| summary              | TEXT |   是 | 章节摘要            |
+| key_events           | TEXT |   否 | 关键事件，JSON 数组 |
+| character_changes    | TEXT |   否 | 角色变化，JSON      |
+| relationship_changes | TEXT |   否 | 关系变化，JSON      |
+| new_foreshadows      | TEXT |   否 | 新增伏笔，JSON      |
+| resolved_foreshadows | TEXT |   否 | 已回收伏笔，JSON    |
+| next_chapter_hints   | TEXT |   否 | 下一章衔接建议      |
+| ai_task_id           | TEXT |   否 | 来源 AI 任务        |
+| created_at           | TEXT |   是 | 创建时间            |
+| updated_at           | TEXT |   是 | 更新时间            |
 
 ## TypeScript 类型
 
@@ -1324,18 +1328,18 @@ export interface ChapterSummary {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 是 | 所属小说 |
-| chapter_id | TEXT | 否 | 来源章节 |
-| context_type | TEXT | 是 | chapter_summary / volume_summary / character_state / foreshadow / rule |
-| title | TEXT | 是 | 上下文标题 |
-| content | TEXT | 是 | 上下文内容 |
-| importance | INTEGER | 是 | 重要程度，1-5 |
-| is_active | INTEGER | 是 | 是否参与后续生成 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名       | 类型    | 必填 | 说明                                                                   |
+| ------------ | ------- | ---: | ---------------------------------------------------------------------- |
+| id           | TEXT    |   是 | UUID 主键                                                              |
+| novel_id     | TEXT    |   是 | 所属小说                                                               |
+| chapter_id   | TEXT    |   否 | 来源章节                                                               |
+| context_type | TEXT    |   是 | chapter_summary / volume_summary / character_state / foreshadow / rule |
+| title        | TEXT    |   是 | 上下文标题                                                             |
+| content      | TEXT    |   是 | 上下文内容                                                             |
+| importance   | INTEGER |   是 | 重要程度，1-5                                                          |
+| is_active    | INTEGER |   是 | 是否参与后续生成                                                       |
+| created_at   | TEXT    |   是 | 创建时间                                                               |
+| updated_at   | TEXT    |   是 | 更新时间                                                               |
 
 ## TypeScript 类型
 
@@ -1344,7 +1348,8 @@ export interface ContextRecord {
   id: string;
   novelId: string;
   chapterId?: string;
-  contextType: "chapter_summary" | "volume_summary" | "character_state" | "foreshadow" | "rule" | "other";
+  contextType:
+    'chapter_summary' | 'volume_summary' | 'character_state' | 'foreshadow' | 'rule' | 'other';
   title: string;
   content: string;
   importance: 1 | 2 | 3 | 4 | 5;
@@ -1366,16 +1371,16 @@ export interface ContextRecord {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| task_type | TEXT | 是 | AI 任务类型 |
-| name | TEXT | 是 | 模板名称 |
-| content | TEXT | 是 | 模板内容 |
-| version | TEXT | 是 | 模板版本 |
-| is_active | INTEGER | 是 | 是否启用 |
-| created_at | TEXT | 是 | 创建时间 |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名     | 类型    | 必填 | 说明        |
+| ---------- | ------- | ---: | ----------- |
+| id         | TEXT    |   是 | UUID 主键   |
+| task_type  | TEXT    |   是 | AI 任务类型 |
+| name       | TEXT    |   是 | 模板名称    |
+| content    | TEXT    |   是 | 模板内容    |
+| version    | TEXT    |   是 | 模板版本    |
+| is_active  | INTEGER |   是 | 是否启用    |
+| created_at | TEXT    |   是 | 创建时间    |
+| updated_at | TEXT    |   是 | 更新时间    |
 
 ## TypeScript 类型
 
@@ -1398,31 +1403,41 @@ export interface PromptTemplate {
 
 ## 作用
 
-保存所有 AI 调用记录。
+保存 Legacy/UI AI 服务的调用记录。正式执行事实管线另使用 `ai_tasks / ai_task_attempts / ai_*_snapshots / result_artifacts`；两者不能互相冒充。
 
 这是调试、回溯、成本估计和用户信任的重要基础。
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 否 | 所属小说 |
-| chapter_id | TEXT | 否 | 所属章节 |
-| task_type | TEXT | 是 | AI 任务类型 |
-| status | TEXT | 是 | pending / running / succeeded / failed / cancelled |
-| model_name | TEXT | 否 | 使用模型 |
-| prompt_template_id | TEXT | 否 | 使用提示词模板 |
-| input_summary | TEXT | 否 | 输入摘要 |
-| prompt_snapshot | TEXT | 否 | 实际提示词快照，可选 |
-| result_text | TEXT | 否 | AI 输出正文 |
-| result_json | TEXT | 否 | AI 输出结构化 JSON |
-| error_message | TEXT | 否 | 错误信息 |
-| token_input | INTEGER | 否 | 输入 token 数 |
-| token_output | INTEGER | 否 | 输出 token 数 |
-| started_at | TEXT | 否 | 开始时间 |
-| finished_at | TEXT | 否 | 结束时间 |
-| created_at | TEXT | 是 | 创建时间 |
+| 字段名                          | 类型    | 必填 | 说明                                               |
+| ------------------------------- | ------- | ---: | -------------------------------------------------- |
+| id                              | TEXT    |   是 | UUID 主键                                          |
+| novel_id                        | TEXT    |   否 | 所属小说                                           |
+| chapter_id                      | TEXT    |   否 | 所属章节                                           |
+| task_type                       | TEXT    |   是 | AI 任务类型                                        |
+| status                          | TEXT    |   是 | pending / running / succeeded / failed / cancelled |
+| runtime_mode                    | TEXT    |   否 | mock / api；任务创建时的运行模式快照               |
+| provider                        | TEXT    |   否 | Provider 标识                                      |
+| model_name                      | TEXT    |   否 | 使用模型                                           |
+| prompt_template_id              | TEXT    |   否 | 使用提示词模板                                     |
+| input_summary                   | TEXT    |   否 | 输入摘要                                           |
+| prompt_snapshot                 | TEXT    |   否 | 实际提示词快照，可选                               |
+| result_text                     | TEXT    |   否 | AI 输出正文                                        |
+| result_json                     | TEXT    |   否 | AI 输出结构化 JSON                                 |
+| error_message                   | TEXT    |   否 | 错误信息                                           |
+| token_input                     | INTEGER |   否 | 输入 token 数                                      |
+| token_output                    | INTEGER |   否 | 输出 token 数                                      |
+| token_total                     | INTEGER |   否 | Provider 返回或由输入、输出相加得到的总 token 数   |
+| input_price_per_million_tokens  | REAL    |   否 | 任务创建时冻结的输入单价，USD / 百万 Token         |
+| output_price_per_million_tokens | REAL    |   否 | 任务创建时冻结的输出单价，USD / 百万 Token         |
+| cost_estimate                   | REAL    |   否 | 按冻结单价与实际用量计算的 USD 估算值              |
+| cost_currency                   | TEXT    |   否 | 当前固定为 USD                                     |
+| cost_status                     | TEXT    |   否 | complete / mock / unpriced / usage_missing         |
+| pricing_source                  | TEXT    |   否 | user_configured / mock / unconfigured              |
+| duration_ms                     | INTEGER |   否 | 任务耗时（毫秒）                                   |
+| started_at                      | TEXT    |   否 | 开始时间                                           |
+| finished_at                     | TEXT    |   否 | 结束时间                                           |
+| created_at                      | TEXT    |   是 | 创建时间                                           |
 
 ## SQLite 建表示例
 
@@ -1433,6 +1448,8 @@ CREATE TABLE IF NOT EXISTS ai_task_records (
   chapter_id TEXT,
   task_type TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  runtime_mode TEXT,
+  provider TEXT,
   model_name TEXT,
   prompt_template_id TEXT,
   input_summary TEXT,
@@ -1442,12 +1459,19 @@ CREATE TABLE IF NOT EXISTS ai_task_records (
   error_message TEXT,
   token_input INTEGER,
   token_output INTEGER,
+  token_total INTEGER,
+  input_price_per_million_tokens REAL,
+  output_price_per_million_tokens REAL,
+  cost_estimate REAL,
+  cost_currency TEXT,
+  cost_status TEXT,
+  pricing_source TEXT,
+  duration_ms INTEGER,
   started_at TEXT,
   finished_at TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (novel_id) REFERENCES novels(id),
-  FOREIGN KEY (chapter_id) REFERENCES chapters(id),
-  FOREIGN KEY (prompt_template_id) REFERENCES prompt_templates(id)
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id)
 );
 ```
 
@@ -1460,6 +1484,8 @@ export interface AiTaskRecord {
   chapterId?: string;
   taskType: AiTaskType;
   status: AiTaskStatus;
+  runtimeMode?: 'mock' | 'api';
+  provider?: string;
   modelName?: string;
   promptTemplateId?: string;
   inputSummary?: string;
@@ -1469,11 +1495,151 @@ export interface AiTaskRecord {
   errorMessage?: string;
   tokenInput?: number;
   tokenOutput?: number;
+  tokenTotal?: number;
+  inputPricePerMillionTokens?: number;
+  outputPricePerMillionTokens?: number;
+  costEstimate?: number;
+  costCurrency?: 'USD';
+  costStatus?: 'complete' | 'mock' | 'unpriced' | 'usage_missing';
+  pricingSource?: 'user_configured' | 'mock' | 'unconfigured';
+  durationMs?: number;
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;
 }
 ```
+
+## 成本快照与计量语义
+
+成本字段保存的是**任务创建时的价格快照和执行完成后的本地估算**，不是 Provider 账单：
+
+1. API 模式只有在输入、输出两项 USD / 百万 Token 单价均有效时，`pricing_source` 才为 `user_configured`；只配置一侧按 `unconfigured` 处理，避免用不完整价格低估成本。
+2. Mock 模式冻结两项零单价并标记 `pricing_source=mock`。旧记录或未配置价格的任务保留空单价，不回填猜测值。
+3. 单价在任务创建时写入，后续修改设置不会改变在途任务或历史任务的计算口径。
+4. 成功结算使用 `round((token_input × input_rate + token_output × output_rate) / 1_000_000, 8)`；SQLite 桌面路径和 LocalStorage 开发回退使用相同语义。
+5. `failed` / `cancelled` 记录不伪造最终费用。Provider 可能已经对失败前或取消前的用量计费，不能把空值解释为零成本。
+
+| `cost_status`   | 条件                                            | `cost_estimate` 语义        |
+| --------------- | ----------------------------------------------- | --------------------------- |
+| `complete`      | 两项冻结单价和输入、输出用量均存在              | 有值；按公式计算的 USD 估算 |
+| `mock`          | Mock 任务                                       | 固定为 `0`                  |
+| `unpriced`      | 未完整配置单价                                  | 空；不以零冒充未知成本      |
+| `usage_missing` | 单价已冻结，但 Provider 未返回完整输入/输出用量 | 空；不根据残缺用量外推      |
+
+正式 Provider 执行管线还会把同一组状态、币种、来源、估算值和冻结单价写入白名单 response metadata；Rust 在持久化和重放读取时复验字段组合、范围与 Mock 零成本约束。当前 WebView 请求治理层已按本地自然日维护请求时间窗、活动 reservation、Token 用量、估算 USD 成本与 usage 缺失次数：派发前执行每分钟请求数、并发数和可选每日 Token / 成本硬门禁，完成后以真实 usage 结算；缺 usage 时保守计入预留值。该 ledger 保存于本机 LocalStorage 并以内存回退，不等于跨进程配额或 Provider 账单；跨进程预算协调、账单对账及失败请求的精确计费归集属于后续能力。
+
+---
+
+# 36. v3.0.0 参考资料库与分层风格画像
+
+## 36.1 独立参考作品
+
+参考资料与小说正文是两类不同事实。`reference_works` 只归属 `novel_id`，不拥有 `volume_id / chapter_id`，因此不会进入卷章树，也不会被误采用为正文。
+
+- `id / novel_id / title / purpose / description`
+- `revision`：参考作品元数据与当前版本切换的 CAS 版本
+- `created_at / updated_at`
+
+`purpose` 当前限定为 `style / research / inspiration`。
+
+## 36.2 不可变导入版本
+
+`reference_imports` 保存每次显式导入的版本事实：
+
+- `version_no / is_current`；每部参考作品恰有一个 current 版本
+- `operation_id / request_hash`；提交结果未知时可用原 operation 重放
+- 原始文件 `source_sha256 / source_byte_count`
+- `detected_encoding / selected_encoding / encoding_source`
+- 解码正文 `decoded_text_sha256 / decoded_char_count / decoded_utf8_byte_count`
+- `parser_version / section_plan_sha256 / warnings_json`
+- 小文本正文或经完整性校验的 `large_text_ref_id`
+
+同一 hash 只用于发现重复，不设唯一约束。用户必须明确选择 `skip / createWork / createVersion`；`skip` 不写业务事实，相同 hash 也可显式创建新版本。
+
+## 36.3 章节派生记录
+
+`reference_sections` 是导入版本的可重建派生事实：
+
+- `order_index / section_kind / title`
+- `content_hash / char_count / utf8_byte_count`
+- `source_start_utf16 / source_end_utf16` 半开区间，与 WebView `slice` 语义一致
+- 复合外键同时约束 import、work 与 novel 作用域
+
+导入事务校验连续序号、正文 hash、码点数、UTF-8 字节数以及权威解码正文的 UTF-16 切片；任一不一致时整笔回滚。
+
+## 36.4 风格画像来源
+
+`style_profiles` 增加：
+
+- `source_reference_work_id / source_reference_import_id`
+- `source_content_sha256`
+- `source_state`：`none / available / outdated / missing / legacy_unverified`
+- `analysis_metadata_json`
+
+分层画像 metadata 只保存模型、Prompt/分析器版本、来源 hash、章节内采样范围、抽象分层结果和置信度，不保存采样原文。参考作品切换版本后旧画像标记 `outdated`；删除参考作品后画像保留、来源 ID 清空、hash 保留并标记 `missing`。
+
+## 36.5 备份与恢复
+
+参考资料首次随完整项目备份 schema 6 加入；当前 schema 7 继续包含三张参考表与画像来源字段，并额外覆盖混合语义 Memory。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
+
+---
+
+# 37. v3.0.0 混合语义 Memory
+
+migration 026 `026_hybrid_semantic_memory` 建立 SQLite 权威的长期 Memory 事实，冻结 checksum 为 `a8622dab5bf60ec4cc7177437fe2e2c5c5da753045b339cac01b0083ce163b0b`。Memory 只保存来自正式采用链路的可追踪证据，不替代 `chapter_drafts`、`chapter_summaries` 或 `context_records`，也不把参考资料原文混入小说记忆。
+
+## 37.1 `memory_documents`：来源版本与失效状态
+
+每个文档绑定：
+
+- `novel_id / chapter_id / adopted_draft_id`：作品、章节和生成该事实时的正式采用稿。
+- `source_type / source_id / source_version / source_hash`：来源类型、稳定身份、单调版本与 SHA-256；类型限定为 `adopted_draft / chapter_summary / context_record`。
+- `status`：`active / invalidated`；失效时同时保存 `invalidated_at / invalidation_reason`。
+- 有界 `metadata_json`、创建与更新时间。
+
+同一 `(novel_id, source_type, source_id)` 最多一个 active 文档。身份、来源、采用稿、章节与 metadata 不可改写；状态只允许 `active → invalidated`。创建新来源版本会使旧 active 版本失效；章节改采时，草稿采用、旧上下文过期和旧 Memory 失效在同一个 SQLite 事务中提交，任一步失败都会整体回滚。
+
+## 37.2 `memory_chunks`：不可变结构化片段
+
+片段通过 `(document_id, ordinal)` 稳定排序，并保存：
+
+- `text / token_count / content_hash`。
+- `importance`（0～1）与可选 `chapter_order_index`。
+- 可选 `temporal_start_chapter / temporal_end_chapter`。
+- `entity_keys_json / metadata_json`，用于人物、地点、事件与其他结构化过滤。
+
+片段必须与文档保持同一 novel / chapter 作用域；正文、顺序、结构化 metadata 与 hash 创建后不可修改。单文档最多 10,000 个片段、64 MiB 文本，每片最多 128 KiB，避免无界写入。
+
+## 37.3 `memory_embeddings`：显式真实向量
+
+向量按 `(chunk_id, provider, model)` 唯一，保存 `dimension / vector_json / vector_norm / vector_hash / chunk_content_hash`。Rust 只接受调用方显式传入的有限、非零、维度一致向量，并复验片段正文 hash；不使用随机数、词 hash 或其他伪向量冒充语义 embedding。同一作品、Provider 与模型的维度必须一致，维度上限为 8,192。
+
+自动 embedding Provider 适配器和 ANN / HNSW 索引仍是后续增强；它们不得改变“无真实向量时明确降级”的契约。
+
+## 37.4 `memory_retrieval_logs`：有界检索审计
+
+每次检索追加一条不可变日志，记录 query / query-vector hash、过滤器、检索模式、模型身份、FTS 可用性、候选数、选中 chunk ID、逐项评分原因、`top_k / page_offset / token_budget / used_tokens`，但不保存查询原文。
+
+检索始终先限制 `novel_id`，再结合章节范围、来源类型、实体键、importance 与时间范围筛选：
+
+1. FTS5 可用时使用 trigram，运行环境不支持时尝试 unicode61；FTS5 缺失或短中文不适配时使用受作用域约束的 substring / 结构化候选。
+2. 提供匹配 provider / model / dimension 的真实 query embedding 时，对最多 500 个候选计算余弦；未提供向量时不生成替代向量。
+3. 最终分数综合 semantic、lexical、importance 与 recency，并返回 `matchedBy` 和各分项原因。
+4. `topK ≤ 50`、`candidateLimit ≤ 500`、`tokenBudget ≤ 100,000`；分页结果的 `usedTokens` 永不超过本次预算。
+
+检索模式显式区分 `hybrid / semantic_structured / fts_structured / lexical_structured / structured`，调用方可以识别降级，而不是把结构化或字面匹配标记成语义成功。
+
+## 37.5 备份 schema 7
+
+完整项目备份 schema 7 包含 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`。恢复为新作品时重映射文档、片段、向量和日志引用，并校验：
+
+- 来源、采用稿、章节与作品归属。
+- active 来源唯一性、版本与 SHA-256。
+- 片段顺序、Token / 时间范围、正文 hash 和 JSON metadata。
+- embedding 的 provider / model / dimension、向量 hash / norm 与片段内容 hash。
+- retrieval log 的候选、选中片段、评分原因和 Token 预算。
+
+schema 2～6 缺少四张 Memory 表时按空集合兼容；任何身份、hash、向量或引用篡改都会在恢复事务提交前失败。
 
 ---
 
@@ -1493,18 +1659,18 @@ export interface AiTaskRecord {
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| id | TEXT | 是 | UUID 主键 |
-| novel_id | TEXT | 否 | 所属小说 |
-| file_name | TEXT | 是 | 文件名 |
-| file_path | TEXT | 否 | 本地路径 |
-| file_type | TEXT | 是 | txt / json / markdown |
-| asset_type | TEXT | 是 | style_reference / novel_text / config / outline / other |
-| content_preview | TEXT | 否 | 内容预览 |
-| parsed_json | TEXT | 否 | 解析后的 JSON |
-| related_style_profile_id | TEXT | 否 | 生成的风格方案 |
-| created_at | TEXT | 是 | 创建时间 |
+| 字段名                   | 类型 | 必填 | 说明                                                    |
+| ------------------------ | ---- | ---: | ------------------------------------------------------- |
+| id                       | TEXT |   是 | UUID 主键                                               |
+| novel_id                 | TEXT |   否 | 所属小说                                                |
+| file_name                | TEXT |   是 | 文件名                                                  |
+| file_path                | TEXT |   否 | 本地路径                                                |
+| file_type                | TEXT |   是 | txt / json / markdown                                   |
+| asset_type               | TEXT |   是 | style_reference / novel_text / config / outline / other |
+| content_preview          | TEXT |   否 | 内容预览                                                |
+| parsed_json              | TEXT |   否 | 解析后的 JSON                                           |
+| related_style_profile_id | TEXT |   否 | 生成的风格方案                                          |
+| created_at               | TEXT |   是 | 创建时间                                                |
 
 ## TypeScript 类型
 
@@ -1514,8 +1680,8 @@ export interface ImportedAsset {
   novelId?: string;
   fileName: string;
   filePath?: string;
-  fileType: "txt" | "json" | "markdown" | "other";
-  assetType: "style_reference" | "novel_text" | "config" | "outline" | "other";
+  fileType: 'txt' | 'json' | 'markdown' | 'other';
+  assetType: 'style_reference' | 'novel_text' | 'config' | 'outline' | 'other';
   contentPreview?: string;
   parsedJson?: string;
   relatedStyleProfileId?: string;
@@ -1538,16 +1704,17 @@ export interface ImportedAsset {
 - 导出路径
 - 界面设置
 - 编辑器设置
+- AI 请求治理：每分钟请求数、最大并发、每日 Token / 成本预算与预警阈值
 
 ## 字段设计
 
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| key | TEXT | 是 | 设置键 |
-| value | TEXT | 否 | 设置值 |
-| value_type | TEXT | 是 | string / number / boolean / json |
-| category | TEXT | 否 | ai / ui / data / editor |
-| updated_at | TEXT | 是 | 更新时间 |
+| 字段名     | 类型 | 必填 | 说明                             |
+| ---------- | ---- | ---: | -------------------------------- |
+| key        | TEXT |   是 | 设置键                           |
+| value      | TEXT |   否 | 设置值                           |
+| value_type | TEXT |   是 | string / number / boolean / json |
+| category   | TEXT |   否 | ai / ui / data / editor          |
+| updated_at | TEXT |   是 | 更新时间                         |
 
 ## SQLite 建表示例
 
@@ -1560,6 +1727,20 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT NOT NULL
 );
 ```
+
+## AI 请求治理设置与 ledger
+
+当前 `AiSettings` 使用以下可选字段：
+
+```text
+maxRequestsPerMinute       默认 12，范围 1～120
+maxConcurrentAiRequests    默认 2，范围 1～8
+dailyTokenBudget           可选本地自然日硬预算
+dailyCostBudgetUsd         可选本地自然日估算 USD 硬预算
+budgetWarningPercent       默认 80，范围 50～99
+```
+
+成本预算只有在输入、输出两项单价均有效时才可启用。瞬时 `ai_novel_studio_ai_request_ledger_v1` 保存当天请求时间、已结算 usage / 成本和 30 分钟过期的活动 reservation；它只用于当前 WebView 的本地门禁，不属于项目内容，不进入完整项目备份，也不表示 Provider 账单或跨进程全局额度。
 
 ## 重要安全规则
 
@@ -1593,6 +1774,14 @@ CREATE INDEX IF NOT EXISTS idx_output_profiles_novel_id ON output_profiles(novel
 CREATE INDEX IF NOT EXISTS idx_ai_task_records_novel_id ON ai_task_records(novel_id);
 CREATE INDEX IF NOT EXISTS idx_ai_task_records_chapter_id ON ai_task_records(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_context_records_novel_id ON context_records(novel_id);
+CREATE INDEX IF NOT EXISTS idx_memory_documents_chapter_status
+  ON memory_documents(novel_id, chapter_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_chunks_novel_chapter
+  ON memory_chunks(novel_id, chapter_order_index, chapter_id, importance DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_model_scope
+  ON memory_embeddings(novel_id, provider, model, dimension, chunk_id);
+CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_novel_created
+  ON memory_retrieval_logs(novel_id, created_at DESC, id DESC);
 ```
 
 ---
@@ -2264,11 +2453,11 @@ Attempt 失败是否允许重试由持久 `error.retryable` 决定。重试创�
 
 ## 29.3 三类 Snapshot
 
-| 模型 | 结构化字段 | 完整大文本 | 来源身份 |
-|------|------------|------------|----------|
-| `AiInputSnapshot` | schema、inputType、payload | input body | sourceDraftId/version/base hash |
-| `AiContextSnapshot` | source manifest、budget、compilerVersion | compiled context | manifest 内稳定来源引用 |
-| `AiConstraintSnapshot` | constraints、template identity、provider options | prompt template body | template id/version/hash |
+| 模型                   | 结构化字段                                       | 完整大文本           | 来源身份                        |
+| ---------------------- | ------------------------------------------------ | -------------------- | ------------------------------- |
+| `AiInputSnapshot`      | schema、inputType、payload                       | input body           | sourceDraftId/version/base hash |
+| `AiContextSnapshot`    | source manifest、budget、compilerVersion         | compiled context     | manifest 内稳定来源引用         |
+| `AiConstraintSnapshot` | constraints、template identity、provider options | prompt template body | template id/version/hash        |
 
 三类 Snapshot 整行不可更新或删除。其大文本 document/chunks 在 Snapshot 建立引用后同样不可变。`contentHash` 是包含 schema、结构化字段和大文本 SHA-256 的 canonical 聚合 hash。
 
@@ -2411,3 +2600,261 @@ Checkpoint 按 Plan 单调 sequence 追加，记录 plan/step/attempt identity�
 启动恢复把 running Attempt 标为 abandoned，Plan/Step 标为 waiting_retry，活动 lease 标为 expired，并追加 `automaticReplay=false` checkpoint。Plan 六类事实使用 `ON DELETE RESTRICT` 与 no-delete trigger，不能随章节清理或历史任务删除而丢失。
 
 完整契约见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。
+
+---
+
+# 33. v3.0.0 Multi-Agent 协作事实
+
+v3.0.0 新增 migration 021～023。三张表只记录章节协作评审事实，不替代 `ai_task_records`、章节草稿或正式采用状态。
+
+## 33.1 `multi_agent_sessions`
+
+Session 冻结 operationId、Novel/Chapter、源草稿 ID/version、评审正文 SHA-256、专家组合、最大轮数、接受率、平均分和 quorum。状态为：
+
+```text
+running → completed / failed / cancelled
+```
+
+相同 operationId 只有冻结身份完全一致时才能重放。completed 必须至少有一轮；接受状态和 finalAction 必须与最终共识一致。最终草稿只能属于同一作品与章节。
+
+## 33.2 `multi_agent_rounds`
+
+Round 以 `(session_id, round_number)` 为稳定身份，记录：
+
+- 输入草稿 ID/version/content hash
+- 可选输出候选草稿 ID/version/content hash
+- 接受率、平均分、成功/失败专家数和 quorum
+- `accept / revise / regenerate`
+- 去重后的主要问题和合并建议
+- token 与耗时
+
+轮次从 1 单调递增且最多三轮。第一轮输入必须是源草稿；后续输入必须是上一轮输出候选。accept 轮不能创建输出候选；未到最大轮次的 revise/regenerate 必须创建输出候选。
+
+## 33.3 `multi_agent_opinions`
+
+Opinion 以 `opinion_id` 为身份，并限制同一 session/round/expert 唯一。状态为：
+
+```text
+succeeded / failed
+```
+
+succeeded 必须有 0～100 score 且不能有 error；failed 不能有 score 或接受票。issues、suggestions 只保存受长度限制的 JSON 数组，不保存 Provider 原始响应或正文。
+
+## 33.4 写入与确认边界
+
+Session 创建、Round/Opinion 追加和终态更新分别在 SQLite `IMMEDIATE` 事务中完成。Rust 根据 opinion 独立复算共识并校验草稿归属。主编 Agent 产生的正文仍通过既有草稿原子保存协议创建为未采用版本，正式采用必须继续经过用户操作和采用事务。
+
+## 33.5 完整备份
+
+完整项目备份 schema 4 首次加入三张 Multi-Agent 表，schema 5 额外加入自主计划；当前 schema 7 继续包含这些事实，并加入参考资料与混合语义 Memory。恢复会重映射 session、opinion、operation 与所有草稿引用。schema 2/3 导入时允许缺少这些表。
+
+详细协议见 [`architecture/multi-agent-collaboration.md`](architecture/multi-agent-collaboration.md)。
+
+---
+
+# 34. v3.0.0 自主创作计划事实
+
+v3.0.0 新增 migration 024。`autonomous_story_plans` 是全书规划、Agent 检查点和逐章执行进度的单一持久事实，不替代正式卷、章、角色、世界设定、章节草稿或章节上下文。
+
+## 34.1 `autonomous_story_plans`
+
+稳定身份与输入：
+
+- `plan_id`：计划身份。
+- `operation_id`：创建/继续操作身份，同一作品内唯一。
+- `novel_id`：所属作品。
+- `request_hash`：`schemaVersion + novelId + normalized brief` 的 canonical SHA-256。
+- `schema_version`：当前为 1。
+
+状态与并发：
+
+- `status`：`running / ready / failed / cancelled / applied`。
+- `stage`：`foundation / creative_dimensions / chapter_batches / ready / applied`。
+- `revision`：每次保存递增，调用方必须提交期望 revision。
+- `target_chapter_count / completed_chapter_count`：用于快速筛选，不替代计划 JSON 校验。
+
+正文：
+
+- `plan_json`：canonical 完整计划，包含故事圣经、故事弧、卷、人物弧、世界、冲突、节奏、章节、Agent run、chapter run 和进度。
+- `plan_hash`：`plan_json` 的 canonical SHA-256。
+- `error_message` 与创建、更新、完成、应用时间戳。
+
+身份字段不可修改；状态 trigger 只允许合法边。Rust 每次保存都会重新解析并验证 JSON、请求 hash、计划 hash、引用完整性、章节连续性、状态/阶段和 revision。
+
+## 34.2 计划内引用
+
+计划 JSON 使用稳定 ID 连接：
+
+- 故事弧 ↔ 分卷。
+- 角色 ↔ 人物成长节点 ↔ 章节。
+- 世界元素 ↔ 首次出现章节 ↔ 章节引用。
+- 冲突线程 ↔ 引入/升级/高潮/解决章节 ↔ 章节事件。
+- 节奏阶段 ↔ 逐章节奏点 ↔ 章节。
+- chapter run ↔ 正式 chapter、生成草稿、评审 session、采用稿和分析候选。
+
+所有章节必须从 1 连续到目标章节数。任何悬空 ID、跨作品引用、越界章节或重复编号都不得进入 `ready / applied`。
+
+## 34.3 应用事务
+
+用户确认应用后，Rust 在一个 `IMMEDIATE` 事务中创建 volumes、chapters、characters、world_settings、chapter_events 和 chapter_characters，并将计划更新为 `applied`。目标作品已有卷章结构时拒绝应用，不覆盖人工数据。
+
+重复应用会读取并复验全部物化目标；缺少或漂移的卷、章、角色、世界设定、事件或章节角色关系都会返回 `OPERATION_REPLAY_TARGET_INVALID`，不能返回陈旧成功。
+
+## 34.4 逐章状态与确认边界
+
+计划章节状态为：
+
+```text
+planned → materialized → adopted
+```
+
+chapter run 状态为：
+
+```text
+generating → reviewing → candidate_ready → adopted
+        └──────────────→ failed / cancelled
+```
+
+章节分析状态为：
+
+```text
+running → pending_confirmation → confirmed
+   └───────────────────────────→ failed
+```
+
+`candidate_ready` 不等于正式采用；`pending_confirmation` 不等于正式上下文。正式采用继续以章节/草稿事务为权威，章节总结、上下文和角色状态只有在用户确认分析后才原子写入。
+
+## 34.5 完整备份 schema 5（当前 schema 7 继续包含）
+
+schema 5 增加 `autonomous_story_plans`；当前 schema 7 在此基础上继续加入参考资料与 Memory。恢复为新作品时重映射 plan/operation、卷、章、角色、人物节点、世界元素、冲突、节奏阶段、chapter run 和草稿引用，再重算 `request_hash` 与 `plan_hash`。schema 4 备份允许缺少自主计划并恢复为空集合。
+
+---
+
+# 35. v3.0.0 全书候选与工作台正文事实
+
+本节明确“生成全书”与“正文写入”的边界：全书是按卷章组织的章节草稿集合，不是一个百万字正文实体。当前实现没有新增整本正文表，也没有把全部正文写入 `autonomous_story_plans.plan_json`。
+
+## 35.1 权威正文位置
+
+```text
+volumes / chapters                    卷章结构与正式采用指针
+autonomous_story_plans.plan_json      规划、进度、run 与草稿引用
+chapter_drafts                        每章各版本正文
+large_text_documents / chunks         超过阈值的完整正文分片
+```
+
+- 每个 AI 初稿、评审候选、用户编辑版本和润色版本继续由 `chapter_drafts` 承载。
+- `chapterRuns.sourceDraftId / candidateDraftId / adoptedDraftId` 只引用草稿身份，不复制正文。
+- `candidate_ready` 只表示候选可编辑；`chapters.adopted_draft_id` 与 `chapter_drafts.is_adopted` 才表示正式采用。
+- 只有正式采用稿参与章节总结与正式上下文沉淀。
+
+## 35.2 全书候选队列检查点
+
+用户启动全书候选队列后，系统按章节串行运行。当前复用 migration 024 的 `plan_json.chapterRuns` 与既有 `generation_jobs`，不新增 migration：
+
+1. 正文安全保存后立即写入 `sourceDraftId / generationJobId` 检查点。
+2. 质量检查和评审完成后写入 `candidateDraftId / reviewSessionId / candidate_ready`。
+3. 继续队列时跳过已有 `candidate_ready / adopted` 的章节，只处理缺失候选。
+4. 前一章候选可通过 `predecessorDraftId / predecessorContentHash` 作为临时连续性来源；它不是正式上下文，也不改变采用状态。
+
+这保证后序质检、评审或应用进程中断时，已经安全保存的章节正文仍可复用，不需要重新生成。
+
+## 35.3 工作台精确读取
+
+自主规划页打开候选时同时传递 `chapterId + draftId`。桌面端 `get_draft_by_chapter_and_id` 只返回同时匹配两个身份的记录，前端再复验作品 / 章节 / 草稿归属并水合完整正文。错误章节、错误草稿、缺失草稿或不可用大文本均失败关闭，不退回“最新草稿”。
+
+因此一部百万字作品仍在同一个写作工作台中呈现，但编辑粒度是左侧卷章树选中的单章。用户可对任一章执行正文修改、保存、草稿版本恢复、润色、质量检查和采用，生成队列不会把后台候选覆盖到 dirty 编辑器。
+
+## 35.4 超过 100 KiB 的单章正文
+
+当单章正文大于 `100 * 1024` UTF-8 字节时：
+
+```text
+chapter_drafts.large_text_ref_id
+→ large_text_documents
+→ large_text_chunks（连续 chunk_index）
+```
+
+`chapter_drafts.content` 只保留预览；文档与每个分片记录字符数、UTF-8 字节数和 SHA-256。正文、文档、分片及草稿引用在同一事务内提交，读取时必须通过片数、顺序、长度、hash 和最终拼接校验。预览不得进入编辑器、AI Prompt、润色、质量检查或采用流程冒充全文。
+
+## 35.5 长章节润色与质量检查
+
+长章节 AI 二次操作不再静默截取正文前缀。分段是服务层瞬时执行状态，不新增数据表：
+
+- 每段最多 7,000 字符，优先按段落、换行和句末切分，全部分段必须连续覆盖原文。
+- 前后各最多 400 字只作为衔接参考，不属于该段输出正文。
+- 润色逐段生成、校验并按顺序合并；合并结果作为新的 `chapter_drafts` 版本保存。
+- 质量检查逐段生成后，分数按原文段长加权，问题 offset 与段落索引换算回全文，再进入现有 `quality_check_reports / quality_check_items`。
+- 质量修稿按问题的全文 offset、引用文本或段落索引选择相交分段；未命中的分段逐字符沿用原文，命中分段合并后仍保存为完整章节草稿。
+- 章节总结对所有连续正文分段先执行事实提取，再通过有界分层归并生成单个待确认结果；工作台与 Autonomous 调用均传入完整采用稿。
+- 章节改写请求使用完整当前草稿；卷总结使用本卷全部有效章节上下文，二者均保留来源尾部事实。
+
+---
+
+# 36. migration 027：跨进程 Autonomous Scheduler
+
+`027_autonomous_book_scheduler` 将原先仅存在于前端进程的全书候选循环升级为 SQLite 权威调度。迁移 checksum 固定为：
+
+```text
+bfe8cc7dd1fbe7d9da6664b611d2f5c2aef97ace02ea768862e74b4a01d085c4
+```
+
+核心事实分为四类：
+
+```text
+autonomous_book_runs           运行、策略快照、预算、时间窗、熔断和当前进度
+autonomous_run_leases          owner、单调 epoch、token hash、heartbeat 与过期状态
+autonomous_run_attempts        每章 claim/生成/评审/采用尝试及终态
+autonomous_run_checkpoints     append-only 决策、状态和 canonical payload hash
+```
+
+- 策略仅允许 `draft_night / quality_gate / full_auto`。策略、专家阈值、预算和时间窗在创建 run 时冻结。
+- 同一 run 同时最多一个 active lease；原始 lease token 不入库，heartbeat 与 finish 必须同时匹配 lease id、owner、epoch 和 token hash。
+- claim、heartbeat、finish、pause、resume、stop 和恢复均使用 revision/CAS；提交未知时调用方可用相同 operationId 重放并复验权威目标。
+- `draft_night` 只生成候选；`quality_gate` 达标后仍进入确认；`full_auto` 只有在预算、六专家阈值、目标归属和采用前正文复验全部通过时才可正式采用。
+- 应用启动恢复把 `running` run 收敛为 `queued`、active lease 收敛为 `expired`、claimed attempt 收敛为 `abandoned`，不复活旧 epoch，也不静默重放 Provider 调用。
+
+# 37. migration 028：多目标事务与正式故事资产
+
+`028_multi_target_transactions_and_story_assets` checksum 固定为：
+
+```text
+57a0165d8f5e5f75db523325476a5187763c17ee7eb56c76c9faac767150d3e9
+```
+
+## 37.1 多目标事务
+
+```text
+content_transactions
+content_transaction_targets
+```
+
+- prepare 冻结有序 target set、`targetSetHash`、每目标 base revision/hash、candidate payload/hash 和整个 `transactionHash`。
+- `all_or_nothing` 必须应用全部目标；`reviewed_partial` 只应用用户明确批准的子集。批准集合不能包含未冻结目标。
+- apply 在单个 SQLite `IMMEDIATE` 事务中重新读取全部 live target，执行作品归属、revision/hash CAS、写入与结果提交；任一目标冲突时未提交目标保持原状。
+- 相同 operationId/requestHash 可幂等重放；已应用事务重放时仍复验全部应用目标，漂移后不返回陈旧成功。
+- `chapter_metadata` 批处理只允许标题、大纲、目标和受限状态字段，不修改正文、草稿、采用指针或大文本引用。
+
+## 37.2 正式资产与关系
+
+```text
+factions                  势力实体
+locations                 地点实体与 parent_location_id 层级
+faction_relations         势力间有向关系
+location_links            地点间有向连接
+character_factions        角色—势力关系
+chapter_factions          章节—势力关系
+chapter_locations         章节—地点关系
+chapter_event_factions    章节事件—势力关系
+chapter_event_locations   章节事件—地点关系
+```
+
+资产 identity、novel scope 和创建时间不可变；更新必须提交 expected revision。所有关系端点必须属于同一作品。地点父子图拒绝自身父级和环，批量创建时按拓扑顺序写入，因此冻结集合中的子地点可以先于父地点出现。
+
+# 38. 完整项目备份 schema 8 / 9
+
+- schema 8 在 schema 7 的 Memory 基线上加入四张 scheduler 表。恢复时废弃中断 owner/epoch，重算 policy/request/decision/payload hash，并保证没有 active lease 残留。
+- schema 9 加入九张势力、地点及关系表；地点按父子拓扑恢复，随后恢复关系和章节关联。
+- content transaction 的运行历史不进入项目备份；已提交形成的正式资产进入 schema 9，避免把可重放的运行中事务带到新作品。
+- 项目清理覆盖 scheduler 和正式资产。清理期间只临时移除 checkpoint 的 no-delete trigger，事务完成后原样重建；失败回滚不能留下缺失 trigger。
+- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表。未来或非整数 schema 版本拒绝进入完整恢复链路。

@@ -1,0 +1,33 @@
+name: Fast frontend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-quality:
+    name: Browser-mode lint, tests, and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint:ci
+      - run: npm run test:component-size
+      - run: npm run test:all
+      - name: Run real Chromium browser-mode E2E
+        run: npm run test:e2e:browser
+      - run: npm run build

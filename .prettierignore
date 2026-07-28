@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+reports/
+test-results/
+tmp/
+.e2e-tools/
+.understand-anything/
+src-tauri/target/
+src-tauri/icons/
+package-lock.json
+CHANGELOG.md
+docs/release-notes-*.md
+docs/project/release-history.md

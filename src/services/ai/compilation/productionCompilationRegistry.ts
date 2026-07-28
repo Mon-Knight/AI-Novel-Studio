@@ -8,6 +8,10 @@ import type {
 } from '../../../types/aiCompilation';
 import type { AiTaskType } from '../../../types/ai-task';
 import { productionToolRegistry } from '../../agent-tools/productionToolRegistry';
+import {
+  CONNECTION_TEST_MAX_OUTPUT_TOKENS,
+  CONNECTION_TEST_TEMPERATURE,
+} from '../providerRequestPolicy';
 import { AiCompilationError } from './errors';
 import {
   compileAiExecutionContract,
@@ -33,8 +37,8 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
     requiredSourceTypes: [],
     allowedTools: [],
     modelContextTokens: 512,
-    maxOutputTokens: 8,
-    defaultTemperature: 0,
+    maxOutputTokens: CONNECTION_TEST_MAX_OUTPUT_TOKENS,
+    defaultTemperature: CONNECTION_TEST_TEMPERATURE,
   },
   setting_expand: {
     taskType: 'setting_expand',
@@ -52,13 +56,7 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
       mayWriteBusinessData: false,
       requireExplicitApplyConfirmation: true,
     },
-    allowedSourceTypes: [
-      'novel',
-      'chapter',
-      'world_setting',
-      'rule_system',
-      'request_context',
-    ],
+    allowedSourceTypes: ['novel', 'chapter', 'world_setting', 'rule_system', 'request_context'],
     requiredSourceTypes: ['novel'],
     allowedTools: [],
     modelContextTokens: 16_000,

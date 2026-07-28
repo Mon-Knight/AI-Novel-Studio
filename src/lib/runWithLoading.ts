@@ -5,6 +5,7 @@
  * 无需在每个组件中引入 LoadingModal，降低耦合。
  */
 import type { LoadingTaskHelpers } from '../hooks/useLoadingTask';
+import { AiRequestCancelledError, isAiRequestCancelled } from '../services/ai/aiCancellation';
 
 // ==================== 类型 ====================
 
@@ -18,6 +19,13 @@ export interface RunWithLoadingOptions {
   successAutoCloseMs?: number;
   /** AbortSignal，用于取消 */
   signal?: AbortSignal;
+  /** 可重放操作身份；省略时自动生成 */
+  operationId?: string;
+}
+
+export interface LoadingTaskContext extends LoadingTaskHelpers {
+  signal: AbortSignal;
+  operationId: string;
 }
 
 export interface LoadingModalUpdate {
@@ -29,10 +37,42 @@ export interface LoadingModalUpdate {
   cancelable?: boolean;
   errorMessage?: string;
   autoCloseMs?: number;
+  operationId?: string;
 }
 
 // ==================== 全局事件名称 ====================
 const LOADING_MODAL_EVENT = 'ai-novel-studio:loading-modal';
+
+interface ActiveLoadingOperation {
+  controller: AbortController;
+  cancelRequested: boolean;
+}
+
+const activeLoadingOperations = new Map<string, ActiveLoadingOperation>();
+
+function createLoadingOperationId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? `loading-${uuid}` : `loading-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function cancelLoadingOperation(operationId: string): boolean {
+  const active = activeLoadingOperations.get(operationId);
+  if (!active || active.controller.signal.aborted) return false;
+  active.cancelRequested = true;
+  active.controller.abort();
+  emit({
+    type: 'update',
+    operationId,
+    message: '正在停止当前任务…',
+    stage: '等待请求安全结束',
+    cancelable: false,
+  });
+  return true;
+}
+
+export function getActiveLoadingOperationCountForTests(): number {
+  return activeLoadingOperations.size;
+}
 
 // ==================== Hook ====================
 
@@ -54,6 +94,7 @@ export interface GlobalLoadingState {
   onCancel?: () => void;
   onClose?: () => void;
   onRetry?: () => void;
+  operationId?: string;
 }
 
 export function useGlobalLoadingModal(
@@ -91,46 +132,75 @@ export function useGlobalLoadingModal(
             percent: detail.percent ?? -1,
             cancelable: detail.cancelable ?? false,
             errorMessage: '',
+            operationId: detail.operationId,
+            onCancel:
+              detail.cancelable && detail.operationId
+                ? () => cancelLoadingOperation(detail.operationId!)
+                : undefined,
           }));
           break;
         case 'update':
-          setState((prev) => ({
-            ...prev,
-            message: detail.message ?? prev.message,
-            stage: detail.stage ?? prev.stage,
-            percent: detail.percent ?? prev.percent,
-            cancelable: detail.cancelable ?? prev.cancelable,
-          }));
+          setState((prev) => {
+            if (detail.operationId && prev.operationId !== detail.operationId) return prev;
+            const nextCancelable = detail.cancelable ?? prev.cancelable;
+            return {
+              ...prev,
+              message: detail.message ?? prev.message,
+              stage: detail.stage ?? prev.stage,
+              percent: detail.percent ?? prev.percent,
+              cancelable: nextCancelable,
+              onCancel:
+                nextCancelable && prev.operationId
+                  ? () => cancelLoadingOperation(prev.operationId!)
+                  : undefined,
+            };
+          });
           break;
         case 'success': {
-          setState((prev) => ({
-            ...prev,
-            state: 'success',
-            message: detail.message || '操作完成',
-            stage: '',
-            percent: 100,
-            cancelable: false,
-            errorMessage: '',
-          }));
+          setState((prev) => {
+            if (detail.operationId && prev.operationId !== detail.operationId) return prev;
+            return {
+              ...prev,
+              state: 'success',
+              message: detail.message || '操作完成',
+              stage: '',
+              percent: 100,
+              cancelable: false,
+              errorMessage: '',
+              onCancel: undefined,
+            };
+          });
           const successAutoCloseMs = detail.autoCloseMs ?? autoCloseMs;
           if (successAutoCloseMs > 0) {
             setTimeout(() => {
-              setState((prev) => ({ ...prev, open: false }));
+              setState((prev) =>
+                detail.operationId && prev.operationId !== detail.operationId
+                  ? prev
+                  : { ...prev, open: false },
+              );
             }, successAutoCloseMs);
           }
           break;
         }
         case 'error':
-          setState((prev) => ({
-            ...prev,
-            state: 'error',
-            message: detail.message || '操作失败',
-            errorMessage: detail.errorMessage || '',
-            cancelable: false,
-          }));
+          setState((prev) => {
+            if (detail.operationId && prev.operationId !== detail.operationId) return prev;
+            return {
+              ...prev,
+              state: 'error',
+              message: detail.message || '操作失败',
+              errorMessage: detail.errorMessage || '',
+              cancelable: false,
+              onCancel: undefined,
+            };
+          });
           break;
         case 'hide':
-          setState((prev) => ({ ...prev, open: false }));
+          setState((prev) =>
+            detail.operationId && prev.operationId !== detail.operationId
+              ? prev
+              : { ...prev, open: false },
+          );
           break;
       }
     };
@@ -170,7 +240,7 @@ function emit(event: LoadingModalUpdate): void {
  */
 export async function runWithLoading<T>(
   options: RunWithLoadingOptions,
-  task: (helpers: LoadingTaskHelpers) => Promise<T>,
+  task: (context: LoadingTaskContext) => Promise<T>,
 ): Promise<T> {
   const {
     title,
@@ -179,54 +249,71 @@ export async function runWithLoading<T>(
     errorMessage = '操作失败',
     cancelable = false,
     successAutoCloseMs = 1200,
-    signal,
+    signal: externalSignal,
+    operationId = createLoadingOperationId(),
   } = options;
+
+  if (activeLoadingOperations.has(operationId)) {
+    throw new Error(`加载任务 operationId 正在执行：${operationId}`);
+  }
+
+  const controller = new AbortController();
+  const active: ActiveLoadingOperation = { controller, cancelRequested: false };
+  activeLoadingOperations.set(operationId, active);
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  if (externalSignal?.aborted) controller.abort();
 
   // 显示弹窗
   emit({
     type: 'show',
+    operationId,
     title,
     message: initialMessage,
     cancelable,
   });
 
   const helpers: LoadingTaskHelpers = {
-    setMessage: (message: string) => emit({ type: 'update', message }),
-    setStage: (stage: string) => emit({ type: 'update', stage }),
-    setPercent: (percent: number) => emit({ type: 'update', percent }),
-    setCancelable: (c: boolean) => emit({ type: 'update', cancelable: c }),
+    setMessage: (message: string) => emit({ type: 'update', operationId, message }),
+    setStage: (stage: string) => emit({ type: 'update', operationId, stage }),
+    setPercent: (percent: number) => emit({ type: 'update', operationId, percent }),
+    setCancelable: (c: boolean) => emit({ type: 'update', operationId, cancelable: c }),
+  };
+  const context: LoadingTaskContext = {
+    ...helpers,
+    signal: controller.signal,
+    operationId,
   };
 
   try {
-    // 支持 AbortSignal
-    if (signal) {
-      const abortPromise = new Promise<never>((_, reject) => {
-        const onAbort = () => {
-          reject(new DOMException('任务已取消', 'AbortError'));
-        };
-        if (signal.aborted) {
-          onAbort();
-        } else {
-          signal.addEventListener('abort', onAbort, { once: true });
-        }
-      });
-      const result = await Promise.race([task(helpers), abortPromise]);
-      emit({ type: 'success', message: successMessage, autoCloseMs: successAutoCloseMs });
-      return result;
-    }
-
-    const result = await task(helpers);
-    emit({ type: 'success', message: successMessage, autoCloseMs: successAutoCloseMs });
+    const result = await task(context);
+    if (controller.signal.aborted) throw new AiRequestCancelledError();
+    emit({
+      type: 'success',
+      operationId,
+      message: successMessage,
+      autoCloseMs: successAutoCloseMs,
+    });
     return result;
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    const isAborted = error instanceof DOMException && error.name === 'AbortError';
+    const isAborted =
+      controller.signal.aborted ||
+      isAiRequestCancelled(error) ||
+      (error instanceof DOMException && error.name === 'AbortError');
     emit({
       type: 'error',
+      operationId,
       message: isAborted ? '操作已取消' : errorMessage,
       errorMessage: isAborted ? '' : msg,
     });
+    if (isAborted && !isAiRequestCancelled(error)) throw new AiRequestCancelledError();
     throw error;
+  } finally {
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+    if (activeLoadingOperations.get(operationId) === active) {
+      activeLoadingOperations.delete(operationId);
+    }
   }
 }
 

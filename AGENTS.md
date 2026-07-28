@@ -26,15 +26,15 @@
 
 ## 2. 技术栈（不可变）
 
-| 层级 | 技术 |
-|------|------|
-| 桌面壳 | Tauri (Rust) |
-| 前端 | React 18 + TypeScript 5 |
-| 构建 | Vite 5 |
-| 路由 | React Router 6 (HashRouter) |
+| 层级     | 技术                                       |
+| -------- | ------------------------------------------ |
+| 桌面壳   | Tauri (Rust)                               |
+| 前端     | React 18 + TypeScript 5                    |
+| 构建     | Vite 5                                     |
+| 路由     | React Router 6 (HashRouter)                |
 | 数据存储 | SQLite (Tauri) / LocalStorage (浏览器开发) |
-| AI 调用 | 统一服务层封装 |
-| 提示词 | Markdown 模板独立管理 |
+| AI 调用  | 统一服务层封装                             |
+| 提示词   | Markdown 模板独立管理                      |
 
 **禁止未经讨论更换技术栈。**
 
@@ -103,16 +103,16 @@ AI Agent **绝对不得**：
 
 ## 5. 模块边界（不可跨）
 
-| 模块 | 职责 | 禁止 |
-|------|------|------|
-| `src/pages/` | 页面级组件，组织布局 | 不写业务逻辑 |
-| `src/components/` | 通用 UI 组件 | 不直接调用 AI 服务 |
-| `src/features/` | 业务逻辑模块 | 不直接操作 DOM |
-| `src/services/` | AI/数据库/提示词/导出服务 | 不包含 UI 代码 |
-| `src/store/` | 状态管理 | 不包含副作用 |
-| `src/types/` | 类型定义 | 不包含逻辑 |
-| `src-tauri/` | Rust 桌面壳 | 不包含前端逻辑 |
-| `prompts/` | AI 提示词模板 | 不在组件中重复 |
+| 模块              | 职责                      | 禁止               |
+| ----------------- | ------------------------- | ------------------ |
+| `src/pages/`      | 页面级组件，组织布局      | 不写业务逻辑       |
+| `src/components/` | 通用 UI 组件              | 不直接调用 AI 服务 |
+| `src/features/`   | 业务逻辑模块              | 不直接操作 DOM     |
+| `src/services/`   | AI/数据库/提示词/导出服务 | 不包含 UI 代码     |
+| `src/store/`      | 状态管理                  | 不包含副作用       |
+| `src/types/`      | 类型定义                  | 不包含逻辑         |
+| `src-tauri/`      | Rust 桌面壳               | 不包含前端逻辑     |
+| `prompts/`        | AI 提示词模板             | 不在组件中重复     |
 
 ---
 
@@ -141,9 +141,9 @@ AI Agent **绝对不得**：
 
 ### 7.1 版本号规则
 
-- **v1.x**：应用化阶段（当前所处）
-- **v2.x**：Agent 化阶段（Planner / Tool Calling / Memory）
-- **v3.x**：Autonomous 阶段（Multi-Agent / 自主创作）
+- **v1.x**：应用化阶段（已完成）
+- **v2.x**：Agent 化阶段（Planner / Tool Calling / Memory，已完成）
+- **v3.x**：Autonomous 阶段（Multi-Agent / 自主创作，当前所处）
 
 ### 7.2 当前版本
 
@@ -153,12 +153,19 @@ AI Agent **绝对不得**：
 
 ```powershell
 git status
+git switch -c codex/vX.Y.Z-release
 git add .
 git commit -m "feat: complete vX.X.X ..."
+git push -u origin codex/vX.Y.Z-release
+
+# 创建 PR，门禁和审查通过后合并；再从 main 创建不可移动的发布 tag
+git switch main
+git pull --ff-only origin main
 git tag vX.X.X
-git push origin main
 git push origin vX.X.X
 ```
+
+详细分支、审查、hotfix 与回滚规则见 `docs/project/git-workflow.md`；日常开发不得直接提交到 `main`。
 
 ---
 
@@ -175,24 +182,24 @@ git status               # 确认 working tree clean
 
 ## 9. 文档体系
 
-| 文件 | 用途 |
-|------|------|
-| `AGENTS.md` | Agent 总入口规则 |
-| `.github/copilot-instructions.md` | Copilot 项目开发指令 |
-| `.github/instructions/` | 分领域开发指令 |
-| `.github/prompts/` | 版本开发 Prompt 模板 |
-| `.github/skills/` | Agent Skills（多步骤工作流） |
-| `.cursor/rules/` | Cursor IDE 规则 |
-| `docs/product-design.md` | 产品设计文档 |
-| `docs/ui-reference.md` | UI 参考标准 |
-| `docs/data-model.md` | 数据模型边界 |
-| `docs/development-rules.md` | 开发规则 |
-| `docs/version-roadmap.md` | 版本路线图 |
-| `docs/project-architecture.md` | 项目架构 |
-| `docs/module-boundaries.md` | 模块边界 |
-| `docs/agent-workflow.md` | Agent 工作流 |
-| `docs/ai-agent-roadmap.md` | AI Agent 路线图 |
-| `CHANGELOG.md` | 变更日志 |
+| 文件                              | 用途                         |
+| --------------------------------- | ---------------------------- |
+| `AGENTS.md`                       | Agent 总入口规则             |
+| `.github/copilot-instructions.md` | Copilot 项目开发指令         |
+| `.github/instructions/`           | 分领域开发指令               |
+| `.github/prompts/`                | 版本开发 Prompt 模板         |
+| `.github/skills/`                 | Agent Skills（多步骤工作流） |
+| `.cursor/rules/`                  | Cursor IDE 规则              |
+| `docs/product-design.md`          | 产品设计文档                 |
+| `docs/ui-reference.md`            | UI 参考标准                  |
+| `docs/data-model.md`              | 数据模型边界                 |
+| `docs/development-rules.md`       | 开发规则                     |
+| `docs/version-roadmap.md`         | 版本路线图                   |
+| `docs/project-architecture.md`    | 项目架构                     |
+| `docs/module-boundaries.md`       | 模块边界                     |
+| `docs/agent-workflow.md`          | Agent 工作流                 |
+| `docs/ai-agent-roadmap.md`        | AI Agent 路线图              |
+| `CHANGELOG.md`                    | 变更日志                     |
 
 ---
 
@@ -231,9 +238,9 @@ git status               # 确认 working tree clean
 
 ## 11. 用户与 Agent 的真实协作流程
 
-### 11.1 当前协作模式（v1.x）
+### 11.1 当前开发协作模式（与产品内 Agent Runtime 版本无关）
 
-AI Novel Studio 当前采用 **用户主导、Agent 执行** 的协作模式：
+AI Novel Studio 仓库开发当前仍采用 **用户主导、Agent 执行** 的协作模式：
 
 ```text
 第 1 步：用户向 ChatGPT / Planner 询问下一步
@@ -278,6 +285,7 @@ Agent **不是** 自主决策者。Agent 是 **任务执行者**。
 `.github/skills/` 中的 Skills 是 **开发辅助系统**，不是用户端产品功能。
 
 它们的作用是：
+
 - 指导 Agent 如何正确执行任务
 - 提供标准化的执行流程
 - 防止 Agent 越界操作

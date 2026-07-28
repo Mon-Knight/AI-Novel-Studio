@@ -56,11 +56,13 @@ function validateScope(
   compilation: AiExecutionCompilationInput,
 ): void {
   if (definition.taskType === 'connection_test') {
-    if (scope.scopeType !== 'system'
-      || scope.novelId !== 'system'
-      || scope.chapterId
-      || scope.draftId
-      || compilation.sources.length > 0) {
+    if (
+      scope.scopeType !== 'system' ||
+      scope.novelId !== 'system' ||
+      scope.chapterId ||
+      scope.draftId ||
+      compilation.sources.length > 0
+    ) {
       throw new AiCompilationError(
         'AI_COMPILATION_INPUT_INVALID',
         '连接测试必须使用无来源的 system scope。',
@@ -87,9 +89,7 @@ function validateScope(
         'Novel 来源与 Task scope 不一致。',
       );
     }
-    if (source.sourceType === 'chapter'
-      && scope.chapterId
-      && source.sourceId !== scope.chapterId) {
+    if (source.sourceType === 'chapter' && scope.chapterId && source.sourceId !== scope.chapterId) {
       throw new AiCompilationError(
         'AI_COMPILATION_INPUT_INVALID',
         'Chapter 来源与 Task scope 不一致。',
@@ -105,9 +105,11 @@ function validateScope(
     }
   }
   for (const requiredType of definition.requiredSourceTypes) {
-    if (!compilation.sources.some((source) => (
-      source.sourceType === requiredType && source.content.trim()
-    ))) {
+    if (
+      !compilation.sources.some(
+        (source) => source.sourceType === requiredType && source.content.trim(),
+      )
+    ) {
       throw new AiCompilationError(
         'AI_CONTEXT_SOURCE_REQUIRED',
         `任务 ${definition.taskType} 缺少必需来源 ${requiredType}。`,
@@ -117,6 +119,7 @@ function validateScope(
 }
 
 function temperature(definition: AiTaskCompilationDefinition, settings: AiSettings): number {
+  if (definition.taskType === 'connection_test') return definition.defaultTemperature;
   const requested = settings.temperature ?? definition.defaultTemperature;
   return Math.min(2, Math.max(0, requested));
 }
@@ -126,15 +129,10 @@ export async function compileAiExecutionContract(
 ): Promise<CompiledAiExecutionContractV1> {
   const { definition, scope, compilation, toolRegistry } = input;
   if (!isPlainRecord(compilation.taskInput ?? {})) {
-    throw new AiCompilationError(
-      'AI_COMPILATION_INPUT_INVALID',
-      'taskInput 必须是 JSON object。',
-    );
+    throw new AiCompilationError('AI_COMPILATION_INPUT_INVALID', 'taskInput 必须是 JSON object。');
   }
   validateScope(definition, scope, compilation);
-  const availableTools = new Set(
-    toolRegistry.tools.map((tool) => `${tool.name}@${tool.version}`),
-  );
+  const availableTools = new Set(toolRegistry.tools.map((tool) => `${tool.name}@${tool.version}`));
   const allowedTools = [...new Set(definition.allowedTools)].sort();
   for (const toolName of allowedTools) {
     if (!availableTools.has(toolName)) {

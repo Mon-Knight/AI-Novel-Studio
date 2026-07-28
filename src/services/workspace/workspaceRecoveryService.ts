@@ -39,11 +39,13 @@ function normalizeRecovery(raw: unknown): WorkspaceRecoverySnapshot | null {
   const record = raw as RecoveryRecord;
   const novelId = optionalString(record.novelId ?? record.novel_id);
   const chapterId = optionalString(record.chapterId ?? record.chapter_id);
-  const recoveryContent = typeof record.recoveryContent === 'string'
-    ? record.recoveryContent
-    : record.recovery_content;
-  const recoveryContentHash = optionalString(record.recoveryContentHash ?? record.recovery_content_hash);
-  if (!novelId || !chapterId || typeof recoveryContent !== 'string' || !recoveryContentHash) return null;
+  const recoveryContent =
+    typeof record.recoveryContent === 'string' ? record.recoveryContent : record.recovery_content;
+  const recoveryContentHash = optionalString(
+    record.recoveryContentHash ?? record.recovery_content_hash,
+  );
+  if (!novelId || !chapterId || typeof recoveryContent !== 'string' || !recoveryContentHash)
+    return null;
   const now = nowISO();
   return {
     novelId,
@@ -65,7 +67,10 @@ function getLocal(target: WorkspaceRecoveryTarget): WorkspaceRecoverySnapshot | 
 }
 
 export const workspaceRecoveryService = {
-  async get(target: WorkspaceRecoveryTarget, traceId: string): Promise<WorkspaceRecoverySnapshot | null> {
+  async get(
+    target: WorkspaceRecoveryTarget,
+    traceId: string,
+  ): Promise<WorkspaceRecoverySnapshot | null> {
     try {
       const raw = await dbCall<unknown | null>(
         'get_workspace_recovery_snapshot',
@@ -73,7 +78,10 @@ export const workspaceRecoveryService = {
         () => getLocal(target),
       );
       const snapshot = normalizeRecovery(raw);
-      if (snapshot && (snapshot.novelId !== target.novelId || snapshot.chapterId !== target.chapterId)) {
+      if (
+        snapshot &&
+        (snapshot.novelId !== target.novelId || snapshot.chapterId !== target.chapterId)
+      ) {
         throw {
           code: 'RECOVERY_CONTENT_INVALID',
           message: '恢复快照与请求目标不一致。',
@@ -106,11 +114,22 @@ export const workspaceRecoveryService = {
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       };
-      lsSet(keyOf(input), snapshot);
+      try {
+        lsSet(keyOf(input), snapshot);
+      } catch {
+        throw {
+          code: 'RECOVERY_CONTENT_INVALID',
+          message: '浏览器恢复快照未能持久化。',
+          retryable: true,
+          traceId: input.traceId,
+        };
+      }
       const persisted = getLocal(input);
-      if (!persisted
-        || persisted.recoveryContentHash !== snapshot.recoveryContentHash
-        || persisted.recoveryContent !== snapshot.recoveryContent) {
+      if (
+        !persisted ||
+        persisted.recoveryContentHash !== snapshot.recoveryContentHash ||
+        persisted.recoveryContent !== snapshot.recoveryContent
+      ) {
         throw {
           code: 'RECOVERY_CONTENT_INVALID',
           message: '浏览器恢复快照未能持久化。',
@@ -121,11 +140,7 @@ export const workspaceRecoveryService = {
       return persisted;
     };
     try {
-      const raw = await dbCall<unknown>(
-        'upsert_workspace_recovery_snapshot',
-        { input },
-        fallback,
-      );
+      const raw = await dbCall<unknown>('upsert_workspace_recovery_snapshot', { input }, fallback);
       const snapshot = normalizeRecovery(raw);
       if (!snapshot) {
         throw {

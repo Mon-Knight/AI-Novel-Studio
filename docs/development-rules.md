@@ -20,6 +20,7 @@ AI Novel Studio 已建立完整的 Agent 工程化开发基础设施。所有开
 - **`docs/agent-workflow.md`** — Agent 标准工作流
 
 AI Agent 在操作本仓库时，必须：
+
 1. 先读 `AGENTS.md`
 2. 遵循 `docs/agent-workflow.md` 定义的工作流
 3. 遵守 `.cursor/rules/agent-safety.mdc` 中的安全约束
@@ -179,14 +180,14 @@ SQLite
 
 技术分工：
 
-| 技术 | 用途 |
-|---|---|
-| Tauri | Windows 桌面应用壳、打包、系统能力调用 |
-| React | UI 界面开发 |
-| TypeScript | 类型约束、提升长期维护性 |
-| SQLite | 本地小说数据、章节、角色、风格方案保存 |
-| CSS / Tailwind 可选 | UI 样式实现 |
-| Markdown / JSON | 提示词模板、风格配置、文档管理 |
+| 技术                | 用途                                   |
+| ------------------- | -------------------------------------- |
+| Tauri               | Windows 桌面应用壳、打包、系统能力调用 |
+| React               | UI 界面开发                            |
+| TypeScript          | 类型约束、提升长期维护性               |
+| SQLite              | 本地小说数据、章节、角色、风格方案保存 |
+| CSS / Tailwind 可选 | UI 样式实现                            |
+| Markdown / JSON     | 提示词模板、风格配置、文档管理         |
 
 ---
 
@@ -934,12 +935,20 @@ git status
 
 ```powershell
 git status
+git switch -c codex/v0.x.x-release
 git add .
 git commit -m "feat: complete v0.x.x ..."
+git push -u origin codex/v0.x.x-release
+
+# PR 审查和门禁通过并合并后
+git switch main
+git pull --ff-only origin main
 git tag v0.x.x
-git push origin main
 git push origin v0.x.x
 ```
+
+不得直接在 `main` 上进行日常开发；完整分支保护、PR、hotfix 和回滚规则见
+[`docs/project/git-workflow.md`](project/git-workflow.md)。
 
 标签格式：
 
@@ -1283,6 +1292,20 @@ AiGeneratePanel.tsx
 
 不需要对非常简单的 HTML / JSX 逐行注释。
 
+### 16.4 格式化与提交门禁
+
+- TypeScript、JavaScript、JSON、Markdown、CSS 与 YAML 使用 Prettier。
+- 历史文件采用增量格式化：修改或新增的暂存文件由 lint-staged 格式化，不得仅为统一格式一次性改写无关模块。
+- 提交前由 Husky 运行 lint-staged；提交信息由 Commitlint 按 Conventional Commits 校验。
+- `npm run lint:ci` 和 `npm run test:coverage` 是 CI 必过项，warning 与覆盖率预算只能收紧，不能放宽来绕过失败。
+
+### 16.5 依赖治理
+
+- 运行时依赖允许在已评估的主版本内使用 semver 范围；构建、测试和发布关键工具使用精确版本，由 lockfile 保证可复现。
+- GitHub Dependabot 定期检查 npm 与 Cargo 的 minor/patch 更新；major 更新必须单独评估迁移影响。
+- CI 使用 `npm ci` 与 Cargo `--locked`，并以 `npm audit --omit=dev --audit-level=high` 阻止新增高危或严重生产依赖漏洞。
+- Tauri、React、React Router、Vite 等技术栈主版本不得由自动更新直接跨越；Tauri 2 迁移必须作为独立版本任务。
+
 ---
 
 ## 17. 数据库迁移规则
@@ -1366,38 +1389,46 @@ JSON 风格配置 ≠ JSON 作品备份
 # v0.x.x 完成汇报
 
 ## 一、版本与分支
+
 - 当前分支：
 - 当前版本：
 - Git tag：
 - GitHub 推送状态：
 
 ## 二、本次目标
+
 - 目标 1：
 - 目标 2：
 - 目标 3：
 
 ## 三、新增文件
+
 - 文件 1：
 - 文件 2：
 
 ## 四、修改文件
+
 - 文件 1：
 - 文件 2：
 
 ## 五、功能完成情况
+
 | 功能 | 状态 | 说明 |
-|---|---|---|
-|  |  |  |
+| ---- | ---- | ---- |
+|      |      |      |
 
 ## 六、测试与验证
+
 - 命令：
 - 结果：
 
 ## 七、已知问题
+
 - 问题 1：
 - 问题 2：
 
 ## 八、下一步建议
+
 - 建议 1：
 - 建议 2：
 ```

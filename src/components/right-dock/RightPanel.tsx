@@ -1,22 +1,36 @@
-import { useRef, useEffect, useState } from 'react';
-import type { PanelType } from '../../pages/WritingWorkspace/WritingWorkspacePage';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type SyntheticEvent,
+} from 'react';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
+import type { QualityCheckItem, QualityCheckReport } from '../../types/qualityCheck';
+import type { PanelType, RightDockPanelType } from '../../types/rightSidebar';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../types/workspaceSafety';
 import type { WritingContext } from '../../utils/writingContext';
 import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
 import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
-import AiGeneratePanel from './panels/AiGeneratePanel';
-import ChapterEngineeringPanel from './panels/ChapterEngineeringPanel';
-import OutlinePanel from './panels/OutlinePanel';
-import CharactersPanel from './panels/CharactersPanel';
-import EventsPanel from './panels/EventsPanel';
-import SettingPanel from './panels/SettingPanel';
-import StylePanel from './panels/StylePanel';
-import CheckPanel from './panels/CheckPanel';
-import PolishPanel from './panels/PolishPanel';
-import ChapterSummaryPanel from './panels/ChapterSummaryPanel';
-import ContextViewPanel from './panels/ContextViewPanel';
+
+const AiGeneratePanel = lazy(() => import('./panels/AiGeneratePanel'));
+const ChapterEngineeringPanel = lazy(() => import('./panels/ChapterEngineeringPanel'));
+const OutlinePanel = lazy(() => import('./panels/OutlinePanel'));
+const CharactersPanel = lazy(() => import('./panels/CharactersPanel'));
+const EventsPanel = lazy(() => import('./panels/EventsPanel'));
+const SettingPanel = lazy(() => import('./panels/SettingPanel'));
+const StylePanel = lazy(() => import('./panels/StylePanel'));
+const CheckPanel = lazy(() => import('./panels/CheckPanel'));
+const PolishPanel = lazy(() => import('./panels/PolishPanel'));
+const ChapterSummaryPanel = lazy(() => import('./panels/ChapterSummaryPanel'));
+const ContextViewPanel = lazy(() => import('./panels/ContextViewPanel'));
+const MultiAgentPanelRuntime = lazy(() => import('./panels/MultiAgentPanelRuntime'));
 
 interface RightPanelProps {
   panelType: PanelType;
@@ -30,11 +44,16 @@ interface RightPanelProps {
   onChapterCharactersChanged?: () => void;
   contextVersion?: number;
   /** 定位正文回调 (v1.7.16 4参数) */
-  onLocateText?: (startOffset: number, endOffset: number, quote?: string, paragraphIndex?: number) => void;
+  onLocateText?: (
+    startOffset: number,
+    endOffset: number,
+    quote?: string,
+    paragraphIndex?: number,
+  ) => void;
   /** v1.7.19 质量检查状态持久化 */
-  qcReport?: any;
-  qcItems?: any[];
-  onQcChange?: (report: any, items: any[]) => void;
+  qcReport?: QualityCheckReport | null;
+  qcItems?: QualityCheckItem[];
+  onQcChange?: (report: QualityCheckReport | null, items: QualityCheckItem[]) => void;
   currentEditorContent?: string;
   currentEditorWordCount?: number;
   currentEditorDirty?: boolean;
@@ -55,19 +74,119 @@ interface RightPanelProps {
   documentAvailable?: boolean;
 }
 
-const panelConfig: Record<string, { title: string; component: React.FC<any> }> = {
-  'ai-generate': { title: 'AI 章节生成', component: AiGeneratePanel },
-  'engineering': { title: '章节工程', component: ChapterEngineeringPanel },
-  'outline': { title: '大纲查看', component: OutlinePanel },
-  'characters': { title: '角色管理', component: CharactersPanel },
-  'events': { title: '事件管理', component: EventsPanel },
-  'setting': { title: '设定查看', component: SettingPanel },
-  'style': { title: '风格方案', component: StylePanel },
-  'check': { title: '质量检查', component: CheckPanel },
-  'polish': { title: '润色优化', component: PolishPanel },
-  'chapter-summary': { title: '章节总结', component: ChapterSummaryPanel },
-  'context-view': { title: '上下文记录', component: ContextViewPanel },
+type PanelContentProps = Omit<
+  RightPanelProps,
+  | 'panelType'
+  | 'onClose'
+  | 'sidebarState'
+  | 'onUpdateToolState'
+  | 'documentAvailable'
+  | 'writingContext'
+> & {
+  onUpdateToolState?: (patch: Partial<PanelToolState>) => void;
 };
+
+interface PanelConfig {
+  title: string;
+  component: ComponentType<PanelContentProps>;
+}
+
+const panelConfig: Record<RightDockPanelType, PanelConfig> = {
+  'ai-generate': { title: 'AI 章节生成', component: (props) => <AiGeneratePanel {...props} /> },
+  engineering: {
+    title: '章节工程',
+    component: (props) => <ChapterEngineeringPanel {...props} />,
+  },
+  outline: { title: '大纲查看', component: (props) => <OutlinePanel {...props} /> },
+  characters: { title: '角色管理', component: (props) => <CharactersPanel {...props} /> },
+  events: { title: '事件管理', component: (props) => <EventsPanel {...props} /> },
+  setting: { title: '设定查看', component: (props) => <SettingPanel {...props} /> },
+  style: { title: '风格方案', component: (props) => <StylePanel {...props} /> },
+  check: { title: '质量检查', component: (props) => <CheckPanel {...props} /> },
+  polish: { title: '润色优化', component: (props) => <PolishPanel {...props} /> },
+  'multi-agent': {
+    title: 'Multi-Agent 协作',
+    component: (props) => <MultiAgentPanelRuntime {...props} />,
+  },
+  'chapter-summary': {
+    title: '章节总结',
+    component: (props) => <ChapterSummaryPanel {...props} />,
+  },
+  'context-view': {
+    title: '上下文记录',
+    component: (props) => <ContextViewPanel {...props} />,
+  },
+};
+
+const DOCUMENT_REQUIRED_PANELS = new Set<RightDockPanelType>([
+  'ai-generate',
+  'engineering',
+  'check',
+  'polish',
+  'multi-agent',
+  'chapter-summary',
+]);
+
+const EDITOR_SENSITIVE_PANELS = new Set<RightDockPanelType>([
+  'ai-generate',
+  'engineering',
+  'check',
+  'polish',
+  'multi-agent',
+]);
+
+const EDITOR_PROP_KEYS = new Set<keyof PanelContentProps>([
+  'currentEditorContent',
+  'currentEditorWordCount',
+  'currentEditorDirty',
+  'currentContentHash',
+]);
+
+interface PanelRuntimeProps {
+  panelType: RightDockPanelType;
+  component: ComponentType<PanelContentProps>;
+  model: PanelContentProps;
+  onUpdateToolState?: RightPanelProps['onUpdateToolState'];
+}
+
+function PanelRuntime({
+  panelType,
+  component: PanelComponent,
+  model,
+  onUpdateToolState,
+}: PanelRuntimeProps) {
+  const updateToolState = useCallback(
+    (patch: Partial<PanelToolState>) => onUpdateToolState?.(panelType, patch),
+    [onUpdateToolState, panelType],
+  );
+  return (
+    <PanelComponent
+      {...model}
+      onUpdateToolState={onUpdateToolState ? updateToolState : undefined}
+    />
+  );
+}
+
+function panelRuntimePropsEqual(previous: PanelRuntimeProps, next: PanelRuntimeProps): boolean {
+  if (
+    previous.panelType !== next.panelType ||
+    previous.component !== next.component ||
+    previous.onUpdateToolState !== next.onUpdateToolState
+  ) {
+    return false;
+  }
+
+  const compareEditorSnapshot = EDITOR_SENSITIVE_PANELS.has(next.panelType);
+  const previousModel = previous.model as Record<string, unknown>;
+  const nextModel = next.model as Record<string, unknown>;
+  for (const key of Object.keys(nextModel) as Array<keyof PanelContentProps>) {
+    if (!compareEditorSnapshot && EDITOR_PROP_KEYS.has(key)) continue;
+    if (previousModel[key] !== nextModel[key]) return false;
+  }
+  return true;
+}
+
+const MemoizedPanelRuntime = memo(PanelRuntime, panelRuntimePropsEqual);
 
 function RightPanel({
   panelType,
@@ -113,8 +232,65 @@ function RightPanel({
   const currentToolState: PanelToolState | undefined = effectivePanelType
     ? getOrCreateToolState(sidebarState ?? createInitialSidebarState(), effectivePanelType)
     : undefined;
-  const toolOutputStale = !!(effectivePanelType && writingContext && currentToolState?.relatedContentHash
-    && currentToolState.relatedContentHash !== writingContext.contentHash);
+  const toolOutputStale = !!(
+    effectivePanelType &&
+    writingContext &&
+    currentToolState?.relatedContentHash &&
+    currentToolState.relatedContentHash !== writingContext.contentHash
+  );
+
+  const panelModel = useMemo<PanelContentProps>(
+    () => ({
+      novelId,
+      chapter,
+      onGenerated,
+      onAdopted,
+      onChapterOutlineApplied,
+      onChapterGoalDirtyChange,
+      onChapterCharactersChanged,
+      contextVersion,
+      onLocateText,
+      qcReport,
+      qcItems,
+      onQcChange,
+      currentEditorContent,
+      currentEditorWordCount,
+      currentEditorDirty,
+      currentContentHash,
+      currentDraftId,
+      currentDraftVersion,
+      onApplyAiText,
+      onBeforeDocumentChange,
+      showAiModal,
+      updateAiModal,
+      hideAiModal,
+    }),
+    [
+      chapter,
+      contextVersion,
+      currentContentHash,
+      currentDraftId,
+      currentDraftVersion,
+      currentEditorContent,
+      currentEditorDirty,
+      currentEditorWordCount,
+      hideAiModal,
+      novelId,
+      onAdopted,
+      onApplyAiText,
+      onBeforeDocumentChange,
+      onChapterCharactersChanged,
+      onChapterGoalDirtyChange,
+      onChapterOutlineApplied,
+      onGenerated,
+      onLocateText,
+      onQcChange,
+      qcItems,
+      qcReport,
+      showAiModal,
+      updateAiModal,
+    ],
+  );
 
   // v1.0.24: 全局 mousedown 监听 —— 精确 click-outside 判断
   useEffect(() => {
@@ -131,34 +307,30 @@ function RightPanel({
   }, [onClose, panelType]);
 
   // v1.0.44: 面板收起时使用 display:none 而非卸载，保留 AI 输出等状态
-  if (!effectivePanelType) return null;
+  if (!effectivePanelType || effectivePanelType === 'draft-history') return null;
   const config = panelConfig[effectivePanelType];
-  if (!config) return null;
 
   const PanelComponent = config.component;
-  const documentRequired = ['ai-generate', 'engineering', 'check', 'polish', 'chapter-summary']
-    .includes(effectivePanelType);
+  const documentRequired = DOCUMENT_REQUIRED_PANELS.has(effectivePanelType);
 
   // v1.0.24: 阻止面板内部所有交互事件冒泡到外部
-  const stopAll = (e: React.SyntheticEvent) => {
+  const stopAll = (e: SyntheticEvent) => {
     e.stopPropagation();
     e.nativeEvent.stopImmediatePropagation?.();
   };
 
   return (
     <div className="right-panel-overlay" style={!panelType ? { display: 'none' } : undefined}>
-      <div
-        ref={panelRef}
-        className="right-panel"
-        onMouseDown={stopAll}
-        onClick={stopAll}
-      >
+      <div ref={panelRef} className="right-panel" onMouseDown={stopAll} onClick={stopAll}>
         <div className="right-panel-header">
           <span className="right-panel-title">{config.title}</span>
           <button
             className="right-panel-close"
             onMouseDown={stopAll}
-            onClick={(e) => { stopAll(e); onClose(); }}
+            onClick={(e) => {
+              stopAll(e);
+              onClose();
+            }}
           >
             ✕
           </button>
@@ -176,34 +348,22 @@ function RightPanel({
               <strong>完整正文暂时无法读取</strong>
               <p>为避免截断内容进入 AI 上下文，本面板已暂停。请先在编辑区重新读取正文。</p>
             </div>
-          ) : <PanelComponent
-            novelId={novelId}
-            chapter={chapter}
-            onGenerated={onGenerated}
-            onAdopted={onAdopted}
-            onChapterOutlineApplied={onChapterOutlineApplied}
-            onChapterGoalDirtyChange={onChapterGoalDirtyChange}
-            onChapterCharactersChanged={onChapterCharactersChanged}
-            contextVersion={contextVersion}
-            onLocateText={onLocateText}
-            qcReport={qcReport}
-            qcItems={qcItems}
-            onQcChange={onQcChange}
-            currentEditorContent={currentEditorContent}
-            currentEditorWordCount={currentEditorWordCount}
-            currentEditorDirty={currentEditorDirty}
-            currentContentHash={currentContentHash}
-            currentDraftId={currentDraftId}
-            currentDraftVersion={currentDraftVersion}
-            onApplyAiText={onApplyAiText}
-            onBeforeDocumentChange={onBeforeDocumentChange}
-            showAiModal={showAiModal}
-            updateAiModal={updateAiModal}
-            hideAiModal={hideAiModal}
-            // v1.0.45 统一上下文 + 状态
-            writingContext={writingContext}
-            onUpdateToolState={effectivePanelType ? (patch: Partial<PanelToolState>) => onUpdateToolState?.(effectivePanelType, patch) : undefined}
-          />}
+          ) : (
+            <Suspense
+              fallback={
+                <div className="panel-loading" role="status">
+                  正在加载工具…
+                </div>
+              }
+            >
+              <MemoizedPanelRuntime
+                panelType={effectivePanelType}
+                component={PanelComponent}
+                model={panelModel}
+                onUpdateToolState={onUpdateToolState}
+              />
+            </Suspense>
+          )}
         </div>
       </div>
     </div>

@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { createServer } from 'vite';
-import type { AiGenerateRequest } from '../../types/ai';
+import type {
+  AiGenerateRequest,
+  AiPricingSnapshot,
+  AiStreamEvent,
+  AiTaskRecord,
+} from '../../types/ai';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -45,11 +50,24 @@ const vite = await createServer({
   server: { middlewareMode: true, hmr: false },
 });
 
-const realModule = await vite.ssrLoadModule('/src/services/ai/realAiClient.ts') as typeof import('./realAiClient');
-const mockModule = await vite.ssrLoadModule('/src/services/ai/mockAiClient.ts') as typeof import('./mockAiClient');
-const cancellationModule = await vite.ssrLoadModule('/src/services/ai/aiCancellation.ts') as typeof import('./aiCancellation');
-const qualityModule = await vite.ssrLoadModule('/src/services/ai/qualityCheckAiService.ts') as typeof import('./qualityCheckAiService');
-const taskModule = await vite.ssrLoadModule('/src/services/ai/aiTaskService.ts') as typeof import('./aiTaskService');
+const realModule = (await vite.ssrLoadModule(
+  '/src/services/ai/realAiClient.ts',
+)) as typeof import('./realAiClient');
+const compilationRegistryModule = (await vite.ssrLoadModule(
+  '/src/services/ai/compilation/productionCompilationRegistry.ts',
+)) as typeof import('./compilation/productionCompilationRegistry');
+const mockModule = (await vite.ssrLoadModule(
+  '/src/services/ai/mockAiClient.ts',
+)) as typeof import('./mockAiClient');
+const cancellationModule = (await vite.ssrLoadModule(
+  '/src/services/ai/aiCancellation.ts',
+)) as typeof import('./aiCancellation');
+const qualityModule = (await vite.ssrLoadModule(
+  '/src/services/ai/qualityCheckAiService.ts',
+)) as typeof import('./qualityCheckAiService');
+const taskModule = (await vite.ssrLoadModule(
+  '/src/services/ai/aiTaskService.ts',
+)) as typeof import('./aiTaskService');
 
 const request: AiGenerateRequest = {
   taskType: 'quality_check',
@@ -129,8 +147,12 @@ test('Tauri cancellation waits for cancel_ai_request confirmation', async () => 
   });
   let resultSettled = false;
   void result.then(
-    () => { resultSettled = true; },
-    () => { resultSettled = true; },
+    () => {
+      resultSettled = true;
+    },
+    () => {
+      resultSettled = true;
+    },
   );
   await requestStarted;
   controller.abort();
@@ -184,8 +206,12 @@ test('Tauri cancellation IPC failure waits for the original request to settle', 
     });
     let resultSettled = false;
     void result.then(
-      () => { resultSettled = true; },
-      () => { resultSettled = true; },
+      () => {
+        resultSettled = true;
+      },
+      () => {
+        resultSettled = true;
+      },
     );
     await requestStarted;
     controller.abort();
@@ -195,7 +221,9 @@ test('Tauri cancellation IPC failure waits for the original request to settle', 
     assert.equal(resultSettled, false);
     assert.ok(resolveActiveRequest);
     resolveActiveRequest({ text: 'late provider response' });
-    await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+    await assert.rejects(result, (error: unknown) =>
+      cancellationModule.isAiRequestCancelled(error),
+    );
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /could not be confirmed/);
     assert.doesNotMatch(warnings[0], /secret-token|Bearer/);
@@ -233,8 +261,12 @@ test('Tauri cancellation settles when the original request finishes before a sta
   });
   let resultSettled = false;
   void result.then(
-    () => { resultSettled = true; },
-    () => { resultSettled = true; },
+    () => {
+      resultSettled = true;
+    },
+    () => {
+      resultSettled = true;
+    },
   );
   await requestStarted;
   controller.abort();
@@ -255,26 +287,29 @@ test('Tauri cancellation settles when the original request finishes before a sta
 
 test('browser caller cancellation is distinct from request timeout', async () => {
   clearMocks();
-  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => (
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
     new Promise<Response>((_resolve, reject) => {
       const signal = init?.signal;
       const rejectAbort = () => reject(new DOMException('Aborted', 'AbortError'));
       signal?.addEventListener('abort', rejectAbort, { once: true });
       if (signal?.aborted) rejectAbort();
-    })
-  )) as typeof fetch;
+    })) as typeof fetch;
 
   const controller = new AbortController();
   const cancelled = createRealClient().generate(request, { signal: controller.signal });
   controller.abort();
-  await assert.rejects(cancelled, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+  await assert.rejects(cancelled, (error: unknown) =>
+    cancellationModule.isAiRequestCancelled(error),
+  );
 
   const timedOut = createRealClient(0.01).generate(request);
-  await assert.rejects(timedOut, (error: unknown) => (
-    error instanceof Error
-    && error.message.includes('请求超时')
-    && !cancellationModule.isAiRequestCancelled(error)
-  ));
+  await assert.rejects(
+    timedOut,
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes('请求超时') &&
+      !cancellationModule.isAiRequestCancelled(error),
+  );
 });
 
 test('browser HTTP errors do not expose provider response bodies', async () => {
@@ -282,12 +317,14 @@ test('browser HTTP errors do not expose provider response bodies', async () => {
   const sensitiveBody = 'Bearer secret-token full sensitive prompt';
   globalThis.fetch = (async () => new Response(sensitiveBody, { status: 500 })) as typeof fetch;
 
-  await assert.rejects(createRealClient().generate(request), (error: unknown) => (
-    error instanceof Error
-    && error.message.includes('模型服务错误（500）')
-    && !error.message.includes(sensitiveBody)
-    && !error.message.includes('secret-token')
-  ));
+  await assert.rejects(
+    createRealClient().generate(request),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes('模型服务错误（500）') &&
+      !error.message.includes(sensitiveBody) &&
+      !error.message.includes('secret-token'),
+  );
 });
 
 test('browser malformed success responses do not expose provider response bodies', async () => {
@@ -295,12 +332,166 @@ test('browser malformed success responses do not expose provider response bodies
   const sensitiveBody = 'Bearer secret-token full sensitive prompt';
   globalThis.fetch = (async () => new Response(sensitiveBody, { status: 200 })) as typeof fetch;
 
-  await assert.rejects(createRealClient().generate(request), (error: unknown) => (
-    error instanceof Error
-    && error.message === 'AI 调用失败：模型服务返回了无法解析的响应。'
-    && !error.message.includes(sensitiveBody)
-    && !error.message.includes('secret-token')
-  ));
+  await assert.rejects(
+    createRealClient().generate(request),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message === 'AI 调用失败：模型服务返回了无法解析的响应。' &&
+      !error.message.includes(sensitiveBody) &&
+      !error.message.includes('secret-token'),
+  );
+});
+
+test('connection test reserves enough output budget for reasoning-compatible models', () => {
+  assert.equal(
+    compilationRegistryModule.productionCompilationRegistryPrivate.definitions.connection_test
+      ?.maxOutputTokens,
+    128,
+  );
+});
+
+test('browser discards non-empty partial output when the provider reports token truncation', async () => {
+  clearMocks();
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: 'length',
+            message: {
+              content: 'partial response contains Bearer private-output and must not be surfaced',
+              reasoning_content: 'private reasoning must not be surfaced',
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+
+  await assert.rejects(
+    createRealClient().generate(request),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes('输出 Token 上限') &&
+      error.message.includes('内容不完整且未采纳') &&
+      !error.message.includes('private-output') &&
+      !error.message.includes('private reasoning') &&
+      !error.message.includes('Bearer'),
+  );
+});
+
+test('browser rejects non-string provider content instead of returning an invalid response type', async () => {
+  clearMocks();
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { content: [{ type: 'text', text: 'unexpected content part' }] },
+          },
+        ],
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+
+  await assert.rejects(
+    createRealClient().generate(request),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes('内容格式无效') &&
+      !error.message.includes('unexpected content part'),
+  );
+});
+
+test('browser streaming emits ordered UTF-8 deltas before returning the exact aggregate', async () => {
+  clearMocks();
+  const encoder = new TextEncoder();
+  const source = [
+    'data: {"choices":[{"delta":{"content":"你"},"finish_reason":null}]}\r\n\r\n',
+    'data: {"choices":[{"delta":{"content":"好🌙"},"finish_reason":"stop"}]}\n\n',
+    'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}\n\n',
+    'data: [DONE]\n\n',
+  ].join('');
+  const bytes = encoder.encode(source);
+  const chunks: Uint8Array[] = [];
+  const widths = [1, 2, 5, 3, 11, 4, 7];
+  for (let offset = 0, index = 0; offset < bytes.length; index += 1) {
+    const end = Math.min(bytes.length, offset + widths[index % widths.length]);
+    chunks.push(bytes.slice(offset, end));
+    offset = end;
+  }
+  let postedBody: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    postedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    );
+  }) as typeof fetch;
+
+  const events: AiStreamEvent[] = [];
+  let settled = false;
+  const resultPromise = createRealClient().generate(request, {
+    stream: true,
+    requestId: 'browser-stream-order',
+    onStreamEvent(event) {
+      if (event.type === 'delta') assert.equal(settled, false);
+      events.push(event);
+    },
+  });
+  void resultPromise.finally(() => {
+    settled = true;
+  });
+  const result = await resultPromise;
+
+  assert.equal(postedBody?.stream, true);
+  assert.equal(result.text, '你好🌙');
+  assert.equal(result.finishReason, 'stop');
+  assert.deepEqual(
+    events.filter((event) => event.type === 'delta'),
+    [
+      { type: 'delta', requestId: 'browser-stream-order', sequence: 1, text: '你' },
+      { type: 'delta', requestId: 'browser-stream-order', sequence: 2, text: '好🌙' },
+    ],
+  );
+  assert.ok(events.some((event) => event.type === 'started'));
+  assert.ok(events.some((event) => event.type === 'usage' && event.tokenTotal === 10));
+  assert.ok(events.some((event) => event.type === 'completed'));
+});
+
+test('browser streaming rejects an unmarked EOF and never reports completion', async () => {
+  clearMocks();
+  globalThis.fetch = (async () =>
+    new Response(
+      new TextEncoder().encode(
+        'data: {"choices":[{"delta":{"content":"未完成"},"finish_reason":null}]}\n\n',
+      ),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )) as typeof fetch;
+  const events: AiStreamEvent[] = [];
+
+  await assert.rejects(
+    createRealClient().generate(request, {
+      stream: true,
+      onStreamEvent: (event) => events.push(event),
+    }),
+    (error: unknown) => error instanceof Error && error.message.includes('完成标记前中断'),
+  );
+  assert.ok(events.some((event) => event.type === 'delta'));
+  assert.ok(events.some((event) => event.type === 'error'));
+  assert.equal(
+    events.some((event) => event.type === 'completed'),
+    false,
+  );
 });
 
 test('Mock AI abort removes a paused waiter and remains released safely', async () => {
@@ -345,22 +536,31 @@ test('Mock AI abort also interrupts the post-gate response delay', async () => {
 test('quality check cancellation records the AI task as cancelled', async () => {
   mockModule.pauseMockAiForE2e();
   const controller = new AbortController();
-  const result = qualityModule.qualityCheckAiService.runCheck({
-    novelId: 'novel-cancel-test',
-    chapterId: 'chapter-cancel-test',
-    draftId: 'draft-cancel-test',
-    draftContent: '等待取消的质量检查正文。',
-    chapterTitle: '取消测试章节',
-  }, {
-    signal: controller.signal,
-    requestId: 'quality-cancel-test',
-  });
+  const result = qualityModule.qualityCheckAiService.runCheck(
+    {
+      novelId: 'novel-cancel-test',
+      chapterId: 'chapter-cancel-test',
+      draftId: 'draft-cancel-test',
+      draftContent: '等待取消的质量检查正文。',
+      chapterTitle: '取消测试章节',
+    },
+    {
+      signal: controller.signal,
+      requestId: 'quality-cancel-test',
+      cancel: () => controller.abort(),
+    },
+  );
 
   await waitForCondition(
     () => mockModule.getMockAiGateStateForE2e().waitingRequests === 1,
     'Quality check did not enter the Mock AI pause gate',
   );
-  controller.abort();
+  const runningTasks = await taskModule.aiTaskService.getByChapterId('chapter-cancel-test');
+  assert.equal(runningTasks.length, 1);
+  assert.equal(runningTasks[0]?.status, 'running');
+  assert.equal(taskModule.aiTaskService.getActiveExecutionState(runningTasks[0].id), 'active');
+  assert.equal(taskModule.aiTaskService.cancelActiveExecution(runningTasks[0].id), 'requested');
+  assert.equal(controller.signal.aborted, true);
   await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
 
   const tasks = await taskModule.aiTaskService.getByChapterId('chapter-cancel-test');
@@ -371,4 +571,81 @@ test('quality check cancellation records the AI task as cancelled', async () => 
   await taskModule.aiTaskService.markSucceeded(tasks[0].id, { resultText: 'late result' });
   const afterLateSuccess = await taskModule.aiTaskService.getByChapterId('chapter-cancel-test');
   assert.equal(afterLateSuccess[0]?.status, 'cancelled');
+  assert.equal(taskModule.aiTaskService.getActiveExecutionState(tasks[0].id), 'inactive');
+});
+
+test('LocalStorage task cost freezes pricing and survives successful round-trip', async () => {
+  const pricing: AiPricingSnapshot = {
+    currency: 'USD',
+    source: 'user_configured',
+    inputPricePerMillionTokens: 2,
+    outputPricePerMillionTokens: 8,
+  };
+  const created = await taskModule.aiTaskService.create('chapter_generate', {
+    novelId: 'novel-cost-test',
+    chapterId: 'chapter-cost-test',
+    runtimeMode: 'api',
+    provider: 'openai_compatible',
+    modelName: 'cost-model',
+    pricing,
+  });
+
+  assert.deepEqual(
+    {
+      inputPricePerMillionTokens: created.inputPricePerMillionTokens,
+      outputPricePerMillionTokens: created.outputPricePerMillionTokens,
+      costCurrency: created.costCurrency,
+      pricingSource: created.pricingSource,
+    },
+    {
+      inputPricePerMillionTokens: 2,
+      outputPricePerMillionTokens: 8,
+      costCurrency: 'USD',
+      pricingSource: 'user_configured',
+    },
+  );
+
+  // Mutating the caller-owned object after creation must not change the durable snapshot.
+  pricing.inputPricePerMillionTokens = 999;
+  pricing.outputPricePerMillionTokens = 999;
+  await taskModule.aiTaskService.markSucceeded(created.id, {
+    resultText: 'metered result',
+    tokenInput: 250_000,
+    tokenOutput: 125_000,
+  });
+
+  const roundTripped = await taskModule.aiTaskService.getByChapterId('chapter-cost-test');
+  assert.equal(roundTripped.length, 1);
+  assert.deepEqual(
+    {
+      status: roundTripped[0]?.status,
+      tokenInput: roundTripped[0]?.tokenInput,
+      tokenOutput: roundTripped[0]?.tokenOutput,
+      inputPricePerMillionTokens: roundTripped[0]?.inputPricePerMillionTokens,
+      outputPricePerMillionTokens: roundTripped[0]?.outputPricePerMillionTokens,
+      costEstimate: roundTripped[0]?.costEstimate,
+      costCurrency: roundTripped[0]?.costCurrency,
+      costStatus: roundTripped[0]?.costStatus,
+      pricingSource: roundTripped[0]?.pricingSource,
+    },
+    {
+      status: 'succeeded',
+      tokenInput: 250_000,
+      tokenOutput: 125_000,
+      inputPricePerMillionTokens: 2,
+      outputPricePerMillionTokens: 8,
+      costEstimate: 1.5,
+      costCurrency: 'USD',
+      costStatus: 'complete',
+      pricingSource: 'user_configured',
+    },
+  );
+
+  const serialized = storage.getItem('ai_novel_studio_ai_tasks');
+  assert.ok(serialized);
+  const persisted = JSON.parse(serialized) as AiTaskRecord[];
+  const persistedTask = persisted.find((item) => item.id === created.id);
+  assert.equal(persistedTask?.costEstimate, 1.5);
+  assert.equal(persistedTask?.inputPricePerMillionTokens, 2);
+  assert.equal(persistedTask?.outputPricePerMillionTokens, 8);
 });

@@ -1,8 +1,10 @@
 # Dependencies
 node_modules/
+.npm-cache/
 
 # Build outputs
 dist/
+coverage/
 target/
 dist-release/
 *.msi
@@ -40,3 +42,5 @@ src-tauri/target/
 # Local WebDriver binaries and desktop E2E artifacts
 .e2e-tools/
 test-results/e2e/
+test-results/browser-theme/
+tmp/

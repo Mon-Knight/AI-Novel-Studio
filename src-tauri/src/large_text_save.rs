@@ -90,6 +90,7 @@ pub struct AbortLargeTextSaveInput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // Stable DTO retained for older desktop integrations.
 pub struct LargeTextDocumentDto {
     pub id: String,
     pub target_type: String,
@@ -846,6 +847,7 @@ pub(crate) fn read_large_text_document_internal(
 }
 
 /// Check if content is stored as chunked large text (returns document_id if so)
+#[allow(dead_code)] // Retained for compatibility with legacy in-process callers.
 pub fn get_large_text_document_id(
     target_type: &str,
     target_id: &str,
@@ -911,6 +913,9 @@ pub struct UpdateLargeTextRefInput {
 
 #[tauri::command]
 pub fn update_large_text_ref(input: UpdateLargeTextRefInput) -> Result<(), String> {
+    if input.target_type.trim().is_empty() || input.target_type.len() > 80 {
+        return Err("target_type invalid".to_string());
+    }
     // Validate table name to prevent SQL injection
     let allowed_tables = [
         "chapter_drafts",
@@ -987,6 +992,7 @@ pub(crate) fn cleanup_session_cache(session_id: &str) -> Result<(), String> {
 // ==================== Database Initialization ====================
 
 /// Create the large_text tables. Called from db::init_database.
+#[cfg(test)]
 pub fn create_large_text_tables(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "

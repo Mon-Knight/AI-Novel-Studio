@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "AI Novel Studio",
-    "version": "2.5.0"
+    "version": "3.0.0"
   },
   "tauri": {
     "allowlist": {
@@ -22,6 +22,7 @@
       },
       "fs": {
         "all": false,
+        "readFile": true,
         "writeFile": true,
         "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
       },
@@ -47,6 +48,18 @@
     },
     "security": {
       "csp": null
+    },
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/updates-stable/latest.json"
+      ],
+      "pubkey": "UPDATER_PUBLIC_KEY_REPLACED_IN_RELEASE_CI",
+      "windows": {
+        "installMode": "passive",
+        "installerArgs": []
+      }
     },
     "windows": [
       {

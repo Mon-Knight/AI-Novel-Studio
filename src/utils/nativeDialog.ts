@@ -1,3 +1,4 @@
+import { appLogger } from '../services/observability/appLogger';
 /**
  * Native Feel P2.2 — 原生确认对话框工具封装
  *
@@ -65,11 +66,21 @@ async function getTauriDialog() {
 /** 危险操作确认 — 默认按钮为"取消"/"确认"，强调风险 */
 export async function confirmDanger(options: DialogOptions): Promise<boolean> {
   const {
-    title = '确认操作', message, okLabel = '确认', cancelLabel = '取消', testId = 'dialog-confirmation',
+    title = '确认操作',
+    message,
+    okLabel = '确认',
+    cancelLabel = '取消',
+    testId = 'dialog-confirmation',
   } = options;
 
   const e2eResult = showE2eDialog({
-    title, message, okLabel, cancelLabel, testId, kind: 'confirm', tone: 'danger',
+    title,
+    message,
+    okLabel,
+    cancelLabel,
+    testId,
+    kind: 'confirm',
+    tone: 'danger',
   });
   if (e2eResult) return await e2eResult;
 
@@ -79,14 +90,14 @@ export async function confirmDanger(options: DialogOptions): Promise<boolean> {
       return await dialog.ask(message, { title, type: 'warning' });
     }
   } catch (err) {
-    console.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
+    appLogger.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
   }
 
   try {
     return window.confirm(`${title}\n\n${message}`);
   } catch {
     // 极端情况：window.confirm 也不可用，危险操作绝不默认执行
-    console.error('[nativeDialog] window.confirm unavailable, denying dangerous action');
+    appLogger.error('[nativeDialog] window.confirm unavailable, denying dangerous action');
     return false;
   }
 }
@@ -94,11 +105,21 @@ export async function confirmDanger(options: DialogOptions): Promise<boolean> {
 /** 普通确认 */
 export async function confirmInfo(options: DialogOptions): Promise<boolean> {
   const {
-    title = '提示', message, okLabel = '确认', cancelLabel = '取消', testId = 'dialog-confirmation',
+    title = '提示',
+    message,
+    okLabel = '确认',
+    cancelLabel = '取消',
+    testId = 'dialog-confirmation',
   } = options;
 
   const e2eResult = showE2eDialog({
-    title, message, okLabel, cancelLabel, testId, kind: 'confirm', tone: 'info',
+    title,
+    message,
+    okLabel,
+    cancelLabel,
+    testId,
+    kind: 'confirm',
+    tone: 'info',
   });
   if (e2eResult) return await e2eResult;
 
@@ -108,7 +129,7 @@ export async function confirmInfo(options: DialogOptions): Promise<boolean> {
       return await dialog.ask(message, { title, type: 'info' });
     }
   } catch (err) {
-    console.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
+    appLogger.warn('[nativeDialog] Tauri dialog failed, falling back to window.confirm:', err);
   }
 
   try {
@@ -127,7 +148,12 @@ export async function showInfo(options: {
   const { title = '提示', message, testId = 'info-notice' } = options;
 
   const e2eResult = showE2eDialog({
-    title, message, okLabel: '确定', testId, kind: 'message', tone: 'info',
+    title,
+    message,
+    okLabel: '确定',
+    testId,
+    kind: 'message',
+    tone: 'info',
   });
   if (e2eResult) {
     await e2eResult;
@@ -156,7 +182,12 @@ export async function showError(options: {
   const { title = '错误', message, testId = 'error-notice' } = options;
 
   const e2eResult = showE2eDialog({
-    title, message, okLabel: '确定', testId, kind: 'message', tone: 'error',
+    title,
+    message,
+    okLabel: '确定',
+    testId,
+    kind: 'message',
+    tone: 'error',
   });
   if (e2eResult) {
     await e2eResult;

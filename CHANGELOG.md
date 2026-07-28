@@ -1,5 +1,127 @@
 # AI Novel Studio - CHANGELOG
 
+## v3.0.0 (2026-07-28) - Multi-Agent 自主创作闭环
+
+> 当前条目包含尚未提交和发布的工作树增量；最终发布状态以完整门禁、提交和版本标签为准。
+
+### 新增
+
+- 新增情节、角色、设定、逻辑、语言和整体质量六类专家，使用当前 Mock 或真实 API Provider 并行评审章节草稿。
+- 新增确定性共识算法：最小成功专家数、接受率和平均分共同决定 `accept / revise / regenerate`，Rust 在持久化前根据专家意见独立复算。
+- 新增主编 Agent 候选修订链路。未通过时生成新的未采用草稿版本，下一轮评审真实的新正文；达到最大轮数后明确保留未接受状态。
+- 新增 migration 021～023，持久化 `multi_agent_sessions`、`multi_agent_rounds` 和 `multi_agent_opinions`，支持 operation 重放、顺序约束、草稿归属校验和终态重放。
+- 写作工作台新增“协作”面板，可选择专家、轮数和阈值，启动或取消评审，查看历史 session、逐轮共识和专家意见，并显式载入候选草稿。
+- 新增八份独立 Markdown Prompt 模板、确定性编排/解析测试、React 面板测试和 Rust 事务测试。
+- 新增 Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller，从小说 Brief 生成 12～500 章的故事圣经、人物弧、世界、冲突、节奏、分卷和连续章节计划。
+- 新增自主创作规划工作台。世界/冲突/节奏三类 Agent 并行执行；Chapter Batch Planner 将每卷拆成最多 5 章的子批次，每批成功后立即保存章节与 CAS 检查点，失败后从连续已保存范围继续，不重复调用成功批次。
+- 新增受审核逐章执行：生成下一章候选、六专家评审、最多三轮修订、用户工作台采用、计划进度推进和下一章选择。
+- 新增用户显式启动的全书候选队列，按章节串行生成，支持暂停 / 继续，跳过已有 `candidate_ready / adopted` 章节，并显示已有候选数 / 总章节数。
+- 全书队列将前一章候选作为临时连续性上下文，同时保存前序草稿 ID 与正文 hash；临时上下文不写入正式章节事实。
+- 自主规划候选使用 `chapterId + draftId` 精确打开写作工作台；工作台定时刷新卷章状态，当前空章节在后台生成完成后自动载入，存在未保存正文时保持编辑器原状。
+- 长章节润色与质量检查改为最多 7,000 字符分段处理，携带前后 400 字衔接参考；润色按原顺序合并，质检按段长加权并将 offset / 段落索引还原为全文位置。
+- 长章节质量修稿按问题位置只处理命中的连续分段，未命中正文逐字符保留；章节总结改为完整正文 map-reduce，并移除工作台 3,000 字符与 Autonomous 12,000 字符的上游截断；章节改写与卷总结也不再静默丢弃后半部分。
+- 新增章节收束候选：从已采用正文提取章节总结、人物变化、新地点与世界规则候选；用户确认前不写正式上下文，世界条目继续保持待确认候选。
+- 新增 migration 024 `autonomous_story_plans`，保存 request hash、revision、计划 JSON/hash、阶段、进度、Agent 运行和逐章运行状态。
+- 新增统一 `AiStreamEvent` 与 OpenAI-compatible SSE 管线：浏览器 `ReadableStream` 和 Tauri Rust 均支持跨 chunk UTF-8、按 requestId 有序 delta、最终 usage/finish reason 聚合及取消；正文生成在请求结束前显示临时候选预览。
+- 新增 AI usage 成本估算：设置中心可配置输入/输出 USD / 百万 Token 单价，任务创建时冻结价格；`ai_task_records`、正式 Provider response metadata 和章节生成 step 保存 `complete / mock / unpriced / usage_missing` 状态，AI 任务页展示单项成本与当前列表已计价合计。
+- 新增独立 TXT 参考资料库：migration 025 持久化 `reference_works / reference_imports / reference_sections`，记录原始字节 hash、解码正文 hash、编码、解析器版本、UTF-16 章节边界与显式重复导入决策；参考作品不进入小说卷章树。
+- 新增长文本分层风格画像：确定性覆盖开篇、发展、对话密集、描写密集、高潮和收束，保存模型、Prompt 版本、来源 hash、采样范围及字段置信度；生成侧只读取抽象画像，不持久化或注入参考原文片段。
+- 作品详情新增“参考资料库”入口和独立桌面工作区，支持版本切换、CAS 冲突保护、来源删除、可取消的画像分析及画像来源状态展示。
+- 新增 migration 026 混合语义 Memory：`memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs` 保存带版本和 hash 的采用稿来源、结构化片段、显式真实向量及不可变检索审计；采用稿改变时旧 Memory 与正文改采在同一事务内失效。
+- Memory 检索支持小说作用域内的 FTS5 / substring、实体与时间过滤、真实向量余弦重排、importance / recency 综合评分、分页和硬 Token 预算；没有向量或 FTS5 时显式降级，不生成伪 embedding。
+- 设置中心新增每分钟请求数、并发数、每日 Token / 估算成本硬预算和预警阈值；请求派发前先做保守预留，超限请求不会进入 Provider，缺少完整单价时不能启用成本硬预算。
+- 写作工作台新增 Zustand 会话状态，统一持有作品、卷章、当前草稿、编辑器、质量检查和 AI 弹窗状态；切换作品时原子重置会话归属，避免跨作品残留。
+- 新增 migration 027 跨进程 Autonomous Scheduler：持久 `book_run / lease / attempt / checkpoint`，使用 owner、单调 epoch、heartbeat、CAS、重试、熔断、预算和时间窗恢复中断任务，并提供夜间草稿、质量门禁、全自动三档策略。
+- 新增 migration 028 多目标事务与正式故事资产：冻结目标集合、base revision/hash 与 candidate hash，在单个 `IMMEDIATE` 事务中执行 `all_or_nothing / reviewed_partial` CAS；跨章节批处理只更新受限 metadata，不绕过正文草稿和采用指针。
+- 新增势力、地点、势力关系、地点连接，以及角色/章节/章节事件与势力或地点的正式关系表；地点父子图按拓扑顺序写入并拒绝环。
+- 作品资产中心新增“势力与地点”工作区，可创建和审核正式资产候选、显式选择跨章节批处理子集，并查看事务历史；浏览器开发模式明确保持只读，不伪造 SQLite 事务。
+- 完整项目备份升级至 schema 9：schema 8 加入调度运行事实，恢复时把 `running / active / claimed` 分别收敛为 `queued / expired / abandoned` 并重算身份与 hash；schema 9 加入全部正式故事资产及关系，按父子拓扑恢复地点。
+- 设置中心新增 Stable/Beta 更新通道、显式检查、签名安装进度和回滚入口；Tauri 1 updater 在安装前重新核对通道与版本，发布流水线注入 minisign 公钥/私钥并生成静态 updater、release 与 rollback manifest。
+
+### 安全与一致性
+
+- 修复真实 OpenAI-compatible API 调用的三处边界：连接测试的 TypeScript 编译器与 Rust 持久化校验共同读取冻结策略，统一使用 `temperature = 0`、128-token 输出预算，以兼容推理型模型并避免旧 8-token policy 被误用；章节规划保留至少 600 秒客户端超时，同时将原先可能一次请求 30 章的长响应降为最多 5 章、2,100～4,500 token 的子批次；自主创作与 Multi-Agent 每次网络尝试使用经清理、限长并带摘要的唯一传输 ID，避免继续操作命中 `AI_REQUEST_ID_RECENTLY_SETTLED`。API Key 与持久设置保持不变。
+- Rust 与浏览器路径在响应正文读取阶段保留 timeout 分类；非超时正文中断会明确报告“上游服务在响应完成前中断连接”，任何 `finish_reason=length` 响应（包括非空部分正文）都会被判定为未完成并丢弃。错误路径不暴露 Provider 正文或推理内容。
+- Chapter Batch Planner 不再固定截取首个 Markdown fence 或首尾大括号：解析器会逐一检查字符串与转义感知的平衡 JSON 候选，优先选择包含 `chapters` 的最完整对象，并仅受控修复字符串外的尾逗号；章节数量、连续编号和引用校验继续严格失败关闭。解析失败只记录 finish reason、响应字符数和输出 Token 数，不持久化 Provider 正文。
+- 修复 `update_volume` 与 `update_chapter` IPC 将 `id`、`status` 和 `volume_id` 拼接进 SQL 的注入风险；改为固定 SQL 与参数绑定，并在 Rust 边界验证分卷/章节状态白名单。
+- 新增恶意 `id`、`status`、`volume_id` 回归测试，证明构造输入不会修改其他分卷或章节，同时保留含单引号合法文本的更新能力。
+- 草稿不存在、版本变化、完整正文不可用、正文为空或超限时失败关闭，不再使用占位正文。
+- 单专家失败被记录为失败意见；未达到 quorum 时不能接受。空专家、零轮次和伪造共识均被拒绝。
+- 候选只保存为草稿，不自动采用；载入候选前经过工作区离开保护，当前编辑器不会被后台结果静默覆盖。
+- 完整项目备份先以 schema 6 加入参考作品，以 schema 7 加入四张 Memory 表，现升级为 schema 9 并纳入跨进程调度和势力/地点正式资产；恢复会重映射身份、复验来源与 hash，并继续兼容 schema 2～8 的历史能力边界。
+- 应用全书计划必须由用户确认；桌面端在一个事务内创建卷、章、角色、世界设定、必需冲突事件和章节角色关系，重放时复验全部物化目标。
+- 页面恢复会按权威采用稿修复计划进度并重启缺失的章节分析；改采不同草稿会清除旧分析和已确认人物节点，避免旧结论继续生效。
+- 章节正文生成成功后立即把源草稿 ID 和 generation job 写入自主计划检查点；后续质量检查、专家评审或进程中断时可复用已保存正文，不重复生成。
+- 写作工作台按章节与草稿双重身份读取候选，并继续复用大文本原子协议：正文超过 100 KiB 时写入 `large_text_documents / large_text_chunks`，完整正文校验失败时不以预览替代。
+- 移除润色和质量检查对正文前 8,000 字符的静默截断；分段缺失、空结果、异常短结果或全文位置映射异常时失败关闭。
+- 全局 `runWithLoading` 现在以 operationId 持有真实 `AbortController`；大纲、设定、角色、事件、风格、润色、质检、修稿和总结等独立 AI 入口统一传播 signal、请求 owner 与取消结算。AI 任务中心可停止当前进程持有的运行任务；自持 controller 的面板会在卸载/目标变化时中止，其他全局 operation 在完成时复验原始目标，迟到结果不能污染新目标，`cancelled` 终态也不被迟到成功复活。
+- 流式 delta 仅进入瞬时预览缓冲；无完成标记 EOF、非法帧、`finish_reason=length`、取消或空正文均不创建成功草稿/Artifact，只有完整最终响应可沿既有原子协议保存未采用候选。
+- 成本快照使用用户配置价格而非 Provider 自报价格；缺价格或缺 usage 时保持显式未知，Mock 才固定为零。Rust 校验币种、来源、状态组合和数值范围，篡改或不一致 metadata 在 Artifact 写入前失败关闭。
+- 统一 npm、Tauri、Cargo、应用常量、路线图、测试说明和发布文档版本为 `3.0.0`。
+
+### 工程质量
+
+- 新增 `docs/feature-gap-analysis-v3.0.0.md`，以当前代码和 schema 逐项核验流式输出、参考小说、风格画像、无人值守、语义 Memory、跨章节检索、多目标放置、可靠取消及势力/地点资产九类缺口；校正“风格画像完全缺失”“取消仅覆盖 generation_jobs”“只存在简单全文检索”和“每章均需单独触发生成”等过时结论，并给出依赖、验收门禁和建议版本顺序。
+- 开启 TypeScript `noUnusedLocals`、`noUnusedParameters` 与 `noImplicitReturns`，同时收紧 `tsconfig.node.json`；修复严格检查发现的风格方案和输出方案删除未实际执行的问题。
+- ESLint 已将显式 `any` 提升为 error，并以 `--max-warnings 0` 运行 CI；生产源码散落的 `console.*` 已收敛到统一、脱敏的 `appLogger` sink，Rust 编译 warning 同步清零。
+- 新增 Prettier、Husky、lint-staged 与 Commitlint，提交时增量格式化变更文件并校验 Conventional Commit 信息，避免对历史文件进行一次性大规模格式化。
+- 新增 `test:all`、`test:vitest`、`test:performance` 与 C8 `test:coverage`，把 Node/tsx、独立 AI 面板、32 个 Vitest 文件和性能基准纳入统一入口。当前全局非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合阈值为 lines/statements 85%、functions/branches 80%。最新实测全局为 35.15% / 44.33% / 64.44%，核心集合为 87.82% / 85.89% / 82.01%（依次为 lines、functions、branches）。
+- 新增 120 万字符分段、500 章索引窗口和重复长文本堆增长基准；当前分段和索引实测约 5 ms / 0.6 ms，并以 1.5 s、100 ms 和 96 MiB 堆增长作为稳定门禁。
+- 新增 AI P50 / P95 延迟与成功、失败、取消计量；设置中心可导出或清理本机脱敏诊断，前端错误最多保存 50 条、性能样本最多 500 条，正文、Prompt、API Key 和 Provider 原始响应不进入报告。
+- 新增桌面原生 panic 最小信封：在数据库与窗口初始化前安装 Rust panic hook，只保存时间、应用版本和源码文件名 / 行列号，排除 panic payload、堆栈、绝对路径与用户内容；设置中心统一展示、导出和清理最近 50 条原生报告，默认不上传。
+- GitHub Actions 新增快速浏览器 CI、定期依赖审计 / CodeQL 和 Windows Beta / Stable 发布工作流；发布产物包含安装包、通道与回滚 manifest，并保留既有真实 Tauri 桌面 E2E。npm/Cargo Dependabot 继续提供依赖更新入口。
+- 新增 `docs/project/git-workflow.md`，明确 `main` 保护、`codex/` 任务分支、PR 审查 / required checks、hotfix、tag、回滚和禁止 force push 的治理边界；远端保护规则由仓库管理员配置，不把文档声明冒充为已启用设置。
+- 将 40 份 `docs/release-notes-v*.md` 合并为带源文件 SHA-256 的单一 `docs/project/release-history.md` 只读归档；`CHANGELOG.md` 成为唯一活动版本入口，版本脚本不再生成碎片，发布工作流按目标版本失败关闭提取 GitHub Release 与 updater notes。
+- 拆分本地安装包与签名发布入口：`tauri:build` 只生成 MSI/NSIS，普通开发机不再因缺少 updater 私钥而在产物生成后返回失败；`tauri:build:release` 仅供 release workflow 注入密钥并生成签名 MSI updater。
+- 真实浏览器开发模式 E2E 使用 Vite + WebdriverIO 驱动 Chromium/Edge，覆盖懒加载 StoryAssets 路由、无 Tauri bridge 的持久化边界，以及手动 Light/Dark 主题的真实 computed style；Windows 桌面 E2E 新增正式势力创建和 reviewed-partial 跨章节事务场景。
+- 所有生产 React/TSX 文件已控制在 500 行以内；自主规划、主角卡和 Multi-Agent 面板进一步拆为 controller、字段、展示和 presentation 模块。补齐缺失 CSS 语义 token，移除会覆盖手动浅色选择的组件级系统暗色媒体查询。
+- AI 任务页与卷树继续拆分为 controller / view / card / dialog 模块，并新增对应渲染回归；`npm run test:component-size` 已纳入 `verify_project.ps1`、发布 Checklist 与 PR 模板，当前 108 个生产 TSX 文件全部不超过 500 行。
+- 修复浏览器主题矩阵在 localStorage 写入后未刷新页面的问题，补齐系统主题测试的存储键传递，并为首页容器补上主题语义背景色。
+- Vitest 从存在 critical advisory 的 3.2.4 升级至 3.2.7，并通过非破坏性 `npm audit fix` 更新 Babel、PostCSS、js-yaml、brace-expansion 等可兼容传递依赖；生产审计继续以 high 为失败阈值。
+- 浏览器开发回退的 LocalStorage 写入失败改为失败关闭，并保留恢复快照的可重试错误契约；自主计划多集合应用使用原始快照补偿，任一写入失败时恢复全部集合并显式报告回滚失败，不再返回部分写入的伪成功。
+- 文档同步检查改为失败关闭：必需文档、Checklist、Skill、工作流脚本、重复或错版的权威声明及过期“当前”标记都会返回非零状态；新增临时夹具负向回归并同步修正旧阶段表述。
+- 补充 Chapter Batch Planner 子批次 / 恢复测试、全书候选队列与临时连续性测试、长章节分段测试、规划页执行面板测试和 Rust 响应正文中断测试。
+- 补充浏览器与 Rust SSE 顺序/UTF-8/usage/无标记 EOF 回归，新增独立 AI 面板停止与卸载测试、LocalStorage/SQLite 冻结单价结算测试，以及正式 Provider 成本 metadata 篡改与重放复验；`test:ai-panels` 将三个 Vite SSR 重用例拆为独立进程，`test:all` 串联 Node/tsx、面板和 Vitest 入口。
+- Windows release 使用既有本地 API 配置真实续跑原失败计划：当前解析修复构建从第 156 章检查点连续完成 6 个五章 Chapter Batch（第 156～185 章），每批均成功解析并立即保存；随后受控取消第 186～190 章请求。生产 SQLite 已核验 1～185 章连续且无重复、成功任务 6/6、取消任务不写入章节、`quick_check=ok` 且外键检查为空，API 设置未改写。
+- 同一 release 使用既有本地 API 配置执行连接测试，界面显示“连接成功！（2577ms）”；测试期间未编辑、读取或输出 API Key，也未保存设置。
+- 同一 release 继续完成真实流式正文验收：工作台“实时候选预览”从等待首段增长到 2,170 字符，并以“已完成 · 3,514 字符”结束；`chapter_generate` 任务成功（输入 2,914 / 输出 2,349 Token），原子保存为未采用的 `AI 初稿 v21`（2,867 字）并自动载入中央编辑器。草稿正文 SHA-256 与 SQLite `content_hash` 完全一致，编辑、保存、润色、检查和采用入口继续可用，未覆盖既有采用稿。
+- 关键工作台视图测试中的 `EditorArea` mock 现与生产组件一致地转发 ref，移除 React 的 ref 噪声，同时保留编辑器、目录、历史和右侧面板的行为覆盖。
+
+### 版本边界
+
+- v3.0.0 工作树已完成长篇自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式安全预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory、多目标事务、跨章节受审核批处理和势力 / 地点正式资产。夜间草稿与质量门禁不自动采用；`full_auto` 仅在冻结策略、预算、专家阈值和采用前复验全部通过时采用。
+- 自动 embedding、召回评估集、更多正式资产类型、跨平台桌面发布和全书分析 UI 属于后续增强；成本仍是冻结单价的 USD 估算，不等同 Provider 账单对账。
+- 当前条目所列代码、动态测试、本地 Windows MSI/NSIS、真实 Edge 3/3 与完整 Tauri 桌面 E2E 14/14 已完成；签名 updater、正式 GitHub Release 与线上回滚仍由 release workflow 在注入仓库密钥后执行。
+
+---
+
+## v2.6.1 (2026-07-27) - 文档规范化与版本统一
+
+### 说明
+
+本版本为 v2.6.0 Memory Facts 系统的文档更新版本，主要完成项目文档规范化和版本号统一工作。
+
+### 变更
+
+- 统一所有配置文件版本号为 `2.6.1`（package.json、Cargo.toml、tauri.conf.json）
+- 更新 README.md 版本描述和功能列表
+- 补充 CHANGELOG 历史记录
+- 规范化发布历史文档
+
+### 技术栈
+
+- React 18 + TypeScript
+- Tauri 1.x + Rust  
+- SQLite + Migrations (001-020)
+- Chapter Readiness Planner
+- Memory Snapshot System
+
+### 版本边界
+
+本版本不包含自主生成（Autonomous Generation）功能，该功能规划在 v3.0。
+
+---
+
 ## v2.5.0 (2026-07-26) - Chapter Readiness Planner Runtime
 
 ### 新增

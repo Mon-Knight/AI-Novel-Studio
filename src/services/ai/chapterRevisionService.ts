@@ -1,4 +1,11 @@
-import type { AiClient, AiGenerateRequest, AiGenerateResponse, ChapterCharacterContext, OutlineKeyPoint } from '../../types/ai';
+import type {
+  AiClient,
+  AiGenerateOptions,
+  AiGenerateRequest,
+  AiGenerateResponse,
+  ChapterCharacterContext,
+  OutlineKeyPoint,
+} from '../../types/ai';
 
 export interface ReviseChapterByOutlineInput {
   originalDraft: string;
@@ -64,7 +71,9 @@ export function buildReviseChapterByOutlineRequest(
     '',
     '【原正文】',
     input.originalDraft.slice(0, 18000),
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   return {
     taskType: 'chapter_rewrite',
@@ -85,7 +94,7 @@ export function buildReviseChapterByOutlineRequest(
 export async function reviseChapterByOutline(
   input: ReviseChapterByOutlineInput,
   client: AiClient,
+  options: AiGenerateOptions = {},
 ): Promise<AiGenerateResponse> {
-  return client.generate(buildReviseChapterByOutlineRequest(input));
+  return client.generate(buildReviseChapterByOutlineRequest(input), options);
 }
-

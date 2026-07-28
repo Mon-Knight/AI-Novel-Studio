@@ -5,6 +5,7 @@
 
 mod ai;
 mod commands;
+mod crash_reports;
 mod db;
 mod domain;
 mod errors;
@@ -74,6 +75,8 @@ fn main() {
         eprintln!("[E2E] startup rejected: {}", error);
         std::process::exit(2);
     });
+    let app_data_dir = e2e_data_dir.clone().unwrap_or_else(get_app_data_dir);
+    crash_reports::install_native_crash_report_hook(&app_data_dir);
     db::init_database();
     runtime::append_e2e_log("startup: database initialized");
     println!(
@@ -82,8 +85,6 @@ fn main() {
     );
 
     // Native Feel P1.1: 确定应用数据目录
-    let app_data_dir = e2e_data_dir.unwrap_or_else(get_app_data_dir);
-
     // 单实例检测
     if !window_state::try_acquire_instance_lock(&app_data_dir) {
         // 已有实例在运行，写入聚焦请求后退出
@@ -99,6 +100,11 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(generate_app_handler![
             commands::get_all_novels,
+            commands::app_update::get_app_update_capabilities,
+            commands::app_update::check_app_update,
+            commands::app_update::install_app_update,
+            crash_reports::get_native_crash_reports,
+            crash_reports::clear_native_crash_reports,
             commands::get_novel_by_id,
             commands::create_novel,
             commands::update_novel,
@@ -122,7 +128,10 @@ fn main() {
             commands::update_chapter,
             commands::delete_chapter,
             commands::get_drafts_by_chapter_id,
+            commands::count_drafts_by_chapter_id,
             commands::get_latest_draft_by_chapter_id,
+            commands::get_adopted_draft_by_chapter_id,
+            commands::get_draft_by_chapter_and_id,
             commands::ai_tasks::create_ai_task,
             commands::ai_tasks::get_ai_task,
             commands::ai_tasks::list_ai_tasks,
@@ -150,6 +159,37 @@ fn main() {
             commands::placements::apply_placement_plan,
             commands::drafts::save_chapter_draft_atomic,
             commands::drafts::read_chapter_draft_content,
+            commands::multi_agent::create_multi_agent_session,
+            commands::multi_agent::append_multi_agent_round,
+            commands::multi_agent::complete_multi_agent_session,
+            commands::multi_agent::get_multi_agent_session,
+            commands::multi_agent::list_multi_agent_sessions_by_chapter,
+            commands::autonomous_story::save_autonomous_story_plan,
+            commands::autonomous_story::get_autonomous_story_plan,
+            commands::autonomous_story::get_autonomous_story_plan_by_operation,
+            commands::autonomous_story::list_autonomous_story_plans_by_novel,
+            commands::autonomous_story::apply_autonomous_story_plan,
+            commands::autonomous_scheduler::create_autonomous_book_run,
+            commands::autonomous_scheduler::get_autonomous_book_run,
+            commands::autonomous_scheduler::list_autonomous_book_runs,
+            commands::autonomous_scheduler::acquire_autonomous_run_lease,
+            commands::autonomous_scheduler::heartbeat_autonomous_run,
+            commands::autonomous_scheduler::claim_autonomous_run_chapter,
+            commands::autonomous_scheduler::finish_autonomous_run_chapter,
+            commands::autonomous_scheduler::promote_autonomous_run_attempt,
+            commands::autonomous_scheduler::list_autonomous_run_attempts,
+            commands::autonomous_scheduler::pause_autonomous_book_run,
+            commands::autonomous_scheduler::resume_autonomous_book_run,
+            commands::autonomous_scheduler::stop_autonomous_book_run,
+            commands::autonomous_scheduler::recover_interrupted_autonomous_runs,
+            commands::content_transactions::prepare_content_transaction,
+            commands::content_transactions::get_content_transaction,
+            commands::content_transactions::list_content_transactions,
+            commands::content_transactions::apply_content_transaction,
+            commands::content_transactions::get_faction_asset,
+            commands::content_transactions::list_faction_assets,
+            commands::content_transactions::get_location_asset,
+            commands::content_transactions::list_location_assets,
             commands::recovery::get_workspace_recovery_snapshot,
             commands::recovery::upsert_workspace_recovery_snapshot,
             commands::recovery::delete_workspace_recovery_snapshot,
@@ -182,6 +222,7 @@ fn main() {
             commands::get_ai_task_records_by_chapter_id,
             commands::get_ai_task_records_by_novel_id,
             ai::ai_chat_completion,
+            ai::ai_chat_completion_stream,
             ai::cancel_ai_request,
             runtime::get_e2e_diagnostics,
             runtime::get_e2e_novel_commit_state,
@@ -210,6 +251,20 @@ fn main() {
             commands::save_style_profile,
             commands::set_active_style_profile,
             commands::delete_style_profile,
+            commands::reference_library::inspect_reference_duplicates,
+            commands::reference_library::commit_reference_import,
+            commands::reference_library::list_reference_works,
+            commands::reference_library::get_reference_work_bundle,
+            commands::reference_library::get_reference_work_bundle_legacy,
+            commands::reference_library::list_reference_sections,
+            commands::reference_library::get_reference_section_content,
+            commands::reference_library::activate_reference_import,
+            commands::reference_library::delete_reference_work,
+            commands::memory::put_memory_document,
+            commands::memory::put_memory_embeddings,
+            commands::memory::retrieve_memory,
+            commands::memory::list_memory_documents,
+            commands::memory::invalidate_memory_document,
             commands::sync_protagonist_to_character_library,
             commands::sync_protagonists_to_character_library,
             commands::get_protagonist_character,

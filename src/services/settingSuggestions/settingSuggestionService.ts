@@ -21,6 +21,9 @@ import type {
 } from '../../types/settingSuggestion';
 import type { RuleCategory } from '../../types/setting';
 import type { CharacterRoleType } from '../../types/character';
+import type { AiGenerateOptions } from '../../types/ai';
+import { throwIfAiRequestCancelled } from '../ai/aiCancellation';
+import { bindAiTaskCancellation, settleAiTaskError } from '../ai/aiTaskCancellation';
 
 const KEY = 'ai_novel_studio_setting_suggestions';
 
@@ -62,7 +65,10 @@ function normalizePayload(raw: unknown): SettingSuggestionPayload {
   );
 }
 
-function extractPayloads(text: string, suggestionType: SettingSuggestionType): SettingSuggestionPayload[] {
+function extractPayloads(
+  text: string,
+  suggestionType: SettingSuggestionType,
+): SettingSuggestionPayload[] {
   const parsed = safeJsonParse<unknown>(stripCodeFence(text), null);
   if (!parsed) return [];
   if (Array.isArray(parsed)) return parsed.map(normalizePayload).filter((item) => item.name);
@@ -106,8 +112,14 @@ function mapRuleCategory(type?: string): RuleCategory {
 }
 
 function mapCharacterRole(item: SettingSuggestionPayload): CharacterRoleType {
-  const roleText = fieldValue(item, ['roleType', 'role_type', 'plot_role', 'identity']).toLowerCase();
-  if (roleText.includes('antagonist') || roleText.includes('反派') || roleText.includes('敌')) return 'antagonist';
+  const roleText = fieldValue(item, [
+    'roleType',
+    'role_type',
+    'plot_role',
+    'identity',
+  ]).toLowerCase();
+  if (roleText.includes('antagonist') || roleText.includes('反派') || roleText.includes('敌'))
+    return 'antagonist';
   if (roleText.includes('protagonist') || roleText.includes('主角')) return 'protagonist';
   if (roleText.includes('neutral') || roleText.includes('中立')) return 'neutral';
   return 'supporting';
@@ -116,9 +128,15 @@ function mapCharacterRole(item: SettingSuggestionPayload): CharacterRoleType {
 async function buildPrompt(input: GenerateSettingSuggestionsInput): Promise<string> {
   const [novel, worldSettings, ruleSystems, characters] = await Promise.all([
     novelRepository.getById(input.novelId),
-    input.includeWorldSettings ? settingRepository.getWorldSettings(input.novelId).catch(() => []) : Promise.resolve([]),
-    input.includeWorldSettings ? settingRepository.getRuleSystems(input.novelId).catch(() => []) : Promise.resolve([]),
-    input.includeExistingAssets ? characterService.getByNovelId(input.novelId).catch(() => []) : Promise.resolve([]),
+    input.includeWorldSettings
+      ? settingRepository.getWorldSettings(input.novelId).catch(() => [])
+      : Promise.resolve([]),
+    input.includeWorldSettings
+      ? settingRepository.getRuleSystems(input.novelId).catch(() => [])
+      : Promise.resolve([]),
+    input.includeExistingAssets
+      ? characterService.getByNovelId(input.novelId).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   const worldSummary = worldSettings
@@ -130,7 +148,10 @@ async function buildPrompt(input: GenerateSettingSuggestionsInput): Promise<stri
     .join('\n')
     .slice(0, 1800);
   const characterSummary = characters
-    .map((item) => `${item.name}${item.identity ? `（${item.identity}）` : ''}${item.faction ? ` / ${item.faction}` : ''}`)
+    .map(
+      (item) =>
+        `${item.name}${item.identity ? `（${item.identity}）` : ''}${item.faction ? ` / ${item.faction}` : ''}`,
+    )
     .join('、')
     .slice(0, 1200);
 
@@ -149,7 +170,9 @@ async function buildPrompt(input: GenerateSettingSuggestionsInput): Promise<stri
     '',
     input.includeWorldSettings && worldSummary ? `【已有世界设定摘要】\n${worldSummary}` : '',
     input.includeWorldSettings && ruleSummary ? `【已有规则体系摘要】\n${ruleSummary}` : '',
-    input.includeExistingAssets && characterSummary ? `【已有角色/势力线索摘要】\n${characterSummary}` : '',
+    input.includeExistingAssets && characterSummary
+      ? `【已有角色/势力线索摘要】\n${characterSummary}`
+      : '',
     '',
     '请参考典型题材中的世界结构、势力矛盾、种族关系、力量体系、宗教冲突、社会结构和战争格局，生成原创设定。',
     '不得直接使用任何现成作品中的专有名称、角色、地点、势力、具体剧情或可识别 IP 元素。',
@@ -168,7 +191,9 @@ async function buildPrompt(input: GenerateSettingSuggestionsInput): Promise<stri
           : '    { "name": "规则名称", "type": "规则类型", "content": "规则内容", "limits": "限制条件", "scope": "影响范围", "possible_conflict": "可能冲突", "plot_usage": "剧情用途" }',
     '  ]',
     '}',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function updateRecord(record: SettingSuggestionRecord): SettingSuggestionRecord {
@@ -194,7 +219,9 @@ async function adoptTarget(
       relationToProtagonist: fieldValue(item, ['mainline_relation', 'relationToProtagonist']),
       goal: fieldValue(item, ['goal']),
       personality: fieldValue(item, ['personality']),
-      behaviorLimits: fieldValue(item, ['weakness']) ? `弱点：${fieldValue(item, ['weakness'])}` : undefined,
+      behaviorLimits: fieldValue(item, ['weakness'])
+        ? `弱点：${fieldValue(item, ['weakness'])}`
+        : undefined,
       currentState: fieldValue(item, ['current_status', 'currentState']),
     });
     return { targetId: created.id, targetType: 'character' };
@@ -209,9 +236,13 @@ async function adoptTarget(
         fieldValue(item, ['content', 'description'], '（空）'),
         fieldValue(item, ['limits']) ? `限制条件：${fieldValue(item, ['limits'])}` : '',
         fieldValue(item, ['scope']) ? `影响范围：${fieldValue(item, ['scope'])}` : '',
-        fieldValue(item, ['possible_conflict']) ? `可能冲突：${fieldValue(item, ['possible_conflict'])}` : '',
+        fieldValue(item, ['possible_conflict'])
+          ? `可能冲突：${fieldValue(item, ['possible_conflict'])}`
+          : '',
         fieldValue(item, ['plot_usage']) ? `剧情用途：${fieldValue(item, ['plot_usage'])}` : '',
-      ].filter(Boolean).join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       isActive: true,
     });
     return { targetId: created.id, targetType: 'rule_system' };
@@ -237,27 +268,40 @@ export const settingSuggestionService = {
     return getAllLocal().filter((item) => item.novelId === novelId);
   },
 
-  async generate(input: GenerateSettingSuggestionsInput): Promise<SettingSuggestionRecord[]> {
+  async generate(
+    input: GenerateSettingSuggestionsInput,
+    options: AiGenerateOptions = {},
+  ): Promise<SettingSuggestionRecord[]> {
     const settings = aiSettingsService.getSettings();
     const prompt = await buildPrompt(input);
-    const task = await aiTaskService.create('setting_suggestion_generate', {
-      novelId: input.novelId,
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `${typeLabels[input.suggestionType]}：${input.worldType} / ${input.referenceStyle}`,
-    }).catch(() => null);
+    const task = await aiTaskService
+      .create('setting_suggestion_generate', {
+        novelId: input.novelId,
+        runtimeMode: settings.runtimeMode,
+        provider: settings.provider,
+        modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+        inputSummary: `${typeLabels[input.suggestionType]}：${input.worldType} / ${input.referenceStyle}`,
+      })
+      .catch(() => null);
+    const releaseCancellation = bindAiTaskCancellation(task?.id, options);
 
     try {
       const client = createAiClient(settings);
-      const response = await client.generate({
-        taskType: 'setting_suggestion_generate',
-        messages: [
-          { role: 'system', content: prompt },
-          { role: 'user', content: `请生成 ${input.count} 条${typeLabels[input.suggestionType]}。` },
-        ],
-        maxTokens: 5000,
-      });
+      const response = await client.generate(
+        {
+          taskType: 'setting_suggestion_generate',
+          messages: [
+            { role: 'system', content: prompt },
+            {
+              role: 'user',
+              content: `请生成 ${input.count} 条${typeLabels[input.suggestionType]}。`,
+            },
+          ],
+          maxTokens: 5000,
+        },
+        options,
+      );
+      throwIfAiRequestCancelled(options.signal);
 
       const payloads = extractPayloads(response.text, input.suggestionType);
       if (payloads.length === 0) {
@@ -285,7 +329,11 @@ export const settingSuggestionService = {
       await aiTaskService.markSucceeded(task?.id || '', {
         resultText: `生成 ${records.length} 条${typeLabels[input.suggestionType]}`,
         promptSnapshot: prompt,
-        resultJson: JSON.stringify(records.map((item) => item.item), null, 2),
+        resultJson: JSON.stringify(
+          records.map((item) => item.item),
+          null,
+          2,
+        ),
         tokenInput: response.tokenInput,
         tokenOutput: response.tokenOutput,
         tokenTotal: response.tokenTotal,
@@ -293,13 +341,22 @@ export const settingSuggestionService = {
 
       return records;
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '设定库 AI 推演失败';
-      if (task) await aiTaskService.markFailed(task.id, message);
+      await settleAiTaskError({
+        taskId: task?.id,
+        error: e,
+        signal: options.signal,
+        fallbackMessage: '设定库 AI 推演失败',
+      });
       throw e;
+    } finally {
+      releaseCancellation();
     }
   },
 
-  async adopt(id: string, editedItem?: SettingSuggestionPayload): Promise<SettingSuggestionAdoptionResult> {
+  async adopt(
+    id: string,
+    editedItem?: SettingSuggestionPayload,
+  ): Promise<SettingSuggestionAdoptionResult> {
     const record = getAllLocal().find((item) => item.id === id);
     if (!record) throw new Error('候选记录不存在');
     if (record.status !== 'pending') throw new Error('该候选已处理，不能重复采纳');

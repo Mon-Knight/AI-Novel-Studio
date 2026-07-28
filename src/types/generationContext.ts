@@ -15,7 +15,15 @@ export type GenerationContextSourceType =
   | 'chapter_character'
   | 'chapter_event'
   | 'context_record'
+  | 'provisional_candidate'
   | 'current_editor';
+
+export interface ProvisionalPreviousChapterContext {
+  chapterId: string;
+  draftId: string;
+  contentHash: string;
+  content: string;
+}
 
 export interface GenerationContextSource {
   type: GenerationContextSourceType;
@@ -69,4 +77,5 @@ export interface CompileGenerationContextInput {
   outputProfileId?: string;
   userInstruction?: string;
   currentEditorContent?: string;
+  provisionalPreviousChapter?: ProvisionalPreviousChapterContext;
 }

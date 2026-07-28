@@ -1,10 +1,7 @@
+import type { ChapterDraft } from './ai';
+
 export type GenerationJobStatus =
-  | 'pending'
-  | 'running'
-  | 'retrying'
-  | 'failed'
-  | 'completed'
-  | 'cancelled';
+  'pending' | 'running' | 'retrying' | 'failed' | 'completed' | 'cancelled';
 
 export type GenerationJobType = 'chapter_generation_mock' | 'chapter_generation';
 
@@ -20,12 +17,7 @@ export type GenerationStepName =
   | 'save_version';
 
 export type GenerationStepStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'skipped'
-  | 'cancelled';
+  'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
 
 export interface GenerationJob {
   id: string;
@@ -78,10 +70,14 @@ export interface RunMockGenerationJobInput {
   volumeId?: string;
   chapterId: string;
   currentEditorContent?: string;
+  provisionalPreviousChapter?: import('./generationContext').ProvisionalPreviousChapterContext;
 }
 
 export interface RunChapterDraftGenerationJobInput extends RunMockGenerationJobInput {
   title?: string;
+  signal?: AbortSignal;
+  onStreamEvent?: (event: import('./ai').AiStreamEvent) => void;
+  onDraftSaved?: (draft: ChapterDraft, jobId: string) => void | Promise<void>;
 }
 
 export interface StartupGenerationRecovery {
