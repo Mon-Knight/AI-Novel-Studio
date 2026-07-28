@@ -24,18 +24,20 @@ const registry: ToolRegistryManifestV1 = {
   contractVersion: 'tool_registry_manifest_v1',
   registryVersion: 'tool_registry_v1',
   registryHash: 'a'.repeat(64),
-  tools: [{
-    name: 'novel.read_context',
-    version: '1',
-    description: 'read',
-    inputSchema: { type: 'object' },
-    outputSchema: { type: 'object' },
-    permissions: ['novel.read'],
-    scope: 'novel',
-    sideEffect: 'none',
-    confirmationPolicy: 'never',
-    timeoutMs: 1000,
-  }],
+  tools: [
+    {
+      name: 'novel.read_context',
+      version: '1',
+      description: 'read',
+      inputSchema: { type: 'object' },
+      outputSchema: { type: 'object' },
+      permissions: ['novel.read'],
+      scope: 'novel',
+      sideEffect: 'none',
+      confirmationPolicy: 'never',
+      timeoutMs: 1000,
+    },
+  ],
 };
 
 const definition: AiTaskCompilationDefinition = {
@@ -102,7 +104,10 @@ test('formal compiler is deterministic across source and JSON key order', async 
     toolRegistry: registry,
   });
   assert.equal(first.contextSnapshot.compiledContext, second.contextSnapshot.compiledContext);
-  assert.deepEqual(first.contextSnapshot.sourceManifestJson, second.contextSnapshot.sourceManifestJson);
+  assert.deepEqual(
+    first.contextSnapshot.sourceManifestJson,
+    second.contextSnapshot.sourceManifestJson,
+  );
   assert.equal(first.inputPayloadJson.compilationHash, second.inputPayloadJson.compilationHash);
   assert.equal(first.contextSnapshot.schemaVersion, 2);
   assert.equal(first.constraintSnapshot.schemaVersion, 2);
@@ -120,9 +125,11 @@ test('context compiler enforces the versioned budget with deterministic truncati
   });
   assert.ok(compiled.budgetJson.compiledContextTokens <= 600);
   assert.equal(compiled.sourceManifestJson.sources[0].status, 'truncated');
-  assert.ok(compiled.sourceManifestJson.sources.some((source) => (
-    source.status === 'truncated' || source.status === 'omitted_budget'
-  )));
+  assert.ok(
+    compiled.sourceManifestJson.sources.some(
+      (source) => source.status === 'truncated' || source.status === 'omitted_budget',
+    ),
+  );
   const replay = await compileAiContext({
     sources: [
       { ...sources()[0], content: 'world '.repeat(1200) },
@@ -144,16 +151,13 @@ test('source drift verifier reports changed, missing and unexpected identities',
     fixedMessageTokens: 200,
   });
   const changed = sources()[1];
-  const report = await verifyAiContextSourceDrift(
-    compiled.sourceManifestJson,
-    [
-      { ...changed, content: `${changed.content} changed` },
-      {
-        ...sources()[0],
-        sourceId: 'world-2',
-      },
-    ],
-  );
+  const report = await verifyAiContextSourceDrift(compiled.sourceManifestJson, [
+    { ...changed, content: `${changed.content} changed` },
+    {
+      ...sources()[0],
+      sourceId: 'world-2',
+    },
+  ]);
   assert.equal(report.matches, false);
   assert.deepEqual(report.items.map((item) => item.status).sort(), [
     'changed',
@@ -174,30 +178,73 @@ test('compiled request separates template, context, registry and provider identi
   });
   assert.equal(compiled.constraintSnapshot.promptTemplateBody.includes('Storm Archive'), false);
   assert.match(compiled.request.messages[0].content, /Storm Archive/);
-  assert.equal(compiled.constraintSnapshot.payloadJson.toolPolicy.registryHash, registry.registryHash);
+  assert.equal(
+    compiled.constraintSnapshot.payloadJson.toolPolicy.registryHash,
+    registry.registryHash,
+  );
   assert.equal(compiled.constraintSnapshot.providerOptionsJson.maxTokens, 500);
+  assert.equal(compiled.constraintSnapshot.providerOptionsJson.temperature, settings.temperature);
   const persisted = JSON.stringify(compiled);
   assert.equal(persisted.includes(settings.apiKey), false);
   assert.equal(persisted.includes(settings.baseUrl), false);
 });
 
+test('connection test locks deterministic temperature instead of inheriting creative settings', async () => {
+  const connectionDefinition: AiTaskCompilationDefinition = {
+    ...definition,
+    taskType: 'connection_test',
+    expectedArtifactType: 'generic_text',
+    promptTemplateId: 'system/connection_test',
+    promptTemplateBody: 'Reply OK only.',
+    userPrompt: 'OK only.',
+    responseSchema: 'exact_text_ok_v1',
+    constraints: { exactText: 'OK' },
+    allowedSourceTypes: [],
+    requiredSourceTypes: [],
+    modelContextTokens: 512,
+    maxOutputTokens: 128,
+    defaultTemperature: 0,
+  };
+  const compiled = await compileAiExecutionContract({
+    definition: connectionDefinition,
+    scope: { scopeType: 'system', novelId: 'system' },
+    compilation: { sources: [], taskInput: { purpose: 'connection_test' } },
+    settings,
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    toolRegistry: registry,
+  });
+
+  assert.equal(compiled.request.temperature, 0);
+  assert.equal(compiled.constraintSnapshot.providerOptionsJson.temperature, 0);
+  assert.equal(compiled.request.maxTokens, 128);
+});
+
 test('compiler rejects unsupported sources, scope drift and unregistered tools', async () => {
-  await assert.rejects(() => compileAiExecutionContract({
-    definition: { ...definition, allowedTools: ['missing.tool@1'] },
-    scope: { scopeType: 'novel', novelId: 'novel-1' },
-    compilation: { sources: sources() },
-    settings,
-    providerId: 'deepseek',
-    modelId: 'test-model',
-    toolRegistry: registry,
-  }), /未注册工具/);
-  await assert.rejects(() => compileAiExecutionContract({
-    definition,
-    scope: { scopeType: 'novel', novelId: 'novel-other' },
-    compilation: { sources: sources() },
-    settings,
-    providerId: 'deepseek',
-    modelId: 'test-model',
-    toolRegistry: registry,
-  }), /Novel 来源与 Task scope/);
+  await assert.rejects(
+    () =>
+      compileAiExecutionContract({
+        definition: { ...definition, allowedTools: ['missing.tool@1'] },
+        scope: { scopeType: 'novel', novelId: 'novel-1' },
+        compilation: { sources: sources() },
+        settings,
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        toolRegistry: registry,
+      }),
+    /未注册工具/,
+  );
+  await assert.rejects(
+    () =>
+      compileAiExecutionContract({
+        definition,
+        scope: { scopeType: 'novel', novelId: 'novel-other' },
+        compilation: { sources: sources() },
+        settings,
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        toolRegistry: registry,
+      }),
+    /Novel 来源与 Task scope/,
+  );
 });

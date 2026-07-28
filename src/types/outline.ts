@@ -65,6 +65,7 @@ export interface OutlineGenerationContext {
   protagonistAbilityLimits?: string;
   protagonistForbidden?: string;
   activeMasterOutline?: string;
+  activeVolumeOutline?: string;
   existingVolumes?: string;
   existingChapters?: string;
   styleSummary?: string;

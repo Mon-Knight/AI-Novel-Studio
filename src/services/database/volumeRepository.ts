@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 /**
  * AI Novel Studio - 分卷 Repository
  */
@@ -72,22 +73,31 @@ function saveLocalVolumes(items: Volume[]): void {
 export const volumeRepository = {
   async getByNovelId(novelId: string): Promise<Volume[]> {
     const items = await dbCall<unknown[]>('get_volumes_by_novel_id', { novelId }, () =>
-      getLocalVolumes().filter((v) => v.novelId === novelId).sort((a, b) => a.orderIndex - b.orderIndex),
+      getLocalVolumes()
+        .filter((v) => v.novelId === novelId)
+        .sort((a, b) => a.orderIndex - b.orderIndex),
     );
     const volumes = normalizeVolumes(items);
-    console.info(`[volumeService] listVolumesByNovelId novelId=${novelId} count=${volumes.length}`);
+    appLogger.info(
+      `[volumeService] listVolumesByNovelId novelId=${novelId} count=${volumes.length}`,
+    );
     return volumes;
   },
 
   async getById(id: string): Promise<Volume | null> {
-    const item = await dbCall<unknown | null>('get_volume_by_id', { id }, () =>
-      getLocalVolumes().find((v) => v.id === id) ?? null,
+    const item = await dbCall<unknown | null>(
+      'get_volume_by_id',
+      { id },
+      () => getLocalVolumes().find((v) => v.id === id) ?? null,
     );
     return normalizeVolume(item);
   },
 
   async create(input: CreateVolumeInput): Promise<Volume> {
-    console.info(`[volumeService] createVolume input novelId=${input.novelId} title=${input.title}`);
+    appLogger.info('[volumeService] createVolume input', {
+      novelId: input.novelId,
+      titleLength: input.title.length,
+    });
     const before = await volumeRepository.getByNovelId(input.novelId);
     const maxOrder = before.reduce((max, v) => Math.max(max, v.orderIndex), -1);
     const preparedInput = {
@@ -95,7 +105,7 @@ export const volumeRepository = {
       title: input.title.trim(),
       orderIndex: input.orderIndex ?? maxOrder + 1,
     };
-    console.info(`[volumeService] before save count=${before.length}`);
+    appLogger.info(`[volumeService] before save count=${before.length}`);
 
     const createdRaw = await dbCall<unknown>('create_volume', { input: preparedInput }, () => {
       const items = getLocalVolumes();
@@ -122,8 +132,8 @@ export const volumeRepository = {
     if (!created?.id) throw new Error('分卷创建返回无效数据');
 
     const after = await volumeRepository.getByNovelId(input.novelId);
-    console.info(`[volumeService] after save count=${after.length}`);
-    console.info(`[volumeService] created id=${created.id}`);
+    appLogger.info(`[volumeService] after save count=${after.length}`);
+    appLogger.info(`[volumeService] created id=${created.id}`);
     if (!after.some((v) => v.id === created.id)) {
       throw new Error('分卷创建后无法读取，请检查存储');
     }

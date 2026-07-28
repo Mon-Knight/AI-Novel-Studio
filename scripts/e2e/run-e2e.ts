@@ -33,7 +33,7 @@ const productAppPath = path.join(
   releaseDirectory,
   process.platform === 'win32'
     ? `${tauriConfig.package?.productName ?? 'AI Novel Studio'}.exe`
-    : tauriConfig.package?.productName ?? 'AI Novel Studio',
+    : (tauriConfig.package?.productName ?? 'AI Novel Studio'),
 );
 const allSpecs = [
   'app-start.spec.ts',
@@ -49,16 +49,24 @@ const allSpecs = [
   'quality-history-replay.spec.ts',
   'chapter-context-persistence.spec.ts',
   'chapter-readiness-planner.spec.ts',
+  'story-assets-transaction.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 
-const artifactRoot = path.resolve(process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ?? path.join(workspaceRoot, 'test-results', 'e2e'));
+const artifactRoot = path.resolve(
+  process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ?? path.join(workspaceRoot, 'test-results', 'e2e'),
+);
 const keepData = process.env.AI_NOVEL_STUDIO_E2E_KEEP_DATA === '1';
 const driverPortBase = process.env.AI_NOVEL_STUDIO_E2E_DRIVER_PORT
   ? validateDriverPortBase(Number(process.env.AI_NOVEL_STUDIO_E2E_DRIVER_PORT), specs.length)
   : await findAvailableDriverPortBase(specs.length);
-const specTimeoutMs = positiveIntegerEnvironment('AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT', 10 * 60 * 1000);
-const realDriver = process.env.AI_NOVEL_STUDIO_E2E_DRIVER ?? (process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
+const specTimeoutMs = positiveIntegerEnvironment(
+  'AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT',
+  10 * 60 * 1000,
+);
+const realDriver =
+  process.env.AI_NOVEL_STUDIO_E2E_DRIVER ??
+  (process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
 const nativeDriver = resolveNativeDriver();
 
 if (process.env.AI_NOVEL_STUDIO_E2E !== undefined && process.env.AI_NOVEL_STUDIO_E2E !== '1') {
@@ -124,7 +132,10 @@ for (const [index, spec] of specs.entries()) {
     try {
       cleanup = await cleanupOwnedProcesses(before, appPath, specRoot, result.wdioPid);
     } catch (error) {
-      cleanupError = appendCleanupError(cleanupError, `process cleanup failed: ${redactLogText(String(error))}`);
+      cleanupError = appendCleanupError(
+        cleanupError,
+        `process cleanup failed: ${redactLogText(String(error))}`,
+      );
       result = { ...result, exitCode: 1 };
       console.error(`[E2E] ${spec} process cleanup could not be verified: ${cleanupError}`);
     }
@@ -134,7 +145,9 @@ for (const [index, spec] of specs.entries()) {
         `owned processes remained after cleanup: ${cleanup.remainingPids.join(', ')}`,
       );
       result = { ...result, exitCode: 1 };
-      console.error(`[E2E] ${spec} left owned processes after cleanup: ${cleanup.remainingPids.join(', ')}`);
+      console.error(
+        `[E2E] ${spec} left owned processes after cleanup: ${cleanup.remainingPids.join(', ')}`,
+      );
     }
     await copyRustLog(specRoot, specArtifacts);
     const artifactIssues = await sanitizeArtifactDirectory(specArtifacts);
@@ -145,7 +158,10 @@ for (const [index, spec] of specs.entries()) {
     }
     const browserHealthFailure = validateBrowserHealthArtifact(specArtifacts);
     if (browserHealthFailure) {
-      artifactError = appendCleanupError(artifactError, `browser health check failed: ${browserHealthFailure}`);
+      artifactError = appendCleanupError(
+        artifactError,
+        `browser health check failed: ${browserHealthFailure}`,
+      );
       result = { ...result, exitCode: 1 };
       console.error(`[E2E] ${spec} browser health check failed: ${browserHealthFailure}`);
     }
@@ -153,9 +169,14 @@ for (const [index, spec] of specs.entries()) {
       try {
         await removeDirectory(specRoot);
       } catch (error) {
-        cleanupError = appendCleanupError(cleanupError, `data cleanup failed: ${redactLogText(String(error))}`);
+        cleanupError = appendCleanupError(
+          cleanupError,
+          `data cleanup failed: ${redactLogText(String(error))}`,
+        );
         result = { ...result, exitCode: 1 };
-        console.error(`[E2E] ${spec} passed, but its isolated data could not be removed: ${cleanupError}`);
+        console.error(
+          `[E2E] ${spec} passed, but its isolated data could not be removed: ${cleanupError}`,
+        );
       }
     }
     await writeRunMetadata(specArtifacts, {
@@ -177,7 +198,10 @@ for (const [index, spec] of specs.entries()) {
     });
     const metadataIssues = await sanitizeArtifactDirectory(specArtifacts);
     if (metadataIssues.length > 0) {
-      artifactError = appendCleanupError(artifactError, `final artifact sanitization failed: ${metadataIssues.join('; ')}`);
+      artifactError = appendCleanupError(
+        artifactError,
+        `final artifact sanitization failed: ${metadataIssues.join('; ')}`,
+      );
       result = { ...result, exitCode: 1 };
       console.error(`[E2E] ${spec} ${artifactError}`);
       await writeRunMetadata(specArtifacts, {
@@ -201,7 +225,9 @@ for (const [index, spec] of specs.entries()) {
   }
   if (result.exitCode !== 0) failures += 1;
   if (cleanupError || artifactError) {
-    console.error('[E2E] aborting the remaining specs because the previous test environment or diagnostics were not safely released.');
+    console.error(
+      '[E2E] aborting the remaining specs because the previous test environment or diagnostics were not safely released.',
+    );
     break;
   }
 }
@@ -227,7 +253,9 @@ await writeRunMetadata(artifactRoot, {
   dataDirectoryRetained: keepData || failures !== 0,
 });
 if (failures > 0) {
-  console.error(`[E2E] ${failures}/${specs.length} spec(s) failed. Failure artifacts are in ${diagnosticPath(artifactRoot)}`);
+  console.error(
+    `[E2E] ${failures}/${specs.length} spec(s) failed. Failure artifacts are in ${diagnosticPath(artifactRoot)}`,
+  );
   console.error(`[E2E] isolated failure data was retained in ${diagnosticPath(runRoot)}`);
   process.exitCode = 1;
 } else {
@@ -245,7 +273,9 @@ interface WdioRunResult {
 function validateDriverPortBase(base: number, specCount: number): number {
   const highestPort = base + specCount - 1 + 1000;
   if (!Number.isSafeInteger(base) || base < 1024 || highestPort > 65535) {
-    throw new Error(`AI_NOVEL_STUDIO_E2E_DRIVER_PORT cannot reserve ${specCount} driver/native port pairs from ${String(base)}.`);
+    throw new Error(
+      `AI_NOVEL_STUDIO_E2E_DRIVER_PORT cannot reserve ${specCount} driver/native port pairs from ${String(base)}.`,
+    );
   }
   return base;
 }
@@ -253,7 +283,10 @@ function validateDriverPortBase(base: number, specCount: number): number {
 async function findAvailableDriverPortBase(specCount: number): Promise<number> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const base = validateDriverPortBase(randomInt(20_000, 40_000), specCount);
-    const ports = Array.from({ length: specCount }, (_, index) => [base + index, base + index + 1000]).flat();
+    const ports = Array.from({ length: specCount }, (_, index) => [
+      base + index,
+      base + index + 1000,
+    ]).flat();
     let available = true;
     for (const port of ports) {
       if (!(await isPortAvailable(port))) {
@@ -271,12 +304,18 @@ async function isPortAvailable(port: number): Promise<boolean> {
   return canBindPort(port, '::1', true);
 }
 
-function canBindPort(port: number, host: string, allowUnavailableAddress: boolean): Promise<boolean> {
+function canBindPort(
+  port: number,
+  host: string,
+  allowUnavailableAddress: boolean,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer();
     server.unref();
     server.once('error', (error: NodeJS.ErrnoException) => {
-      resolve(allowUnavailableAddress && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code ?? ''));
+      resolve(
+        allowUnavailableAddress && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code ?? ''),
+      );
     });
     server.listen({ port, host, exclusive: true }, () => {
       server.close((error) => resolve(!error));
@@ -322,12 +361,16 @@ async function runWdio(
 
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(process.execPath, [wdioEntry, 'run', configPath, '--spec', path.join(workspaceRoot, 'tests', 'e2e', spec)], {
-      cwd: workspaceRoot,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: false,
-    });
+    child = spawn(
+      process.execPath,
+      [wdioEntry, 'run', configPath, '--spec', path.join(workspaceRoot, 'tests', 'e2e', spec)],
+      {
+        cwd: workspaceRoot,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: false,
+      },
+    );
   } catch (error) {
     logStream.end();
     try {
@@ -367,14 +410,18 @@ async function runWdio(
         logError ??= error instanceof Error ? error : new Error(String(error));
       }
       if (logError) {
-        console.error(`[E2E] ${spec} output log could not be completed: ${redactLogText(String(logError))}`);
+        console.error(
+          `[E2E] ${spec} output log could not be completed: ${redactLogText(String(logError))}`,
+        );
         result = { ...result, exitCode: 1 };
       }
       if (launchError) {
         if (logError) {
-          reject(new Error(
-            `WebdriverIO could not start (${redactLogText(String(launchError))}) and its output log could not be completed: ${redactLogText(String(logError))}`,
-          ));
+          reject(
+            new Error(
+              `WebdriverIO could not start (${redactLogText(String(launchError))}) and its output log could not be completed: ${redactLogText(String(logError))}`,
+            ),
+          );
         } else {
           reject(launchError);
         }
@@ -384,28 +431,39 @@ async function runWdio(
     };
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
-      console.error(`[E2E] ${spec} exceeded the ${specTimeoutMs}ms process timeout; terminating its process tree.`);
+      console.error(
+        `[E2E] ${spec} exceeded the ${specTimeoutMs}ms process timeout; terminating its process tree.`,
+      );
       void cleanupProcessTrees(child.pid ? [child.pid] : []).finally(() => {
         if (settled) return;
-        forceSettleTimer = setTimeout(() => void settle({
-          exitCode: 1,
-          signal: 'SIGTERM',
-          timedOut: true,
-          wdioPid: child.pid,
-        }), 5000);
+        forceSettleTimer = setTimeout(
+          () =>
+            void settle({
+              exitCode: 1,
+              signal: 'SIGTERM',
+              timedOut: true,
+              wdioPid: child.pid,
+            }),
+          5000,
+        );
       });
     }, specTimeoutMs);
     child.once('error', (error) => {
       clearTimeout(timeoutTimer);
-      if (timedOut) void settle({ exitCode: 1, signal: 'SIGTERM', timedOut: true, wdioPid: child.pid });
+      if (timedOut)
+        void settle({ exitCode: 1, signal: 'SIGTERM', timedOut: true, wdioPid: child.pid });
       else void settle({ exitCode: 1, signal: null, timedOut: false, wdioPid: child.pid }, error);
     });
-    child.once('close', (exitCode, signal) => void settle({
-      exitCode: exitCode ?? 1,
-      signal: signal ?? (timedOut ? 'SIGTERM' : null),
-      timedOut,
-      wdioPid: child.pid,
-    }));
+    child.once(
+      'close',
+      (exitCode, signal) =>
+        void settle({
+          exitCode: exitCode ?? 1,
+          signal: signal ?? (timedOut ? 'SIGTERM' : null),
+          timedOut,
+          wdioPid: child.pid,
+        }),
+    );
   });
 }
 
@@ -465,11 +523,15 @@ function resolveBuiltApplication(): string {
 
 function assertApplication(application: string, context: string): void {
   if (!fs.existsSync(application)) {
-    throw new Error(`${context}, but the E2E application was not found: ${diagnosticPath(application)}`);
+    throw new Error(
+      `${context}, but the E2E application was not found: ${diagnosticPath(application)}`,
+    );
   }
   const stat = fs.statSync(application);
   if (!stat.isFile() || stat.size === 0) {
-    throw new Error(`${context}, but the E2E application is not a non-empty file: ${diagnosticPath(application)}`);
+    throw new Error(
+      `${context}, but the E2E application is not a non-empty file: ${diagnosticPath(application)}`,
+    );
   }
 }
 
@@ -487,10 +549,14 @@ function stageApplication(source: string, dataRoot: string): string {
   assertApplication(destination, 'The Cargo application binary was staged for this E2E run');
   const destinationStat = fs.statSync(destination);
   if (destinationStat.size !== fs.statSync(source).size) {
-    throw new Error(`The staged E2E application size does not match its Cargo source: ${diagnosticPath(destination)}`);
+    throw new Error(
+      `The staged E2E application size does not match its Cargo source: ${diagnosticPath(destination)}`,
+    );
   }
   if (destinationStat.mtimeMs < stagedAt - 2000) {
-    throw new Error(`The staged E2E application has a stale modification time: ${diagnosticPath(destination)}`);
+    throw new Error(
+      `The staged E2E application has a stale modification time: ${diagnosticPath(destination)}`,
+    );
   }
   return destination;
 }
@@ -511,33 +577,47 @@ interface CleanupResult {
 
 async function snapshotProcesses(): Promise<ProcessInfo[]> {
   if (process.platform !== 'win32') return [];
-  const script = '$ErrorActionPreference="Stop"; @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Compress';
+  const script =
+    '$ErrorActionPreference="Stop"; @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Compress';
   try {
-    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { maxBuffer: 10 * 1024 * 1024 });
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { maxBuffer: 10 * 1024 * 1024 },
+    );
     if (!stdout.trim()) throw new Error('CIM returned an empty process snapshot.');
     const parsed = JSON.parse(stdout) as Record<string, unknown> | Array<Record<string, unknown>>;
     const rows = Array.isArray(parsed) ? parsed : [parsed];
     if (rows.length === 0) throw new Error('CIM returned no processes.');
-    return rows.map((row, index) => {
-      if (!row || typeof row !== 'object') {
-        throw new Error(`CIM process row ${index} is not an object.`);
-      }
-      const pid = Number(row.ProcessId);
-      const parentPid = Number(row.ParentProcessId);
-      if (!Number.isSafeInteger(pid) || pid < 0 || !Number.isSafeInteger(parentPid) || parentPid < 0) {
-        throw new Error(`CIM process row ${index} has invalid process identifiers.`);
-      }
-      return {
-        pid,
-        parentPid,
-        name: String(row.Name ?? ''),
-        path: row.ExecutablePath ? String(row.ExecutablePath) : undefined,
-        commandLine: row.CommandLine ? String(row.CommandLine) : undefined,
-        creationDate: row.CreationDate ? String(row.CreationDate) : undefined,
-      };
-    }).filter((process) => process.pid > 0);
+    return rows
+      .map((row, index) => {
+        if (!row || typeof row !== 'object') {
+          throw new Error(`CIM process row ${index} is not an object.`);
+        }
+        const pid = Number(row.ProcessId);
+        const parentPid = Number(row.ParentProcessId);
+        if (
+          !Number.isSafeInteger(pid) ||
+          pid < 0 ||
+          !Number.isSafeInteger(parentPid) ||
+          parentPid < 0
+        ) {
+          throw new Error(`CIM process row ${index} has invalid process identifiers.`);
+        }
+        return {
+          pid,
+          parentPid,
+          name: String(row.Name ?? ''),
+          path: row.ExecutablePath ? String(row.ExecutablePath) : undefined,
+          commandLine: row.CommandLine ? String(row.CommandLine) : undefined,
+          creationDate: row.CreationDate ? String(row.CreationDate) : undefined,
+        };
+      })
+      .filter((process) => process.pid > 0);
   } catch (error) {
-    throw new Error(`Could not obtain a trustworthy Windows process snapshot: ${redactLogText(String(error))}`);
+    throw new Error(
+      `Could not obtain a trustworthy Windows process snapshot: ${redactLogText(String(error))}`,
+    );
   }
 }
 
@@ -565,10 +645,10 @@ function findOwnedProcesses(
     const executable = item.path ? processOwnershipNeedle(item.path) : undefined;
     const commandLine = item.commandLine ? processOwnershipNeedle(item.commandLine) : undefined;
     if (
-      executable === appNeedle
-      || commandLine?.includes(appNeedle)
-      || commandLine?.includes(dataNeedle)
-      || commandLine?.includes(webviewNeedle)
+      executable === appNeedle ||
+      commandLine?.includes(appNeedle) ||
+      commandLine?.includes(dataNeedle) ||
+      commandLine?.includes(webviewNeedle)
     ) {
       owned.add(item.pid);
     }
@@ -578,7 +658,8 @@ function findOwnedProcesses(
   while (addedDescendant) {
     addedDescendant = false;
     for (const item of current) {
-      if (owned.has(item.pid) || (!ancestryRoots.has(item.parentPid) && !owned.has(item.parentPid))) continue;
+      if (owned.has(item.pid) || (!ancestryRoots.has(item.parentPid) && !owned.has(item.parentPid)))
+        continue;
       owned.add(item.pid);
       addedDescendant = true;
     }
@@ -624,7 +705,11 @@ async function cleanupOwnedProcesses(
 async function cleanupProcessTrees(rootPids: number[]): Promise<void> {
   if (process.platform !== 'win32') {
     for (const pid of rootPids) {
-      try { process.kill(pid, 'SIGTERM'); } catch { /* already exited */ }
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* already exited */
+      }
     }
     return;
   }
@@ -638,7 +723,11 @@ async function cleanupProcessTrees(rootPids: number[]): Promise<void> {
 }
 
 async function writeRunMetadata(dir: string, data: Record<string, unknown>): Promise<void> {
-  fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify({ ...data, generatedAt: new Date().toISOString() }, null, 2), 'utf8');
+  fs.writeFileSync(
+    path.join(dir, 'run.json'),
+    JSON.stringify({ ...data, generatedAt: new Date().toISOString() }, null, 2),
+    'utf8',
+  );
 }
 
 async function copyRustLog(dataDir: string, artifactsDir: string): Promise<void> {
@@ -646,8 +735,14 @@ async function copyRustLog(dataDir: string, artifactsDir: string): Promise<void>
   if (!fs.existsSync(source)) return;
   try {
     const contents = await fs.promises.readFile(source, 'utf8');
-    await fs.promises.writeFile(path.join(artifactsDir, 'rust-backend.log'), redactLogText(contents), 'utf8');
-  } catch { /* best effort */ }
+    await fs.promises.writeFile(
+      path.join(artifactsDir, 'rust-backend.log'),
+      redactLogText(contents),
+      'utf8',
+    );
+  } catch {
+    /* best effort */
+  }
 }
 
 async function removeDirectory(target: string): Promise<void> {
@@ -663,7 +758,13 @@ async function removeDirectory(target: string): Promise<void> {
 
 async function removeDirectChildDirectory(root: string, target: string): Promise<void> {
   const relative = path.relative(path.resolve(root), path.resolve(target));
-  if (!relative || relative === '..' || path.isAbsolute(relative) || relative.startsWith(`..${path.sep}`) || relative.includes(path.sep)) {
+  if (
+    !relative ||
+    relative === '..' ||
+    path.isAbsolute(relative) ||
+    relative.startsWith(`..${path.sep}`) ||
+    relative.includes(path.sep)
+  ) {
     throw new Error(
       `Refusing to remove an E2E artifact path outside a direct child of ${diagnosticPath(root)}: ${diagnosticPath(target)}`,
     );
@@ -690,12 +791,18 @@ function assertIndependentCargoTarget(e2eTarget: string, productionTarget: strin
 function pathsOverlap(left: string, right: string): boolean {
   const resolvedLeft = path.resolve(left);
   const resolvedRight = path.resolve(right);
-  return isSameOrDescendant(resolvedLeft, resolvedRight) || isSameOrDescendant(resolvedRight, resolvedLeft);
+  return (
+    isSameOrDescendant(resolvedLeft, resolvedRight) ||
+    isSameOrDescendant(resolvedRight, resolvedLeft)
+  );
 }
 
 function isSameOrDescendant(candidate: string, parent: string): boolean {
   const relative = path.relative(parent, candidate);
-  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+  return (
+    relative === '' ||
+    (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+  );
 }
 
 function validateBrowserHealthArtifact(specArtifacts: string): string | undefined {
@@ -715,14 +822,18 @@ function validateBrowserHealthArtifact(specArtifacts: string): string | undefine
   }
 
   if (snapshot.error) return 'front-end diagnostics reported a collection error';
-  if (!Array.isArray(snapshot.errors)) return 'front-end unhandled-error diagnostics were unavailable';
-  if (snapshot.errors.length > 0) return `front-end reported ${snapshot.errors.length} unhandled error(s)`;
+  if (!Array.isArray(snapshot.errors))
+    return 'front-end unhandled-error diagnostics were unavailable';
+  if (snapshot.errors.length > 0)
+    return `front-end reported ${snapshot.errors.length} unhandled error(s)`;
   if (!Array.isArray(snapshot.logs)) return 'front-end console diagnostics were unavailable';
-  const consoleErrorCount = snapshot.logs.filter((entry) => (
-    entry && typeof entry === 'object' && (entry as { level?: unknown }).level === 'error'
-  )).length;
+  const consoleErrorCount = snapshot.logs.filter(
+    (entry) =>
+      entry && typeof entry === 'object' && (entry as { level?: unknown }).level === 'error',
+  ).length;
   if (consoleErrorCount > 0) return `front-end console reported ${consoleErrorCount} error(s)`;
-  if (snapshot.networkAttempts?.installed !== true) return 'E2E WebView network guard was not installed';
+  if (snapshot.networkAttempts?.installed !== true)
+    return 'E2E WebView network guard was not installed';
   if (snapshot.networkAttempts.total !== 0) {
     return `E2E WebView blocked ${String(snapshot.networkAttempts.total)} external network request(s)`;
   }
@@ -754,14 +865,17 @@ function resolveNativeDriver(): string | undefined {
   const toolsRoot = path.join(workspaceRoot, '.e2e-tools');
   const discovered = findFiles(toolsRoot, 'msedgedriver.exe', [e2eCargoTargetDirectory])
     .map((candidate) => ({ candidate, modifiedAt: fs.statSync(candidate).mtimeMs }))
-    .sort((left, right) => right.modifiedAt - left.modifiedAt || left.candidate.localeCompare(right.candidate));
+    .sort(
+      (left, right) =>
+        right.modifiedAt - left.modifiedAt || left.candidate.localeCompare(right.candidate),
+    );
   if (discovered.length > 0) return discovered[0].candidate;
 
   const fromPath = findOnPath('msedgedriver.exe');
   if (fromPath) return fromPath;
   throw new Error(
-    'Microsoft Edge WebDriver was not found. Set AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER, '
-    + 'place msedgedriver.exe under .e2e-tools, or add it to PATH. Its major version must match WebView2.',
+    'Microsoft Edge WebDriver was not found. Set AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER, ' +
+      'place msedgedriver.exe under .e2e-tools, or add it to PATH. Its major version must match WebView2.',
   );
 }
 
@@ -781,7 +895,9 @@ function findOnPath(executable: string): string | undefined {
     const candidate = path.join(entry.replace(/^"|"$/g, ''), executable);
     try {
       if (fs.statSync(candidate).isFile()) return candidate;
-    } catch { /* not present in this PATH entry */ }
+    } catch {
+      /* not present in this PATH entry */
+    }
   }
   return undefined;
 }
@@ -798,7 +914,8 @@ function findFiles(root: string, fileName: string, excludedRoots: string[] = [])
   for (const entry of entries) {
     const target = path.join(root, entry.name);
     if (entry.isDirectory()) matches.push(...findFiles(target, fileName, excludedRoots));
-    else if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase()) matches.push(target);
+    else if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase())
+      matches.push(target);
   }
   return matches;
 }
@@ -807,11 +924,21 @@ function diagnosticPath(target: string): string {
   const absoluteTarget = path.resolve(target);
   const temporaryRoot = path.resolve(os.tmpdir());
   const relativeToTemp = path.relative(temporaryRoot, absoluteTarget);
-  if (relativeToTemp && relativeToTemp !== '..' && !path.isAbsolute(relativeToTemp) && !relativeToTemp.startsWith(`..${path.sep}`)) {
+  if (
+    relativeToTemp &&
+    relativeToTemp !== '..' &&
+    !path.isAbsolute(relativeToTemp) &&
+    !relativeToTemp.startsWith(`..${path.sep}`)
+  ) {
     return path.join('%TEMP%', relativeToTemp);
   }
   const relativeToWorkspace = path.relative(workspaceRoot, absoluteTarget);
-  if (relativeToWorkspace && relativeToWorkspace !== '..' && !path.isAbsolute(relativeToWorkspace) && !relativeToWorkspace.startsWith(`..${path.sep}`)) {
+  if (
+    relativeToWorkspace &&
+    relativeToWorkspace !== '..' &&
+    !path.isAbsolute(relativeToWorkspace) &&
+    !relativeToWorkspace.startsWith(`..${path.sep}`)
+  ) {
     return path.join('%WORKSPACE%', relativeToWorkspace);
   }
   return redactLogText(absoluteTarget);

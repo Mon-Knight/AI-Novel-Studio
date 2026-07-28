@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 /**
  * AI Novel Studio - 数据库服务适配层
  * Tauri 环境下使用 Rust SQLite，浏览器开发环境使用 localStorage 回退
@@ -19,14 +20,17 @@ function lsSet(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
-    console.error('localStorage set failed:', e);
+    appLogger.error('localStorage set failed:', e);
+    throw e;
   }
 }
 
 function lsRemove(key: string): void {
   try {
     localStorage.removeItem(key);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function generateId(): string {
@@ -59,8 +63,11 @@ function shouldLogDbCommand(command: string): boolean {
 
 function isSensitiveLogKey(key: string): boolean {
   if (/hash|length|count|id|version|status/i.test(key)) return false;
-  return /(^|_)(content|recovery_content|text|body|prompt|messages?|api_?key|token|secret)($|_)/i.test(key)
-    || /recoveryContent|currentEditorContent|adoptedContent|apiKey/i.test(key);
+  return (
+    /(^|_)(content|recovery_content|text|body|prompt|messages?|api_?key|token|secret)($|_)/i.test(
+      key,
+    ) || /recoveryContent|currentEditorContent|adoptedContent|apiKey/i.test(key)
+  );
 }
 
 function sanitizeForDbLog(value: unknown, depth = 0, key = ''): unknown {
@@ -97,7 +104,7 @@ export async function dbCall<T>(
 ): Promise<T> {
   if (isTauriRuntime()) {
     if (shouldLogDbCommand(command)) {
-      console.log('[DB_CALL] invoke start', {
+      appLogger.debug('[DB_CALL] invoke start', {
         command,
         args: sanitizeForDbLog(args),
         isTauri: true,
@@ -110,7 +117,7 @@ export async function dbCall<T>(
       // retry.  Wait for the authoritative command result instead.
       const result = await tauriInvoke<T>(command, args);
       if (shouldLogDbCommand(command)) {
-        console.log('[DB_CALL] invoke success', {
+        appLogger.debug('[DB_CALL] invoke success', {
           command,
           result: sanitizeForDbLog(result),
         });
@@ -119,7 +126,7 @@ export async function dbCall<T>(
     } catch (e: unknown) {
       const errorMessage = describeUnknownError(e, `Tauri command failed: ${command}`);
       const appError = normalizeAppError(e, errorMessage);
-      console.error('[DB_CALL_FAILED]', {
+      appLogger.error('[DB_CALL_FAILED]', {
         command,
         args: sanitizeForDbLog(args),
         code: appError.code,
@@ -141,7 +148,7 @@ export async function dbCall<T>(
   }
   if (fallback) {
     if (shouldLogDbCommand(command)) {
-      console.log('[DB_CALL] localStorage fallback', {
+      appLogger.debug('[DB_CALL] localStorage fallback', {
         command,
         args: sanitizeForDbLog(args),
         isTauri: false,

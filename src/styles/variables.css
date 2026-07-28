@@ -2,12 +2,22 @@
  * AI Novel Studio - CSS 变量与设计令牌
  */
 
-:root {
+:root,
+:root[data-effective-theme='light'] {
   /* === 颜色系统 === */
   --color-primary: #4a7cf7;
   --color-primary-hover: #3b6be0;
   --color-primary-light: #e8effe;
   --color-primary-dark: #2a50b0;
+  --color-on-primary: #ffffff;
+  --color-on-error: #ffffff;
+  --color-overlay: rgba(0, 0, 0, 0.45);
+  --color-overlay-soft: rgba(0, 0, 0, 0.12);
+  --color-bg-glass: rgba(255, 255, 255, 0.85);
+  --color-bg-glass-strong: rgba(255, 255, 255, 0.9);
+  --gradient-home-banner: linear-gradient(135deg, #e8effe 0%, #f5f0ff 100%);
+  --gradient-cover: linear-gradient(135deg, #e8effe 0%, #dce3f5 100%);
+  --color-autonomy-accent: #bf6f45;
 
   --color-bg-app: #f5f6f8;
   --color-bg-sidebar: #ffffff;
@@ -16,6 +26,10 @@
   --color-bg-editor: #fdfbf7;
   --color-bg-hover: #f0f2f5;
   --color-bg-active: #e8effe;
+  --color-bg-primary: var(--color-bg-card);
+  --color-bg-secondary: var(--color-bg-hover);
+  --color-bg-subtle: color-mix(in srgb, var(--color-bg-app) 55%, var(--color-bg-card));
+  --color-bg-input: var(--color-bg-panel);
 
   --color-text-primary: #1a1a2e;
   --color-text-secondary: #5a5a7a;
@@ -30,6 +44,20 @@
   --color-warning: #ff9800;
   --color-error: #f44336;
   --color-info: #2196f3;
+  --color-success-bg: #e8f5e9;
+  --color-success-border: #c8e6c9;
+  --color-success-text: #166534;
+  --color-warning-bg: #fff8e1;
+  --color-warning-border: #ffe082;
+  --color-warning-text: #92400e;
+  --color-warning-light: var(--color-warning-bg);
+  --color-error-bg: #ffebee;
+  --color-error-border: #ffcdd2;
+  --color-error-text: #991b1b;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bae6fd;
+  --color-info-text: #0369a1;
+  --color-secondary-accent: #7c3aed;
 
   --color-accent: #4a7cf7;
   --color-focus-ring: #4a7cf7;
@@ -49,6 +77,7 @@
   /* === 字体 === */
   --font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
   --font-family-editor: 'Microsoft YaHei', 'Segoe UI', 'Noto Serif CJK SC', serif;
+  --font-family-mono: 'Cascadia Mono', Consolas, 'Courier New', monospace;
 
   --font-size-xs: 11px;
   --font-size-sm: 12px;
@@ -102,6 +131,57 @@
   --z-modal: 400;
 }
 
+:root[data-effective-theme='dark'] {
+  --color-primary: #7aa2ff;
+  --color-primary-hover: #5b8af0;
+  --color-primary-light: #1e2a45;
+  --color-primary-dark: #3b5fc0;
+  --color-on-primary: #111827;
+  --color-on-error: #111827;
+  --color-overlay: rgba(0, 0, 0, 0.68);
+  --color-overlay-soft: rgba(0, 0, 0, 0.32);
+  --color-bg-glass: rgba(45, 45, 48, 0.85);
+  --color-bg-glass-strong: rgba(45, 45, 48, 0.92);
+  --gradient-home-banner: linear-gradient(135deg, #1e2a45 0%, #2a1f3d 100%);
+  --gradient-cover: linear-gradient(135deg, #1e2a45 0%, #252540 100%);
+  --color-autonomy-accent: #d98a61;
+  --color-bg-app: #1f1f1f;
+  --color-bg-sidebar: #252526;
+  --color-bg-panel: #252526;
+  --color-bg-card: #2d2d30;
+  --color-bg-editor: #1e1e1e;
+  --color-bg-hover: #3c3c3c;
+  --color-bg-active: #1e2a45;
+  --color-text-primary: #f3f3f3;
+  --color-text-secondary: #c8c8c8;
+  --color-text-muted: #8f8f8f;
+  --color-text-placeholder: #6f6f6f;
+  --color-border: #3c3c3c;
+  --color-border-light: #333333;
+  --color-border-focus: #7aa2ff;
+  --color-shadow: rgba(0, 0, 0, 0.3);
+  --color-shadow-hover: rgba(0, 0, 0, 0.5);
+  --color-focus-ring: #7aa2ff;
+  --color-accent: #7aa2ff;
+  --color-success: #66bb6a;
+  --color-warning: #ffb74d;
+  --color-error: #ef5350;
+  --color-info: #42a5f5;
+  --color-success-bg: #1c3326;
+  --color-success-border: #46785a;
+  --color-success-text: #9bd7ae;
+  --color-warning-bg: #352a19;
+  --color-warning-border: #785f35;
+  --color-warning-text: #f0c778;
+  --color-error-bg: #3a2224;
+  --color-error-border: #82484c;
+  --color-error-text: #f2a0a4;
+  --color-info-bg: #1d3045;
+  --color-info-border: #456d98;
+  --color-info-text: #9bc9f5;
+  --color-secondary-accent: #a78bfa;
+}
+
 /* === 暗色模式基础覆盖（Native Feel P1） === */
 @media (prefers-color-scheme: dark) {
   :root {
@@ -117,6 +197,11 @@
     --color-bg-editor: #1e1e1e;
     --color-bg-hover: #3c3c3c;
     --color-bg-active: #1e2a45;
+    --color-bg-glass: rgba(45, 45, 48, 0.85);
+    --color-bg-glass-strong: rgba(45, 45, 48, 0.92);
+    --gradient-home-banner: linear-gradient(135deg, #1e2a45 0%, #2a1f3d 100%);
+    --gradient-cover: linear-gradient(135deg, #1e2a45 0%, #252540 100%);
+    --color-autonomy-accent: #d98a61;
 
     --color-text-primary: #f3f3f3;
     --color-text-secondary: #c8c8c8;

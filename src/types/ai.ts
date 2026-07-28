@@ -16,6 +16,20 @@ export interface AiSettings {
   temperature?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
+  /** User-configured USD price for one million input tokens. */
+  inputPricePerMillionTokens?: number;
+  /** User-configured USD price for one million output tokens. */
+  outputPricePerMillionTokens?: number;
+  /** Maximum real-provider requests started inside a rolling minute. */
+  maxRequestsPerMinute?: number;
+  /** Maximum real-provider requests owned by this WebView at once. */
+  maxConcurrentAiRequests?: number;
+  /** Optional hard daily input + output token budget. */
+  dailyTokenBudget?: number;
+  /** Optional hard daily estimated USD budget. Requires both token prices. */
+  dailyCostBudgetUsd?: number;
+  /** Percentage at which the settings page reports a budget warning. */
+  budgetWarningPercent?: number;
   mockMode: boolean; // 兼容旧字段，从 runtimeMode 派生
   lastTestAt?: string;
   lastTestOk?: boolean;
@@ -51,11 +65,46 @@ export interface AiGenerateResponse {
   tokenInput?: number;
   tokenOutput?: number;
   tokenTotal?: number;
+  finishReason?: string;
+  usageCost?: AiUsageCost;
 }
+
+export type AiCostStatus = 'complete' | 'mock' | 'unpriced' | 'usage_missing';
+
+export interface AiPricingSnapshot {
+  currency: 'USD';
+  source: 'user_configured' | 'mock' | 'unconfigured';
+  inputPricePerMillionTokens?: number;
+  outputPricePerMillionTokens?: number;
+}
+
+export interface AiUsageCost extends AiPricingSnapshot {
+  status: AiCostStatus;
+  estimatedCost?: number;
+}
+
+export type AiStreamEvent =
+  | { type: 'started'; requestId: string }
+  | { type: 'delta'; requestId: string; sequence: number; text: string }
+  | {
+      type: 'usage';
+      requestId: string;
+      tokenInput?: number;
+      tokenOutput?: number;
+      tokenTotal?: number;
+    }
+  | { type: 'completed'; requestId: string; finishReason?: string }
+  | { type: 'error'; requestId: string; code: string };
 
 export interface AiGenerateOptions {
   signal?: AbortSignal;
   requestId?: string;
+  /** Process-local owner used by the AI task center to stop an active execution. */
+  cancel?: () => void;
+  /** Request an OpenAI-compatible SSE response while preserving the aggregated return value. */
+  stream?: boolean;
+  /** Receives transient stream events. Callers must persist only the final generate() result. */
+  onStreamEvent?: (event: AiStreamEvent) => void;
 }
 
 export interface AiClient {
@@ -84,6 +133,14 @@ export type AiTaskType =
   | 'chapter_polish'
   | 'quality_check'
   | 'quality_fix'
+  | 'multi_agent_review'
+  | 'multi_agent_revision'
+  | 'autonomous_plot_plan'
+  | 'autonomous_character_evolution'
+  | 'autonomous_world_build'
+  | 'autonomous_conflict_generate'
+  | 'autonomous_pacing_control'
+  | 'autonomous_chapter_batch'
   | 'chapter_summarize'
   | 'context_update';
 
@@ -107,6 +164,12 @@ export interface AiTaskRecord {
   tokenInput?: number;
   tokenOutput?: number;
   tokenTotal?: number;
+  inputPricePerMillionTokens?: number;
+  outputPricePerMillionTokens?: number;
+  costEstimate?: number;
+  costCurrency?: 'USD';
+  costStatus?: AiCostStatus;
+  pricingSource?: AiPricingSnapshot['source'];
   durationMs?: number;
   startedAt?: string;
   finishedAt?: string;
@@ -133,6 +196,14 @@ export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   chapter_polish: '章节润色',
   quality_check: '质量检查',
   quality_fix: 'AI修稿',
+  multi_agent_review: 'Multi-Agent 专家评审',
+  multi_agent_revision: 'Multi-Agent 候选修订',
+  autonomous_plot_plan: 'Plot Planner 全书规划',
+  autonomous_character_evolution: 'Character Evolution 人物弧线',
+  autonomous_world_build: 'World Builder 世界扩展',
+  autonomous_conflict_generate: 'Conflict Generator 冲突设计',
+  autonomous_pacing_control: 'Pacing Controller 节奏控制',
+  autonomous_chapter_batch: 'Plot Planner 章节批次',
   chapter_summarize: '章节总结',
   context_update: '上下文更新',
 };
@@ -201,13 +272,7 @@ export interface ChapterCharacterContext {
 }
 
 export type OutlineKeyPointType =
-  | 'event'
-  | 'character'
-  | 'conflict'
-  | 'turning_point'
-  | 'ending'
-  | 'setting'
-  | 'other';
+  'event' | 'character' | 'conflict' | 'turning_point' | 'ending' | 'setting' | 'other';
 
 export interface OutlineKeyPoint {
   id: string;

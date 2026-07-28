@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 /**
  * AI Novel Studio - 提示词调度中心
  * 负责将上下文组装为 AI 请求
@@ -11,13 +12,19 @@ function renderTemplate(template: string, context: Record<string, string | undef
   let result = template;
 
   // 处理条件块 {{#key}}...{{/key}}
-  result = result.replace(/\{\{\^(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, content: string) => {
-    return context[key] ? '' : content;
-  });
+  result = result.replace(
+    /\{\{\^(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g,
+    (_, key: string, content: string) => {
+      return context[key] ? '' : content;
+    },
+  );
 
-  result = result.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, content: string) => {
-    return context[key] ? content : '';
-  });
+  result = result.replace(
+    /\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g,
+    (_, key: string, content: string) => {
+      return context[key] ? content : '';
+    },
+  );
 
   // 替换变量
   result = result.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
@@ -39,7 +46,8 @@ function buildPromptDebug(
   context: ChapterGenerationContext,
   templateSource: ChapterPromptDebugInfo['templateSource'],
 ): ChapterPromptDebugInfo {
-  const requiredCharacterNames = context.requiredCharacters?.map((item) => item.name).filter(Boolean) ?? [];
+  const requiredCharacterNames =
+    context.requiredCharacters?.map((item) => item.name).filter(Boolean) ?? [];
   return {
     templateSource,
     hasChapterOutlineBlock: systemPrompt.includes('【当前章节大纲】'),
@@ -52,7 +60,10 @@ function buildPromptDebug(
     includesChapterOutlineText: containsInsertedText(systemPrompt, context.chapterOutline),
     includesOutlineChecklistText: containsInsertedText(systemPrompt, context.outlineChecklistText),
     includesVolumeOutlineText: containsInsertedText(systemPrompt, context.volumeOutline),
-    includesMasterOutlineText: containsInsertedText(systemPrompt, context.masterOutline || context.novelOutline),
+    includesMasterOutlineText: containsInsertedText(
+      systemPrompt,
+      context.masterOutline || context.novelOutline,
+    ),
     outlineKeyPointCount: context.outlineKeyPoints?.length || 0,
     requiredCharactersCount: requiredCharacterNames.length,
     requiredCharacterNames,
@@ -236,16 +247,32 @@ export async function buildGenerateRequest(
 
   const systemPrompt = renderTemplate(template, ctx);
   const userPromptContent = buildUserGenerationPrompt(context);
-  const promptDebug = buildPromptDebug(`${systemPrompt}\n${userPromptContent}`, context, templateSource);
+  const promptDebug = buildPromptDebug(
+    `${systemPrompt}\n${userPromptContent}`,
+    context,
+    templateSource,
+  );
 
   // 开发态只输出摘要，不输出完整 prompt 或 API Key。
   if (import.meta.env.DEV) {
-    console.info(`[ChapterGenerate] final prompt includes chapterOutline=${promptDebug.includesChapterOutlineText} length=${context.chapterOutline?.length || 0}`);
-    console.info(`[ChapterGenerate] final prompt includes outlineChecklist=${promptDebug.includesOutlineChecklistText} count=${promptDebug.outlineKeyPointCount}`);
-    console.info(`[ChapterGenerate] final prompt includes volumeOutline=${promptDebug.includesVolumeOutlineText} length=${context.volumeOutline?.length || 0}`);
-    console.info(`[ChapterGenerate] final prompt includes masterOutline=${promptDebug.includesMasterOutlineText} length=${(context.masterOutline || context.novelOutline)?.length || 0}`);
-    console.info(`[ChapterGenerate] final prompt includes requiredCharacters=${promptDebug.requiredCharactersCount} names=${promptDebug.requiredCharacterNames.join(',') || '(none)'}`);
-    console.info(`[ChapterGenerate] final prompt length=${promptDebug.promptLength} templateSource=${promptDebug.templateSource}`);
+    appLogger.info(
+      `[ChapterGenerate] final prompt includes chapterOutline=${promptDebug.includesChapterOutlineText} length=${context.chapterOutline?.length || 0}`,
+    );
+    appLogger.info(
+      `[ChapterGenerate] final prompt includes outlineChecklist=${promptDebug.includesOutlineChecklistText} count=${promptDebug.outlineKeyPointCount}`,
+    );
+    appLogger.info(
+      `[ChapterGenerate] final prompt includes volumeOutline=${promptDebug.includesVolumeOutlineText} length=${context.volumeOutline?.length || 0}`,
+    );
+    appLogger.info(
+      `[ChapterGenerate] final prompt includes masterOutline=${promptDebug.includesMasterOutlineText} length=${(context.masterOutline || context.novelOutline)?.length || 0}`,
+    );
+    appLogger.info(
+      `[ChapterGenerate] final prompt includes requiredCharacters=${promptDebug.requiredCharactersCount}`,
+    );
+    appLogger.info(
+      `[ChapterGenerate] final prompt length=${promptDebug.promptLength} templateSource=${promptDebug.templateSource}`,
+    );
   }
 
   return {

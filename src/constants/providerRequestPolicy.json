@@ -1,0 +1,9 @@
+{
+  "connectionTest": {
+    "maxOutputTokens": 128,
+    "temperature": 0
+  },
+  "autonomousChapterBatch": {
+    "minTimeoutSeconds": 600
+  }
+}

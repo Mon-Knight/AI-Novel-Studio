@@ -46,10 +46,12 @@ export async function restoreCompleteProjectBackup(
     throw new Error('完整项目恢复仅支持桌面版 SQLite 数据库。');
   }
 
-  const result = await dbCall<ProjectBackupImportResult>('import_project_backup', { input: { backup } });
+  const result = await dbCall<ProjectBackupImportResult>('import_project_backup', {
+    input: { backup },
+  });
   try {
     const idMap = mergeLocalStorageIdMap(backup.localStorage, result.idMap);
-    restoreLocalProjectData(backup.localStorage, idMap);
+    await restoreLocalProjectData(backup.localStorage, idMap);
     return { ...result, idMap };
   } catch (error) {
     try {

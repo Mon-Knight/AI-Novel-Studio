@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 /**
  * AI Novel Studio - 章节 Repository
  */
@@ -38,7 +39,7 @@ function normalizeChapter(raw: unknown): Chapter | null {
   const wordCount = toNumber(item.wordCount ?? item.word_count, 0);
   // v1.0.37: 不再强制默认4000，允许undefined以支持输出控制方案覆盖
   const rawTarget = item.targetWordCount ?? item.target_word_count;
-  const targetWordCount = (typeof rawTarget === 'number' && rawTarget > 0) ? rawTarget : undefined;
+  const targetWordCount = typeof rawTarget === 'number' && rawTarget > 0 ? rawTarget : undefined;
   const now = nowISO();
 
   return {
@@ -86,29 +87,41 @@ function saveLocalChapters(items: Chapter[]): void {
 export const chapterRepository = {
   async getByNovelId(novelId: string): Promise<Chapter[]> {
     const items = await dbCall<unknown[]>('get_chapters_by_novel_id', { novelId }, () =>
-      getLocalChapters().filter((ch) => ch.novelId === novelId).sort((a, b) => a.orderIndex - b.orderIndex),
+      getLocalChapters()
+        .filter((ch) => ch.novelId === novelId)
+        .sort((a, b) => a.orderIndex - b.orderIndex),
     );
     const chapters = normalizeChapters(items);
-    console.info(`[chapterService] listChaptersByNovelId novelId=${novelId} count=${chapters.length}`);
+    appLogger.info(
+      `[chapterService] listChaptersByNovelId novelId=${novelId} count=${chapters.length}`,
+    );
     return chapters;
   },
 
   async getByVolumeId(volumeId: string): Promise<Chapter[]> {
     const items = await dbCall<unknown[]>('get_chapters_by_volume_id', { volumeId }, () =>
-      getLocalChapters().filter((ch) => ch.volumeId === volumeId).sort((a, b) => a.orderIndex - b.orderIndex),
+      getLocalChapters()
+        .filter((ch) => ch.volumeId === volumeId)
+        .sort((a, b) => a.orderIndex - b.orderIndex),
     );
     return normalizeChapters(items);
   },
 
   async getById(id: string): Promise<Chapter | null> {
-    const item = await dbCall<unknown | null>('get_chapter_by_id', { id }, () =>
-      getLocalChapters().find((ch) => ch.id === id) ?? null,
+    const item = await dbCall<unknown | null>(
+      'get_chapter_by_id',
+      { id },
+      () => getLocalChapters().find((ch) => ch.id === id) ?? null,
     );
     return normalizeChapter(item);
   },
 
   async create(input: CreateChapterInput): Promise<Chapter> {
-    console.info(`[chapterService] createChapter input novelId=${input.novelId} volumeId=${input.volumeId ?? ''} title=${input.title}`);
+    appLogger.info('[chapterService] createChapter input', {
+      novelId: input.novelId,
+      volumeId: input.volumeId,
+      titleLength: input.title.length,
+    });
     const before = await chapterRepository.getByNovelId(input.novelId);
     const siblings = before.filter((ch) => (ch.volumeId ?? '') === (input.volumeId ?? ''));
     const maxOrder = siblings.reduce((max, ch) => Math.max(max, ch.orderIndex), -1);
@@ -121,7 +134,7 @@ export const chapterRepository = {
       orderIndex: input.orderIndex ?? maxOrder + 1,
       targetWordCount: input.targetWordCount,
     };
-    console.info(`[chapterService] before save count=${before.length}`);
+    appLogger.info(`[chapterService] before save count=${before.length}`);
 
     const createdRaw = await dbCall<unknown>('create_chapter', { input: preparedInput }, () => {
       const items = getLocalChapters();
@@ -154,8 +167,8 @@ export const chapterRepository = {
     if (!created?.id) throw new Error('章节创建返回无效数据');
 
     const after = await chapterRepository.getByNovelId(input.novelId);
-    console.info(`[chapterService] after save count=${after.length}`);
-    console.info(`[chapterService] created id=${created.id}`);
+    appLogger.info(`[chapterService] after save count=${after.length}`);
+    appLogger.info(`[chapterService] created id=${created.id}`);
     if (!after.some((chapter) => chapter.id === created.id)) {
       throw new Error('章节创建后无法读取，请检查存储');
     }

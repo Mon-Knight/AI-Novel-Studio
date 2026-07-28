@@ -3,11 +3,11 @@ name: Windows desktop quality and E2E
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ['v*']
   pull_request:
   schedule:
     # Tuesday 02:00 Asia/Shanghai. Scheduled workflows run from the default branch.
-    - cron: "0 18 * * 1"
+    - cron: '0 18 * * 1'
   workflow_dispatch:
     inputs:
       suite:
@@ -69,11 +69,20 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Run frontend tests
-        run: npm run test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Check version synchronization
+        run: npm run test:version-sync
+
+      - name: Check documentation synchronization
+        run: npm run test:docs-sync
+
+      - name: Run frontend tests with coverage gate
+        run: npm run test:coverage
 
       - name: Run lint
-        run: npm run lint
+        run: npm run lint:ci
 
       - name: Build frontend
         run: npm run build
@@ -100,7 +109,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       E2E_SUITE: ${{ ((github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 'full') || (github.event_name == 'workflow_dispatch' && inputs.suite) || 'smoke' }}
-      MSEDGEDRIVER_TELEMETRY_OPTOUT: "1"
+      MSEDGEDRIVER_TELEMETRY_OPTOUT: '1'
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -229,9 +238,9 @@ jobs:
       - name: Build the isolated E2E application
         shell: pwsh
         env:
-          CARGO_NET_OFFLINE: "true"
-          NPM_CONFIG_OFFLINE: "true"
-          VITE_AI_NOVEL_STUDIO_E2E: "1"
+          CARGO_NET_OFFLINE: 'true'
+          NPM_CONFIG_OFFLINE: 'true'
+          VITE_AI_NOVEL_STUDIO_E2E: '1'
         run: |
           $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE ".e2e-tools\target"
           node node_modules/@tauri-apps/cli/tauri.js build --features e2e --bundles none --ci
@@ -264,9 +273,9 @@ jobs:
       - name: Run real desktop E2E without dependency downloads
         shell: pwsh
         env:
-          AI_NOVEL_STUDIO_E2E_SKIP_BUILD: "1"
-          CARGO_NET_OFFLINE: "true"
-          NPM_CONFIG_OFFLINE: "true"
+          AI_NOVEL_STUDIO_E2E_SKIP_BUILD: '1'
+          CARGO_NET_OFFLINE: 'true'
+          NPM_CONFIG_OFFLINE: 'true'
         run: |
           $command = if ($env:E2E_SUITE -eq "smoke") { "test:e2e:smoke" } else { "test:e2e" }
           $repeat = if ($env:E2E_SUITE -eq "full-three") { 3 } else { 1 }

@@ -34,6 +34,9 @@
 - `docs/version-roadmap.md`
 - `docs/agent-runtime.md`
 - `docs/development-skills.md`
+- `docs/project/git-workflow.md`
+- `docs/project/release-history.md`
+- `docs/technical/diagnostics.md`
 - `AGENTS.md`
 - `.github/copilot-instructions.md`
 
@@ -72,6 +75,8 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 - [ ] `CHANGELOG.md` 已新增当前版本条目
 - [ ] `docs/version-roadmap.md` 已标记当前版本
 - [ ] `docs/agent-runtime.md` 已更新（如涉及 Agent Runtime）
+- [ ] `CHANGELOG.md` 是唯一活动发布入口，`docs/` 下没有逐版本发布说明碎片
+- [ ] Git / PR / Release 治理文件和工作流均存在
 - [ ] `AGENTS.md` 无需更新或已更新
 - [ ] 所有文档中的版本号一致
 
@@ -91,16 +96,20 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 ## 文档同步报告
 
 ### 已同步
+
 - ✅ README.md — vX.X.X 已更新
 - ✅ CHANGELOG.md — 新增版本条目
 
 ### 需要更新
+
 - ⚠️ docs/version-roadmap.md — 需要标记当前版本
 
 ### 缺失
+
 - ❌ docs/agent-runtime.md — 不存在
 
 ### 版本号一致性
+
 - package.json: X.X.X
 - Cargo.toml: X.X.X
 - tauri.conf.json: X.X.X
@@ -108,6 +117,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 - CHANGELOG: X.X.X
 
 ### 建议
+
 - 是否需要人工确认：
 ```
 

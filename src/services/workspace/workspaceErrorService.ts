@@ -1,5 +1,6 @@
 import type { AppError } from '../../types/appError';
 import { normalizeAppError } from '../../types/appError';
+import { appLogger } from '../observability/appLogger';
 
 export interface WorkspaceLogContext {
   traceId?: string;
@@ -13,9 +14,10 @@ export interface WorkspaceLogContext {
 }
 
 export function createTraceId(prefix = 'trace'): string {
-  const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const uuid =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${uuid}`;
 }
 
@@ -41,7 +43,7 @@ export function logWorkspaceError(
     traceId: context.traceId,
     operationId: context.operationId,
   });
-  console.error(`[WorkspaceError] ${event}`, {
+  appLogger.error(`[WorkspaceError] ${event}`, {
     ...sanitizeContext(context),
     code: error.code,
     retryable: error.retryable,
@@ -53,5 +55,5 @@ export function logWorkspaceError(
 }
 
 export function logWorkspaceWarning(event: string, context: WorkspaceLogContext = {}): void {
-  console.warn(`[WorkspaceWarning] ${event}`, sanitizeContext(context));
+  appLogger.warn(`[WorkspaceWarning] ${event}`, sanitizeContext(context));
 }

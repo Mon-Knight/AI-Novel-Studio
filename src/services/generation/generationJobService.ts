@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 import { dbCall, generateId, lsGet, lsSet, nowISO } from '../database/db';
 import { createAiClient, aiSettingsService } from '../ai/aiClient';
 import { isAiRequestCancelled } from '../ai/aiCancellation';
@@ -26,7 +27,8 @@ import type {
 const JOBS_KEY = 'ai_novel_studio_generation_jobs';
 const STEPS_KEY_PREFIX = 'ai_novel_studio_generation_steps_';
 const STARTUP_RECOVERY_ERROR_CODE = 'APP_RESTART_INTERRUPTED';
-const STARTUP_RECOVERY_MESSAGE = '应用在任务完成前退出；已保留完成步骤和草稿，请确认后手动重新开始。';
+const STARTUP_RECOVERY_MESSAGE =
+  '应用在任务完成前退出；已保留完成步骤和草稿，请确认后手动重新开始。';
 
 interface ActiveJobControl {
   controller: AbortController;
@@ -35,11 +37,11 @@ interface ActiveJobControl {
 
 const activeJobControls = new Map<string, ActiveJobControl>();
 
-async function trackActiveAiRequest<T>(
-  control: ActiveJobControl,
-  request: Promise<T>,
-): Promise<T> {
-  const settled = request.then(() => undefined, () => undefined);
+async function trackActiveAiRequest<T>(control: ActiveJobControl, request: Promise<T>): Promise<T> {
+  const settled = request.then(
+    () => undefined,
+    () => undefined,
+  );
   control.requestSettled = settled;
   try {
     return await request;
@@ -56,7 +58,9 @@ const TERMINAL_JOB_STATUSES: ReadonlySet<GenerationJobStatus> = new Set([
   'cancelled',
 ]);
 
-const ALLOWED_JOB_TRANSITIONS: Readonly<Record<GenerationJobStatus, ReadonlySet<GenerationJobStatus>>> = {
+const ALLOWED_JOB_TRANSITIONS: Readonly<
+  Record<GenerationJobStatus, ReadonlySet<GenerationJobStatus>>
+> = {
   pending: new Set(['pending', 'running', 'retrying', 'failed', 'cancelled']),
   running: new Set(['running', 'retrying', 'completed', 'failed', 'cancelled']),
   retrying: new Set(['retrying', 'running', 'completed', 'failed', 'cancelled']),
@@ -200,7 +204,8 @@ function normalizeStep(raw: unknown): GenerationStepResult | null {
     jobId,
     stepName,
     status: normalizeStepStatus(item.status),
-    inputSnapshot: item.inputSnapshot ?? normalizeJsonField(item.inputSnapshotJson, item.input_snapshot_json),
+    inputSnapshot:
+      item.inputSnapshot ?? normalizeJsonField(item.inputSnapshotJson, item.input_snapshot_json),
     outputJson: normalizeJsonField(item.outputJson, item.output_json),
     outputText: toSafeString(item.outputText ?? item.output_text).trim() || undefined,
     errorMessage: toSafeString(item.errorMessage ?? item.error_message).trim() || undefined,
@@ -218,7 +223,14 @@ function normalizeSteps(raw: unknown): GenerationStepResult[] {
 
 function normalizeJobStatus(value: unknown): GenerationJobStatus {
   const status = toSafeString(value);
-  if (status === 'pending' || status === 'running' || status === 'retrying' || status === 'failed' || status === 'completed' || status === 'cancelled') {
+  if (
+    status === 'pending' ||
+    status === 'running' ||
+    status === 'retrying' ||
+    status === 'failed' ||
+    status === 'completed' ||
+    status === 'cancelled'
+  ) {
     return status;
   }
   return 'pending';
@@ -226,13 +238,30 @@ function normalizeJobStatus(value: unknown): GenerationJobStatus {
 
 function normalizeStepName(value: unknown): GenerationStepName | undefined {
   const name = toSafeString(value);
-  const allowed: GenerationStepName[] = ['preflight', 'compile_context', 'chapter_card', 'scene_plan', 'draft_generation', 'quality_check', 'patch_generation', 'patch_apply', 'save_version'];
-  return allowed.includes(name as GenerationStepName) ? name as GenerationStepName : undefined;
+  const allowed: GenerationStepName[] = [
+    'preflight',
+    'compile_context',
+    'chapter_card',
+    'scene_plan',
+    'draft_generation',
+    'quality_check',
+    'patch_generation',
+    'patch_apply',
+    'save_version',
+  ];
+  return allowed.includes(name as GenerationStepName) ? (name as GenerationStepName) : undefined;
 }
 
 function normalizeStepStatus(value: unknown): GenerationStepStatus {
   const status = toSafeString(value);
-  if (status === 'pending' || status === 'running' || status === 'succeeded' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
+  if (
+    status === 'pending' ||
+    status === 'running' ||
+    status === 'succeeded' ||
+    status === 'failed' ||
+    status === 'skipped' ||
+    status === 'cancelled'
+  ) {
     return status;
   }
   return 'pending';
@@ -268,11 +297,19 @@ function updateLocalJob(existing: GenerationJob, input: UpdateGenerationJobInput
     throw new Error(`generation_job_invalid_transition: ${existing.status} -> ${input.status}`);
   }
   if (input.progressPercent !== undefined) {
-    if (!Number.isInteger(input.progressPercent) || input.progressPercent < 0 || input.progressPercent > 100) {
-      throw new Error(`generation_job_invalid_progress: ${input.progressPercent} is outside 0..100`);
+    if (
+      !Number.isInteger(input.progressPercent) ||
+      input.progressPercent < 0 ||
+      input.progressPercent > 100
+    ) {
+      throw new Error(
+        `generation_job_invalid_progress: ${input.progressPercent} is outside 0..100`,
+      );
     }
     if (input.progressPercent < existing.progressPercent) {
-      throw new Error(`generation_job_progress_regression: ${existing.progressPercent} -> ${input.progressPercent}`);
+      throw new Error(
+        `generation_job_progress_regression: ${existing.progressPercent} -> ${input.progressPercent}`,
+      );
     }
   }
   return upsertLocalJob({ ...existing, ...input });
@@ -330,7 +367,12 @@ function buildMockDraft(snapshot: ChapterGenerationSnapshot): string {
   const base = snapshot.compiledContext.baseContext;
   const engineering = snapshot.compiledContext.activeEngineeringState;
   const sceneLines = engineering?.scenePlan.length
-    ? engineering.scenePlan.map((scene) => `- ${scene.sceneNo}. ${scene.title || '未命名场景'}：${scene.goal || scene.conflict || '推进本章目标'}`).join('\n')
+    ? engineering.scenePlan
+        .map(
+          (scene) =>
+            `- ${scene.sceneNo}. ${scene.title || '未命名场景'}：${scene.goal || scene.conflict || '推进本章目标'}`,
+        )
+        .join('\n')
     : '- 根据章节大纲推进本章目标';
   return [
     `【Mock 初稿】${base.chapterTitle || '未命名章节'}`,
@@ -380,11 +422,12 @@ function buildPatchCandidates(items: QualityCheckItem[]): PatchCandidate[] {
     .map((item) => {
       const quote = item.quote?.trim() || '';
       const suggestion = item.suggestion?.trim() || '';
-      const riskLevel: PatchCandidate['riskLevel'] = item.severity === 'low' && quote.length <= 120
-        ? 'low'
-        : item.severity === 'critical' || item.severity === 'high'
-          ? 'high'
-          : 'medium';
+      const riskLevel: PatchCandidate['riskLevel'] =
+        item.severity === 'low' && quote.length <= 120
+          ? 'low'
+          : item.severity === 'critical' || item.severity === 'high'
+            ? 'high'
+            : 'medium';
       return {
         issueId: item.id,
         severity: item.severity,
@@ -396,7 +439,10 @@ function buildPatchCandidates(items: QualityCheckItem[]): PatchCandidate[] {
     });
 }
 
-function applyLowRiskPatches(content: string, patches: PatchCandidate[]): {
+function applyLowRiskPatches(
+  content: string,
+  patches: PatchCandidate[],
+): {
   content: string;
   applied: PatchCandidate[];
   skipped: PatchCandidate[];
@@ -422,19 +468,17 @@ function applyLowRiskPatches(content: string, patches: PatchCandidate[]): {
 export const generationJobService = {
   async recoverInterruptedAtStartup(): Promise<StartupGenerationRecovery> {
     const recoveredAt = nowISO();
-    return dbCall<StartupGenerationRecovery>(
-      'recover_interrupted_generation_jobs',
-      {},
-      () => {
-        const jobs = getLocalJobs();
-        const interrupted = jobs.filter((job) => (
-          job.status === 'pending' || job.status === 'running' || job.status === 'retrying'
-        ));
-        if (interrupted.length === 0) {
-          return { recoveredJobs: 0, recoveredAt };
-        }
-        const interruptedIds = new Set(interrupted.map((job) => job.id));
-        saveLocalJobs(jobs.map((job) => {
+    return dbCall<StartupGenerationRecovery>('recover_interrupted_generation_jobs', {}, () => {
+      const jobs = getLocalJobs();
+      const interrupted = jobs.filter(
+        (job) => job.status === 'pending' || job.status === 'running' || job.status === 'retrying',
+      );
+      if (interrupted.length === 0) {
+        return { recoveredJobs: 0, recoveredAt };
+      }
+      const interruptedIds = new Set(interrupted.map((job) => job.id));
+      saveLocalJobs(
+        jobs.map((job) => {
           if (!interruptedIds.has(job.id)) return job;
           return {
             ...job,
@@ -443,26 +487,26 @@ export const generationJobService = {
             errorMessage: STARTUP_RECOVERY_MESSAGE,
             finishedAt: recoveredAt,
           };
-        }));
-        for (const job of interrupted) {
-          saveLocalStep({
-            id: generateId(),
-            jobId: job.id,
-            stepName: job.currentStep ?? 'preflight',
-            status: 'failed',
-            outputJson: {
-              recoveryReason: STARTUP_RECOVERY_ERROR_CODE,
-              previousStatus: job.status,
-              preservedProgressPercent: job.progressPercent,
-            },
-            outputText: STARTUP_RECOVERY_MESSAGE,
-            errorMessage: STARTUP_RECOVERY_MESSAGE,
-            createdAt: recoveredAt,
-          });
-        }
-        return { recoveredJobs: interrupted.length, recoveredAt };
-      },
-    );
+        }),
+      );
+      for (const job of interrupted) {
+        saveLocalStep({
+          id: generateId(),
+          jobId: job.id,
+          stepName: job.currentStep ?? 'preflight',
+          status: 'failed',
+          outputJson: {
+            recoveryReason: STARTUP_RECOVERY_ERROR_CODE,
+            previousStatus: job.status,
+            preservedProgressPercent: job.progressPercent,
+          },
+          outputText: STARTUP_RECOVERY_MESSAGE,
+          errorMessage: STARTUP_RECOVERY_MESSAGE,
+          createdAt: recoveredAt,
+        });
+      }
+      return { recoveredJobs: interrupted.length, recoveredAt };
+    });
   },
 
   async create(input: CreateGenerationJobInput): Promise<GenerationJob> {
@@ -491,15 +535,11 @@ export const generationJobService = {
   },
 
   async update(input: UpdateGenerationJobInput): Promise<GenerationJob> {
-    const raw = await dbCall<unknown>(
-      'update_generation_job',
-      { input },
-      () => {
-        const existing = getLocalJobs().find((item) => item.id === input.id);
-        if (!existing) throw new Error('生成任务不存在');
-        return updateLocalJob(existing, input);
-      },
-    );
+    const raw = await dbCall<unknown>('update_generation_job', { input }, () => {
+      const existing = getLocalJobs().find((item) => item.id === input.id);
+      if (!existing) throw new Error('生成任务不存在');
+      return updateLocalJob(existing, input);
+    });
     const normalized = normalizeJob(raw);
     if (!normalized) throw new Error('生成任务更新返回无效数据');
     return normalized;
@@ -515,10 +555,8 @@ export const generationJobService = {
   },
 
   async getByChapterId(chapterId: string): Promise<GenerationJob[]> {
-    const raw = await dbCall<unknown[]>(
-      'get_generation_jobs_by_chapter_id',
-      { chapterId },
-      () => getLocalJobs().filter((item) => item.chapterId === chapterId),
+    const raw = await dbCall<unknown[]>('get_generation_jobs_by_chapter_id', { chapterId }, () =>
+      getLocalJobs().filter((item) => item.chapterId === chapterId),
     );
     return normalizeJobs(raw);
   },
@@ -534,10 +572,19 @@ export const generationJobService = {
       () => {
         const existing = getLocalJobs().find((item) => item.id === id);
         if (!existing) return null;
-        if (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled') {
+        if (
+          existing.status === 'completed' ||
+          existing.status === 'failed' ||
+          existing.status === 'cancelled'
+        ) {
           return existing;
         }
-        const cancelled = upsertLocalJob({ ...existing, status: 'cancelled', finishedAt: now, progressPercent: existing.progressPercent });
+        const cancelled = upsertLocalJob({
+          ...existing,
+          status: 'cancelled',
+          finishedAt: now,
+          progressPercent: existing.progressPercent,
+        });
         saveLocalStep({
           id: generateId(),
           jobId: existing.id,
@@ -579,7 +626,9 @@ export const generationJobService = {
         const parent = getLocalJobs().find((item) => item.id === step.jobId);
         if (!parent) throw new Error(`generation_step_parent_not_found: ${step.jobId}`);
         if (TERMINAL_JOB_STATUSES.has(parent.status)) {
-          throw new Error(`generation_step_parent_terminal: ${step.jobId} is already ${parent.status}`);
+          throw new Error(
+            `generation_step_parent_terminal: ${step.jobId} is already ${parent.status}`,
+          );
         }
         return saveLocalStep(step);
       },
@@ -590,10 +639,8 @@ export const generationJobService = {
   },
 
   async getSteps(jobId: string): Promise<GenerationStepResult[]> {
-    const raw = await dbCall<unknown[]>(
-      'get_generation_step_results',
-      { jobId },
-      () => getLocalSteps(jobId),
+    const raw = await dbCall<unknown[]>('get_generation_step_results', { jobId }, () =>
+      getLocalSteps(jobId),
     );
     return normalizeSteps(raw);
   },
@@ -627,7 +674,11 @@ export const generationJobService = {
     const runStep = async (
       stepName: GenerationStepName,
       progressPercent: number,
-      action: () => Promise<{ outputJson?: unknown; outputText?: string; status?: GenerationStepStatus }>,
+      action: () => Promise<{
+        outputJson?: unknown;
+        outputText?: string;
+        status?: GenerationStepStatus;
+      }>,
       inputSnapshot?: unknown,
     ) => {
       await ensureNotCancelled();
@@ -660,6 +711,7 @@ export const generationJobService = {
           volumeId: input.volumeId,
           chapterId: input.chapterId,
           currentEditorContent: input.currentEditorContent,
+          provisionalPreviousChapter: input.provisionalPreviousChapter,
         });
         return {
           outputJson: { snapshotId: snapshot.id, contextHash: snapshot.contextHash },
@@ -678,15 +730,24 @@ export const generationJobService = {
       await runStep('scene_plan', 52, async () => {
         const scenes = snapshot?.compiledContext.activeEngineeringState?.scenePlan ?? [];
         return {
-          outputJson: { sceneCount: scenes.length, scenes: scenes.map((scene) => ({ no: scene.sceneNo, title: scene.title })) },
-          outputText: scenes.length ? `读取 ${scenes.length} 个工程场景。` : '无工程场景，Mock 将按章节大纲推进。',
+          outputJson: {
+            sceneCount: scenes.length,
+            scenes: scenes.map((scene) => ({ no: scene.sceneNo, title: scene.title })),
+          },
+          outputText: scenes.length
+            ? `读取 ${scenes.length} 个工程场景。`
+            : '无工程场景，Mock 将按章节大纲推进。',
         };
       });
       await runStep('draft_generation', 72, async () => {
         if (!snapshot) throw new Error('missing_context_snapshot');
         const mockDraft = buildMockDraft(snapshot);
         return {
-          outputJson: { provider: 'mock', contextHash: snapshot.contextHash, textLength: mockDraft.length },
+          outputJson: {
+            provider: 'mock',
+            contextHash: snapshot.contextHash,
+            textLength: mockDraft.length,
+          },
           outputText: mockDraft,
         };
       });
@@ -724,7 +785,12 @@ export const generationJobService = {
         return job;
       }
       const persisted = await this.getById(job.id);
-      if (persisted && (persisted.status === 'completed' || persisted.status === 'failed' || persisted.status === 'cancelled')) {
+      if (
+        persisted &&
+        (persisted.status === 'completed' ||
+          persisted.status === 'failed' ||
+          persisted.status === 'cancelled')
+      ) {
         job = persisted;
         await emit();
         return job;
@@ -773,6 +839,9 @@ export const generationJobService = {
     let patchCandidates: PatchCandidate[] = [];
     const control: ActiveJobControl = { controller: new AbortController() };
     activeJobControls.set(job.id, control);
+    const onCallerAbort = () => control.controller.abort();
+    input.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (input.signal?.aborted) onCallerAbort();
 
     const emit = async () => {
       steps = await this.getSteps(job.id);
@@ -789,7 +858,11 @@ export const generationJobService = {
     const runStep = async (
       stepName: GenerationStepName,
       progressPercent: number,
-      action: () => Promise<{ outputJson?: unknown; outputText?: string; status?: GenerationStepStatus }>,
+      action: () => Promise<{
+        outputJson?: unknown;
+        outputText?: string;
+        status?: GenerationStepStatus;
+      }>,
       inputSnapshot?: unknown,
     ) => {
       await ensureNotCancelled();
@@ -842,6 +915,8 @@ export const generationJobService = {
           client.generate(request, {
             signal: control.controller.signal,
             requestId: `${job.id}:draft:${generateId()}`,
+            stream: true,
+            onStreamEvent: input.onStreamEvent,
           }),
         );
         generatedText = response.text.trim();
@@ -850,6 +925,7 @@ export const generationJobService = {
           id: job.id,
           actualInputTokens: response.tokenInput,
           actualOutputTokens: response.tokenOutput,
+          costEstimate: response.usageCost?.estimatedCost,
         });
         return {
           outputJson: {
@@ -859,6 +935,8 @@ export const generationJobService = {
             tokenInput: response.tokenInput,
             tokenOutput: response.tokenOutput,
             tokenTotal: response.tokenTotal,
+            costEstimate: response.usageCost?.estimatedCost,
+            costStatus: response.usageCost?.status,
             textLength: generatedText.length,
           },
           outputText: generatedText,
@@ -875,8 +953,24 @@ export const generationJobService = {
           aiTaskId: job.id,
           note: `v2.0.0 generation job ${job.id} / context ${snapshot.contextHash}`,
         });
+        await input.onDraftSaved?.(savedDraft, job.id);
+        const chapter = await chapterRepository.getById(input.chapterId);
+        if (chapter && chapter.status !== 'adopted' && chapter.status !== 'summarized') {
+          await chapterRepository
+            .update(chapter.id, { status: 'draft_generated' })
+            .catch((error) => {
+              appLogger.warn('[GenerationJob] draft saved but chapter status refresh failed', {
+                chapterId: chapter.id,
+                error,
+              });
+            });
+        }
         return {
-          outputJson: { draftId: savedDraft.id, versionNo: savedDraft.versionNo, contextHash: snapshot.contextHash },
+          outputJson: {
+            draftId: savedDraft.id,
+            versionNo: savedDraft.versionNo,
+            contextHash: snapshot.contextHash,
+          },
           outputText: `已保存正文草稿 v${savedDraft.versionNo}。`,
         };
       });
@@ -887,21 +981,24 @@ export const generationJobService = {
         const checkedAt = nowISO();
         const result = await trackActiveAiRequest(
           control,
-          qualityCheckAiService.runCheck({
-            novelId: input.novelId,
-            chapterId: input.chapterId,
-            draftId: savedDraft.id,
-            volumeId: input.volumeId,
-            draftContent: savedDraft.content,
-            chapterTitle: chapter?.title || input.title || '未命名章节',
-            chapterOutline: chapter?.outline,
-            chapterGoal: chapter?.goal,
-            contentHash,
-            wordCount: countTextWords(savedDraft.content),
-          }, {
-            signal: control.controller.signal,
-            requestId: `${job.id}:quality:${generateId()}`,
-          }),
+          qualityCheckAiService.runCheck(
+            {
+              novelId: input.novelId,
+              chapterId: input.chapterId,
+              draftId: savedDraft.id,
+              volumeId: input.volumeId,
+              draftContent: savedDraft.content,
+              chapterTitle: chapter?.title || input.title || '未命名章节',
+              chapterOutline: chapter?.outline,
+              chapterGoal: chapter?.goal,
+              contentHash,
+              wordCount: countTextWords(savedDraft.content),
+            },
+            {
+              signal: control.controller.signal,
+              requestId: `${job.id}:quality:${generateId()}`,
+            },
+          ),
         );
         const report = await qualityCheckService.createReport({
           novelId: input.novelId,
@@ -990,17 +1087,25 @@ export const generationJobService = {
       await emit();
       return { job, draft: savedDraft };
     } catch (e: unknown) {
-      if (isAiRequestCancelled(e) || (e instanceof Error && e.message === 'generation_job_cancelled')) {
+      if (
+        isAiRequestCancelled(e) ||
+        (e instanceof Error && e.message === 'generation_job_cancelled')
+      ) {
         const cancelled = await this.cancel(job.id);
         if (cancelled) job = cancelled;
         await emit();
-        return { job };
+        return { job, draft: savedDraft };
       }
       const persisted = await this.getById(job.id);
-      if (persisted && (persisted.status === 'completed' || persisted.status === 'failed' || persisted.status === 'cancelled')) {
+      if (
+        persisted &&
+        (persisted.status === 'completed' ||
+          persisted.status === 'failed' ||
+          persisted.status === 'cancelled')
+      ) {
         job = persisted;
         await emit();
-        return { job };
+        return { job, draft: savedDraft };
       }
       const message = e instanceof Error ? e.message : '正文生成任务失败';
       try {
@@ -1023,8 +1128,9 @@ export const generationJobService = {
         job = terminal;
       }
       await emit();
-      return { job };
+      return { job, draft: savedDraft };
     } finally {
+      input.signal?.removeEventListener('abort', onCallerAbort);
       if (activeJobControls.get(job.id) === control) {
         activeJobControls.delete(job.id);
       }

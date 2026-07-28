@@ -4,11 +4,18 @@
  */
 import type { Volume } from '../../types/volume';
 import type { Chapter } from '../../types/chapter';
-import type { VolumeCompletionCheck, VolumeSummarizeResult, SummarizeVolumeInput } from '../../types/chapterSummary';
+import type {
+  VolumeCompletionCheck,
+  VolumeSummarizeResult,
+  SummarizeVolumeInput,
+} from '../../types/chapterSummary';
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { createAiClient, aiSettingsService } from './aiClient';
 import { aiTaskService } from './aiTaskService';
 import { safeJsonParse } from './jsonUtils';
+import type { AiGenerateOptions } from '../../types/ai';
+import { throwIfAiRequestCancelled } from './aiCancellation';
+import { bindAiTaskCancellation, settleAiTaskError } from './aiTaskCancellation';
 
 /** 检查卷是否满足生成卷上下文的条件 */
 export async function checkVolumeCompletion(
@@ -25,7 +32,14 @@ export async function checkVolumeCompletion(
 
   if (totalChapters === 0) {
     reasons.push('该卷下没有章节');
-    return { completed: false, reasons, totalChapters: 0, chaptersWithContext: 0, expiredContexts: 0, disabledContexts: 0 };
+    return {
+      completed: false,
+      reasons,
+      totalChapters: 0,
+      chaptersWithContext: 0,
+      expiredContexts: 0,
+      disabledContexts: 0,
+    };
   }
 
   let chaptersWithContext = 0;
@@ -94,22 +108,31 @@ export async function collectVolumeChapterContexts(
 
 /** AI 生成卷总结 */
 export const volumeSummaryAiService = {
-  async summarize(input: SummarizeVolumeInput): Promise<VolumeSummarizeResult> {
+  async summarize(
+    input: SummarizeVolumeInput,
+    options: AiGenerateOptions = {},
+  ): Promise<VolumeSummarizeResult> {
     const settings = aiSettingsService.getSettings();
 
     // 构建章节上下文摘要
-    const chaptersSummary = input.chapterContexts.map((ctx, i) => {
-      const parts = [
-        `第${i + 1}章：${ctx.chapterTitle}`,
-        `摘要：${ctx.summary}`,
-        ctx.keyEvents.length > 0 ? `关键事件：${ctx.keyEvents.join('；')}` : '',
-        ctx.protagonistStateChange ? `主角变化：${ctx.protagonistStateChange}` : '',
-        ctx.settingChanges?.length ? `设定变化：${ctx.settingChanges.join('；')}` : '',
-        ctx.unresolvedQuestions?.length ? `未解决问题：${ctx.unresolvedQuestions.join('；')}` : '',
-        ctx.factsMustRemember?.length ? `必须记住的事实：${ctx.factsMustRemember.join('；')}` : '',
-      ];
-      return parts.filter(Boolean).join('\n');
-    }).join('\n\n---\n\n');
+    const chaptersSummary = input.chapterContexts
+      .map((ctx, i) => {
+        const parts = [
+          `第${i + 1}章：${ctx.chapterTitle}`,
+          `摘要：${ctx.summary}`,
+          ctx.keyEvents.length > 0 ? `关键事件：${ctx.keyEvents.join('；')}` : '',
+          ctx.protagonistStateChange ? `主角变化：${ctx.protagonistStateChange}` : '',
+          ctx.settingChanges?.length ? `设定变化：${ctx.settingChanges.join('；')}` : '',
+          ctx.unresolvedQuestions?.length
+            ? `未解决问题：${ctx.unresolvedQuestions.join('；')}`
+            : '',
+          ctx.factsMustRemember?.length
+            ? `必须记住的事实：${ctx.factsMustRemember.join('；')}`
+            : '',
+        ];
+        return parts.filter(Boolean).join('\n');
+      })
+      .join('\n\n---\n\n');
 
     const system = [
       '你是一位专业的小说编辑，擅长对长篇小说的分卷进行总结和梳理。',
@@ -120,7 +143,7 @@ export const volumeSummaryAiService = {
       '注意：你只能基于提供的章节上下文来总结，不得编造任何没有出现在章节上下文中的信息。',
       '',
       '--- 章节上下文 ---',
-      chaptersSummary.slice(0, 8000),
+      chaptersSummary,
       '--- 结束 ---',
       '',
       '请严格按以下 JSON 格式返回，不要输出其他内容：',
@@ -142,32 +165,48 @@ export const volumeSummaryAiService = {
       '```',
     ].join('\n');
 
-    const task = await aiTaskService.create('context_summarize', {
-      novelId: input.novelId,
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `汇总卷「${input.volumeTitle}」上下文`,
-    }).catch(() => null);
+    const task = await aiTaskService
+      .create('context_summarize', {
+        novelId: input.novelId,
+        runtimeMode: settings.runtimeMode,
+        provider: settings.provider,
+        modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+        inputSummary: `汇总卷「${input.volumeTitle}」上下文`,
+      })
+      .catch(() => null);
+    const releaseCancellation = bindAiTaskCancellation(task?.id, options);
 
     try {
       const client = createAiClient(settings);
-      const response = await client.generate({
-        taskType: 'context_summarize',
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: `请汇总卷「${input.volumeTitle}」的章节上下文，生成结构化卷总结。` },
-        ],
-        maxTokens: 4000,
-      });
+      const response = await client.generate(
+        {
+          taskType: 'context_summarize',
+          messages: [
+            { role: 'system', content: system },
+            {
+              role: 'user',
+              content: `请汇总卷「${input.volumeTitle}」的章节上下文，生成结构化卷总结。`,
+            },
+          ],
+          maxTokens: 4000,
+        },
+        options,
+      );
+      throwIfAiRequestCancelled(options.signal);
 
       const parsed = safeJsonParse<VolumeSummarizeResult>(response.text, {
         summaryTitle: input.volumeTitle + ' 总结',
         volumeMainArc: response.text.slice(0, 500) || '无法解析卷总结',
-        majorEvents: [], protagonistGrowth: '', characterChanges: [],
-        relationshipChanges: [], factionChanges: [], settingChanges: [],
-        foreshadowingCollected: [], unresolvedQuestions: [],
-        factsMustRemember: [], nextVolumeHook: '',
+        majorEvents: [],
+        protagonistGrowth: '',
+        characterChanges: [],
+        relationshipChanges: [],
+        factionChanges: [],
+        settingChanges: [],
+        foreshadowingCollected: [],
+        unresolvedQuestions: [],
+        factsMustRemember: [],
+        nextVolumeHook: '',
       });
 
       await aiTaskService.markSucceeded(task?.id || '', {
@@ -179,10 +218,15 @@ export const volumeSummaryAiService = {
 
       return parsed;
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '卷总结失败';
-      if (task) await aiTaskService.markFailed(task.id, message);
+      await settleAiTaskError({
+        taskId: task?.id,
+        error: e,
+        signal: options.signal,
+        fallbackMessage: '卷总结失败',
+      });
       throw e;
+    } finally {
+      releaseCancellation();
     }
   },
 };
-

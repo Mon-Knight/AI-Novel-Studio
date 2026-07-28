@@ -1,7 +1,8 @@
-export const PROJECT_BACKUP_SCHEMA_VERSION = 3;
+export const PROJECT_BACKUP_SCHEMA_VERSION = 9;
 export const MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION = 2;
 
-export type BackupValue = null | boolean | number | string | BackupValue[] | { [key: string]: BackupValue };
+export type BackupValue =
+  null | boolean | number | string | BackupValue[] | { [key: string]: BackupValue };
 export type BackupRow = Record<string, BackupValue>;
 
 export interface LocalProjectBackupData {
@@ -61,12 +62,57 @@ const REQUIRED_TABLES = [
   'large_text_chunks',
 ] as const;
 
+const MULTI_AGENT_TABLES = [
+  'multi_agent_sessions',
+  'multi_agent_rounds',
+  'multi_agent_opinions',
+] as const;
+
+const AUTONOMOUS_STORY_TABLES = ['autonomous_story_plans'] as const;
+
+const REFERENCE_LIBRARY_TABLES = [
+  'reference_works',
+  'reference_imports',
+  'reference_sections',
+] as const;
+
+const MEMORY_TABLES = [
+  'memory_documents',
+  'memory_chunks',
+  'memory_embeddings',
+  'memory_retrieval_logs',
+] as const;
+
+const AUTONOMOUS_SCHEDULER_TABLES = [
+  'autonomous_book_runs',
+  'autonomous_run_leases',
+  'autonomous_run_chapter_attempts',
+  'autonomous_run_checkpoints',
+] as const;
+
+const CONTENT_TRANSACTION_TABLES = [
+  'factions',
+  'locations',
+  'faction_relations',
+  'location_links',
+  'character_factions',
+  'chapter_factions',
+  'chapter_locations',
+  'chapter_event_factions',
+  'chapter_event_locations',
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function isBackupValue(value: unknown): value is BackupValue {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'number' ||
+    typeof value === 'string'
+  ) {
     return true;
   }
   if (Array.isArray(value)) return value.every(isBackupValue);
@@ -74,35 +120,63 @@ function isBackupValue(value: unknown): value is BackupValue {
 }
 
 export function isLocalProjectBackupData(data: unknown): data is LocalProjectBackupData {
-  if (!isRecord(data) || data.version !== 1 || !isRecord(data.collections) || !isRecord(data.entries)) {
+  if (
+    !isRecord(data) ||
+    data.version !== 1 ||
+    !isRecord(data.collections) ||
+    !isRecord(data.entries)
+  ) {
     return false;
   }
-  if (!Object.values(data.collections).every((rows) => (
-    Array.isArray(rows) && rows.every(isBackupValue)
-  ))) {
+  if (
+    !Object.values(data.collections).every(
+      (rows) => Array.isArray(rows) && rows.every(isBackupValue),
+    )
+  ) {
     return false;
   }
   if (!Object.values(data.entries).every(isBackupValue)) return false;
-  return data.rawEntries === undefined || (
-    isRecord(data.rawEntries) && Object.values(data.rawEntries).every((value) => typeof value === 'string')
+  return (
+    data.rawEntries === undefined ||
+    (isRecord(data.rawEntries) &&
+      Object.values(data.rawEntries).every((value) => typeof value === 'string'))
   );
 }
 
 export function isCompleteProjectBackup(data: unknown): data is CompleteProjectBackup {
   if (!isRecord(data)) return false;
-  if (data.type !== 'ai_novel_studio_project'
-    || typeof data.schemaVersion !== 'number'
-    || !Number.isInteger(data.schemaVersion)
-    || data.schemaVersion < MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION
-    || data.schemaVersion > PROJECT_BACKUP_SCHEMA_VERSION) return false;
-  if (!isRecord(data.novel) || typeof data.novel.id !== 'string' || typeof data.novel.title !== 'string') return false;
+  if (
+    data.type !== 'ai_novel_studio_project' ||
+    typeof data.schemaVersion !== 'number' ||
+    !Number.isInteger(data.schemaVersion) ||
+    data.schemaVersion < MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION ||
+    data.schemaVersion > PROJECT_BACKUP_SCHEMA_VERSION
+  )
+    return false;
+  if (
+    !isRecord(data.novel) ||
+    typeof data.novel.id !== 'string' ||
+    typeof data.novel.title !== 'string'
+  )
+    return false;
   if (!isRecord(data.tables)) return false;
   const tables = data.tables as Record<string, unknown>;
-  const requiredTables = data.schemaVersion >= 3
-    ? [...REQUIRED_TABLES, 'quality_issue_states']
-    : REQUIRED_TABLES;
-  return requiredTables.every((table) => Array.isArray(tables[table]))
-    && (data.localStorage === undefined || isLocalProjectBackupData(data.localStorage));
+  const requiredTables = [
+    ...REQUIRED_TABLES,
+    ...(data.schemaVersion >= 3 ? ['quality_issue_states'] : []),
+    ...(data.schemaVersion >= 4 ? MULTI_AGENT_TABLES : []),
+    ...(data.schemaVersion >= 5 ? AUTONOMOUS_STORY_TABLES : []),
+    ...(data.schemaVersion >= 6 ? REFERENCE_LIBRARY_TABLES : []),
+    ...(data.schemaVersion >= 7 ? MEMORY_TABLES : []),
+    ...(data.schemaVersion >= 8 ? AUTONOMOUS_SCHEDULER_TABLES : []),
+    ...(data.schemaVersion >= 9 ? CONTENT_TRANSACTION_TABLES : []),
+  ];
+  const allowedTables = new Set<string>(requiredTables);
+  return (
+    Object.keys(tables).every((table) => allowedTables.has(table)) &&
+    requiredTables.every((table) => Array.isArray(tables[table])) &&
+    (data.localStorage === undefined || isLocalProjectBackupData(data.localStorage))
+  );
 }
 
 export function getProjectBackupSummary(backup: CompleteProjectBackup): string {

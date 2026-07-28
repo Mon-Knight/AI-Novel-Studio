@@ -46,11 +46,13 @@ let lastRepairSummary: NovelRepairSummary | null = null;
 
 function buildSeedNovels(): Novel[] {
   return mockNovels
-    .map((n) => normalizeNovel({
-      ...n,
-      totalWordCount: n.totalWords ?? n.totalWordCount,
-      targetWordCount: n.targetWords ?? n.targetWordCount,
-    }))
+    .map((n) =>
+      normalizeNovel({
+        ...n,
+        totalWordCount: n.totalWords ?? n.totalWordCount,
+        targetWordCount: n.targetWords ?? n.targetWordCount,
+      }),
+    )
     .filter((n): n is Novel => n !== null);
 }
 
@@ -100,9 +102,12 @@ function createBackupKey(): string {
 }
 
 function normalizePatch(existing: Novel, input: UpdateNovelInput): Novel {
-  const mergedRelation = input.dualProtagonistRelation === null
-    ? getDefaultDualProtagonistRelation()
-    : normalizeDualProtagonistRelation(input.dualProtagonistRelation ?? existing.dualProtagonistRelation);
+  const mergedRelation =
+    input.dualProtagonistRelation === null
+      ? getDefaultDualProtagonistRelation()
+      : normalizeDualProtagonistRelation(
+          input.dualProtagonistRelation ?? existing.dualProtagonistRelation,
+        );
   const merged = normalizeNovel({
     ...existing,
     ...input,
@@ -113,10 +118,10 @@ function normalizePatch(existing: Novel, input: UpdateNovelInput): Novel {
     targetWords: input.targetWordCount ?? existing.targetWords,
     mainCharacter: input.mainCharacter ?? input.protagonists?.[0]?.name ?? existing.mainCharacter,
     protagonistAbility:
-      input.protagonistAbility
-      ?? input.protagonists?.[0]?.ability
-      ?? input.protagonists?.[0]?.specialAbility
-      ?? existing.protagonistAbility,
+      input.protagonistAbility ??
+      input.protagonists?.[0]?.ability ??
+      input.protagonists?.[0]?.specialAbility ??
+      existing.protagonistAbility,
     updatedAt: toIsoDateOrNow(new Date()),
   });
   if (!merged) throw new Error('作品更新数据无效，无法保存');
@@ -220,10 +225,7 @@ export const novelRepository = {
     return reread;
   },
 
-  async updateProtagonists(
-    novelId: string,
-    input: UpdateNovelProtagonistsInput,
-  ): Promise<Novel> {
+  async updateProtagonists(novelId: string, input: UpdateNovelProtagonistsInput): Promise<Novel> {
     const relation = input.dualProtagonistRelation ?? getDefaultDualProtagonistRelation();
     const updated = await this.update(novelId, {
       protagonistMode: input.protagonistMode,
@@ -248,13 +250,15 @@ export const novelRepository = {
       try {
         const data = lsGet<unknown>(key);
         if (Array.isArray(data)) {
-          const filtered = data.filter((item: any) => {
+          const filtered = data.filter((item: unknown) => {
             if (!item || typeof item !== 'object') return true;
-            return item.novelId !== novelId;
+            return (item as Record<string, unknown>).novelId !== novelId;
           });
           if (filtered.length !== data.length) lsSet(key, filtered);
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
 
     const keys = [
@@ -277,6 +281,7 @@ export const novelRepository = {
       'ai_novel_studio_quality_check_items',
       'ai_novel_studio_protagonists',
       'ai_novel_studio_imported_assets',
+      'ai_novel_studio_autonomous_story_plans',
     ];
     for (const key of keys) purge(key);
 

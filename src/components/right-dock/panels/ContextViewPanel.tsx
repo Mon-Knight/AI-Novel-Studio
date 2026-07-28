@@ -1,3 +1,4 @@
+import { appLogger } from '../../../services/observability/appLogger';
 /**
  * AI Novel Studio - 上下文记录查看面板
  * v1.7.14: 增加卷上下文生成 + 卷完成检查 + 过期联动
@@ -5,13 +6,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Chapter } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
-import type { ContextRecord, ContextCategory } from '../../../types/context';
+import type {
+  ContextRecord,
+  ContextCategory,
+  CreateContextRecordInput,
+} from '../../../types/context';
 import type { VolumeCompletionCheck, VolumeSummarizeResult } from '../../../types/chapterSummary';
 import { contextRecordService } from '../../../services/context/contextRecordService';
 import { volumeRepository } from '../../../services/database/volumeRepository';
 import { chapterRepository } from '../../../services/database/chapterRepository';
-import { checkVolumeCompletion, collectVolumeChapterContexts, volumeSummaryAiService } from '../../../services/ai/volumeSummaryService';
-import { runWithLoading } from '../../../lib/runWithLoading';
+import {
+  checkVolumeCompletion,
+  collectVolumeChapterContexts,
+  volumeSummaryAiService,
+} from '../../../services/ai/volumeSummaryService';
+import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoading';
 import ContextRecordList from '../../context-records/ContextRecordList';
 import ContextRecordForm from '../../context-records/ContextRecordForm';
 import { describeUnknownError } from '../../../utils/errorMessage';
@@ -90,21 +99,24 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
         setRecords(recs);
       }
     } catch (error) {
-      console.error(error);
+      appLogger.error(error);
       setLoadError(describeUnknownError(error, '上下文读取或状态同步失败'));
+    } finally {
+      setLoading(false);
     }
-    finally { setLoading(false); }
   }, [novelId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
     setLoadError('');
     try {
       await contextRecordService.setActive(id, isActive);
-      setRecords((prev) => prev.map((r) => r.id === id ? { ...r, isActive } : r));
+      setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, isActive } : r)));
     } catch (error) {
-      console.error(error);
+      appLogger.error(error);
       setLoadError(describeUnknownError(error, '上下文启用状态保存失败'));
     }
   };
@@ -115,19 +127,19 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
       await contextRecordService.remove(id);
       setRecords((prev) => prev.filter((r) => r.id !== id));
     } catch (error) {
-      console.error(error);
+      appLogger.error(error);
       setLoadError(describeUnknownError(error, '上下文删除失败'));
     }
   };
 
-  const handleAdd = async (input: any) => {
+  const handleAdd = async (input: CreateContextRecordInput) => {
     setLoadError('');
     try {
       await contextRecordService.create(input);
       setShowForm(false);
       await load();
     } catch (error) {
-      console.error(error);
+      appLogger.error(error);
       setLoadError(describeUnknownError(error, '上下文保存失败'));
     }
   };
@@ -145,21 +157,27 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
           initialMessage: `正在汇总「${volume.title}」的章节上下文……`,
           successMessage: '卷上下文生成完成',
           errorMessage: '生成失败',
+          cancelable: true,
         },
-        async ({ setStage }) => {
+        async ({ setStage, signal, operationId }) => {
           setStage('收集章节上下文……');
           const chapterContexts = await collectVolumeChapterContexts(volume.id, chapters);
 
           setStage('AI 正在汇总……');
-          const result = await volumeSummaryAiService.summarize({
-            novelId, volumeId: volume.id, volumeTitle: volume.title,
-            chapterContexts,
-          });
+          const result = await volumeSummaryAiService.summarize(
+            {
+              novelId,
+              volumeId: volume.id,
+              volumeTitle: volume.title,
+              chapterContexts,
+            },
+            { signal, cancel: () => cancelLoadingOperation(operationId) },
+          );
           setGenResult((prev) => ({ ...prev, [volume.id]: result }));
         },
       );
-    } catch (e: any) {
-      setGenError((prev) => ({ ...prev, [volume.id]: e.message || '生成失败' }));
+    } catch (e: unknown) {
+      setGenError((prev) => ({ ...prev, [volume.id]: describeUnknownError(e, '生成失败') }));
     } finally {
       setGenLoading((prev) => ({ ...prev, [volume.id]: false }));
     }
@@ -173,14 +191,26 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
     const content = [
       `## ${result.summaryTitle}`,
       `**主线**：${result.volumeMainArc}`,
-      result.majorEvents.length > 0 ? `**重大事件**：\n${result.majorEvents.map((e: string) => `- ${e}`).join('\n')}` : '',
+      result.majorEvents.length > 0
+        ? `**重大事件**：\n${result.majorEvents.map((e: string) => `- ${e}`).join('\n')}`
+        : '',
       result.protagonistGrowth ? `**主角成长**：${result.protagonistGrowth}` : '',
-      result.settingChanges.length > 0 ? `**设定变化**：\n${result.settingChanges.map((s: string) => `- ${s}`).join('\n')}` : '',
-      result.foreshadowingCollected.length > 0 ? `**已埋伏笔**：\n${result.foreshadowingCollected.map((f: string) => `- ${f}`).join('\n')}` : '',
-      result.unresolvedQuestions.length > 0 ? `**未解决问题**：\n${result.unresolvedQuestions.map((q: string) => `- ${q}`).join('\n')}` : '',
-      result.factsMustRemember.length > 0 ? `**关键事实**：\n${result.factsMustRemember.map((f: string) => `- ${f}`).join('\n')}` : '',
+      result.settingChanges.length > 0
+        ? `**设定变化**：\n${result.settingChanges.map((s: string) => `- ${s}`).join('\n')}`
+        : '',
+      result.foreshadowingCollected.length > 0
+        ? `**已埋伏笔**：\n${result.foreshadowingCollected.map((f: string) => `- ${f}`).join('\n')}`
+        : '',
+      result.unresolvedQuestions.length > 0
+        ? `**未解决问题**：\n${result.unresolvedQuestions.map((q: string) => `- ${q}`).join('\n')}`
+        : '',
+      result.factsMustRemember.length > 0
+        ? `**关键事实**：\n${result.factsMustRemember.map((f: string) => `- ${f}`).join('\n')}`
+        : '',
       result.nextVolumeHook ? `**下卷衔接**：${result.nextVolumeHook}` : '',
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
 
     setGenError((prev) => ({ ...prev, [volume.id]: '' }));
     try {
@@ -202,7 +232,7 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
       });
       await load();
     } catch (error) {
-      console.error(error);
+      appLogger.error(error);
       setGenError((prev) => ({
         ...prev,
         [volume.id]: describeUnknownError(error, '卷上下文保存失败'),
@@ -210,24 +240,36 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
     }
   };
 
-  const filteredRecords = activeTab === 'all'
-    ? records
-    : records.filter((r) => classifyRecord(r) === activeTab);
+  const filteredRecords =
+    activeTab === 'all' ? records : records.filter((r) => classifyRecord(r) === activeTab);
 
   const activeCount = filteredRecords.filter((r) => r.isActive && !r.isExpired).length;
   const expiredCount = filteredRecords.filter((r) => r.isExpired).length;
 
-  if (!novelId) return <div style={{ padding: 16, color: 'var(--color-text-muted)' }}>请先选择作品</div>;
+  if (!novelId)
+    return <div style={{ padding: 16, color: 'var(--color-text-muted)' }}>请先选择作品</div>;
 
   return (
     <div>
       {loadError && (
-        <div className="panel-section" role="alert" data-testid="error-notice" style={{ color: 'var(--color-error)', fontSize: 12 }}>
+        <div
+          className="panel-section"
+          role="alert"
+          data-testid="error-notice"
+          style={{ color: 'var(--color-error)', fontSize: 12 }}
+        >
           {loadError}
         </div>
       )}
       <div className="panel-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 8,
+          }}
+        >
           <div className="panel-section-title" style={{ marginBottom: 0 }}>
             📦 上下文记录（{filteredRecords.length}）
           </div>
@@ -239,9 +281,10 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
         {/* 分类标签 */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
           {CATEGORY_TABS.map((tab) => {
-            const count = tab.key === 'all'
-              ? records.length
-              : records.filter((r) => classifyRecord(r) === tab.key).length;
+            const count =
+              tab.key === 'all'
+                ? records.length
+                : records.filter((r) => classifyRecord(r) === tab.key).length;
             return (
               <button
                 key={tab.key}
@@ -257,13 +300,24 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
 
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8 }}>
           启用 {activeCount} 条 / 共 {filteredRecords.length} 条
-          {expiredCount > 0 && <span style={{ color: '#d97706', marginLeft: 6 }}>⏳ {expiredCount} 条已过期</span>}
+          {expiredCount > 0 && (
+            <span style={{ color: 'var(--color-warning-text)', marginLeft: 6 }}>
+              ⏳ {expiredCount} 条已过期
+            </span>
+          )}
         </div>
 
         {/* 卷上下文生成区 */}
         {activeTab === 'volume_context' && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--color-text-muted)',
+                marginBottom: 6,
+              }}
+            >
               📚 卷上下文生成
             </div>
             {volumes.length === 0 && (
@@ -281,7 +335,9 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
                 <div
                   key={vol.id}
                   style={{
-                    padding: 8, marginBottom: 6, borderRadius: 6,
+                    padding: 8,
+                    marginBottom: 6,
+                    borderRadius: 6,
                     border: '1px solid var(--color-border-light)',
                     background: 'var(--color-bg-primary)',
                   }}
@@ -289,11 +345,20 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
                   <div style={{ fontWeight: 500, fontSize: 12, marginBottom: 4 }}>
                     📖 {vol.title}
                     {check && (
-                      <span style={{
-                        fontSize: 10, marginLeft: 6, padding: '1px 6px', borderRadius: 3,
-                        background: check.completed ? '#22c55e20' : '#f59e0b20',
-                        color: check.completed ? '#16a34a' : '#d97706',
-                      }}>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          marginLeft: 6,
+                          padding: '1px 6px',
+                          borderRadius: 3,
+                          background: check.completed
+                            ? 'color-mix(in srgb, var(--color-success) 13%, transparent)'
+                            : 'color-mix(in srgb, var(--color-warning) 13%, transparent)',
+                          color: check.completed
+                            ? 'var(--color-success)'
+                            : 'var(--color-warning-text)',
+                        }}
+                      >
                         {check.completed ? '✅ 可生成' : '⏳ 未就绪'}
                       </span>
                     )}
@@ -301,7 +366,9 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
 
                   {/* 未就绪原因 */}
                   {check && !check.completed && check.reasons.length > 0 && (
-                    <div style={{ fontSize: 10, color: '#d97706', marginBottom: 6 }}>
+                    <div
+                      style={{ fontSize: 10, color: 'var(--color-warning-text)', marginBottom: 6 }}
+                    >
                       {check.reasons.map((r: string, i: number) => (
                         <div key={i}>• {r}</div>
                       ))}
@@ -319,15 +386,27 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
                       {isLoading ? '⏳ 生成中...' : '🤖 生成卷上下文'}
                     </button>
                   )}
-                  {error && <div style={{ fontSize: 10, color: 'var(--color-error)', marginTop: 4 }}>{error}</div>}
+                  {error && (
+                    <div style={{ fontSize: 10, color: 'var(--color-error)', marginTop: 4 }}>
+                      {error}
+                    </div>
+                  )}
 
                   {/* 生成结果预览 */}
                   {result && (
                     <div style={{ marginTop: 6, fontSize: 11 }}>
-                      <div style={{ fontWeight: 500, color: 'var(--color-success)', marginBottom: 4 }}>
+                      <div
+                        style={{ fontWeight: 500, color: 'var(--color-success)', marginBottom: 4 }}
+                      >
                         ✅ {result.summaryTitle}
                       </div>
-                      <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5, marginBottom: 4 }}>
+                      <div
+                        style={{
+                          color: 'var(--color-text-secondary)',
+                          lineHeight: 1.5,
+                          marginBottom: 4,
+                        }}
+                      >
                         {result.volumeMainArc.slice(0, 150)}…
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -340,7 +419,13 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
                         </button>
                         <button
                           className="btn btn-sm btn-secondary"
-                          onClick={() => setGenResult((prev) => { const n = { ...prev }; delete n[vol.id]; return n; })}
+                          onClick={() =>
+                            setGenResult((prev) => {
+                              const n = { ...prev };
+                              delete n[vol.id];
+                              return n;
+                            })
+                          }
                           style={{ flex: 1, fontSize: 10 }}
                         >
                           放弃
@@ -364,7 +449,9 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
         )}
 
         {loading ? (
-          <div style={{ padding: 16, color: 'var(--color-text-muted)', textAlign: 'center' }}>加载中...</div>
+          <div style={{ padding: 16, color: 'var(--color-text-muted)', textAlign: 'center' }}>
+            加载中...
+          </div>
         ) : (
           <ContextRecordList
             records={filteredRecords}

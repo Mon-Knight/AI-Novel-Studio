@@ -1,3 +1,4 @@
+import { appLogger } from '../services/observability/appLogger';
 /**
  * Native Feel P2.3.2 — DOM Toast 轻量提示工具
  *
@@ -51,8 +52,7 @@ export function showToast(options: ToastOptions): void {
   }
 
   // ToastProvider 未挂载时的安全回退
-  const prefix = kind === 'error' ? '[ERROR]' : kind === 'warning' ? '[WARN]' : '';
-  const text = title ? `${prefix} ${title}: ${message}` : `${prefix} ${message}`;
-  if (kind === 'error') console.error(text);
-  else console.info(text);
+  const diagnostic = { kind, hasTitle: Boolean(title), messageLength: message.length };
+  if (kind === 'error') appLogger.error('TOAST_PROVIDER_UNAVAILABLE', diagnostic);
+  else appLogger.info('TOAST_PROVIDER_UNAVAILABLE', diagnostic);
 }

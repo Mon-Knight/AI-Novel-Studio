@@ -10,7 +10,8 @@
  * 5. 清空输出必须由用户主动触发
  */
 
-import type { PanelType } from '../pages/WritingWorkspace/WritingWorkspacePage';
+import type { PanelType } from '../types/rightSidebar';
+import { create } from 'zustand';
 
 // ==================== 类型定义 ====================
 
@@ -49,14 +50,14 @@ export interface RightSidebarState {
 /** 面板键名映射（与 PanelType 一致） */
 export const TOOL_KEYS: Record<string, string> = {
   'ai-generate': 'ai-generate',
-  'engineering': 'engineering',
-  'outline': 'outline',
-  'characters': 'characters',
-  'events': 'events',
-  'setting': 'setting',
-  'style': 'style',
-  'check': 'check',
-  'polish': 'polish',
+  engineering: 'engineering',
+  outline: 'outline',
+  characters: 'characters',
+  events: 'events',
+  setting: 'setting',
+  style: 'style',
+  check: 'check',
+  polish: 'polish',
   'chapter-summary': 'chapter-summary',
   'context-view': 'context-view',
 };
@@ -80,10 +81,7 @@ export function createEmptyToolState(): PanelToolState {
   };
 }
 
-export function getOrCreateToolState(
-  state: RightSidebarState,
-  toolKey: string,
-): PanelToolState {
+export function getOrCreateToolState(state: RightSidebarState, toolKey: string): PanelToolState {
   return state.toolStates[toolKey] ?? createEmptyToolState();
 }
 
@@ -104,10 +102,7 @@ export function updateToolState(
 }
 
 /** 清空指定工具的 AI 输出 */
-export function clearToolOutput(
-  state: RightSidebarState,
-  toolKey: string,
-): RightSidebarState {
+export function clearToolOutput(state: RightSidebarState, toolKey: string): RightSidebarState {
   return updateToolState(state, toolKey, {
     output: '',
     error: '',
@@ -149,10 +144,7 @@ export function toggleCollapse(state: RightSidebarState): RightSidebarState {
 }
 
 /** 切换到指定工具面板 */
-export function switchTool(
-  state: RightSidebarState,
-  toolKey: PanelType,
-): RightSidebarState {
+export function switchTool(state: RightSidebarState, toolKey: PanelType): RightSidebarState {
   if (state.activeTool === toolKey) {
     // 点击同一面板 → 收起
     return toggleCollapse(state);
@@ -176,3 +168,26 @@ export function closePanel(state: RightSidebarState): RightSidebarState {
     activeTool: null,
   };
 }
+
+export interface RightSidebarStore extends RightSidebarState {
+  reset: () => void;
+  openTool: (toolKey: PanelType) => void;
+  close: () => void;
+  toggle: () => void;
+  updateTool: (toolKey: string, patch: Partial<PanelToolState>) => void;
+  clearTool: (toolKey: string) => void;
+}
+
+/**
+ * Cross-panel runtime state. Zustand gives every panel a single observable data
+ * flow while the pure reducers above remain independently testable.
+ */
+export const useRightSidebarStore = create<RightSidebarStore>((set) => ({
+  ...createInitialSidebarState(),
+  reset: () => set(createInitialSidebarState()),
+  openTool: (toolKey) => set((state) => switchTool(state, toolKey)),
+  close: () => set((state) => closePanel(state)),
+  toggle: () => set((state) => toggleCollapse(state)),
+  updateTool: (toolKey, patch) => set((state) => updateToolState(state, toolKey, patch)),
+  clearTool: (toolKey) => set((state) => clearToolOutput(state, toolKey)),
+}));

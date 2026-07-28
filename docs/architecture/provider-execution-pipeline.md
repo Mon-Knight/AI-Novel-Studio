@@ -61,7 +61,7 @@ Input、Context 与 Constraint 可能保存部分重复文本，以换取当前�
 
 - 相同 operationId 已完成且存在 Artifact：直接读取首次结果，Provider 调用次数为 0。
 - `DATABASE_COMMIT_UNKNOWN`：最多重放一次相同持久化操作，不重放网络请求。
-- Provider 失败：映射为稳定 timeout / cancelled / authentication / request-rejected / rate-limited / server / network / malformed AppError，再安全终结 Attempt；Tauri 1.x 的纯字符串拒绝会保留已脱敏的后端消息。
+- Provider 失败：映射为稳定 timeout / cancelled / authentication / request-rejected / rate-limited / server / network / malformed AppError，再安全终结 Attempt；Tauri 1.x 的纯字符串拒绝会保留已脱敏的后端消息，输出 Token 截断归为可重试 malformed response 而不是网络错误。
 - 取消：同时触发现有 HTTP Abort 和持久 Task cancel；取消后到达的响应不能创建 Artifact。
 - Artifact 校验失败：完整模型正文仍保存在 invalid Artifact，入口可以展示原始候选，但不会把它当作正式业务数据。
 
@@ -76,7 +76,7 @@ AI settings.apiKey / baseUrl
 → 不进入 Task/Snapshot/Artifact/Issue/log
 ```
 
-单元测试直接扫描 Task 创建参数，证明 API Key 与 Base URL 不存在。E2E 仍强制 Mock、阻断 WebView 与 Rust 外网；真实 API 只在人工验收中调用一次，输出预算 8 tokens，不打印或导出凭据。
+单元测试直接扫描 Task 创建参数，证明 API Key 与 Base URL 不存在。E2E 仍强制 Mock、阻断 WebView 与 Rust 外网；真实 API 只在人工验收中调用一次，输出预算 128 tokens，不打印或导出凭据。
 
 ## 7. 首批入口
 
@@ -85,7 +85,8 @@ AI settings.apiKey / baseUrl
 - system scope；
 - expected Artifact：`generic_text@1`；
 - 模型必须只返回 `OK`；
-- `maxTokens = 8`；
+- `temperature = 0`，不继承正文创作的随机性设置；
+- `maxTokens = 128`，避免推理型兼容模型在形成最终 `OK` 前耗尽预算；
 - valid Artifact 才报告连接成功。
 
 ### 设定补充
@@ -104,5 +105,6 @@ AI settings.apiKey / baseUrl
 
 - 不调用 Task/Artifact IPC；
 - 不在 LocalStorage 伪造执行事实；
+- 仅接受字符串 final content；content-parts 等未支持结构失败关闭且不回显 Provider 正文；
 - 不作为桌面发布证据；
 - 真实持久行为由 Rust/SQLite 与 Windows Tauri E2E 证明。

@@ -36,11 +36,15 @@ function Assert-NotContains {
 }
 
 $workspacePage = Join-Path $root "src\pages\WritingWorkspace\WritingWorkspacePage.tsx"
+$workspaceView = Join-Path $root "src\pages\WritingWorkspace\WritingWorkspaceView.tsx"
+$workspaceLoader = Join-Path $root "src\features\workspace\useWorkspaceChapterLoader.ts"
 $mainFile = Join-Path $root "src\main.tsx"
 $editorArea = Join-Path $root "src\components\workspace\EditorArea.tsx"
+$editorDocumentController = Join-Path $root "src\components\workspace\editor-area\useEditorDocumentController.ts"
 $rightToolbar = Join-Path $root "src\components\right-dock\RightToolbar.tsx"
 $rightPanel = Join-Path $root "src\components\right-dock\RightPanel.tsx"
 $checkPanel = Join-Path $root "src\components\right-dock\panels\CheckPanel.tsx"
+$qualityFixAction = Join-Path $root "src\components\right-dock\panels\useQualityFixAction.ts"
 $qualityService = Join-Path $root "src\services\quality\qualityCheckService.ts"
 $qualityFixService = Join-Path $root "src\services\ai\qualityFixService.ts"
 $qualityTypes = Join-Path $root "src\types\qualityCheck.ts"
@@ -48,11 +52,15 @@ $commandsFile = Join-Path $root "src-tauri\src\commands.rs"
 $dbFile = Join-Path $root "src-tauri\src\db.rs"
 
 Assert-FileExists $workspacePage
+Assert-FileExists $workspaceView
+Assert-FileExists $workspaceLoader
 Assert-FileExists $mainFile
 Assert-FileExists $editorArea
+Assert-FileExists $editorDocumentController
 Assert-FileExists $rightToolbar
 Assert-FileExists $rightPanel
 Assert-FileExists $checkPanel
+Assert-FileExists $qualityFixAction
 Assert-FileExists $qualityService
 Assert-FileExists $qualityFixService
 Assert-FileExists $qualityTypes
@@ -65,20 +73,20 @@ Assert-Contains $mainFile "scheduleHideStartupSplash" "startup splash hides afte
 Assert-Contains $editorArea "EditorContentSnapshot" "editor snapshot type"
 Assert-Contains $editorArea "onEditorContentChange" "editor snapshot callback"
 Assert-Contains $editorArea "applyTextRequest" "AI text apply request"
-Assert-Contains $editorArea "hashTextContent" "editor content hash"
+Assert-Contains $editorDocumentController "hashTextContent" "editor content hash"
 Assert-Contains $editorArea "EditorCommandRequest" "editor accepts right toolbar command requests"
-Assert-Contains $editorArea "adopt-current" "editor can adopt current draft from right toolbar"
+Assert-Contains $editorDocumentController "adopt-current" "editor can adopt current draft from right toolbar"
 Assert-NotContains $editorArea "className=""editor-toolbar""" "editor inline toolbar removed"
 
 Assert-Contains $workspacePage "editorSnapshot" "workspace editor snapshot state"
 Assert-Contains $workspacePage "handleEditorContentChange" "workspace snapshot handler"
-Assert-Contains $workspacePage "currentEditorContent=" "workspace passes current editor content"
-Assert-Contains $workspacePage "currentContentHash=" "workspace passes current content hash"
-Assert-Contains $workspacePage "onApplyAiText=" "workspace passes AI apply callback"
+Assert-Contains $workspaceView "currentEditorContent=" "workspace passes current editor content"
+Assert-Contains $workspaceView "currentContentHash=" "workspace passes current content hash"
+Assert-Contains $workspaceView "onApplyAiText=" "workspace passes AI apply callback"
 Assert-Contains $workspacePage "target\?\.closest\('button, a, input, textarea, select" "workspace toolbar clicks do not instantly close right panel"
-Assert-Contains $workspacePage "getNovelForWorkspace" "workspace retries novel lookup before not-found state"
-Assert-Contains $workspacePage "NOVEL_LOAD_RETRY_DELAYS_MS" "workspace has bounded novel lookup retry delays"
-Assert-Contains $workspacePage "onRunCommand=" "workspace passes editor commands to right toolbar"
+Assert-Contains $workspaceLoader "getNovelForWorkspace" "workspace retries novel lookup before not-found state"
+Assert-Contains $workspaceLoader "NOVEL_LOAD_RETRY_DELAYS_MS" "workspace has bounded novel lookup retry delays"
+Assert-Contains $workspaceView "onRunCommand=" "workspace passes editor commands to right toolbar"
 
 Assert-Contains $rightToolbar "command: 'save'" "right toolbar has save command"
 Assert-Contains $rightToolbar "id: 'draft-history'" "right toolbar has draft history panel"
@@ -94,9 +102,9 @@ Assert-Contains $checkPanel "reportOutdated" "check panel detects outdated repor
 Assert-Contains $checkPanel "qualityCheckService\.createReport\(\{" "check panel creates SQLite report"
 Assert-Contains $checkPanel "contentHash" "check panel binds content hash"
 Assert-Contains $checkPanel "qualityCheckService\.saveResult\(\{" "check panel saves result"
-Assert-Contains $checkPanel "setFixError\(" "AI fix blocks stale reports"
-Assert-Contains $checkPanel "comparison\.isBetter" "AI fix gates adoption by comparison"
-Assert-Contains $checkPanel "onGenerated\(newDraft,\s*resultMetadata\)" "AI fix applies target-bound better draft to workspace"
+Assert-Contains $qualityFixAction "setFixError\(" "AI fix blocks stale reports"
+Assert-Contains $qualityFixAction "comparison\.isBetter" "AI fix gates adoption by comparison"
+Assert-Contains $qualityFixAction "onGenerated\(newDraft,\s*resultMetadata\)" "AI fix applies target-bound better draft to workspace"
 
 Assert-Contains $qualityTypes "contentHash\?: string" "quality type content hash"
 Assert-Contains $qualityTypes "contentLength\?: number" "quality type content length"

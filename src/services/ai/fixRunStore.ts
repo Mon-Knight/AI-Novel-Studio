@@ -7,8 +7,70 @@ import type { QualityFixRun } from '../ai/qualityFixService';
 
 const KEY = 'ai_novel_studio_fix_runs';
 
-function getAllLocal(): QualityFixRun[] { return lsGet<QualityFixRun[]>(KEY) ?? []; }
-function saveAllLocal(items: QualityFixRun[]): void { lsSet(KEY, items); }
+interface QualityFixRunDto {
+  id: string;
+  novelId?: string;
+  novel_id?: string;
+  chapterId?: string;
+  chapter_id?: string;
+  sourceDraftId?: string;
+  source_draft_id?: string;
+  sourceDraftVersion?: number;
+  source_draft_version?: number;
+  targetDraftId?: string;
+  target_draft_id?: string;
+  targetDraftVersion?: number;
+  target_draft_version?: number;
+  sourceContentHash?: string;
+  source_content_hash?: string;
+  targetContentHash?: string;
+  target_content_hash?: string;
+  beforeReportId?: string;
+  before_report_id?: string;
+  afterReportId?: string;
+  after_report_id?: string;
+  beforeScore?: number;
+  before_score?: number;
+  afterScore?: number;
+  after_score?: number;
+  beforePendingCount?: number;
+  before_pending_count?: number;
+  afterPendingCount?: number;
+  after_pending_count?: number;
+  beforeSeriousCount?: number;
+  before_serious_count?: number;
+  afterSeriousCount?: number;
+  after_serious_count?: number;
+  fixedIssueIds?: unknown;
+  fixed_issue_ids?: unknown;
+  newIssueIds?: unknown;
+  new_issue_ids?: unknown;
+  mode?: QualityFixRun['mode'];
+  status?: QualityFixRun['status'];
+  model?: string;
+  revisionSummary?: string;
+  revision_summary?: string;
+  changedRangesJson?: string;
+  changed_ranges_json?: string;
+  failureReason?: string;
+  failure_reason?: string;
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+  usedContextIds?: string;
+  used_context_ids?: string;
+  skippedContextIds?: string;
+  skipped_context_ids?: string;
+  warnings?: string;
+}
+
+function getAllLocal(): QualityFixRun[] {
+  return lsGet<QualityFixRun[]>(KEY) ?? [];
+}
+function saveAllLocal(items: QualityFixRun[]): void {
+  lsSet(KEY, items);
+}
 
 function toTauriInput(fixRun: QualityFixRun): Record<string, unknown> {
   return {
@@ -36,9 +98,9 @@ function toTauriInput(fixRun: QualityFixRun): Record<string, unknown> {
     model: fixRun.model || null,
     revisionSummary: fixRun.revisionSummary || null,
     changedRangesJson: fixRun.changedRangesJson || null,
-    usedContextIds: (fixRun as any).usedContextIds || null,
-    skippedContextIds: (fixRun as any).skippedContextIds || null,
-    warnings: (fixRun as any).warnings || null,
+    usedContextIds: fixRun.usedContextIds || null,
+    skippedContextIds: fixRun.skippedContextIds || null,
+    warnings: fixRun.warnings || null,
     failureReason: fixRun.failureReason || null,
   };
 }
@@ -46,10 +108,13 @@ function toTauriInput(fixRun: QualityFixRun): Record<string, unknown> {
 export const fixRunStore = {
   async getByChapterId(chapterId: string): Promise<QualityFixRun[]> {
     try {
-      const dtos = await dbCall<any[]>('get_quality_fix_runs', { chapterId });
+      const dtos = await dbCall<QualityFixRunDto[]>('get_quality_fix_runs', { chapterId });
       if (Array.isArray(dtos)) return dtos.map(fromTauriDto);
-    } catch { /* fallback */ }
-    return getAllLocal().filter((r) => r.chapterId === chapterId)
+    } catch {
+      /* fallback */
+    }
+    return getAllLocal()
+      .filter((r) => r.chapterId === chapterId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
@@ -66,17 +131,27 @@ export const fixRunStore = {
     const r = { ...fixRun, updatedAt: nowISO() };
     try {
       await dbCall('save_quality_fix_run', toTauriInput(r));
-    } catch { /* fallback */ }
+    } catch {
+      /* fallback */
+    }
     // localStorage fallback
     const list = getAllLocal();
     const idx = list.findIndex((x) => x.id === r.id);
-    if (idx >= 0) { list[idx] = r; } else { list.push(r); }
+    if (idx >= 0) {
+      list[idx] = r;
+    } else {
+      list.push(r);
+    }
     saveAllLocal(list);
     return r;
   },
 
   async updateStatus(id: string, status: QualityFixRun['status']): Promise<QualityFixRun | null> {
-    try { await dbCall('update_quality_fix_run_status', { id, status }); } catch { /* fallback */ }
+    try {
+      await dbCall('update_quality_fix_run_status', { id, status });
+    } catch {
+      /* fallback */
+    }
     const list = getAllLocal();
     const idx = list.findIndex((r) => r.id === id);
     if (idx === -1) return null;
@@ -87,20 +162,40 @@ export const fixRunStore = {
   },
 };
 
-function fromTauriDto(dto: any): QualityFixRun {
+function readRequiredString(primary: unknown, legacy: unknown, fieldName: string): string {
+  const value = primary || legacy;
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid quality fix run field: ${fieldName}`);
+  }
+  return value;
+}
+
+function readRequiredNumber(primary: unknown, legacy: unknown, fieldName: string): number {
+  const value = primary ?? legacy;
+  if (typeof value !== 'number') {
+    throw new Error(`Invalid quality fix run field: ${fieldName}`);
+  }
+  return value;
+}
+
+function fromTauriDto(dto: QualityFixRunDto): QualityFixRun {
   return {
     id: dto.id,
-    novelId: dto.novelId || dto.novel_id,
-    chapterId: dto.chapterId || dto.chapter_id,
-    sourceDraftId: dto.sourceDraftId || dto.source_draft_id,
+    novelId: readRequiredString(dto.novelId, dto.novel_id, 'novelId'),
+    chapterId: readRequiredString(dto.chapterId, dto.chapter_id, 'chapterId'),
+    sourceDraftId: readRequiredString(dto.sourceDraftId, dto.source_draft_id, 'sourceDraftId'),
     sourceDraftVersion: dto.sourceDraftVersion || dto.source_draft_version || 0,
     targetDraftId: dto.targetDraftId || dto.target_draft_id,
     targetDraftVersion: dto.targetDraftVersion || dto.target_draft_version,
-    sourceContentHash: dto.sourceContentHash || dto.source_content_hash,
+    sourceContentHash: readRequiredString(
+      dto.sourceContentHash,
+      dto.source_content_hash,
+      'sourceContentHash',
+    ),
     targetContentHash: dto.targetContentHash || dto.target_content_hash,
-    beforeReportId: dto.beforeReportId || dto.before_report_id,
+    beforeReportId: readRequiredString(dto.beforeReportId, dto.before_report_id, 'beforeReportId'),
     afterReportId: dto.afterReportId || dto.after_report_id,
-    beforeScore: dto.beforeScore ?? dto.before_score,
+    beforeScore: readRequiredNumber(dto.beforeScore, dto.before_score, 'beforeScore'),
     afterScore: dto.afterScore ?? dto.after_score,
     beforePendingCount: dto.beforePendingCount ?? dto.before_pending_count ?? 0,
     afterPendingCount: dto.afterPendingCount ?? dto.after_pending_count,
@@ -114,17 +209,27 @@ function fromTauriDto(dto: any): QualityFixRun {
     revisionSummary: dto.revisionSummary || dto.revision_summary,
     changedRangesJson: dto.changedRangesJson || dto.changed_ranges_json,
     failureReason: dto.failureReason || dto.failure_reason,
-    createdAt: dto.createdAt || dto.created_at,
-    updatedAt: dto.updatedAt || dto.updated_at,
+    createdAt: readRequiredString(dto.createdAt, dto.created_at, 'createdAt'),
+    updatedAt: readRequiredString(dto.updatedAt, dto.updated_at, 'updatedAt'),
     usedContextIds: dto.usedContextIds || dto.used_context_ids,
     skippedContextIds: dto.skippedContextIds || dto.skipped_context_ids,
     warnings: dto.warnings,
-  } as QualityFixRun & { usedContextIds?: string; skippedContextIds?: string; warnings?: string };
+  };
 }
 
-function safeParseArray(v: any): string[] {
-  if (Array.isArray(v)) return v;
-  if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function safeParseArray(v: unknown): string[] {
+  if (isStringArray(v)) return v;
+  if (typeof v === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(v);
+      return isStringArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
   return [];
 }
-

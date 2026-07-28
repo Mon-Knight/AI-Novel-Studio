@@ -48,50 +48,33 @@ git status
 ## vX.X.X (YYYY-MM-DD)
 
 ### 新增
+
 - 功能/文件描述
 
 ### 修改
+
 - 修改内容描述
 
 ### 修复
+
 - 修复内容描述
 
 ### 开发者备注
+
 - 技术相关备注
 ```
 
-### 步骤 4：生成 Release Notes
+### 步骤 4：校验 Release Notes 来源
 
-在 `docs/` 下创建 `release-notes-vX.X.X.md`，包含：
+Release Notes 只维护在 `CHANGELOG.md` 的当前版本段落中。运行：
 
-```markdown
-# vX.X.X 发布说明
-
-## 版本信息
-- 版本号：vX.X.X
-- 发布日期：YYYY-MM-DD
-
-## 新增功能
-...
-
-## 修改内容
-...
-
-## 修复内容
-...
-
-## 文件变更清单
-...
-
-## 测试结果
-...
-
-## 已知问题
-...
-
-## 后续计划
-...
+```powershell
+npm run test:version-sync
+node scripts/release/extract-release-notes.mjs --version X.Y.Z --output dist-release/release-notes-vX.Y.Z.md
 ```
+
+检查提取结果包含版本号、日期、变更、验证、已知限制与回滚边界。不要新增
+`docs/release-notes-vX.Y.Z.md`；旧版本快照统一保存在 `docs/project/release-history.md`。
 
 ### 步骤 5：更新 README
 
@@ -113,7 +96,7 @@ git status
 执行以下 Git 操作：
 
 ```powershell
-# 1. 确认状态
+# 1. 在版本分支确认状态
 git status
 
 # 2. 添加所有变更
@@ -122,13 +105,17 @@ git add .
 # 3. 提交
 git commit -m "feat: complete vX.X.X - 版本描述"
 
-# 4. 创建 Tag
-git tag vX.X.X
+# 4. 推送版本分支并创建 PR
+git push -u origin codex/vX.Y.Z-release
 
-# 5. 推送
-git push origin main
+# 5. 审查和门禁通过、PR 合并后，从 main 创建 Tag
+git switch main
+git pull --ff-only origin main
+git tag vX.X.X
 git push origin vX.X.X
 ```
+
+不得绕过 `docs/project/git-workflow.md` 中的 `main` 保护和审查要求，也不得移动已发布 tag。
 
 ### 步骤 8：最终确认
 
@@ -138,21 +125,25 @@ git push origin vX.X.X
 ## 🚀 vX.X.X 发布完成
 
 ### 版本信息
+
 - 版本号：vX.X.X
 - Commit：
 - Tag：vX.X.X ✅
 
 ### 发布内容
+
 - 新增：X 项
 - 修改：X 项
 - 修复：X 项
 
 ### Git 操作
+
 - commit：✅
 - push：✅
 - tag：✅
 
 ### 下一步
+
 - 下一版本目标：...
 ```
 

@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 /**
  * AI Novel Studio - 统一上下文读取服务
  * v1.7.15: 按任务类型分层读取上下文，过滤 expired/disabled
@@ -50,14 +51,17 @@ function addLog(log: ContextReadLog): void {
   if (getDbMode() !== 'tauri') return;
   dbCall('save_context_read_log', {
     input: {
-      id: log.id, novelId: log.novelId, taskType: log.taskType,
-      chapterId: log.chapterId || null, volumeId: log.volumeId || null,
+      id: log.id,
+      novelId: log.novelId,
+      taskType: log.taskType,
+      chapterId: log.chapterId || null,
+      volumeId: log.volumeId || null,
       usedContextIds: JSON.stringify(log.usedContextIds),
       skippedContextIds: JSON.stringify(log.skippedContextIds),
       warnings: JSON.stringify(log.warnings),
     },
   }).catch((error) => {
-    console.warn('[ContextReader] failed to persist context read log', { error });
+    appLogger.warn('[ContextReader] failed to persist context read log', { error });
   });
 }
 
@@ -88,7 +92,9 @@ export async function getContextForChapterTask(params: {
     if (currentSummary.enabled && !currentSummary.isExpired) {
       chapterSummaries.push(currentSummary);
     } else {
-      warnings.push(`当前章节上下文${currentSummary.isExpired ? '已过期' : '已停用'}，未纳入本次 AI 任务。`);
+      warnings.push(
+        `当前章节上下文${currentSummary.isExpired ? '已过期' : '已停用'}，未纳入本次 AI 任务。`,
+      );
       skippedIds.push(currentSummary.id);
     }
   }
@@ -112,7 +118,11 @@ export async function getContextForChapterTask(params: {
   if (resolvedVolumeId) {
     const allRecords = await contextRecordService.getByNovelId(novelId);
     const volRecords = allRecords.filter(
-      (r) => r.contextType === 'volume_summary' && r.volumeId === resolvedVolumeId && r.isActive && !r.isExpired,
+      (r) =>
+        r.contextType === 'volume_summary' &&
+        r.volumeId === resolvedVolumeId &&
+        r.isActive &&
+        !r.isExpired,
     );
     for (const vr of volRecords) {
       volumeContexts.push(vr);
@@ -126,15 +136,29 @@ export async function getContextForChapterTask(params: {
   // 4. 手动上下文
   const allRecords = await contextRecordService.getByNovelId(novelId);
   const chapterContexts: ContextRecord[] = chapterSummaries.map((s) => ({
-    id: s.id, novelId: s.novelId, chapterId: s.chapterId, volumeId: s.volumeId,
-    contextType: 'chapter_summary' as const, title: `第${currentChapter?.chapterNumber || '?'}章上下文`,
-    content: s.summary, importance: 4, isActive: s.enabled, isExpired: s.isExpired,
-    createdAt: s.createdAt, updatedAt: s.updatedAt,
+    id: s.id,
+    novelId: s.novelId,
+    chapterId: s.chapterId,
+    volumeId: s.volumeId,
+    contextType: 'chapter_summary' as const,
+    title: `第${currentChapter?.chapterNumber || '?'}章上下文`,
+    content: s.summary,
+    importance: 4,
+    isActive: s.enabled,
+    isExpired: s.isExpired,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
   }));
 
-  const manualContexts = allRecords.filter(
-    (r) => r.isActive && !r.isExpired && r.contextType !== 'chapter_summary' && r.contextType !== 'volume_summary',
-  ).slice(0, 10);
+  const manualContexts = allRecords
+    .filter(
+      (r) =>
+        r.isActive &&
+        !r.isExpired &&
+        r.contextType !== 'chapter_summary' &&
+        r.contextType !== 'volume_summary',
+    )
+    .slice(0, 10);
   for (const mc of manualContexts) usedIds.push(mc.id);
 
   // 去重：移除已在 chapterContexts 中出现的
@@ -144,12 +168,24 @@ export async function getContextForChapterTask(params: {
 
   // 记录日志
   addLog({
-    id: logId(), novelId, taskType, chapterId, volumeId: resolvedVolumeId,
-    usedContextIds: usedIds, skippedContextIds: skippedIds, warnings,
+    id: logId(),
+    novelId,
+    taskType,
+    chapterId,
+    volumeId: resolvedVolumeId,
+    usedContextIds: usedIds,
+    skippedContextIds: skippedIds,
+    warnings,
     createdAt: new Date().toISOString(),
   });
 
-  return { chapterContexts, volumeContexts, manualContexts: dedupedManual, chapterSummaries, warnings };
+  return {
+    chapterContexts,
+    volumeContexts,
+    manualContexts: dedupedManual,
+    chapterSummaries,
+    warnings,
+  };
 }
 
 /**
@@ -175,41 +211,67 @@ export async function getContextForVolumeTask(params: {
   }
 
   const chapterContexts: ContextRecord[] = chapterSummaries.map((s) => ({
-    id: s.id, novelId: s.novelId, chapterId: s.chapterId, volumeId,
-    contextType: 'chapter_summary' as const, title: '章节上下文',
-    content: s.summary, importance: 4, isActive: s.enabled, isExpired: s.isExpired,
-    createdAt: s.createdAt, updatedAt: s.updatedAt,
+    id: s.id,
+    novelId: s.novelId,
+    chapterId: s.chapterId,
+    volumeId,
+    contextType: 'chapter_summary' as const,
+    title: '章节上下文',
+    content: s.summary,
+    importance: 4,
+    isActive: s.enabled,
+    isExpired: s.isExpired,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
   }));
 
   // 2. 当前卷上下文
   const allRecords = await contextRecordService.getByNovelId(novelId);
   const volumeContexts = allRecords.filter(
-    (r) => r.contextType === 'volume_summary' && r.volumeId === volumeId && r.isActive && !r.isExpired,
+    (r) =>
+      r.contextType === 'volume_summary' && r.volumeId === volumeId && r.isActive && !r.isExpired,
   );
   for (const vr of volumeContexts) usedIds.push(vr.id);
 
   // 3. 前一卷上下文
-  const currentVol = (await volumeRepository.getByNovelId(novelId))
-    .find((v) => v.id === volumeId);
+  const currentVol = (await volumeRepository.getByNovelId(novelId)).find((v) => v.id === volumeId);
   if (currentVol) {
     const allVolumes = await volumeRepository.getByNovelId(novelId);
     const prevVol = allVolumes.find((v) => v.orderIndex === currentVol.orderIndex - 1);
     if (prevVol) {
       const prevRecords = allRecords.filter(
-        (r) => r.contextType === 'volume_summary' && r.volumeId === prevVol.id && r.isActive && !r.isExpired,
+        (r) =>
+          r.contextType === 'volume_summary' &&
+          r.volumeId === prevVol.id &&
+          r.isActive &&
+          !r.isExpired,
       );
-      for (const pr of prevRecords) { volumeContexts.push(pr); usedIds.push(pr.id); }
+      for (const pr of prevRecords) {
+        volumeContexts.push(pr);
+        usedIds.push(pr.id);
+      }
     }
   }
 
   // 4. 手动上下文
-  const manualContexts = allRecords.filter(
-    (r) => r.isActive && !r.isExpired && r.contextType !== 'chapter_summary' && r.contextType !== 'volume_summary',
-  ).slice(0, 10);
+  const manualContexts = allRecords
+    .filter(
+      (r) =>
+        r.isActive &&
+        !r.isExpired &&
+        r.contextType !== 'chapter_summary' &&
+        r.contextType !== 'volume_summary',
+    )
+    .slice(0, 10);
 
   addLog({
-    id: logId(), novelId, taskType, volumeId,
-    usedContextIds: usedIds, skippedContextIds: [], warnings,
+    id: logId(),
+    novelId,
+    taskType,
+    volumeId,
+    usedContextIds: usedIds,
+    skippedContextIds: [],
+    warnings,
     createdAt: new Date().toISOString(),
   });
 
@@ -235,20 +297,28 @@ export async function getContextForBookTask(params: {
   );
 
   // 2. 重要手动上下文（importance >= 4）
-  const manualContexts = allRecords.filter(
-    (r) => r.isActive && !r.isExpired
-      && r.contextType !== 'chapter_summary' && r.contextType !== 'volume_summary'
-      && r.importance >= 4,
-  ).slice(0, 15);
+  const manualContexts = allRecords
+    .filter(
+      (r) =>
+        r.isActive &&
+        !r.isExpired &&
+        r.contextType !== 'chapter_summary' &&
+        r.contextType !== 'volume_summary' &&
+        r.importance >= 4,
+    )
+    .slice(0, 15);
 
   if (volumeContexts.length === 0 && manualContexts.length === 0) {
     warnings.push('无可用卷上下文或手动上下文。');
   }
 
   addLog({
-    id: logId(), novelId, taskType,
+    id: logId(),
+    novelId,
+    taskType,
     usedContextIds: [...volumeContexts.map((v) => v.id), ...manualContexts.map((m) => m.id)],
-    skippedContextIds: [], warnings,
+    skippedContextIds: [],
+    warnings,
     createdAt: new Date().toISOString(),
   });
 
@@ -262,19 +332,18 @@ export function buildContextPromptSection(result: ContextReadResult): string {
   const sections: string[] = [];
 
   if (result.chapterSummaries.length > 0) {
-    const texts = result.chapterSummaries.map((s, i) =>
-      `### 章节上下文 ${i + 1}\n${s.summary}\n` +
-      (s.keyEvents?.length ? `关键事件：${s.keyEvents.join('；')}\n` : '') +
-      (s.protagonistStateChange ? `主角变化：${s.protagonistStateChange}\n` : '') +
-      (s.factsMustRemember?.length ? `关键事实：${s.factsMustRemember.join('；')}\n` : ''),
+    const texts = result.chapterSummaries.map(
+      (s, i) =>
+        `### 章节上下文 ${i + 1}\n${s.summary}\n` +
+        (s.keyEvents?.length ? `关键事件：${s.keyEvents.join('；')}\n` : '') +
+        (s.protagonistStateChange ? `主角变化：${s.protagonistStateChange}\n` : '') +
+        (s.factsMustRemember?.length ? `关键事实：${s.factsMustRemember.join('；')}\n` : ''),
     );
     sections.push('【章节上下文】\n' + texts.join('\n---\n'));
   }
 
   if (result.volumeContexts.length > 0) {
-    const texts = result.volumeContexts.map((v) =>
-      `### ${v.title}\n${v.content.slice(0, 800)}`,
-    );
+    const texts = result.volumeContexts.map((v) => `### ${v.title}\n${v.content.slice(0, 800)}`);
     sections.push('【卷上下文】\n' + texts.join('\n---\n'));
   }
 
@@ -288,9 +357,9 @@ export function buildContextPromptSection(result: ContextReadResult): string {
 
   sections.push(
     '【注意】\n' +
-    '- 以上上下文用于保持故事连续性，不得新增与上下文冲突的事实。\n' +
-    '- 如上下文与正文或已确认设定冲突，以正文和已确认设定为准。\n' +
-    '- 上下文中的推测不应被当作正文事实。',
+      '- 以上上下文用于保持故事连续性，不得新增与上下文冲突的事实。\n' +
+      '- 如上下文与正文或已确认设定冲突，以正文和已确认设定为准。\n' +
+      '- 上下文中的推测不应被当作正文事实。',
   );
 
   return sections.join('\n\n');
@@ -303,9 +372,7 @@ function getAdjacentChapterIds(
   volumeId?: string,
 ): string[] {
   const ids: string[] = [];
-  const sameVolume = volumeId
-    ? chapters.filter((c) => c.volumeId === volumeId)
-    : chapters;
+  const sameVolume = volumeId ? chapters.filter((c) => c.volumeId === volumeId) : chapters;
   const sorted = [...sameVolume].sort((a, b) => a.chapterNumber - b.chapterNumber);
   const currentIdx = sorted.findIndex((c) => c.chapterNumber === currentNumber);
   if (currentIdx > 0) ids.push(sorted[currentIdx - 1].id);

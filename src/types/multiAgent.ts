@@ -1,71 +1,157 @@
-/**
- * Multi-Agent Collaboration System Types
- *
- * 多智能体协作系统，用于章节内容的多维度评审和迭代改进。
- */
+import type { ChapterDraft } from './ai';
 
-export type ExpertType =
-  | 'outline'     // 大纲专家：情节结构、起承转合
-  | 'character'   // 角色专家：人物动机、性格一致性
-  | 'setting'     // 设定专家：世界观规则、场景细节
-  | 'logic'       // 逻辑专家：因果关系、时间线
-  | 'polish'      // 润色专家：语言、节奏、文风
-  | 'quality';    // 质量专家：整体可读性、完成度
+export type ExpertType = 'outline' | 'character' | 'setting' | 'logic' | 'polish' | 'quality';
+
+export type ExpertOpinionStatus = 'succeeded' | 'failed';
+export type ConsensusAction = 'accept' | 'revise' | 'regenerate';
+export type MultiAgentSessionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ExpertOpinion {
+  opinionId: string;
   expert: ExpertType;
-  score: number;                  // 0-100 评分
-  issues: string[];               // 发现的问题列表
-  suggestions: string[];          // 改进建议
+  status: ExpertOpinionStatus;
+  score?: number;
+  accepted: boolean;
+  summary: string;
+  issues: string[];
+  suggestions: string[];
+  provider?: string;
+  model?: string;
+  aiTaskId?: string;
+  tokensInput: number;
+  tokensOutput: number;
   tokensUsed: number;
   durationMs: number;
+  errorMessage?: string;
 }
 
 export interface Consensus {
-  agreed: boolean;                // 是否达成共识
-  acceptanceRate: number;         // 接受率 (0-1)
-  averageScore: number;           // 平均评分
-  majorConcerns: string[];        // 主要关注点
-  action: 'accept' | 'revise' | 'regenerate';
+  agreed: boolean;
+  acceptanceRate: number;
+  averageScore: number;
+  successfulExperts: number;
+  failedExperts: number;
+  requiredSuccessfulExperts: number;
+  majorConcerns: string[];
+  mergedSuggestions: string[];
+  action: ConsensusAction;
 }
 
 export interface CollaborationRound {
   roundNumber: number;
+  inputDraftId: string;
+  inputDraftVersion: number;
+  inputContentHash: string;
+  outputDraftId?: string;
+  outputDraftVersion?: number;
+  outputContentHash?: string;
   expertOpinions: ExpertOpinion[];
   consensus: Consensus;
-  draftId: string;                // 本轮评审的草稿 ID
+  tokensInput: number;
+  tokensOutput: number;
+  tokensUsed: number;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+}
+
+export interface MultiAgentSessionRecord {
+  sessionId: string;
+  operationId: string;
+  novelId: string;
+  chapterId: string;
+  sourceDraftId: string;
+  sourceDraftVersion: number;
+  sourceContentHash: string;
+  expertTypes: ExpertType[];
+  maxRounds: number;
+  acceptanceThreshold: number;
+  minimumAverageScore: number;
+  minimumSuccessfulExperts: number;
+  status: MultiAgentSessionStatus;
+  currentRound: number;
+  accepted: boolean;
+  finalAction?: ConsensusAction;
+  finalDraftId?: string;
+  totalTokensInput: number;
+  totalTokensOutput: number;
+  totalTokensUsed: number;
+  durationMs: number;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface MultiAgentSessionBundle {
+  session: MultiAgentSessionRecord;
+  rounds: CollaborationRound[];
 }
 
 export interface MultiAgentReviewParams {
   novelId: string;
   chapterId: string;
   draftId: string;
-  experts: ExpertType[];          // 参与的专家类型
-  maxRounds?: number;             // 最大轮数（默认 3）
-  acceptanceThreshold?: number;   // 接受阈值（默认 0.7）
+  draftVersion?: number;
+  draftContent?: string;
+  contentHash?: string;
+  chapterTitle?: string;
+  chapterOutline?: string;
+  chapterGoal?: string;
+  experts: ExpertType[];
+  maxRounds?: number;
+  acceptanceThreshold?: number;
+  minimumAverageScore?: number;
+  minimumSuccessfulExperts?: number;
   operationId?: string;
+  signal?: AbortSignal;
 }
 
 export interface MultiAgentReviewResult {
-  success: boolean;
-  finalDraftId: string;           // 最终草稿 ID
-  rounds: CollaborationRound[];
+  success: true;
+  accepted: boolean;
+  finalAction: ConsensusAction;
+  finalDraft: ChapterDraft;
+  session: MultiAgentSessionBundle;
   totalTokensUsed: number;
   durationMs: number;
-  errorMessage?: string;
 }
 
-export interface ExpertCollaborationLog {
-  id: string;
+export interface ExpertReviewRequest {
+  expert: ExpertType;
   novelId: string;
   chapterId: string;
-  draftId: string;
+  chapterTitle: string;
+  chapterOutline: string;
+  chapterGoal: string;
+  draftContent: string;
   roundNumber: number;
-  expertType: ExpertType;
-  score: number;
-  issues: string;                 // JSON 字符串
-  suggestions: string;            // JSON 字符串
-  tokensUsed: number;
   operationId: string;
-  createdAt: string;
+  signal?: AbortSignal;
+}
+
+export interface DraftRevisionRequest {
+  action: Exclude<ConsensusAction, 'accept'>;
+  novelId: string;
+  chapterId: string;
+  chapterTitle: string;
+  chapterOutline: string;
+  chapterGoal: string;
+  draftContent: string;
+  majorConcerns: string[];
+  suggestions: string[];
+  roundNumber: number;
+  operationId: string;
+  signal?: AbortSignal;
+}
+
+export interface DraftRevisionResult {
+  content: string;
+  provider: string;
+  model: string;
+  aiTaskId?: string;
+  tokensInput: number;
+  tokensOutput: number;
+  tokensUsed: number;
+  durationMs: number;
 }

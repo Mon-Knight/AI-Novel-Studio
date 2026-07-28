@@ -12,6 +12,9 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/novels/') && pathname.endsWith('/workspace')) {
     return '写作工作台';
   }
+  if (pathname.startsWith('/novels/') && pathname.endsWith('/autonomous-planning')) {
+    return '自主创作规划';
+  }
   if (
     (pathname.startsWith('/novels/') && pathname.endsWith('/setting-suggestions')) ||
     (pathname.startsWith('/worlds/') && pathname.endsWith('/lore/suggestions'))
@@ -32,7 +35,9 @@ function TopBar() {
     <header className="app-topbar">
       <span className="topbar-title">{title}</span>
       <div className="topbar-actions">
-        <span className="text-sm text-muted">{APP_VERSION} · {APP_PLATFORM_LABEL}</span>
+        <span className="text-sm text-muted">
+          {APP_VERSION} · {APP_PLATFORM_LABEL}
+        </span>
       </div>
     </header>
   );

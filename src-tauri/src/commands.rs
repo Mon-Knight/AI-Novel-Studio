@@ -3,12 +3,19 @@ use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub mod ai_tasks;
 pub mod agent_plans;
+pub mod ai_tasks;
+pub mod app_update;
 pub mod artifacts;
+pub mod autonomous_scheduler;
+pub mod autonomous_story;
+pub mod content_transactions;
 pub mod drafts;
+pub mod memory;
+pub mod multi_agent;
 pub mod placements;
 pub mod recovery;
+pub mod reference_library;
 
 // ==================== Novel ====================
 
@@ -688,6 +695,17 @@ pub struct UpdateVolumeInput {
     pub status: Option<String>,
 }
 
+const VOLUME_STATUSES: [&str; 3] = ["planned", "writing", "completed"];
+
+fn validate_volume_update_input(input: &UpdateVolumeInput) -> Result<(), String> {
+    if let Some(status) = input.status.as_deref() {
+        if !VOLUME_STATUSES.contains(&status) {
+            return Err("volume_status_invalid".to_string());
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_volumes_by_novel_id(novel_id: String) -> Result<Vec<VolumeDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
@@ -742,28 +760,39 @@ pub fn create_volume(input: CreateVolumeInput) -> Result<VolumeDto, String> {
 pub fn update_volume(id: String, input: UpdateVolumeInput) -> Result<VolumeDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let mut sets = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref v) = input.title {
-        sets.push(format!("title = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.summary {
-        sets.push(format!("summary = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.goal {
-        sets.push(format!("goal = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.main_conflict {
-        sets.push(format!("main_conflict = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(v) = input.order_index {
-        sets.push(format!("order_index = {}", v));
-    }
-    if let Some(ref v) = input.status {
-        sets.push(format!("status = '{}'", v));
-    }
-    let sql = format!("UPDATE volumes SET {} WHERE id = '{}'", sets.join(", "), id);
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
-    get_volume_by_id_internal(&conn, &id)
+    update_volume_internal(&conn, &id, input, &now)
+}
+
+fn update_volume_internal(
+    conn: &Connection,
+    id: &str,
+    input: UpdateVolumeInput,
+    now: &str,
+) -> Result<VolumeDto, String> {
+    validate_volume_update_input(&input)?;
+    conn.execute(
+        "UPDATE volumes
+         SET title = COALESCE(?1, title),
+             summary = COALESCE(?2, summary),
+             goal = COALESCE(?3, goal),
+             main_conflict = COALESCE(?4, main_conflict),
+             order_index = COALESCE(?5, order_index),
+             status = COALESCE(?6, status),
+             updated_at = ?7
+         WHERE id = ?8",
+        params![
+            input.title.as_deref(),
+            input.summary.as_deref(),
+            input.goal.as_deref(),
+            input.main_conflict.as_deref(),
+            input.order_index,
+            input.status.as_deref(),
+            now,
+            id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    get_volume_by_id_internal(conn, id)
 }
 
 #[tauri::command]
@@ -849,6 +878,25 @@ pub struct UpdateChapterInput {
     pub order_index: Option<i64>,
     pub status: Option<String>,
     pub target_word_count: Option<i64>,
+}
+
+const CHAPTER_STATUSES: [&str; 7] = [
+    "not_started",
+    "outline_ready",
+    "draft_generated",
+    "editing",
+    "polished",
+    "adopted",
+    "summarized",
+];
+
+fn validate_chapter_update_input(input: &UpdateChapterInput) -> Result<(), String> {
+    if let Some(status) = input.status.as_deref() {
+        if !CHAPTER_STATUSES.contains(&status) {
+            return Err("chapter_status_invalid".to_string());
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -943,35 +991,41 @@ pub fn create_chapter(input: CreateChapterInput) -> Result<ChapterDto, String> {
 pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let mut sets = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref v) = input.volume_id {
-        sets.push(format!("volume_id = '{}'", v));
-    }
-    if let Some(ref v) = input.title {
-        sets.push(format!("title = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.outline {
-        sets.push(format!("outline = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.goal {
-        sets.push(format!("goal = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(v) = input.order_index {
-        sets.push(format!("order_index = {}", v));
-    }
-    if let Some(ref v) = input.status {
-        sets.push(format!("status = '{}'", v));
-    }
-    if let Some(v) = input.target_word_count {
-        sets.push(format!("target_word_count = {}", v));
-    }
-    let sql = format!(
-        "UPDATE chapters SET {} WHERE id = '{}'",
-        sets.join(", "),
-        id
-    );
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
-    get_chapter_by_id_internal(&conn, &id)
+    update_chapter_internal(&conn, &id, input, &now)
+}
+
+fn update_chapter_internal(
+    conn: &Connection,
+    id: &str,
+    input: UpdateChapterInput,
+    now: &str,
+) -> Result<ChapterDto, String> {
+    validate_chapter_update_input(&input)?;
+    conn.execute(
+        "UPDATE chapters
+         SET volume_id = COALESCE(?1, volume_id),
+             title = COALESCE(?2, title),
+             outline = COALESCE(?3, outline),
+             goal = COALESCE(?4, goal),
+             order_index = COALESCE(?5, order_index),
+             status = COALESCE(?6, status),
+             target_word_count = COALESCE(?7, target_word_count),
+             updated_at = ?8
+         WHERE id = ?9",
+        params![
+            input.volume_id.as_deref(),
+            input.title.as_deref(),
+            input.outline.as_deref(),
+            input.goal.as_deref(),
+            input.order_index,
+            input.status.as_deref(),
+            input.target_word_count,
+            now,
+            id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    get_chapter_by_id_internal(conn, id)
 }
 
 #[tauri::command]
@@ -988,19 +1042,17 @@ pub fn delete_chapter(id: String) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     let affected = transaction
         .execute(
-        "UPDATE chapters SET deleted_at = ?1 WHERE id = ?2",
-        params![now, &id],
-    ).map_err(|e| e.to_string())?;
+            "UPDATE chapters SET deleted_at = ?1 WHERE id = ?2",
+            params![now, &id],
+        )
+        .map_err(|e| e.to_string())?;
     if affected != 1 {
         return Err("TARGET_CHAPTER_NOT_FOUND: 章节删除未命中唯一目标".to_string());
     }
-    let recovery_document_id = crate::repositories::recovery_repository::get(
-        &transaction,
-        &novel_id,
-        &id,
-    )
-    .map_err(|error| error.to_string())?
-    .and_then(|snapshot| snapshot.large_text_ref_id);
+    let recovery_document_id =
+        crate::repositories::recovery_repository::get(&transaction, &novel_id, &id)
+            .map_err(|error| error.to_string())?
+            .and_then(|snapshot| snapshot.large_text_ref_id);
     crate::repositories::recovery_repository::delete_exact(&transaction, &novel_id, &id)
         .map_err(|error| error.to_string())?;
     if let Some(document_id) = recovery_document_id {
@@ -1136,17 +1188,45 @@ pub(crate) fn get_draft_by_id_and_chapter_internal(
 }
 
 #[tauri::command]
-pub fn get_drafts_by_chapter_id(chapter_id: String) -> Result<Vec<ChapterDraftDto>, String> {
+pub fn get_drafts_by_chapter_id(
+    chapter_id: String,
+    page: Option<i64>,
+    size: Option<i64>,
+) -> Result<Vec<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC")
-        .map_err(|e| e.to_string())?;
-    let items = stmt
-        .query_map(params![chapter_id], map_draft_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    let paged = page.is_some() || size.is_some();
+    let page = page.unwrap_or(1).max(1);
+    let size = size.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * size;
+    let sql = if paged {
+        "SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no DESC LIMIT ?2 OFFSET ?3"
+    } else {
+        "SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC"
+    };
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let items = if paged {
+        stmt.query_map(params![chapter_id, size, offset], map_draft_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    } else {
+        stmt.query_map(params![chapter_id], map_draft_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
     Ok(items)
+}
+
+#[tauri::command]
+pub fn count_drafts_by_chapter_id(chapter_id: String) -> Result<i64, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT COUNT(*) FROM chapter_drafts WHERE chapter_id = ?1",
+        params![chapter_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1161,6 +1241,37 @@ pub fn get_latest_draft_by_chapter_id(
         Ok(draft) => Ok(Some(draft)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_adopted_draft_by_chapter_id(
+    chapter_id: String,
+) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 AND is_adopted = 1 ORDER BY version_no DESC LIMIT 1")
+        .map_err(|e| e.to_string())?;
+    match stmt.query_row(params![chapter_id], map_draft_row) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_draft_by_chapter_and_id(
+    chapter_id: String,
+    draft_id: String,
+) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT d.id, d.novel_id, d.chapter_id, d.title, d.content, d.source, d.version_no, d.word_count, d.is_adopted, d.ai_task_id, d.note, d.large_text_ref_id, d.created_at, d.updated_at FROM chapter_drafts AS d INNER JOIN chapters AS c ON c.id = d.chapter_id AND c.novel_id = d.novel_id WHERE d.id = ?1 AND d.chapter_id = ?2 AND c.deleted_at IS NULL")
+        .map_err(|e| e.to_string())?;
+    match stmt.query_row(params![draft_id, chapter_id], map_draft_row) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -1403,11 +1514,12 @@ fn adopt_chapter_draft_internal(
         .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
 
     let word_count = validate_live_draft_target_internal(&transaction, draft_id, chapter_id)?;
-    let previous_adopted_draft_id = transaction
+    let (chapter_novel_id, previous_adopted_draft_id) = transaction
         .query_row(
-            "SELECT adopted_draft_id FROM chapters WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT novel_id, adopted_draft_id FROM chapters
+             WHERE id = ?1 AND deleted_at IS NULL",
             params![chapter_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .map_err(|e| format!("adopt_previous_draft_lookup_failed: {}", e))?;
     let adopted_draft_changed = previous_adopted_draft_id.as_deref() != Some(draft_id);
@@ -1443,6 +1555,14 @@ fn adopt_chapter_draft_internal(
 
     if adopted_draft_changed {
         expire_chapter_context_rows(&transaction, chapter_id, &now)?;
+        crate::services::memory_service::invalidate_for_adopted_draft_change(
+            &transaction,
+            &chapter_novel_id,
+            chapter_id,
+            draft_id,
+            &now,
+        )
+        .map_err(|e| format!("adopt_memory_invalidation_failed: {}", e))?;
     }
 
     let adopted = get_draft_by_id_and_chapter_internal(&transaction, draft_id, chapter_id)
@@ -2354,6 +2474,12 @@ pub struct AiTaskRecordDto {
     pub token_input: Option<i64>,
     pub token_output: Option<i64>,
     pub token_total: Option<i64>,
+    pub input_price_per_million_tokens: Option<f64>,
+    pub output_price_per_million_tokens: Option<f64>,
+    pub cost_estimate: Option<f64>,
+    pub cost_currency: Option<String>,
+    pub cost_status: Option<String>,
+    pub pricing_source: Option<String>,
     pub duration_ms: Option<i64>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -2371,6 +2497,10 @@ pub struct CreateAiTaskRecordInput {
     pub runtime_mode: Option<String>,
     pub provider: Option<String>,
     pub model_name: Option<String>,
+    pub input_price_per_million_tokens: Option<f64>,
+    pub output_price_per_million_tokens: Option<f64>,
+    pub cost_currency: Option<String>,
+    pub pricing_source: Option<String>,
     pub input_summary: Option<String>,
     pub started_at: Option<String>,
     pub created_at: String,
@@ -2387,6 +2517,20 @@ pub struct MarkAiTaskSucceededInput {
     pub token_total: Option<i64>,
     pub duration_ms: Option<i64>,
     pub finished_at: String,
+}
+
+fn validate_mark_ai_task_succeeded_input(input: &MarkAiTaskSucceededInput) -> Result<(), String> {
+    for (field, value) in [
+        ("tokenInput", input.token_input),
+        ("tokenOutput", input.token_output),
+        ("tokenTotal", input.token_total),
+        ("durationMs", input.duration_ms),
+    ] {
+        if value.is_some_and(|number| number < 0) {
+            return Err(format!("{field} must be non-negative"));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -2439,15 +2583,21 @@ fn map_ai_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTaskRecordDto>
         token_input: row.get(14)?,
         token_output: row.get(15)?,
         token_total: row.get(16)?,
-        duration_ms: row.get(17)?,
-        started_at: row.get(18)?,
-        finished_at: row.get(19)?,
-        created_at: row.get(20)?,
+        input_price_per_million_tokens: row.get(17)?,
+        output_price_per_million_tokens: row.get(18)?,
+        cost_estimate: row.get(19)?,
+        cost_currency: row.get(20)?,
+        cost_status: row.get(21)?,
+        pricing_source: row.get(22)?,
+        duration_ms: row.get(23)?,
+        started_at: row.get(24)?,
+        finished_at: row.get(25)?,
+        created_at: row.get(26)?,
     })
 }
 
 fn ai_task_select_sql() -> &'static str {
-    "SELECT id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, prompt_template_id, input_summary, prompt_snapshot, result_text, result_json, error_message, token_input, token_output, token_total, duration_ms, started_at, finished_at, created_at FROM ai_task_records"
+    "SELECT id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, prompt_template_id, input_summary, prompt_snapshot, result_text, result_json, error_message, token_input, token_output, token_total, input_price_per_million_tokens, output_price_per_million_tokens, cost_estimate, cost_currency, cost_status, pricing_source, duration_ms, started_at, finished_at, created_at FROM ai_task_records"
 }
 
 fn ai_task_db_path_for_log() -> String {
@@ -2490,6 +2640,76 @@ fn ensure_ai_task_records_table(conn: &Connection, db_path: &str) -> Result<(), 
 fn count_ai_task_records_in_conn(conn: &Connection) -> Result<i64, String> {
     conn.query_row("SELECT COUNT(*) FROM ai_task_records", [], |row| row.get(0))
         .map_err(|e| e.to_string())
+}
+
+const AI_TASK_TYPE_FILTERS: &[&str] = &[
+    "connection_test",
+    "setting_expand",
+    "setting_suggestion_generate",
+    "outline_generate",
+    "volume_outline_generate",
+    "context_summarize",
+    "setting_structure",
+    "rule_structure",
+    "protagonist_structure",
+    "volume_outline_expand",
+    "chapter_outline_generate",
+    "style_analyze",
+    "character_generate",
+    "event_suggest",
+    "chapter_generate",
+    "chapter_rewrite",
+    "chapter_polish",
+    "quality_check",
+    "quality_fix",
+    "multi_agent_review",
+    "multi_agent_revision",
+    "autonomous_plot_plan",
+    "autonomous_character_evolution",
+    "autonomous_world_build",
+    "autonomous_conflict_generate",
+    "autonomous_pacing_control",
+    "autonomous_chapter_batch",
+    "chapter_summarize",
+    "context_update",
+];
+const AI_TASK_STATUS_FILTERS: &[&str] = &["pending", "running", "succeeded", "failed", "cancelled"];
+
+fn normalize_ai_task_filter(
+    value: Option<String>,
+    allowed: &[&str],
+    label: &str,
+) -> Result<Option<String>, String> {
+    let value = value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty());
+    if let Some(candidate) = value.as_deref() {
+        if !allowed.contains(&candidate) {
+            return Err(format!("invalid AI task {} filter", label));
+        }
+    }
+    Ok(value)
+}
+
+fn normalize_ai_task_type_filter(value: Option<String>) -> Result<Option<String>, String> {
+    normalize_ai_task_filter(value, AI_TASK_TYPE_FILTERS, "type")
+}
+
+fn normalize_ai_task_status_filter(value: Option<String>) -> Result<Option<String>, String> {
+    normalize_ai_task_filter(value, AI_TASK_STATUS_FILTERS, "status")
+}
+
+fn count_ai_task_records_filtered_in_conn(
+    conn: &Connection,
+    task_type: Option<&str>,
+    status: Option<&str>,
+) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM ai_task_records WHERE (?1 IS NULL OR task_type = ?1) AND (?2 IS NULL OR status = ?2)",
+        params![task_type, status],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn count_ai_task_records_by_ids(conn: &Connection, ids: &[String]) -> Result<i64, String> {
@@ -2806,12 +3026,65 @@ fn clear_ai_task_records_internal(
     })
 }
 
+fn validate_ai_task_pricing(input: &CreateAiTaskRecordInput) -> Result<(), String> {
+    const MAX_PRICE_PER_MILLION: f64 = 1_000_000.0;
+    let valid_price = |value: Option<f64>| {
+        value
+            .is_none_or(|price| price.is_finite() && (0.0..=MAX_PRICE_PER_MILLION).contains(&price))
+    };
+    if !valid_price(input.input_price_per_million_tokens)
+        || !valid_price(input.output_price_per_million_tokens)
+    {
+        return Err("AI task pricing must be finite and non-negative".to_string());
+    }
+
+    match input.pricing_source.as_deref() {
+        None => {
+            if input.input_price_per_million_tokens.is_some()
+                || input.output_price_per_million_tokens.is_some()
+                || input.cost_currency.is_some()
+            {
+                return Err(
+                    "AI task pricing source is required when pricing is present".to_string()
+                );
+            }
+        }
+        Some("mock") => {
+            if input.input_price_per_million_tokens != Some(0.0)
+                || input.output_price_per_million_tokens != Some(0.0)
+                || input.cost_currency.as_deref() != Some("USD")
+            {
+                return Err("Mock AI task pricing must be zero USD".to_string());
+            }
+        }
+        Some("user_configured") => {
+            if input.input_price_per_million_tokens.is_none()
+                || input.output_price_per_million_tokens.is_none()
+                || input.cost_currency.as_deref() != Some("USD")
+            {
+                return Err("Configured AI task pricing requires both USD token rates".to_string());
+            }
+        }
+        Some("unconfigured") => {
+            if input.input_price_per_million_tokens.is_some()
+                || input.output_price_per_million_tokens.is_some()
+                || input.cost_currency.as_deref() != Some("USD")
+            {
+                return Err("Unconfigured AI task pricing cannot contain token rates".to_string());
+            }
+        }
+        Some(_) => return Err("Unsupported AI task pricing source".to_string()),
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRecordDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    validate_ai_task_pricing(&input)?;
     let id = input.id.clone();
     conn.execute(
-        "INSERT OR REPLACE INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        "INSERT OR REPLACE INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_price_per_million_tokens, output_price_per_million_tokens, cost_currency, pricing_source, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![
             input.id,
             input.novel_id,
@@ -2821,6 +3094,10 @@ pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRec
             input.runtime_mode,
             input.provider,
             input.model_name,
+            input.input_price_per_million_tokens,
+            input.output_price_per_million_tokens,
+            input.cost_currency,
+            input.pricing_source,
             input.input_summary,
             input.started_at,
             input.created_at,
@@ -2833,12 +3110,35 @@ pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRec
 #[tauri::command]
 pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    mark_ai_task_succeeded_internal(&conn, &id, &input)?;
+    Ok(())
+}
+
+fn mark_ai_task_succeeded_internal(
+    conn: &Connection,
+    id: &str,
+    input: &MarkAiTaskSucceededInput,
+) -> Result<usize, String> {
+    validate_mark_ai_task_succeeded_input(input)?;
     conn.execute(
-        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6, duration_ms = ?7, finished_at = ?8 WHERE id = ?9 AND status IN ('pending', 'running')",
+        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6,
+         cost_estimate = CASE
+           WHEN pricing_source = 'mock' THEN 0.0
+           WHEN input_price_per_million_tokens IS NOT NULL AND output_price_per_million_tokens IS NOT NULL AND ?4 IS NOT NULL AND ?5 IS NOT NULL
+             THEN ROUND(((?4 * input_price_per_million_tokens) + (?5 * output_price_per_million_tokens)) / 1000000.0, 8)
+           ELSE NULL
+         END,
+         cost_status = CASE
+           WHEN pricing_source = 'mock' THEN 'mock'
+           WHEN input_price_per_million_tokens IS NULL OR output_price_per_million_tokens IS NULL THEN 'unpriced'
+           WHEN ?4 IS NULL OR ?5 IS NULL THEN 'usage_missing'
+           ELSE 'complete'
+         END,
+         duration_ms = ?7, finished_at = ?8 WHERE id = ?9 AND status IN ('pending', 'running')",
         params![
-            input.result_text,
-            input.prompt_snapshot,
-            input.result_json,
+            &input.result_text,
+            &input.prompt_snapshot,
+            &input.result_json,
             input.token_input,
             input.token_output,
             input.token_total,
@@ -2846,8 +3146,7 @@ pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Re
             input.finished_at,
             id,
         ],
-    ).map_err(|e| e.to_string())?;
-    Ok(())
+    ).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2893,28 +3192,36 @@ pub fn mark_ai_task_cancelled(
 pub fn get_ai_task_records(
     page: Option<i64>,
     size: Option<i64>,
+    task_type: Option<String>,
+    status: Option<String>,
 ) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let db_path = ai_task_db_path_for_log();
     let page = page.unwrap_or(1).max(1);
     let size = size.unwrap_or(20).clamp(1, 500);
     let offset = (page - 1) * size;
+    let task_type = normalize_ai_task_type_filter(task_type)?;
+    let status = normalize_ai_task_status_filter(status)?;
     let sql = format!(
-        "{} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+        "{} WHERE (?3 IS NULL OR task_type = ?3) AND (?4 IS NULL OR status = ?4) ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
         ai_task_select_sql()
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let result = stmt
-        .query_map(params![size, offset], map_ai_task_row)
+        .query_map(
+            params![size, offset, task_type.as_deref(), status.as_deref()],
+            map_ai_task_row,
+        )
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
     if let Ok(items) = &result {
         println!(
-            "[AI_TASK_READ_RUST] get_ai_task_records db_path={} page={} size={} returned={}",
+            "[AI_TASK_READ_RUST] get_ai_task_records db_path={} page={} size={} filtered={} returned={}",
             db_path,
             page,
             size,
+            task_type.is_some() || status.is_some(),
             items.len()
         );
     }
@@ -2922,13 +3229,21 @@ pub fn get_ai_task_records(
 }
 
 #[tauri::command]
-pub fn count_ai_task_records() -> Result<i64, String> {
+pub fn count_ai_task_records(
+    task_type: Option<String>,
+    status: Option<String>,
+) -> Result<i64, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let db_path = ai_task_db_path_for_log();
-    let count = count_ai_task_records_in_conn(&conn)?;
+    let task_type = normalize_ai_task_type_filter(task_type)?;
+    let status = normalize_ai_task_status_filter(status)?;
+    let count =
+        count_ai_task_records_filtered_in_conn(&conn, task_type.as_deref(), status.as_deref())?;
     println!(
-        "[AI_TASK_READ_RUST] count_ai_task_records db_path={} count={}",
-        db_path, count
+        "[AI_TASK_READ_RUST] count_ai_task_records db_path={} filtered={} count={}",
+        db_path,
+        task_type.is_some() || status.is_some(),
+        count
     );
     Ok(count)
 }
@@ -3069,6 +3384,12 @@ pub struct StyleProfileDto {
     pub raw_config_json: Option<String>,
     pub is_active: bool,
     pub source_type: String,
+    pub source_asset_id: Option<String>,
+    pub source_reference_work_id: Option<String>,
+    pub source_reference_import_id: Option<String>,
+    pub source_content_sha256: Option<String>,
+    pub source_state: String,
+    pub analysis_metadata_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -3094,10 +3415,17 @@ pub struct SaveStyleProfileInput {
     pub style_summary: Option<String>,
     pub raw_config_json: Option<String>,
     pub source_type: Option<String>,
+    pub source_asset_id: Option<String>,
+    pub source_reference_work_id: Option<String>,
+    pub source_reference_import_id: Option<String>,
+    pub source_content_sha256: Option<String>,
+    pub source_state: Option<String>,
+    pub analysis_metadata_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // Kept for backwards-compatible IPC payload deserialization.
 pub struct UpdateStyleProfileInput {
     pub id: String,
     pub project_id: String,
@@ -3152,11 +3480,17 @@ fn map_style_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StyleProfi
         source_type: row.get(19)?,
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
+        source_asset_id: row.get(22)?,
+        source_reference_work_id: row.get(23)?,
+        source_reference_import_id: row.get(24)?,
+        source_content_sha256: row.get(25)?,
+        source_state: row.get(26)?,
+        analysis_metadata_json: row.get(27)?,
     })
 }
 
 fn style_select_sql() -> &'static str {
-    "SELECT id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at FROM style_profiles"
+    "SELECT id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at, source_asset_id, source_reference_work_id, source_reference_import_id, source_content_sha256, source_state, analysis_metadata_json FROM style_profiles"
 }
 
 #[tauri::command]
@@ -3213,10 +3547,79 @@ pub fn save_style_profile(
     let forbidden_json = serde_json::to_string(&input.forbidden_styles.unwrap_or_default())
         .unwrap_or_else(|_| "[]".to_string());
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
+    let source_state = input.source_state.clone().unwrap_or_else(|| {
+        if input.source_reference_import_id.is_some() {
+            "available".to_string()
+        } else {
+            "none".to_string()
+        }
+    });
+    if !matches!(
+        source_state.as_str(),
+        "none" | "available" | "outdated" | "missing" | "legacy_unverified"
+    ) {
+        return Err("REFERENCE_INPUT_INVALID: invalid style source state".to_string());
+    }
+    if let Some(metadata) = input.analysis_metadata_json.as_deref() {
+        let parsed = serde_json::from_str::<serde_json::Value>(metadata)
+            .map_err(|_| "REFERENCE_INPUT_INVALID: invalid analysis metadata".to_string())?;
+        if !parsed.is_object() || metadata.len() > 500_000 {
+            return Err("REFERENCE_INPUT_INVALID: invalid analysis metadata".to_string());
+        }
+    }
+    let reference_fields = [
+        input.source_reference_work_id.as_deref(),
+        input.source_reference_import_id.as_deref(),
+        input.source_content_sha256.as_deref(),
+    ];
+    let populated_reference_fields = reference_fields
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    if populated_reference_fields != 0 && populated_reference_fields != reference_fields.len() {
+        return Err("REFERENCE_INPUT_INVALID: incomplete style reference identity".to_string());
+    }
+    if populated_reference_fields == reference_fields.len() {
+        let source_hash = input.source_content_sha256.as_deref().unwrap_or_default();
+        if source_hash.len() != 64
+            || !source_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("REFERENCE_INPUT_INVALID: invalid style source hash".to_string());
+        }
+        let valid_scope: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM reference_imports i
+                 INNER JOIN reference_works w
+                   ON w.id = i.reference_work_id AND w.novel_id = i.novel_id
+                 WHERE w.novel_id = ?1 AND w.id = ?2 AND i.id = ?3 AND i.source_sha256 = ?4
+                   AND (?5 <> 'available' OR i.is_current = 1)",
+                params![
+                    input.project_id,
+                    input.source_reference_work_id,
+                    input.source_reference_import_id,
+                    input.source_content_sha256,
+                    source_state,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if valid_scope != 1 {
+            return Err(
+                "REFERENCE_SCOPE_MISMATCH: style reference does not belong to project".to_string(),
+            );
+        }
+    }
+    let source_state_update = if populated_reference_fields == reference_fields.len() {
+        Some(source_state.clone())
+    } else {
+        input.source_state.clone()
+    };
 
     if let Some(existing_id) = id {
         conn.execute(
-            "UPDATE style_profiles SET name = ?1, description = ?2, narrative_perspective = ?3, tone = ?4, pace = ?5, sentence_style = ?6, dialogue_ratio = ?7, description_ratio = ?8, psychological_ratio = ?9, battle_style = ?10, battle_intensity = ?11, emotion_tendency = ?12, chapter_ending = ?13, forbidden_styles = ?14, style_summary = ?15, raw_config_json = ?16, source_type = ?17, updated_at = ?18 WHERE id = ?19 AND novel_id = ?20",
+            "UPDATE style_profiles SET name = ?1, description = ?2, narrative_perspective = ?3, tone = ?4, pace = ?5, sentence_style = ?6, dialogue_ratio = ?7, description_ratio = ?8, psychological_ratio = ?9, battle_style = ?10, battle_intensity = ?11, emotion_tendency = ?12, chapter_ending = ?13, forbidden_styles = ?14, style_summary = ?15, raw_config_json = ?16, source_type = ?17, updated_at = ?18, source_asset_id = COALESCE(?21, source_asset_id), source_reference_work_id = COALESCE(?22, source_reference_work_id), source_reference_import_id = COALESCE(?23, source_reference_import_id), source_content_sha256 = COALESCE(?24, source_content_sha256), source_state = COALESCE(?25, source_state), analysis_metadata_json = COALESCE(?26, analysis_metadata_json) WHERE id = ?19 AND novel_id = ?20",
             params![
                 &input.name, &input.description,
                 &input.narrative_perspective, &input.tone, &input.pace, &input.sentence_style,
@@ -3225,13 +3628,16 @@ pub fn save_style_profile(
                 &input.emotion_tendency, &input.chapter_ending,
                 &forbidden_json, &input.style_summary, &input.raw_config_json,
                 &source_type, &now, &existing_id, &input.project_id,
+                &input.source_asset_id, &input.source_reference_work_id,
+                &input.source_reference_import_id, &input.source_content_sha256,
+                &source_state_update, &input.analysis_metadata_json,
             ],
         ).map_err(|e| e.to_string())?;
         get_style_profile_by_id_internal(&conn, &existing_id)
     } else {
         let new_id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO style_profiles (id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,0,?18,?19,?20,?20)",
+            "INSERT INTO style_profiles (id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at, source_asset_id, source_reference_work_id, source_reference_import_id, source_content_sha256, source_state, analysis_metadata_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,0,?18,?19,?20,?20,?21,?22,?23,?24,?25,?26)",
             params![
                 &new_id, &input.project_id, &input.name, &input.description,
                 &input.narrative_perspective, &input.tone, &input.pace, &input.sentence_style,
@@ -3240,6 +3646,9 @@ pub fn save_style_profile(
                 &input.emotion_tendency, &input.chapter_ending,
                 &forbidden_json, &input.style_summary, &input.raw_config_json,
                 &source_type, &now,
+                &input.source_asset_id, &input.source_reference_work_id,
+                &input.source_reference_import_id, &input.source_content_sha256,
+                &source_state, &input.analysis_metadata_json,
             ],
         ).map_err(|e| e.to_string())?;
         get_style_profile_by_id_internal(&conn, &new_id)
@@ -6957,6 +7366,236 @@ mod tests {
         assert_eq!(count_words(" \n\t，。！？ "), 0);
     }
 
+    fn create_volume_chapter_update_test_schema(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE volumes (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT,
+                goal TEXT,
+                main_conflict TEXT,
+                order_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE chapters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                volume_id TEXT,
+                title TEXT NOT NULL,
+                outline TEXT,
+                goal TEXT,
+                order_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                word_count INTEGER NOT NULL,
+                target_word_count INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (volume_id) REFERENCES volumes(id)
+            );
+
+            INSERT INTO volumes
+                (id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at)
+            VALUES
+                ('volume-a', 'novel-a', 'volume-original-a', NULL, NULL, NULL, 0, 'planned', 'before', 'before'),
+                ('volume-b', 'novel-a', 'volume-original-b', NULL, NULL, NULL, 1, 'planned', 'before', 'before');
+
+            INSERT INTO chapters
+                (id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at)
+            VALUES
+                ('chapter-a', 'novel-a', 'volume-a', 'chapter-original-a', NULL, NULL, 0, 'not_started', NULL, 0, 3000, 'before', 'before'),
+                ('chapter-b', 'novel-a', 'volume-b', 'chapter-original-b', NULL, NULL, 1, 'not_started', NULL, 0, 3000, 'before', 'before');
+            ",
+        )
+    }
+
+    #[test]
+    fn update_volume_binds_ipc_values_and_rejects_invalid_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_volume_chapter_update_test_schema(&conn).unwrap();
+
+        let injection_result = update_volume_internal(
+            &conn,
+            "volume-a' OR 1=1 --",
+            UpdateVolumeInput {
+                title: Some("injected".to_string()),
+                summary: None,
+                goal: None,
+                main_conflict: None,
+                order_index: None,
+                status: None,
+            },
+            "after-injection",
+        );
+        assert!(injection_result.is_err());
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM volumes WHERE title LIKE 'volume-original-%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 2);
+
+        let updated = update_volume_internal(
+            &conn,
+            "volume-a",
+            UpdateVolumeInput {
+                title: Some("Writer's volume".to_string()),
+                summary: None,
+                goal: None,
+                main_conflict: None,
+                order_index: Some(2),
+                status: Some("writing".to_string()),
+            },
+            "after-valid-update",
+        )
+        .unwrap();
+        assert_eq!(updated.title, "Writer's volume");
+        assert_eq!(updated.status, "writing");
+        assert_eq!(updated.order_index, 2);
+
+        let invalid_status = update_volume_internal(
+            &conn,
+            "volume-a",
+            UpdateVolumeInput {
+                title: Some("must-not-apply".to_string()),
+                summary: None,
+                goal: None,
+                main_conflict: None,
+                order_index: None,
+                status: Some("writing', title = 'injected".to_string()),
+            },
+            "after-invalid-status",
+        )
+        .unwrap_err();
+        assert_eq!(invalid_status, "volume_status_invalid");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM volumes WHERE id = 'volume-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Writer's volume");
+    }
+
+    #[test]
+    fn update_chapter_binds_ipc_values_and_rejects_invalid_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_volume_chapter_update_test_schema(&conn).unwrap();
+
+        let injection_result = update_chapter_internal(
+            &conn,
+            "chapter-a' OR 1=1 --",
+            UpdateChapterInput {
+                volume_id: None,
+                title: Some("injected".to_string()),
+                outline: None,
+                goal: None,
+                order_index: None,
+                status: None,
+                target_word_count: None,
+            },
+            "after-injection",
+        );
+        assert!(injection_result.is_err());
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chapters WHERE title LIKE 'chapter-original-%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 2);
+
+        let injected_volume_id = "volume-b' OR 1=1 --";
+        let volume_injection = update_chapter_internal(
+            &conn,
+            "chapter-a",
+            UpdateChapterInput {
+                volume_id: Some(injected_volume_id.to_string()),
+                title: Some("must-not-apply".to_string()),
+                outline: None,
+                goal: None,
+                order_index: Some(2),
+                status: Some("editing".to_string()),
+                target_word_count: Some(4500),
+            },
+            "after-volume-injection",
+        );
+        assert!(volume_injection.is_err());
+        let unchanged_title: String = conn
+            .query_row(
+                "SELECT title FROM chapters WHERE id = 'chapter-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unchanged_title, "chapter-original-a");
+
+        let updated = update_chapter_internal(
+            &conn,
+            "chapter-a",
+            UpdateChapterInput {
+                volume_id: Some("volume-b".to_string()),
+                title: Some("Editor's chapter".to_string()),
+                outline: Some("The hero's choice".to_string()),
+                goal: None,
+                order_index: Some(2),
+                status: Some("editing".to_string()),
+                target_word_count: Some(4500),
+            },
+            "after-valid-update",
+        )
+        .unwrap();
+        assert_eq!(updated.volume_id.as_deref(), Some("volume-b"));
+        assert_eq!(updated.title, "Editor's chapter");
+        assert_eq!(updated.outline.as_deref(), Some("The hero's choice"));
+        assert_eq!(updated.status, "editing");
+        assert_eq!(updated.target_word_count, Some(4500));
+        let other_title: String = conn
+            .query_row(
+                "SELECT title FROM chapters WHERE id = 'chapter-b'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(other_title, "chapter-original-b");
+
+        let invalid_status = update_chapter_internal(
+            &conn,
+            "chapter-a",
+            UpdateChapterInput {
+                volume_id: None,
+                title: Some("must-not-apply".to_string()),
+                outline: None,
+                goal: None,
+                order_index: None,
+                status: Some("editing', title = 'injected".to_string()),
+                target_word_count: None,
+            },
+            "after-invalid-status",
+        )
+        .unwrap_err();
+        assert_eq!(invalid_status, "chapter_status_invalid");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM chapters WHERE id = 'chapter-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Editor's chapter");
+    }
+
     #[test]
     fn create_novel_command_returns_without_relocking_database_mutex() {
         crate::db::init_test_database();
@@ -7113,6 +7752,17 @@ mod tests {
                 id TEXT PRIMARY KEY,
                 chapter_id TEXT NOT NULL,
                 is_expired INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE memory_documents (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                invalidated_at TEXT,
+                invalidation_reason TEXT,
                 updated_at TEXT NOT NULL
             );
             ",
@@ -7722,6 +8372,74 @@ mod tests {
             get_test_chapter_context_expired(&conn, "chapter-a")?,
             (1, 1)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn adopting_different_draft_invalidates_old_memory_atomically(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "old body", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "new body", false)?;
+        conn.execute(
+            "INSERT INTO memory_documents
+                (id, novel_id, chapter_id, adopted_draft_id, status, updated_at)
+             VALUES ('memory-old', 'novel-1', 'chapter-a', 'draft-old', 'active', 'before')",
+            [],
+        )?;
+
+        adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")?;
+
+        let memory: (String, Option<String>) = conn.query_row(
+            "SELECT status, invalidation_reason FROM memory_documents WHERE id = 'memory-old'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(memory.0, "invalidated");
+        assert_eq!(memory.1.as_deref(), Some("adopted_draft_changed"));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_invalidation_failure_rolls_back_adoption() -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "old body", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "new body", false)?;
+        conn.execute(
+            "INSERT INTO memory_documents
+                (id, novel_id, chapter_id, adopted_draft_id, status, updated_at)
+             VALUES ('memory-old', 'novel-1', 'chapter-a', 'draft-old', 'active', 'before')",
+            [],
+        )?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_memory_invalidation
+             BEFORE UPDATE OF status ON memory_documents
+             BEGIN SELECT RAISE(ABORT, 'forced memory failure'); END;",
+        )?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")
+            .expect_err("memory invalidation failure must roll back adoption");
+
+        assert!(
+            error.starts_with("adopt_memory_invalidation_failed:"),
+            "{error}"
+        );
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-old")
+        );
+        let status: String = conn.query_row(
+            "SELECT status FROM memory_documents WHERE id = 'memory-old'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(status, "active");
         Ok(())
     }
 
@@ -9755,6 +10473,250 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(succeeded, "succeeded");
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_success_calculates_cost_from_frozen_pricing(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                result_text TEXT,
+                prompt_snapshot TEXT,
+                result_json TEXT,
+                error_message TEXT,
+                token_input INTEGER,
+                token_output INTEGER,
+                token_total INTEGER,
+                input_price_per_million_tokens REAL,
+                output_price_per_million_tokens REAL,
+                cost_estimate REAL,
+                cost_status TEXT,
+                pricing_source TEXT,
+                duration_ms INTEGER,
+                finished_at TEXT
+            );
+            INSERT INTO ai_task_records
+                (id, status, input_price_per_million_tokens, output_price_per_million_tokens, pricing_source)
+            VALUES ('configured', 'running', 2.0, 8.0, 'user_configured');
+            INSERT INTO ai_task_records (id, status, pricing_source)
+            VALUES ('unpriced', 'running', 'unconfigured');
+            INSERT INTO ai_task_records
+                (id, status, input_price_per_million_tokens, output_price_per_million_tokens, pricing_source)
+            VALUES ('mock', 'running', 0.0, 0.0, 'mock');
+            ",
+        )?;
+
+        let success = |input_tokens, output_tokens| MarkAiTaskSucceededInput {
+            result_text: Some("ok".to_string()),
+            prompt_snapshot: None,
+            result_json: None,
+            token_input: input_tokens,
+            token_output: output_tokens,
+            token_total: input_tokens
+                .zip(output_tokens)
+                .map(|(left, right)| left + right),
+            duration_ms: Some(10),
+            finished_at: "2026-07-28T10:00:00Z".to_string(),
+        };
+        assert_eq!(
+            mark_ai_task_succeeded_internal(
+                &conn,
+                "configured",
+                &success(Some(250_000), Some(125_000)),
+            )?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_succeeded_internal(&conn, "unpriced", &success(Some(10), Some(20)),)?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_succeeded_internal(&conn, "mock", &success(None, None))?,
+            1
+        );
+
+        let configured: (f64, String) = conn.query_row(
+            "SELECT cost_estimate, cost_status FROM ai_task_records WHERE id = 'configured'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(configured, (1.5, "complete".to_string()));
+        let unpriced: (Option<f64>, String) = conn.query_row(
+            "SELECT cost_estimate, cost_status FROM ai_task_records WHERE id = 'unpriced'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(unpriced, (None, "unpriced".to_string()));
+        let mock: (f64, String) = conn.query_row(
+            "SELECT cost_estimate, cost_status FROM ai_task_records WHERE id = 'mock'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(mock, (0.0, "mock".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_success_rejects_negative_usage_and_duration() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (field, token_input, token_output, token_total, duration_ms) in [
+            ("tokenInput", Some(-1), Some(0), Some(0), Some(0)),
+            ("tokenOutput", Some(0), Some(-1), Some(0), Some(0)),
+            ("tokenTotal", Some(0), Some(0), Some(-1), Some(0)),
+            ("durationMs", Some(0), Some(0), Some(0), Some(-1)),
+        ] {
+            let input = MarkAiTaskSucceededInput {
+                result_text: Some("must-not-persist".to_string()),
+                prompt_snapshot: None,
+                result_json: None,
+                token_input,
+                token_output,
+                token_total,
+                duration_ms,
+                finished_at: "2026-07-28T10:00:00Z".to_string(),
+            };
+            assert_eq!(
+                mark_ai_task_succeeded_internal(&conn, "task", &input).unwrap_err(),
+                format!("{field} must be non-negative")
+            );
+        }
+    }
+
+    #[test]
+    fn save_style_profile_rejects_cross_novel_reference_binding(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        crate::db::init_test_database();
+        let suffix = uuid::Uuid::new_v4().to_string();
+        let source_novel_id = format!("style-source-novel-{suffix}");
+        let target_novel_id = format!("style-target-novel-{suffix}");
+        let work_id = format!("style-reference-work-{suffix}");
+        let import_id = format!("style-reference-import-{suffix}");
+        let profile_name = format!("cross-scope-profile-{suffix}");
+        let source_hash = "a".repeat(64);
+        {
+            let connection = crate::db::get_connection()
+                .lock()
+                .expect("lock style reference test database");
+            connection.execute(
+                "INSERT INTO novels (id, title, created_at, updated_at)
+                 VALUES (?1, 'source novel', 'now', 'now'), (?2, 'target novel', 'now', 'now')",
+                params![source_novel_id, target_novel_id],
+            )?;
+            connection.execute(
+                "INSERT INTO reference_works
+                    (id, novel_id, title, purpose, revision, created_at, updated_at)
+                 VALUES (?1, ?2, 'reference', 'style', 1, 'now', 'now')",
+                params![work_id, source_novel_id],
+            )?;
+            connection.execute(
+                "INSERT INTO reference_imports
+                    (id, reference_work_id, novel_id, version_no, is_current, operation_id,
+                     request_hash, file_name, source_format, source_sha256, source_byte_count,
+                     selected_encoding, encoding_source, decoded_text_sha256,
+                     decoded_char_count, decoded_utf8_byte_count, source_text, section_count,
+                     parser_version, section_plan_sha256, warnings_json, imported_at)
+                 VALUES (?1, ?2, ?3, 1, 1, ?4, ?5, 'reference.txt', 'txt', ?6, 1,
+                         'utf-8', 'utf8_valid', ?7, 1, 1, 'x', 1,
+                         'reference_txt_parser_v1', ?8, '[]', 'now')",
+                params![
+                    import_id,
+                    work_id,
+                    source_novel_id,
+                    format!("style-reference-operation-{suffix}"),
+                    "b".repeat(64),
+                    source_hash,
+                    "c".repeat(64),
+                    "d".repeat(64),
+                ],
+            )?;
+        }
+
+        let error = save_style_profile(
+            None,
+            SaveStyleProfileInput {
+                project_id: target_novel_id.clone(),
+                name: profile_name.clone(),
+                description: None,
+                narrative_perspective: None,
+                tone: None,
+                pace: None,
+                sentence_style: None,
+                dialogue_ratio: None,
+                description_ratio: None,
+                psychological_ratio: None,
+                battle_style: None,
+                battle_intensity: None,
+                emotion_tendency: None,
+                chapter_ending: None,
+                forbidden_styles: None,
+                style_summary: None,
+                raw_config_json: None,
+                source_type: Some("ai_analyzed".to_string()),
+                source_asset_id: None,
+                source_reference_work_id: Some(work_id),
+                source_reference_import_id: Some(import_id),
+                source_content_sha256: Some(source_hash),
+                source_state: Some("available".to_string()),
+                analysis_metadata_json: Some("{}".to_string()),
+            },
+        )
+        .expect_err("cross-novel reference binding must fail");
+        assert!(error.starts_with("REFERENCE_SCOPE_MISMATCH:"), "{error}");
+        let connection = crate::db::get_connection()
+            .lock()
+            .expect("lock style reference test database");
+        let persisted: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM style_profiles WHERE novel_id = ?1 AND name = ?2",
+            params![target_novel_id, profile_name],
+            |row| row.get(0),
+        )?;
+        assert_eq!(persisted, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_count_applies_server_side_type_and_status_filters(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL
+            );
+            INSERT INTO ai_task_records (id, task_type, status) VALUES
+                ('a', 'chapter_generate', 'succeeded'),
+                ('b', 'chapter_generate', 'failed'),
+                ('c', 'quality_check', 'succeeded');",
+        )?;
+
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(&conn, None, None)?,
+            3
+        );
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(&conn, Some("chapter_generate"), None)?,
+            2
+        );
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(&conn, None, Some("succeeded"))?,
+            2
+        );
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(
+                &conn,
+                Some("chapter_generate"),
+                Some("succeeded"),
+            )?,
+            1
+        );
+        assert!(normalize_ai_task_type_filter(Some("unknown".to_string())).is_err());
+        assert!(normalize_ai_task_status_filter(Some("unknown".to_string())).is_err());
         Ok(())
     }
 }

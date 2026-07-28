@@ -96,7 +96,10 @@ function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
 }
 
 function formatEngineeringState(state: ChapterEngineeringState): string {
@@ -112,27 +115,49 @@ function formatEngineeringState(state: ChapterEngineeringState): string {
     card.appearingCharacters.length ? `出场角色：${card.appearingCharacters.join('、')}` : '',
     card.mustHappenEvents.length ? `必须发生：\n${formatList(card.mustHappenEvents)}` : '',
     card.forbiddenEvents.length ? `禁止发生：\n${formatList(card.forbiddenEvents)}` : '',
-    card.releasedInformation.length ? `本章释放信息：\n${formatList(card.releasedInformation)}` : '',
+    card.releasedInformation.length
+      ? `本章释放信息：\n${formatList(card.releasedInformation)}`
+      : '',
     card.reservedSecrets.length ? `保留悬念：\n${formatList(card.reservedSecrets)}` : '',
     card.styleRequirements.length ? `文风要求：\n${formatList(card.styleRequirements)}` : '',
     card.forbiddenWriting.length ? `写法禁区：\n${formatList(card.forbiddenWriting)}` : '',
-    state.scenePlan.length ? `场景计划：\n${state.scenePlan.map((scene) => [
-      `${scene.sceneNo}. ${scene.title}`,
-      scene.location ? `地点：${scene.location}` : '',
-      scene.characters.length ? `角色：${scene.characters.join('、')}` : '',
-      scene.goal ? `目标：${scene.goal}` : '',
-      scene.conflict ? `冲突：${scene.conflict}` : '',
-      scene.keyActions.length ? `关键动作：${scene.keyActions.join('；')}` : '',
-      scene.informationRelease.length ? `释放信息：${scene.informationRelease.join('；')}` : '',
-      scene.result ? `结果：${scene.result}` : '',
-    ].filter(Boolean).join(' / ')).join('\n')}` : '',
+    state.scenePlan.length
+      ? `场景计划：\n${state.scenePlan
+          .map((scene) =>
+            [
+              `${scene.sceneNo}. ${scene.title}`,
+              scene.location ? `地点：${scene.location}` : '',
+              scene.characters.length ? `角色：${scene.characters.join('、')}` : '',
+              scene.goal ? `目标：${scene.goal}` : '',
+              scene.conflict ? `冲突：${scene.conflict}` : '',
+              scene.keyActions.length ? `关键动作：${scene.keyActions.join('；')}` : '',
+              scene.informationRelease.length
+                ? `释放信息：${scene.informationRelease.join('；')}`
+                : '',
+              scene.result ? `结果：${scene.result}` : '',
+            ]
+              .filter(Boolean)
+              .join(' / '),
+          )
+          .join('\n')}`
+      : '',
     constraints.mustFollow.length ? `必须遵守：\n${formatList(constraints.mustFollow)}` : '',
-    constraints.forbiddenChanges.length ? `不得改变：\n${formatList(constraints.forbiddenChanges)}` : '',
-    constraints.forbiddenAdditions.length ? `不得新增：\n${formatList(constraints.forbiddenAdditions)}` : '',
-    constraints.forbiddenEarlyEvents.length ? `不得提前发生：\n${formatList(constraints.forbiddenEarlyEvents)}` : '',
-    constraints.forbiddenEarlyReveals.length ? `不得提前揭示：\n${formatList(constraints.forbiddenEarlyReveals)}` : '',
+    constraints.forbiddenChanges.length
+      ? `不得改变：\n${formatList(constraints.forbiddenChanges)}`
+      : '',
+    constraints.forbiddenAdditions.length
+      ? `不得新增：\n${formatList(constraints.forbiddenAdditions)}`
+      : '',
+    constraints.forbiddenEarlyEvents.length
+      ? `不得提前发生：\n${formatList(constraints.forbiddenEarlyEvents)}`
+      : '',
+    constraints.forbiddenEarlyReveals.length
+      ? `不得提前揭示：\n${formatList(constraints.forbiddenEarlyReveals)}`
+      : '',
     constraints.bannedWords.length ? `禁用词：${constraints.bannedWords.join('、')}` : '',
-    constraints.bannedSentencePatterns.length ? `禁用句式：${constraints.bannedSentencePatterns.join('、')}` : '',
+    constraints.bannedSentencePatterns.length
+      ? `禁用句式：${constraints.bannedSentencePatterns.join('、')}`
+      : '',
     constraints.narrativePerson ? `叙事人称：${constraints.narrativePerson}` : '',
     constraints.wordRange.min || constraints.wordRange.max
       ? `字数范围：${constraints.wordRange.min ?? '?'} - ${constraints.wordRange.max ?? '?'}`
@@ -145,12 +170,14 @@ function formatEngineeringState(state: ChapterEngineeringState): string {
 }
 
 function buildPromptText(sections: GenerationContextSection[]): string {
-  return sections
-    .map((section) => `## ${section.title}\n${section.content}`)
-    .join('\n\n---\n\n');
+  return sections.map((section) => `## ${section.title}\n${section.content}`).join('\n\n---\n\n');
 }
 
-function buildPromptSummary(sections: GenerationContextSection[], sources: GenerationContextSource[], warnings: string[]): string {
+function buildPromptSummary(
+  sections: GenerationContextSection[],
+  sources: GenerationContextSource[],
+  warnings: string[],
+): string {
   const usedCount = sources.filter((item) => item.status === 'used').length;
   const missingCount = sources.filter((item) => item.status === 'missing').length;
   const titles = sections.map((section) => section.title).join('、');
@@ -168,23 +195,29 @@ function normalizeSnapshot(raw: unknown): ChapterGenerationSnapshot | null {
   const novelId = toSafeString(item.novelId ?? item.novel_id).trim();
   const chapterId = toSafeString(item.chapterId ?? item.chapter_id).trim();
   if (!id || !novelId || !chapterId) return null;
-  const compiledContext = item.compiledContext ?? safeJsonParse<CompiledGenerationContext | null>(
-    toSafeString(item.compiledContextJson ?? item.compiled_context_json),
-    null,
-  );
+  const compiledContext =
+    item.compiledContext ??
+    safeJsonParse<CompiledGenerationContext | null>(
+      toSafeString(item.compiledContextJson ?? item.compiled_context_json),
+      null,
+    );
   if (!compiledContext) return null;
-  const sources = item.sources ?? safeJsonParse<GenerationContextSource[]>(
-    toSafeString(item.sourcesJson ?? item.sources_json),
-    compiledContext.sources ?? [],
-  );
+  const sources =
+    item.sources ??
+    safeJsonParse<GenerationContextSource[]>(
+      toSafeString(item.sourcesJson ?? item.sources_json),
+      compiledContext.sources ?? [],
+    );
   return {
     id,
     novelId,
     volumeId: toSafeString(item.volumeId ?? item.volume_id).trim() || undefined,
     chapterId,
-    engineeringStateId: toSafeString(item.engineeringStateId ?? item.engineering_state_id).trim() || undefined,
+    engineeringStateId:
+      toSafeString(item.engineeringStateId ?? item.engineering_state_id).trim() || undefined,
     styleProfileId: toSafeString(item.styleProfileId ?? item.style_profile_id).trim() || undefined,
-    outputProfileId: toSafeString(item.outputProfileId ?? item.output_profile_id).trim() || undefined,
+    outputProfileId:
+      toSafeString(item.outputProfileId ?? item.output_profile_id).trim() || undefined,
     compiledContext,
     compiledPromptText: toSafeString(item.compiledPromptText ?? item.compiled_prompt_text),
     promptSummary: toSafeString(item.promptSummary ?? item.prompt_summary),
@@ -199,7 +232,9 @@ function normalizeSnapshots(raw: unknown): ChapterGenerationSnapshot[] {
   return raw
     .map(normalizeSnapshot)
     .filter((item): item is ChapterGenerationSnapshot => item !== null)
-    .sort((a, b) => toSafeNumber(Date.parse(b.createdAt), 0) - toSafeNumber(Date.parse(a.createdAt), 0));
+    .sort(
+      (a, b) => toSafeNumber(Date.parse(b.createdAt), 0) - toSafeNumber(Date.parse(a.createdAt), 0),
+    );
 }
 
 function getLocalSnapshots(chapterId: string): ChapterGenerationSnapshot[] {
@@ -210,7 +245,10 @@ function getLocalSnapshots(chapterId: string): ChapterGenerationSnapshot[] {
 
 function saveLocalSnapshot(snapshot: ChapterGenerationSnapshot): ChapterGenerationSnapshot {
   const snapshots = getLocalSnapshots(snapshot.chapterId);
-  lsSet(storageKey(snapshot.chapterId), [snapshot, ...snapshots.filter((item) => item.id !== snapshot.id)]);
+  lsSet(storageKey(snapshot.chapterId), [
+    snapshot,
+    ...snapshots.filter((item) => item.id !== snapshot.id),
+  ]);
   return snapshot;
 }
 
@@ -247,56 +285,158 @@ export const generationContextCompiler = {
       ? engineeringBundle.states.find((item) => item.id === input.engineeringStateId)
       : engineeringBundle.activeState;
     const warnings: string[] = [];
-    if (!activeEngineeringState) warnings.push('未找到 active 章节工程状态，快照仅包含旧式章节上下文。');
+    if (!activeEngineeringState)
+      warnings.push('未找到 active 章节工程状态，快照仅包含旧式章节上下文。');
 
     const sections: GenerationContextSection[] = [];
-    addSection(sections, 'novel', '作品与世界', joinLines([
-      baseContext.novelTitle ? `作品：${baseContext.novelTitle}` : '',
-      baseContext.novelGenre ? `类型：${baseContext.novelGenre}` : '',
-      baseContext.novelDescription ? `简介：${baseContext.novelDescription}` : '',
-      baseContext.worldBackground ? `世界设定：\n${baseContext.worldBackground}` : '',
-      baseContext.ruleSystems ? `规则设定：\n${baseContext.ruleSystems}` : '',
-    ]), ['novel', 'world_setting', 'rule_system']);
-    addSection(sections, 'protagonist', '主角与角色', joinLines([
-      baseContext.protagonistsSummary,
-      baseContext.dualProtagonistSummary,
-      baseContext.protagonistAppearance,
-      baseContext.chapterCharacters,
-      baseContext.requiredCharactersSummary,
-    ]), ['protagonist', 'chapter_character']);
-    addSection(sections, 'outline', '大纲与剧情锚点', joinLines([
-      baseContext.masterOutline ? `全书大纲：\n${baseContext.masterOutline}` : '',
-      baseContext.volumeOutline ? `分卷大纲：\n${baseContext.volumeOutline}` : '',
-      baseContext.chapterOutline ? `章节大纲：\n${baseContext.chapterOutline}` : '',
-      baseContext.outlineChecklistText ? `执行清单：\n${baseContext.outlineChecklistText}` : '',
-      baseContext.chapterGoal ? `本章目标：${baseContext.chapterGoal}` : '',
-      baseContext.chapterEvents ? `本章事件：\n${baseContext.chapterEvents}` : '',
-    ]), ['master_outline', 'volume_outline', 'chapter_outline', 'chapter_event']);
+    addSection(
+      sections,
+      'novel',
+      '作品与世界',
+      joinLines([
+        baseContext.novelTitle ? `作品：${baseContext.novelTitle}` : '',
+        baseContext.novelGenre ? `类型：${baseContext.novelGenre}` : '',
+        baseContext.novelDescription ? `简介：${baseContext.novelDescription}` : '',
+        baseContext.worldBackground ? `世界设定：\n${baseContext.worldBackground}` : '',
+        baseContext.ruleSystems ? `规则设定：\n${baseContext.ruleSystems}` : '',
+      ]),
+      ['novel', 'world_setting', 'rule_system'],
+    );
+    addSection(
+      sections,
+      'protagonist',
+      '主角与角色',
+      joinLines([
+        baseContext.protagonistsSummary,
+        baseContext.dualProtagonistSummary,
+        baseContext.protagonistAppearance,
+        baseContext.chapterCharacters,
+        baseContext.requiredCharactersSummary,
+      ]),
+      ['protagonist', 'chapter_character'],
+    );
+    addSection(
+      sections,
+      'outline',
+      '大纲与剧情锚点',
+      joinLines([
+        baseContext.masterOutline ? `全书大纲：\n${baseContext.masterOutline}` : '',
+        baseContext.volumeOutline ? `分卷大纲：\n${baseContext.volumeOutline}` : '',
+        baseContext.chapterOutline ? `章节大纲：\n${baseContext.chapterOutline}` : '',
+        baseContext.outlineChecklistText ? `执行清单：\n${baseContext.outlineChecklistText}` : '',
+        baseContext.chapterGoal ? `本章目标：${baseContext.chapterGoal}` : '',
+        baseContext.chapterEvents ? `本章事件：\n${baseContext.chapterEvents}` : '',
+      ]),
+      ['master_outline', 'volume_outline', 'chapter_outline', 'chapter_event'],
+    );
     if (activeEngineeringState) {
-      addSection(sections, 'engineering', '章节工程状态', formatEngineeringState(activeEngineeringState), ['chapter_engineering']);
+      addSection(
+        sections,
+        'engineering',
+        '章节工程状态',
+        formatEngineeringState(activeEngineeringState),
+        ['chapter_engineering'],
+      );
     }
-    addSection(sections, 'context_records', '创作上下文包', baseContext.previousContext, ['context_record']);
-    addSection(sections, 'style_output', '风格与输出控制', joinLines([
-      baseContext.styleProfile ? `风格方案：\n${baseContext.styleProfile}` : '',
-      baseContext.outputProfile ? `输出方案：\n${baseContext.outputProfile}` : '',
-      baseContext.targetWordCount ? `目标字数：${baseContext.targetWordCount}` : '',
-    ]), ['style_profile', 'output_profile']);
-    addSection(sections, 'current_editor', '当前正文修改', input.currentEditorContent, ['current_editor']);
+    addSection(sections, 'context_records', '创作上下文包', baseContext.previousContext, [
+      'context_record',
+    ]);
+    addSection(
+      sections,
+      'provisional_previous_chapter',
+      '前一章候选承接（队列临时上下文）',
+      input.provisionalPreviousChapter
+        ? [
+            `来源章节：${input.provisionalPreviousChapter.chapterId}`,
+            `来源草稿：${input.provisionalPreviousChapter.draftId}`,
+            `正文哈希：${input.provisionalPreviousChapter.contentHash}`,
+            '以下内容只用于保持本轮候选连续性，尚未自动写入正式章节事实：',
+            input.provisionalPreviousChapter.content,
+          ].join('\n')
+        : undefined,
+      ['provisional_candidate'],
+    );
+    addSection(
+      sections,
+      'style_output',
+      '风格与输出控制',
+      joinLines([
+        baseContext.styleProfile ? `风格方案：\n${baseContext.styleProfile}` : '',
+        baseContext.outputProfile ? `输出方案：\n${baseContext.outputProfile}` : '',
+        baseContext.targetWordCount ? `目标字数：${baseContext.targetWordCount}` : '',
+      ]),
+      ['style_profile', 'output_profile'],
+    );
+    addSection(sections, 'current_editor', '当前正文修改', input.currentEditorContent, [
+      'current_editor',
+    ]);
 
     const sources: GenerationContextSource[] = [
-      source('novel', '作品基础信息', baseContext.novelTitle ? 'used' : 'missing', baseContext.novelTitle),
+      source(
+        'novel',
+        '作品基础信息',
+        baseContext.novelTitle ? 'used' : 'missing',
+        baseContext.novelTitle,
+      ),
       source('world_setting', '世界设定', baseContext.worldBackground ? 'used' : 'missing'),
       source('rule_system', '规则设定', baseContext.ruleSystems ? 'used' : 'missing'),
-      source('master_outline', '全书大纲', baseContext.masterOutline ? 'used' : 'missing', baseContext.masterOutlineSource),
-      source('volume_outline', '分卷大纲', baseContext.volumeOutline ? 'used' : 'missing', baseContext.volumeOutlineSource),
-      source('chapter_outline', '章节大纲', baseContext.chapterOutline ? 'used' : 'missing', baseContext.chapterOutlineSource),
-      source('chapter_engineering', '章节工程 active 状态', activeEngineeringState ? 'used' : 'missing', activeEngineeringState ? `v${activeEngineeringState.draftVersion}` : undefined, activeEngineeringState?.id),
-      source('chapter_character', '本章角色', baseContext.chapterCharacters ? 'used' : 'missing', baseContext.requiredCharacterNames),
+      source(
+        'master_outline',
+        '全书大纲',
+        baseContext.masterOutline ? 'used' : 'missing',
+        baseContext.masterOutlineSource,
+      ),
+      source(
+        'volume_outline',
+        '分卷大纲',
+        baseContext.volumeOutline ? 'used' : 'missing',
+        baseContext.volumeOutlineSource,
+      ),
+      source(
+        'chapter_outline',
+        '章节大纲',
+        baseContext.chapterOutline ? 'used' : 'missing',
+        baseContext.chapterOutlineSource,
+      ),
+      source(
+        'chapter_engineering',
+        '章节工程 active 状态',
+        activeEngineeringState ? 'used' : 'missing',
+        activeEngineeringState ? `v${activeEngineeringState.draftVersion}` : undefined,
+        activeEngineeringState?.id,
+      ),
+      source(
+        'chapter_character',
+        '本章角色',
+        baseContext.chapterCharacters ? 'used' : 'missing',
+        baseContext.requiredCharacterNames,
+      ),
       source('chapter_event', '本章事件', baseContext.chapterEvents ? 'used' : 'missing'),
       source('context_record', '创作上下文包', baseContext.previousContext ? 'used' : 'missing'),
-      source('style_profile', '风格方案', baseContext.styleProfile ? 'used' : 'fallback', input.styleProfileId),
-      source('output_profile', '输出控制', baseContext.outputProfile ? 'used' : 'fallback', input.outputProfileId),
-      source('current_editor', '当前正文修改', input.currentEditorContent?.trim() ? 'used' : 'missing'),
+      source(
+        'provisional_candidate',
+        '前一章候选承接',
+        input.provisionalPreviousChapter ? 'used' : 'missing',
+        input.provisionalPreviousChapter?.contentHash,
+        input.provisionalPreviousChapter?.draftId,
+      ),
+      source(
+        'style_profile',
+        '风格方案',
+        baseContext.styleProfile ? 'used' : 'fallback',
+        input.styleProfileId,
+      ),
+      source(
+        'output_profile',
+        '输出控制',
+        baseContext.outputProfile ? 'used' : 'fallback',
+        input.outputProfileId,
+      ),
+      source(
+        'current_editor',
+        '当前正文修改',
+        input.currentEditorContent?.trim() ? 'used' : 'missing',
+      ),
     ];
     const compiledAt = nowISO();
     const compiledContext: CompiledGenerationContext = {
@@ -312,13 +452,22 @@ export const generationContextCompiler = {
     };
     const compiledPromptText = buildPromptText(sections);
     const promptSummary = buildPromptSummary(sections, sources, warnings);
-    const contextHash = hashTextContent(stableStringify({
-      sections,
-      sources,
-      engineeringStateId: activeEngineeringState?.id,
-      styleProfileId: input.styleProfileId,
-      outputProfileId: input.outputProfileId,
-    }));
+    const contextHash = hashTextContent(
+      stableStringify({
+        sections,
+        sources,
+        engineeringStateId: activeEngineeringState?.id,
+        styleProfileId: input.styleProfileId,
+        outputProfileId: input.outputProfileId,
+        provisionalPreviousChapter: input.provisionalPreviousChapter
+          ? {
+              chapterId: input.provisionalPreviousChapter.chapterId,
+              draftId: input.provisionalPreviousChapter.draftId,
+              contentHash: input.provisionalPreviousChapter.contentHash,
+            }
+          : undefined,
+      }),
+    );
 
     return {
       id: generateId(),
@@ -350,10 +499,8 @@ export const generationContextCompiler = {
   },
 
   async getByChapterId(chapterId: string): Promise<ChapterGenerationSnapshot[]> {
-    const raw = await dbCall<unknown[]>(
-      'get_chapter_generation_snapshots',
-      { chapterId },
-      () => getLocalSnapshots(chapterId),
+    const raw = await dbCall<unknown[]>('get_chapter_generation_snapshots', { chapterId }, () =>
+      getLocalSnapshots(chapterId),
     );
     return normalizeSnapshots(raw);
   },

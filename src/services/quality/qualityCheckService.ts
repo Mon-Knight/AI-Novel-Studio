@@ -1,12 +1,18 @@
+import { appLogger } from '../observability/appLogger';
 /**
  * AI Novel Studio - 质量检查服务（Tauri SQLite + localStorage 回退）
  * v1.7.12: 引入问题处理闭环，使用 Tauri 后端持久化
  */
 import { lsGet, lsSet, generateId, nowISO, dbCall, getDbMode } from '../database/db';
 import type {
-  QualityCheckReport, QualityCheckItem, QualityIssueState, QualityIssueStatus,
-  CreateQualityReportInput, SaveQualityCheckResultInput,
-  GetQualityCheckIssuesResult, QualityCheckStatistics,
+  QualityCheckReport,
+  QualityCheckItem,
+  QualityIssueState,
+  QualityIssueStatus,
+  CreateQualityReportInput,
+  SaveQualityCheckResultInput,
+  GetQualityCheckIssuesResult,
+  QualityCheckStatistics,
 } from '../../types/qualityCheck';
 
 const REPORTS_KEY = 'ai_novel_studio_quality_reports';
@@ -15,11 +21,21 @@ const STATES_KEY = 'ai_novel_studio_quality_issue_states';
 
 // ==================== localStorage 回退实现 ====================
 
-function getReports(): QualityCheckReport[] { return lsGet<QualityCheckReport[]>(REPORTS_KEY) ?? []; }
-function saveReports(v: QualityCheckReport[]): void { lsSet(REPORTS_KEY, v); }
-function getItems(): QualityCheckItem[] { return lsGet<QualityCheckItem[]>(ITEMS_KEY) ?? []; }
-function saveItems(v: QualityCheckItem[]): void { lsSet(ITEMS_KEY, v); }
-function saveStates(v: QualityIssueState[]): void { lsSet(STATES_KEY, v); }
+function getReports(): QualityCheckReport[] {
+  return lsGet<QualityCheckReport[]>(REPORTS_KEY) ?? [];
+}
+function saveReports(v: QualityCheckReport[]): void {
+  lsSet(REPORTS_KEY, v);
+}
+function getItems(): QualityCheckItem[] {
+  return lsGet<QualityCheckItem[]>(ITEMS_KEY) ?? [];
+}
+function saveItems(v: QualityCheckItem[]): void {
+  lsSet(ITEMS_KEY, v);
+}
+function saveStates(v: QualityIssueState[]): void {
+  lsSet(STATES_KEY, v);
+}
 
 function compareReportsNewestFirst(a: QualityCheckReport, b: QualityCheckReport): number {
   return b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id);
@@ -30,9 +46,11 @@ function isReportNewer(a: QualityCheckReport, b: QualityCheckReport): boolean {
 }
 
 function compareSnapshotItems(a: QualityCheckItem, b: QualityCheckItem): number {
-  return (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
-    || a.createdAt.localeCompare(b.createdAt)
-    || a.id.localeCompare(b.id);
+  return (
+    (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER) ||
+    a.createdAt.localeCompare(b.createdAt) ||
+    a.id.localeCompare(b.id)
+  );
 }
 
 function getCompletedReports(chapterId: string): QualityCheckReport[] {
@@ -49,10 +67,11 @@ function synthesizeLegacyStates(): QualityIssueState[] {
   const states = new Map<string, QualityIssueState>();
   const legacyItems = getItems()
     .map((item, storageIndex) => ({ item, storageIndex }))
-    .sort((left, right) => (
-      right.item.updatedAt.localeCompare(left.item.updatedAt)
-      || right.storageIndex - left.storageIndex
-    ));
+    .sort(
+      (left, right) =>
+        right.item.updatedAt.localeCompare(left.item.updatedAt) ||
+        right.storageIndex - left.storageIndex,
+    );
   for (const { item } of legacyItems) {
     const key = stateIdentity(item.chapterId, item.issueKey);
     if (states.has(key)) continue;
@@ -78,7 +97,9 @@ function overlayWorkflowState(
   items: QualityCheckItem[],
   states: QualityIssueState[] = getStates(),
 ): QualityCheckItem[] {
-  const byKey = new Map(states.map((state) => [stateIdentity(state.chapterId, state.issueKey), state]));
+  const byKey = new Map(
+    states.map((state) => [stateIdentity(state.chapterId, state.issueKey), state]),
+  );
   return items.map((item) => {
     const state = byKey.get(stateIdentity(item.chapterId, item.issueKey));
     if (!state) return item;
@@ -182,7 +203,9 @@ export const qualityCheckService = {
   /** Replay one immutable report snapshot without applying current issue state. */
   async getReportSnapshot(reportId: string): Promise<GetQualityCheckIssuesResult> {
     try {
-      return await dbCall<GetQualityCheckIssuesResult>('get_quality_check_report_snapshot', { reportId });
+      return await dbCall<GetQualityCheckIssuesResult>('get_quality_check_report_snapshot', {
+        reportId,
+      });
     } catch (error) {
       if (getDbMode() === 'tauri') throw error;
       return getLocalSnapshot(reportId);
@@ -205,19 +228,19 @@ export const qualityCheckService = {
   async createReport(input: CreateQualityReportInput): Promise<QualityCheckReport> {
     const now = nowISO();
     const localReport: QualityCheckReport = {
-      ...input, id: generateId(), scope: input.scope || 'current_draft', status: 'pending',
-      createdAt: now, updatedAt: now,
+      ...input,
+      id: generateId(),
+      scope: input.scope || 'current_draft',
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
     };
-    return await dbCall<QualityCheckReport>(
-      'create_quality_check_report',
-      { input },
-      () => {
-        const list = getReports();
-        list.push(localReport);
-        saveReports(list);
-        return localReport;
-      },
-    );
+    return await dbCall<QualityCheckReport>('create_quality_check_report', { input }, () => {
+      const list = getReports();
+      list.push(localReport);
+      saveReports(list);
+      return localReport;
+    });
   },
 
   /** 保存 AI 检查结果（合并问题） */
@@ -261,7 +284,7 @@ export const qualityCheckService = {
     } catch (error) {
       if (getDbMode() === 'tauri') {
         if (isMissingReportError(error)) {
-          console.warn('[QualityCheck] report placeholder missing, recreating before retry', {
+          appLogger.warn('[QualityCheck] report placeholder missing, recreating before retry', {
             reportId: input.reportId,
             novelId: input.novelId,
             chapterId: input.chapterId,
@@ -285,9 +308,11 @@ export const qualityCheckService = {
       const rIdx = reports.findIndex((r) => r.id === input.reportId);
       if (rIdx === -1) throw new Error('报告不存在');
       const existingReport = reports[rIdx];
-      if (existingReport.novelId !== input.novelId
-        || existingReport.chapterId !== input.chapterId
-        || existingReport.draftId !== input.draftId) {
+      if (
+        existingReport.novelId !== input.novelId ||
+        existingReport.chapterId !== input.chapterId ||
+        existingReport.draftId !== input.draftId
+      ) {
         throw new Error('quality_check_report_target_mismatch');
       }
       if (existingReport.status === 'completed') {
@@ -295,8 +320,9 @@ export const qualityCheckService = {
           throw new Error('quality_check_report_ai_task_mismatch');
         }
         const snapshot = getLocalSnapshot(existingReport.id);
-        const hasNewerCompletedReport = getCompletedReports(existingReport.chapterId)
-          .some((completedReport) => isReportNewer(completedReport, existingReport));
+        const hasNewerCompletedReport = getCompletedReports(existingReport.chapterId).some(
+          (completedReport) => isReportNewer(completedReport, existingReport),
+        );
         if (hasNewerCompletedReport) return snapshot;
         const items = overlayWorkflowState(snapshot.items);
         return { ...snapshot, items, statistics: computeStatistics(items) };
@@ -304,12 +330,14 @@ export const qualityCheckService = {
 
       const duplicateKeys = new Set<string>();
       for (const item of itemsWithKeys) {
-        if (duplicateKeys.has(item.issueKey)) throw new Error(`quality_check_duplicate_issue_key: ${item.issueKey}`);
+        if (duplicateKeys.has(item.issueKey))
+          throw new Error(`quality_check_duplicate_issue_key: ${item.issueKey}`);
         duplicateKeys.add(item.issueKey);
       }
 
       const nextReport: QualityCheckReport = {
-        ...existingReport, status: 'completed',
+        ...existingReport,
+        status: 'completed',
         overallScore: input.result.overallScore,
         summary: input.result.summary,
         draftVersion: input.draftVersion,
@@ -323,8 +351,9 @@ export const qualityCheckService = {
 
       const now = nowISO();
       const latestByKey = getLocalWorkflowStateByKey(input.chapterId);
-      const updatesWorkflowState = !getCompletedReports(input.chapterId)
-        .some((completedReport) => isReportNewer(completedReport, existingReport));
+      const updatesWorkflowState = !getCompletedReports(input.chapterId).some((completedReport) =>
+        isReportNewer(completedReport, existingReport),
+      );
       const newItems: QualityCheckItem[] = itemsWithKeys.map((it, sortOrder) => ({
         ...it,
         id: generateId(),
@@ -350,14 +379,16 @@ export const qualityCheckService = {
             chapterId: item.chapterId,
             issueKey: item.issueKey,
             status: existingState?.status === 'ignored' ? 'ignored' : 'pending',
-            resolutionNote: existingState?.status === 'ignored' ? existingState.resolutionNote : undefined,
+            resolutionNote:
+              existingState?.status === 'ignored' ? existingState.resolutionNote : undefined,
             resolvedAt: existingState?.status === 'ignored' ? existingState.resolvedAt : undefined,
             createdAt: existingState?.createdAt ?? now,
             updatedAt: now,
           };
-          const stateIndex = nextStates.findIndex((state) => (
-            state.chapterId === nextState.chapterId && state.issueKey === nextState.issueKey
-          ));
+          const stateIndex = nextStates.findIndex(
+            (state) =>
+              state.chapterId === nextState.chapterId && state.issueKey === nextState.issueKey,
+          );
           if (stateIndex === -1) nextStates.push(nextState);
           else nextStates[stateIndex] = nextState;
         }
@@ -370,7 +401,9 @@ export const qualityCheckService = {
       reports[rIdx] = nextReport;
       saveReports(reports);
 
-      const returnedItems = updatesWorkflowState ? overlayWorkflowState(newItems, nextStates) : newItems;
+      const returnedItems = updatesWorkflowState
+        ? overlayWorkflowState(newItems, nextStates)
+        : newItems;
       return {
         report: nextReport,
         items: returnedItems,
@@ -387,7 +420,9 @@ export const qualityCheckService = {
   ): Promise<QualityCheckItem | null> {
     try {
       return await dbCall<QualityCheckItem>('update_quality_issue_status', {
-        issueId, status, resolutionNote: resolutionNote || null,
+        issueId,
+        status,
+        resolutionNote: resolutionNote || null,
       });
     } catch (error) {
       if (getDbMode() === 'tauri') throw error;
@@ -400,9 +435,10 @@ export const qualityCheckService = {
       }
       const states = getStates();
       const now = nowISO();
-      const stateIndex = states.findIndex((state) => (
-        state.chapterId === items[idx].chapterId && state.issueKey === items[idx].issueKey
-      ));
+      const stateIndex = states.findIndex(
+        (state) =>
+          state.chapterId === items[idx].chapterId && state.issueKey === items[idx].issueKey,
+      );
       const existingState = stateIndex === -1 ? undefined : states[stateIndex];
       const nextState: QualityIssueState = {
         id: existingState?.id ?? generateId(),
@@ -428,7 +464,8 @@ export const qualityCheckService = {
   ): Promise<QualityCheckItem[]> {
     try {
       return await dbCall<QualityCheckItem[]>('batch_update_quality_issue_status', {
-        issueIds, status,
+        issueIds,
+        status,
       });
     } catch (error) {
       if (getDbMode() === 'tauri') throw error;
@@ -445,9 +482,9 @@ export const qualityCheckService = {
       for (const id of issueIds) {
         const item = items.find((candidate) => candidate.id === id);
         if (!item) continue;
-        const stateIndex = states.findIndex((state) => (
-          state.chapterId === item.chapterId && state.issueKey === item.issueKey
-        ));
+        const stateIndex = states.findIndex(
+          (state) => state.chapterId === item.chapterId && state.issueKey === item.issueKey,
+        );
         const existingState = stateIndex === -1 ? undefined : states[stateIndex];
         const nextState: QualityIssueState = {
           id: existingState?.id ?? generateId(),
@@ -488,4 +525,3 @@ export function computeStatistics(items: QualityCheckItem[]): QualityCheckStatis
     low: items.filter((i) => i.severity === 'low').length,
   };
 }
-

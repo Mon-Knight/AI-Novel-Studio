@@ -1,3 +1,4 @@
+import { appLogger } from '../services/observability/appLogger';
 /**
  * Debug helper: seed bad novels into localStorage for testing repairs
  */
@@ -15,9 +16,9 @@ export function seedBadNovels() {
   ];
   try {
     lsSet(key, data);
-    console.info('[debugSeed] seeded bad novels into localStorage');
+    appLogger.info('[debugSeed] seeded bad novels into localStorage');
   } catch (e) {
-    console.error('[debugSeed] seed failed', e);
+    appLogger.error('[debugSeed] seed failed', e);
   }
 }
 
