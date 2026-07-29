@@ -43,6 +43,7 @@ npm run test:migrations
 专项脚本必须运行动态测试并原样传播退出码：
 
 - `components`：正文不可用状态与恢复对话框。
+- `test:ai-request-governance`：TypeScript AST 扫描生产 AI client 调用，显式阻断遗漏 request options 的新入口，并以零命中和负向夹具失败关闭。
 - `workspace-reliability`：T01～T07、T12，覆盖快速切章、保存/取消、Hash 路由与 Tauri 关闭防重入。
 - `workspace-reliability` 在 v2.2.1 额外覆盖 close reject 后撤销 bypass、第二次关闭重新阻断，以及 goal-only close 拒绝的 Promise 收口。
 - `workspace-recovery`：T09～T11，覆盖 debounce、StrictMode、恢复冲突、内存恢复、精确清理、清理失败后的跨会话候选复用，以及 completed replay 目标被删除或损坏时的失败关闭。
@@ -57,15 +58,21 @@ npm run test:migrations
 npm run test:all
 npm run test:coverage
 npm run test:component-size
+npm run test:rust-logging
 npm run lint:ci
+npm run build
+npm run test:bundle-size
 ```
 
-- `test:all` 顺序运行 Node/tsx 动态测试、三个隔离 AI 面板组、Vitest 自动发现的全部 `src/test/**` 与服务测试，以及性能基准，避免新增专项只存在于文档而未进入 CI。
+- `test:all` 顺序运行 Node/tsx 动态测试、三个隔离 AI 面板组、Vitest 自动发现的全部 `src/test/**` 与显式服务测试，以及性能基准；AI 任务 650 条分页可达性测试也在标准 Vitest 入口中，避免新增专项只存在于文档而未进入 CI。
 - `test:coverage` 使用 C8 对生产 `src/**/*.ts` 与 `src/**/*.tsx` 建立全量文件基线；测试文件、声明文件与 `src/test/**` 不计入分母。
 - `test:component-size` 扫描全部生产 `.tsx`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。
-- 当前全量非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合另设 lines/statements 85%、functions/branches 80%。最近一次完整结果为全量 lines/statements 34.32%、functions 44.13%、branches 64.05%，核心集合 lines/statements 87.82%、functions 85.89%、branches 82.01%。这些阈值是当前可验证基线，不是最终质量目标；后续补测必须单调提高。
+- `test:rust-logging` 扫描全部生产与测试 Rust 源码，只允许 `errors.rs` 中唯一结构化 stderr sink；任何新增 `println! / eprintln! / print! / eprint! / dbg!` 或 sink 缺失/重复都失败关闭，并由临时负向夹具验证门禁本身。
+- `test:bundle-size` 读取 Vite manifest，校验唯一入口、全部 emitted JS、稳定 vendor chunk 与安全路径，再按真实文件字节和 gzip-9 执行双预算。当前入口门槛为 400 KiB / 135 KiB gzip-9，任一 chunk 为 450 KiB / 160 KiB gzip-9；缺失或歧义产物同样返回非零。
+- 当前全量非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合另设 lines/statements 85%、functions/branches 80%。最近一次干净完整结果为全量 lines/statements 35.14%、functions 47.34%、branches 66.41%，核心集合 lines/statements 87.90%、functions 85.89%、branches 82.01%，关键组件集合 lines/statements 91.67%、functions 90.00%、branches 78.74%。这些阈值是当前可验证基线，不是最终质量目标；后续补测必须单调提高。
 - `lint:ci` 将显式 `any` 作为 error，并以 `--max-warnings 0` 运行；生产源码 warning 回归会直接返回非零退出码。
 - `workspaceSessionStore.test.ts` 验证切换 novel 时清空 active chapter、当前草稿与 dirty，并覆盖可追踪的函数式集合更新；同一 reset 契约还统一持有质量和 AI 弹窗状态，该 Zustand store 已进入核心覆盖率集合。
+- `renderIdentityBudget.test.tsx` 验证编辑器活动状态一次原子提交，并证明 AI 任务轮询只替换变化事实、memo 卡片与卷树在无关更新中保持对象/渲染身份。
 - Pull Request、`main` 推送和发布构建都执行上述门禁；覆盖率或 warning 数发生回退时命令返回非零退出码。
 
 ### 2.2 v2.1.8 及此前 Node / tsx 回归集合
@@ -228,6 +235,17 @@ npm run test:e2e -- --spec generation-job-cancel
 
 Rust loopback 只绑定 `127.0.0.1`，测试构建显式绕过系统代理，不访问互联网；生产代理行为不变。真实桌面取消 spec 使用强制 Mock Provider，因此负责验证 React、AbortSignal、Rust/SQLite 任务终态与 WebView 生命周期，不用它替代真实 socket 关闭测试。
 
+#### migration 029 全局请求治理定向回归
+
+```powershell
+cargo test --locked --manifest-path src-tauri/Cargo.toml ai_request_policy_service -- --nocapture
+cargo test --locked --manifest-path src-tauri/Cargo.toml migrations::tests::db29_global_ai_policy -- --nocapture
+npx vitest run src/services/ai/aiRequestPolicyService.test.ts
+npx tsx --test --test-concurrency=1 src/services/ai/aiCancellation.test.ts
+```
+
+Rust 定向组覆盖 owner/token/request 绑定、单次 Provider 派发、终态计量 trigger 防篡改、TTL 保守回收、相同结算幂等与不同载荷冲突、snapshot 不隐式建策略、缺失策略的陈旧 revision 冲突、本地跨午夜归属、实际 usage 超过预留后的完整入账、未定价事实、失败保守计量、双连接并发/预算竞争，以及两个独立测试进程共享同一并发额度。TypeScript 组确认桌面只走 reservation/settlement IPC、数据库错误失败关闭且不写 LocalStorage，权威 policy 回填表单且首个 revision 在保存前保持固定，UTF-8 字节上界覆盖 CJK/emoji，并验证浏览器失败和 TTL 过期只保守计量一次。
+
 ### 2.9 v2.1.7 质量历史原子快照与重放
 
 ```powershell
@@ -324,7 +342,7 @@ AI 设置在 E2E 构建中强制返回 Mock Provider。前端还在 `App` 加载
 
 完整 Windows 前置条件、环境变量、数据隔离、Mock / 网络阻断、选择器契约和排障见 [Windows 桌面 E2E 自动化](desktop-e2e.md)。
 
-GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；`v*` tag、每周定时和手动完整模式运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
+GitHub Actions 的 `windows-desktop-e2e.yml` 在 Pull Request 与 `main` 推送时运行质量门和真实桌面 smoke；每周定时、手动完整模式及签名发布的可复用 `workflow_call` 运行全部桌面流程，手动 `full-three` 可执行连续三轮稳定性验证。`release.yml` 显式依赖该 full 门禁，不再与标签桌面 E2E 并行竞速。CI 在依赖准备阶段匹配 WebView2 与 EdgeDriver，随后以 Cargo / npm offline 模式构建并运行 E2E；失败诊断作为短期 artifact 上传。
 
 ### 2.12 v2.3.0 执行事实层专项
 
@@ -568,7 +586,7 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml ai_task_success_calcula
 - 交互式 AI 入口的 request owner 是 WebView/前端进程内 `AbortController`、loading operation 和 AI Task active map；应用重启后不接管旧 Map。Autonomous Scheduler 使用 migration 027 的独立持久 owner/lease/epoch 域，只接管 scheduler run，不能复活任意旧交互请求。
 - 可见流式预览当前面向正文生成；结构化 Agent 可以继续聚合完整响应后再解析。仓库尚无 Provider capability negotiation 或 streaming 不支持时的自动非流式重派发，不能把失败重派发描述为无缝降级。
 - 自动化流协议使用浏览器内存流与本机 loopback，不消耗真实 API；真实 Provider 证据是上节记录的受控 Windows 手动验收。
-- `cost_estimate` 是用户单价乘 Provider usage 的 USD 估算，不是账单。交互请求 ledger 保存于本机 LocalStorage/内存；scheduler 另冻结 run 预算并在 claim/finish 中复验。失败或取消后的 Provider 实际费用和账单对账仍属于后续能力。
+- `cost_estimate` 是用户单价乘 Provider usage 的 USD 估算，不是账单。桌面交互请求由 migration 029 的应用级 SQLite ledger 仲裁，浏览器开发才使用 LocalStorage/内存回退；scheduler 另冻结 run 预算并在 claim/finish 中复验。失败或取消后的 Provider 实际费用和账单对账仍属于后续能力。
 
 ---
 
@@ -627,6 +645,8 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml crash_reports -- --noca
 | 500 章导航索引与窗口  | 10 卷、目标卷 50 章，活动章节始终可达 | `< 100 ms`                  | 约 0.6 ms |
 | 重复长文本分段 100 次 | 每轮拼接均等于原文                    | 强制 GC 后堆增长 `< 96 MiB` | 通过      |
 
+React 高频路径另由 `renderIdentityBudget.test.tsx` 执行渲染预算：未变化 AI Task 保留对象引用，父级无关状态变化不会重新渲染 memo 卡片；1,000 章卷树只物化当前窗口，编辑输入只触发一次 `setEditorActivity` Store 更新。
+
 性能时间只作为同一测试环境中的非回退信号，不承诺所有机器达到最近记录。AI 观测最多保留 500 个本地样本并计算 P50 / P95 / max、成功 / 失败 / 取消数；`appLogger` 最多持久化 50 条脱敏 error。原生 panic 报告按 128 KiB 单代轮换，导出最近 50 条，且只包含时间、应用版本和源码文件名 / 行列号。诊断导出不包含正文、Prompt、API Key、Provider 原始响应、panic payload、堆栈或绝对路径；完整边界见 [`diagnostics.md`](diagnostics.md)。
 
 ---
@@ -640,7 +660,7 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml autonomous_scheduler --
 cargo test --locked --manifest-path src-tauri/Cargo.toml project_backup_schema_eight -- --nocapture
 ```
 
-动态用例必须覆盖：同一 run 唯一 active lease、epoch/token 失配、heartbeat 过期、claim/finish CAS、预算与时间窗、可重试失败、连续失败熔断、停止与幂等重放；启动恢复必须证明 `running → queued`、active lease → expired、claimed attempt → abandoned，并重算 policy/request/decision/payload hash。三档策略必须分别证明草稿-only、质量确认门禁和全自动采用前复验，不能只检查 UI 中存在三个选项。
+动态用例必须覆盖：同一 run 唯一 active lease、epoch/token 失配、heartbeat 过期、claim/finish CAS、预算与时间窗、可重试失败、连续失败熔断、停止与幂等重放；启动恢复必须证明 `running → queued`、active lease → expired、claimed attempt → abandoned，并证明数据库初始化先执行恢复后，前端入口的第二次恢复扫描仍能重新发现全部持久 `queued` run、获取更高 epoch 的新 lease。另需用旧 lease 首轮尚未到期的夹具触发 15 秒恢复扫描，证明 TTL 到期后无需再次重启即可接管；claim 前异常必须在 heartbeat 复验 lease 后暂停并释放，heartbeat 失败的旧 epoch 不得暂停替代 owner。三档策略必须分别证明草稿-only、质量确认门禁和全自动采用前复验，不能只检查 UI 中存在三个选项。
 
 ### 2.22 多目标事务、StoryAssets 与备份 schema 9
 
@@ -662,7 +682,7 @@ npx vitest run src/services/update/appUpdateService.test.ts
 cargo test --locked --manifest-path src-tauri/Cargo.toml commands::app_update::tests -- --nocapture
 ```
 
-- 浏览器 E2E 启动真实 Vite，驱动 Chromium/Edge，证明 StoryAssets lazy route、无 Tauri bridge 时不伪造 SQLite 资产，以及手动 dark/light 的 root dataset、`color-scheme`、语义 token 和 computed surface 均切换。
+- 浏览器 E2E 启动真实 Vite，驱动 Chromium/Edge，证明 StoryAssets lazy route、无 Tauri bridge 时不伪造 SQLite 资产，以及手动 dark/light 的 root dataset、`color-scheme`、语义 token 和 computed surface 均切换。主题 spec 还会等待 Splash 真正移除，解析 WebDriver RGB/RGBA PNG，并按页面校验亮度分位数、不透明率、颜色桶范围及 Light/Dark 平均亮度差 `> 0.55`。
 - updater 单元测试证明 Stable/Beta 版本隔离、发布说明限长/控制字符清理、普通本地包的公钥槽位不被视为已配置。
 - release manifest 测试使用临时 MSI updater/signature fixture，验证静态 Tauri v1 `latest.json`、artifact SHA-256、上一版 HTTPS installer 和 rollback backup 要求；稳定版本不得进入 Beta 索引。
 - `.github/workflows/release.yml` 只有在 `TAURI_PUBLIC_KEY / TAURI_PRIVATE_KEY` secrets 存在时构建 `msi,updater`，并在发布前检查 `.msi.zip.sig`。普通本地构建不会读取或生成私钥。
@@ -739,9 +759,9 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-`verify_project.ps1` 会顺序运行版本同步、文档同步、覆盖率、组件体积、Node 测试、ESLint、前端构建、静态补充检查、AI Task 删除和项目备份运行时测试、`cargo check`、完整 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
+`verify_project.ps1` 会顺序运行版本同步、文档同步、覆盖率、组件体积、Node 测试、ESLint、前端构建、包体预算、静态补充检查、AI Task 删除和项目备份运行时测试、`cargo check`、完整 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
 
-GitHub Actions 分为四层：`ci.yml` 提供 Linux lint / test / build 并运行真实 Chromium 浏览器模式 E2E；`windows-desktop-e2e.yml` 在 Windows 运行版本、文档、覆盖率、Rust、无 bundle 生产构建和真实 Tauri E2E；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道构建 MSI、签名 updater 与回滚 manifest。浏览器快速 CI 通过不等于桌面发布通过。
+GitHub Actions 分为四层：`ci.yml` 提供 Linux lint / test / build、真实 Chromium 浏览器模式 E2E 和包体预算；`windows-desktop-e2e.yml` 在 Windows 运行版本、文档、覆盖率、Rust、无 bundle 生产构建、包体预算和真实 Tauri E2E；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道先调用 full Windows 门禁，再构建 MSI、签名 updater 与回滚 manifest。浏览器快速 CI 通过不等于桌面发布通过。
 
 辅助脚本不替代第 2 节的定向动态测试。发布汇报必须逐项记录真实命令、退出码与失败信息，不能只写“综合验证通过”。
 
@@ -842,7 +862,7 @@ GitHub Actions 分为四层：`ci.yml` 提供 Linux lint / test / build 并运�
 - `recovery-dialog` 已作为 `generation_jobs` 的真实启动恢复节点纳入桌面 E2E；其他 AI 任务模型仍不得为测试伪造恢复能力。
 - v2.3.0+ 已具有 Artifact，v2.3.2 已具有 PlacementProposal / ApplyPlan；测试必须读取真实 SQLite 事实，不能以 UI 文案或旧 AiTaskRecord 代替。
 - `operationId` 的数据库级重放、completed 目标权威复验与提交后清理故障已由 service 测试证明；真实 IPC 进程在提交边界被强制终止时的端到端对账仍需继续补充。
-- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消、质量历史不可变重放、v2.5.0 Planner、SQLite 混合语义 Memory、migration 027 scheduler 和 migration 028 多目标事务均已由 Rust / SQLite 动态测试覆盖；自动 embedding 和 Provider 账单对账仍不在当前能力中。
+- 大文本 DB04～DB07、章节工程任务跨重启安全结算、在途 AI 取消、质量历史不可变重放、v2.5.0 Planner、SQLite 混合语义 Memory、migration 027 scheduler、migration 028 多目标事务和 migration 029 全局 AI 请求治理均已由 Rust / SQLite 动态测试覆盖；自动 embedding 和 Provider 账单对账仍不在当前能力中。
 - 完整备份 schema 9 的 SQLite 往返已在临时项目库中覆盖参考资料、Memory、scheduler 和正式资产；SQLite 与 LocalStorage 的跨存储 ACID 不存在，浏览器 StoryAssets 因此保持只读而不是补偿式伪持久化。
 - v2.1.8 已把章节总结、上下文和角色状态的桌面事实源收敛到 SQLite；旧缓存清理仍发生在 SQLite 提交之后，因此只能通过明确 ID 映射、warning 和幂等重试保证安全，不宣称跨存储 ACID。
 - Tauri 完整构建依赖本机 Rust 与 Windows 构建环境。

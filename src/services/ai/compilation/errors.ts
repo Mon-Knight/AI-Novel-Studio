@@ -10,11 +10,7 @@ export class AiCompilationError extends Error {
   readonly retryable = false;
   readonly details?: Record<string, unknown>;
 
-  constructor(
-    code: AiCompilationErrorCode,
-    message: string,
-    details?: Record<string, unknown>,
-  ) {
+  constructor(code: AiCompilationErrorCode, message: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'AiCompilationError';
     this.code = code;

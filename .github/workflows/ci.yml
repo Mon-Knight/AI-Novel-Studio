@@ -31,3 +31,4 @@ jobs:
       - name: Run real Chromium browser-mode E2E
         run: npm run test:e2e:browser
       - run: npm run build
+      - run: npm run test:bundle-size

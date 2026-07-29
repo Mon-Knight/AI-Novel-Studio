@@ -42,6 +42,7 @@
 ## 构建验证
 
 - [ ] `npm run build` 通过
+- [ ] `npm run test:bundle-size` 通过，入口和任一 chunk 的真实字节/gzip 预算未回退
 - [ ] `npm run test:component-size` 通过，所有生产 TSX 不超过 500 行
 - [ ] `cargo check` 通过
 - [ ] `npm run tauri build` 通过

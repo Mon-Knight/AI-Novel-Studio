@@ -7,6 +7,16 @@ import { RealAiClient } from './realAiClient';
 import { aiSettingsService } from './aiSettingsService';
 import { attachAiUsageCost } from './aiCost';
 
+const GOVERNED_TASK_TYPES = new Set([
+  'chapter_generate',
+  'autonomous_plot_plan',
+  'autonomous_character_evolution',
+  'autonomous_world_build',
+  'autonomous_conflict_generate',
+  'autonomous_pacing_control',
+  'autonomous_chapter_batch',
+]);
+
 export function createAiClient(settings?: AiSettings): AiClient {
   const resolvedSettings = settings ?? aiSettingsService.getSettings();
   const client: AiClient =
@@ -31,6 +41,11 @@ export function createAiClient(settings?: AiSettings): AiClient {
 
   return {
     async generate(request, options) {
+      if (request.taskType && GOVERNED_TASK_TYPES.has(request.taskType)) {
+        throw new Error(
+          `Task ${request.taskType} must run through executeAiTask and its compiled contract.`,
+        );
+      }
       return attachAiUsageCost(await client.generate(request, options), resolvedSettings);
     },
   };

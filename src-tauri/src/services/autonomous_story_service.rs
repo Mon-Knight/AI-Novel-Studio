@@ -173,11 +173,42 @@ fn expected_request_hash(
     schema_version: i64,
 ) -> Result<String, AppError> {
     let brief = field(plan, "brief")?.clone();
-    Ok(hash_value(&json!({
+    let mut request = json!({
         "schemaVersion": schema_version,
         "novelId": novel_id,
         "brief": brief,
-    })))
+    });
+    if plan.get("planningMode").is_some() || plan.get("baseline").is_some() {
+        let object = request
+            .as_object_mut()
+            .ok_or_else(|| invalid("自主规划请求哈希对象无效"))?;
+        object.insert(
+            "planningMode".to_string(),
+            plan.get("planningMode")
+                .cloned()
+                .unwrap_or_else(|| json!("greenfield")),
+        );
+        object.insert(
+            "volumeStrategy".to_string(),
+            plan.get("volumeStrategy")
+                .cloned()
+                .unwrap_or_else(|| json!("create_new_volume")),
+        );
+        object.insert(
+            "baseline".to_string(),
+            match plan.get("baseline") {
+                Some(baseline) => hashable_baseline(baseline)?,
+                None => Value::Null,
+            },
+        );
+    }
+    Ok(hash_value(&request))
+}
+
+fn hashable_baseline(value: &Value) -> Result<Value, AppError> {
+    let mut baseline = object(value, "baseline")?.clone();
+    baseline.remove("capturedAt");
+    Ok(Value::Object(baseline))
 }
 
 pub(crate) fn refresh_restored_plan_hashes(plan: &mut Value) -> Result<(String, String), AppError> {
@@ -248,7 +279,46 @@ fn validate_plan(plan: &Value) -> Result<PlanMeta, AppError> {
     let target_chapter_count = integer_field(brief, "targetChapterCount", 12, 500)?;
     integer_field(brief, "targetWordsPerChapter", 500, 10_000)?;
     let completed_chapter_count = array_field(plan, "chapters")?.len() as i64;
-    if completed_chapter_count > target_chapter_count {
+    let planning_mode = plan
+        .get("planningMode")
+        .and_then(Value::as_str)
+        .unwrap_or("greenfield");
+    if !matches!(planning_mode, "greenfield" | "continuation") {
+        return Err(invalid("自主规划模式无效"));
+    }
+    if planning_mode == "continuation" {
+        let baseline = object(
+            plan.get("baseline")
+                .ok_or_else(|| invalid("续写计划缺少作品基线"))?,
+            "baseline",
+        )?;
+        if baseline.get("novelId").and_then(Value::as_str) != Some(novel_id.as_str()) {
+            return Err(invalid("续写计划基线不属于目标作品"));
+        }
+        let baseline_hash = baseline
+            .get("structureHash")
+            .and_then(Value::as_str)
+            .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .ok_or_else(|| invalid("续写计划缺少有效基线哈希"))?;
+        if baseline_hash.is_empty() {
+            return Err(invalid("续写计划基线哈希不能为空"));
+        }
+        let existing_chapters = baseline
+            .get("existingChapters")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("续写计划基线章节格式无效"))?;
+        let last_chapter = existing_chapters
+            .iter()
+            .filter_map(|item| item.get("chapterNumber").and_then(Value::as_i64))
+            .max()
+            .unwrap_or(0);
+        if target_chapter_count <= last_chapter {
+            return Err(invalid("续写计划目标章节数必须大于已有章节数"));
+        }
+        if completed_chapter_count > target_chapter_count - last_chapter {
+            return Err(invalid("续写计划新增章节数超过目标范围"));
+        }
+    } else if completed_chapter_count > target_chapter_count {
         return Err(invalid("已规划章节数超过目标章节数"));
     }
     let error_message = optional_string_field(plan, "errorMessage", 1_000)?;
@@ -340,6 +410,32 @@ fn validate_complete_plan(plan: &Value, meta: &PlanMeta) -> Result<(), AppError>
     let pacing_phases = array_field(plan, "pacingPhases")?;
     let pacing = array_field(plan, "pacingCurve")?;
     let chapters = array_field(plan, "chapters")?;
+    let planning_mode = plan
+        .get("planningMode")
+        .and_then(Value::as_str)
+        .unwrap_or("greenfield");
+    let chapter_start = if planning_mode == "continuation" {
+        let baseline = object(
+            plan.get("baseline")
+                .ok_or_else(|| invalid("续写计划缺少作品基线"))?,
+            "baseline",
+        )?;
+        baseline
+            .get("existingChapters")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("续写计划基线章节格式无效"))?
+            .iter()
+            .filter_map(|item| item.get("chapterNumber").and_then(Value::as_i64))
+            .max()
+            .unwrap_or(0)
+            + 1
+    } else {
+        1
+    };
+    let planned_chapter_count = meta.target_chapter_count - chapter_start + 1;
+    if planned_chapter_count < 1 {
+        return Err(invalid("自主创作计划没有可规划的章节范围"));
+    }
     if arcs.is_empty()
         || volumes.is_empty()
         || characters.len() < 3
@@ -349,8 +445,8 @@ fn validate_complete_plan(plan: &Value, meta: &PlanMeta) -> Result<(), AppError>
     {
         return Err(invalid("完整自主创作计划缺少必要创作维度"));
     }
-    if chapters.len() as i64 != meta.target_chapter_count
-        || pacing.len() as i64 != meta.target_chapter_count
+    if chapters.len() as i64 != planned_chapter_count
+        || pacing.len() as i64 != planned_chapter_count
     {
         return Err(invalid("章节计划或节奏曲线没有覆盖目标章节数"));
     }
@@ -384,7 +480,7 @@ fn validate_complete_plan(plan: &Value, meta: &PlanMeta) -> Result<(), AppError>
                 beat,
                 "chapterNumber",
                 "人物成长节点",
-                1,
+                chapter_start,
                 meta.target_chapter_count,
             )?;
         }
@@ -394,12 +490,12 @@ fn validate_complete_plan(plan: &Value, meta: &PlanMeta) -> Result<(), AppError>
     }
 
     for (index, chapter) in chapters.iter().enumerate() {
-        let expected = index as i64 + 1;
+        let expected = chapter_start + index as i64;
         if number(
             chapter,
             "chapterNumber",
             "章节",
-            1,
+            chapter_start,
             meta.target_chapter_count,
         )? != expected
         {
@@ -433,9 +529,9 @@ fn validate_complete_plan(plan: &Value, meta: &PlanMeta) -> Result<(), AppError>
             point,
             "chapterNumber",
             "节奏点",
-            1,
+            chapter_start,
             meta.target_chapter_count,
-        )? != index as i64 + 1
+        )? != chapter_start + index as i64
         {
             return Err(invalid("节奏曲线必须逐章连续"));
         }
@@ -466,6 +562,116 @@ fn ensure_novel(connection: &Connection, novel_id: &str) -> Result<(), AppError>
         ));
     }
     Ok(())
+}
+
+pub fn get_planning_baseline(connection: &Connection, novel_id: &str) -> Result<Value, AppError> {
+    ensure_novel(connection, novel_id)?;
+
+    let mut volumes_statement = connection
+        .prepare(
+            "SELECT id, order_index, title, status
+             FROM volumes
+             WHERE novel_id=?1 AND deleted_at IS NULL
+             ORDER BY order_index ASC, id ASC",
+        )
+        .map_err(AppError::database)?;
+    let existing_volumes = volumes_statement
+        .query_map([novel_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "orderIndex": row.get::<_, i64>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "status": row.get::<_, String>(3)?,
+            }))
+        })
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+
+    let mut chapters_statement = connection
+        .prepare(
+            "SELECT id, volume_id, order_index, title, outline, goal, status, adopted_draft_id
+             FROM chapters
+             WHERE novel_id=?1 AND deleted_at IS NULL
+             ORDER BY order_index ASC, id ASC",
+        )
+        .map_err(AppError::database)?;
+    let existing_chapters = chapters_statement
+        .query_map([novel_id], |row| {
+            let order_index: i64 = row.get(2)?;
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "volumeId": row.get::<_, Option<String>>(1)?,
+                "chapterNumber": order_index + 1,
+                "orderIndex": order_index,
+                "title": row.get::<_, String>(3)?,
+                "outline": row.get::<_, Option<String>>(4)?,
+                "goal": row.get::<_, Option<String>>(5)?,
+                "status": row.get::<_, String>(6)?,
+                "adoptedDraftId": row.get::<_, Option<String>>(7)?,
+            }))
+        })
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+
+    let mut characters_statement = connection
+        .prepare(
+            "SELECT id, name, role_type, current_state, identity
+             FROM characters
+             WHERE novel_id=?1 AND is_active=1
+             ORDER BY created_at ASC, id ASC",
+        )
+        .map_err(AppError::database)?;
+    let existing_characters = characters_statement
+        .query_map([novel_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "role": row.get::<_, Option<String>>(2)?,
+                "summary": row.get::<_, Option<String>>(3)?.or(row.get::<_, Option<String>>(4)?),
+            }))
+        })
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+
+    let mut world_statement = connection
+        .prepare(
+            "SELECT id, title, content
+             FROM world_settings
+             WHERE novel_id=?1 AND is_active=1
+             ORDER BY created_at ASC, id ASC",
+        )
+        .map_err(AppError::database)?;
+    let existing_world_elements = world_statement
+        .query_map([novel_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "summary": row.get::<_, Option<String>>(2)?,
+            }))
+        })
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+
+    let payload = json!({
+        "novelId": novel_id,
+        "existingVolumes": existing_volumes,
+        "existingChapters": existing_chapters,
+        "existingCharacters": existing_characters,
+        "existingWorldElements": existing_world_elements,
+    });
+    Ok(json!({
+        "novelId": novel_id,
+        "capturedAt": Utc::now().to_rfc3339(),
+        "structureHash": hash_value(&payload),
+        "existingVolumes": payload["existingVolumes"].clone(),
+        "existingChapters": payload["existingChapters"].clone(),
+        "existingCharacters": payload["existingCharacters"].clone(),
+        "existingWorldElements": payload["existingWorldElements"].clone(),
+    }))
 }
 
 fn set_revision(plan: &mut Value, revision: i64) -> Result<(), AppError> {
@@ -700,7 +906,16 @@ fn verify_materialized_relations(
 }
 
 fn expected_materialized_counts(plan: &Value) -> Result<(i64, i64, i64, i64, i64, i64), AppError> {
-    let volumes = array_field(plan, "volumes")?.len() as i64;
+    let volumes = array_field(plan, "volumes")?
+        .iter()
+        .filter(|volume| {
+            volume
+                .get("materialization")
+                .and_then(Value::as_str)
+                .unwrap_or("create")
+                != "existing"
+        })
+        .count() as i64;
     let chapters = array_field(plan, "chapters")?;
     let characters = array_field(plan, "characters")?.len() as i64;
     let world = array_field(plan, "worldElements")?.len() as i64;
@@ -724,6 +939,117 @@ fn expected_materialized_counts(plan: &Value) -> Result<(i64, i64, i64, i64, i64
         events,
         chapter_characters,
     ))
+}
+
+fn validate_continuation_target(
+    connection: &Connection,
+    plan: &Value,
+    novel_id: &str,
+) -> Result<(), AppError> {
+    let baseline = object(
+        plan.get("baseline")
+            .ok_or_else(|| invalid("续写计划缺少作品基线"))?,
+        "baseline",
+    )?;
+    let expected_hash = baseline
+        .get("structureHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("续写基线缺少结构哈希"))?;
+    let live = get_planning_baseline(connection, novel_id)?;
+    if live.get("structureHash").and_then(Value::as_str) != Some(expected_hash) {
+        return Err(AppError::new(
+            codes::AUTONOMOUS_PLAN_BASELINE_CHANGED,
+            "续写计划生成后作品结构已变化，请刷新基线并重新生成。",
+            false,
+        ));
+    }
+
+    let existing_volumes = live
+        .get("existingVolumes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("续写基线的分卷数据无效"))?;
+    let existing_chapters = live
+        .get("existingChapters")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("续写基线的章节数据无效"))?;
+    let existing_volume_ids = existing_volumes
+        .iter()
+        .filter_map(|item| item.get("id").and_then(Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect::<HashSet<_>>();
+    let baseline_volume_order = existing_volumes
+        .iter()
+        .filter_map(|item| {
+            Some((
+                item.get("id")?.as_str()?.to_owned(),
+                item.get("orderIndex")?.as_i64()?,
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    let existing_chapter_ids = existing_chapters
+        .iter()
+        .filter_map(|item| item.get("id").and_then(Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect::<HashSet<_>>();
+    let max_existing_volume_index = existing_volumes
+        .iter()
+        .filter_map(|item| item.get("orderIndex").and_then(Value::as_i64))
+        .max()
+        .unwrap_or(-1);
+    let max_existing_chapter = existing_chapters
+        .iter()
+        .filter_map(|item| item.get("chapterNumber").and_then(Value::as_i64))
+        .max()
+        .unwrap_or(0);
+    let volumes = array_field(plan, "volumes")?;
+    let plan_volume_ids = volumes
+        .iter()
+        .map(|volume| string_id(volume, "id", "volume"))
+        .collect::<Result<HashSet<_>, _>>()?;
+    let mut volume_indexes = HashSet::new();
+    for volume in volumes {
+        let index = number(volume, "index", "volume", 0, 10_000)?;
+        if !volume_indexes.insert(index) {
+            return Err(invalid("续写计划的分卷序号必须唯一"));
+        }
+        let id = string_id(volume, "id", "volume")?;
+        let materialization = volume
+            .get("materialization")
+            .and_then(Value::as_str)
+            .unwrap_or("create");
+        match materialization {
+            "existing" if existing_volume_ids.contains(&id) => {
+                if baseline_volume_order.get(&id) != Some(&index) {
+                    return Err(invalid("续写计划不得修改既有分卷的位置"));
+                }
+            }
+            "existing" => return Err(invalid("续写计划引用的既有分卷已不存在")),
+            "create" if !existing_volume_ids.contains(&id) => {
+                if index <= max_existing_volume_index {
+                    return Err(invalid("续写计划的新增分卷必须排列在既有分卷之后"));
+                }
+            }
+            "create" => return Err(invalid("续写计划复用了既有分卷 ID")),
+            _ => return Err(invalid("分卷物化策略无效")),
+        }
+    }
+    let chapters = array_field(plan, "chapters")?;
+    let mut chapter_numbers = HashSet::new();
+    for chapter in chapters {
+        let id = string_id(chapter, "id", "chapter")?;
+        if existing_chapter_ids.contains(&id) {
+            return Err(invalid("续写计划复用了既有章节 ID"));
+        }
+        let chapter_number = number(chapter, "chapterNumber", "chapter", 1, 10_000)?;
+        if chapter_number <= max_existing_chapter || !chapter_numbers.insert(chapter_number) {
+            return Err(invalid("续写章节必须使用唯一且递增的编号"));
+        }
+        let volume_id = string_id(chapter, "volumeId", "chapter")?;
+        if !plan_volume_ids.contains(&volume_id) && !existing_volume_ids.contains(&volume_id) {
+            return Err(invalid("续写章节引用了未知分卷"));
+        }
+    }
+    Ok(())
 }
 
 fn verify_applied(
@@ -803,6 +1129,14 @@ pub fn apply_plan(
     let meta = validate_plan(&row.plan)?;
     validate_complete_plan(&row.plan, &meta)?;
     ensure_novel(&transaction, &row.novel_id)?;
+    let planning_mode = row
+        .plan
+        .get("planningMode")
+        .and_then(Value::as_str)
+        .unwrap_or("greenfield");
+    if planning_mode == "continuation" {
+        validate_continuation_target(&transaction, &row.plan, &row.novel_id)?;
+    }
     let existing_volumes: i64 = transaction
         .query_row(
             "SELECT COUNT(*) FROM volumes WHERE novel_id=?1 AND deleted_at IS NULL",
@@ -817,7 +1151,7 @@ pub fn apply_plan(
             |record| record.get(0),
         )
         .map_err(AppError::database)?;
-    if existing_volumes != 0 || existing_chapters != 0 {
+    if planning_mode != "continuation" && (existing_volumes != 0 || existing_chapters != 0) {
         return Err(AppError::new(
             codes::AUTONOMOUS_PLAN_TARGET_CONFLICT,
             "目标作品已有分卷或章节，不能覆盖式应用自主创作计划",
@@ -828,6 +1162,14 @@ pub fn apply_plan(
     let now = Utc::now().to_rfc3339();
     let volumes = array_field(&row.plan, "volumes")?;
     for volume in volumes {
+        if volume
+            .get("materialization")
+            .and_then(Value::as_str)
+            .unwrap_or("create")
+            == "existing"
+        {
+            continue;
+        }
         transaction
             .execute(
                 "INSERT INTO volumes (
@@ -841,7 +1183,7 @@ pub fn apply_plan(
                     text(volume, "summary", "分卷", 2_000)?,
                     text(volume, "goal", "分卷", 1_000)?,
                     text(volume, "mainConflict", "分卷", 1_000)?,
-                    number(volume, "index", "分卷", 0, 23)?,
+                    number(volume, "index", "分卷", 0, 10_000)?,
                     &now,
                 ],
             )
@@ -1051,7 +1393,16 @@ pub fn apply_plan(
 
     Ok(ApplyAutonomousPlanResult {
         plan: applied_plan,
-        created_volumes: volumes.len() as i64,
+        created_volumes: volumes
+            .iter()
+            .filter(|volume| {
+                volume
+                    .get("materialization")
+                    .and_then(Value::as_str)
+                    .unwrap_or("create")
+                    != "existing"
+            })
+            .count() as i64,
         created_chapters: chapters.len() as i64,
         created_characters: characters.len() as i64,
         created_world_elements: world.len() as i64,
@@ -1342,6 +1693,34 @@ mod tests {
                 row.get(0)
             })?;
         assert_eq!(count, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn planning_baseline_is_stable_and_captures_existing_structure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = database()?;
+        let now = Utc::now().to_rfc3339();
+        connection.execute(
+            "INSERT INTO volumes (id,novel_id,title,order_index,status,created_at,updated_at)
+             VALUES ('baseline-volume','novel-1','Existing volume',2,'planned',?1,?1)",
+            [&now],
+        )?;
+        connection.execute(
+            "INSERT INTO chapters (id,novel_id,volume_id,title,outline,goal,order_index,status,created_at,updated_at)
+             VALUES ('baseline-chapter','novel-1','baseline-volume','Existing chapter','outline','goal',8,'outline_ready',?1,?1)",
+            [&now],
+        )?;
+        let baseline = get_planning_baseline(&connection, "novel-1")?;
+        assert_eq!(baseline["existingVolumes"].as_array().unwrap().len(), 1);
+        assert_eq!(baseline["existingChapters"][0]["chapterNumber"], json!(9));
+        assert_eq!(baseline["structureHash"].as_str().unwrap().len(), 64);
+        connection.execute(
+            "UPDATE chapters SET title='Changed chapter' WHERE id='baseline-chapter'",
+            [],
+        )?;
+        let changed = get_planning_baseline(&connection, "novel-1")?;
+        assert_ne!(baseline["structureHash"], changed["structureHash"]);
         Ok(())
     }
 }

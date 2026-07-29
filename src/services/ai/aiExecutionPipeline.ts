@@ -1,4 +1,4 @@
-import type { AiSettings } from '../../types/ai';
+import type { AiSettings, AiStreamEvent, AiTaskType as LegacyAiTaskType } from '../../types/ai';
 import type {
   AiExecutionCompilationInput,
   CompiledAiExecutionContractV1,
@@ -16,6 +16,8 @@ import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { isTauri } from '../database/db';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
 import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
+import { createAiPricingSnapshot } from './aiCost';
+import { aiTaskService } from './aiTaskService';
 import {
   createProviderAdapter,
   type ProviderAdapter,
@@ -37,6 +39,10 @@ export interface ExecuteAiTaskInput {
   compilation: AiExecutionCompilationInput;
   parseStructuredPayload?: (text: string) => unknown | undefined;
   signal?: AbortSignal;
+  /** Internal cancellation owner used by the legacy task-center projection. */
+  cancel?: () => void;
+  stream?: boolean;
+  onStreamEvent?: (event: AiStreamEvent) => void;
 }
 
 export interface AiExecutionResult {
@@ -61,8 +67,19 @@ interface RuntimePort {
   getArtifact: typeof aiTaskRuntimeService.getArtifact;
 }
 
+interface AiTaskProjectionPort {
+  create: typeof aiTaskService.create;
+  markRunningForRetry?: typeof aiTaskService.markRunningForRetry;
+  markSucceeded: typeof aiTaskService.markSucceeded;
+  markFailed: typeof aiTaskService.markFailed;
+  markCancelled: typeof aiTaskService.markCancelled;
+  registerActiveExecution: typeof aiTaskService.registerActiveExecution;
+}
+
 export interface AiExecutionDependencies {
   runtime: RuntimePort;
+  /** Compatibility projection for the current AI task center and draft foreign key. */
+  projection?: AiTaskProjectionPort;
   createAdapter: (settings: AiSettings) => ProviderAdapter;
   compileContract: (input: {
     taskType: AiTaskType;
@@ -83,6 +100,7 @@ export interface AiExecutionDependencies {
 
 const defaultDependencies: AiExecutionDependencies = {
   runtime: aiTaskRuntimeService,
+  projection: aiTaskService,
   createAdapter: createProviderAdapter,
   compileContract: async (input) => {
     const { compileProductionAiExecution } =
@@ -503,7 +521,10 @@ async function cleanupFailedExecution(
 ): Promise<void> {
   if (!task) return;
   if (error.code === 'AI_PROVIDER_CANCELLED' || !attemptId) {
-    await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
+    const cancelled = await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
+    if (cancelled.status === 'cancel_requested') {
+      await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
+    }
     return;
   }
   await withCommitReplay(() =>
@@ -523,6 +544,28 @@ async function cleanupFailedExecution(
 }
 
 export async function executeAiTask(
+  input: ExecuteAiTaskInput,
+  dependencies: AiExecutionDependencies = defaultDependencies,
+): Promise<AiExecutionResult> {
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort();
+  input.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  if (input.signal?.aborted) onCallerAbort();
+  try {
+    return await executeAiTaskInternal(
+      {
+        ...input,
+        signal: controller.signal,
+        cancel: () => controller.abort(),
+      },
+      dependencies,
+    );
+  } finally {
+    input.signal?.removeEventListener('abort', onCallerAbort);
+  }
+}
+
+async function executeAiTaskInternal(
   input: ExecuteAiTaskInput,
   dependencies: AiExecutionDependencies = defaultDependencies,
 ): Promise<AiExecutionResult> {
@@ -563,7 +606,12 @@ export async function executeAiTask(
 
   if (!dependencies.isTauriRuntime()) {
     try {
-      const provider = await adapter.execute(contract.request, { signal: input.signal });
+      const provider = await adapter.execute(contract.request, {
+        signal: input.signal,
+        requestId: operationId,
+        stream: input.stream,
+        onStreamEvent: input.onStreamEvent,
+      });
       throwIfAiRequestCancelled(input.signal);
       return {
         persistence: 'ephemeral_browser',
@@ -579,11 +627,56 @@ export async function executeAiTask(
   let task: AiTask | undefined;
   let attemptId: string | undefined;
   let providerCompleted = false;
+  let projectionCreated = false;
+  let projectionSettled = false;
+  let releaseProjection: () => void = () => {};
   try {
     const taskInput = await buildTaskInput({ ...input, traceId }, contract, adapter, operationId);
     task = await withCommitReplay(() => dependencies.runtime.create(taskInput));
+    if (dependencies.projection) {
+      await dependencies.projection.create(input.taskType as LegacyAiTaskType, {
+        id: task.taskId,
+        novelId: input.scopeType === 'system' ? undefined : input.novelId,
+        chapterId: input.scopeType === 'system' ? undefined : input.chapterId,
+        modelName: adapter.modelId,
+        inputSummary: `受治理的 ${input.taskType} 请求`,
+        runtimeMode: input.settings.runtimeMode,
+        provider: adapter.providerId,
+        pricing: createAiPricingSnapshot(input.settings),
+      });
+      projectionCreated = true;
+      if (input.cancel) {
+        releaseProjection = dependencies.projection.registerActiveExecution(
+          task.taskId,
+          input.cancel,
+        );
+      }
+    }
     const completedReplay = await replayCompletedTask(dependencies.runtime, task);
-    if (completedReplay) return completedReplay;
+    if (completedReplay) {
+      providerCompleted = true;
+      if (completedReplay.artifactBundle?.artifact.processingStatus === 'invalid') {
+        throw new AiExecutionError({
+          code: 'ARTIFACT_VALIDATION_FAILED',
+          message: 'AI 结果未通过校验。',
+          retryable: true,
+          traceId,
+          operationId,
+          details: {
+            artifactId: completedReplay.artifactBundle.artifact.artifactId,
+            issueCodes: completedReplay.artifactBundle.issues.map((issue) => issue.code),
+          },
+        });
+      }
+      await dependencies.projection?.markSucceeded(task.taskId, {
+        resultText: completedReplay.text,
+        tokenInput: completedReplay.provider.tokenInput,
+        tokenOutput: completedReplay.provider.tokenOutput,
+        tokenTotal: completedReplay.provider.tokenTotal,
+      });
+      projectionSettled = true;
+      return completedReplay;
+    }
     const queued = await withCommitReplay(() =>
       dependencies.runtime.queueAttempt(task!.taskId, traceId),
     );
@@ -598,10 +691,13 @@ export async function executeAiTask(
         providerRequestId,
       }),
     );
+    await dependencies.projection?.markRunningForRetry?.(task.taskId);
 
     const provider = await adapter.execute(contract.request, {
       signal: input.signal,
       requestId: providerRequestId,
+      stream: input.stream,
+      onStreamEvent: input.onStreamEvent,
     });
     throwIfAiRequestCancelled(input.signal);
     const responseHash = await requireSha256(provider.text);
@@ -640,6 +736,26 @@ export async function executeAiTask(
     const artifactBundle = await withCommitReplay(() =>
       dependencies.runtime.createArtifact(artifactInput),
     );
+    if (artifactBundle.artifact.processingStatus === 'invalid') {
+      throw new AiExecutionError({
+        code: 'ARTIFACT_VALIDATION_FAILED',
+        message: 'AI 结果未通过校验。',
+        retryable: true,
+        traceId,
+        operationId,
+        details: {
+          artifactId: artifactBundle.artifact.artifactId,
+          issueCodes: artifactBundle.issues.map((issue) => issue.code),
+        },
+      });
+    }
+    await dependencies.projection?.markSucceeded(task.taskId, {
+      resultText: provider.text,
+      tokenInput: provider.tokenInput,
+      tokenOutput: provider.tokenOutput,
+      tokenTotal: provider.tokenTotal,
+    });
+    projectionSettled = true;
     return {
       persistence: 'sqlite',
       text: provider.text,
@@ -651,15 +767,33 @@ export async function executeAiTask(
     };
   } catch (error) {
     const mapped = mapProviderError(error, { traceId, operationId });
+    let cleanupError: unknown;
     if (!providerCompleted) {
       try {
         await cleanupFailedExecution(dependencies.runtime, task, attemptId, mapped);
-      } catch (cleanupError) {
-        throw toExecutionError(
-          normalizeAppError(cleanupError, mapped.message, { traceId, operationId }),
-        );
+      } catch (errorDuringCleanup) {
+        cleanupError = errorDuringCleanup;
       }
     }
+    if (task && projectionCreated && !projectionSettled && dependencies.projection) {
+      try {
+        if (mapped.code === 'AI_PROVIDER_CANCELLED' || isAiRequestCancelled(error)) {
+          await dependencies.projection.markCancelled(task.taskId);
+        } else {
+          await dependencies.projection.markFailed(task.taskId, mapped.message);
+        }
+        projectionSettled = true;
+      } catch (projectionError) {
+        cleanupError ??= projectionError;
+      }
+    }
+    if (cleanupError) {
+      throw toExecutionError(
+        normalizeAppError(cleanupError, mapped.message, { traceId, operationId }),
+      );
+    }
     throw mapped;
+  } finally {
+    releaseProjection();
   }
 }

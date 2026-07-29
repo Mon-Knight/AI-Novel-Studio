@@ -1,5 +1,7 @@
 import { appLogger } from '../observability/appLogger';
 import { generateId } from '../database/db';
+import { chapterRepository } from '../database/chapterRepository';
+import { draftVersionService } from '../database/draftVersionService';
 import type { ChapterDraft } from '../../types/ai';
 import type {
   AutonomousChapterPlan,
@@ -14,6 +16,7 @@ import type {
   AutonomousSchedulerSnapshot,
 } from '../../types/autonomousScheduler';
 import { autonomousSchedulerService } from './autonomousSchedulerService';
+import { autonomousChapterRuntimeLoader } from './autonomousChapterRuntimeLoader';
 
 type SchedulerService = typeof autonomousSchedulerService;
 
@@ -46,6 +49,8 @@ interface ActiveWorker {
   controller: AbortController;
   promise: Promise<void>;
 }
+
+const RECOVERY_SWEEP_INTERVAL_MS = 15_000;
 
 function message(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
@@ -95,6 +100,8 @@ export class AutonomousSchedulerWorker {
   private readonly snapshots = new Map<string, AutonomousSchedulerSnapshot>();
   private readonly listeners = new Set<() => void>();
   private startupPromise: Promise<void> | null = null;
+  private recoverySweepPromise: Promise<void> | null = null;
+  private recoveryInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly dependencies: SchedulerWorkerDependencies) {
     this.ownerId = `desktop-process:${dependencies.generateId()}`;
@@ -138,10 +145,9 @@ export class AutonomousSchedulerWorker {
     if (run?.status === 'queued') this.attach(run);
   }
 
-  recoverStartup(): Promise<void> {
-    if (!this.dependencies.scheduler.capability().persistent) return Promise.resolve();
-    if (this.startupPromise) return this.startupPromise;
-    this.startupPromise = this.dependencies.scheduler
+  private recoverAndAttach(): Promise<void> {
+    if (this.recoverySweepPromise) return this.recoverySweepPromise;
+    const sweep = this.dependencies.scheduler
       .recoverInterruptedRuns()
       .then((runs) => {
         runs.forEach((run) => {
@@ -151,7 +157,23 @@ export class AutonomousSchedulerWorker {
       })
       .catch((reason) => {
         appLogger.warn('[AutonomousScheduler] 启动恢复失败', reason);
+      })
+      .finally(() => {
+        if (this.recoverySweepPromise === sweep) this.recoverySweepPromise = null;
       });
+    this.recoverySweepPromise = sweep;
+    return sweep;
+  }
+
+  recoverStartup(): Promise<void> {
+    if (!this.dependencies.scheduler.capability().persistent) return Promise.resolve();
+    if (this.startupPromise) return this.startupPromise;
+    this.startupPromise = this.recoverAndAttach().then(() => {
+      if (this.recoveryInterval !== null) return;
+      this.recoveryInterval = this.dependencies.setInterval(() => {
+        void this.recoverAndAttach();
+      }, RECOVERY_SWEEP_INTERVAL_MS);
+    });
     return this.startupPromise;
   }
 
@@ -191,20 +213,54 @@ export class AutonomousSchedulerWorker {
     this.publish(run.planId, { workerActive: true, error: undefined });
   }
 
+  private async pauseOwnedRunAfterFailure(
+    run: AutonomousBookRun,
+    lease: AutonomousRunLeaseProof,
+    reason: unknown,
+  ): Promise<AutonomousBookRun | null> {
+    try {
+      // Revalidate the lease immediately before the state transition. A worker that has already
+      // been fenced by a newer epoch must never pause the replacement owner's run.
+      await this.dependencies.scheduler.heartbeat(run.runId, lease, 90);
+      const latest = await this.dependencies.scheduler.getRun(run.runId);
+      if (!latest || latest.status !== 'running') return latest;
+      const reasonCode = (errorCode(reason) ?? 'unexpected')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '_')
+        .slice(0, 160);
+      const paused = await this.dependencies.scheduler.pauseRun(
+        `scheduler-worker-error:${this.dependencies.generateId()}`,
+        latest.runId,
+        latest.stateRevision,
+        `worker_error:${reasonCode}`,
+      );
+      this.publish(paused.planId, { run: paused, busy: false, error: message(reason) });
+      return paused;
+    } catch (cleanupReason) {
+      appLogger.warn('[AutonomousScheduler] owned-run cleanup skipped', {
+        runId: run.runId,
+        code: errorCode(cleanupReason),
+      });
+      return null;
+    }
+  }
+
   private async execute(initial: AutonomousBookRun, signal: AbortSignal): Promise<void> {
     const grant = await this.dependencies.scheduler.acquireLease(initial.runId, this.ownerId, 90);
     const lease = proof(grant);
-    let run = (await this.dependencies.scheduler.getRun(initial.runId)) ?? initial;
-    this.publish(run.planId, { run, workerActive: true });
-    const heartbeat = this.dependencies.setInterval(() => {
-      void this.dependencies.scheduler.heartbeat(run.runId, lease, 90).catch((reason) => {
-        appLogger.warn('[AutonomousScheduler] heartbeat failed', {
-          runId: run.runId,
-          code: errorCode(reason),
-        });
-      });
-    }, 30_000);
+    let run = initial;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
     try {
+      run = (await this.dependencies.scheduler.getRun(initial.runId)) ?? initial;
+      this.publish(run.planId, { run, workerActive: true });
+      heartbeat = this.dependencies.setInterval(() => {
+        void this.dependencies.scheduler.heartbeat(run.runId, lease, 90).catch((reason) => {
+          appLogger.warn('[AutonomousScheduler] heartbeat failed', {
+            runId: run.runId,
+            code: errorCode(reason),
+          });
+        });
+      }, 30_000);
       while (!signal.aborted && run.status === 'running') {
         const plan = await this.dependencies.getPlan(run.planId);
         if (!plan || plan.status !== 'applied')
@@ -332,8 +388,14 @@ export class AutonomousSchedulerWorker {
         const attempts = await this.dependencies.scheduler.listAttempts(run.runId, 100);
         this.publish(run.planId, { run, attempts, busy: false });
       }
+    } catch (reason) {
+      if (!signal.aborted) {
+        const paused = await this.pauseOwnedRunAfterFailure(run, lease, reason);
+        if (paused) run = paused;
+      }
+      throw reason;
     } finally {
-      this.dependencies.clearInterval(heartbeat);
+      if (heartbeat !== null) this.dependencies.clearInterval(heartbeat);
       const latest = await this.dependencies.scheduler.getRun(run.runId).catch(() => null);
       if (latest) this.publish(run.planId, { run: latest, busy: false });
     }
@@ -391,14 +453,12 @@ export const autonomousSchedulerWorker = new AutonomousSchedulerWorker({
     return autonomousPlanPersistence.getPlan(planId);
   },
   async generateCandidate(planId, signal, selection) {
-    const { autonomousChapterWorkflow } = await import('./autonomousChapterRuntime');
-    return autonomousChapterWorkflow.generateNextCandidate(planId, {
+    return autonomousChapterRuntimeLoader.generateNextCandidate(planId, {
       signal,
       selection,
     });
   },
   async adoptDraft(draftId, chapterId) {
-    const { draftVersionService } = await import('../database/draftVersionService');
     return draftVersionService.adopt(draftId, chapterId);
   },
   async getReview(sessionId) {
@@ -406,11 +466,7 @@ export const autonomousSchedulerWorker = new AutonomousSchedulerWorker({
     return multiAgentService.getSession(sessionId);
   },
   async confirmAnalysis(planId, chapterId, draftId, signal) {
-    const [{ draftVersionService }, { chapterRepository }, postChapter] = await Promise.all([
-      import('../database/draftVersionService'),
-      import('../database/chapterRepository'),
-      import('./autonomousPostChapterRuntime'),
-    ]);
+    const postChapter = await import('./autonomousPostChapterRuntime');
     const draft = await draftVersionService.getById(chapterId, draftId);
     const chapter = await chapterRepository.getById(chapterId);
     if (!draft || !chapter) throw new Error('全自动收束缺少正式章节或采用稿。');
@@ -421,9 +477,3 @@ export const autonomousSchedulerWorker = new AutonomousSchedulerWorker({
   setInterval: (callback, delay) => globalThis.setInterval(callback, delay),
   clearInterval: (handle) => globalThis.clearInterval(handle),
 });
-
-// AutonomousPlanning is eagerly imported by the desktop route table, so this runs once per app
-// process and resumes only backend-confirmed interrupted runs. Browser mode is an explicit no-op.
-if (autonomousSchedulerService.capability().persistent) {
-  void autonomousSchedulerWorker.recoverStartup();
-}

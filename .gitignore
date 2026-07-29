@@ -43,4 +43,5 @@ src-tauri/target/
 .e2e-tools/
 test-results/e2e/
 test-results/browser-theme/
+test-results/production-exe-smoke-*/
 tmp/

@@ -67,7 +67,6 @@ interface WorkspaceViewActions {
   togglePanel(panel: PanelType): Promise<void>;
   closePanel(): Promise<void>;
   editorClick(event: MouseEvent<HTMLDivElement>): void;
-  draftChange(wordCount: number, dirty: boolean): void;
   editorContentChange(snapshot: EditorContentSnapshot): void;
   chapterOutlineApplied(chapterId: string): Promise<void>;
   confirmEditorLeave(): Promise<boolean>;
@@ -312,7 +311,6 @@ export default function WritingWorkspaceView({
               currentDraft={activeDraft}
               documentState={isChapterDocumentBlocked ? chapterDocumentLoad.status : 'ready'}
               contentStateOverride={activeContentState}
-              onDraftChange={actions.draftChange}
               onEditorContentChange={actions.editorContentChange}
               onDraftSaved={handlePersistentDraftSaved}
               applyTextRequest={applyTextRequest}

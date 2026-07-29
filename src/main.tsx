@@ -10,6 +10,7 @@ import { tauriInvoke } from './services/tauri/runtime';
 import { describeUnknownError } from './utils/errorMessage';
 import { initializeTheme } from './store/themeStore';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
+import { autonomousSchedulerWorker } from './services/autonomous-creation/autonomousSchedulerWorker';
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
@@ -17,6 +18,7 @@ import './styles/theme.css';
 performance.mark('app-script-start');
 initializeTheme();
 installGlobalErrorHandlers();
+void autonomousSchedulerWorker.recoverStartup();
 
 const startupScriptStartedAt = performance.now();
 const MIN_STARTUP_SPLASH_MS = 700;

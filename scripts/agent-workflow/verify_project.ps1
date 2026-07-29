@@ -115,6 +115,7 @@ $npmSteps = @(
     @{ Name = "npm run test:component-size"; Arguments = @("run", "test:component-size") },
     @{ Name = "npm run lint:ci"; Arguments = @("run", "lint:ci") },
     @{ Name = "npm run build"; Arguments = @("run", "build") },
+    @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") },
     @{ Name = "npm run test:quality-workspace"; Arguments = @("run", "test:quality-workspace") },
     @{ Name = "npm run test:setting-suggestions"; Arguments = @("run", "test:setting-suggestions") },
     @{ Name = "npm run test:ai-tasks-delete"; Arguments = @("run", "test:ai-tasks-delete") },

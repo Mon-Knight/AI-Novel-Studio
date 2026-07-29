@@ -27,6 +27,7 @@ import { getCurrentWritingContext, type WritingContext } from '../../utils/writi
 import { useRightSidebarStore } from '../../store/rightSidebarStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import WritingWorkspaceView from './WritingWorkspaceView';
+import { reportAppError } from '../../utils/reportAndPresentError';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
 
@@ -73,6 +74,7 @@ function WritingWorkspacePage() {
       setActiveChapterId: state.setActiveChapterId,
       setCurrentDraft: state.setCurrentDraft,
       setEditorSnapshot: state.setEditorSnapshot,
+      setEditorActivity: state.setEditorActivity,
       setDraftWordCount: state.setDraftWordCount,
       setDirty: state.setDirty,
       setQuality: state.setQuality,
@@ -88,6 +90,7 @@ function WritingWorkspacePage() {
     setActiveChapterId,
     setCurrentDraft,
     setEditorSnapshot,
+    setEditorActivity,
     setDraftWordCount,
     setDirty: setIsDirty,
     setQuality,
@@ -386,22 +389,12 @@ function WritingWorkspacePage() {
     [handleClosePanel],
   );
 
-  const handleDraftChange = useCallback(
-    (wordCount: number, dirty: boolean) => {
-      setDraftWordCount(wordCount);
-      setIsDirty(dirty);
-    },
-    [setDraftWordCount, setIsDirty],
-  );
-
   const handleEditorContentChange = useCallback(
     (snapshot: EditorContentSnapshot) => {
       editorSnapshotRef.current = snapshot;
-      setEditorSnapshot(snapshot);
-      setDraftWordCount(snapshot.wordCount);
-      setIsDirty(snapshot.isDirty);
+      setEditorActivity(snapshot);
     },
-    [setDraftWordCount, setEditorSnapshot, setIsDirty],
+    [setEditorActivity],
   );
 
   // v1.0.34 章节大纲应用回调：刷新父组件的章节状态
@@ -413,11 +406,16 @@ function WritingWorkspacePage() {
         if (updated) {
           setChapters((prev) => prev.map((c) => (c.id === chapterId ? updated : c)));
         }
-      } catch {
-        // 刷新失败时静默处理，不影响用户操作
+      } catch (error) {
+        reportAppError({
+          event: 'WORKSPACE_CHAPTER_OUTLINE_REFRESH_FAILED',
+          error,
+          fallbackMessage: '章节大纲已应用，但工作区刷新失败，请重新打开该章节。',
+          context: { novelId: novelId || '', chapterId },
+        });
       }
     },
-    [setChapters],
+    [novelId, setChapters],
   );
 
   return (
@@ -443,7 +441,6 @@ function WritingWorkspacePage() {
         togglePanel: handleTogglePanel,
         closePanel: handleClosePanel,
         editorClick: handleEditorClick,
-        draftChange: handleDraftChange,
         editorContentChange: handleEditorContentChange,
         chapterOutlineApplied: handleChapterOutlineApplied,
         confirmEditorLeave,

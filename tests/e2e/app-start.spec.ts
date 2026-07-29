@@ -17,8 +17,8 @@ describe('desktop startup', () => {
     await assertCleanDiagnostics();
     const diagnostics = await bridgeDiagnostics();
     expect(diagnostics.databasePath).toContain('ai-novel-studio.db');
-    expect(diagnostics.migrationCount).toBe(28);
-    expect(diagnostics.latestMigrationId).toBe('028_multi_target_transactions_and_story_assets');
+    expect(diagnostics.migrationCount).toBe(29);
+    expect(diagnostics.latestMigrationId).toBe('029_global_ai_request_policy');
     expect(diagnostics.counts?.novels).toBe(0);
     expect(diagnostics.counts?.executionTasks).toBe(0);
     expect(diagnostics.counts?.resultArtifacts).toBe(0);

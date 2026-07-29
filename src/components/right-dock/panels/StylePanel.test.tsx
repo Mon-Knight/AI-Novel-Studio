@@ -33,10 +33,14 @@ const outputServiceModule = (await vite.ssrLoadModule(
 const panelModule = (await vite.ssrLoadModule(
   '/src/components/right-dock/panels/StylePanel.tsx',
 )) as typeof import('./StylePanel');
+const styleAnalyzeModule = (await vite.ssrLoadModule(
+  '/src/services/styles/styleAnalyzeService.ts',
+)) as typeof import('../../../services/styles/styleAnalyzeService');
 
 const { styleProfileService } = styleServiceModule;
 const { outputProfileService } = outputServiceModule;
 const StylePanel = panelModule.default;
+const { renderStyleAnalyzePrompt } = styleAnalyzeModule;
 const { cleanup, fireEvent, render, screen } = await import('@testing-library/react');
 
 const originalStyleGetAll = styleProfileService.getAll;
@@ -102,4 +106,28 @@ test('style analysis can be stopped and an in-flight request is aborted on unmou
       writable: true,
     });
   }
+});
+
+test('style analysis uses the complete build-time prompt contract', () => {
+  const prompt = renderStyleAnalyzePrompt('参考文本内容');
+  for (const field of [
+    'name',
+    'narrativePerspective',
+    'tone',
+    'pace',
+    'sentenceStyle',
+    'dialogueRatio',
+    'descriptionRatio',
+    'psychologicalRatio',
+    'battleStyle',
+    'battleIntensity',
+    'emotionTendency',
+    'chapterEnding',
+    'forbiddenStyles',
+    'styleSummary',
+  ]) {
+    assert.match(prompt, new RegExp(`"${field}"`));
+  }
+  assert.match(prompt, /参考文本内容/);
+  assert.doesNotMatch(prompt, /\{\{reference_text\}\}/);
 });

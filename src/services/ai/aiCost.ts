@@ -85,6 +85,7 @@ export function attachAiUsageCost(
   response: AiGenerateResponse,
   settings: AiSettings,
 ): AiGenerateResponse {
+  if (response.usageCost) return response;
   return {
     ...response,
     usageCost: calculateAiUsageCost(

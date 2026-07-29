@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { formatDateTime } from '../../utils/date';
 import { formatTokenCount } from '../../utils/format';
 import type { AiTaskRecord } from '../../types/ai';
@@ -71,6 +72,8 @@ function AiTaskRecordCard({
 }: AiTaskRecordCardProps) {
   const canStop =
     (task.status === 'running' || task.status === 'pending') && activeExecutionState !== 'inactive';
+  const canDelete =
+    task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled';
 
   return (
     <div
@@ -80,7 +83,7 @@ function AiTaskRecordCard({
         borderLeft: `3px solid ${statusColor(task.status)}`,
         background: selected ? 'var(--color-primary-light)' : undefined,
       }}
-      onClick={() => (selectMode ? onToggleSelect(task.id) : onToggleExpand(task.id))}
+      onClick={() => (selectMode ? canDelete && onToggleSelect(task.id) : onToggleExpand(task.id))}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
@@ -93,7 +96,7 @@ function AiTaskRecordCard({
               marginBottom: 4,
             }}
           >
-            {selectMode && (
+            {selectMode && canDelete && (
               <input
                 type="checkbox"
                 checked={selected}
@@ -145,17 +148,19 @@ function AiTaskRecordCard({
                 {activeExecutionState === 'cancelling' ? '停止中' : '停止'}
               </button>
             )}
-            <button
-              className="btn btn-text btn-sm"
-              style={{ color: 'var(--color-error)', fontSize: 16 }}
-              onClick={(event) => {
-                event.stopPropagation();
-                onDelete(task);
-              }}
-              title="删除此记录"
-            >
-              🗑️
-            </button>
+            {canDelete && (
+              <button
+                className="btn btn-text btn-sm"
+                style={{ color: 'var(--color-error)', fontSize: 16 }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(task);
+                }}
+                title="删除此记录"
+              >
+                🗑️
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -253,4 +258,4 @@ function AiTaskRecordCard({
   );
 }
 
-export default AiTaskRecordCard;
+export default memo(AiTaskRecordCard);

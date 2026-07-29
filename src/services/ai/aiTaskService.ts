@@ -4,8 +4,8 @@ import { appLogger } from '../observability/appLogger';
  */
 import { dbCall, isTauri, lsGet, lsRemove, lsSet, generateId, nowISO } from '../database/db';
 import type { AiPricingSnapshot, AiTaskRecord, AiTaskStatus, AiTaskType } from '../../types/ai';
-import { aiSettingsService } from './aiSettingsService';
 import { calculateAiUsageCost, createAiPricingSnapshot, normalizeAiTokenCount } from './aiCost';
+import { getAiSettings } from './aiSettingsStore';
 
 const AI_TASKS_KEY = 'ai_novel_studio_ai_tasks';
 const LEGACY_AI_TASKS_KEY = 'ai_novel_studio_ai_task_records';
@@ -15,7 +15,7 @@ interface ActiveAiTaskExecution {
   cancelling: boolean;
 }
 
-const activeAiTaskExecutions = new Map<string, ActiveAiTaskExecution>();
+const activeAiTaskExecutions = new Map<string, Set<ActiveAiTaskExecution>>();
 
 interface DeleteAiTaskRecordsResult {
   deletedCount: number;
@@ -161,6 +161,19 @@ function isTerminalTask(record: AiTaskRecord | undefined): boolean {
   );
 }
 
+function assertProjectionIdentity(existing: AiTaskRecord, requested: AiTaskRecord): void {
+  if (
+    existing.taskType !== requested.taskType ||
+    existing.novelId !== requested.novelId ||
+    existing.chapterId !== requested.chapterId ||
+    existing.runtimeMode !== requested.runtimeMode ||
+    existing.provider !== requested.provider ||
+    existing.modelName !== requested.modelName
+  ) {
+    throw new Error('AI 任务投影 ID 与既有任务身份冲突。');
+  }
+}
+
 function summarizeText(text: string | undefined, limit = 500): string | undefined {
   if (!text) return undefined;
   return text.length > limit ? `${text.slice(0, limit)}...` : text;
@@ -170,30 +183,43 @@ export const aiTaskService = {
   registerActiveExecution(id: string, cancel: () => void): () => void {
     if (!id) return () => {};
     const execution: ActiveAiTaskExecution = { cancel, cancelling: false };
-    activeAiTaskExecutions.set(id, execution);
+    const owners = activeAiTaskExecutions.get(id) ?? new Set<ActiveAiTaskExecution>();
+    owners.add(execution);
+    activeAiTaskExecutions.set(id, owners);
     return () => {
-      if (activeAiTaskExecutions.get(id) === execution) activeAiTaskExecutions.delete(id);
+      const currentOwners = activeAiTaskExecutions.get(id);
+      if (!currentOwners) return;
+      currentOwners.delete(execution);
+      if (currentOwners.size === 0) activeAiTaskExecutions.delete(id);
     };
   },
 
   cancelActiveExecution(id: string): 'requested' | 'already_requested' | 'not_active' {
-    const execution = activeAiTaskExecutions.get(id);
-    if (!execution) return 'not_active';
-    if (execution.cancelling) return 'already_requested';
-    execution.cancelling = true;
-    execution.cancel();
+    const owners = activeAiTaskExecutions.get(id);
+    if (!owners || owners.size === 0) return 'not_active';
+    const activeOwners = [...owners].filter((execution) => !execution.cancelling);
+    if (activeOwners.length === 0) return 'already_requested';
+    for (const execution of activeOwners) {
+      execution.cancelling = true;
+      try {
+        execution.cancel();
+      } catch (error) {
+        appLogger.captureError('AI_TASK_CANCEL_OWNER_FAILED', error, { taskId: id });
+      }
+    }
     return 'requested';
   },
 
   getActiveExecutionState(id: string): 'active' | 'cancelling' | 'inactive' {
-    const execution = activeAiTaskExecutions.get(id);
-    if (!execution) return 'inactive';
-    return execution.cancelling ? 'cancelling' : 'active';
+    const owners = activeAiTaskExecutions.get(id);
+    if (!owners || owners.size === 0) return 'inactive';
+    return [...owners].some((execution) => !execution.cancelling) ? 'active' : 'cancelling';
   },
 
   async create(
     taskType: AiTaskType,
     input: {
+      id?: string;
       novelId?: string;
       chapterId?: string;
       modelName?: string;
@@ -204,9 +230,13 @@ export const aiTaskService = {
     },
   ): Promise<AiTaskRecord> {
     const now = nowISO();
-    const pricing = input.pricing ?? createAiPricingSnapshot(aiSettingsService.getSettings());
+    const pricing = input.pricing ?? createAiPricingSnapshot(getAiSettings());
+    const requestedId = input.id?.trim();
+    if (input.id !== undefined && !requestedId) {
+      throw new Error('AI 任务投影 ID 不能为空。');
+    }
     const record: AiTaskRecord = {
-      id: generateId(),
+      id: requestedId ?? generateId(),
       novelId: input.novelId,
       chapterId: input.chapterId,
       taskType,
@@ -246,6 +276,11 @@ export const aiTaskService = {
       },
       () => {
         const tasks = getLocalTasks();
+        const existing = tasks.find((task) => task.id === record.id);
+        if (existing) {
+          assertProjectionIdentity(existing, record);
+          return existing;
+        }
         tasks.unshift(record);
         saveLocalTasks(tasks);
         return record;
@@ -257,6 +292,25 @@ export const aiTaskService = {
       upsertLocalTask(normalized);
     }
     return normalized;
+  },
+
+  async markRunningForRetry(id: string): Promise<void> {
+    if (!id) return;
+    const startedAt = nowISO();
+    await dbCall<void>('mark_ai_task_running_for_retry', { id, startedAt }, () => {
+      const tasks = getLocalTasks();
+      const index = tasks.findIndex((task) => task.id === id);
+      if (index === -1 || tasks[index].status !== 'failed') return;
+      tasks[index] = {
+        ...tasks[index],
+        status: 'running',
+        errorMessage: undefined,
+        durationMs: undefined,
+        finishedAt: undefined,
+        startedAt,
+      };
+      saveLocalTasks(tasks);
+    });
   },
 
   async markSucceeded(
@@ -516,6 +570,12 @@ export const aiTaskService = {
     if (!id) return { deletedCount: 0 };
 
     const tauri = isTauri();
+    if (!tauri) {
+      const task = getLocalTasks().find((item) => item.id === id);
+      if (task && !isTerminalTask(task)) {
+        throw new Error('运行中或等待中的 AI 任务不能删除。');
+      }
+    }
     appLogger.debug('[AI_TASK_SERVICE] deleteOne invoke', {
       command: 'delete_ai_task_record',
       id,
@@ -547,6 +607,12 @@ export const aiTaskService = {
     if (uniqueIds.length === 0) return { deletedCount: 0 };
 
     const tauri = isTauri();
+    if (!tauri) {
+      const idSet = new Set(uniqueIds);
+      if (getLocalTasks().some((task) => idSet.has(task.id) && !isTerminalTask(task))) {
+        throw new Error('批量删除包含运行中或等待中的 AI 任务。');
+      }
+    }
     appLogger.debug('[AI_TASK_SERVICE] deleteMany invoke', {
       command: 'delete_ai_task_records_by_ids',
       ids: uniqueIds,
@@ -588,6 +654,9 @@ export const aiTaskService = {
   /** 清空全部记录 */
   async clearAll(): Promise<DeleteAiTaskRecordsResult> {
     const tauri = isTauri();
+    if (!tauri && getLocalTasks().some((task) => !isTerminalTask(task))) {
+      throw new Error('存在运行中或等待中的 AI 任务，请先停止并确认终态。');
+    }
     appLogger.debug('[AI_TASK_SERVICE] clearAll invoke', {
       command: 'clear_ai_task_records',
       isTauri: tauri,

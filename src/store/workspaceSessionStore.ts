@@ -48,6 +48,7 @@ export interface WorkspaceSessionState {
   setActiveChapterId(value: string): void;
   setCurrentDraft(value: ChapterDraft | null): void;
   setEditorSnapshot(value: EditorContentSnapshot): void;
+  setEditorActivity(value: EditorContentSnapshot): void;
   setDraftWordCount(value: number): void;
   setDirty(value: boolean): void;
   setQuality(report: QualityCheckReport | null, items: QualityCheckItem[]): void;
@@ -82,6 +83,12 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set) => (
   setActiveChapterId: (activeChapterId) => set({ activeChapterId }),
   setCurrentDraft: (currentDraft) => set({ currentDraft }),
   setEditorSnapshot: (editorSnapshot) => set({ editorSnapshot }),
+  setEditorActivity: (editorSnapshot) =>
+    set({
+      editorSnapshot,
+      draftWordCount: editorSnapshot.wordCount,
+      isDirty: editorSnapshot.isDirty,
+    }),
   setDraftWordCount: (draftWordCount) => set({ draftWordCount }),
   setDirty: (isDirty) => set({ isDirty }),
   setQuality: (qcReport, qcItems) => set({ qcReport, qcItems }),

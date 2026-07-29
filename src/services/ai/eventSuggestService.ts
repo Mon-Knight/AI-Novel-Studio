@@ -6,6 +6,7 @@ import { buildEventSuggestPrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import { volumeRepository } from '../database/volumeRepository';
+import { chapterRepository } from '../database/chapterRepository';
 import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
 import type { Character } from '../../types/character';
 import { safeJsonParse } from './jsonUtils';
@@ -45,9 +46,7 @@ export const eventSuggestService = {
     let volumeGoal: string | undefined;
     let previousContext: string | undefined;
     try {
-      const chapters = await (
-        await import('../database/chapterRepository')
-      ).chapterRepository.getByNovelId(input.novelId);
+      const chapters = await chapterRepository.getByNovelId(input.novelId);
       const chapter = chapters.find((c) => c.id === input.chapterId);
       if (chapter?.volumeId) {
         const vol = await volumeRepository.getById(chapter.volumeId);

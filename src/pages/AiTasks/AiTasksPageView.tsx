@@ -68,6 +68,11 @@ function AiTasksPageView({
   onPreviousPage,
   onNextPage,
 }: AiTasksPageViewProps) {
+  const deletableTaskCount = tasks.filter(
+    (task) =>
+      task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled',
+  ).length;
+
   return (
     <div
       style={{ padding: 32, maxWidth: 900, margin: '0 auto', height: '100%', overflowY: 'auto' }}
@@ -118,7 +123,9 @@ function AiTasksPageView({
         {selectMode && (
           <>
             <button className="btn btn-sm btn-secondary" onClick={onToggleSelectAll}>
-              {selectedIds.size === tasks.length ? '☐ 取消全选' : '☑️ 全选'}
+              {deletableTaskCount > 0 && selectedIds.size === deletableTaskCount
+                ? '☐ 取消全选'
+                : '☑️ 全选终态'}
             </button>
             <button
               className="btn btn-sm btn-danger"
@@ -189,8 +196,12 @@ function AiTasksPageView({
       </div>
       {(typeFilter !== 'all' || statusFilter !== 'all') && tasks.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <button className="btn btn-xs btn-danger" onClick={onDeleteFiltered} disabled={deleting}>
-            🗑️ 删除当前页的 {tasks.length} 条记录
+          <button
+            className="btn btn-xs btn-danger"
+            onClick={onDeleteFiltered}
+            disabled={deleting || deletableTaskCount === 0}
+          >
+            🗑️ 删除当前页的 {deletableTaskCount} 条终态记录
           </button>
         </div>
       )}

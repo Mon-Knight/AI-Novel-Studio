@@ -1,7 +1,4 @@
-import type {
-  AiToolPolicySnapshotV1,
-  CompiledAiConstraintV1,
-} from '../../../types/aiCompilation';
+import type { AiToolPolicySnapshotV1, CompiledAiConstraintV1 } from '../../../types/aiCompilation';
 import type { AiTaskType } from '../../../types/ai-task';
 import type { ResultArtifactType } from '../../../types/result-artifact';
 import {
@@ -32,20 +29,14 @@ export interface CompileAiConstraintInput {
 function identifier(value: string, label: string, maxLength: number): string {
   const normalized = value.trim();
   if (!normalized || normalized.length > maxLength || !/^[A-Za-z0-9._:/@-]+$/.test(normalized)) {
-    throw new AiCompilationError(
-      'AI_CONSTRAINT_POLICY_INVALID',
-      `${label} 不是有效的稳定标识。`,
-    );
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', `${label} 不是有效的稳定标识。`);
   }
   return normalized;
 }
 
 function validateToolPolicy(input: AiToolPolicySnapshotV1): AiToolPolicySnapshotV1 {
   if (input.registryVersion !== 'tool_registry_v1' || !/^[0-9a-f]{64}$/.test(input.registryHash)) {
-    throw new AiCompilationError(
-      'AI_CONSTRAINT_POLICY_INVALID',
-      'Tool Registry identity 无效。',
-    );
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'Tool Registry identity 无效。');
   }
   if (!Array.isArray(input.allowedTools) || input.allowedTools.length > 128) {
     throw new AiCompilationError(
@@ -53,9 +44,9 @@ function validateToolPolicy(input: AiToolPolicySnapshotV1): AiToolPolicySnapshot
       'allowedTools 必须是最多 128 项的数组。',
     );
   }
-  const allowedTools = [...new Set(input.allowedTools.map((name) => (
-    identifier(name, 'allowed tool', 192)
-  )))].sort();
+  const allowedTools = [
+    ...new Set(input.allowedTools.map((name) => identifier(name, 'allowed tool', 192))),
+  ].sort();
   return { ...input, allowedTools };
 }
 
@@ -68,32 +59,22 @@ export async function compileAiConstraint(
       'constraints 必须是 JSON object。',
     );
   }
-  if (!Number.isInteger(input.expectedArtifactSchemaVersion)
-    || input.expectedArtifactSchemaVersion < 1
-    || input.expectedArtifactSchemaVersion > 1000) {
-    throw new AiCompilationError(
-      'AI_CONSTRAINT_POLICY_INVALID',
-      'Artifact schemaVersion 无效。',
-    );
+  if (
+    !Number.isInteger(input.expectedArtifactSchemaVersion) ||
+    input.expectedArtifactSchemaVersion < 1 ||
+    input.expectedArtifactSchemaVersion > 1000
+  ) {
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'Artifact schemaVersion 无效。');
   }
   if (!Number.isFinite(input.temperature) || input.temperature < 0 || input.temperature > 2) {
-    throw new AiCompilationError(
-      'AI_CONSTRAINT_POLICY_INVALID',
-      'temperature 必须位于 0～2。',
-    );
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'temperature 必须位于 0～2。');
   }
   if (!Number.isInteger(input.maxTokens) || input.maxTokens < 1 || input.maxTokens > 1_000_000) {
-    throw new AiCompilationError(
-      'AI_CONSTRAINT_POLICY_INVALID',
-      'maxTokens 无效。',
-    );
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'maxTokens 无效。');
   }
   const promptTemplateBody = normalizeCompilationText(input.promptTemplateBody);
   if (!promptTemplateBody || unicodeLength(promptTemplateBody) > 100_000) {
-    throw new AiCompilationError(
-      'AI_CONSTRAINT_POLICY_INVALID',
-      'Prompt 模板为空或超过长度限制。',
-    );
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'Prompt 模板为空或超过长度限制。');
   }
   const promptTemplateId = identifier(input.promptTemplateId, 'promptTemplateId', 160);
   const promptTemplateVersion = identifier(

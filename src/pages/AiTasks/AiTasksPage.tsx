@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { appLogger } from '../../services/observability/appLogger';
 import { aiTaskService } from '../../services/ai/aiTaskService';
 import type { AiTaskRecord, AiTaskStatus, AiTaskType } from '../../types/ai';
@@ -7,6 +7,11 @@ import { confirmDanger } from '../../utils/nativeDialog';
 import { describeUnknownError } from '../../utils/errorMessage';
 import AiTasksPageView from './AiTasksPageView';
 import { TASK_PAGE_SIZE, type ActiveExecutionState } from './aiTasksPresentation';
+import { reconcileAiTaskRecords } from './aiTaskRecordReconciliation';
+
+function isDeletableTask(task: AiTaskRecord): boolean {
+  return task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled';
+}
 
 function AiTasksPage() {
   const [tasks, setTasks] = useState<AiTaskRecord[]>([]);
@@ -20,6 +25,8 @@ function AiTasksPage() {
   const [deleting, setDeleting] = useState(false);
   const [executionRevision, setExecutionRevision] = useState(0);
   const [page, setPage] = useState(1);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
 
   const showMessage = useCallback((text: string, durationMs = 3000) => {
     setMsg(text);
@@ -33,7 +40,7 @@ function AiTasksPage() {
         taskType: typeFilter === 'all' ? undefined : typeFilter,
         status: statusFilter === 'all' ? undefined : statusFilter,
       });
-      setTasks(result.items);
+      setTasks((previous) => reconcileAiTaskRecords(previous, result.items));
       setTotal(result.total);
       appLogger.debug('[AI_TASK_DELETE_UI] reload tasks done', {
         itemCount: result.items.length,
@@ -89,50 +96,77 @@ function AiTasksPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const handleStopTask = (task: AiTaskRecord) => {
-    const outcome = aiTaskService.cancelActiveExecution(task.id);
-    setExecutionRevision((value) => value + 1);
-    showMessage(
-      outcome === 'requested'
-        ? '已发送停止请求，正在等待传输和任务终态确认。'
-        : outcome === 'already_requested'
-          ? '该任务正在停止。'
-          : '当前进程没有该任务的运行句柄；它可能来自上次应用会话。',
-    );
-  };
+  const handleStopTask = useCallback(
+    (task: AiTaskRecord) => {
+      const outcome = aiTaskService.cancelActiveExecution(task.id);
+      setExecutionRevision((value) => value + 1);
+      showMessage(
+        outcome === 'requested'
+          ? '已发送停止请求，正在等待传输和任务终态确认。'
+          : outcome === 'already_requested'
+            ? '该任务正在停止。'
+            : '当前进程没有该任务的运行句柄；它可能来自上次应用会话。',
+      );
+    },
+    [showMessage],
+  );
 
-  const handleDeleteOne = async (task: AiTaskRecord) => {
-    if (
-      !(await confirmDanger({
-        title: '删除任务记录',
-        message: `确定删除这条「${AiTaskTypeLabels[task.taskType]}」记录吗？`,
-      }))
-    )
-      return;
-    try {
-      const result = await aiTaskService.deleteOne(task.id);
-      appLogger.debug('[AI_TASK_DELETE_UI] delete one result', result);
-      if (result.deletedCount === 0) return showMessage('未删除任何记录，请检查记录ID或数据库连接');
-      const reloaded = await loadTasks(page);
-      if (reloaded.some((item) => item.id === task.id)) {
-        appLogger.error('[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible', [task.id]);
-        return showMessage('删除后仍检测到记录，请检查数据源');
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds((previous) => {
+      if (!tasksRef.current.some((task) => task.id === id && isDeletableTask(task))) {
+        return previous;
       }
-      setSelectedIds((previous) => {
-        const next = new Set(previous);
-        next.delete(task.id);
-        return next;
-      });
-      setExpandedId((previous) => (previous === task.id ? null : previous));
-      showMessage(`已删除 ${result.deletedCount} 条记录`, 2000);
-    } catch (error: unknown) {
-      appLogger.error('[AI_TASK_DELETE_UI] delete one failed full error', {
-        errorMessage: describeUnknownError(error),
-        error,
-      });
-      showMessage('删除失败：' + describeUnknownError(error), 8000);
-    }
-  };
+      const next = new Set(previous);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleExpand = useCallback(
+    (id: string) => setExpandedId((previous) => (previous === id ? null : id)),
+    [],
+  );
+
+  const handleDeleteOne = useCallback(
+    async (task: AiTaskRecord) => {
+      if (!isDeletableTask(task)) {
+        showMessage('运行中或等待中的任务需先停止并确认终态，之后才能删除。');
+        return;
+      }
+      if (
+        !(await confirmDanger({
+          title: '删除任务记录',
+          message: `确定删除这条「${AiTaskTypeLabels[task.taskType]}」记录吗？`,
+        }))
+      )
+        return;
+      try {
+        const result = await aiTaskService.deleteOne(task.id);
+        appLogger.debug('[AI_TASK_DELETE_UI] delete one result', result);
+        if (result.deletedCount === 0)
+          return showMessage('未删除任何记录，请检查记录ID或数据库连接');
+        const reloaded = await loadTasks(page);
+        if (reloaded.some((item) => item.id === task.id)) {
+          appLogger.error('[AI_TASK_DELETE_VERIFY_FAILED] deleted ids still visible', [task.id]);
+          return showMessage('删除后仍检测到记录，请检查数据源');
+        }
+        setSelectedIds((previous) => {
+          const next = new Set(previous);
+          next.delete(task.id);
+          return next;
+        });
+        setExpandedId((previous) => (previous === task.id ? null : previous));
+        showMessage(`已删除 ${result.deletedCount} 条记录`, 2000);
+      } catch (error: unknown) {
+        appLogger.error('[AI_TASK_DELETE_UI] delete one failed full error', {
+          errorMessage: describeUnknownError(error),
+          error,
+        });
+        showMessage('删除失败：' + describeUnknownError(error), 8000);
+      }
+    },
+    [loadTasks, page, showMessage],
+  );
 
   const deleteMany = async (ids: string[], successMessage: (count: number) => string) => {
     if (ids.length === 0) return showMessage('请先选择要删除的记录', 2000);
@@ -183,17 +217,19 @@ function AiTasksPage() {
   };
 
   const handleDeleteFiltered = async () => {
+    const deletableIds = tasks.filter(isDeletableTask).map((task) => task.id);
+    if (deletableIds.length === 0) {
+      showMessage('当前页没有可删除的终态任务。');
+      return;
+    }
     if (
       !(await confirmDanger({
         title: '删除当前页记录',
-        message: `确定删除当前页显示的 ${tasks.length} 条记录吗？`,
+        message: `确定删除当前页的 ${deletableIds.length} 条终态记录吗？`,
       }))
     )
       return;
-    await deleteMany(
-      tasks.map((task) => task.id),
-      (count) => `已删除当前页 ${count} 条记录`,
-    );
+    await deleteMany(deletableIds, (count) => `已删除当前页 ${count} 条记录`);
   };
 
   const handleClearAll = async () => {
@@ -258,21 +294,16 @@ function AiTasksPage() {
         setSelectedIds(new Set());
       }}
       onToggleSelectAll={() =>
-        setSelectedIds(
-          selectedIds.size === tasks.length ? new Set() : new Set(tasks.map((task) => task.id)),
-        )
+        setSelectedIds(() => {
+          const deletableIds = tasks.filter(isDeletableTask).map((task) => task.id);
+          return selectedIds.size === deletableIds.length ? new Set() : new Set(deletableIds);
+        })
       }
       onDeleteSelected={handleDeleteSelected}
       onClearAll={handleClearAll}
       onDeleteFiltered={handleDeleteFiltered}
-      onToggleSelect={(id) =>
-        setSelectedIds((previous) => {
-          const next = new Set(previous);
-          next.has(id) ? next.delete(id) : next.add(id);
-          return next;
-        })
-      }
-      onToggleExpand={(id) => setExpandedId((previous) => (previous === id ? null : id))}
+      onToggleSelect={handleToggleSelect}
+      onToggleExpand={handleToggleExpand}
       onStopTask={handleStopTask}
       onDeleteOne={handleDeleteOne}
       onPreviousPage={() => setPage((value) => Math.max(1, value - 1))}

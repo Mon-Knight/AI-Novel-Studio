@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -335,4 +335,4 @@ function VolumeTree({
   );
 }
 
-export default VolumeTree;
+export default memo(VolumeTree);

@@ -10,20 +10,18 @@ import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
 import type { DraftResultMetadata } from '../../../types/workspaceSafety';
 import { appLogger } from '../../../services/observability/appLogger';
-import { createAiClient } from '../../../services/ai/aiClient';
+import { executeChapterGeneration } from '../../../services/ai/chapterGenerationExecutionService';
 import { buildFreshChapterGenerationContext } from '../../../services/prompt/contextBuilder';
 import { buildGenerateRequest } from '../../../services/prompt/promptOrchestrator';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { notifyNative } from '../../../utils/nativeNotification';
-import { aiTaskService } from '../../../services/ai/aiTaskService';
-import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoading';
+import { runWithLoading } from '../../../lib/runWithLoading';
 import { hashTextContent } from '../../../utils/contentHash';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import {
   isAiRequestCancelled,
   throwIfAiRequestCancelled,
 } from '../../../services/ai/aiCancellation';
-import { settleAiTaskError } from '../../../services/ai/aiTaskCancellation';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import type { GenerationValidationState } from './aiGenerateValidation';
 import {
@@ -86,8 +84,6 @@ export function useChapterGenerationAction({
   selectedStyleId,
   selectedOutputId,
   wordCountDraft,
-  availableStyles,
-  availableOutputs,
   settings,
   generating,
   revising,
@@ -172,9 +168,6 @@ export function useChapterGenerationAction({
     setErrorMsg('');
     setValidationState(null);
     beginStreamPreview();
-    let activeTaskId: string | undefined;
-    let activeSignal: AbortSignal | undefined;
-    let releaseTaskCancellation: () => void = () => {};
 
     try {
       await runWithLoading(
@@ -186,50 +179,10 @@ export function useChapterGenerationAction({
           cancelable: true,
         },
         async ({ setMessage, setStage, setPercent, setCancelable, signal, operationId }) => {
-          activeSignal = signal;
           // 点击生成前已经强制构建 fresh context；这里沿用同一份上下文进入最终 prompt。
           const ctx: ChapterGenerationContext = preflightContext;
 
-          const hasOutline = ctx?.chapterOutline ? '有' : '无';
-          const hasChapterGoal = ctx?.chapterGoal ? '有' : '无';
-          const charCount = ctx?.chapterCharacterList?.length || 0;
-          const eventCount = ctx?.chapterEvents ? ctx.chapterEvents.match(/\n- /g)?.length || 1 : 0;
-          const hasPrevContext = ctx?.previousContext ? '有' : '无';
-          const styleName = availableStyles.find((s) => s.id === selectedStyleId)?.name || '默认';
-          const outputName =
-            availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认';
-
-          const inputSummary = [
-            `生成：${novelId.slice(0, 8)}/${ctx.chapterTitle}`,
-            `大纲：${hasOutline}`,
-            `目标：${hasChapterGoal}`,
-            `角色：${charCount}个`,
-            `必须出场：${ctx.requiredCharacters?.length || 0}个`,
-            `事件：${eventCount}个`,
-            `前文：${hasPrevContext}`,
-            `风格：${styleName}`,
-            `输出：${outputName}`,
-            `字数：${ctx.targetWordCount || wordCountDraft}`,
-          ].join('，');
-
-          // 创建 AI 任务记录
-          const task = await aiTaskService
-            .create('chapter_generate', {
-              novelId,
-              chapterId: chapter.id,
-              runtimeMode: settings.runtimeMode,
-              provider: settings.provider,
-              modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-              inputSummary,
-            })
-            .catch(() => null);
-          activeTaskId = task?.id;
-          releaseTaskCancellation = task
-            ? aiTaskService.registerActiveExecution(task.id, () =>
-                cancelLoadingOperation(operationId),
-              )
-            : () => {};
-
+          // 通过统一执行管线编译并发送章节请求
           setStage('正在组装提示词……');
           setPercent(15);
 
@@ -243,10 +196,28 @@ export function useChapterGenerationAction({
           setStage('正在请求 AI 生成正文……');
           setMessage('AI 正在输出章节内容，请稍候……');
           setPercent(40);
-          const client = createAiClient(settings);
-          const response = await client.generate(request, {
+          const requestSourceVersion = hashTextContent(
+            request.messages.map((message) => `${message.role}\n${message.content}`).join('\n\n'),
+          );
+          const response = await executeChapterGeneration({
+            novelId,
+            chapterId: chapter.id,
+            operationId,
+            settings,
+            request,
+            sourceId: `${chapter.id}:${operationId}`,
+            sourceVersion: requestSourceVersion,
+            taskInput: {
+              chapterTitle: ctx.chapterTitle,
+              targetWordCount: ctx.targetWordCount || wordCountDraft,
+              contextHash: requestSourceVersion,
+              promptTemplateSource: request.promptTemplateSource,
+              mode: genMode,
+              sourceDraftId: currentDraftId,
+              sourceRevision: currentDraftVersion,
+            },
+            targetHintJson: requestTarget,
             signal,
-            cancel: () => cancelLoadingOperation(operationId),
             stream: true,
             onStreamEvent: (event) => {
               handleStreamEvent(event, requestTarget);
@@ -274,7 +245,7 @@ export function useChapterGenerationAction({
             chapterId: chapter.id,
             content: response.text,
             source: genMode === 'rewrite' ? 'ai_regenerated' : 'ai_generated',
-            aiTaskId: task?.id,
+            aiTaskId: response.taskId,
             note: validation.note,
           });
           const validationWithDraft: GenerationValidationState = {
@@ -294,17 +265,6 @@ export function useChapterGenerationAction({
           }
 
           setPercent(95);
-
-          // 5. 更新 AI 任务记录
-          if (task) {
-            await aiTaskService.markSucceeded(task.id, {
-              resultText: `字数：${draft.wordCount}，首段：${response.text.slice(0, 200)}${validationWarning ? ' ' + validationWarning : ''}`,
-              promptSnapshot: `template=${request.promptTemplateSource || 'unknown'} length=${request.promptDebug?.promptLength || request.messages[0]?.content?.length || 0} chapterOutline=${request.promptDebug?.includesChapterOutlineText ? 'yes' : 'no'} outlineChecklist=${request.promptDebug?.includesOutlineChecklistText ? 'yes' : 'no'} outlineScore=${validation.outlineCompliance.score} volumeOutline=${request.promptDebug?.includesVolumeOutlineText ? 'yes' : 'no'} masterOutline=${request.promptDebug?.includesMasterOutlineText ? 'yes' : 'no'} requiredCharacters=${request.promptDebug?.requiredCharactersCount || 0}:${request.promptDebug?.requiredCharacterNames.join('、') || ''}`,
-              tokenInput: response.tokenInput,
-              tokenOutput: response.tokenOutput,
-              tokenTotal: response.tokenTotal,
-            });
-          }
 
           setPercent(100);
           setStage('生成完成');
@@ -368,12 +328,6 @@ export function useChapterGenerationAction({
 
       setGenerating(false);
     } catch (err: unknown) {
-      await settleAiTaskError({
-        taskId: activeTaskId,
-        error: err,
-        signal: activeSignal,
-        fallbackMessage: '正文生成失败',
-      });
       const msg = err instanceof Error ? err.message : '生成失败';
       flushStreamPreview();
       setStreamPreviewStatus(streamBufferRef.current ? 'interrupted' : 'idle');
@@ -389,8 +343,6 @@ export function useChapterGenerationAction({
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
         // 错误已由 runWithLoading 显示弹窗，这里只做本地状态清理
       }
-    } finally {
-      releaseTaskCancellation();
     }
   };
 

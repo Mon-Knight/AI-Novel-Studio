@@ -11,11 +11,13 @@
 AI Novel Studio 是一个面向长篇小说创作的 **Windows 桌面端 AI 工作台**。
 
 它不是：
+
 - 普通码字软件
 - 网页后台管理系统
 - 一次性生成整本小说的工具
 
 它是：
+
 - AI 长篇小说创作工程系统
 - AI Autonomous Creative Platform
 - 逐章辅助完成长篇创作的桌面应用
@@ -47,14 +49,14 @@ AI Novel Studio 是一个面向长篇小说创作的 **Windows 桌面端 AI 工�
 
 ## 3. 技术选型理由
 
-| 技术 | 理由 |
-|------|------|
-| **Tauri** | 轻量级桌面壳（vs Electron），Rust 后端性能好，安装包小 |
-| **React 18** | 组件化 UI，生态成熟，适合复杂交互 |
-| **TypeScript** | 类型安全，长周期项目的可维护性保障 |
-| **Vite 5** | 快速构建，开发体验好 |
-| **SQLite** | 嵌入式数据库，无需额外服务，适合本地桌面应用 |
-| **HashRouter** | 桌面端路径稳定，不依赖服务器配置 |
+| 技术           | 理由                                                   |
+| -------------- | ------------------------------------------------------ |
+| **Tauri**      | 轻量级桌面壳（vs Electron），Rust 后端性能好，安装包小 |
+| **React 18**   | 组件化 UI，生态成熟，适合复杂交互                      |
+| **TypeScript** | 类型安全，长周期项目的可维护性保障                     |
+| **Vite 5**     | 快速构建，开发体验好                                   |
+| **SQLite**     | 嵌入式数据库，无需额外服务，适合本地桌面应用           |
+| **HashRouter** | 桌面端路径稳定，不依赖服务器配置                       |
 
 ---
 
@@ -290,6 +292,12 @@ Tool Registry 当前注册八个真实只读/本地验证工具。每个工具�
 
 ---
 
+## Autonomous creation governance
+
+Autonomous creation and the main chapter-generation path now use the shared execution compiler for seven governed task types. The planning/apply boundary also captures a persisted baseline and performs a compare-and-swap check before continuation plans are written, so existing volumes and chapters are never silently overwritten. The scope, compatibility boundary, and continuation protocol are documented in [`project/ai-generation-governance.md`](project/ai-generation-governance.md).
+
+---
+
 ## 16. v2.5.0 Chapter Readiness Planner Runtime
 
 v2.5.0 在 Compiler / Registry 之上增加第一个正式持久 Planner：
@@ -305,6 +313,34 @@ Writing Workspace
 Rust 构造并冻结 `chapter_readiness_plan_v1`，前端不能提交任意计划；Executor 每次 claim 前复验 Registry、schema、权限、scope、参数 hash 和依赖。应用重启时 running Attempt 被标记 `abandoned`，Plan/Step 进入 `waiting_retry`，不自动重放 Tool。浏览器模式不伪造持久计划。
 
 完整设计见 [`architecture/chapter-readiness-planner-runtime.md`](architecture/chapter-readiness-planner-runtime.md)。
+
+---
+
+## 17. v3.0.0 Scheduler 启动与生产分包治理
+
+跨进程 Autonomous Scheduler 的持久事实继续由 Rust / SQLite 管理，前端执行 Worker 的启动所有权固定在应用入口：
+
+```text
+main.tsx
+→ 安装全局错误处理
+→ autonomousSchedulerWorker.recoverStartup()（进程内幂等）
+→ Rust 收敛中断 run / lease / attempt
+→ 仅 attach 后端确认 queued / running 的 run
+```
+
+规划页 Hook 只订阅和刷新当前计划，不负责进程启动恢复。Rust 初始化会先收敛过期 lease 与中断 run；恢复命令随后仍返回全部持久 `queued` run，确保 WebView 入口可以为它们获取新 owner/epoch，而不会因初始化阶段已执行过同一恢复事务而丢失接管列表。桌面 Worker 还以 15 秒间隔串行执行恢复扫描：若应用在旧 lease 的 TTL 内重启，旧 lease 到期后的下一轮扫描会完成 fenced recovery 和新 epoch 接管。Worker 已取得 lease 后若在 claim 前遇到计划读取或其他未处理异常，会先 heartbeat 复验 owner/epoch，再以最新 revision 暂停 run；pause 事务同时释放 active lease。heartbeat 或 CAS 失败表示 Worker 已被 fencing，此时不触碰替代 owner 的状态。浏览器 capability 返回非持久模式时，启动调用直接结束，不创建伪造 run。章节生成运行时通过 `autonomousChapterRuntimeLoader` 延迟加载；AI 设置的读取/规范化/保存位于不依赖执行管线的 `aiSettingsStore`，价格快照因此不形成 `aiTaskService → aiSettingsService → aiExecutionPipeline` 循环。
+
+Vite 生产输出固定拆分 `vendor-react / vendor-router / vendor-zustand / vendor-tauri`，并生成 manifest。`scripts/quality/check-bundle-size.mjs` 从 manifest 确认唯一入口、全部 JS 归属和 vendor 身份，再按真实字节与 gzip-9 执行入口和单 chunk 双预算；缺文件、额外 JS、路径逃逸或身份歧义均失败关闭。快速 CI、Windows 桌面质量工作流和签名发布共享该门禁，`release.yml` 必须等待可复用的完整 Windows 桌面 E2E 成功后才进入签名构建。
+
+---
+
+## 18. migration 029 全局 AI 请求治理
+
+桌面端真实 Provider 在网络派发前先经过 `aiRequestPolicyService → Tauri IPC → SQLite`。单例策略、滚动分钟窗口、跨进程 active reservation 与每日 Token/成本聚合均由 Rust `IMMEDIATE` 事务裁决；snapshot 不隐式创建策略，设置页把首次观察的 revision 固定为 CAS 基线。输入预留采用 UTF-8 字节上界与 chat envelope，WebView 只持有 owner 与原始 lease proof。Rust `ai_chat_completion(_stream)` 再复验 request-bound proof 并原子标记单次派发，直接 IPC 不能绕过预算门禁。
+
+完成、失败、取消和 TTL 回收都进入同一幂等结算协议。缺失 usage 与中断 owner 使用预留上限保守计量，实际 usage 高于预留时仍全量入账；派发与终态计量字段由 trigger 冻结。冻结价格来自 SQLite 策略，未定价成本保持显式未知。浏览器开发模式继续使用 LocalStorage ledger，并对失败/过期执行同样的保守计量；桌面 IPC 失败时不会降级到该回退。
+
+完整协议见 [`project/ai-generation-governance.md`](project/ai-generation-governance.md)。
 
 ---
 

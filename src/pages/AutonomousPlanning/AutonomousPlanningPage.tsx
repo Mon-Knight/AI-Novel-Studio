@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { autonomousStoryService } from '../../services/autonomous-creation/autonomousRuntime';
-import { autonomousChapterWorkflow } from '../../services/autonomous-creation/autonomousChapterRuntime';
+import { autonomousChapterRuntimeLoader } from '../../services/autonomous-creation/autonomousChapterRuntimeLoader';
 import {
   autonomousPostChapterService,
   cancelAutonomousPostChapterAnalysis,
@@ -16,8 +16,10 @@ import { draftVersionService } from '../../services/database/draftVersionService
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
 import type {
   AutonomousChapterRun,
+  AutonomousPlanningBaseline,
   AutonomousStoryBrief,
   AutonomousStoryPlan,
+  AutonomousVolumeStrategy,
 } from '../../types/autonomousCreation';
 import type { Novel } from '../../types/novel';
 import type { AutonomousAutomationPolicy } from '../../types/autonomousScheduler';
@@ -27,12 +29,13 @@ import AutonomousApplyBar from './AutonomousApplyBar';
 import AutonomousPlanContent from './AutonomousPlanContent';
 import AutonomousPlanProgress from './AutonomousPlanProgress';
 import {
-  STATUS_LABELS,
-  defaultBrief,
-  progressPercent,
-  type PlanTab,
-} from './autonomousPlanningPresentation';
+  AutonomousPlanningEmptyState,
+  AutonomousPlanningHeader,
+  AutonomousPlanningMissingState,
+} from './AutonomousPlanningChrome';
+import { defaultBrief, progressPercent, type PlanTab } from './autonomousPlanningPresentation';
 import { confirmDanger, confirmInfo } from '../../utils/nativeDialog';
+import { getAutonomousPlanningBaseline } from '../../services/autonomous-creation/autonomousPlanningBaselineService';
 import '../../styles/autonomous-planning.css';
 
 function errorText(reason: unknown): string {
@@ -47,6 +50,9 @@ function AutonomousPlanningPage() {
   const analysisAbortRef = useRef<AbortController | null>(null);
   const [novel, setNovel] = useState<Novel | null>(null);
   const [brief, setBrief] = useState<AutonomousStoryBrief | null>(null);
+  const [baseline, setBaseline] = useState<AutonomousPlanningBaseline | null>(null);
+  const [volumeStrategy, setVolumeStrategy] =
+    useState<AutonomousVolumeStrategy>('create_new_volume');
   const [plans, setPlans] = useState<AutonomousStoryPlan[]>([]);
   const [activePlan, setActivePlan] = useState<AutonomousStoryPlan | null>(null);
   const [tab, setTab] = useState<PlanTab>('overview');
@@ -113,14 +119,25 @@ function AutonomousPlanningPage() {
     Promise.all([
       novelService.getNovelById(novelId),
       autonomousStoryService.listPlansByNovel(novelId, 20),
+      getAutonomousPlanningBaseline(novelId),
     ])
-      .then(async ([loadedNovel, history]) => {
+      .then(async ([loadedNovel, history, loadedBaseline]) => {
         if (!active) return;
         if (!loadedNovel) throw new Error('作品不存在。');
         const selected = history[0] ? await reconcileCandidateAdoptions(history[0]) : null;
         if (!active) return;
         setNovel(loadedNovel);
-        setBrief(defaultBrief(loadedNovel));
+        setBaseline(loadedBaseline);
+        setVolumeStrategy('create_new_volume');
+        const initialBrief = defaultBrief(loadedNovel);
+        const lastChapter = Math.max(
+          0,
+          ...loadedBaseline.existingChapters.map((chapter) => chapter.chapterNumber),
+        );
+        if (lastChapter > 0 && initialBrief.targetChapterCount <= lastChapter) {
+          initialBrief.targetChapterCount = Math.min(500, lastChapter + 12);
+        }
+        setBrief(initialBrief);
         setPlans(
           selected
             ? history.map((item) => (item.planId === selected.planId ? selected : item))
@@ -150,11 +167,22 @@ function AutonomousPlanningPage() {
     setError('');
     setTab('overview');
     try {
+      const currentBaseline =
+        resumePlan?.baseline ?? (await getAutonomousPlanningBaseline(novelId));
+      if (!resumePlan) setBaseline(currentBaseline);
       const result = resumePlan
         ? await autonomousStoryService.resume(resumePlan.planId, controller.signal, setActivePlan)
         : await autonomousStoryService.generate({
             novelId,
             brief,
+            planningMode:
+              currentBaseline &&
+              (currentBaseline.existingVolumes.length > 0 ||
+                currentBaseline.existingChapters.length > 0)
+                ? 'continuation'
+                : 'greenfield',
+            volumeStrategy,
+            baseline: currentBaseline ?? undefined,
             signal: controller.signal,
             onProgress: setActivePlan,
           });
@@ -171,9 +199,15 @@ function AutonomousPlanningPage() {
 
   const applyPlan = async () => {
     if (!activePlan || activePlan.status !== 'ready' || applying) return;
+    const createdVolumeCount = activePlan.volumes.filter(
+      (volume) => volume.materialization !== 'existing',
+    ).length;
+    const continuation = activePlan.planningMode === 'continuation';
     const confirmed = await confirmDanger({
       title: '应用全书规划',
-      message: `将创建 ${activePlan.volumes.length} 个分卷和 ${activePlan.chapters.length} 个章节，并同步角色、设定与章节参数。继续吗？`,
+      message: continuation
+        ? `将在已有结构后新增 ${createdVolumeCount} 个分卷和 ${activePlan.chapters.length} 个章节，目标为第 ${activePlan.brief.targetChapterCount} 章；已有卷章不会被覆盖。继续吗？`
+        : `将创建 ${createdVolumeCount} 个分卷和 ${activePlan.chapters.length} 个章节，并同步角色、设定与章节参数。继续吗？`,
       testId: 'autonomous-plan-apply-confirmation',
     });
     if (!confirmed) return;
@@ -204,7 +238,7 @@ function AutonomousPlanningPage() {
     setChapterRunning(true);
     setError('');
     try {
-      const result = await autonomousChapterWorkflow.generateNextCandidate(activePlan.planId, {
+      const result = await autonomousChapterRuntimeLoader.generateNextCandidate(activePlan.planId, {
         signal: controller.signal,
         onProgress: setActivePlan,
       });
@@ -240,7 +274,7 @@ function AutonomousPlanningPage() {
     setBookRunning(true);
     setError('');
     try {
-      const result = await autonomousChapterWorkflow.generateAllCandidates(activePlan.planId, {
+      const result = await autonomousChapterRuntimeLoader.generateAllCandidates(activePlan.planId, {
         signal: controller.signal,
         onProgress: setActivePlan,
       });
@@ -373,56 +407,28 @@ function AutonomousPlanningPage() {
   if (loading)
     return <div className="autonomous-page autonomous-loading">正在读取自主创作计划...</div>;
   if (!novel || !brief) {
-    return (
-      <div className="autonomous-page autonomous-loading">
-        <p>{error || '作品不存在。'}</p>
-        <button type="button" className="btn btn-secondary" onClick={() => navigate('/')}>
-          返回作品库
-        </button>
-      </div>
-    );
+    return <AutonomousPlanningMissingState error={error} onBack={() => navigate('/')} />;
   }
 
   return (
     <div className="autonomous-page">
-      <header className="autonomous-header">
-        <button
-          type="button"
-          className="autonomous-icon-button"
-          title="返回作品详情"
-          onClick={() => navigate(`/novels/${novel.id}`)}
-        >
-          ←
-        </button>
-        <div className="autonomous-heading">
-          <h1>自主创作规划</h1>
-          <span>{novel.title}</span>
-        </div>
-        <div className="autonomous-header-actions">
-          {activePlan && (
-            <span className={`autonomous-status status-${activePlan.status}`}>
-              {STATUS_LABELS[activePlan.status]}
-            </span>
-          )}
-          {activePlan?.status === 'applied' && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => navigate(`/novels/${novel.id}/workspace`)}
-            >
-              进入写作工作台
-            </button>
-          )}
-        </div>
-      </header>
+      <AutonomousPlanningHeader
+        novelTitle={novel.title}
+        status={activePlan?.status}
+        onBack={() => navigate(`/novels/${novel.id}`)}
+        onOpenWorkspace={() => navigate(`/novels/${novel.id}/workspace`)}
+      />
 
       <div className="autonomous-layout">
         <AutonomousBriefPanel
           brief={brief}
+          baseline={baseline}
+          volumeStrategy={volumeStrategy}
           running={running}
           plans={plans}
           activePlan={activePlan}
           onBriefChange={setBrief}
+          onVolumeStrategyChange={setVolumeStrategy}
           onCancel={() => abortRef.current?.abort()}
           onRun={() => void runPlan()}
           onResume={(plan) => void runPlan(plan)}
@@ -436,13 +442,7 @@ function AutonomousPlanningPage() {
             </div>
           )}
           {!activePlan ? (
-            <div className="autonomous-empty">
-              <strong>从一个创意开始</strong>
-              <p>
-                系统将先建立故事圣经，再让人物、世界、冲突与节奏 Agent
-                协作，最后按分卷生成完整章节计划。
-              </p>
-            </div>
+            <AutonomousPlanningEmptyState />
           ) : (
             <>
               <AutonomousPlanProgress plan={activePlan} percent={percent} />

@@ -7,6 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+#[cfg(debug_assertions)]
+use crate::errors::{log_workspace_event, WorkspaceLogEvent};
+use crate::services::ai_request_policy_service::{self, AiRequestPolicyLeaseProof};
+
 const AI_REQUEST_CANCELLED: &str = "AI_REQUEST_CANCELLED";
 const AI_REQUEST_ID_INVALID: &str = "AI_REQUEST_ID_INVALID";
 const AI_REQUEST_ID_IN_USE: &str = "AI_REQUEST_ID_IN_USE";
@@ -247,6 +251,7 @@ pub struct AiChatCompletionRequest {
     pub max_tokens: Option<u32>,
     pub timeout_seconds: Option<u64>,
     pub request_id: Option<String>,
+    pub policy_lease: Option<AiRequestPolicyLeaseProof>,
 }
 
 #[derive(Debug, Serialize)]
@@ -326,6 +331,25 @@ fn validate_request_id(request_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_request_policy_lease(request: &AiChatCompletionRequest) -> Result<(), String> {
+    let request_id = request
+        .request_id
+        .as_deref()
+        .ok_or_else(|| crate::errors::codes::AI_REQUEST_POLICY_LEASE_REQUIRED.to_string())?;
+    let proof = request
+        .policy_lease
+        .as_ref()
+        .ok_or_else(|| crate::errors::codes::AI_REQUEST_POLICY_LEASE_REQUIRED.to_string())?;
+    if proof.provider_request_id != request_id {
+        return Err(crate::errors::codes::AI_REQUEST_POLICY_LEASE_CONFLICT.to_string());
+    }
+    let mut connection = crate::db::get_connection()
+        .lock()
+        .map_err(|_| crate::errors::codes::DATABASE_TRANSACTION_FAILED.to_string())?;
+    ai_request_policy_service::verify_provider_dispatch(&mut connection, proof)
+        .map_err(|error| error.code)
+}
+
 #[tauri::command]
 pub fn cancel_ai_request(request_id: String) -> bool {
     if validate_request_id(&request_id).is_err() {
@@ -393,6 +417,7 @@ fn user_error_from_status(status: reqwest::StatusCode, body: &str, model_name: &
 pub async fn ai_chat_completion(
     request: AiChatCompletionRequest,
 ) -> Result<AiChatCompletionResponse, String> {
+    verify_request_policy_lease(&request)?;
     execute_ai_chat_completion(request, crate::runtime::is_network_blocked()).await
 }
 
@@ -401,6 +426,7 @@ pub async fn ai_chat_completion_stream(
     window: tauri::Window,
     request: AiChatCompletionRequest,
 ) -> Result<AiChatCompletionResponse, String> {
+    verify_request_policy_lease(&request)?;
     let emitter: StreamEmitter = Arc::new(move |event| {
         window
             .emit(AI_STREAM_EVENT_NAME, event)
@@ -728,26 +754,23 @@ async fn perform_ai_chat_completion(
             .find(|message| message.role == "user")
             .map(|message| message.content.as_str())
             .unwrap_or("");
-        println!(
-            "[ai_chat_completion] messages count={}",
-            request.messages.len()
-        );
-        println!(
-            "[ai_chat_completion] user message length={}",
-            last_user_message.chars().count()
-        );
-        println!(
-            "[ai_chat_completion] contains chapter outline marker={}",
-            last_user_message.contains("【当前章节大纲】")
-        );
-        println!(
-            "[ai_chat_completion] contains outline checklist marker={}",
-            last_user_message.contains("【章节大纲执行清单】")
-        );
-        println!(
-            "[ai_chat_completion] contains required characters marker={}",
-            last_user_message.contains("【本章必须直接出场角色】")
-        );
+        log_workspace_event(WorkspaceLogEvent {
+            level: "debug",
+            event: "ai_provider_request_shape",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: None,
+            metadata: Some(serde_json::json!({
+                "messageCount": request.messages.len(),
+                "userMessageLength": last_user_message.chars().count(),
+                "hasChapterOutline": last_user_message.contains("【当前章节大纲】"),
+                "hasOutlineChecklist": last_user_message.contains("【章节大纲执行清单】"),
+                "hasRequiredCharacters": last_user_message.contains("【本章必须直接出场角色】"),
+            })),
+        });
     }
 
     let body = json!({
@@ -902,7 +925,21 @@ mod tests {
             max_tokens: Some(64),
             timeout_seconds: Some(timeout_seconds),
             request_id: request_id.map(str::to_string),
+            policy_lease: None,
         }
+    }
+
+    #[test]
+    fn provider_command_rejects_missing_global_policy_lease_before_dispatch() {
+        let request = test_request(
+            "https://provider.invalid/v1".to_string(),
+            Some("policy-proof-required"),
+            1,
+        );
+        assert_eq!(
+            verify_request_policy_lease(&request),
+            Err(crate::errors::codes::AI_REQUEST_POLICY_LEASE_REQUIRED.to_string())
+        );
     }
 
     fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> io::Result<TcpStream> {

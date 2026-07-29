@@ -118,6 +118,7 @@ test('renders task statuses, expanded details, execution controls, and paginatio
   assert.match(container.textContent ?? '', /failed/);
   assert.match(container.textContent ?? '', /0\.12/);
   assert.equal(container.querySelectorAll('.list-pagination').length, 1);
+  assert.equal(container.querySelectorAll('button[title="删除此记录"]').length, 3);
 
   const actionButtons = container.querySelectorAll('.detail-card button');
   assert.ok(actionButtons.length >= 3);

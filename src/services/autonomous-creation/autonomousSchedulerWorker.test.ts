@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import type { AutonomousStoryPlan } from '../../types/autonomousCreation';
 import type {
@@ -8,6 +9,35 @@ import type {
 } from '../../types/autonomousScheduler';
 import { autonomousSchedulerService } from './autonomousSchedulerService';
 import { AutonomousSchedulerWorker, estimateChapterReservation } from './autonomousSchedulerWorker';
+
+function recoveryWorker(
+  persistent: boolean,
+  recoverInterruptedRuns: () => Promise<AutonomousBookRun[]>,
+): AutonomousSchedulerWorker {
+  const scheduler = {
+    capability: () =>
+      persistent
+        ? ({ persistent: true, runtime: 'tauri' } as const)
+        : ({ persistent: false, runtime: 'browser' } as const),
+    recoverInterruptedRuns,
+  } as unknown as typeof autonomousSchedulerService;
+
+  return new AutonomousSchedulerWorker({
+    scheduler,
+    getPlan: async () => null,
+    generateCandidate: async () => {
+      throw new Error('unexpected candidate generation');
+    },
+    adoptDraft: async () => {
+      throw new Error('unexpected draft adoption');
+    },
+    getReview: async () => null,
+    confirmAnalysis: async () => undefined,
+    generateId: () => 'startup-owner',
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
+    clearInterval: () => undefined,
+  });
+}
 
 function plan(): AutonomousStoryPlan {
   return {
@@ -178,4 +208,302 @@ test('reservation uses a bounded conservative chapter estimate', () => {
     estimatedTokens: 7200,
     estimatedCostUsd: 0.216,
   });
+});
+
+test('application entry owns scheduler recovery instead of the lazy route hook', () => {
+  const mainSource = readFileSync(new URL('../../main.tsx', import.meta.url), 'utf8');
+  const hookSource = readFileSync(new URL('./useAutonomousScheduler.ts', import.meta.url), 'utf8');
+
+  assert.match(
+    mainSource,
+    /import \{ autonomousSchedulerWorker \} from '\.\/services\/autonomous-creation\/autonomousSchedulerWorker';/,
+  );
+  assert.match(mainSource, /void autonomousSchedulerWorker\.recoverStartup\(\);/);
+  assert.doesNotMatch(hookSource, /recoverStartup/);
+});
+
+test('desktop startup recovery is idempotent across concurrent and settled calls', async () => {
+  let recoveryCalls = 0;
+  let releaseRecovery!: () => void;
+  const recoveryGate = new Promise<void>((resolve) => {
+    releaseRecovery = resolve;
+  });
+  const worker = recoveryWorker(true, async () => {
+    recoveryCalls += 1;
+    await recoveryGate;
+    return [];
+  });
+
+  const first = worker.recoverStartup();
+  const concurrent = worker.recoverStartup();
+
+  assert.strictEqual(concurrent, first);
+  assert.equal(recoveryCalls, 1);
+
+  releaseRecovery();
+  await first;
+
+  const settled = worker.recoverStartup();
+  assert.strictEqual(settled, first);
+  await settled;
+  assert.equal(recoveryCalls, 1);
+});
+
+test('browser startup recovery is a no-op without calling the persistent scheduler', async () => {
+  let recoveryCalls = 0;
+  const worker = recoveryWorker(false, async () => {
+    recoveryCalls += 1;
+    return [];
+  });
+
+  await Promise.all([worker.recoverStartup(), worker.recoverStartup()]);
+
+  assert.equal(recoveryCalls, 0);
+});
+
+test('desktop recovery sweep claims a run after a previous process lease expires', async () => {
+  const story = plan();
+  const queuedRun = {
+    runId: 'run-recovery-sweep',
+    operationId: 'operation-recovery-sweep',
+    requestHash: 'request-hash',
+    novelId: story.novelId,
+    planId: story.planId,
+    mode: 'draft_night',
+    policy: policy('draft_night'),
+    policyHash: 'policy-hash',
+    status: 'queued',
+    stateRevision: 3,
+    nextChapterNumber: 1,
+    totalChapters: 1,
+    completedChapters: 0,
+    tokenInput: 0,
+    tokenOutput: 0,
+    costUsd: 0,
+    usageDay: '2026-07-30',
+    dailyTokenInput: 0,
+    dailyTokenOutput: 0,
+    dailyCostUsd: 0,
+    consecutiveFailures: 0,
+    createdAt: '',
+    updatedAt: '',
+  } as AutonomousBookRun;
+  let recoveryCalls = 0;
+  let acquireCalls = 0;
+  let recoverySweep: (() => void) | undefined;
+  const scheduler = {
+    capability: () => ({ persistent: true as const, runtime: 'tauri' as const }),
+    async recoverInterruptedRuns() {
+      recoveryCalls += 1;
+      return recoveryCalls === 1 ? [] : [queuedRun];
+    },
+    async acquireLease() {
+      acquireCalls += 1;
+      return {
+        lease: {
+          leaseId: 'lease-recovery-sweep',
+          runId: queuedRun.runId,
+          novelId: queuedRun.novelId,
+          epoch: 2,
+        },
+        token: '1234567890123456',
+      };
+    },
+    async getRun() {
+      return { ...queuedRun, status: 'completed' as const, stateRevision: 4 };
+    },
+  } as unknown as typeof autonomousSchedulerService;
+  const worker = new AutonomousSchedulerWorker({
+    scheduler,
+    getPlan: async () => story,
+    generateCandidate: async () => {
+      throw new Error('unexpected candidate generation');
+    },
+    adoptDraft: async () => {
+      throw new Error('unexpected draft adoption');
+    },
+    getReview: async () => null,
+    confirmAnalysis: async () => undefined,
+    generateId: () => 'recovery-sweep-owner',
+    setInterval: (callback, delay) => {
+      if (delay === 15_000) recoverySweep = callback;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    },
+    clearInterval: () => undefined,
+  });
+
+  await worker.recoverStartup();
+  assert.equal(recoveryCalls, 1);
+  assert.ok(recoverySweep);
+
+  recoverySweep();
+  await waitFor(() => acquireCalls === 1);
+
+  assert.equal(recoveryCalls, 2);
+  assert.equal(acquireCalls, 1);
+});
+
+test('pre-claim failure pauses an owned run instead of leaving a zombie lease', async () => {
+  const story = plan();
+  let run = {
+    runId: 'run-owned-failure',
+    operationId: 'operation-owned-failure',
+    requestHash: 'request-hash',
+    novelId: story.novelId,
+    planId: story.planId,
+    mode: 'draft_night',
+    policy: policy('draft_night'),
+    policyHash: 'policy-hash',
+    status: 'queued',
+    stateRevision: 3,
+    nextChapterNumber: 1,
+    totalChapters: 1,
+    completedChapters: 0,
+    tokenInput: 0,
+    tokenOutput: 0,
+    costUsd: 0,
+    usageDay: '2026-07-30',
+    dailyTokenInput: 0,
+    dailyTokenOutput: 0,
+    dailyCostUsd: 0,
+    consecutiveFailures: 0,
+    createdAt: '',
+    updatedAt: '',
+  } as AutonomousBookRun;
+  let heartbeatCalls = 0;
+  let pauseCalls = 0;
+  let pauseReason = '';
+  const scheduler = {
+    capability: () => ({ persistent: true as const, runtime: 'tauri' as const }),
+    async recoverInterruptedRuns() {
+      return [run];
+    },
+    async acquireLease() {
+      run = { ...run, status: 'running', stateRevision: 4 };
+      return {
+        lease: { leaseId: 'lease-owned-failure', runId: run.runId, novelId: run.novelId, epoch: 2 },
+        token: '1234567890123456',
+      };
+    },
+    async getRun() {
+      return run;
+    },
+    async heartbeat() {
+      heartbeatCalls += 1;
+      return {};
+    },
+    async pauseRun(
+      _operationId: string,
+      _runId: string,
+      expectedRevision: number,
+      reason?: string,
+    ) {
+      pauseCalls += 1;
+      pauseReason = reason ?? '';
+      assert.equal(expectedRevision, 4);
+      run = { ...run, status: 'paused', stateRevision: 5, pauseReason };
+      return run;
+    },
+  } as unknown as typeof autonomousSchedulerService;
+  const worker = new AutonomousSchedulerWorker({
+    scheduler,
+    getPlan: async () => null,
+    generateCandidate: async () => {
+      throw new Error('unexpected candidate generation');
+    },
+    adoptDraft: async () => {
+      throw new Error('unexpected draft adoption');
+    },
+    getReview: async () => null,
+    confirmAnalysis: async () => undefined,
+    generateId: () => 'owned-failure-cleanup',
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
+    clearInterval: () => undefined,
+  });
+
+  await worker.recoverStartup();
+  await waitFor(() => pauseCalls === 1);
+
+  assert.equal(heartbeatCalls, 1);
+  assert.equal(pauseReason, 'worker_error:unexpected');
+  assert.equal(worker.snapshot(story.planId).run?.status, 'paused');
+});
+
+test('a fenced worker does not pause the replacement owner after cleanup lease verification fails', async () => {
+  const story = plan();
+  let run = {
+    runId: 'run-fenced-failure',
+    operationId: 'operation-fenced-failure',
+    requestHash: 'request-hash',
+    novelId: story.novelId,
+    planId: story.planId,
+    mode: 'draft_night',
+    policy: policy('draft_night'),
+    policyHash: 'policy-hash',
+    status: 'queued',
+    stateRevision: 3,
+    nextChapterNumber: 1,
+    totalChapters: 1,
+    completedChapters: 0,
+    tokenInput: 0,
+    tokenOutput: 0,
+    costUsd: 0,
+    usageDay: '2026-07-30',
+    dailyTokenInput: 0,
+    dailyTokenOutput: 0,
+    dailyCostUsd: 0,
+    consecutiveFailures: 0,
+    createdAt: '',
+    updatedAt: '',
+  } as AutonomousBookRun;
+  let pauseCalls = 0;
+  const scheduler = {
+    capability: () => ({ persistent: true as const, runtime: 'tauri' as const }),
+    async recoverInterruptedRuns() {
+      return [run];
+    },
+    async acquireLease() {
+      run = { ...run, status: 'running', stateRevision: 4 };
+      return {
+        lease: {
+          leaseId: 'lease-fenced-failure',
+          runId: run.runId,
+          novelId: run.novelId,
+          epoch: 2,
+        },
+        token: '1234567890123456',
+      };
+    },
+    async getRun() {
+      return run;
+    },
+    async heartbeat() {
+      throw Object.assign(new Error('lease fenced'), { code: 'AUTONOMOUS_RUN_LEASE_EXPIRED' });
+    },
+    async pauseRun() {
+      pauseCalls += 1;
+      return run;
+    },
+  } as unknown as typeof autonomousSchedulerService;
+  const worker = new AutonomousSchedulerWorker({
+    scheduler,
+    getPlan: async () => null,
+    generateCandidate: async () => {
+      throw new Error('unexpected candidate generation');
+    },
+    adoptDraft: async () => {
+      throw new Error('unexpected draft adoption');
+    },
+    getReview: async () => null,
+    confirmAnalysis: async () => undefined,
+    generateId: () => 'fenced-failure-cleanup',
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
+    clearInterval: () => undefined,
+  });
+
+  await worker.recoverStartup();
+  await waitFor(() => worker.snapshot(story.planId).workerActive === false);
+
+  assert.equal(pauseCalls, 0);
+  assert.equal(worker.snapshot(story.planId).run?.status, 'running');
 });

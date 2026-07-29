@@ -2,6 +2,48 @@ import type { ChapterSummarizeResult } from './chapterSummary';
 import type { ConsensusAction } from './multiAgent';
 
 export const AUTONOMOUS_PLAN_SCHEMA_VERSION = 1;
+export type AutonomousPlanSchemaVersion = typeof AUTONOMOUS_PLAN_SCHEMA_VERSION;
+
+export type AutonomousPlanningMode = 'greenfield' | 'continuation';
+export type AutonomousVolumeStrategy = 'create_new_volume' | 'append_to_last_volume';
+
+export interface AutonomousPlanningVolumeBaseline {
+  id: string;
+  orderIndex: number;
+  title: string;
+  status?: string;
+}
+
+export interface AutonomousPlanningChapterBaseline {
+  id: string;
+  volumeId?: string;
+  chapterNumber: number;
+  orderIndex: number;
+  title: string;
+  outline?: string;
+  goal?: string;
+  status?: string;
+  adoptedDraftId?: string;
+  contentHash?: string;
+  summary?: string;
+}
+
+export interface AutonomousPlanningEntityBaseline {
+  id: string;
+  name: string;
+  role?: string;
+  summary?: string;
+}
+
+export interface AutonomousPlanningBaseline {
+  novelId: string;
+  capturedAt: string;
+  structureHash: string;
+  existingVolumes: AutonomousPlanningVolumeBaseline[];
+  existingChapters: AutonomousPlanningChapterBaseline[];
+  existingCharacters: AutonomousPlanningEntityBaseline[];
+  existingWorldElements: AutonomousPlanningEntityBaseline[];
+}
 
 export type AutonomousAgentType =
   | 'plot_planner'
@@ -60,6 +102,7 @@ export interface AutonomousVolumePlan {
   goal: string;
   mainConflict: string;
   arcIds: string[];
+  materialization?: 'create' | 'existing';
 }
 
 export interface CharacterEvolutionBeat {
@@ -216,11 +259,14 @@ export interface AutonomousChapterRun {
 }
 
 export interface AutonomousStoryPlan {
-  schemaVersion: typeof AUTONOMOUS_PLAN_SCHEMA_VERSION;
+  schemaVersion: AutonomousPlanSchemaVersion;
   planId: string;
   operationId: string;
   requestHash: string;
   novelId: string;
+  planningMode?: AutonomousPlanningMode;
+  volumeStrategy?: AutonomousVolumeStrategy;
+  baseline?: AutonomousPlanningBaseline;
   status: AutonomousPlanStatus;
   stage: AutonomousPlanStage;
   revision: number;
@@ -248,6 +294,9 @@ export interface GenerateAutonomousPlanInput {
   novelId: string;
   brief: AutonomousStoryBrief;
   operationId?: string;
+  planningMode?: AutonomousPlanningMode;
+  volumeStrategy?: AutonomousVolumeStrategy;
+  baseline?: AutonomousPlanningBaseline;
   signal?: AbortSignal;
   onProgress?: (plan: AutonomousStoryPlan) => void;
 }

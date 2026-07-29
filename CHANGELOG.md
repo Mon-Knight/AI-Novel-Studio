@@ -33,6 +33,10 @@
 - 写作工作台新增 Zustand 会话状态，统一持有作品、卷章、当前草稿、编辑器、质量检查和 AI 弹窗状态；切换作品时原子重置会话归属，避免跨作品残留。
 - 新增 migration 027 跨进程 Autonomous Scheduler：持久 `book_run / lease / attempt / checkpoint`，使用 owner、单调 epoch、heartbeat、CAS、重试、熔断、预算和时间窗恢复中断任务，并提供夜间草稿、质量门禁、全自动三档策略。
 - 新增 migration 028 多目标事务与正式故事资产：冻结目标集合、base revision/hash 与 candidate hash，在单个 `IMMEDIATE` 事务中执行 `all_or_nothing / reviewed_partial` CAS；跨章节批处理只更新受限 metadata，不绕过正文草稿和采用指针。
+- 新增自主创作续写协议：读取卷章、角色和世界设定基线，按最终章节号生成增量计划，支持新建分卷或接续最后一卷；应用前复验基线 hash、卷序、章节 ID 和引用，既有卷章不会被覆盖。
+- 自主创作六类 Agent 统一接入 `executeAiTask` 与生产编译注册表；直接绕过治理边界的自主任务请求会失败关闭，并新增架构说明 `docs/project/ai-generation-governance.md`。
+- 主章节生成路径统一接入 `executeChapterGeneration` 与生产编译注册表；写作工作台和 generation job 共享编译、取消、流式事件和候选 Artifact 边界，历史直接 Provider 调用对 `chapter_generate` 失败关闭。
+- 修复风格分析 Prompt 的构建期加载与字段契约校验，避免运行时静默回退到不完整 Prompt。
 - 新增势力、地点、势力关系、地点连接，以及角色/章节/章节事件与势力或地点的正式关系表；地点父子图按拓扑顺序写入并拒绝环。
 - 作品资产中心新增“势力与地点”工作区，可创建和审核正式资产候选、显式选择跨章节批处理子集，并查看事务历史；浏览器开发模式明确保持只读，不伪造 SQLite 事务。
 - 完整项目备份升级至 schema 9：schema 8 加入调度运行事实，恢复时把 `running / active / claimed` 分别收敛为 `queued / expired / abandoned` 并重算身份与 hash；schema 9 加入全部正式故事资产及关系，按父子拓扑恢复地点。
@@ -55,17 +59,27 @@
 - 写作工作台按章节与草稿双重身份读取候选，并继续复用大文本原子协议：正文超过 100 KiB 时写入 `large_text_documents / large_text_chunks`，完整正文校验失败时不以预览替代。
 - 移除润色和质量检查对正文前 8,000 字符的静默截断；分段缺失、空结果、异常短结果或全文位置映射异常时失败关闭。
 - 全局 `runWithLoading` 现在以 operationId 持有真实 `AbortController`；大纲、设定、角色、事件、风格、润色、质检、修稿和总结等独立 AI 入口统一传播 signal、请求 owner 与取消结算。AI 任务中心可停止当前进程持有的运行任务；自持 controller 的面板会在卸载/目标变化时中止，其他全局 operation 在完成时复验原始目标，迟到结果不能污染新目标，`cancelled` 终态也不被迟到成功复活。
+- 正式 `ai_tasks` 以相同 task ID 幂等投影到兼容任务中心 `ai_task_records`，使候选草稿外键、任务可见性、停止 owner 和成本结算保持同一身份；系统级任务不写伪造作品外键，同 ID 不同归属失败关闭，重复投影不替换终态父记录。Provider 停止后完成两阶段取消，同任务的全部进程内 owner 都会收到停止信号，失败任务重试时兼容投影恢复运行态；迟到响应与无效 Artifact 会同步结算为取消或失败。任务中心和 Rust 删除命令共同保护等待/运行记录，避免执行期间清空草稿 provenance。
 - 流式 delta 仅进入瞬时预览缓冲；无完成标记 EOF、非法帧、`finish_reason=length`、取消或空正文均不创建成功草稿/Artifact，只有完整最终响应可沿既有原子协议保存未采用候选。
 - 成本快照使用用户配置价格而非 Provider 自报价格；缺价格或缺 usage 时保持显式未知，Mock 才固定为零。Rust 校验币种、来源、状态组合和数值范围，篡改或不一致 metadata 在 Artifact 写入前失败关闭。
+- 新增 migration 029 桌面全局 AI 请求治理：单例 revision 策略、滚动分钟窗口、跨进程并发、每日 Token/定点成本与 owner/TTL reservation 全部由 SQLite `IMMEDIATE` 事务裁决；Rust Provider command 强制复验 request-bound 哈希 lease 并只允许一次派发。snapshot 不隐式建策略，设置页固定首次观察的 CAS revision；UTF-8 字节上界与 chat envelope 避免输入低估，实际 usage 超预留仍全量入账。结算可幂等重放，派发和终态计量字段由 trigger 冻结；失败、取消、缺失 usage 和 TTL 回收保守计量，未定价成本保持显式未知。浏览器开发继续使用 LocalStorage 回退并对失败/过期执行相同保守计量，桌面 IPC 错误不降级。
 - 统一 npm、Tauri、Cargo、应用常量、路线图、测试说明和发布文档版本为 `3.0.0`。
 
 ### 工程质量
 
+- Autonomous Scheduler 的执行接管固定在应用入口：`main.tsx` 在全局错误处理就绪后幂等接管后端确认可恢复的 run，规划页 Hook 只刷新当前计划；Rust 数据库初始化与前端入口连续执行恢复扫描时，后端会重新返回全部持久 `queued` run，避免首轮恢复结果被初始化阶段消费后无人获取新 lease。桌面 Worker 每 15 秒执行一次互斥恢复扫描，使应用在旧进程 lease 尚未到期时重启，也能在 lease 到期后自动获取更高 epoch；已持 lease 的 Worker 若在 claim 前发生未处理异常，会先 heartbeat 复验 owner/epoch，再以 CAS 暂停 run 并释放 lease，已被新 epoch fencing 的旧 Worker 不会暂停替代 owner。新增 SQLite 回归同时断言 claim 前失败后的 run 为 `paused`、lease 为 `released`、最新 checkpoint 为 `run_pause`，且 Attempt、AI Task 与 generation job 均保持 0。浏览器模式继续保持零持久化调用。
+- 抽离无执行管线依赖的 AI 设置持久化模块，任务价格快照不再通过动态导入重建 `aiTaskService → aiSettingsService → aiExecutionPipeline` 循环；统一清理 Tool Registry、Repository 与 Scheduler 的无效静态/动态重复导入，生产构建相关告警归零，同时保留 Autonomous 章节运行时按需加载。
+- Vite 新增稳定的 React、Router、Zustand、Tauri vendor chunk 和构建 manifest；`test:bundle-size` 以真实文件字节和 gzip-9 双门槛失败关闭，并校验单一入口、全部 JS 归属和稳定 vendor 名称。入口由 527,482 B / 171,797 B gzip 降至 324,172 B / 104,328 B gzip-9；快速 CI、Windows 质量门和签名发布均执行该门禁，签名发布还显式依赖可复用的完整 Windows 桌面 E2E。
+- 新增生产 AI 请求静态门禁：使用 TypeScript AST 扫描全部非测试 TS/TSX，`client.generate` 与 `createAiClient(...).generate` 必须显式传递非空 `AiGenerateOptions`；零命中、缺参、`undefined` 或 `null` 都失败关闭，并以负向夹具防止门禁退化。
+- 编辑器高频输入改为单次 `setEditorActivity` 原子 Store 更新；卷树和 AI 任务卡使用稳定 memo 边界，任务轮询 reconciliation 保留未变化对象引用，并以渲染身份预算测试防止无关卡片/树节点重复渲染。
+- 大纲加载/采用、AI 草稿采用和工作区刷新失败统一进入脱敏诊断与桌面错误呈现；Provider 失败后的 reservation 结算异常只记录次级诊断并保留原始 Provider 错误，Provider 成功但结算失败则扣留结果、保持失败关闭。
+- 浏览器 Light/Dark E2E 在 Splash 移除后解析真实 WebDriver PNG，校验亮度分位数、不透明率、颜色桶和每页明暗均值差，不再只以 DOM 属性或 computed style 代替像素证据。
+- Rust 原始 `println!/eprintln!/dbg!` 已收敛到唯一结构化 stderr sink；任务删除、读取、质量检查和启动日志不再输出数据库路径或原始实体 ID，`test:rust-logging` 及负向夹具阻止新增旁路日志。
 - 新增 `docs/feature-gap-analysis-v3.0.0.md`，以当前代码和 schema 逐项核验流式输出、参考小说、风格画像、无人值守、语义 Memory、跨章节检索、多目标放置、可靠取消及势力/地点资产九类缺口；校正“风格画像完全缺失”“取消仅覆盖 generation_jobs”“只存在简单全文检索”和“每章均需单独触发生成”等过时结论，并给出依赖、验收门禁和建议版本顺序。
 - 开启 TypeScript `noUnusedLocals`、`noUnusedParameters` 与 `noImplicitReturns`，同时收紧 `tsconfig.node.json`；修复严格检查发现的风格方案和输出方案删除未实际执行的问题。
 - ESLint 已将显式 `any` 提升为 error，并以 `--max-warnings 0` 运行 CI；生产源码散落的 `console.*` 已收敛到统一、脱敏的 `appLogger` sink，Rust 编译 warning 同步清零。
 - 新增 Prettier、Husky、lint-staged 与 Commitlint，提交时增量格式化变更文件并校验 Conventional Commit 信息，避免对历史文件进行一次性大规模格式化。
-- 新增 `test:all`、`test:vitest`、`test:performance` 与 C8 `test:coverage`，把 Node/tsx、独立 AI 面板、32 个 Vitest 文件和性能基准纳入统一入口。当前全局非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合阈值为 lines/statements 85%、functions/branches 80%。最新实测全局为 35.15% / 44.33% / 64.44%，核心集合为 87.82% / 85.89% / 82.01%（依次为 lines、functions、branches）。
+- 新增 `test:all`、`test:vitest`、`test:performance` 与 C8 `test:coverage`，把 Node/tsx、独立 AI 面板、44 个 Vitest 文件和性能基准纳入统一入口；650 条 AI 任务分页回归也已进入标准门禁。当前全局非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合阈值为 lines/statements 85%、functions/branches 80%。最新干净实测全局为 35.14% / 47.34% / 66.41%，核心集合为 87.90% / 85.89% / 82.01%，关键组件集合为 91.67% / 90.00% / 78.74%（依次为 lines、functions、branches）。
 - 新增 120 万字符分段、500 章索引窗口和重复长文本堆增长基准；当前分段和索引实测约 5 ms / 0.6 ms，并以 1.5 s、100 ms 和 96 MiB 堆增长作为稳定门禁。
 - 新增 AI P50 / P95 延迟与成功、失败、取消计量；设置中心可导出或清理本机脱敏诊断，前端错误最多保存 50 条、性能样本最多 500 条，正文、Prompt、API Key 和 Provider 原始响应不进入报告。
 - 新增桌面原生 panic 最小信封：在数据库与窗口初始化前安装 Rust panic hook，只保存时间、应用版本和源码文件名 / 行列号，排除 panic payload、堆栈、绝对路径与用户内容；设置中心统一展示、导出和清理最近 50 条原生报告，默认不上传。
@@ -75,11 +89,13 @@
 - 拆分本地安装包与签名发布入口：`tauri:build` 只生成 MSI/NSIS，普通开发机不再因缺少 updater 私钥而在产物生成后返回失败；`tauri:build:release` 仅供 release workflow 注入密钥并生成签名 MSI updater。
 - 真实浏览器开发模式 E2E 使用 Vite + WebdriverIO 驱动 Chromium/Edge，覆盖懒加载 StoryAssets 路由、无 Tauri bridge 的持久化边界，以及手动 Light/Dark 主题的真实 computed style；Windows 桌面 E2E 新增正式势力创建和 reviewed-partial 跨章节事务场景。
 - 所有生产 React/TSX 文件已控制在 500 行以内；自主规划、主角卡和 Multi-Agent 面板进一步拆为 controller、字段、展示和 presentation 模块。补齐缺失 CSS 语义 token，移除会覆盖手动浅色选择的组件级系统暗色媒体查询。
-- AI 任务页与卷树继续拆分为 controller / view / card / dialog 模块，并新增对应渲染回归；`npm run test:component-size` 已纳入 `verify_project.ps1`、发布 Checklist 与 PR 模板，当前 108 个生产 TSX 文件全部不超过 500 行。
-- 修复浏览器主题矩阵在 localStorage 写入后未刷新页面的问题，补齐系统主题测试的存储键传递，并为首页容器补上主题语义背景色。
+- AI 任务页与卷树继续拆分为 controller / view / card / dialog 模块，并新增对应渲染回归；`npm run test:component-size` 已纳入 `verify_project.ps1`、发布 Checklist 与 PR 模板，当前 109 个生产 TSX 文件全部不超过 500 行。
+- 修复浏览器主题矩阵在 localStorage 写入后未刷新页面的问题，补齐系统主题测试的存储键传递，并为首页容器补上主题语义背景色；启动 Splash 还会在首屏绘制前同步读取手动主题，截图门禁等待 Splash 真正移除后再采集目标页面。
+- 更新 Store 状态所有权与模块边界文档，明确 Zustand 只保存当前 WebView 的运行时投影，组件局部状态保持局部，Service / Tauri IPC / SQLite 继续持有业务事实与跨进程事务。
 - Vitest 从存在 critical advisory 的 3.2.4 升级至 3.2.7，并通过非破坏性 `npm audit fix` 更新 Babel、PostCSS、js-yaml、brace-expansion 等可兼容传递依赖；生产审计继续以 high 为失败阈值。
 - 浏览器开发回退的 LocalStorage 写入失败改为失败关闭，并保留恢复快照的可重试错误契约；自主计划多集合应用使用原始快照补偿，任一写入失败时恢复全部集合并显式报告回滚失败，不再返回部分写入的伪成功。
 - 文档同步检查改为失败关闭：必需文档、Checklist、Skill、工作流脚本、重复或错版的权威声明及过期“当前”标记都会返回非零状态；新增临时夹具负向回归并同步修正旧阶段表述。
+- 同步自主续写数据模型：明确 schema 1 可选 baseline、最终章节号、两类分卷物化策略及应用前 compare-and-swap；生成治理文档区分全产品传输/请求治理与分阶段编译 Artifact 治理，并统一新增续写错误提示语言。
 - 补充 Chapter Batch Planner 子批次 / 恢复测试、全书候选队列与临时连续性测试、长章节分段测试、规划页执行面板测试和 Rust 响应正文中断测试。
 - 补充浏览器与 Rust SSE 顺序/UTF-8/usage/无标记 EOF 回归，新增独立 AI 面板停止与卸载测试、LocalStorage/SQLite 冻结单价结算测试，以及正式 Provider 成本 metadata 篡改与重放复验；`test:ai-panels` 将三个 Vite SSR 重用例拆为独立进程，`test:all` 串联 Node/tsx、面板和 Vitest 入口。
 - Windows release 使用既有本地 API 配置真实续跑原失败计划：当前解析修复构建从第 156 章检查点连续完成 6 个五章 Chapter Batch（第 156～185 章），每批均成功解析并立即保存；随后受控取消第 186～190 章请求。生产 SQLite 已核验 1～185 章连续且无重复、成功任务 6/6、取消任务不写入章节、`quick_check=ok` 且外键检查为空，API 设置未改写。
@@ -90,8 +106,8 @@
 ### 版本边界
 
 - v3.0.0 工作树已完成长篇自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式安全预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory、多目标事务、跨章节受审核批处理和势力 / 地点正式资产。夜间草稿与质量门禁不自动采用；`full_auto` 仅在冻结策略、预算、专家阈值和采用前复验全部通过时采用。
-- 自动 embedding、召回评估集、更多正式资产类型、跨平台桌面发布和全书分析 UI 属于后续增强；成本仍是冻结单价的 USD 估算，不等同 Provider 账单对账。
-- 当前条目所列代码、动态测试、本地 Windows MSI/NSIS、真实 Edge 3/3 与完整 Tauri 桌面 E2E 14/14 已完成；签名 updater、正式 GitHub Release 与线上回滚仍由 release workflow 在注入仓库密钥后执行。
+- 自动 embedding/增量向量化/模型重建、召回评估集、EPUB/PDF/OCR/Markdown/DOCX 参考资料、全书分析/项目驾驶舱、系统级无人值守、正文级批处理、资产图谱、受控模型 Tool Calling 与出版交付属于后续独立版本目标；成本仍是冻结单价的 USD 估算，不等同 Provider 账单对账。
+- 当前工作树的动态测试、真实浏览器 10/10、完整 Tauri 桌面 E2E 14/14 与独立 Windows EXE 已完成；本轮按测试顺序只使用 `--bundles none` 刷新 EXE，既有 MSI/NSIS 保留为较早产物，待独立 EXE 验收后再进入安装包阶段。签名 updater、正式 GitHub Release 与线上回滚仍由 release workflow 在注入仓库密钥后执行。
 
 ---
 
@@ -169,7 +185,7 @@
 
 ### 安全与可靠性
 
-- `executeAiTask` 不再接受调用方自拼 Provider request 或三类 Snapshot；同一编译契约同时驱动实际派发与持久执行事实。
+- 受治理的 `executeAiTask` 入口不接受调用方自拼 Provider request 或三类 Snapshot；同一编译契约同时驱动实际派发与持久执行事实。普通历史任务在迁移完成前仍保留兼容入口，边界见 `docs/project/ai-generation-governance.md`。
 - Rust 在创建 Task 前复算 requestBodyHash、compilationHash、Context hash/预算、Constraint hash、固定 Prompt hash、Provider messages 和冻结 Registry hash；改写 Artifact type 也不能绕过正式验证。
 - 来源与 Registry 使用区域设置无关的固定排序；设定来源按 createdAt/id 稳定整理，避免不同电脑对相同事实产生不同 hash。
 - Registry manifest 返回隔离副本，调用方不能篡改缓存权威值；allowlist、权限、参数/输出 schema 与 novel/chapter/draft scope 在 handler 前后动态验证。

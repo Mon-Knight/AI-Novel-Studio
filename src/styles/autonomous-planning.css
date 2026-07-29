@@ -134,6 +134,22 @@
   font-size: var(--font-size-xs);
 }
 
+.autonomous-continuation-notice {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 9px 10px;
+  border-left: 3px solid var(--color-info-border);
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.autonomous-continuation-notice strong {
+  font-size: var(--font-size-sm);
+}
+
 .autonomous-field {
   display: block;
   min-width: 0;

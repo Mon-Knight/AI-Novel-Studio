@@ -19,6 +19,12 @@ pub struct AutonomousPlanIdInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AutonomousNovelIdInput {
+    pub novel_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AutonomousOperationIdInput {
     pub operation_id: String,
 }
@@ -75,6 +81,14 @@ pub fn list_autonomous_story_plans_by_novel(
         &input.novel_id,
         input.limit.unwrap_or(20),
     )
+}
+
+#[tauri::command]
+pub fn get_autonomous_planning_baseline(input: AutonomousNovelIdInput) -> Result<Value, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    autonomous_story_service::get_planning_baseline(&connection, &input.novel_id)
 }
 
 #[tauri::command]

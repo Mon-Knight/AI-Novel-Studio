@@ -17,7 +17,13 @@ export type AiTaskType =
   | 'volume_summary'
   | 'style_analyze'
   | 'quality_check'
-  | 'quality_fix';
+  | 'quality_fix'
+  | 'autonomous_plot_plan'
+  | 'autonomous_character_evolution'
+  | 'autonomous_world_build'
+  | 'autonomous_conflict_generate'
+  | 'autonomous_pacing_control'
+  | 'autonomous_chapter_batch';
 
 export type AiTaskStatus =
   | 'created'

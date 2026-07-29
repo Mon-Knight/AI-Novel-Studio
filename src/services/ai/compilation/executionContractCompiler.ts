@@ -1,4 +1,4 @@
-import type { AiSettings } from '../../../types/ai';
+import type { AiGenerateRequest, AiSettings } from '../../../types/ai';
 import type {
   AiCompilationScope,
   AiContextSourceType,
@@ -29,7 +29,7 @@ export interface AiTaskCompilationDefinition {
   promptTemplateId: string;
   promptTemplateVersion: string;
   promptTemplateBody: string;
-  userPrompt: string;
+  userPrompt: string | ((taskInput: Record<string, unknown>) => string);
   responseSchema: string;
   constraints: Record<string, unknown>;
   allowedSourceTypes: AiContextSourceType[];
@@ -142,8 +142,13 @@ export async function compileAiExecutionContract(
       );
     }
   }
+  const taskInput = compilation.taskInput ?? {};
+  const userPromptValue =
+    typeof definition.userPrompt === 'function'
+      ? definition.userPrompt(taskInput)
+      : definition.userPrompt;
   const promptTemplateBody = normalizeCompilationText(definition.promptTemplateBody);
-  const userPrompt = normalizeCompilationText(definition.userPrompt);
+  const userPrompt = normalizeCompilationText(userPromptValue);
   const fixedMessages = {
     messages: [
       { role: 'system', content: `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}` },
@@ -162,6 +167,7 @@ export async function compileAiExecutionContract(
     ? `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}${contextSnapshot.compiledContext}`
     : promptTemplateBody;
   const request = {
+    taskType: definition.taskType as AiGenerateRequest['taskType'],
     messages: [
       { role: 'system' as const, content: systemMessage },
       { role: 'user' as const, content: userPrompt },
@@ -191,7 +197,6 @@ export async function compileAiExecutionContract(
       allowedTools,
     },
   });
-  const taskInput = compilation.taskInput ?? {};
   const compilationHash = await canonicalHash({
     contractVersion: 'compiled_ai_execution_v1',
     taskType: definition.taskType,

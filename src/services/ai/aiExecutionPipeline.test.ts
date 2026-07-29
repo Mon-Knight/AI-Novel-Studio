@@ -366,6 +366,264 @@ test('tracked pipeline persists safe snapshots, response identity and one artifa
   assert.equal(observations.created?.constraintSnapshot.providerOptionsJson.maxTokens, 8);
 });
 
+test('tracked pipeline projects the formal task into the task center with the same identity', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  let projectedId: string | undefined;
+  let projectedNovelId: string | undefined;
+  let projectedChapterId: string | undefined;
+  let projectedTokens: { input?: number; output?: number; total?: number } | undefined;
+  let projectedResultText: string | undefined;
+  let projectedRunning = 0;
+  let released = false;
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute() {
+      return {
+        text: 'OK',
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        tokenInput: 4,
+        tokenOutput: 2,
+        tokenTotal: 6,
+        durationMs: 1,
+      };
+    },
+  };
+  const deps = dependencies(createRuntime(observations), adapter);
+  deps.projection = {
+    async create(taskType, input) {
+      projectedId = input.id;
+      projectedNovelId = input.novelId;
+      projectedChapterId = input.chapterId;
+      return {
+        id: input.id!,
+        taskType,
+        status: 'running',
+        createdAt: '2026-07-29T00:00:00Z',
+      };
+    },
+    async markSucceeded(_id, result) {
+      projectedResultText = result.resultText;
+      projectedTokens = {
+        input: result.tokenInput,
+        output: result.tokenOutput,
+        total: result.tokenTotal,
+      };
+    },
+    async markRunningForRetry() {
+      projectedRunning += 1;
+    },
+    async markFailed() {},
+    async markCancelled() {},
+    registerActiveExecution() {
+      return () => {
+        released = true;
+      };
+    },
+  };
+
+  const result = await executeAiTask(executionInput(), deps);
+
+  assert.equal(projectedId, result.taskId);
+  assert.equal(projectedNovelId, undefined);
+  assert.equal(projectedChapterId, undefined);
+  assert.equal(projectedResultText, 'OK');
+  assert.equal(projectedRunning, 1);
+  assert.deepEqual(projectedTokens, { input: 4, output: 2, total: 6 });
+  assert.equal(released, true);
+});
+
+test('task-center cancellation owner aborts the formal provider request and settles both facts', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  let cancelOwner: (() => void) | undefined;
+  let projectedCancelled = 0;
+  let released = false;
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute(_request, options) {
+      cancelOwner?.();
+      assert.equal(options?.signal?.aborted, true);
+      throw new AiRequestCancelledError();
+    },
+  };
+  let cancelCalls = 0;
+  const runtime = createRuntime(observations, {
+    async cancel() {
+      observations.cancellations += 1;
+      cancelCalls += 1;
+      return task(cancelCalls === 1 ? 'cancel_requested' : 'cancelled');
+    },
+  });
+  const deps = dependencies(runtime, adapter);
+  deps.projection = {
+    async create(taskType, input) {
+      return {
+        id: input.id!,
+        taskType,
+        status: 'running',
+        createdAt: '2026-07-29T00:00:00Z',
+      };
+    },
+    async markSucceeded() {},
+    async markFailed() {},
+    async markCancelled() {
+      projectedCancelled += 1;
+    },
+    registerActiveExecution(_id, cancel) {
+      cancelOwner = cancel;
+      return () => {
+        released = true;
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => executeAiTask(executionInput(), deps),
+    (error: unknown) => error instanceof AiExecutionError && error.code === 'AI_PROVIDER_CANCELLED',
+  );
+  assert.equal(observations.cancellations, 2);
+  assert.equal(projectedCancelled, 1);
+  assert.equal(released, true);
+});
+
+test('invalid artifacts fail the task-center projection without reporting a usable result', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  let projectedSucceeded = 0;
+  let projectedFailed = 0;
+  const runtime = createRuntime(observations, {
+    async createArtifact(input) {
+      observations.artifact = input;
+      return artifactBundle(input, 'invalid');
+    },
+  });
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute() {
+      return {
+        text: 'invalid-result',
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        durationMs: 1,
+      };
+    },
+  };
+  const deps = dependencies(runtime, adapter);
+  deps.projection = {
+    async create(taskType, input) {
+      return {
+        id: input.id!,
+        taskType,
+        status: 'running',
+        createdAt: '2026-07-29T00:00:00Z',
+      };
+    },
+    async markSucceeded() {
+      projectedSucceeded += 1;
+    },
+    async markFailed() {
+      projectedFailed += 1;
+    },
+    async markCancelled() {},
+    registerActiveExecution() {
+      return () => {};
+    },
+  };
+
+  await assert.rejects(
+    () => executeAiTask(executionInput(), deps),
+    (error: unknown) =>
+      error instanceof AiExecutionError && error.code === 'ARTIFACT_VALIDATION_FAILED',
+  );
+  assert.equal(projectedSucceeded, 0);
+  assert.equal(projectedFailed, 1);
+  assert.equal(observations.failures, 0);
+  assert.equal(observations.cancellations, 0);
+});
+
+test('late provider responses settle an already-cancelled formal task and its projection', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  let projectedCancelled = 0;
+  const runtime = createRuntime(observations, {
+    async markProviderSucceeded() {
+      return attemptResult('cancelled', 'late_response_ignored');
+    },
+  });
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute() {
+      return {
+        text: 'late-result',
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        durationMs: 1,
+      };
+    },
+  };
+  const deps = dependencies(runtime, adapter);
+  deps.projection = {
+    async create(taskType, input) {
+      return {
+        id: input.id!,
+        taskType,
+        status: 'running',
+        createdAt: '2026-07-29T00:00:00Z',
+      };
+    },
+    async markSucceeded() {},
+    async markFailed() {},
+    async markCancelled() {
+      projectedCancelled += 1;
+    },
+    registerActiveExecution() {
+      return () => {};
+    },
+  };
+
+  await assert.rejects(
+    () => executeAiTask(executionInput(), deps),
+    (error: unknown) => error instanceof AiExecutionError && error.code === 'AI_PROVIDER_CANCELLED',
+  );
+  assert.equal(projectedCancelled, 1);
+  assert.equal(observations.cancellations, 0);
+  assert.equal(observations.artifact, undefined);
+});
+
+test('governed pipeline forwards transient stream options to the provider adapter', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  let receivedOptions: Parameters<ProviderAdapter['execute']>[1];
+  const onStreamEvent = () => undefined;
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute(_request, options) {
+      receivedOptions = options;
+      return {
+        text: 'OK',
+        providerId: 'deepseek',
+        modelId: 'test-model',
+        durationMs: 1,
+      };
+    },
+  };
+
+  await executeAiTask(
+    {
+      ...executionInput(),
+      stream: true,
+      onStreamEvent,
+    },
+    dependencies(createRuntime(observations), adapter, false),
+  );
+
+  assert.equal(receivedOptions?.requestId, 'operation-1');
+  assert.equal(receivedOptions?.stream, true);
+  assert.equal(receivedOptions?.onStreamEvent, onStreamEvent);
+});
+
 for (const [label, usageCost] of [
   [
     'forged cost status',
@@ -582,6 +840,74 @@ test('browser fallback remains ephemeral and never fabricates Task or Artifact f
   assert.equal(result.taskId, undefined);
   assert.equal(result.artifactBundle, undefined);
   assert.equal(observations.created, undefined);
+});
+
+test('invalid artifact replay remains failed and never dispatches the provider again', async () => {
+  const observations: RuntimeObservations = { cancellations: 0, failures: 0 };
+  const replayInput: CreateResultArtifactInput = {
+    taskId: 'task-1',
+    attemptId: 'attempt-1',
+    artifactType: 'generic_text',
+    schemaVersion: 1,
+    rawContent: 'invalid-result',
+  };
+  let providerCalls = 0;
+  let projectedFailed = 0;
+  const runtime = createRuntime(observations, {
+    async create(input) {
+      observations.created = input;
+      return task('failed', 'artifact-1');
+    },
+    async get() {
+      return {
+        task: task('failed', 'artifact-1'),
+        attempts: [attempt('succeeded')],
+        inputSnapshot: {} as AiTaskDetail['inputSnapshot'],
+        contextSnapshot: {} as AiTaskDetail['contextSnapshot'],
+        constraintSnapshot: {} as AiTaskDetail['constraintSnapshot'],
+      };
+    },
+    async getArtifact() {
+      return artifactBundle(replayInput, 'invalid');
+    },
+  });
+  const adapter: ProviderAdapter = {
+    providerId: 'deepseek',
+    modelId: 'test-model',
+    async execute() {
+      providerCalls += 1;
+      throw new Error('provider must not run during invalid replay');
+    },
+  };
+  const deps = dependencies(runtime, adapter);
+  deps.projection = {
+    async create(taskType, input) {
+      return {
+        id: input.id!,
+        taskType,
+        status: 'running',
+        createdAt: '2026-07-29T00:00:00Z',
+      };
+    },
+    async markSucceeded() {},
+    async markFailed() {
+      projectedFailed += 1;
+    },
+    async markCancelled() {},
+    registerActiveExecution() {
+      return () => {};
+    },
+  };
+
+  await assert.rejects(
+    () => executeAiTask(executionInput(), deps),
+    (error: unknown) =>
+      error instanceof AiExecutionError && error.code === 'ARTIFACT_VALIDATION_FAILED',
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(projectedFailed, 1);
+  assert.equal(observations.failures, 0);
+  assert.equal(observations.cancellations, 0);
 });
 
 test('completed operation replay reads the persisted Artifact without another API call', async () => {

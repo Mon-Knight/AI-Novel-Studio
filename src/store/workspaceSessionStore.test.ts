@@ -26,4 +26,37 @@ describe('workspace session store', () => {
     useWorkspaceSessionStore.getState().setChapters((chapters) => [...chapters]);
     expect(useWorkspaceSessionStore.getState().chapters).toEqual([]);
   });
+
+  it('publishes one internally consistent editor activity update', () => {
+    let notificationCount = 0;
+    const unsubscribe = useWorkspaceSessionStore.subscribe(() => {
+      notificationCount += 1;
+    });
+
+    useWorkspaceSessionStore.getState().setEditorActivity({
+      chapterId: 'chapter-a',
+      draftId: 'draft-a',
+      draftVersion: 3,
+      content: '原子更新后的正文',
+      wordCount: 8,
+      isDirty: true,
+      contentHash: 'editor-activity-hash',
+      contentAvailable: true,
+    });
+
+    expect(useWorkspaceSessionStore.getState()).toEqual(
+      expect.objectContaining({
+        draftWordCount: 8,
+        isDirty: true,
+        editorSnapshot: expect.objectContaining({
+          chapterId: 'chapter-a',
+          content: '原子更新后的正文',
+          wordCount: 8,
+          isDirty: true,
+        }),
+      }),
+    );
+    expect(notificationCount).toBe(1);
+    unsubscribe();
+  });
 });

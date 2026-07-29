@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     setActiveChapterId: vi.fn(),
     setCurrentDraft: vi.fn(),
     setEditorSnapshot: vi.fn(),
+    setEditorActivity: vi.fn(),
     setDraftWordCount: vi.fn(),
     setDirty: vi.fn(),
     setQuality: vi.fn(),
@@ -110,6 +111,7 @@ const mocks = vi.hoisted(() => {
       setActiveChapterId: actions.setActiveChapterId,
       setCurrentDraft: actions.setCurrentDraft,
       setEditorSnapshot: actions.setEditorSnapshot,
+      setEditorActivity: actions.setEditorActivity,
       setDraftWordCount: actions.setDraftWordCount,
       setDirty: actions.setDirty,
       setQuality: actions.setQuality,
@@ -243,9 +245,6 @@ vi.mock('../../pages/WritingWorkspace/WritingWorkspaceView', () => ({
         <button type="button" onClick={() => void actions.closePanel()}>
           close
         </button>
-        <button type="button" onClick={() => actions.draftChange(200, true)}>
-          draft-change
-        </button>
         <button
           type="button"
           onClick={() =>
@@ -327,7 +326,6 @@ describe('WritingWorkspacePage orchestration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'toggle' }));
     await waitFor(() => expect(mocks.actions.openSidebarTool).toHaveBeenCalledWith('check'));
     fireEvent.click(screen.getByRole('button', { name: 'close' }));
-    fireEvent.click(screen.getByRole('button', { name: 'draft-change' }));
     fireEvent.click(screen.getByRole('button', { name: 'content-change' }));
     fireEvent.click(screen.getByRole('button', { name: 'outline' }));
     await waitFor(() => expect(mocks.actions.getChapterById).toHaveBeenCalledWith('chapter-1'));
@@ -346,9 +344,9 @@ describe('WritingWorkspacePage orchestration', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     fireEvent(window, new Event('beforeunload', { cancelable: true }));
 
-    expect(mocks.actions.setDraftWordCount).toHaveBeenCalled();
-    expect(mocks.actions.setDirty).toHaveBeenCalled();
-    expect(mocks.actions.setEditorSnapshot).toHaveBeenCalled();
+    expect(mocks.actions.setEditorActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '新正文', wordCount: 200, isDirty: true }),
+    );
     expect(mocks.actions.setAiModal).toHaveBeenCalledTimes(3);
     expect(mocks.actions.updateSidebarTool).toHaveBeenCalled();
     expect(mocks.actions.setQuality).toHaveBeenCalledWith(null, []);

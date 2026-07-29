@@ -119,6 +119,7 @@ v3.0.0 将章节六专家评审扩展为可实际使用的长篇自主创作平�
 - migration 025～026：参考资料版本库与混合语义 Memory。
 - migration 027：跨进程 `book_run / lease / attempt / checkpoint` 与三档调度策略。
 - migration 028：多目标事务、势力、地点及九张正式资产/关系表。
+- migration 029：应用级全局 AI 请求策略、跨进程 reservation、request-bound 哈希 lease、TTL 回收与幂等结算；不属于单个作品备份。
 - 项目备份 schema 9：包含 Multi-Agent、自主计划、参考资料、Memory、scheduler 与正式资产；导入为新作品时重映射全部身份，收敛中断 lease/attempt 并按拓扑恢复地点。
 - schema 2～8 继续按各自历史能力兼容。
 

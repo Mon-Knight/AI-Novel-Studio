@@ -100,7 +100,7 @@ function sanitizeForDbLog(value: unknown, depth = 0, key = ''): unknown {
 export async function dbCall<T>(
   command: string,
   args?: Record<string, unknown>,
-  fallback?: () => T,
+  fallback?: () => T | Promise<T>,
 ): Promise<T> {
   if (isTauriRuntime()) {
     if (shouldLogDbCommand(command)) {
@@ -154,7 +154,7 @@ export async function dbCall<T>(
         isTauri: false,
       });
     }
-    return fallback();
+    return await fallback();
   }
   throw new Error(`No fallback for command: ${command}`);
 }

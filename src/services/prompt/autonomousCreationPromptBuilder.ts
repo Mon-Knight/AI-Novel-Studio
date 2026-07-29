@@ -10,6 +10,8 @@ import type {
   AutonomousChapterPlan,
   AutonomousConflictThread,
   AutonomousPacingPoint,
+  AutonomousPlanningBaseline,
+  AutonomousPlanningMode,
   AutonomousStoryArc,
   AutonomousStoryBible,
   AutonomousStoryBrief,
@@ -26,6 +28,10 @@ function requestMessage(marker: string, payload: unknown): string {
 export function buildPlotFoundationRequest(
   brief: AutonomousStoryBrief,
   shape: PlanShape,
+  continuation?: {
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
+  },
 ): AiGenerateRequest {
   return {
     taskType: 'autonomous_plot_plan',
@@ -36,7 +42,11 @@ export function buildPlotFoundationRequest(
       },
       {
         role: 'user',
-        content: requestMessage('[AUTONOMOUS_FOUNDATION_REQUEST]', { brief, shape }),
+        content: requestMessage('[AUTONOMOUS_FOUNDATION_REQUEST]', {
+          brief,
+          shape,
+          ...continuation,
+        }),
       },
     ],
     temperature: 0.55,

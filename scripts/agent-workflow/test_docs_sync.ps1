@@ -110,6 +110,27 @@ try {
         Assert-MissingArtifactFails $missingArtifact
     }
 
+    $releaseWorkflowPath = Join-Path $FixtureRoot ".github/workflows/release.yml"
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseWorkflow = $releaseWorkflow -replace 'needs: desktop-gate', 'needs: omitted-desktop-gate'
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
+    Assert-CheckResult "release without desktop dependency" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
+    $desktopWorkflowPath = Join-Path $FixtureRoot ".github/workflows/windows-desktop-e2e.yml"
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWorkflow = $desktopWorkflow -replace 'workflow_call:', 'workflow_call_removed:'
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflow -Encoding UTF8
+    Assert-CheckResult "desktop workflow without reusable gate" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $fastCiWorkflowPath = Join-Path $FixtureRoot ".github/workflows/ci.yml"
+    $fastCiWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $fastCiWorkflowPath
+    $fastCiWorkflow = $fastCiWorkflow -replace 'npm run test:bundle-size', 'npm run bundle-size-gate-removed'
+    Set-Content -LiteralPath $fastCiWorkflowPath -Value $fastCiWorkflow -Encoding UTF8
+    Assert-CheckResult "fast CI without bundle budget" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/ci.yml"
+
     $fragmentedReleaseNote = Join-Path $FixtureRoot "docs/release-notes-v9.9.9.md"
     Set-Content -LiteralPath $fragmentedReleaseNote -Value "# fragmented release note fixture" -Encoding UTF8
     Assert-CheckResult "fragmented release notes" $false (Invoke-DocsSyncCheck $FixtureRoot)

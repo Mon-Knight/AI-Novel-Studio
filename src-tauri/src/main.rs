@@ -21,6 +21,8 @@ mod window_state;
 
 use tauri::Manager;
 
+use crate::errors::{log_workspace_event, WorkspaceLogEvent};
+
 #[cfg(feature = "e2e")]
 macro_rules! generate_app_handler {
     ($($command:path),* $(,)?) => {
@@ -65,24 +67,63 @@ fn get_app_data_dir() -> std::path::PathBuf {
 
 fn main() {
     let startup_at = std::time::Instant::now();
-    println!("[Startup] tauri main start");
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "application_starting",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: None,
+    });
     #[cfg(feature = "e2e")]
-    runtime::require_e2e_runtime_flag_for_feature().unwrap_or_else(|error| {
-        eprintln!("[E2E] startup rejected: {}", error);
+    runtime::require_e2e_runtime_flag_for_feature().unwrap_or_else(|_error| {
+        log_workspace_event(WorkspaceLogEvent {
+            level: "error",
+            event: "e2e_startup_rejected",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: Some("E2E_RUNTIME_REJECTED"),
+            metadata: Some(serde_json::json!({ "stage": "feature_flag" })),
+        });
         std::process::exit(2);
     });
-    let e2e_data_dir = runtime::initialize_e2e_environment().unwrap_or_else(|error| {
-        eprintln!("[E2E] startup rejected: {}", error);
+    let e2e_data_dir = runtime::initialize_e2e_environment().unwrap_or_else(|_error| {
+        log_workspace_event(WorkspaceLogEvent {
+            level: "error",
+            event: "e2e_startup_rejected",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: Some("E2E_RUNTIME_REJECTED"),
+            metadata: Some(serde_json::json!({ "stage": "environment" })),
+        });
         std::process::exit(2);
     });
     let app_data_dir = e2e_data_dir.clone().unwrap_or_else(get_app_data_dir);
     crash_reports::install_native_crash_report_hook(&app_data_dir);
     db::init_database();
     runtime::append_e2e_log("startup: database initialized");
-    println!(
-        "[Startup] database initialized: {} ms",
-        startup_at.elapsed().as_millis()
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "startup_database_ready",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "elapsedMs": startup_at.elapsed().as_millis(),
+        })),
+    });
 
     // Native Feel P1.1: 确定应用数据目录
     // 单实例检测
@@ -140,6 +181,10 @@ fn main() {
             commands::ai_tasks::mark_ai_task_provider_succeeded,
             commands::ai_tasks::fail_ai_task_attempt,
             commands::ai_tasks::cancel_ai_task,
+            commands::ai_request_policy::configure_ai_request_policy,
+            commands::ai_request_policy::reserve_ai_request,
+            commands::ai_request_policy::settle_ai_request,
+            commands::ai_request_policy::get_ai_request_policy_snapshot,
             commands::agent_plans::create_agent_plan,
             commands::agent_plans::get_agent_plan,
             commands::agent_plans::list_agent_plans_by_chapter,
@@ -168,6 +213,7 @@ fn main() {
             commands::autonomous_story::get_autonomous_story_plan,
             commands::autonomous_story::get_autonomous_story_plan_by_operation,
             commands::autonomous_story::list_autonomous_story_plans_by_novel,
+            commands::autonomous_story::get_autonomous_planning_baseline,
             commands::autonomous_story::apply_autonomous_story_plan,
             commands::autonomous_scheduler::create_autonomous_book_run,
             commands::autonomous_scheduler::get_autonomous_book_run,
@@ -210,6 +256,7 @@ fn main() {
             commands::get_generation_step_results,
             commands::recover_interrupted_generation_jobs,
             commands::create_ai_task_record,
+            commands::mark_ai_task_running_for_retry,
             commands::mark_ai_task_succeeded,
             commands::mark_ai_task_failed,
             commands::mark_ai_task_cancelled,
@@ -312,10 +359,19 @@ fn main() {
             system_accent::get_system_accent_color,
         ])
         .setup(move |app| {
-            println!(
-                "[Startup] tauri setup reached: {} ms",
-                startup_at.elapsed().as_millis()
-            );
+            log_workspace_event(WorkspaceLogEvent {
+                level: "info",
+                event: "tauri_setup_ready",
+                trace_id: None,
+                operation_id: None,
+                novel_id: None,
+                chapter_id: None,
+                draft_id: None,
+                error_code: None,
+                metadata: Some(serde_json::json!({
+                    "elapsedMs": startup_at.elapsed().as_millis(),
+                })),
+            });
             // Native Feel P1.1: 恢复窗口状态
             if let Some(window) = app.get_window("main") {
                 window_state::apply_window_state(&window, &saved_state);

@@ -49,7 +49,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 - SQLite + Migrations（001-024）
 - HashRouter + Vite 5
 
-系统不会自动应用全书计划、自动采用正文或自动沉淀章节分析；这三类正式副作用都保留用户确认。全书候选队列必须由用户显式启动，可暂停 / 继续，并在当前应用进程内逐章串行运行；跨进程自动续跑不属于当前范围。
+系统不会自动应用全书计划；夜间草稿与质量门禁模式也不会自动采用正文或沉淀章节分析，这些正式副作用继续保留用户确认。全书候选队列必须由用户显式启动，可暂停 / 继续，并由 SQLite Scheduler 通过持久 lease/epoch 在应用重启后接管；只有用户明确选择 `full_auto` 且冻结预算、专家阈值和采用前复验全部通过时，才允许自动采用与确认分析。
 
 ---
 
@@ -91,7 +91,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 - **风格控制**：风格方案与输出控制方案管理。
 - **参考资料与分层风格**：独立 TXT 参考作品版本库不进入卷章树；长文本按六类语义层有界采样，只把抽象画像、来源 hash、范围与置信度投影到生成 Prompt。
 - **混合语义 Memory**：migration 026 绑定正式采用稿、来源版本和 hash，提供 FTS / substring、实体 / 时间过滤与显式真实向量余弦重排；改采正文时旧 Memory 在同一事务中失效。
-- **请求治理与诊断**：当前 WebView 在派发前执行速率、并发、每日 Token / 估算成本硬预算；本地诊断采集脱敏前端异常和原生 Rust panic 元数据，并提供 AI P50 / P95、失败和取消计量。报告仅在用户主动导出时离开本机。
+- **请求治理与诊断**：桌面端由 SQLite 全局策略与 `IMMEDIATE` reservation 事务在派发前执行跨进程速率、并发、每日 Token / 估算成本硬预算；Rust Provider command 复验 request-bound lease。浏览器开发保留 LocalStorage 回退。本地诊断采集脱敏前端异常和原生 Rust panic 元数据，并提供 AI P50 / P95、失败和取消计量。报告仅在用户主动导出时离开本机。
 - **上下文总结**：章节采用后将总结、上下文、角色状态与章节终态原子沉淀；桌面重启后继续使用同一 SQLite 数据，过期记录不会再注入后续生成。
 - **质量检查**：逻辑、设定、角色、连续性、语言、节奏多维度检查。
 - **正文润色**：多种润色模式，结果保存为新草稿。
@@ -246,7 +246,7 @@ API Key 仅保存在本地，不提交到 Git，也不上传到任何服务端�
 | v2.5.0                    | 已完成：持久 Chapter Readiness Planner、lease/checkpoint、显式重试与重启恢复                                                                                                   |
 | v2.6.1                    | 文档规范化版本；未形成独立 Memory 实现                                                                                                                                         |
 | v3.0.0                    | **当前：全书自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory，以及多目标事务、跨章节批处理和势力 / 地点正式资产** |
-| v3.x 后续                 | 自动 embedding 与召回评估、更多正式资产类型、跨平台桌面验收和全书分析 UI                                                                                                       |
+| v3.x 后续                 | 自动语义化与召回评估、常见资料格式、全书分析/项目驾驶舱、系统级无人值守、正文批处理、资产可视化、受控 Tool Calling 与出版交付                                                  |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
 
@@ -320,6 +320,9 @@ cd ..
 # TypeScript 类型检查 + 前端构建
 npm run build
 
+# 校验入口、任一 chunk 的真实字节/gzip 预算与稳定 vendor 分包
+npm run test:bundle-size
+
 # Node/tsx 与 Vitest 统一测试入口
 npm run test:all
 
@@ -352,6 +355,8 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 详细分层、覆盖范围与静态检查边界见 [docs/technical/testing.md](docs/technical/testing.md)，桌面环境、隔离、失败产物和排障见 [docs/technical/desktop-e2e.md](docs/technical/desktop-e2e.md)。
 
+正式签名发布先调用可复用的完整 Windows 桌面质量/E2E 工作流，只有该门禁成功后才构建安装包、签名 updater 和回滚清单；本地独立 EXE 验证使用 `tauri build --bundles none`，与安装包阶段分离。
+
 ---
 
 ## 12. 当前限制
@@ -363,8 +368,10 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 - Windows Tauri E2E 与真实浏览器 E2E 已形成双门禁；macOS/Linux 仍不是当前产品发布目标。
 - 章节操作、HashRouter 导航与 Tauri 原生窗口关闭已共用可恢复 Leave Guard，但其他非正文工作流尚未统一接入。
 - `recovery-dialog` 当前只覆盖章节工程 `generation_jobs` 的应用重启中断；旧 `ai_task_records` 和其他异步业务尚未纳入同一恢复协议。
-- 参考资料库当前支持独立 TXT 版本导入、来源 hash、六层采样与置信度画像；PDF/EPUB 和自动 embedding 仍属于后续增强。
+- 参考资料库当前支持独立 TXT 版本导入、来源 hash、六层采样与置信度画像；EPUB/PDF/OCR/Markdown/DOCX 和自动 embedding、增量向量化、模型重建与召回评估仍属于后续增强。
 - migration 027 的跨进程调度提供夜间草稿、质量门禁与全自动三档策略。`full_auto` 只有在冻结预算、lease/epoch、六专家阈值和采用前复验全部通过时才可正式采用；其他策略继续保留人工确认。
+- Scheduler Worker 仍依附桌面应用进程；系统托盘/定时唤醒、锁屏/睡眠/断网恢复、次日审核收件箱和凭据解锁生命周期尚未形成系统级无人值守体验。
+- 生产 Provider 任务仍使用冻结工具 allowlist，开放式模型 Tool Calling、项目驾驶舱、关系图/地图，以及 DOCX/EPUB/PDF 出版与最终校对属于后续独立版本目标。
 - Mock 模式用于确定性流程验收，不代表真实模型的文学质量；真实 API 模式复用用户当前 Provider 配置，发布自动化不会读取 API Key 或产生外部调用费用。
 - 势力、地点和关系现为 SQLite 正式资产；浏览器开发模式只展示持久化边界，不伪造这些桌面事务记录。
 - 应用内更新仅在签名发布流水线注入公钥后启用；普通本地构建保留显式未配置状态。Stable/Beta 索引、minisign 校验和上一版本回滚目标由 release workflow 生成。

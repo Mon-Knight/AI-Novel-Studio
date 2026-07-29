@@ -88,3 +88,24 @@ test('mock responses are metered as zero without requiring usage fields', () => 
     estimatedCost: 0,
   });
 });
+
+test('an authoritative frozen-pricing result is not overwritten by stale caller settings', () => {
+  const response = {
+    text: 'desktop response',
+    usageCost: {
+      currency: 'USD' as const,
+      source: 'user_configured' as const,
+      inputPricePerMillionTokens: 1,
+      outputPricePerMillionTokens: 2,
+      status: 'complete' as const,
+      estimatedCost: 0.003,
+    },
+  };
+  assert.equal(
+    attachAiUsageCost(
+      response,
+      settings({ inputPricePerMillionTokens: 99, outputPricePerMillionTokens: 99 }),
+    ),
+    response,
+  );
+});

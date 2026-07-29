@@ -1526,7 +1526,7 @@ export interface AiTaskRecord {
 | `unpriced`      | 未完整配置单价                                  | 空；不以零冒充未知成本      |
 | `usage_missing` | 单价已冻结，但 Provider 未返回完整输入/输出用量 | 空；不根据残缺用量外推      |
 
-正式 Provider 执行管线还会把同一组状态、币种、来源、估算值和冻结单价写入白名单 response metadata；Rust 在持久化和重放读取时复验字段组合、范围与 Mock 零成本约束。当前 WebView 请求治理层已按本地自然日维护请求时间窗、活动 reservation、Token 用量、估算 USD 成本与 usage 缺失次数：派发前执行每分钟请求数、并发数和可选每日 Token / 成本硬门禁，完成后以真实 usage 结算；缺 usage 时保守计入预留值。该 ledger 保存于本机 LocalStorage 并以内存回退，不等于跨进程配额或 Provider 账单；跨进程预算协调、账单对账及失败请求的精确计费归集属于后续能力。
+正式 Provider 执行管线还会把同一组状态、币种、来源、估算值和冻结单价写入白名单 response metadata；Rust 在持久化和重放读取时复验字段组合、范围与 Mock 零成本约束。migration 029 进一步把桌面请求治理升级为应用级 SQLite ledger：全局策略、最近一分钟请求、跨进程 active reservation、每日 Token / 成本和 usage 缺失均在 `IMMEDIATE` 事务中裁决。完成时使用实际 usage；缺 usage、失败、取消或 TTL 回收时保守计入预留值。浏览器开发仍保存 `ai_novel_studio_ai_request_ledger_v1`；它不等于桌面权威事实或 Provider 账单。账单导入、差异对账及 Provider 动态组织额度仍属于后续能力。
 
 ---
 
@@ -1740,7 +1740,7 @@ dailyCostBudgetUsd         可选本地自然日估算 USD 硬预算
 budgetWarningPercent       默认 80，范围 50～99
 ```
 
-成本预算只有在输入、输出两项单价均有效时才可启用。瞬时 `ai_novel_studio_ai_request_ledger_v1` 保存当天请求时间、已结算 usage / 成本和 30 分钟过期的活动 reservation；它只用于当前 WebView 的本地门禁，不属于项目内容，不进入完整项目备份，也不表示 Provider 账单或跨进程全局额度。
+成本预算只有在输入、输出两项单价均有效时才可启用。桌面端权威设置与 ledger 位于 migration 029 的 `ai_request_policy / ai_request_daily_usage / ai_request_reservations`；设置修改使用 revision CAS，Provider 派发使用 owner/request/hash lease。它们是应用级本机事实，不属于某个项目，也不进入完整项目备份。浏览器开发的瞬时 `ai_novel_studio_ai_request_ledger_v1` 仍只用于当前 WebView 回退。两种模式的估算都不表示 Provider 账单。
 
 ## 重要安全规则
 
@@ -2646,7 +2646,7 @@ Session 创建、Round/Opinion 追加和终态更新分别在 SQLite `IMMEDIATE`
 
 ## 33.5 完整备份
 
-完整项目备份 schema 4 首次加入三张 Multi-Agent 表，schema 5 额外加入自主计划；当前 schema 7 继续包含这些事实，并加入参考资料与混合语义 Memory。恢复会重映射 session、opinion、operation 与所有草稿引用。schema 2/3 导入时允许缺少这些表。
+完整项目备份 schema 4 首次加入三张 Multi-Agent 表，schema 5 额外加入自主计划；当前 schema 9 继续包含这些事实，并依次加入参考资料、混合语义 Memory、跨进程调度及正式故事资产。恢复会重映射 session、opinion、operation 与所有草稿引用。schema 2/3 导入时允许缺少这些表。
 
 详细协议见 [`architecture/multi-agent-collaboration.md`](architecture/multi-agent-collaboration.md)。
 
@@ -2663,7 +2663,7 @@ v3.0.0 新增 migration 024。`autonomous_story_plans` 是全书规划、Agent �
 - `plan_id`：计划身份。
 - `operation_id`：创建/继续操作身份，同一作品内唯一。
 - `novel_id`：所属作品。
-- `request_hash`：`schemaVersion + novelId + normalized brief` 的 canonical SHA-256。
+- `request_hash`：canonical 请求载荷的 SHA-256。greenfield 载荷覆盖 `schemaVersion + novelId + normalized brief`；continuation 额外覆盖 `planningMode + volumeStrategy + baseline`。baseline 的 `capturedAt` 不参与 hash，结构内容和 `structureHash` 参与 hash。
 - `schema_version`：当前为 1。
 
 状态与并发：
@@ -2679,6 +2679,13 @@ v3.0.0 新增 migration 024。`autonomous_story_plans` 是全书规划、Agent �
 - `plan_hash`：`plan_json` 的 canonical SHA-256。
 - `error_message` 与创建、更新、完成、应用时间戳。
 
+续写字段保持 schema 1 的可选扩展：
+
+- `planningMode`：`greenfield / continuation`。
+- `volumeStrategy`：`create_new_volume / append_to_last_volume`。
+- `baseline`：规划时冻结的既有卷、章、有效角色和世界设定，以及不含采集时间的 `structureHash`。
+- `volumes[].materialization`：`create` 表示新增卷，`existing` 表示只引用既有卷。
+
 身份字段不可修改；状态 trigger 只允许合法边。Rust 每次保存都会重新解析并验证 JSON、请求 hash、计划 hash、引用完整性、章节连续性、状态/阶段和 revision。
 
 ## 34.2 计划内引用
@@ -2692,11 +2699,16 @@ v3.0.0 新增 migration 024。`autonomous_story_plans` 是全书规划、Agent �
 - 节奏阶段 ↔ 逐章节奏点 ↔ 章节。
 - chapter run ↔ 正式 chapter、生成草稿、评审 session、采用稿和分析候选。
 
-所有章节必须从 1 连续到目标章节数。任何悬空 ID、跨作品引用、越界章节或重复编号都不得进入 `ready / applied`。
+greenfield 计划的章节必须从 1 连续到目标章节数。continuation 计划把目标章节数解释为最终章节号：新增章节从 baseline 的最大章节号加 1 连续到目标章节号，既有章节不进入新增集合。任何悬空 ID、跨作品引用、越界章节或重复编号都不得进入 `ready / applied`。
 
 ## 34.3 应用事务
 
-用户确认应用后，Rust 在一个 `IMMEDIATE` 事务中创建 volumes、chapters、characters、world_settings、chapter_events 和 chapter_characters，并将计划更新为 `applied`。目标作品已有卷章结构时拒绝应用，不覆盖人工数据。
+用户确认应用后，Rust 在一个 `IMMEDIATE` 事务中创建新增 volumes、chapters、characters、world_settings、chapter_events 和 chapter_characters，并将计划更新为 `applied`。
+
+- greenfield：目标作品出现既有卷章时拒绝应用，避免覆盖人工数据。
+- continuation：应用前重新读取实时 baseline，以 `structureHash` 执行 compare-and-swap，并复验既有卷位置、章节 ID/编号、新卷顺序和全部卷引用；漂移时整笔应用失败。
+- `create_new_volume`：所有计划卷在既有最大顺序之后新增。
+- `append_to_last_volume`：第一个计划卷以 `existing` 引用最后一个既有卷，后续计划卷继续新增；既有卷章不更新、不重建。
 
 重复应用会读取并复验全部物化目标；缺少或漂移的卷、章、角色、世界设定、事件或章节角色关系都会返回 `OPERATION_REPLAY_TARGET_INVALID`，不能返回陈旧成功。
 
@@ -2858,3 +2870,30 @@ chapter_event_locations   章节事件—地点关系
 - content transaction 的运行历史不进入项目备份；已提交形成的正式资产进入 schema 9，避免把可重放的运行中事务带到新作品。
 - 项目清理覆盖 scheduler 和正式资产。清理期间只临时移除 checkpoint 的 no-delete trigger，事务完成后原样重建；失败回滚不能留下缺失 trigger。
 - schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表。未来或非整数 schema 版本拒绝进入完整恢复链路。
+
+# 39. migration 029：桌面端全局 AI 请求治理
+
+`029_global_ai_request_policy` checksum 固定为：
+
+```text
+cc2caf7c92d84eef722b109d67bba83b4c8015f893dedae099cb3662d0d4ebdc
+```
+
+该迁移把原先仅存在于单个 WebView LocalStorage 的请求账本升级为 SQLite
+权威事实：
+
+```text
+ai_request_policy          单例 revision、全局频率/并发/日预算、冻结单价与提醒阈值
+ai_request_daily_usage     按本地自然日累计 Token、已定价成本及缺失/未定价/失败/过期计数
+ai_request_reservations    request/owner、token hash、TTL、预留、单次派发与幂等结算
+```
+
+- 策略更新使用 revision CAS；snapshot 不创建或更新策略。设置页用已存在的权威策略回填治理/价格表单，并把首个观察到的 revision（包括“尚不存在”）固定到保存成功；显式设置保存或首个真实请求才可初始化策略，携带陈旧 revision 的初始化失败关闭。
+- reservation 只读取数据库中的当前策略，本地旧设置不能放宽全局额度。输入预留使用 UTF-8 字节数加固定/逐消息 chat envelope，输出预留使用 Provider 最大 Token，避免中文、emoji 与随机字节文本被字符比例低估；实际 usage 即使高于预留也完整入账并约束下一请求。
+- reserve、TTL 回收、派发证明和 settle 均使用 `IMMEDIATE` 事务。最近 60 秒请求数、全部进程 active 数、当日已用量与预留量在同一写锁快照中判定。
+- reservation 绑定唯一 Provider request ID。原始 lease token 不入库；Rust Provider command 同时复验 reservation、owner、request ID 与 token hash，并只允许一次派发。
+- TTL 回收、Provider 失败/取消和成功但缺少 usage 均按预留 Token 与冻结价格保守计量，同时释放并发槽位。
+- 硬预算比较使用 `1 USD = 100,000,000 cost units` 的整数定点值；reservation 成本向上取整、预算向下取整，避免 SQLite `REAL` 累加误差放宽硬门禁。
+- 相同结算 hash 可幂等重放；不同 usage、owner 或 token 失败关闭。派发时间只允许从空值写入一次，结算 hash、accounted Token / 成本 / 状态和结算时间在终态后由 trigger 冻结，直接 SQL 也不能改写。
+- 未配置成对价格时 accounted cost 保持 `NULL`，并增加未定价计数，不伪装为零成本。浏览器回退对 Provider 失败和 TTL 过期采用同样的保守计量，不再只释放 reservation。
+- 三张表属于应用级治理事实，不随单个作品备份、恢复或删除而迁移。浏览器开发模式继续使用原 LocalStorage 回退，不伪造桌面全局事务。

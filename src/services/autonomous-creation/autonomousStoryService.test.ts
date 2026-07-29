@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
   ApplyAutonomousPlanResult,
+  AutonomousPlanningBaseline,
   AutonomousStoryBrief,
   AutonomousStoryPlan,
 } from '../../types/autonomousCreation';
@@ -427,4 +428,91 @@ test('相同 operationId 但 brief 漂移时失败关闭', async () => {
     }),
     /请求不一致/,
   );
+});
+test('continuation coordinates append after baseline', async () => {
+  const { service, provider } = createService();
+  const baseline: AutonomousPlanningBaseline = {
+    novelId: 'novel-continuation',
+    capturedAt: '2026-07-27T12:00:00.000Z',
+    structureHash: 'a'.repeat(64),
+    existingVolumes: [{ id: 'volume-existing', orderIndex: 0, title: 'Existing volume' }],
+    existingChapters: Array.from({ length: 10 }, (_, index) => ({
+      id: `chapter-existing-${index + 1}`,
+      volumeId: 'volume-existing',
+      chapterNumber: index + 1,
+      orderIndex: index,
+      title: `Existing chapter ${index + 1}`,
+      goal: `Existing goal ${index + 1}`,
+      summary: `Existing ending ${index + 1}`,
+    })),
+    existingCharacters: [],
+    existingWorldElements: [],
+  };
+  const plan = await service.generate({
+    novelId: baseline.novelId,
+    brief: { ...brief, targetChapterCount: 80 },
+    planningMode: 'continuation',
+    volumeStrategy: 'create_new_volume',
+    baseline,
+    operationId: 'operation-continuation',
+  });
+  assert.equal(plan.planningMode, 'continuation');
+  assert.equal(plan.volumes[0].index, 1);
+  assert.deepEqual(
+    plan.chapters.map((chapter) => chapter.chapterNumber),
+    Array.from({ length: 70 }, (_, index) => index + 11),
+  );
+  assert.deepEqual(provider.chapterBatchCalls[0].previousChapterNumbers, [8, 9, 10]);
+  assert.ok(
+    plan.characters.every((character) => character.beats.every((beat) => beat.chapterNumber >= 11)),
+  );
+  const resumed = await service.resume(plan.planId);
+  assert.deepEqual(resumed, plan);
+  const timestampReplay = await service.generate({
+    novelId: baseline.novelId,
+    brief: { ...brief, targetChapterCount: 80 },
+    planningMode: 'continuation',
+    volumeStrategy: 'create_new_volume',
+    baseline: { ...baseline, capturedAt: '2026-07-28T12:00:00.000Z' },
+    operationId: 'operation-continuation',
+  });
+  assert.deepEqual(timestampReplay, plan);
+});
+
+test('continuation can append to the last existing volume without renumbering it', async () => {
+  const { service } = createService();
+  const baseline: AutonomousPlanningBaseline = {
+    novelId: 'novel-append-volume',
+    capturedAt: '2026-07-27T12:00:00.000Z',
+    structureHash: 'b'.repeat(64),
+    existingVolumes: [
+      { id: 'volume-first', orderIndex: 0, title: 'First volume' },
+      { id: 'volume-last', orderIndex: 2, title: 'Last volume' },
+    ],
+    existingChapters: Array.from({ length: 10 }, (_, index) => ({
+      id: `chapter-append-${index + 1}`,
+      volumeId: index < 5 ? 'volume-first' : 'volume-last',
+      chapterNumber: index + 1,
+      orderIndex: index,
+      title: `Existing chapter ${index + 1}`,
+    })),
+    existingCharacters: [],
+    existingWorldElements: [],
+  };
+  const plan = await service.generate({
+    novelId: baseline.novelId,
+    brief: { ...brief, targetChapterCount: 80 },
+    planningMode: 'continuation',
+    volumeStrategy: 'append_to_last_volume',
+    baseline,
+    operationId: 'operation-append-volume',
+  });
+  assert.equal(plan.volumes[0].id, 'volume-last');
+  assert.equal(plan.volumes[0].materialization, 'existing');
+  assert.equal(plan.volumes[0].index, 2);
+  assert.deepEqual(
+    plan.volumes.slice(1).map((volume) => volume.index),
+    [3, 4],
+  );
+  assert.equal(plan.chapters[0].volumeId, 'volume-last');
 });

@@ -8,8 +8,21 @@ import { extractJsonObject } from '../ai/jsonUtils';
 import type { AiGenerateOptions } from '../../types/ai';
 import { throwIfAiRequestCancelled } from '../ai/aiCancellation';
 import { bindAiTaskCancellation, settleAiTaskError } from '../ai/aiTaskCancellation';
+import styleAnalyzeTemplate from '../../../prompts/style_analyze.md?raw';
 
 const MAX_TEXT_LENGTH = 20000;
+const REFERENCE_TEXT_TOKEN = '{{reference_text}}';
+
+export function renderStyleAnalyzePrompt(referenceText: string): string {
+  if (!styleAnalyzeTemplate.includes(REFERENCE_TEXT_TOKEN)) {
+    throw new Error('风格分析提示词缺少 reference_text 模板变量。');
+  }
+  const rendered = styleAnalyzeTemplate.replace(REFERENCE_TEXT_TOKEN, referenceText);
+  if (rendered.includes(REFERENCE_TEXT_TOKEN)) {
+    throw new Error('风格分析提示词包含未替换的 reference_text 模板变量。');
+  }
+  return rendered;
+}
 
 export async function analyzeStyle(
   text: string,
@@ -34,20 +47,7 @@ export async function analyzeStyle(
 
   const truncated = text.slice(0, MAX_TEXT_LENGTH);
 
-  // 尝试加载模板
-  let template = '';
-  try {
-    const resp = await fetch('/prompts/style_analyze.md');
-    if (resp.ok) template = await resp.text();
-  } catch {
-    /* use inline */
-  }
-
-  if (!template) {
-    template = `你是文学风格分析师。分析以下文本的抽象风格，输出 JSON。\n参考文本：\n{{reference_text}}`;
-  }
-
-  const prompt = template.replace('{{reference_text}}', truncated);
+  const prompt = renderStyleAnalyzePrompt(truncated);
 
   try {
     const client = createAiClient(settings);

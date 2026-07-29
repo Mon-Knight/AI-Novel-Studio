@@ -5,8 +5,12 @@ import type {
   AutonomousAgentRun,
   AutonomousAgentType,
   AutonomousChapterPlan,
+  AutonomousPlanningBaseline,
+  AutonomousPlanningMode,
   AutonomousStoryPlan,
+  AutonomousStoryBrief,
   AutonomousVolumePlan,
+  AutonomousVolumeStrategy,
   GenerateAutonomousPlanInput,
 } from '../../types/autonomousCreation';
 import { AUTONOMOUS_PLAN_SCHEMA_VERSION } from '../../types/autonomousCreation';
@@ -127,21 +131,150 @@ function assertResumableChapterCheckpoint(plan: AutonomousStoryPlan): void {
   }
 }
 
-function continuityAnchors(
-  plan: AutonomousStoryPlan,
-  volume: AutonomousVolumePlan,
-  beforeChapter: number,
-) {
-  return plan.chapters
-    .filter((chapter) => chapter.volumeId === volume.id && chapter.chapterNumber < beforeChapter)
-    .sort((left, right) => left.chapterNumber - right.chapterNumber)
-    .slice(-CONTINUITY_ANCHOR_COUNT)
+function lastBaselineChapter(baseline?: AutonomousPlanningBaseline): number {
+  return Math.max(0, ...(baseline?.existingChapters ?? []).map((chapter) => chapter.chapterNumber));
+}
+
+function hashableBaseline(
+  baseline: AutonomousPlanningBaseline,
+): Omit<AutonomousPlanningBaseline, 'capturedAt'> {
+  return {
+    novelId: baseline.novelId,
+    structureHash: baseline.structureHash,
+    existingVolumes: baseline.existingVolumes,
+    existingChapters: baseline.existingChapters,
+    existingCharacters: baseline.existingCharacters,
+    existingWorldElements: baseline.existingWorldElements,
+  };
+}
+
+function generationBrief(plan: AutonomousStoryPlan): AutonomousStoryBrief {
+  if (plan.planningMode !== 'continuation' || !plan.baseline) return plan.brief;
+  return {
+    ...plan.brief,
+    targetChapterCount: plan.brief.targetChapterCount - lastBaselineChapter(plan.baseline),
+  };
+}
+
+function promptBaseline(
+  baseline?: AutonomousPlanningBaseline,
+): AutonomousPlanningBaseline | undefined {
+  if (!baseline) return undefined;
+  return {
+    ...baseline,
+    // Keep the full snapshot on the plan for hashing and apply-time drift checks,
+    // while sending only the most useful tail to creative agents.
+    existingChapters: baseline.existingChapters.slice(-12),
+    existingCharacters: baseline.existingCharacters.slice(0, 48),
+    existingWorldElements: baseline.existingWorldElements.slice(0, 48),
+  };
+}
+
+function continuityAnchors(plan: AutonomousStoryPlan, beforeChapter: number) {
+  const existing = (plan.baseline?.existingChapters ?? [])
+    .filter((chapter) => chapter.chapterNumber < beforeChapter)
+    .map((chapter) => ({
+      chapterNumber: chapter.chapterNumber,
+      title: chapter.title,
+      goal: chapter.goal ?? '',
+      endingHook: chapter.summary ?? chapter.outline ?? '',
+    }));
+  const planned = plan.chapters
+    .filter((chapter) => chapter.chapterNumber < beforeChapter)
     .map((chapter) => ({
       chapterNumber: chapter.chapterNumber,
       title: chapter.title,
       goal: chapter.goal,
       endingHook: chapter.endingHook,
     }));
+  return [...existing, ...planned]
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+    .slice(-CONTINUITY_ANCHOR_COUNT);
+}
+
+function applyContinuationCoordinates(plan: AutonomousStoryPlan): AutonomousStoryPlan {
+  if (plan.planningMode !== 'continuation' || !plan.baseline) return plan;
+  const offset = lastBaselineChapter(plan.baseline);
+  const existingVolumes = [...plan.baseline.existingVolumes].sort(
+    (left, right) => left.orderIndex - right.orderIndex,
+  );
+  const nextVolumeIndex = Math.max(-1, ...existingVolumes.map((volume) => volume.orderIndex)) + 1;
+  const lastVolume = existingVolumes[existingVolumes.length - 1];
+  const strategy: AutonomousVolumeStrategy = plan.volumeStrategy ?? 'create_new_volume';
+  const coordinatesAlreadyApplied =
+    plan.volumes.length > 0 &&
+    plan.volumes.every((volume, index) => {
+      const appendTarget = strategy === 'append_to_last_volume' && index === 0 && lastVolume;
+      return (
+        volume.chapterStart > offset &&
+        volume.chapterEnd > offset &&
+        (appendTarget
+          ? volume.id === appendTarget.id && volume.materialization === 'existing'
+          : volume.index >= nextVolumeIndex && volume.materialization !== 'existing')
+      );
+    });
+  if (coordinatesAlreadyApplied) return plan;
+
+  const volumeIdMap = new Map<string, string>();
+  const volumes = plan.volumes.map((volume, index) => {
+    const appendTarget =
+      strategy === 'append_to_last_volume' && index === 0 ? lastVolume : undefined;
+    const id = appendTarget?.id ?? volume.id;
+    volumeIdMap.set(volume.id, id);
+    const indexAfterExisting =
+      strategy === 'append_to_last_volume'
+        ? nextVolumeIndex + Math.max(0, index - 1)
+        : nextVolumeIndex + volume.index;
+    return {
+      ...volume,
+      id,
+      index: appendTarget?.orderIndex ?? indexAfterExisting,
+      chapterStart: volume.chapterStart + offset,
+      chapterEnd: volume.chapterEnd + offset,
+      materialization: appendTarget ? ('existing' as const) : ('create' as const),
+    };
+  });
+  return {
+    ...plan,
+    arcs: plan.arcs.map((arc) => ({
+      ...arc,
+      chapterStart: arc.chapterStart + offset,
+      chapterEnd: arc.chapterEnd + offset,
+    })),
+    volumes,
+    characters: plan.characters.map((character) => ({
+      ...character,
+      beats: character.beats.map((beat) => ({
+        ...beat,
+        chapterNumber: beat.chapterNumber + offset,
+      })),
+    })),
+    worldElements: plan.worldElements.map((element) => ({
+      ...element,
+      firstChapter: element.firstChapter + offset,
+    })),
+    conflicts: plan.conflicts.map((conflict) => ({
+      ...conflict,
+      introducedChapter: conflict.introducedChapter + offset,
+      escalationChapters: conflict.escalationChapters.map((chapter) => chapter + offset),
+      climaxChapter: conflict.climaxChapter + offset,
+      resolutionChapter: conflict.resolutionChapter + offset,
+    })),
+    pacingPhases: plan.pacingPhases.map((phase) => ({
+      ...phase,
+      chapterStart: phase.chapterStart + offset,
+      chapterEnd: phase.chapterEnd + offset,
+    })),
+    pacingCurve: plan.pacingCurve.map((point) => ({
+      ...point,
+      chapterNumber: point.chapterNumber + offset,
+    })),
+    chapters: plan.chapters.map((chapter) => ({
+      ...chapter,
+      chapterNumber: chapter.chapterNumber + offset,
+      volumeId: volumeIdMap.get(chapter.volumeId) ?? chapter.volumeId,
+    })),
+  };
 }
 
 export interface AutonomousStoryServiceDependencies {
@@ -236,16 +369,52 @@ export class AutonomousStoryService {
 
   async generate(input: GenerateAutonomousPlanInput): Promise<AutonomousStoryPlan> {
     const brief = validateStoryBrief(input.brief);
+    const planningMode: AutonomousPlanningMode =
+      input.planningMode ??
+      (input.baseline &&
+      (input.baseline.existingVolumes.length > 0 || input.baseline.existingChapters.length > 0)
+        ? 'continuation'
+        : 'greenfield');
+    const volumeStrategy: AutonomousVolumeStrategy = input.volumeStrategy ?? 'create_new_volume';
+    if (planningMode === 'continuation') {
+      const baseline = input.baseline;
+      if (!baseline || baseline.novelId !== input.novelId) {
+        throw new Error('续写计划必须携带目标作品基线。');
+      }
+      const lastChapter = lastBaselineChapter(baseline);
+      if (brief.targetChapterCount <= lastChapter) {
+        throw new Error('续写目标章节数必须大于已有最大章节号。');
+      }
+      if (volumeStrategy === 'append_to_last_volume' && baseline.existingVolumes.length === 0) {
+        throw new Error('追加到上一分卷需要已有分卷。');
+      }
+    }
     const operationId = input.operationId?.trim() || this.createId();
-    const requestHash = await canonicalHash({
+    const requestPayload: Record<string, unknown> = {
       schemaVersion: AUTONOMOUS_PLAN_SCHEMA_VERSION,
       novelId: input.novelId,
       brief,
-    });
+    };
+    if (planningMode === 'continuation') {
+      requestPayload.planningMode = planningMode;
+      requestPayload.volumeStrategy = volumeStrategy;
+      requestPayload.baseline = hashableBaseline(input.baseline!);
+    }
+    const requestHash = await canonicalHash(requestPayload);
     const active = this.inFlight.get(operationId);
     if (active) return active;
 
-    const promise = this.generateInternal({ ...input, brief, operationId }, requestHash);
+    const promise = this.generateInternal(
+      {
+        ...input,
+        brief,
+        operationId,
+        planningMode,
+        volumeStrategy,
+        baseline: planningMode === 'continuation' ? input.baseline : undefined,
+      },
+      requestHash,
+    );
     this.inFlight.set(operationId, promise);
     try {
       return await promise;
@@ -265,6 +434,11 @@ export class AutonomousStoryService {
       novelId: plan.novelId,
       brief: plan.brief,
       operationId: plan.operationId,
+      planningMode: plan.planningMode,
+      volumeStrategy: plan.volumeStrategy,
+      // Preserve the full snapshot for request hashing and idempotent resume.
+      // The provider-facing prompt is trimmed later by promptBaseline().
+      baseline: plan.baseline,
       signal,
       onProgress,
     });
@@ -310,6 +484,13 @@ export class AutonomousStoryService {
           operationId: input.operationId,
           requestHash,
           novelId: input.novelId,
+          ...(input.planningMode === 'continuation'
+            ? {
+                planningMode: 'continuation' as const,
+                volumeStrategy: input.volumeStrategy ?? 'create_new_volume',
+                baseline: input.baseline,
+              }
+            : {}),
           status: 'running',
           stage: 'foundation',
           revision: 0,
@@ -341,6 +522,10 @@ export class AutonomousStoryService {
       plan = await this.generateFoundation(plan, input);
       plan = await this.generateCharacters(plan, input);
       plan = await this.generateDimensions(plan, input);
+      const coordinated = applyContinuationCoordinates(plan);
+      if (coordinated !== plan) {
+        plan = await this.save(coordinated, input.onProgress);
+      }
       plan = await this.generateChapterBatches(plan, input);
       const completedAt = this.now();
       plan = {
@@ -398,6 +583,7 @@ export class AutonomousStoryService {
     input: GenerateAutonomousPlanInput & { operationId: string },
   ): Promise<AutonomousStoryPlan> {
     if (plan.storyBible && plan.arcs.length > 0 && plan.volumes.length > 0) return plan;
+    const brief = generationBrief(plan);
     const startedAt = this.now();
     plan = await this.save(
       updateRun(plan, 'plot_planner', { status: 'running' }, startedAt),
@@ -406,11 +592,13 @@ export class AutonomousStoryService {
     const result = await this.provider.planFoundation({
       novelId: plan.novelId,
       operationId: plan.operationId,
-      brief: plan.brief,
-      shape: derivePlanShape(plan.brief.targetChapterCount),
+      brief,
+      shape: derivePlanShape(brief.targetChapterCount),
+      planningMode: plan.planningMode,
+      baseline: promptBaseline(plan.baseline),
       signal: input.signal,
     });
-    const foundation = buildFoundation(plan.brief, result.value, this.createId);
+    const foundation = buildFoundation(brief, result.value, this.createId);
     plan = addResult(
       {
         ...plan,
@@ -430,6 +618,7 @@ export class AutonomousStoryService {
     input: GenerateAutonomousPlanInput & { operationId: string },
   ): Promise<AutonomousStoryPlan> {
     if (plan.characters.length > 0) return plan;
+    const brief = generationBrief(plan);
     if (!plan.storyBible) throw new Error('人物规划前缺少故事圣经。');
     const storyBible = plan.storyBible;
     plan = await this.save(
@@ -439,15 +628,17 @@ export class AutonomousStoryService {
     const result = await this.provider.planCharacters({
       novelId: plan.novelId,
       operationId: plan.operationId,
-      brief: plan.brief,
+      brief,
       storyBible,
       arcs: plan.arcs,
+      planningMode: plan.planningMode,
+      baseline: promptBaseline(plan.baseline),
       signal: input.signal,
     });
     plan = addResult(
       {
         ...plan,
-        characters: buildCharacters(plan.brief.targetChapterCount, result.value, this.createId),
+        characters: buildCharacters(brief.targetChapterCount, result.value, this.createId),
         progress: { ...plan.progress, lastCheckpoint: '人物成长弧线已生成' },
       },
       'character_evolution',
@@ -463,6 +654,7 @@ export class AutonomousStoryService {
   ): Promise<AutonomousStoryPlan> {
     if (!plan.storyBible) throw new Error('创作维度规划前缺少故事圣经。');
     const storyBible = plan.storyBible;
+    const brief = generationBrief(plan);
     const missing = [
       plan.worldElements.length === 0 ? 'world_builder' : null,
       plan.conflicts.length === 0 ? 'conflict_generator' : null,
@@ -486,16 +678,18 @@ export class AutonomousStoryService {
           .buildWorld({
             novelId: plan.novelId,
             operationId: plan.operationId,
-            brief: plan.brief,
+            brief,
             storyBible,
             arcs: plan.arcs,
             volumes: plan.volumes,
+            planningMode: plan.planningMode,
+            baseline: promptBaseline(plan.baseline),
             signal: input.signal,
           })
           .then((result) => ({
             agent: 'world_builder',
             result,
-            value: buildWorldElements(plan.brief.targetChapterCount, result.value, this.createId),
+            value: buildWorldElements(brief.targetChapterCount, result.value, this.createId),
           })),
       );
     }
@@ -505,17 +699,19 @@ export class AutonomousStoryService {
           .generateConflicts({
             novelId: plan.novelId,
             operationId: plan.operationId,
-            brief: plan.brief,
+            brief,
             storyBible,
             arcs: plan.arcs,
             volumes: plan.volumes,
             characters: plan.characters,
+            planningMode: plan.planningMode,
+            baseline: promptBaseline(plan.baseline),
             signal: input.signal,
           })
           .then((result) => ({
             agent: 'conflict_generator',
             result,
-            value: buildConflicts(plan.brief.targetChapterCount, result.value, this.createId),
+            value: buildConflicts(brief.targetChapterCount, result.value, this.createId),
           })),
       );
     }
@@ -525,10 +721,12 @@ export class AutonomousStoryService {
           .controlPacing({
             novelId: plan.novelId,
             operationId: plan.operationId,
-            brief: plan.brief,
+            brief,
             storyBible,
             arcs: plan.arcs,
             volumes: plan.volumes,
+            planningMode: plan.planningMode,
+            baseline: promptBaseline(plan.baseline),
             signal: input.signal,
           })
           .then((result) => ({
@@ -584,6 +782,7 @@ export class AutonomousStoryService {
   ): Promise<AutonomousStoryPlan> {
     if (!plan.storyBible) throw new Error('章节批次规划前缺少故事圣经。');
     const storyBible = plan.storyBible;
+    const brief = generationBrief(plan);
     assertResumableChapterCheckpoint(plan);
     for (const volume of plan.volumes) {
       const ranges = chapterBatchRanges(volume);
@@ -637,7 +836,7 @@ export class AutonomousStoryService {
         const result = await this.provider.planChapterBatch({
           novelId: plan.novelId,
           operationId: plan.operationId,
-          brief: plan.brief,
+          brief,
           storyBible,
           volume: batchVolume,
           arcs: plan.arcs.filter((arc) => volume.arcIds.includes(arc.id)),
@@ -655,11 +854,13 @@ export class AutonomousStoryService {
             (item) =>
               item.chapterNumber >= range.chapterStart && item.chapterNumber <= range.chapterEnd,
           ),
-          previousChapters: continuityAnchors(plan, volume, range.chapterStart),
+          planningMode: plan.planningMode,
+          baseline: promptBaseline(plan.baseline),
+          previousChapters: continuityAnchors(plan, range.chapterStart),
           signal: input.signal,
         });
         const chapters = buildChapterBatch({
-          brief: plan.brief,
+          brief,
           volume: batchVolume,
           arcs: plan.arcs,
           characters: plan.characters,

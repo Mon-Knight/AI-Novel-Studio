@@ -5,6 +5,7 @@ import type {
   AutonomousStoryPlan,
 } from '../../types/autonomousCreation';
 import { validateCompletePlan } from './autonomousPlanBuilder';
+import { getAutonomousPlanningBaseline } from './autonomousPlanningBaselineService';
 
 const PLAN_KEY = 'ai_novel_studio_autonomous_story_plans';
 const VOLUME_KEY = 'ai_novel_studio_volumes';
@@ -149,7 +150,10 @@ function writeLocalApplyBundle(
   }
 }
 
-function applyLocalPlan(planId: string, expectedRevision: number): ApplyAutonomousPlanResult {
+async function applyLocalPlan(
+  planId: string,
+  expectedRevision: number,
+): Promise<ApplyAutonomousPlanResult> {
   const plans = localPlans();
   const index = plans.findIndex((item) => item.planId === planId);
   if (index < 0) throw new Error('自主创作计划不存在。');
@@ -157,7 +161,7 @@ function applyLocalPlan(planId: string, expectedRevision: number): ApplyAutonomo
   if (plan.status === 'applied') {
     return {
       plan,
-      createdVolumes: plan.volumes.length,
+      createdVolumes: plan.volumes.filter((volume) => volume.materialization !== 'existing').length,
       createdChapters: plan.chapters.length,
       createdCharacters: plan.characters.length,
       createdWorldElements: plan.worldElements.length,
@@ -177,27 +181,104 @@ function applyLocalPlan(planId: string, expectedRevision: number): ApplyAutonomo
   const volumes = rawArray(VOLUME_KEY);
   const chapters = rawArray(CHAPTER_KEY);
   if (
-    volumes.some((item) => belongsToNovel(item, plan.novelId)) ||
-    chapters.some((item) => belongsToNovel(item, plan.novelId))
+    plan.planningMode !== 'continuation' &&
+    (volumes.some((item) => belongsToNovel(item, plan.novelId)) ||
+      chapters.some((item) => belongsToNovel(item, plan.novelId)))
   ) {
     throw new Error('目标作品已有分卷或章节，不能覆盖式应用自主创作计划。');
   }
 
+  const existingVolumes = volumes.filter((item) => belongsToNovel(item, plan.novelId));
+  const existingChapters = chapters.filter((item) => belongsToNovel(item, plan.novelId));
+  if (plan.planningMode === 'continuation') {
+    const baseline = plan.baseline;
+    const live = await getAutonomousPlanningBaseline(plan.novelId);
+    if (!baseline || live.structureHash !== baseline.structureHash) {
+      throw new Error('规划完成后作品结构已变化，请刷新基线并重新生成计划。');
+    }
+    const existingVolumeIds = new Set(
+      existingVolumes.map((item) => String((item as Record<string, unknown>).id ?? '')),
+    );
+    const baselineVolumeOrder = new Map(
+      baseline.existingVolumes.map((volume) => [volume.id, volume.orderIndex]),
+    );
+    const existingChapterIds = new Set(
+      existingChapters.map((item) => String((item as Record<string, unknown>).id ?? '')),
+    );
+    const nextVolumeIndex =
+      Math.max(
+        -1,
+        ...existingVolumes.map((item) =>
+          Number(
+            (item as Record<string, unknown>).orderIndex ??
+              (item as Record<string, unknown>).order_index ??
+              -1,
+          ),
+        ),
+      ) + 1;
+    const maxChapter = Math.max(
+      0,
+      ...existingChapters.map((item) =>
+        Number(
+          (item as Record<string, unknown>).chapterNumber ??
+            (item as Record<string, unknown>).orderIndex ??
+            0,
+        ),
+      ),
+    );
+    const newVolumeIds = new Set<string>();
+    const volumeIndexes = new Set<number>();
+    for (const volume of plan.volumes) {
+      if (!volumeIndexes.add(volume.index)) {
+        throw new Error('续写计划包含重复的分卷序号。');
+      }
+      if (volume.materialization === 'existing') {
+        if (!existingVolumeIds.has(volume.id)) {
+          throw new Error('续写计划引用的既有分卷已不存在。');
+        }
+        if (baselineVolumeOrder.get(volume.id) !== volume.index) {
+          throw new Error('续写计划修改了既有分卷的位置。');
+        }
+      } else {
+        if (existingVolumeIds.has(volume.id) || !newVolumeIds.add(volume.id)) {
+          throw new Error('续写计划包含与既有分卷冲突的 ID。');
+        }
+        if (volume.index < nextVolumeIndex) {
+          throw new Error('新增分卷必须排列在全部既有分卷之后。');
+        }
+      }
+    }
+    const chapterNumbers = new Set<number>();
+    for (const chapter of plan.chapters) {
+      if (existingChapterIds.has(chapter.id) || chapter.chapterNumber <= maxChapter) {
+        throw new Error('续写计划只能追加新章节。');
+      }
+      if (!chapterNumbers.add(chapter.chapterNumber)) {
+        throw new Error('续写计划包含重复的章节编号。');
+      }
+      if (!newVolumeIds.has(chapter.volumeId) && !existingVolumeIds.has(chapter.volumeId)) {
+        throw new Error('续写章节引用的分卷不存在。');
+      }
+    }
+  }
+
   const now = nowISO();
-  const createdVolumes = plan.volumes.map((volume) => ({
-    id: volume.id,
-    novelId: plan.novelId,
-    title: volume.title,
-    summary: volume.summary,
-    goal: volume.goal,
-    mainConflict: volume.mainConflict,
-    orderIndex: volume.index,
-    volumeNumber: volume.index + 1,
-    sortOrder: volume.index,
-    status: 'planned',
-    createdAt: now,
-    updatedAt: now,
-  }));
+  const createdVolumes = plan.volumes
+    .filter((volume) => volume.materialization !== 'existing')
+    .map((volume) => ({
+      id: volume.id,
+      novelId: plan.novelId,
+      title: volume.title,
+      summary: volume.summary,
+      goal: volume.goal,
+      mainConflict: volume.mainConflict,
+      orderIndex: volume.index,
+      volumeNumber: volume.index + 1,
+      sortOrder: volume.index,
+      status: 'planned',
+      createdAt: now,
+      updatedAt: now,
+    }));
   const createdChapters = plan.chapters.map((chapter) => ({
     id: chapter.id,
     novelId: plan.novelId,

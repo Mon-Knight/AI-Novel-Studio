@@ -77,6 +77,37 @@ const request: AiGenerateRequest = {
   ],
 };
 
+const POLICY_IPC_UNHANDLED = Symbol('policy-ipc-unhandled');
+
+function handlePolicyIpc(command: string, args: Record<string, unknown>): unknown {
+  if (command === 'reserve_ai_request') {
+    const input = args.input as Record<string, unknown>;
+    return {
+      reservationId: `reservation-${String(input.ownerId)}`,
+      ownerId: input.ownerId,
+      providerRequestId: input.providerRequestId,
+      leaseToken: 'test-policy-lease-token',
+      expiresAtMs: Date.now() + 120_000,
+      policyRevision: 1,
+      estimatedInputTokens: input.estimatedInputTokens,
+      estimatedOutputTokens: input.estimatedOutputTokens,
+      estimatedTokens:
+        Number(input.estimatedInputTokens ?? 0) + Number(input.estimatedOutputTokens ?? 0),
+      inputPricePerMillionTokens: input.inputPricePerMillionTokens,
+      outputPricePerMillionTokens: input.outputPricePerMillionTokens,
+    };
+  }
+  if (command === 'settle_ai_request') {
+    const input = args.input as Record<string, unknown>;
+    return {
+      reservationId: input.reservationId,
+      status: input.outcome === 'succeeded' ? 'settled' : 'failed',
+      replayed: false,
+    };
+  }
+  return POLICY_IPC_UNHANDLED;
+}
+
 function createRealClient(timeoutSeconds = 1) {
   return new realModule.RealAiClient({
     baseUrl: 'https://example.invalid/v1',
@@ -123,6 +154,8 @@ test('Tauri cancellation waits for cancel_ai_request confirmation', async () => 
 
   mockIPC((command, args) => {
     calls.push({ command, args });
+    const policyResult = handlePolicyIpc(command, args);
+    if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
     if (command === 'ai_chat_completion') {
       markRequestStarted?.();
       return new Promise((_resolve, reject) => {
@@ -171,6 +204,16 @@ test('Tauri cancellation waits for cancel_ai_request confirmation', async () => 
   const startRequest = startCall?.args.request as Record<string, unknown> | undefined;
   const cancelCall = calls.find((call) => call.command === 'cancel_ai_request');
   assert.equal(startRequest?.requestId, 'request-cancel-test');
+  assert.deepEqual(startRequest?.policyLease, {
+    reservationId: startRequest?.policyLease
+      ? (startRequest.policyLease as Record<string, unknown>).reservationId
+      : undefined,
+    ownerId: startRequest?.policyLease
+      ? (startRequest.policyLease as Record<string, unknown>).ownerId
+      : undefined,
+    providerRequestId: 'request-cancel-test',
+    leaseToken: 'test-policy-lease-token',
+  });
   assert.equal(cancelCall?.args.requestId, 'request-cancel-test');
   assert.equal(calls.filter((call) => call.command === 'cancel_ai_request').length, 1);
 });
@@ -186,7 +229,9 @@ test('Tauri cancellation IPC failure waits for the original request to settle', 
   console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
 
   try {
-    mockIPC((command) => {
+    mockIPC((command, args) => {
+      const policyResult = handlePolicyIpc(command, args);
+      if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
       if (command === 'ai_chat_completion') {
         markRequestStarted?.();
         return new Promise<{ text: string }>((resolve) => {
@@ -240,7 +285,9 @@ test('Tauri cancellation settles when the original request finishes before a sta
     markRequestStarted = resolve;
   });
 
-  mockIPC((command) => {
+  mockIPC((command, args) => {
+    const policyResult = handlePolicyIpc(command, args);
+    if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
     calls.push(command);
     if (command === 'ai_chat_completion') {
       markRequestStarted?.();
@@ -283,6 +330,52 @@ test('Tauri cancellation settles when the original request finishes before a sta
     'caller remained blocked after the original request safely settled',
   );
   await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
+});
+
+test('provider failure remains primary when conservative policy settlement also fails', async () => {
+  const providerFailure = new Error('primary provider failure');
+  const settlementFailure = new Error('secondary settlement failure');
+  const capturedErrors: string[] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => capturedErrors.push(args.map(String).join(' '));
+
+  try {
+    mockIPC((command, args) => {
+      if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+      if (command === 'ai_chat_completion') throw providerFailure;
+      if (command === 'settle_ai_request') throw settlementFailure;
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await assert.rejects(
+      createRealClient().generate(request, { requestId: 'provider-primary-error' }),
+      (error: unknown) => error === providerFailure,
+    );
+    assert.equal(capturedErrors.length, 1);
+    assert.match(capturedErrors[0], /AI_REQUEST_POLICY_SETTLEMENT_FAILED_AFTER_PROVIDER_FAILURE/);
+    assert.doesNotMatch(capturedErrors[0], /secondary settlement failure/);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
+test('successful provider output is withheld when policy settlement fails closed', async () => {
+  const settlementFailure = new Error('settlement unavailable');
+  mockIPC((command, args) => {
+    if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+    if (command === 'ai_chat_completion') return { text: 'provider success' };
+    if (command === 'settle_ai_request') throw settlementFailure;
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  await assert.rejects(
+    createRealClient().generate(request, { requestId: 'provider-success-settle-failure' }),
+    (error: unknown) =>
+      typeof error === 'object' &&
+      error !== null &&
+      (error as { code?: string }).code === 'UNKNOWN_ERROR' &&
+      (error as { message?: string }).message === settlementFailure.message,
+  );
 });
 
 test('browser caller cancellation is distinct from request timeout', async () => {
@@ -348,6 +441,22 @@ test('connection test reserves enough output budget for reasoning-compatible mod
       ?.maxOutputTokens,
     128,
   );
+});
+
+test('chapter generation is registered as a candidate-only compiled contract', () => {
+  const definition =
+    compilationRegistryModule.productionCompilationRegistryPrivate.definitions.chapter_generate;
+  assert.equal(definition?.expectedArtifactType, 'chapter_text');
+  assert.deepEqual(definition?.requiredSourceTypes, ['request_context']);
+  assert.equal(definition?.constraints.candidateOnly, true);
+  assert.equal(definition?.constraints.mayWriteBusinessData, false);
+  assert.equal(typeof definition?.userPrompt, 'function');
+  if (typeof definition?.userPrompt === 'function') {
+    assert.match(
+      definition.userPrompt({ chapterTitle: '第一章', contextHash: 'a'.repeat(64) }),
+      /CHAPTER_GENERATE_REQUEST/,
+    );
+  }
 });
 
 test('browser discards non-empty partial output when the provider reports token truncation', async () => {
@@ -574,6 +683,29 @@ test('quality check cancellation records the AI task as cancelled', async () => 
   assert.equal(taskModule.aiTaskService.getActiveExecutionState(tasks[0].id), 'inactive');
 });
 
+test('task-center cancellation reaches every concurrent owner for the same formal task', () => {
+  let firstCancelled = 0;
+  let secondCancelled = 0;
+  const releaseFirst = taskModule.aiTaskService.registerActiveExecution('shared-task', () => {
+    firstCancelled += 1;
+  });
+  const releaseSecond = taskModule.aiTaskService.registerActiveExecution('shared-task', () => {
+    secondCancelled += 1;
+  });
+
+  assert.equal(taskModule.aiTaskService.getActiveExecutionState('shared-task'), 'active');
+  assert.equal(taskModule.aiTaskService.cancelActiveExecution('shared-task'), 'requested');
+  assert.equal(firstCancelled, 1);
+  assert.equal(secondCancelled, 1);
+  assert.equal(taskModule.aiTaskService.getActiveExecutionState('shared-task'), 'cancelling');
+  assert.equal(taskModule.aiTaskService.cancelActiveExecution('shared-task'), 'already_requested');
+
+  releaseFirst();
+  assert.equal(taskModule.aiTaskService.getActiveExecutionState('shared-task'), 'cancelling');
+  releaseSecond();
+  assert.equal(taskModule.aiTaskService.getActiveExecutionState('shared-task'), 'inactive');
+});
+
 test('LocalStorage task cost freezes pricing and survives successful round-trip', async () => {
   const pricing: AiPricingSnapshot = {
     currency: 'USD',
@@ -648,4 +780,91 @@ test('LocalStorage task cost freezes pricing and survives successful round-trip'
   assert.equal(persistedTask?.costEstimate, 1.5);
   assert.equal(persistedTask?.inputPricePerMillionTokens, 2);
   assert.equal(persistedTask?.outputPricePerMillionTokens, 8);
+});
+
+test('LocalStorage projection replay preserves identity and rejects conflicting ownership', async () => {
+  const first = await taskModule.aiTaskService.create('chapter_generate', {
+    id: 'projection-identity-test',
+    novelId: 'novel-identity',
+    chapterId: 'chapter-identity',
+    runtimeMode: 'mock',
+    provider: 'mock',
+    modelName: 'Mock',
+    pricing: {
+      currency: 'USD',
+      source: 'mock',
+      inputPricePerMillionTokens: 0,
+      outputPricePerMillionTokens: 0,
+    },
+  });
+  const replay = await taskModule.aiTaskService.create('chapter_generate', {
+    id: first.id,
+    novelId: 'novel-identity',
+    chapterId: 'chapter-identity',
+    runtimeMode: 'mock',
+    provider: 'mock',
+    modelName: 'Mock',
+    pricing: {
+      currency: 'USD',
+      source: 'mock',
+      inputPricePerMillionTokens: 0,
+      outputPricePerMillionTokens: 0,
+    },
+  });
+  assert.equal(replay.id, first.id);
+  assert.equal(replay.createdAt, first.createdAt);
+  await assert.rejects(
+    () =>
+      taskModule.aiTaskService.create('chapter_generate', {
+        id: first.id,
+        novelId: 'other-novel',
+        chapterId: 'chapter-identity',
+        runtimeMode: 'mock',
+        provider: 'mock',
+        modelName: 'Mock',
+        pricing: {
+          currency: 'USD',
+          source: 'mock',
+          inputPricePerMillionTokens: 0,
+          outputPricePerMillionTokens: 0,
+        },
+      }),
+    /身份冲突/,
+  );
+  await taskModule.aiTaskService.markFailed(first.id, 'retryable');
+  assert.equal(
+    (await taskModule.aiTaskService.getByChapterId('chapter-identity'))[0]?.status,
+    'failed',
+  );
+  await taskModule.aiTaskService.markRunningForRetry(first.id);
+  assert.equal(
+    (await taskModule.aiTaskService.getByChapterId('chapter-identity'))[0]?.status,
+    'running',
+  );
+  await taskModule.aiTaskService.markCancelled(first.id);
+});
+
+test('LocalStorage deletion keeps running task provenance until terminal settlement', async () => {
+  const running = await taskModule.aiTaskService.create('chapter_generate', {
+    id: 'running-delete-test',
+    novelId: 'novel-delete',
+    chapterId: 'chapter-delete',
+    runtimeMode: 'mock',
+    provider: 'mock',
+    modelName: 'Mock',
+    pricing: {
+      currency: 'USD',
+      source: 'mock',
+      inputPricePerMillionTokens: 0,
+      outputPricePerMillionTokens: 0,
+    },
+  });
+  await assert.rejects(() => taskModule.aiTaskService.deleteOne(running.id), /不能删除/);
+  await assert.rejects(() => taskModule.aiTaskService.deleteMany([running.id]), /包含运行中/);
+  await assert.rejects(() => taskModule.aiTaskService.clearAll(), /请先停止/);
+  assert.equal((await taskModule.aiTaskService.getByChapterId('chapter-delete')).length, 1);
+
+  await taskModule.aiTaskService.markCancelled(running.id);
+  assert.equal((await taskModule.aiTaskService.deleteOne(running.id)).deletedCount, 1);
+  assert.equal((await taskModule.aiTaskService.getByChapterId('chapter-delete')).length, 0);
 });

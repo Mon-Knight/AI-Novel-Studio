@@ -1,9 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { browser, expect, $ } from '@wdio/globals';
+import { readPngVisualMetrics, type PngVisualMetrics } from './pngVisualMetrics';
 
 const THEME_STORAGE_KEY = 'ai_novel_studio_theme_preference';
 const screenshotDirectory = path.resolve(import.meta.dirname, '../../test-results/browser-theme');
+const visualBaseline = JSON.parse(
+  fs.readFileSync(path.resolve(import.meta.dirname, 'theme-visual-baseline.json'), 'utf8'),
+) as {
+  minimumWidth: number;
+  minimumHeight: number;
+  minimumOpaqueRatio: number;
+  minimumThemeLuminanceDelta: number;
+  routes: Record<
+    string,
+    Record<string, { meanLuminance: [number, number]; minimumColorBuckets: number }>
+  >;
+};
+const visualMetrics = new Map<string, PngVisualMetrics>();
 
 const routes = [
   { name: 'home', hash: '/#/', selector: '.home-page' },
@@ -20,10 +34,28 @@ function screenshotPath(theme: string, page: string): string {
   return path.join(screenshotDirectory, `${page}-${theme}.png`);
 }
 
+async function waitForStartupSplashRemoval(): Promise<void> {
+  const splash = await $('#startup-splash');
+  await splash.waitForExist({ reverse: true });
+  expect(await splash.isExisting()).toBe(false);
+}
+
 describe('theme visual matrix', () => {
   before(async () => {
     await browser.url('/');
     await browser.execute(() => window.localStorage.clear());
+  });
+
+  after(() => {
+    for (const route of routes) {
+      const light = visualMetrics.get(`${route.name}:light`);
+      const dark = visualMetrics.get(`${route.name}:dark`);
+      expect(light).toBeDefined();
+      expect(dark).toBeDefined();
+      expect((light?.meanLuminance ?? 0) - (dark?.meanLuminance ?? 1)).toBeGreaterThan(
+        visualBaseline.minimumThemeLuminanceDelta,
+      );
+    }
   });
 
   for (const theme of ['light', 'dark'] as const) {
@@ -36,6 +68,7 @@ describe('theme visual matrix', () => {
         await browser.url(route.hash);
         const page = await $(route.selector);
         await page.waitForDisplayed();
+        await waitForStartupSplashRemoval();
 
         const snapshot = await browser.execute((selector) => {
           const root = document.documentElement;
@@ -67,7 +100,22 @@ describe('theme visual matrix', () => {
         expect(snapshot.bodyText).not.toBe('rgba(0, 0, 0, 0)');
         expect(snapshot.targetBackground).not.toBe('rgba(0, 0, 0, 0)');
 
-        await browser.saveScreenshot(screenshotPath(theme, route.name));
+        const outputPath = screenshotPath(theme, route.name);
+        await browser.saveScreenshot(outputPath);
+        const pixels = readPngVisualMetrics(outputPath);
+        const baseline = visualBaseline.routes[route.name]?.[theme];
+        expect(baseline).toBeDefined();
+        expect(pixels.width).toBeGreaterThanOrEqual(visualBaseline.minimumWidth);
+        expect(pixels.height).toBeGreaterThanOrEqual(visualBaseline.minimumHeight);
+        expect(pixels.opaqueRatio).toBeGreaterThanOrEqual(visualBaseline.minimumOpaqueRatio);
+        expect(pixels.coarseColorBuckets).toBeGreaterThanOrEqual(
+          baseline?.minimumColorBuckets ?? Number.MAX_SAFE_INTEGER,
+        );
+        expect(pixels.meanLuminance).toBeGreaterThanOrEqual(
+          baseline?.meanLuminance[0] ?? Number.MAX_SAFE_INTEGER,
+        );
+        expect(pixels.meanLuminance).toBeLessThanOrEqual(baseline?.meanLuminance[1] ?? -1);
+        visualMetrics.set(`${route.name}:${theme}`, pixels);
       });
     }
   }

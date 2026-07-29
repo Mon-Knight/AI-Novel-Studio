@@ -156,7 +156,8 @@ export function validateStoryBrief(brief: AutonomousStoryBrief): AutonomousStory
 }
 
 export function derivePlanShape(targetChapterCount: number): PlanShape {
-  assertInteger(targetChapterCount, '目标章节数', 12, 500);
+  // Continuation plans may only need a short tail after the existing book.
+  assertInteger(targetChapterCount, '目标章节数', 1, 500);
   return {
     arcCount: Math.max(3, Math.min(8, Math.ceil(targetChapterCount / 60))),
     volumeCount: Math.max(1, Math.min(24, Math.ceil(targetChapterCount / 30))),
@@ -534,19 +535,34 @@ function assertUnique(values: string[], label: string): void {
 
 export function validateCompletePlan(plan: AutonomousStoryPlan): void {
   const brief = validateStoryBrief(plan.brief);
+  if (plan.planningMode === 'continuation' && !plan.baseline) {
+    throw new Error('Continuation plans require a baseline snapshot.');
+  }
   if (!plan.storyBible) throw new Error('自主创作计划缺少故事圣经。');
   if (plan.status !== 'ready' && plan.status !== 'applied')
     throw new Error('自主创作计划尚未完成。');
   if (plan.stage !== 'ready' && plan.stage !== 'applied') throw new Error('自主创作计划阶段无效。');
+  const chapterStart =
+    plan.planningMode === 'continuation'
+      ? Math.max(
+          0,
+          ...(plan.baseline?.existingChapters ?? []).map((chapter) => chapter.chapterNumber),
+        ) + 1
+      : 1;
+  const plannedChapterCount = brief.targetChapterCount - chapterStart + 1;
   if (
-    plan.chapters.length !== brief.targetChapterCount ||
-    plan.pacingCurve.length !== brief.targetChapterCount
+    plannedChapterCount < 1 ||
+    plan.chapters.length !== plannedChapterCount ||
+    plan.pacingCurve.length !== plannedChapterCount
   ) {
     throw new Error('章节计划或节奏曲线数量与目标章节数不一致。');
   }
-  const expectedNumbers = Array.from({ length: brief.targetChapterCount }, (_, index) => index + 1);
+  const expectedNumbers = Array.from(
+    { length: plannedChapterCount },
+    (_, index) => chapterStart + index,
+  );
   if (plan.chapters.some((item, index) => item.chapterNumber !== expectedNumbers[index])) {
-    throw new Error('章节编号必须从 1 开始连续递增。');
+    throw new Error(`章节编号必须从 ${chapterStart} 开始连续递增。`);
   }
   if (plan.pacingCurve.some((item, index) => item.chapterNumber !== expectedNumbers[index])) {
     throw new Error('节奏曲线必须覆盖每一个章节。');
@@ -577,7 +593,12 @@ export function validateCompletePlan(plan: AutonomousStoryPlan): void {
     '冲突线程',
   );
 
-  const volumeIds = new Set(plan.volumes.map((item) => item.id));
+  const volumeIds = new Set([
+    ...plan.volumes.map((item) => item.id),
+    ...(plan.planningMode === 'continuation'
+      ? (plan.baseline?.existingVolumes ?? []).map((volume) => volume.id)
+      : []),
+  ]);
   const arcIds = new Set(plan.arcs.map((item) => item.id));
   const characterIds = new Set(plan.characters.map((item) => item.id));
   const beatIds = new Set(plan.characters.flatMap((item) => item.beats.map((beat) => beat.id)));

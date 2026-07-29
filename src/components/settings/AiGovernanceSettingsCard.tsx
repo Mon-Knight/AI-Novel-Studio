@@ -1,10 +1,13 @@
+import { useEffect, useRef, useState } from 'react';
 import type { AiSettings } from '../../types/ai';
 import { aiRequestPolicyService } from '../../services/ai/aiRequestPolicyService';
+import { appLogger } from '../../services/observability/appLogger';
 
 interface AiGovernanceSettingsCardProps {
   settings: AiSettings;
   onChange: (patch: Partial<AiSettings>) => void;
   onSave: () => void;
+  refreshVersion: number;
 }
 
 function optionalPositive(value: string): number | undefined {
@@ -13,8 +16,47 @@ function optionalPositive(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function AiGovernanceSettingsCard({ settings, onChange, onSave }: AiGovernanceSettingsCardProps) {
-  const snapshot = aiRequestPolicyService.snapshot(settings);
+function AiGovernanceSettingsCard({
+  settings,
+  onChange,
+  onSave,
+  refreshVersion,
+}: AiGovernanceSettingsCardProps) {
+  const [snapshot, setSnapshot] = useState(() => aiRequestPolicyService.snapshot(settings));
+  const [snapshotUnavailable, setSnapshotUnavailable] = useState(false);
+  const settingsRef = useRef(settings);
+  const onChangeRef = useRef(onChange);
+  settingsRef.current = settings;
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    let active = true;
+    void aiRequestPolicyService
+      .snapshotCurrent(settingsRef.current)
+      .then((value) => {
+        if (active) {
+          setSnapshot(value);
+          setSnapshotUnavailable(false);
+          if (value.policy) {
+            onChangeRef.current({
+              maxRequestsPerMinute: value.policy.maxRequestsPerMinute,
+              maxConcurrentAiRequests: value.policy.maxConcurrentRequests,
+              dailyTokenBudget: value.policy.dailyTokenBudget,
+              dailyCostBudgetUsd: value.policy.dailyCostBudgetUsd,
+              inputPricePerMillionTokens: value.policy.inputPricePerMillionTokens,
+              outputPricePerMillionTokens: value.policy.outputPricePerMillionTokens,
+              budgetWarningPercent: value.policy.warningPercent,
+            });
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        appLogger.warn('[AiGovernanceSettingsCard] global policy snapshot failed', error);
+        if (active) setSnapshotUnavailable(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshVersion]);
   const pricingReady =
     settings.inputPricePerMillionTokens !== undefined &&
     settings.outputPricePerMillionTokens !== undefined;
@@ -90,24 +132,33 @@ function AiGovernanceSettingsCard({ settings, onChange, onSave }: AiGovernanceSe
       </div>
 
       <div className={`budget-summary${snapshot.warning ? ' is-warning' : ''}`} role="status">
-        <strong>今日用量</strong>
-        <span>
-          Token {snapshot.tokenUsed.toLocaleString()}
-          {snapshot.reservedTokens
-            ? `（运行中预留 ${snapshot.reservedTokens.toLocaleString()}）`
-            : ''}
-          {snapshot.tokenBudget ? ` / ${snapshot.tokenBudget.toLocaleString()}` : ''}
-        </span>
-        <span>
-          估算成本 ${snapshot.costUsedUsd.toFixed(6)} USD
-          {snapshot.costBudgetUsd ? ` / ${snapshot.costBudgetUsd.toFixed(2)} USD` : ''}
-        </span>
-        <span>
-          最近一分钟 {snapshot.requestsLastMinute} 次 · 正在运行 {snapshot.activeRequests} 次
-          {snapshot.usageMissingCount
-            ? ` · ${snapshot.usageMissingCount} 次缺少 Provider 用量`
-            : ''}
-        </span>
+        {snapshotUnavailable ? (
+          <span>桌面全局用量暂不可读取；Provider 请求仍按失败关闭处理。</span>
+        ) : (
+          <>
+            <strong>今日用量</strong>
+            <span>
+              Token {snapshot.tokenUsed.toLocaleString()}
+              {snapshot.reservedTokens
+                ? `（运行中预留 ${snapshot.reservedTokens.toLocaleString()}）`
+                : ''}
+              {snapshot.tokenBudget ? ` / ${snapshot.tokenBudget.toLocaleString()}` : ''}
+            </span>
+            <span>
+              估算成本 ${snapshot.costUsedUsd.toFixed(6)} USD
+              {snapshot.costBudgetUsd ? ` / ${snapshot.costBudgetUsd.toFixed(2)} USD` : ''}
+            </span>
+            <span>
+              最近一分钟 {snapshot.requestsLastMinute} 次 · 正在运行 {snapshot.activeRequests} 次
+              {snapshot.usageMissingCount
+                ? ` · ${snapshot.usageMissingCount} 次缺少 Provider 用量`
+                : ''}
+              {snapshot.unpricedRequestCount
+                ? ` · ${snapshot.unpricedRequestCount} 次成本未定价`
+                : ''}
+            </span>
+          </>
+        )}
       </div>
       <div className="settings-card-actions">
         <span className="settings-help-text">

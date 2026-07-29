@@ -29,6 +29,7 @@ import {
   emitAiStreamEvent,
 } from './aiStreamProtocol';
 import { aiRequestPolicyService, type AiRequestPolicyLease } from './aiRequestPolicyService';
+import { attachAiUsageCost } from './aiCost';
 
 export interface RealAiClientConfig {
   baseUrl: string;
@@ -189,12 +190,12 @@ export class RealAiClient implements AiClient {
     };
   }
 
-  private settlePolicy(
+  private async settlePolicy(
     lease: AiRequestPolicyLease,
     settings: AiSettings,
     response?: AiGenerateResponse,
-  ): void {
-    aiRequestPolicyService.settle(lease, settings, response);
+  ): Promise<void> {
+    await aiRequestPolicyService.settleRequest(lease, settings, response);
   }
 
   async generate(
@@ -203,8 +204,16 @@ export class RealAiClient implements AiClient {
   ): Promise<AiGenerateResponse> {
     throwIfAiRequestCancelled(options.signal);
     validateRealAiConfig(this.config);
+    const governedOptions: AiGenerateOptions = {
+      ...options,
+      requestId: options.requestId?.trim() || createProviderTransportRequestId('ai'),
+    };
     const policySettings = this.policySettings();
-    const policyLease = aiRequestPolicyService.begin(policySettings, request);
+    const policyLease = await aiRequestPolicyService.beginRequest(
+      policySettings,
+      request,
+      governedOptions.requestId,
+    );
 
     if (import.meta.env.DEV) {
       const lastUserMessage = getLastUserMessage(request);
@@ -220,21 +229,39 @@ export class RealAiClient implements AiClient {
       );
     }
 
+    const useStream =
+      governedOptions.stream === true || governedOptions.onStreamEvent !== undefined;
+    let response: AiGenerateResponse;
     try {
-      const useStream = options.stream === true || options.onStreamEvent !== undefined;
-      const response = isTauri()
+      response = isTauri()
         ? useStream
-          ? await this.generateStreamViaTauri(request, options)
-          : await this.generateViaTauri(request, options)
+          ? await this.generateStreamViaTauri(request, governedOptions, policyLease)
+          : await this.generateViaTauri(request, governedOptions, policyLease)
         : useStream
-          ? await this.generateStreamViaFetch(request, options)
-          : await this.generateViaFetch(request, options);
-      this.settlePolicy(policyLease, policySettings, response);
-      return response;
-    } catch (error) {
-      this.settlePolicy(policyLease, policySettings);
-      throw error;
+          ? await this.generateStreamViaFetch(request, governedOptions)
+          : await this.generateViaFetch(request, governedOptions);
+    } catch (providerError) {
+      try {
+        await this.settlePolicy(policyLease, policySettings);
+      } catch (settlementError) {
+        appLogger.captureError(
+          'AI_REQUEST_POLICY_SETTLEMENT_FAILED_AFTER_PROVIDER_FAILURE',
+          settlementError,
+          { providerFailurePreserved: true },
+        );
+      }
+      throw providerError;
     }
+    await this.settlePolicy(policyLease, policySettings, response);
+    const frozenPricingSettings =
+      policyLease.storage === 'sqlite'
+        ? {
+            ...policySettings,
+            inputPricePerMillionTokens: policyLease.inputPricePerMillionTokens,
+            outputPricePerMillionTokens: policyLease.outputPricePerMillionTokens,
+          }
+        : policySettings;
+    return attachAiUsageCost(response, frozenPricingSettings);
   }
 
   private buildRequestBody(request: AiGenerateRequest, stream = false): Record<string, unknown> {
@@ -251,6 +278,7 @@ export class RealAiClient implements AiClient {
   private async generateViaTauri(
     request: AiGenerateRequest,
     options: AiGenerateOptions,
+    policyLease: AiRequestPolicyLease,
   ): Promise<AiGenerateResponse> {
     const signal = options.signal;
     const requestId =
@@ -265,6 +293,12 @@ export class RealAiClient implements AiClient {
         temperature: request.temperature ?? this.config.temperature ?? 0.7,
         maxTokens: request.maxTokens ?? this.config.maxTokens ?? 8000,
         timeoutSeconds: this.config.timeoutSeconds ?? 120,
+        policyLease: {
+          reservationId: policyLease.id,
+          ownerId: policyLease.ownerId,
+          providerRequestId: policyLease.providerRequestId,
+          leaseToken: policyLease.leaseToken,
+        },
       },
     });
     const response = await this.awaitTauriResponse(responsePromise, signal, requestId);
@@ -344,6 +378,7 @@ export class RealAiClient implements AiClient {
   private async generateStreamViaTauri(
     request: AiGenerateRequest,
     options: AiGenerateOptions,
+    policyLease: AiRequestPolicyLease,
   ): Promise<AiGenerateResponse> {
     const requestId = options.requestId?.trim() || createProviderTransportRequestId('ai-stream');
     let lastSequence = 0;
@@ -391,6 +426,12 @@ export class RealAiClient implements AiClient {
           temperature: request.temperature ?? this.config.temperature ?? 0.7,
           maxTokens: request.maxTokens ?? this.config.maxTokens ?? 8000,
           timeoutSeconds: this.config.timeoutSeconds ?? 120,
+          policyLease: {
+            reservationId: policyLease.id,
+            ownerId: policyLease.ownerId,
+            providerRequestId: policyLease.providerRequestId,
+            leaseToken: policyLease.leaseToken,
+          },
         },
       });
       const response = await this.awaitTauriResponse(responsePromise, options.signal, requestId);

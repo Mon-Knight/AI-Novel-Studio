@@ -20,6 +20,7 @@ function SettingsPage() {
   const [message, setMessage] = useState('');
   const [testing, setTesting] = useState(false);
   const [repairMsg, setRepairMsg] = useState('');
+  const [policySnapshotVersion, setPolicySnapshotVersion] = useState(0);
   const connectionAbortRef = useRef<AbortController | null>(null);
 
   const handleRepairData = async () => {
@@ -44,12 +45,17 @@ function SettingsPage() {
     return () => connectionAbortRef.current?.abort();
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // 保存前确保 mockMode 与 runtimeMode 一致
     const final = { ...settings, mockMode: settings.runtimeMode === 'mock' };
-    aiSettingsService.saveSettings(final);
-    setSettings(aiSettingsService.getSettings());
-    setMessage('✅ AI 设置已保存');
+    try {
+      await aiSettingsService.saveSettings(final);
+      setSettings(aiSettingsService.getSettings());
+      setPolicySnapshotVersion((version) => version + 1);
+      setMessage('✅ AI 设置已保存');
+    } catch (error) {
+      setMessage(`❌ AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
+    }
     setTimeout(() => setMessage(''), 2000);
   };
 
@@ -82,8 +88,9 @@ function SettingsPage() {
         lastTestOk: result.ok,
         lastTestMessage: result.message,
       };
-      aiSettingsService.saveSettings(updated);
+      await aiSettingsService.saveSettings(updated);
       setSettings(updated);
+      setPolicySnapshotVersion((version) => version + 1);
       setMessage(result.ok ? `✅ 连接成功！（${latency}ms）` : `❌ 连接失败：${result.message}`);
     } catch (e: unknown) {
       setMessage(
@@ -132,7 +139,12 @@ function SettingsPage() {
         onStopTest={() => connectionAbortRef.current?.abort()}
         handleSave={handleSave}
       />
-      <AiGovernanceSettingsCard settings={settings} onChange={update} onSave={handleSave} />
+      <AiGovernanceSettingsCard
+        settings={settings}
+        onChange={update}
+        onSave={handleSave}
+        refreshVersion={policySnapshotVersion}
+      />
 
       {/* 安全提示 */}
       <div

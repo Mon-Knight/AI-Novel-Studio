@@ -244,8 +244,6 @@ export const novelRepository = {
   },
 
   async deleteCascade(novelId: string): Promise<void> {
-    const { lsGet, lsSet } = await import('./db');
-
     const purge = (key: string) => {
       try {
         const data = lsGet<unknown>(key);

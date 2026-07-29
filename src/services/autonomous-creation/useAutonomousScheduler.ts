@@ -31,7 +31,7 @@ export function useAutonomousScheduler(
   }, [plan]);
 
   useEffect(() => {
-    void autonomousSchedulerWorker.recoverStartup().then(refresh);
+    void refresh();
   }, [refresh]);
 
   return useMemo(

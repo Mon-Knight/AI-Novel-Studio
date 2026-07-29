@@ -3,7 +3,13 @@ import { after, afterEach, test } from 'node:test';
 // @ts-expect-error jsdom has no bundled declarations; this import is test-only.
 import { JSDOM } from 'jsdom';
 import React from 'react';
-import type { AutonomousStoryPlan } from '../../types/autonomousCreation';
+import type {
+  AutonomousPlanningBaseline,
+  AutonomousStoryBrief,
+  AutonomousStoryPlan,
+  AutonomousVolumeStrategy,
+} from '../../types/autonomousCreation';
+import AutonomousBriefPanel from './AutonomousBriefPanel';
 import AutonomousExecutionPanel from './AutonomousExecutionPanel';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
@@ -275,4 +281,64 @@ test('桌面调度面板冻结三档策略、预算、时间窗和失败熔断�
   fireEvent.click(screen.getByRole('button', { name: /全自动/ }));
   fireEvent.click(screen.getByRole('button', { name: '启动无人值守任务' }));
   assert.equal(startedMode, 'full_auto');
+});
+
+test('续写提示完整使用中文并保留分卷策略选择', () => {
+  const brief: AutonomousStoryBrief = {
+    premise: '一段用于验证自主续写规划面板的完整故事前提。',
+    genre: '悬疑',
+    targetChapterCount: 36,
+    targetWordsPerChapter: 2400,
+    readerPromise: '持续推进谜题',
+    endingPreference: '完成主线',
+    constraints: [],
+  };
+  const baseline: AutonomousPlanningBaseline = {
+    novelId: 'novel-1',
+    capturedAt: '2026-07-29T00:00:00Z',
+    structureHash: 'baseline-hash',
+    existingVolumes: [{ id: 'volume-1', orderIndex: 0, title: '第一卷' }],
+    existingChapters: [
+      {
+        id: 'chapter-24',
+        volumeId: 'volume-1',
+        chapterNumber: 24,
+        orderIndex: 23,
+        title: '第二十四章',
+      },
+    ],
+    existingCharacters: [],
+    existingWorldElements: [],
+  };
+  let selectedStrategy: AutonomousVolumeStrategy | undefined;
+
+  render(
+    React.createElement(AutonomousBriefPanel, {
+      brief,
+      baseline,
+      volumeStrategy: 'create_new_volume',
+      running: false,
+      plans: [],
+      activePlan: null,
+      onBriefChange: () => undefined,
+      onVolumeStrategyChange: (strategy: AutonomousVolumeStrategy) => {
+        selectedStrategy = strategy;
+      },
+      onCancel: () => undefined,
+      onRun: () => undefined,
+      onResume: () => undefined,
+      onSelectPlan: () => undefined,
+    }),
+  );
+
+  const notice = screen.getByRole('status');
+  assert.match(notice.textContent ?? '', /续写模式/);
+  assert.match(notice.textContent ?? '', /已有 1 个分卷、1 个章节/);
+  assert.match(notice.textContent ?? '', /目标总章节数表示最终章节序号/);
+  assert.doesNotMatch(notice.textContent ?? '', /Continuation mode|Existing:/);
+
+  fireEvent.change(screen.getByRole('combobox', { name: '续写分卷策略' }), {
+    target: { value: 'append_to_last_volume' },
+  });
+  assert.equal(selectedStrategy, 'append_to_last_volume');
 });

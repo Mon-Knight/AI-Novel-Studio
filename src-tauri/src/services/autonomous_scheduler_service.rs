@@ -1999,10 +1999,21 @@ pub fn recover_interrupted_runs(
         )?;
     }
     commit(transaction, None)?;
-    run_ids
-        .iter()
-        .map(|run_id| require_run(connection, run_id))
-        .collect()
+
+    // Database initialization performs the first recovery sweep before the WebView is ready.
+    // Return every queued run, not only rows changed by this invocation, so the application
+    // entry can rediscover that durable queue and acquire a fresh process lease afterwards.
+    let sql = format!(
+        "SELECT {RUN_COLUMNS} FROM autonomous_book_runs
+         WHERE status='queued' ORDER BY created_at, run_id"
+    );
+    let mut statement = connection.prepare(&sql).map_err(AppError::database)?;
+    let runs = statement
+        .query_map([], map_run)
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+    Ok(runs)
 }
 
 #[cfg(test)]

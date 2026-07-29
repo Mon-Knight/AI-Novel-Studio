@@ -1,12 +1,20 @@
-import type { AutonomousStoryBrief, AutonomousStoryPlan } from '../../types/autonomousCreation';
+import type {
+  AutonomousPlanningBaseline,
+  AutonomousVolumeStrategy,
+  AutonomousStoryBrief,
+  AutonomousStoryPlan,
+} from '../../types/autonomousCreation';
 import { STATUS_LABELS } from './autonomousPlanningPresentation';
 
 interface AutonomousBriefPanelProps {
   brief: AutonomousStoryBrief;
+  baseline?: AutonomousPlanningBaseline | null;
+  volumeStrategy?: AutonomousVolumeStrategy;
   running: boolean;
   plans: AutonomousStoryPlan[];
   activePlan: AutonomousStoryPlan | null;
   onBriefChange(brief: AutonomousStoryBrief): void;
+  onVolumeStrategyChange?(strategy: AutonomousVolumeStrategy): void;
   onCancel(): void;
   onRun(): void;
   onResume(plan: AutonomousStoryPlan): void;
@@ -15,10 +23,13 @@ interface AutonomousBriefPanelProps {
 
 export default function AutonomousBriefPanel({
   brief,
+  baseline = null,
+  volumeStrategy = 'create_new_volume',
   running,
   plans,
   activePlan,
   onBriefChange,
+  onVolumeStrategyChange,
   onCancel,
   onRun,
   onResume,
@@ -30,6 +41,33 @@ export default function AutonomousBriefPanel({
         <strong>小说 Brief</strong>
         <span>方向由你确认，结构由 Agent 展开</span>
       </div>
+
+      {baseline &&
+        (baseline.existingVolumes.length > 0 || baseline.existingChapters.length > 0) && (
+          <div className="autonomous-continuation-notice" role="status">
+            <strong>续写模式</strong>
+            <span>
+              已有 {baseline.existingVolumes.length} 个分卷、{baseline.existingChapters.length}{' '}
+              个章节。目标总章节数表示最终章节序号，系统仅新增后续章节。
+            </span>
+          </div>
+        )}
+
+      {baseline && baseline.existingVolumes.length > 0 && onVolumeStrategyChange && (
+        <label className="autonomous-field">
+          <span>续写分卷策略</span>
+          <select
+            value={volumeStrategy}
+            onChange={(event) =>
+              onVolumeStrategyChange(event.target.value as AutonomousVolumeStrategy)
+            }
+            disabled={running}
+          >
+            <option value="create_new_volume">新建分卷</option>
+            <option value="append_to_last_volume">接续最后一卷</option>
+          </select>
+        </label>
+      )}
 
       <label className="autonomous-field">
         <span>核心创意</span>

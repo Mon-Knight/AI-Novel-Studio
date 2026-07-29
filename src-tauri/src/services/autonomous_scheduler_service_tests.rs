@@ -214,6 +214,65 @@ fn lease_competition_has_one_owner() {
 }
 
 #[test]
+fn pre_claim_pause_releases_lease_and_records_no_generation_side_effects() {
+    let mut db = db();
+    let f = fixture(&db, "pre-claim-pause");
+    let run = run(&mut db, &f, "pre-claim-pause", policy("draft_night"));
+    let lease = lease(&mut db, &run.run_id, "pre-claim-owner");
+    let running = get_run(&db, &run.run_id).unwrap().unwrap();
+    assert_eq!(running.status, "running");
+
+    let paused = pause_run(
+        &mut db,
+        ChangeAutonomousRunStateInput {
+            operation_id: "pre-claim-worker-failure".into(),
+            run_id: run.run_id.clone(),
+            expected_revision: running.state_revision,
+            reason: Some("worker_error:unexpected".into()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(paused.status, "paused");
+    assert_eq!(
+        paused.pause_reason.as_deref(),
+        Some("worker_error:unexpected")
+    );
+    let lease_state: (String, Option<String>) = db
+        .query_row(
+            "SELECT status, released_at FROM autonomous_run_leases WHERE lease_id=?1",
+            [&lease.lease.lease_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(lease_state.0, "released");
+    assert!(lease_state.1.is_some());
+    let latest_checkpoint: (String, String) = db
+        .query_row(
+            "SELECT event_type, run_status FROM autonomous_run_checkpoints
+             WHERE run_id=?1 ORDER BY sequence DESC LIMIT 1",
+            [&run.run_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(latest_checkpoint, ("run_pause".into(), "paused".into()));
+
+    for table in [
+        "autonomous_run_chapter_attempts",
+        "ai_tasks",
+        "ai_task_records",
+        "generation_jobs",
+    ] {
+        let count: i64 = db
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "{table} must remain empty before claim");
+    }
+}
+
+#[test]
 fn expired_lease_recovers_and_epoch_increases() {
     let mut db = db();
     let f = fixture(&db, "recover");
@@ -247,6 +306,23 @@ fn expired_lease_recovers_and_epoch_increases() {
     )
     .unwrap_err();
     assert_eq!(error.code, codes::AUTONOMOUS_RUN_LEASE_EXPIRED);
+}
+
+#[test]
+fn queued_runs_remain_discoverable_after_an_earlier_recovery_owner() {
+    let mut db = db();
+    let f = fixture(&db, "recovery-handoff");
+    let run = run(&mut db, &f, "recovery-handoff", policy("draft_night"));
+
+    let database_bootstrap = recover_interrupted_runs(&mut db).unwrap();
+    assert_eq!(database_bootstrap.len(), 1);
+    assert_eq!(database_bootstrap[0].run_id, run.run_id);
+    assert_eq!(database_bootstrap[0].status, "queued");
+
+    let frontend_bootstrap = recover_interrupted_runs(&mut db).unwrap();
+    assert_eq!(frontend_bootstrap.len(), 1);
+    assert_eq!(frontend_bootstrap[0].run_id, run.run_id);
+    assert_eq!(frontend_bootstrap[0].status, "queued");
 }
 
 #[test]

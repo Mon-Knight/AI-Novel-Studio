@@ -27,6 +27,7 @@ import { useGenerationStreamPreview } from './useGenerationStreamPreview';
 import { useAiGenerateResources } from './useAiGenerateResources';
 import { useChapterGenerationAction } from './useChapterGenerationAction';
 import { AiGeneratePanelView } from './AiGeneratePanelView';
+import { reportAppError } from '../../../utils/reportAndPresentError';
 
 interface AiGeneratePanelProps {
   novelId?: string;
@@ -338,15 +339,17 @@ function AiGeneratePanel({
     if (adoptingRef.current) return;
     adoptingRef.current = true;
     setAdopting(true);
+    const requestNovelId = novelId;
+    const requestChapterId = chapter.id;
+    let candidateDraftId: string | undefined;
     try {
       if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
-      const requestNovelId = novelId;
-      const requestChapterId = chapter.id;
       const latest = await draftVersionService.getLatestByChapterId(requestChapterId);
       if (!latest) {
         setErrorMsg('没有可采用的草稿');
         return;
       }
+      candidateDraftId = latest.id;
       if (latest.novelId !== requestNovelId || latest.chapterId !== requestChapterId) {
         setErrorMsg('草稿与当前作品章节不一致，已阻止采用');
         return;
@@ -389,7 +392,17 @@ function AiGeneratePanel({
       setTimeout(() => setStatusMsg(''), 3000);
       onAdopted?.();
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : '采用失败');
+      const reported = reportAppError({
+        event: 'AI_GENERATED_DRAFT_ADOPTION_FAILED',
+        error,
+        fallbackMessage: '候选草稿采用失败，请重试。',
+        context: {
+          novelId: requestNovelId,
+          chapterId: requestChapterId,
+          draftId: candidateDraftId,
+        },
+      });
+      setErrorMsg(reported.message);
     } finally {
       adoptingRef.current = false;
       setAdopting(false);

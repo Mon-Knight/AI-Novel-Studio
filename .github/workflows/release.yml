@@ -20,7 +20,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  desktop-gate:
+    name: Required Windows desktop quality and E2E
+    uses: ./.github/workflows/windows-desktop-e2e.yml
+    with:
+      suite: full
+
   windows-release:
+    needs: desktop-gate
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -40,6 +47,8 @@ jobs:
       - run: npm run test:version-sync
       - run: npm run lint:ci
       - run: npm run test:all
+      - run: npm run build
+      - run: npm run test:bundle-size
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Prepare signed updater configuration

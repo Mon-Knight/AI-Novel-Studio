@@ -216,7 +216,8 @@ $governanceFiles = @(
     ".github/dependabot.yml",
     ".github/workflows/ci.yml",
     ".github/workflows/release.yml",
-    ".github/workflows/security.yml"
+    ".github/workflows/security.yml",
+    ".github/workflows/windows-desktop-e2e.yml"
 )
 
 $requiredFiles = @(
@@ -234,6 +235,23 @@ foreach ($file in $requiredFiles) {
     $exists = Test-Path -LiteralPath (Get-ProjectPath $file) -PathType Leaf
     Add-CheckResult $file $exists $(if ($exists) { "exists" } else { "missing" })
 }
+
+$fastCiWorkflow = Get-OptionalText ".github/workflows/ci.yml"
+Add-CheckResult "fast CI bundle budget" ([string]$fastCiWorkflow).Contains("npm run test:bundle-size") "production build is followed by the bundle-size gate"
+
+$desktopWorkflow = Get-OptionalText ".github/workflows/windows-desktop-e2e.yml"
+$desktopWorkflowHasReusableGate =
+    ([string]$desktopWorkflow).Contains("workflow_call:") -and
+    ([string]$desktopWorkflow).Contains("npm run test:bundle-size")
+Add-CheckResult "reusable desktop release gate" $desktopWorkflowHasReusableGate "workflow_call and bundle-size gate are present"
+
+$releaseWorkflow = Get-OptionalText ".github/workflows/release.yml"
+$releaseRequiresDesktopGate =
+    ([string]$releaseWorkflow).Contains("uses: ./.github/workflows/windows-desktop-e2e.yml") -and
+    ([string]$releaseWorkflow).Contains("needs: desktop-gate") -and
+    ([string]$releaseWorkflow).Contains("suite: full") -and
+    ([string]$releaseWorkflow).Contains("npm run test:bundle-size")
+Add-CheckResult "release waits for full desktop gate" $releaseRequiresDesktopGate "signed release depends on full reusable desktop E2E and bundle budgets"
 
 $releaseNoteFragments = @(Get-ChildItem -LiteralPath (Get-ProjectPath "docs") -File -Filter "release-notes-v*.md" -ErrorAction SilentlyContinue)
 Add-CheckResult "single release history archive" ($releaseNoteFragments.Count -eq 0) $(if ($releaseNoteFragments.Count -eq 0) { "no per-version fragments" } else { ($releaseNoteFragments.Name -join ", ") })

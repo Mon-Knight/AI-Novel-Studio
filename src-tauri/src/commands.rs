@@ -1,9 +1,11 @@
 use crate::db::{get_connection, get_database_path};
+use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 pub mod agent_plans;
+pub mod ai_request_policy;
 pub mod ai_tasks;
 pub mod app_update;
 pub mod artifacts;
@@ -2759,6 +2761,34 @@ fn ensure_ai_tasks_are_not_bound_to_completed_quality_reports(
     Ok(())
 }
 
+fn ensure_ai_tasks_are_terminal(conn: &Connection, ids: Option<&[String]>) -> Result<(), String> {
+    let active_count = if let Some(ids) = ids {
+        let mut count = 0_i64;
+        for id in ids {
+            count += conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_task_records
+                     WHERE id = ?1 AND status IN ('pending', 'running')",
+                    params![id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        count
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*) FROM ai_task_records WHERE status IN ('pending', 'running')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+    };
+    if active_count > 0 {
+        return Err("ai_task_running_delete_protected".to_string());
+    }
+    Ok(())
+}
+
 fn sample_ai_task_ids(conn: &Connection, limit: i64) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT id FROM ai_task_records ORDER BY created_at DESC LIMIT ?1")
@@ -2779,18 +2809,35 @@ fn delete_ai_task_records_by_ids_internal(
     let ids = normalize_ai_task_ids(ids);
     let requested_count = ids.len() as i64;
     let table_exists = ai_task_records_table_exists(conn)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_many command_entered db_path={} table_exists={} requested_count={} ids={:?}",
-        db_path, table_exists, requested_count, ids
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_delete_many_started",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "tableExists": table_exists,
+            "requestedCount": requested_count,
+        })),
+    });
     ensure_ai_task_records_table(conn, &db_path)?;
     let before_count = count_ai_task_records_in_conn(conn)?;
 
     if ids.is_empty() {
-        println!(
-            "[AI_TASK_DELETE_RUST] delete_many skipped empty ids db_path={} before_count={}",
-            db_path, before_count
-        );
+        log_workspace_event(WorkspaceLogEvent {
+            level: "info",
+            event: "ai_task_delete_many_empty",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: None,
+            metadata: Some(serde_json::json!({ "beforeCount": before_count })),
+        });
         return Ok(DeleteAiTaskRecordsResult {
             deleted_count: 0,
             requested_count,
@@ -2805,22 +2852,26 @@ fn delete_ai_task_records_by_ids_internal(
     }
 
     let before_match_count = count_ai_task_records_by_ids(conn, &ids)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_many called ids={:?} db_path={} before_count={} before_match_count={}",
-        ids, db_path, before_count, before_match_count
-    );
-
     if before_match_count == 0 {
         let sample_ids = sample_ai_task_ids(conn, 5)?;
-        println!(
-            "[AI_TASK_DELETE_RUST] delete_many no matching ids requested={:?} sample_existing_ids={:?}",
-            ids, sample_ids
-        );
-        return Err(format!(
-            "No AI task records matched selected ids. requested_ids={:?}, sample_existing_ids={:?}, db_path={}",
-            ids, sample_ids, db_path
-        ));
+        log_workspace_event(WorkspaceLogEvent {
+            level: "warn",
+            event: "ai_task_delete_many_no_match",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: Some("AI_TASK_NOT_FOUND"),
+            metadata: Some(serde_json::json!({
+                "requestedCount": requested_count,
+                "sampleCount": sample_ids.len(),
+                "beforeCount": before_count,
+            })),
+        });
+        return Err("No AI task records matched selected ids.".to_string());
     }
+    ensure_ai_tasks_are_terminal(conn, Some(&ids))?;
     ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, Some(&ids))?;
 
     // 构建 IN 子句占位符
@@ -2856,16 +2907,33 @@ fn delete_ai_task_records_by_ids_internal(
         match conn.execute(&sql, rusqlite::params_from_iter(params_refs.iter())) {
             Ok(rows) => {
                 if rows > 0 {
-                    println!(
-                        "[AI_TASK_DELETE_RUST] delete_many cleaned child table {} rows={}",
-                        table, rows
-                    );
+                    log_workspace_event(WorkspaceLogEvent {
+                        level: "info",
+                        event: "ai_task_delete_many_child_cleanup",
+                        trace_id: None,
+                        operation_id: None,
+                        novel_id: None,
+                        chapter_id: None,
+                        draft_id: None,
+                        error_code: None,
+                        metadata: Some(serde_json::json!({ "table": table, "rows": rows })),
+                    });
                     deleted_child_rows.insert(table.to_string(), rows as i64);
                 }
             }
             Err(e) => {
                 let msg = format!("Failed to clean child table {}: {}", table, e);
-                println!("[AI_TASK_DELETE_RUST] delete_many rollback: {}", msg);
+                log_workspace_event(WorkspaceLogEvent {
+                    level: "error",
+                    event: "ai_task_delete_many_child_cleanup_failed",
+                    trace_id: None,
+                    operation_id: None,
+                    novel_id: None,
+                    chapter_id: None,
+                    draft_id: None,
+                    error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                    metadata: Some(serde_json::json!({ "table": table })),
+                });
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(msg);
             }
@@ -2878,8 +2946,18 @@ fn delete_ai_task_records_by_ids_internal(
         match conn.execute("DELETE FROM ai_task_records WHERE id = ?1", params![id]) {
             Ok(rows) => affected_rows += rows as i64,
             Err(e) => {
-                let msg = format!("Failed to delete ai_task_record {}: {}", id, e);
-                println!("[AI_TASK_DELETE_RUST] delete_many rollback: {}", msg);
+                let msg = format!("Failed to delete ai_task_record: {}", e);
+                log_workspace_event(WorkspaceLogEvent {
+                    level: "error",
+                    event: "ai_task_delete_many_parent_delete_failed",
+                    trace_id: None,
+                    operation_id: None,
+                    novel_id: None,
+                    chapter_id: None,
+                    draft_id: None,
+                    error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                    metadata: None,
+                });
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(msg);
             }
@@ -2890,23 +2968,31 @@ fn delete_ai_task_records_by_ids_internal(
     let after_count = count_ai_task_records_in_conn(conn)?;
     let deleted_count = before_match_count - after_match_count;
 
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_many result db_path={} before_count={} before_match_count={} affected_rows={} after_match_count={} after_count={} deleted_count={} deleted_child_rows={:?}",
-        db_path,
-        before_count,
-        before_match_count,
-        affected_rows,
-        after_match_count,
-        after_count,
-        deleted_count,
-        deleted_child_rows
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_delete_many_completed",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "beforeCount": before_count,
+            "matchedCount": before_match_count,
+            "affectedRows": affected_rows,
+            "afterMatchCount": after_match_count,
+            "afterCount": after_count,
+            "deletedCount": deleted_count,
+            "childTableCount": deleted_child_rows.len(),
+        })),
+    });
 
     if before_match_count > 0 && after_match_count > 0 {
         let _ = conn.execute_batch("ROLLBACK");
         return Err(format!(
-            "AI task records still exist after delete. requested_ids={:?}, after_match_count={}, db_path={}",
-            ids, after_match_count, db_path
+            "AI task records still exist after delete. after_match_count={}",
+            after_match_count
         ));
     }
 
@@ -2931,16 +3017,20 @@ fn clear_ai_task_records_internal(
     db_path: String,
 ) -> Result<DeleteAiTaskRecordsResult, String> {
     let table_exists = ai_task_records_table_exists(conn)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] clear_all command_entered db_path={} table_exists={}",
-        db_path, table_exists
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_clear_all_started",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({ "tableExists": table_exists })),
+    });
     ensure_ai_task_records_table(conn, &db_path)?;
     let before_count = count_ai_task_records_in_conn(conn)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] clear_all called db_path={} before_count={}",
-        db_path, before_count
-    );
+    ensure_ai_tasks_are_terminal(conn, None)?;
     ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, None)?;
 
     // 开启事务
@@ -2969,16 +3059,33 @@ fn clear_ai_task_records_internal(
         match conn.execute(&sql, []) {
             Ok(rows) => {
                 if rows > 0 {
-                    println!(
-                        "[AI_TASK_DELETE_RUST] clear_all cleaned child table {} rows={}",
-                        table, rows
-                    );
+                    log_workspace_event(WorkspaceLogEvent {
+                        level: "info",
+                        event: "ai_task_clear_all_child_cleanup",
+                        trace_id: None,
+                        operation_id: None,
+                        novel_id: None,
+                        chapter_id: None,
+                        draft_id: None,
+                        error_code: None,
+                        metadata: Some(serde_json::json!({ "table": table, "rows": rows })),
+                    });
                     deleted_child_rows.insert(table.to_string(), rows as i64);
                 }
             }
             Err(e) => {
                 let msg = format!("Failed to clean child table {}: {}", table, e);
-                println!("[AI_TASK_DELETE_RUST] clear_all rollback: {}", msg);
+                log_workspace_event(WorkspaceLogEvent {
+                    level: "error",
+                    event: "ai_task_clear_all_child_cleanup_failed",
+                    trace_id: None,
+                    operation_id: None,
+                    novel_id: None,
+                    chapter_id: None,
+                    draft_id: None,
+                    error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                    metadata: Some(serde_json::json!({ "table": table })),
+                });
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(msg);
             }
@@ -2990,23 +3097,46 @@ fn clear_ai_task_records_internal(
         .execute("DELETE FROM ai_task_records", [])
         .map_err(|e| {
             let msg = format!("Failed to delete ai_task_records: {}", e);
-            println!("[AI_TASK_DELETE_RUST] clear_all rollback: {}", msg);
+            log_workspace_event(WorkspaceLogEvent {
+                level: "error",
+                event: "ai_task_clear_all_parent_delete_failed",
+                trace_id: None,
+                operation_id: None,
+                novel_id: None,
+                chapter_id: None,
+                draft_id: None,
+                error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                metadata: None,
+            });
             let _ = conn.execute_batch("ROLLBACK");
             msg
         })? as i64;
 
     let after_count = count_ai_task_records_in_conn(conn)?;
     let deleted_count = before_count - after_count;
-    println!(
-        "[AI_TASK_DELETE_RUST] clear_all result db_path={} before_count={} affected_rows={} after_count={} deleted_count={} deleted_child_rows={:?}",
-        db_path, before_count, affected_rows, after_count, deleted_count, deleted_child_rows
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_clear_all_completed",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "beforeCount": before_count,
+            "affectedRows": affected_rows,
+            "afterCount": after_count,
+            "deletedCount": deleted_count,
+            "childTableCount": deleted_child_rows.len(),
+        })),
+    });
 
     if after_count != 0 {
         let _ = conn.execute_batch("ROLLBACK");
         return Err(format!(
-            "AI task records still exist after clear. after_count={}, db_path={}",
-            after_count, db_path
+            "AI task records still exist after clear. after_count={}",
+            after_count
         ));
     }
 
@@ -3081,30 +3211,89 @@ fn validate_ai_task_pricing(input: &CreateAiTaskRecordInput) -> Result<(), Strin
 #[tauri::command]
 pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRecordDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    validate_ai_task_pricing(&input)?;
+    create_ai_task_record_internal(&conn, &input)
+}
+
+fn create_ai_task_record_internal(
+    conn: &Connection,
+    input: &CreateAiTaskRecordInput,
+) -> Result<AiTaskRecordDto, String> {
+    validate_ai_task_pricing(input)?;
     let id = input.id.clone();
+    let existing_count = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ai_task_records WHERE id = ?1",
+            params![&input.id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if existing_count > 0 {
+        let existing = get_ai_task_record_by_id_internal(conn, &id)?;
+        validate_ai_task_projection_identity(&existing, input)?;
+        return Ok(existing);
+    }
     conn.execute(
-        "INSERT OR REPLACE INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_price_per_million_tokens, output_price_per_million_tokens, cost_currency, pricing_source, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+        "INSERT INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_price_per_million_tokens, output_price_per_million_tokens, cost_currency, pricing_source, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15) ON CONFLICT(id) DO NOTHING",
         params![
-            input.id,
-            input.novel_id,
-            input.chapter_id,
-            input.task_type,
-            input.status,
-            input.runtime_mode,
-            input.provider,
-            input.model_name,
+            &input.id,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.task_type,
+            &input.status,
+            &input.runtime_mode,
+            &input.provider,
+            &input.model_name,
             input.input_price_per_million_tokens,
             input.output_price_per_million_tokens,
-            input.cost_currency,
-            input.pricing_source,
-            input.input_summary,
-            input.started_at,
-            input.created_at,
+            &input.cost_currency,
+            &input.pricing_source,
+            &input.input_summary,
+            &input.started_at,
+            &input.created_at,
         ],
     ).map_err(|e| e.to_string())?;
 
-    get_ai_task_record_by_id_internal(&conn, &id)
+    let created = get_ai_task_record_by_id_internal(conn, &id)?;
+    validate_ai_task_projection_identity(&created, input)?;
+    Ok(created)
+}
+
+fn validate_ai_task_projection_identity(
+    existing: &AiTaskRecordDto,
+    input: &CreateAiTaskRecordInput,
+) -> Result<(), String> {
+    if existing.task_type != input.task_type
+        || existing.novel_id != input.novel_id
+        || existing.chapter_id != input.chapter_id
+        || existing.runtime_mode != input.runtime_mode
+        || existing.provider != input.provider
+        || existing.model_name != input.model_name
+    {
+        return Err("ai_task_projection_identity_conflict".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn mark_ai_task_running_for_retry(id: String, started_at: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    mark_ai_task_running_for_retry_internal(&conn, &id, &started_at)?;
+    Ok(())
+}
+
+fn mark_ai_task_running_for_retry_internal(
+    conn: &Connection,
+    id: &str,
+    started_at: &str,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE ai_task_records
+         SET status = 'running', error_message = NULL, duration_ms = NULL,
+             finished_at = NULL, started_at = ?1
+         WHERE id = ?2 AND status = 'failed'",
+        params![started_at, id],
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -3196,7 +3385,6 @@ pub fn get_ai_task_records(
     status: Option<String>,
 ) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let db_path = ai_task_db_path_for_log();
     let page = page.unwrap_or(1).max(1);
     let size = size.unwrap_or(20).clamp(1, 500);
     let offset = (page - 1) * size;
@@ -3215,16 +3403,6 @@ pub fn get_ai_task_records(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
-    if let Ok(items) = &result {
-        println!(
-            "[AI_TASK_READ_RUST] get_ai_task_records db_path={} page={} size={} filtered={} returned={}",
-            db_path,
-            page,
-            size,
-            task_type.is_some() || status.is_some(),
-            items.len()
-        );
-    }
     result
 }
 
@@ -3234,17 +3412,10 @@ pub fn count_ai_task_records(
     status: Option<String>,
 ) -> Result<i64, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let db_path = ai_task_db_path_for_log();
     let task_type = normalize_ai_task_type_filter(task_type)?;
     let status = normalize_ai_task_status_filter(status)?;
     let count =
         count_ai_task_records_filtered_in_conn(&conn, task_type.as_deref(), status.as_deref())?;
-    println!(
-        "[AI_TASK_READ_RUST] count_ai_task_records db_path={} filtered={} count={}",
-        db_path,
-        task_type.is_some() || status.is_some(),
-        count
-    );
     Ok(count)
 }
 
@@ -3252,10 +3423,6 @@ pub fn count_ai_task_records(
 pub fn delete_ai_task_record(id: String) -> Result<DeleteAiTaskRecordsResult, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let db_path = ai_task_db_path_for_log();
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_one called id={} db_path={}",
-        id, db_path
-    );
     delete_ai_task_records_by_ids_internal(&conn, vec![id], db_path)
 }
 
@@ -3302,10 +3469,6 @@ pub fn get_ai_task_records_debug_state(
     } else {
         Vec::new()
     };
-    println!(
-        "[AI_TASK_DEBUG_RUST] state db_path={} table_exists={} total_count={} matched_count={:?} ids={:?} sample_ids={:?}",
-        db_path, table_exists, total_count, matched_count, normalized_ids, sample_ids
-    );
     Ok(AiTaskRecordsDebugState {
         db_path,
         table_exists,
@@ -4609,11 +4772,6 @@ pub fn create_quality_check_report(
     if draft_target.0 != input.novel_id || draft_target.1 != input.chapter_id {
         return Err("quality_check_draft_ownership_mismatch".to_string());
     }
-    println!(
-        "[QUALITY_CHECK] create_report start id={} novel_id={} chapter_id={} draft_id={}",
-        id, input.novel_id, input.chapter_id, input.draft_id
-    );
-
     conn.execute(
         "INSERT INTO quality_check_reports (id, novel_id, chapter_id, draft_id, scope, status, content_hash, content_length, checked_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ?9, ?9)",
         params![
@@ -4629,11 +4787,6 @@ pub fn create_quality_check_report(
         ],
     )
     .map_err(|e| e.to_string())?;
-    println!(
-        "[QUALITY_CHECK] create_report done id={} chapter_id={}",
-        id, input.chapter_id
-    );
-
     let mut stmt = conn
         .prepare(&format!("{} WHERE id = ?1", quality_report_select_sql()))
         .map_err(|e| e.to_string())?;
@@ -5183,21 +5336,8 @@ fn save_quality_check_result_internal(
 pub fn save_quality_check_result(
     input: SaveQualityCheckResultInput,
 ) -> Result<GetQualityCheckIssuesResult, String> {
-    println!(
-        "[QUALITY_CHECK] save_result start report_id={} chapter_id={} item_count={}",
-        input.report_id,
-        input.chapter_id,
-        input.result.items.len()
-    );
     let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
-    let result = save_quality_check_result_internal(&mut conn, &input);
-    if result.is_ok() {
-        println!(
-            "[QUALITY_CHECK] save_result done report_id={} chapter_id={}",
-            input.report_id, input.chapter_id
-        );
-    }
-    result
+    save_quality_check_result_internal(&mut conn, &input)
 }
 
 // ==================== Chapter Summary ====================
@@ -8945,10 +9085,6 @@ mod tests {
         insert_runtime_ai_task_children(&conn, &second_id, "clear-child")?;
 
         let before_count = count_ai_task_records_in_conn(&conn)?;
-        println!(
-            "[AI_TASK_DELETE_RUNTIME_TEST] inserted db_path={} ids=[{}, {}] before_count={}",
-            db_path_text, first_id, second_id, before_count
-        );
         assert_eq!(before_count, 2);
         assert_eq!(count_runtime_ai_task_child_refs(&conn, &first_id)?, 5);
         assert_eq!(count_runtime_ai_task_child_refs(&conn, &second_id)?, 5);
@@ -8959,10 +9095,6 @@ mod tests {
             vec![first_id.clone()],
             db_path_text.clone(),
         )?;
-        println!(
-            "[AI_TASK_DELETE_RUNTIME_TEST] delete_result={:?}",
-            delete_result
-        );
         assert_eq!(delete_result.requested_count, 1);
         assert_eq!(delete_result.before_count, 2);
         assert_eq!(delete_result.before_match_count, 1);
@@ -8982,10 +9114,6 @@ mod tests {
         assert_eq!(count_runtime_ai_task_child_rows(&conn)?, 10);
 
         let clear_result = clear_ai_task_records_internal(&conn, db_path_text.clone())?;
-        println!(
-            "[AI_TASK_DELETE_RUNTIME_TEST] clear_result={:?}",
-            clear_result
-        );
         assert_eq!(clear_result.before_count, 1);
         assert_eq!(clear_result.deleted_count, 1);
         assert_eq!(clear_result.after_count, 0);
@@ -8997,6 +9125,42 @@ mod tests {
 
         drop(conn);
         let _ = fs::remove_file(db_path);
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_delete_rejects_running_records_without_clearing_provenance(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_runtime_ai_task_table(&conn)?;
+        insert_runtime_ai_task(&conn, "terminal-task")?;
+        conn.execute(
+            "INSERT INTO ai_task_records (id, task_type, status, created_at)
+             VALUES ('running-task', 'chapter_generate', 'running', '2026-07-29T00:00:00Z')",
+            [],
+        )?;
+        insert_runtime_ai_task_children(&conn, "running-task", "running-child")?;
+
+        for result in [
+            delete_ai_task_records_by_ids_internal(
+                &conn,
+                vec!["running-task".to_string()],
+                "memory".to_string(),
+            ),
+            delete_ai_task_records_by_ids_internal(
+                &conn,
+                vec!["terminal-task".to_string(), "running-task".to_string()],
+                "memory".to_string(),
+            ),
+            clear_ai_task_records_internal(&conn, "memory".to_string()),
+        ] {
+            assert_eq!(
+                result.expect_err("running AI task must be protected"),
+                "ai_task_running_delete_protected"
+            );
+        }
+        assert_eq!(count_ai_task_records_in_conn(&conn)?, 2);
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, "running-task")?, 5);
         Ok(())
     }
 
@@ -10414,6 +10578,136 @@ mod tests {
     }
 
     #[test]
+    fn ai_task_projection_replay_preserves_terminal_record_and_draft_foreign_key(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT,
+                chapter_id TEXT,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                runtime_mode TEXT,
+                provider TEXT,
+                model_name TEXT,
+                prompt_template_id TEXT,
+                input_summary TEXT,
+                prompt_snapshot TEXT,
+                result_text TEXT,
+                result_json TEXT,
+                error_message TEXT,
+                token_input INTEGER,
+                token_output INTEGER,
+                token_total INTEGER,
+                input_price_per_million_tokens REAL,
+                output_price_per_million_tokens REAL,
+                cost_estimate REAL,
+                cost_currency TEXT,
+                cost_status TEXT,
+                pricing_source TEXT,
+                duration_ms INTEGER,
+                started_at TEXT,
+                finished_at TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT,
+                FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+            );
+            ",
+        )?;
+        let input = CreateAiTaskRecordInput {
+            id: "formal-task-1".to_string(),
+            novel_id: Some("novel-1".to_string()),
+            chapter_id: Some("chapter-1".to_string()),
+            task_type: "chapter_generate".to_string(),
+            status: "running".to_string(),
+            runtime_mode: Some("mock".to_string()),
+            provider: Some("mock".to_string()),
+            model_name: Some("Mock".to_string()),
+            input_price_per_million_tokens: Some(0.0),
+            output_price_per_million_tokens: Some(0.0),
+            cost_currency: Some("USD".to_string()),
+            pricing_source: Some("mock".to_string()),
+            input_summary: Some("first projection".to_string()),
+            started_at: Some("2026-07-29T00:00:00Z".to_string()),
+            created_at: "2026-07-29T00:00:00Z".to_string(),
+        };
+        assert_eq!(
+            create_ai_task_record_internal(&conn, &input)?.status,
+            "running"
+        );
+        mark_ai_task_succeeded_internal(
+            &conn,
+            &input.id,
+            &MarkAiTaskSucceededInput {
+                result_text: Some("terminal result".to_string()),
+                prompt_snapshot: None,
+                result_json: None,
+                token_input: Some(2),
+                token_output: Some(3),
+                token_total: Some(5),
+                duration_ms: Some(10),
+                finished_at: "2026-07-29T00:00:01Z".to_string(),
+            },
+        )?;
+        conn.execute(
+            "INSERT INTO chapter_drafts (id, ai_task_id) VALUES ('draft-1', ?1)",
+            params![&input.id],
+        )?;
+
+        let replayed = create_ai_task_record_internal(
+            &conn,
+            &CreateAiTaskRecordInput {
+                input_summary: Some("replayed projection".to_string()),
+                created_at: "2026-07-29T00:00:02Z".to_string(),
+                ..input
+            },
+        )?;
+        assert_eq!(replayed.status, "succeeded");
+        assert_eq!(replayed.result_text.as_deref(), Some("terminal result"));
+        assert_eq!(replayed.input_summary.as_deref(), Some("first projection"));
+        let conflict = create_ai_task_record_internal(
+            &conn,
+            &CreateAiTaskRecordInput {
+                id: "formal-task-1".to_string(),
+                novel_id: Some("other-novel".to_string()),
+                chapter_id: Some("chapter-1".to_string()),
+                task_type: "chapter_generate".to_string(),
+                status: "running".to_string(),
+                runtime_mode: Some("mock".to_string()),
+                provider: Some("mock".to_string()),
+                model_name: Some("Mock".to_string()),
+                input_price_per_million_tokens: Some(0.0),
+                output_price_per_million_tokens: Some(0.0),
+                cost_currency: Some("USD".to_string()),
+                pricing_source: Some("mock".to_string()),
+                input_summary: None,
+                started_at: Some("2026-07-29T00:00:03Z".to_string()),
+                created_at: "2026-07-29T00:00:03Z".to_string(),
+            },
+        )
+        .expect_err("same projection id with different ownership must fail");
+        assert_eq!(conflict, "ai_task_projection_identity_conflict");
+        let draft_task_id: Option<String> = conn.query_row(
+            "SELECT ai_task_id FROM chapter_drafts WHERE id = 'draft-1'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(draft_task_id.as_deref(), Some("formal-task-1"));
+        let foreign_key_violations: i64 =
+            conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(foreign_key_violations, 0);
+        Ok(())
+    }
+
+    #[test]
     fn ai_task_cancellation_is_terminal_and_idempotent() -> Result<(), Box<dyn std::error::Error>> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(
@@ -10473,6 +10767,70 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(succeeded, "succeeded");
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_retry_reopens_only_failed_compatibility_projection(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                duration_ms INTEGER,
+                started_at TEXT,
+                finished_at TEXT
+            );
+            INSERT INTO ai_task_records
+                (id, status, error_message, duration_ms, started_at, finished_at)
+            VALUES
+                ('failed-task', 'failed', 'retryable', 10, 'before', 'finished'),
+                ('succeeded-task', 'succeeded', NULL, 12, 'before', 'finished');
+            ",
+        )?;
+
+        assert_eq!(
+            mark_ai_task_running_for_retry_internal(&conn, "failed-task", "retry-start")?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_running_for_retry_internal(&conn, "succeeded-task", "must-not-change")?,
+            0
+        );
+        let failed: (String, Option<String>, Option<i64>, String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error_message, duration_ms, started_at, finished_at
+                 FROM ai_task_records WHERE id = 'failed-task'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+        assert_eq!(
+            failed,
+            (
+                "running".to_string(),
+                None,
+                None,
+                "retry-start".to_string(),
+                None
+            )
+        );
+        let succeeded: (String, String) = conn.query_row(
+            "SELECT status, started_at FROM ai_task_records WHERE id = 'succeeded-task'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(succeeded, ("succeeded".to_string(), "before".to_string()));
         Ok(())
     }
 

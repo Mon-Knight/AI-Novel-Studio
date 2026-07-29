@@ -22,7 +22,7 @@ export interface AiSettings {
   outputPricePerMillionTokens?: number;
   /** Maximum real-provider requests started inside a rolling minute. */
   maxRequestsPerMinute?: number;
-  /** Maximum real-provider requests owned by this WebView at once. */
+  /** Maximum real-provider requests active across the desktop SQLite database. */
   maxConcurrentAiRequests?: number;
   /** Optional hard daily input + output token budget. */
   dailyTokenBudget?: number;

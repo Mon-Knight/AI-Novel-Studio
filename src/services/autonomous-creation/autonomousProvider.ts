@@ -1,11 +1,7 @@
-import { createAiClient, aiSettingsService } from '../ai/aiClient';
-import { isAiRequestCancelled } from '../ai/aiCancellation';
-import { aiTaskService } from '../ai/aiTaskService';
-import {
-  createProviderTransportRequestId,
-  resolveProviderTimeoutSeconds,
-} from '../ai/providerRequestPolicy';
-import type { AiGenerateRequest, AiTaskType } from '../../types/ai';
+import { aiSettingsService } from '../ai/aiClient';
+import { executeAiTask } from '../ai/aiExecutionPipeline';
+import type { AiGenerateRequest } from '../../types/ai';
+import type { AiTaskType } from '../../types/ai-task';
 import type {
   AutonomousCharacterPlan,
   AutonomousChapterPlan,
@@ -14,6 +10,8 @@ import type {
   AutonomousStoryArc,
   AutonomousStoryBible,
   AutonomousStoryBrief,
+  AutonomousPlanningBaseline,
+  AutonomousPlanningMode,
   AutonomousVolumePlan,
   AutonomousWorldElement,
 } from '../../types/autonomousCreation';
@@ -59,6 +57,8 @@ export interface AutonomousCreationProvider {
     operationId: string;
     brief: AutonomousStoryBrief;
     shape: PlanShape;
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
     signal?: AbortSignal;
   }): Promise<AutonomousProviderResult<PlotFoundationProposal>>;
   planCharacters(input: {
@@ -67,6 +67,8 @@ export interface AutonomousCreationProvider {
     brief: AutonomousStoryBrief;
     storyBible: AutonomousStoryBible;
     arcs: AutonomousStoryArc[];
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
     signal?: AbortSignal;
   }): Promise<AutonomousProviderResult<CharacterProposal[]>>;
   buildWorld(input: {
@@ -76,6 +78,8 @@ export interface AutonomousCreationProvider {
     storyBible: AutonomousStoryBible;
     arcs: AutonomousStoryArc[];
     volumes: AutonomousVolumePlan[];
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
     signal?: AbortSignal;
   }): Promise<AutonomousProviderResult<WorldElementProposal[]>>;
   generateConflicts(input: {
@@ -86,6 +90,8 @@ export interface AutonomousCreationProvider {
     arcs: AutonomousStoryArc[];
     volumes: AutonomousVolumePlan[];
     characters: AutonomousCharacterPlan[];
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
     signal?: AbortSignal;
   }): Promise<AutonomousProviderResult<ConflictProposal[]>>;
   controlPacing(input: {
@@ -95,6 +101,8 @@ export interface AutonomousCreationProvider {
     storyBible: AutonomousStoryBible;
     arcs: AutonomousStoryArc[];
     volumes: AutonomousVolumePlan[];
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
     signal?: AbortSignal;
   }): Promise<AutonomousProviderResult<PacingPhaseProposal[]>>;
   planChapterBatch(input: {
@@ -111,6 +119,8 @@ export interface AutonomousCreationProvider {
     previousChapters: Array<
       Pick<AutonomousChapterPlan, 'chapterNumber' | 'title' | 'goal' | 'endingHook'>
     >;
+    planningMode?: AutonomousPlanningMode;
+    baseline?: AutonomousPlanningBaseline;
     signal?: AbortSignal;
   }): Promise<AutonomousProviderResult<ChapterProposal[]>>;
 }
@@ -154,78 +164,82 @@ async function runProvider<T>(input: {
 }): Promise<AutonomousProviderResult<T>> {
   const startedAt = Date.now();
   const settings = aiSettingsService.getSettings();
-  const task = await aiTaskService.create(input.taskType, {
-    novelId: input.novelId,
-    runtimeMode: settings.runtimeMode,
-    provider: settings.provider,
-    modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-    inputSummary: input.summary,
-  });
-  const controller = new AbortController();
-  const onExternalAbort = () => controller.abort();
-  input.signal?.addEventListener('abort', onExternalAbort, { once: true });
-  if (input.signal?.aborted) onExternalAbort();
-  const releaseCancellation = aiTaskService.registerActiveExecution(task.id, () =>
-    controller.abort(),
-  );
-
+  const userMessage =
+    input.request.messages.find((message) => message.role === 'user')?.content ?? '';
+  const payloadStart = userMessage.indexOf('{');
+  if (payloadStart < 0) throw new Error('autonomous request payload is missing');
+  let payload: Record<string, unknown>;
   try {
-    const requestSettings = {
-      ...settings,
-      timeoutSeconds: resolveProviderTimeoutSeconds(input.taskType, settings.timeoutSeconds),
-    };
-    const response = await createAiClient(requestSettings).generate(input.request, {
-      signal: controller.signal,
-      requestId: createProviderTransportRequestId(input.requestId),
-      cancel: () => controller.abort(),
-    });
-    const responseText = response.text || '';
-    const finishReason = readFinishReason(response.raw);
-    if (finishReason === 'length') {
-      throw new Error(
-        'AI 调用失败：模型在输出 Token 上限处停止，响应内容不完整且未采纳；' +
-          '请缩小单次输出或提高最大输出 Token 后重试。',
-      );
+    const parsed = JSON.parse(userMessage.slice(payloadStart)) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('autonomous request payload must be an object');
     }
-    const tokensInput = response.tokenInput ?? 0;
-    const tokensOutput = response.tokenOutput ?? 0;
-    const tokensUsed = response.tokenTotal ?? tokensInput + tokensOutput;
-    let value: T;
-    try {
-      value = input.parser(responseText);
-    } catch (error) {
-      if (input.taskType !== 'autonomous_chapter_batch') throw error;
-      throw chapterBatchParseError({
-        error,
-        finishReason,
-        responseLength: responseText.length,
-        tokensOutput: response.tokenOutput,
-      });
-    }
-    await aiTaskService.markSucceeded(task.id, {
-      resultText: input.successText(value),
-      tokenInput: tokensInput,
-      tokenOutput: tokensOutput,
-      tokenTotal: tokensUsed,
-    });
-    return {
-      value,
-      aiTaskId: task.id,
-      tokensInput,
-      tokensOutput,
-      tokensUsed,
-      durationMs: Math.max(0, Date.now() - startedAt),
-    };
+    payload = parsed as Record<string, unknown>;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (controller.signal.aborted || isAiRequestCancelled(error))
-      await aiTaskService.markCancelled(task.id);
-    else await aiTaskService.markFailed(task.id, message);
-    throw error;
-  } finally {
-    input.signal?.removeEventListener('abort', onExternalAbort);
-    releaseCancellation();
+    throw error instanceof Error ? error : new Error(String(error));
   }
+
+  const execution = await executeAiTask({
+    operationId: input.requestId,
+    traceId: input.requestId,
+    taskType: input.taskType,
+    scopeType: 'novel',
+    novelId: input.novelId,
+    targetHintJson: { summary: input.summary },
+    settings,
+    compilation: {
+      taskInput: { payload },
+      sources: [
+        {
+          sourceType: 'request_context',
+          sourceId: input.requestId,
+          sourceVersion: '1',
+          origin: 'request',
+          label: 'Autonomous request payload',
+          content: JSON.stringify({
+            taskType: input.taskType,
+            operationId: input.operationId,
+            summary: input.summary,
+          }),
+          order: 0,
+          priority: 100,
+          maxTokens: 48_000,
+        },
+      ],
+    },
+    signal: input.signal,
+  });
+  const responseText = execution.text || '';
+  const finishReason = execution.provider.finishReason ?? readFinishReason(execution.provider.raw);
+  if (finishReason === 'length') {
+    throw new Error(
+      'AI 调用失败：模型在输出 Token 上限处停止，响应内容不完整且未采纳；' +
+        '请缩小单次输出或提高最大输出 Token 后重试。',
+    );
+  }
+  const tokensInput = execution.provider.tokenInput ?? 0;
+  const tokensOutput = execution.provider.tokenOutput ?? 0;
+  const tokensUsed = execution.provider.tokenTotal ?? tokensInput + tokensOutput;
+  let value: T;
+  try {
+    value = input.parser(responseText);
+  } catch (error) {
+    if (input.taskType !== 'autonomous_chapter_batch') throw error;
+    throw chapterBatchParseError({
+      error,
+      finishReason,
+      responseLength: responseText.length,
+      tokensOutput: execution.provider.tokenOutput,
+    });
+  }
+  return {
+    value,
+    aiTaskId: execution.taskId ?? input.requestId,
+    tokensInput,
+    tokensOutput,
+    tokensUsed,
+    durationMs: execution.provider.durationMs || Math.max(0, Date.now() - startedAt),
+  };
 }
 
 export class AiAutonomousCreationProvider implements AutonomousCreationProvider {
@@ -235,7 +249,10 @@ export class AiAutonomousCreationProvider implements AutonomousCreationProvider 
       taskType: 'autonomous_plot_plan',
       summary: `规划 ${input.brief.targetChapterCount} 章长篇故事基础`,
       requestId: `${input.operationId}-plot-foundation`,
-      request: buildPlotFoundationRequest(input.brief, input.shape),
+      request: buildPlotFoundationRequest(input.brief, input.shape, {
+        planningMode: input.planningMode,
+        baseline: input.baseline,
+      }),
       parser: parsePlotFoundation,
       successText: (value) => `生成 ${value.arcs.length} 个故事弧与 ${value.volumes.length} 个分卷`,
     });

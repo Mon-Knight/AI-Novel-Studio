@@ -57,12 +57,6 @@ vi.mock('../../components/workspace/EditorArea', () => ({
     <div data-testid="mock-editor">
       <button
         type="button"
-        onClick={() => (props.onDraftChange as (count: number, dirty: boolean) => void)(100, true)}
-      >
-        editor-draft
-      </button>
-      <button
-        type="button"
         onClick={() =>
           (props.onEditorContentChange as (value: Record<string, unknown>) => void)({
             content: '正文',
@@ -424,7 +418,6 @@ function baseProps(): React.ComponentProps<typeof WritingWorkspaceView> {
       togglePanel: calls.togglePanel,
       closePanel: calls.closePanel,
       editorClick: calls.editorClick,
-      draftChange: calls.draftChange,
       editorContentChange: calls.editorContentChange,
       chapterOutlineApplied: calls.chapterOutlineApplied,
       confirmEditorLeave: calls.confirmEditorLeave,
@@ -475,7 +468,6 @@ describe('WritingWorkspaceView', () => {
       'tree-volume',
       'tree-chapter',
       'tree-first',
-      'editor-draft',
       'editor-content',
       'editor-save',
       'editor-consume',

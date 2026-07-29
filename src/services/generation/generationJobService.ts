@@ -1,6 +1,7 @@
 import { appLogger } from '../observability/appLogger';
 import { dbCall, generateId, lsGet, lsSet, nowISO } from '../database/db';
-import { createAiClient, aiSettingsService } from '../ai/aiClient';
+import { aiSettingsService } from '../ai/aiClient';
+import { executeChapterGeneration } from '../ai/chapterGenerationExecutionService';
 import { isAiRequestCancelled } from '../ai/aiCancellation';
 import { qualityCheckAiService } from '../ai/qualityCheckAiService';
 import { chapterRepository } from '../database/chapterRepository';
@@ -906,37 +907,61 @@ export const generationJobService = {
         };
       });
       let generatedText = '';
+      let aiTaskId: string | undefined;
       await runStep('draft_generation', 72, async () => {
         if (!snapshot) throw new Error('missing_context_snapshot');
         const request = buildSnapshotGenerateRequest(snapshot);
-        const client = createAiClient(settings);
         const response = await trackActiveAiRequest(
           control,
-          client.generate(request, {
+          executeChapterGeneration({
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            operationId: `${job.id}:draft`,
+            traceId: job.id,
+            settings,
+            request,
+            sourceId: snapshot.id,
+            sourceVersion: snapshot.contextHash,
+            taskInput: {
+              chapterTitle: snapshot.compiledContext.baseContext.chapterTitle,
+              targetWordCount:
+                snapshot.compiledContext.baseContext.targetWordCount ??
+                snapshot.compiledContext.activeEngineeringState?.chapterCard.targetWordCount,
+              contextHash: snapshot.contextHash,
+              promptTemplateSource: request.promptTemplateSource,
+              generationJobId: job.id,
+              snapshotId: snapshot.id,
+            },
+            targetHintJson: {
+              generationJobId: job.id,
+              snapshotId: snapshot.id,
+              contextHash: snapshot.contextHash,
+            },
             signal: control.controller.signal,
-            requestId: `${job.id}:draft:${generateId()}`,
             stream: true,
             onStreamEvent: input.onStreamEvent,
           }),
         );
+        aiTaskId = response.taskId;
         generatedText = response.text.trim();
         if (!generatedText) throw new Error('正文模型返回为空');
         job = await this.update({
           id: job.id,
-          actualInputTokens: response.tokenInput,
-          actualOutputTokens: response.tokenOutput,
-          costEstimate: response.usageCost?.estimatedCost,
+          actualInputTokens: response.provider.tokenInput,
+          actualOutputTokens: response.provider.tokenOutput,
+          costEstimate: response.provider.usageCost?.estimatedCost,
         });
         return {
           outputJson: {
-            provider: settings.provider,
-            modelName: settings.modelName,
+            provider: response.provider.providerId,
+            modelName: response.provider.modelId,
             contextHash: snapshot.contextHash,
-            tokenInput: response.tokenInput,
-            tokenOutput: response.tokenOutput,
-            tokenTotal: response.tokenTotal,
-            costEstimate: response.usageCost?.estimatedCost,
-            costStatus: response.usageCost?.status,
+            aiTaskId: response.taskId,
+            tokenInput: response.provider.tokenInput,
+            tokenOutput: response.provider.tokenOutput,
+            tokenTotal: response.provider.tokenTotal,
+            costEstimate: response.provider.usageCost?.estimatedCost,
+            costStatus: response.provider.usageCost?.status,
             textLength: generatedText.length,
           },
           outputText: generatedText,
@@ -950,7 +975,7 @@ export const generationJobService = {
           title: input.title || `AI 初稿 ${new Date().toLocaleString()}`,
           content: generatedText,
           source: 'ai_generated',
-          aiTaskId: job.id,
+          aiTaskId,
           note: `v2.0.0 generation job ${job.id} / context ${snapshot.contextHash}`,
         });
         await input.onDraftSaved?.(savedDraft, job.id);

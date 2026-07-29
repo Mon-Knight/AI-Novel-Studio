@@ -1,6 +1,6 @@
 use crate::errors::{codes, AppError};
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 #[cfg(test)]
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 28] {
+fn migrations() -> [Migration; 29] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -164,6 +164,11 @@ fn migrations() -> [Migration; 28] {
             definition: "multi_target_transactions_and_story_assets_v1(frozen_ordered_target_set_and_hash,operation_request_idempotency,per_target_base_revision_hash,all_or_nothing_and_explicit_reviewed_partial,prepared_candidates,immediate_cas_apply,replay_target_revalidation,factions,locations,faction_relations,location_hierarchy_and_links,character_chapter_conflict_asset_relations,novel_scope,immutable_identity,revision_cas,indexes,foreign_keys)",
             apply: apply_multi_target_transactions_and_story_assets,
         },
+        Migration {
+            id: "029_global_ai_request_policy",
+            definition: "global_ai_request_policy_v1(singleton_revisioned_policy,global_rolling_minute_and_concurrency,day_token_and_fixed_point_cost_counters,explicit_unpriced_usage,immediate_budget_reservations,provider_request_bound_single_dispatch,owner_hashed_lease_ttl_conservative_reclaim,frozen_policy_and_pricing,idempotent_settlement,indexes,immutable_identity,dispatch_once,terminal_accounting_immutable,status_edges,no_delete)",
+            apply: apply_global_ai_request_policy,
+        },
     ]
 }
 
@@ -188,7 +193,12 @@ fn create_ledger(transaction: &Transaction<'_>) -> Result<(), AppError> {
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), AppError> {
     for migration in migrations() {
-        let transaction = connection.transaction().map_err(AppError::database)?;
+        // Startup currently opens the database before the single-instance fence. An IMMEDIATE
+        // transaction makes two concurrent processes serialize before either reads the ledger,
+        // avoiding a deferred-read / write-upgrade SQLITE_BUSY_SNAPSHOT race.
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(AppError::database)?;
         create_ledger(&transaction)?;
         let expected_checksum = checksum(migration.definition);
         let existing_checksum = transaction
@@ -2755,11 +2765,213 @@ fn apply_multi_target_transactions_and_story_assets(
         .map_err(AppError::database)
 }
 
+fn apply_global_ai_request_policy(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_request_policy (
+                policy_id INTEGER PRIMARY KEY CHECK (policy_id=1),
+                revision INTEGER NOT NULL CHECK (revision>=1),
+                policy_hash TEXT NOT NULL
+                    CHECK (length(policy_hash)=64 AND policy_hash NOT GLOB '*[^0-9a-f]*'),
+                max_requests_per_minute INTEGER NOT NULL
+                    CHECK (max_requests_per_minute BETWEEN 1 AND 10000),
+                max_concurrent_requests INTEGER NOT NULL
+                    CHECK (max_concurrent_requests BETWEEN 1 AND 1024),
+                daily_token_budget INTEGER
+                    CHECK (daily_token_budget IS NULL OR daily_token_budget>0),
+                daily_cost_budget_units INTEGER
+                    CHECK (daily_cost_budget_units IS NULL OR daily_cost_budget_units>0),
+                input_price_per_million_tokens REAL
+                    CHECK (input_price_per_million_tokens IS NULL OR input_price_per_million_tokens>=0),
+                output_price_per_million_tokens REAL
+                    CHECK (output_price_per_million_tokens IS NULL OR output_price_per_million_tokens>=0),
+                warning_percent INTEGER NOT NULL
+                    CHECK (warning_percent BETWEEN 1 AND 100),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms>=0),
+                CHECK (
+                    (input_price_per_million_tokens IS NULL
+                     AND output_price_per_million_tokens IS NULL
+                     AND daily_cost_budget_units IS NULL)
+                    OR
+                    (input_price_per_million_tokens IS NOT NULL
+                     AND output_price_per_million_tokens IS NOT NULL)
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_request_daily_usage (
+                day_key TEXT PRIMARY KEY
+                    CHECK (length(day_key)=10),
+                token_input INTEGER NOT NULL DEFAULT 0
+                    CHECK (token_input>=0),
+                token_output INTEGER NOT NULL DEFAULT 0
+                    CHECK (token_output>=0),
+                cost_units INTEGER NOT NULL DEFAULT 0
+                    CHECK (cost_units>=0),
+                usage_missing_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (usage_missing_count>=0),
+                unpriced_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (unpriced_request_count>=0),
+                failed_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (failed_request_count>=0),
+                expired_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (expired_request_count>=0),
+                settled_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (settled_request_count>=0),
+                updated_at_ms INTEGER NOT NULL
+                    CHECK (updated_at_ms>=0)
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_request_reservations (
+                reservation_id TEXT PRIMARY KEY
+                    CHECK (length(reservation_id) BETWEEN 1 AND 128),
+                owner_id TEXT NOT NULL
+                    CHECK (length(owner_id) BETWEEN 1 AND 128),
+                provider_request_id TEXT NOT NULL UNIQUE
+                    CHECK (length(provider_request_id) BETWEEN 1 AND 128),
+                lease_token_hash TEXT NOT NULL
+                    CHECK (length(lease_token_hash)=64 AND lease_token_hash NOT GLOB '*[^0-9a-f]*'),
+                policy_revision INTEGER NOT NULL CHECK (policy_revision>=1),
+                policy_hash TEXT NOT NULL
+                    CHECK (length(policy_hash)=64 AND policy_hash NOT GLOB '*[^0-9a-f]*'),
+                day_key TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL
+                    CHECK (started_at_ms>=0),
+                expires_at_ms INTEGER NOT NULL
+                    CHECK (expires_at_ms>started_at_ms),
+                estimated_input_tokens INTEGER NOT NULL
+                    CHECK (estimated_input_tokens>=0),
+                estimated_output_tokens INTEGER NOT NULL
+                    CHECK (estimated_output_tokens>=0),
+                estimated_cost_units INTEGER
+                    CHECK (estimated_cost_units IS NULL OR estimated_cost_units>=0),
+                input_price_per_million_tokens REAL
+                    CHECK (input_price_per_million_tokens IS NULL OR input_price_per_million_tokens>=0),
+                output_price_per_million_tokens REAL
+                    CHECK (output_price_per_million_tokens IS NULL OR output_price_per_million_tokens>=0),
+                status TEXT NOT NULL
+                    CHECK (status IN ('active','settled','failed','expired')),
+                dispatched_at_ms INTEGER
+                    CHECK (dispatched_at_ms IS NULL OR dispatched_at_ms>=started_at_ms),
+                settlement_hash TEXT
+                    CHECK (settlement_hash IS NULL OR (length(settlement_hash)=64 AND settlement_hash NOT GLOB '*[^0-9a-f]*')),
+                accounted_input_tokens INTEGER
+                    CHECK (accounted_input_tokens IS NULL OR accounted_input_tokens>=0),
+                accounted_output_tokens INTEGER
+                    CHECK (accounted_output_tokens IS NULL OR accounted_output_tokens>=0),
+                accounted_cost_units INTEGER
+                    CHECK (accounted_cost_units IS NULL OR accounted_cost_units>=0),
+                accounted_cost_status TEXT
+                    CHECK (accounted_cost_status IS NULL OR accounted_cost_status IN ('complete','unpriced')),
+                settled_at_ms INTEGER
+                    CHECK (settled_at_ms IS NULL OR settled_at_ms>=started_at_ms),
+                FOREIGN KEY (day_key) REFERENCES ai_request_daily_usage(day_key),
+                CHECK (
+                    (input_price_per_million_tokens IS NULL
+                     AND output_price_per_million_tokens IS NULL
+                     AND estimated_cost_units IS NULL)
+                    OR
+                    (input_price_per_million_tokens IS NOT NULL
+                     AND output_price_per_million_tokens IS NOT NULL
+                     AND estimated_cost_units IS NOT NULL)
+                ),
+                CHECK (
+                    (status='active' AND settlement_hash IS NULL
+                     AND accounted_input_tokens IS NULL
+                     AND accounted_output_tokens IS NULL
+                     AND accounted_cost_units IS NULL
+                     AND accounted_cost_status IS NULL
+                     AND settled_at_ms IS NULL)
+                    OR
+                    (status<>'active' AND settlement_hash IS NOT NULL
+                     AND accounted_input_tokens IS NOT NULL
+                     AND accounted_output_tokens IS NOT NULL
+                     AND accounted_cost_status IS NOT NULL
+                     AND ((accounted_cost_status='complete' AND accounted_cost_units IS NOT NULL)
+                          OR (accounted_cost_status='unpriced' AND accounted_cost_units IS NULL))
+                     AND settled_at_ms IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ai_request_reservations_started
+            ON ai_request_reservations(started_at_ms DESC);
+            CREATE INDEX IF NOT EXISTS idx_ai_request_reservations_day_status
+            ON ai_request_reservations(day_key,status);
+            CREATE INDEX IF NOT EXISTS idx_ai_request_reservations_active_expiry
+            ON ai_request_reservations(expires_at_ms)
+            WHERE status='active';
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_immutable_identity
+            BEFORE UPDATE ON ai_request_reservations
+            WHEN NEW.reservation_id<>OLD.reservation_id
+              OR NEW.owner_id<>OLD.owner_id
+              OR NEW.provider_request_id<>OLD.provider_request_id
+              OR NEW.lease_token_hash<>OLD.lease_token_hash
+              OR NEW.policy_revision<>OLD.policy_revision
+              OR NEW.policy_hash<>OLD.policy_hash
+              OR NEW.day_key<>OLD.day_key
+              OR NEW.started_at_ms<>OLD.started_at_ms
+              OR NEW.expires_at_ms<>OLD.expires_at_ms
+              OR NEW.estimated_input_tokens<>OLD.estimated_input_tokens
+              OR NEW.estimated_output_tokens<>OLD.estimated_output_tokens
+              OR NEW.estimated_cost_units IS NOT OLD.estimated_cost_units
+              OR NEW.input_price_per_million_tokens IS NOT OLD.input_price_per_million_tokens
+              OR NEW.output_price_per_million_tokens IS NOT OLD.output_price_per_million_tokens
+            BEGIN SELECT RAISE(ABORT, 'ai request reservation identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_dispatch_once
+            BEFORE UPDATE OF dispatched_at_ms ON ai_request_reservations
+            WHEN NOT (
+                OLD.status='active'
+                AND OLD.dispatched_at_ms IS NULL
+                AND NEW.dispatched_at_ms IS NOT NULL
+                AND NEW.dispatched_at_ms>=OLD.started_at_ms
+                AND NEW.dispatched_at_ms<=OLD.expires_at_ms
+            )
+            BEGIN SELECT RAISE(ABORT, 'ai request reservation dispatch is single use'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_terminal_accounting_immutable
+            BEFORE UPDATE OF settlement_hash,accounted_input_tokens,accounted_output_tokens,
+                             accounted_cost_units,accounted_cost_status,settled_at_ms
+            ON ai_request_reservations
+            WHEN NOT (
+                OLD.status='active'
+                AND NEW.status IN ('settled','failed','expired')
+            )
+            BEGIN SELECT RAISE(ABORT, 'ai request reservation accounting is terminal'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_status_edges
+            BEFORE UPDATE OF status ON ai_request_reservations
+            WHEN NOT (
+                OLD.status='active'
+                AND NEW.status IN ('settled','failed','expired')
+            )
+            BEGIN SELECT RAISE(ABORT, 'illegal ai request reservation status transition'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_no_delete
+            BEFORE DELETE ON ai_request_reservations
+            BEGIN SELECT RAISE(ABORT, 'ai request reservations are durable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_policy_revision_cas
+            BEFORE UPDATE ON ai_request_policy
+            WHEN NEW.policy_id<>OLD.policy_id OR NEW.revision<>OLD.revision+1
+            BEGIN SELECT RAISE(ABORT, 'ai request policy revision conflict'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_policy_no_delete
+            BEFORE DELETE ON ai_request_policy
+            BEGIN SELECT RAISE(ABORT, 'ai request policy is durable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+    use std::time::Duration;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 28] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 29] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -2871,6 +3083,10 @@ mod tests {
         (
             "028_multi_target_transactions_and_story_assets",
             "57a0165d8f5e5f75db523325476a5187763c17ee7eb56c76c9faac767150d3e9",
+        ),
+        (
+            "029_global_ai_request_policy",
+            "cc2caf7c92d84eef722b109d67bba83b4c8015f893dedae099cb3662d0d4ebdc",
         ),
     ];
 
@@ -3219,8 +3435,9 @@ mod tests {
                 OR name GLOB 'idx_artifact_validation_*'
                 OR name GLOB 'trg_ai_*'
                 OR name GLOB 'trg_result_artifacts_*'
-                OR name GLOB 'trg_artifact_validation_*'
+              OR name GLOB 'trg_artifact_validation_*'
              )
+             AND name NOT GLOB '*ai_request*'
              ORDER BY type ASC, name ASC",
         )?;
         let rows = statement
@@ -3361,6 +3578,179 @@ mod tests {
                 .count(),
             0
         );
+        Ok(())
+    }
+
+    #[test]
+    fn db29_global_ai_policy_schema_has_hashed_leases_and_durable_status_guards(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        crate::db::create_tables(&mut connection)?;
+        for table in [
+            "ai_request_policy",
+            "ai_request_daily_usage",
+            "ai_request_reservations",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing global AI policy table {table}");
+        }
+        for index in [
+            "idx_ai_request_reservations_started",
+            "idx_ai_request_reservations_day_status",
+            "idx_ai_request_reservations_active_expiry",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                params![index],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing global AI policy index {index}");
+        }
+        for trigger in [
+            "trg_ai_request_reservations_immutable_identity",
+            "trg_ai_request_reservations_dispatch_once",
+            "trg_ai_request_reservations_terminal_accounting_immutable",
+            "trg_ai_request_reservations_status_edges",
+            "trg_ai_request_reservations_no_delete",
+            "trg_ai_request_policy_revision_cas",
+            "trg_ai_request_policy_no_delete",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                params![trigger],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing global AI policy trigger {trigger}");
+        }
+        let columns = table_columns(&connection, "ai_request_reservations")?;
+        assert!(columns.iter().any(|column| column == "lease_token_hash"));
+        assert!(!columns.iter().any(|column| column == "lease_token"));
+
+        let grant = crate::services::ai_request_policy_service::reserve_request(
+            &mut connection,
+            crate::services::ai_request_policy_service::ReserveAiRequestInput {
+                owner_id: "migration-trigger-owner".to_string(),
+                provider_request_id: "migration-trigger-request".to_string(),
+                max_requests_per_minute: 12,
+                max_concurrent_requests: 2,
+                daily_token_budget: Some(10_000),
+                daily_cost_budget_usd: Some(10.0),
+                estimated_input_tokens: 100,
+                estimated_output_tokens: 200,
+                input_price_per_million_tokens: Some(1.0),
+                output_price_per_million_tokens: Some(2.0),
+                warning_percent: 80,
+                ttl_ms: 120_000,
+            },
+        )?;
+        crate::services::ai_request_policy_service::verify_provider_dispatch(
+            &mut connection,
+            &crate::services::ai_request_policy_service::AiRequestPolicyLeaseProof {
+                reservation_id: grant.reservation_id.clone(),
+                owner_id: grant.owner_id.clone(),
+                provider_request_id: grant.provider_request_id.clone(),
+                lease_token: grant.lease_token.clone(),
+            },
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE ai_request_reservations
+                 SET dispatched_at_ms=dispatched_at_ms+1 WHERE reservation_id=?1",
+                params![&grant.reservation_id],
+            )
+            .is_err());
+        crate::services::ai_request_policy_service::settle_request(
+            &mut connection,
+            crate::services::ai_request_policy_service::SettleAiRequestInput {
+                reservation_id: grant.reservation_id.clone(),
+                owner_id: grant.owner_id,
+                lease_token: grant.lease_token,
+                outcome: "succeeded".to_string(),
+                token_input: Some(40),
+                token_output: Some(60),
+            },
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE ai_request_reservations
+                 SET accounted_input_tokens=accounted_input_tokens+1
+                 WHERE reservation_id=?1",
+                params![&grant.reservation_id],
+            )
+            .is_err());
+        assert_eq!(
+            connection
+                .prepare("PRAGMA foreign_key_check")?
+                .query_map([], |_| Ok(()))?
+                .count(),
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_startup_migrations_serialize_before_reading_the_ledger(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "ai-novel-studio-concurrent-migrations-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let connection = Connection::open(&path)?;
+            connection.busy_timeout(Duration::from_secs(10))?;
+            connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = (0..2)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || -> Result<(), String> {
+                    let mut connection =
+                        Connection::open(path).map_err(|error| error.to_string())?;
+                    connection
+                        .busy_timeout(Duration::from_secs(10))
+                        .map_err(|error| error.to_string())?;
+                    connection
+                        .execute_batch("PRAGMA foreign_keys=ON;")
+                        .map_err(|error| error.to_string())?;
+                    barrier.wait();
+                    crate::db::create_tables(&mut connection).map_err(|error| error.to_string())
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle
+                .join()
+                .map_err(|_| "concurrent migration thread panicked")??;
+        }
+
+        let connection = Connection::open(&path)?;
+        let migration_count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(migration_count, EXPECTED_MIGRATION_CHECKSUMS.len() as i64);
+        let duplicate_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM (SELECT migration_id FROM schema_migrations GROUP BY migration_id HAVING COUNT(*)<>1)",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(duplicate_count, 0);
+        drop(connection);
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            fs::remove_file(candidate).ok();
+        }
         Ok(())
     }
 }

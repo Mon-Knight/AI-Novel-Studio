@@ -3,6 +3,9 @@ use rusqlite::{Connection, Result as SqliteResult};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
+
+use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
@@ -52,6 +55,10 @@ pub fn init_database() {
     let mut connection = Connection::open(&db_path).expect("Failed to open database");
 
     connection
+        .busy_timeout(Duration::from_secs(5))
+        .expect("Failed to set database busy timeout");
+
+    connection
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .expect("Failed to set pragmas");
 
@@ -64,7 +71,17 @@ pub fn init_database() {
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");
 
-    println!("Database initialized at: {:?}", db_path);
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "database_initialized",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: None,
+    });
 }
 
 pub fn get_connection() -> &'static Mutex<Connection> {
