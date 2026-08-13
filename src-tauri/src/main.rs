@@ -357,6 +357,7 @@ fn main() {
             project_backup::import_project_backup,
             project_backup::discard_imported_project_backup,
             system_accent::get_system_accent_color,
+            services::dsh::commands::dsh_prepare_chapter,
         ])
         .setup(move |app| {
             log_workspace_event(WorkspaceLogEvent {

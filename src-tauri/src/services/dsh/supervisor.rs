@@ -418,6 +418,7 @@ impl RuntimeHandle {
     }
 
     /// The last observed `session.status` for a session.
+    #[allow(dead_code)] // exercised by tests; wire to a future cancel command
     pub fn status_of(&self, session_id: &str) -> Option<String> {
         self.sessions
             .lock()
@@ -429,6 +430,7 @@ impl RuntimeHandle {
     /// Hard-terminates the runtime tree. Cancellation = kill + restart by
     /// design: the wire has no prompt-cancel method. Closing the Job Object
     /// first reaps the whole tree (runtime + MCP gateway descendants).
+    #[allow(dead_code)] // exercised by tests; wire to a future cancel command
     pub fn kill(&self) {
         #[cfg(windows)]
         if let Ok(mut guard) = self.job.lock() {
