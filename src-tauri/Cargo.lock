@@ -2259,6 +2259,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "novel-domain-gateway"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
