@@ -16,6 +16,9 @@
 - 新增 TS 端口：`src/types/chapterPreparation.ts` 类型层与 `ChapterPreparationPlannerPort`；`CurrentPlannerAdapter`（编排现有 readiness 计划并确定性映射，零模型成本）与 `DshPlannerAdapter`（invoke 薄 facade，浏览器模式明确不可用）；TS 镜像校验器与 13 项单测。
 - 写作工作台 AI 生成面板新增“章节准备提案（DSH 融合实验）”卡片：双源切换（当前 Planner 零成本 / DSH 真实 API）、运行计时、提案摘要（目标/场景/人物约束/风险分级/未决问题/建议动作）、度量展示与枚举归一标记；提案不自动采用。
 - 新增章节准备规划 persona 提示词（`prompts/dsh_chapter_preparation.md`）与生产 cordis 组合模板（`scripts/dsh/cordis-template.yml`，六插件、stdout 纯净、零 Key 落盘）。
+- 新增自包含运行时载体：`scripts/dsh/build-runtime-payload.mjs` 把固定版本 harness 运行时装配为 `dsh-runtime/` 载荷（全部包 lib + package.json + node_modules junction 农场 + `VERSION_MATRIX.json`；junction 感知拷贝器 + 构建期目标存在性门禁）；启动解析链 `DSH_RUNTIME_ROOT` → 应用目录 `dsh-runtime/`（或 `resources/dsh-runtime/`）→ `DSH_CHECKOUT`，载荷完整性五判据不足时回退，载荷载体 e2e 实测通过（无 `DSH_CHECKOUT`，真实 API 66s）。
+- 新增逐来源基线修订号接线：六来源真实修订号（大纲 version / 工程 activeVersion / 风格·输出·角色状态·记忆 updatedAt→unix 毫秒）在发起提案前加载并原样回显校验；修订号与章节身份原子绑定防竞态，单来源读取失败降级不阻断（结构化告警），记忆源只取 active 文档。
+- 修复网关只读查询两处语义：工程状态按 `status='active'` 选取（原 `active_version=1` 误把版本号当布尔，真实库上下文 2386B→7300B）；角色状态修订号改读 `MAX(created_at)`（表无 updated_at）。
 
 ### 安全与一致性
 
