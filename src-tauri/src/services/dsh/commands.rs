@@ -6,7 +6,11 @@
 //! validator (enum coercion included); adapter-owned metrics are injected before
 //! returning. The runtime tree dies with the handle (Job Object).
 
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader};
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -21,6 +25,9 @@ use super::supervisor::RuntimeHandle;
 
 /// The persona the runtime is booted with (asset: prompts/dsh_chapter_preparation.md).
 const PERSONA: &str = include_str!("../../../../prompts/dsh_chapter_preparation.md");
+/// The local model-gateway proxy script (asset: scripts/dsh/model-proxy.mjs),
+/// embedded so the command can write it to the runtime work dir at launch.
+const PROXY_SCRIPT: &str = include_str!("../../../../scripts/dsh/model-proxy.mjs");
 const MAX_REPAIR_TURNS: usize = 3;
 const SETTLE: Duration = Duration::from_millis(3000);
 const TURN_TIMEOUT: Duration = Duration::from_secs(480);
@@ -50,6 +57,123 @@ pub async fn dsh_prepare_chapter(
         .map_err(|error| format!("DSH 准备任务失败: {}", error))?
 }
 
+/// Owns the local model-gateway proxy process; killed on drop.
+struct ProxyGuard {
+    child: Mutex<Option<Child>>,
+    log: Arc<Mutex<String>>,
+}
+
+impl ProxyGuard {
+    fn log_tail(&self) -> String {
+        let buffer = self.log.lock().unwrap();
+        if buffer.len() > 4000 {
+            buffer[buffer.len() - 4000..].to_string()
+        } else {
+            buffer.clone()
+        }
+    }
+}
+
+impl Drop for ProxyGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Spawns the local proxy on a free port with the upstream key; returns the
+/// guard plus the base URL. The downstream (DSH) side gets a dummy key: the
+/// upstream credential lives only in the proxy process.
+fn spawn_proxy(work: &Path, upstream_key: &str) -> Result<(ProxyGuard, String), String> {
+    let port = {
+        let listener =
+            TcpListener::bind("127.0.0.1:0").map_err(|error| format!("端口分配失败: {}", error))?;
+        listener.local_addr().map(|address| address.port()).map_err(|error| error.to_string())?
+    };
+    let script_path = work.join("model-proxy.mjs");
+    std::fs::write(&script_path, PROXY_SCRIPT).map_err(|error| format!("代理脚本写入失败: {}", error))?;
+
+    let upstream = std::env::var("DSH_PROXY_UPSTREAM").unwrap_or_else(|_| "https://api.deepseek.com".to_string());
+    let mut command = Command::new("node");
+    command
+        .arg(&script_path)
+        .env("PROXY_PORT", port.to_string())
+        .env("PROXY_UPSTREAM", &upstream)
+        .env("PROXY_UPSTREAM_KEY", upstream_key)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| format!("代理启动失败: {}", error))?;
+
+    let log = Arc::new(Mutex::new(String::new()));
+    let stdout = child.stdout.take().ok_or_else(|| "代理 stdout 未接管".to_string())?;
+    {
+        let log = log.clone();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let mut buffer = log.lock().unwrap();
+                        buffer.push_str(&line);
+                        if buffer.len() > 1_000_000 {
+                            *buffer = buffer[buffer.len() - 600_000..].to_string();
+                        }
+                    }
+                }
+            }
+        });
+    }
+    let stderr = child.stderr.take().ok_or_else(|| "代理 stderr 未接管".to_string())?;
+    {
+        let log = log.clone();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let mut buffer = log.lock().unwrap();
+                        buffer.push_str(&line);
+                        if buffer.len() > 1_000_000 {
+                            *buffer = buffer[buffer.len() - 600_000..].to_string();
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Health: wait until the server accepts connections.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("代理未在 10 秒内就绪；日志: {}", log.lock().unwrap()));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let base_url = format!("http://127.0.0.1:{}", port);
+    Ok((
+        ProxyGuard {
+            child: Mutex::new(Some(child)),
+            log,
+        },
+        base_url,
+    ))
+}
+
 fn prepare(
     input: ChapterPreparationInput,
     options: DshPrepareOptions,
@@ -71,10 +195,15 @@ fn prepare(
     std::fs::write(&cordis_path, cordis_yml(&checkout, &gateway_bin, &db_path))
         .map_err(|error| format!("cordis 渲染失败: {}", error))?;
 
-    let base_url = options
-        .base_url
-        .or_else(|| std::env::var("DEEPSEEK_BASE_URL").ok())
-        .unwrap_or_else(|| "https://api.deepseek.com".to_string());
+    // Model gateway (option A): explicit baseUrl wins; otherwise spawn the local
+    // proxy and hand the DSH child a dummy downstream key (key isolation).
+    let (proxy_guard, base_url, downstream_key) = match options.base_url {
+        Some(url) => (None, url, options.api_key.clone()),
+        None => {
+            let (guard, url) = spawn_proxy(&work, &options.api_key)?;
+            (Some(guard), url, "local-proxy".to_string())
+        }
+    };
     let model = options
         .model
         .or_else(|| std::env::var("DSH_MODEL").ok())
@@ -85,7 +214,7 @@ fn prepare(
         cordis_config: cordis_path,
         session_root: work.join("sessions"),
         home: work.join("home"),
-        api_key: options.api_key,
+        api_key: downstream_key,
         base_url,
         system_prompt: PERSONA.to_string(),
         cwd: work.clone(),
@@ -98,6 +227,11 @@ fn prepare(
 
     let result = run_preparation(&runtime, &config, &input, &model);
     let _ = runtime.shutdown_and_wait(SHUTDOWN_TIMEOUT);
+    drop(runtime);
+    if let Some(guard) = proxy_guard {
+        let tail = guard.log_tail();
+        eprintln!("[dsh] model proxy accounting log:\n{}", tail);
+    }
     result
 }
 
@@ -283,4 +417,43 @@ fn resolve_gateway_bin() -> Result<String, String> {
         "novel-domain-gateway 未找到（可设 DSH_GATEWAY_BIN 指定）；查找位置: {}",
         candidate.display()
     ))
+}
+
+#[cfg(test)]
+mod e2e_tests {
+    use super::super::models::ChapterBaselineRevision;
+    use super::super::proposal_validator::PROPOSAL_SOURCES;
+    use super::*;
+
+    #[test]
+    #[ignore = "real api + full dsh stack; run explicitly with DSH_CHECKOUT/DSH_E2E_API_KEY/DSH_GATEWAY_BIN"]
+    fn e2e_prepare_via_local_proxy() {
+        let api_key = std::env::var("DSH_E2E_API_KEY").expect("set DSH_E2E_API_KEY");
+        let gateway_bin = std::env::var("DSH_GATEWAY_BIN").expect("set DSH_GATEWAY_BIN");
+        std::env::set_var("DSH_GATEWAY_BIN", gateway_bin);
+        let input = ChapterPreparationInput {
+            novel_id: std::env::var("DSH_E2E_NOVEL_ID")
+                .unwrap_or_else(|_| "fed8183e-f40f-4b68-8291-fe0f1a4c82b2".to_string()),
+            chapter_id: std::env::var("DSH_E2E_CHAPTER_ID")
+                .unwrap_or_else(|_| "bbf1d4e6-df6d-470f-b8ea-ba70b71ae67b".to_string()),
+            baseline_revisions: PROPOSAL_SOURCES
+                .iter()
+                .map(|source| ChapterBaselineRevision {
+                    source: source.to_string(),
+                    revision: 1,
+                })
+                .collect(),
+        };
+        let options = DshPrepareOptions {
+            api_key,
+            base_url: None,
+            model: Some("deepseek-v4-flash".to_string()),
+        };
+        let proposal = prepare(input, options).expect("prepare e2e failed");
+        assert_eq!(proposal.schema_version, 1);
+        assert_eq!(proposal.planner, "dsh_spike_v0");
+        assert!(!proposal.chapter_goals.is_empty());
+        assert!(proposal.metrics.prompt_tokens.unwrap_or(0) > 0);
+        assert!(proposal.metrics.tool_call_count.unwrap_or(0) > 0);
+    }
 }
