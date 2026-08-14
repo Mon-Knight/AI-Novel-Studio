@@ -132,10 +132,21 @@ export function DshPreparationCard({
   hook = useDshPreparation,
 }: DshPreparationCardProps) {
   const preparation = hook(novelId, chapterId);
-  const { proposal, planner, running, error, elapsedMs, run } = preparation;
+  const {
+    proposal,
+    planner,
+    running,
+    error,
+    elapsedMs,
+    revisions,
+    revisionsLoading,
+    revisionsError,
+    run,
+  } = preparation;
   const dshModel =
     modelName && modelName.toLowerCase().includes('deepseek') ? modelName : undefined;
-  const dshDisabled = running || !novelId || !chapterId || !apiKey;
+  const revisionsReady = !revisionsLoading && revisions !== null;
+  const dshDisabled = running || !novelId || !chapterId || !apiKey || !revisionsReady;
 
   return (
     <section
@@ -163,7 +174,7 @@ export function DshPreparationCard({
           className="btn btn-secondary btn-sm"
           type="button"
           data-testid="dsh-run-current"
-          disabled={running || !novelId || !chapterId}
+          disabled={running || !novelId || !chapterId || !revisionsReady}
           onClick={() => void run('current')}
         >
           {planner === 'current' && running ? '映射中…' : '当前 Planner（零成本）'}
@@ -179,6 +190,25 @@ export function DshPreparationCard({
         </button>
       </div>
 
+      {revisionsLoading && (
+        <div className="agent-plan-card__notice" data-testid="dsh-revisions-loading">
+          正在加载基线修订号（六来源）…
+        </div>
+      )}
+      {revisionsError && (
+        <div className="agent-plan-card__notice is-warning" data-testid="dsh-revisions-error">
+          {revisionsError}
+        </div>
+      )}
+      {revisionsReady && (
+        <div
+          className="agent-plan-card__notice"
+          style={{ fontSize: 11 }}
+          data-testid="dsh-revisions-ready"
+        >
+          基线修订号已加载：{revisions?.map((item) => item.source + '=' + item.revision).join('，')}
+        </div>
+      )}
       {!apiKey && (
         <div className="agent-plan-card__notice is-warning" data-testid="dsh-no-key">
           未配置 API Key，DSH 大脑不可用；请先在设置中心配置 DeepSeek Provider。

@@ -140,6 +140,15 @@ fn max_updated_at(connection: &Connection, table: &str, column: &str, param: &st
         .flatten()
 }
 
+fn max_created_at(connection: &Connection, table: &str, column: &str, param: &str) -> Option<String> {
+    // For tables without an updated_at column (e.g. character_states).
+    let sql = format!("SELECT MAX(created_at) FROM {} WHERE {} = ?1", table, column);
+    connection
+        .query_row(&sql, params![param], |row| row.get::<_, Option<String>>(0))
+        .ok()
+        .flatten()
+}
+
 fn chapter_order(connection: &Connection, chapter_id: &str) -> Result<i64, String> {
     connection
         .query_row(
@@ -338,7 +347,7 @@ fn get_chapter_context(connection: &Connection, arguments: &Value) -> Result<Val
     let engineering_state = connection
         .query_row(
             "SELECT active_version, status, chapter_card_json, scene_plan_json, generation_constraints_json
-             FROM chapter_engineering_states WHERE chapter_id = ?1 AND active_version = 1 LIMIT 1",
+             FROM chapter_engineering_states WHERE chapter_id = ?1 AND status = 'active' LIMIT 1",
             params![chapter_id],
             |row| {
                 Ok(json!({
@@ -752,7 +761,7 @@ fn get_character_states(connection: &Connection, arguments: &Value) -> Result<Va
         "toolVersion": TOOL_VERSION,
         "revisions": {
             "characters": max_updated_at(connection, "characters", "novel_id", &novel_id),
-            "character_states": max_updated_at(connection, "character_states", "novel_id", &novel_id),
+            "character_states": max_created_at(connection, "character_states", "novel_id", &novel_id),
             "chapter_characters": max_updated_at(connection, "chapter_characters", "chapter_id", &chapter_id)
         },
         "data": {

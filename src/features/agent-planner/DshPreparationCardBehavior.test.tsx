@@ -5,7 +5,10 @@ import { after, afterEach, test } from 'node:test';
 // @ts-expect-error jsdom has no bundled declarations; this import is test-only.
 import { JSDOM } from 'jsdom';
 import React from 'react';
-import type { ChapterPreparationProposal } from '../../types/chapterPreparation';
+import type {
+  ChapterBaselineRevision,
+  ChapterPreparationProposal,
+} from '../../types/chapterPreparation';
 import { DshPreparationCard } from './DshPreparationCard';
 import type { DshPreparationMode } from './useDshPreparation';
 
@@ -30,7 +33,7 @@ const proposal: ChapterPreparationProposal = {
   planner: 'dsh_spike_v0',
   targetChapter: { novelId: 'nov-a', chapterId: 'ch-a1' },
   baselineRevisions: [],
-  retrievedEvidence: [{ source: 'outline', revision: 0, summary: '已读大纲' }],
+  retrievedEvidence: [{ source: 'outline', revision: 7, summary: '已读大纲' }],
   chapterGoals: ['推进主线'],
   scenePlan: [{ title: '场景一', purpose: '揭示线索' }],
   characterConstraints: [{ characterId: 'char-1', constraint: '不登场' }],
@@ -54,16 +57,40 @@ interface FakeHookState {
   running: boolean;
   error: string;
   elapsedMs: number | null;
+  revisions: ChapterBaselineRevision[] | null;
+  revisionsLoading: boolean;
+  revisionsError: string;
   runCalls: { mode: DshPreparationMode; options?: { apiKey?: string; model?: string } }[];
 }
 
-function renderWithHook(state: FakeHookState) {
+function baseHookState(overrides: Partial<FakeHookState> = {}): FakeHookState {
+  return {
+    proposal: null,
+    planner: 'current',
+    running: false,
+    error: '',
+    elapsedMs: null,
+    revisions: [
+      { source: 'outline', revision: 7 },
+      { source: 'chapter_context', revision: 3 },
+    ],
+    revisionsLoading: false,
+    revisionsError: '',
+    runCalls: [],
+    ...overrides,
+  };
+}
+
+function renderWithHook(state: FakeHookState, apiKey: string | undefined = 'sk-test') {
   const hook = () => ({
     proposal: state.proposal,
     planner: state.planner,
     running: state.running,
     error: state.error,
     elapsedMs: state.elapsedMs,
+    revisions: state.revisions,
+    revisionsLoading: state.revisionsLoading,
+    revisionsError: state.revisionsError,
     run: (mode: DshPreparationMode, options?: { apiKey?: string; model?: string }) => {
       state.runCalls.push({ mode, options });
       return Promise.resolve();
@@ -73,7 +100,7 @@ function renderWithHook(state: FakeHookState) {
     React.createElement(DshPreparationCard, {
       novelId: 'nov-a',
       chapterId: 'ch-a1',
-      apiKey: 'sk-test',
+      apiKey,
       modelName: 'deepseek-v4-flash',
       hook,
     }),
@@ -81,43 +108,27 @@ function renderWithHook(state: FakeHookState) {
 }
 
 test('无 apiKey 时禁用 DSH 按钮并提示', () => {
-  const state: FakeHookState = {
-    proposal: null,
-    planner: 'current',
-    running: false,
-    error: '',
-    elapsedMs: null,
-    runCalls: [],
-  };
-  render(
-    React.createElement(DshPreparationCard, {
-      novelId: 'nov-a',
-      chapterId: 'ch-a1',
-      apiKey: undefined,
-      hook: () => ({
-        proposal: state.proposal,
-        planner: state.planner,
-        running: state.running,
-        error: state.error,
-        elapsedMs: state.elapsedMs,
-        run: () => Promise.resolve(),
-      }),
-    }),
-  );
+  renderWithHook(baseHookState(), '');
   const dshButton = screen.getByTestId('dsh-run-dsh');
   assert.equal((dshButton as HTMLButtonElement).disabled, true);
   assert.ok(screen.getByTestId('dsh-no-key'));
 });
 
+test('修订号未就绪时禁用两个按钮并展示加载态', () => {
+  renderWithHook(baseHookState({ revisions: null, revisionsLoading: true }));
+  assert.equal((screen.getByTestId('dsh-run-dsh') as HTMLButtonElement).disabled, true);
+  assert.equal((screen.getByTestId('dsh-run-current') as HTMLButtonElement).disabled, true);
+  assert.ok(screen.getByTestId('dsh-revisions-loading'));
+});
+
+test('修订号就绪后展示六来源快照', () => {
+  renderWithHook(baseHookState());
+  const ready = screen.getByTestId('dsh-revisions-ready');
+  assert.ok(ready.textContent?.includes('outline=7'));
+});
+
 test('点击 DSH 按钮携带 apiKey 与 deepseek 模型', () => {
-  const state: FakeHookState = {
-    proposal: null,
-    planner: 'current',
-    running: false,
-    error: '',
-    elapsedMs: null,
-    runCalls: [],
-  };
+  const state = baseHookState();
   renderWithHook(state);
   fireEvent.click(screen.getByTestId('dsh-run-dsh'));
   assert.equal(state.runCalls.length, 1);
@@ -127,14 +138,7 @@ test('点击 DSH 按钮携带 apiKey 与 deepseek 模型', () => {
 });
 
 test('点击当前 Planner 按钮走确定性映射', () => {
-  const state: FakeHookState = {
-    proposal: null,
-    planner: 'dsh',
-    running: false,
-    error: '',
-    elapsedMs: null,
-    runCalls: [],
-  };
+  const state = baseHookState({ planner: 'dsh' });
   renderWithHook(state);
   fireEvent.click(screen.getByTestId('dsh-run-current'));
   assert.equal(state.runCalls[0].mode, 'current');
@@ -142,14 +146,7 @@ test('点击当前 Planner 按钮走确定性映射', () => {
 });
 
 test('提案展示归一标记与度量', () => {
-  const state: FakeHookState = {
-    proposal,
-    planner: 'dsh',
-    running: false,
-    error: '',
-    elapsedMs: null,
-    runCalls: [],
-  };
+  const state = baseHookState({ proposal, planner: 'dsh' });
   renderWithHook(state);
   assert.ok(screen.getByTestId('dsh-proposal'));
   const mark = screen.getByTestId('dsh-coercion-mark');
@@ -161,14 +158,7 @@ test('提案展示归一标记与度量', () => {
 });
 
 test('错误信息展示', () => {
-  const state: FakeHookState = {
-    proposal: null,
-    planner: 'dsh',
-    running: false,
-    error: 'DSH 提案生成失败',
-    elapsedMs: null,
-    runCalls: [],
-  };
+  const state = baseHookState({ error: 'DSH 提案生成失败' });
   renderWithHook(state);
   assert.equal(screen.getByTestId('dsh-error').textContent, 'DSH 提案生成失败');
 });

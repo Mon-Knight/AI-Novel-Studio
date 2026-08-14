@@ -17,7 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::async_runtime;
 
-use super::config::{checkout_from_env, cordis_yml};
+use super::config::{cordis_yml, runtime_root};
 use super::launcher::{DshLaunchConfig, DshRuntimeLauncher, NodeDshRuntime};
 use super::models::{ChapterPreparationInput, ChapterPreparationProposal};
 use super::proposal_validator::{self, ValidationReport};
@@ -182,17 +182,17 @@ fn prepare(
         return Err("apiKey 不能为空（从设置中的 DeepSeek Provider 读取）".to_string());
     }
     let _node_version = NodeDshRuntime::check_node()?;
-    let checkout = checkout_from_env().ok_or_else(|| {
-        "DSH_CHECKOUT 未设置或不存在（需要已构建的 DSH harness checkout，或设 DSH_RUNTIME_BIN）".to_string()
+    let root = runtime_root().ok_or_else(|| {
+        "未找到 DSH 运行时载体：请设置 DSH_RUNTIME_ROOT / DSH_CHECKOUT，或在应用目录放置 dsh-runtime/ 载荷（用 scripts/dsh/build-runtime-payload.mjs 构建）".to_string()
     })?;
-    let runtime_bin = NodeDshRuntime::runtime_bin(&checkout)?;
+    let runtime_bin = NodeDshRuntime::runtime_bin(&root)?;
     let gateway_bin = resolve_gateway_bin()?;
     let db_path = crate::db::get_database_path().to_string_lossy().to_string();
 
     let work = std::env::temp_dir().join(format!("dsh-v310-{}", std::process::id()));
     std::fs::create_dir_all(&work).map_err(|error| format!("工作目录创建失败: {}", error))?;
     let cordis_path = work.join("cordis.yml");
-    std::fs::write(&cordis_path, cordis_yml(&checkout, &gateway_bin, &db_path))
+    std::fs::write(&cordis_path, cordis_yml(&root, &gateway_bin, &db_path))
         .map_err(|error| format!("cordis 渲染失败: {}", error))?;
 
     // Model gateway (option A): explicit baseUrl wins; otherwise spawn the local
@@ -436,7 +436,7 @@ mod e2e_tests {
     use super::*;
 
     #[test]
-    #[ignore = "real api + full dsh stack; run explicitly with DSH_CHECKOUT/DSH_E2E_API_KEY/DSH_GATEWAY_BIN"]
+    #[ignore = "real api + full dsh stack; run explicitly with DSH_RUNTIME_ROOT/DSH_E2E_API_KEY/DSH_GATEWAY_BIN"]
     fn e2e_prepare_via_local_proxy() {
         let api_key = std::env::var("DSH_E2E_API_KEY").expect("set DSH_E2E_API_KEY");
         let gateway_bin = std::env::var("DSH_GATEWAY_BIN").expect("set DSH_GATEWAY_BIN");

@@ -32,6 +32,39 @@ pub fn checkout_from_env() -> Option<String> {
     checkout_if_dir(std::env::var("DSH_CHECKOUT").ok())
 }
 
+/// Resolves the runtime root (the directory whose layout mirrors the harness
+/// checkout: packages/.../lib plus bin.js). Resolution order:
+/// 1. `DSH_RUNTIME_ROOT` env (explicit carrier: checkout or payload);
+/// 2. exe-adjacent `dsh-runtime/` payload (also `resources/dsh-runtime` for
+///    bundled Windows installs); the payload is only accepted when COMPLETE
+///    (bin.js + server entry + VERSION_MATRIX.json + .pnpm store), so a partial
+///    build can never shadow a usable DSH_CHECKOUT;
+/// 3. `DSH_CHECKOUT` env (built harness checkout, dev fallback).
+pub fn runtime_root() -> Option<String> {
+    if let Some(root) = checkout_if_dir(std::env::var("DSH_RUNTIME_ROOT").ok()) {
+        return Some(root);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for candidate in [dir.join("dsh-runtime"), dir.join("resources").join("dsh-runtime")] {
+                if payload_complete(&candidate) {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    checkout_from_env()
+}
+
+/// A payload counts as usable only when every runtime-critical piece exists.
+fn payload_complete(root: &std::path::Path) -> bool {
+    root.join("packages/examples/jsonrpc-demo/lib/bin.js").is_file()
+        && root.join("packages/sdk/server/lib/index.js").is_file()
+        && root.join("packages/sdk/protocol/lib/index.js").is_file()
+        && root.join("VERSION_MATRIX.json").is_file()
+        && root.join("node_modules/.pnpm").is_dir()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
