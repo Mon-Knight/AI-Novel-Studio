@@ -65,11 +65,13 @@ function defaultDependencies(): BaselineRevisionDependencies {
       return (preferred as { updatedAt?: string } | undefined)?.updatedAt;
     },
     latestChapterStateUpdatedAt: async (chapterId) => {
+      // character_states 表只有 created_at（无 updated_at），取本章最新一条。
       const states = await characterStateService.getByChapterId(chapterId);
       return states[0]?.createdAt;
     },
     latestMemoryUpdatedAt: async (novelId) => {
-      const page = await memoryService.listDocuments({ novelId, limit: 50 });
+      // 只取 active 文档：invalidated 的 updated_at 不算"最新"。
+      const page = await memoryService.listDocuments({ novelId, status: 'active', limit: 50 });
       const items = (page.items ?? []) as { updatedAt?: string }[];
       const latestMs = Math.max(0, ...items.map((item) => toUnixMs(item.updatedAt)));
       return latestMs > 0 ? new Date(latestMs).toISOString() : undefined;
