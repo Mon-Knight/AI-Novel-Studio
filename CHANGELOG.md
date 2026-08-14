@@ -1,5 +1,37 @@
 # AI Novel Studio - CHANGELOG
 
+
+## v3.1.0 (2026-08-14) - DSH 进程外大脑接入
+
+> 当前条目包含尚未提交和发布的工作树增量；最终发布状态以完整门禁、提交和版本标签为准。
+
+### 新增
+
+- 新增 DSH（DeepSeek Harness）进程外大脑接入：DSH 只经只读 MCP 工具产出可验证的 `ChapterPreparationProposal`，与现有章节准备 Planner 双源并行；事实解释、策略否决、预算、执行、事务与最终采用权全部留在 ANS（设计文档 `docs/architecture/dsh-feasibility-spike.md`，可行性证据 `reports/dsh-spike/spike-report.md`：12 案例六项门槛全过、盲评胜率 100%）。
+- 新增 Rust DSH Supervisor（`src-tauri/src/services/dsh/`）：stdio JSON-RPC 帧编解码、initialize/prompt/shutdown、崩溃检测、取消=重启语义，子进程树纳入 Windows Job Object（`KILL_ON_JOB_CLOSE`，含 MCP 网关后代）；会话遥测（工具调用、文本/推理、token usage）随事件流记录。
+- 新增 `novel-domain-gateway`（workspace 成员 crate）：MCP stdio 只读网关，暴露 `get_metadata / get_chapter_context / search_memory / get_character_states` 四个只读工具；`SQLITE_OPEN_READONLY`、参数校验、camel/snake 双名兼容、2 MiB 输出上限，输入与输出均拒绝疑似凭据（镜像 `ai_fact_security` 规则并带漂移测试）。
+- 新增 Rust 权威 Proposal Validator：schemaVersion/顶层键/目标章节/baseline 回显/revision 漂移/写动作拒绝全量校验；planner 枚举支持唯一近邻归一（Levenshtein ≤2，写入 `metrics.plannerCoerced`，绝不静默）。
+- 新增 `dsh_prepare_chapter` 命令：驱动 Supervisor 完成 initialize→MCP settle→规划回合，解析失败或校验失败时执行最多 3 次修复回合（回喂校验错误并逐字符拼写枚举），adapter 注入运行时 metrics 后返回类型化提案。
+- 新增本地 OpenAI 兼容模型网关代理（`scripts/dsh/model-proxy.mjs`）：流式透传 + usage 记账日志（预算网关挂钩点）；上游 Key 只存在于代理进程，DSH 侧使用隔离的下游假 Key；命令自动分配空闲端口并管理代理生命周期。
+- 新增 TS 端口：`src/types/chapterPreparation.ts` 类型层与 `ChapterPreparationPlannerPort`；`CurrentPlannerAdapter`（编排现有 readiness 计划并确定性映射，零模型成本）与 `DshPlannerAdapter`（invoke 薄 facade，浏览器模式明确不可用）；TS 镜像校验器与 13 项单测。
+- 写作工作台 AI 生成面板新增“章节准备提案（DSH 融合实验）”卡片：双源切换（当前 Planner 零成本 / DSH 真实 API）、运行计时、提案摘要（目标/场景/人物约束/风险分级/未决问题/建议动作）、度量展示与枚举归一标记；提案不自动采用。
+- 新增章节准备规划 persona 提示词（`prompts/dsh_chapter_preparation.md`）与生产 cordis 组合模板（`scripts/dsh/cordis-template.yml`，六插件、stdout 纯净、零 Key 落盘）。
+
+### 安全与一致性
+
+- API Key 全程零落盘：只经环境变量注入 DSH 子进程；启用本地代理时上游 Key 仅存在于代理进程，DSH 进程拿到的是隔离假 Key。
+- 提案校验失败、越权写动作、revision 漂移、超长文档一律整体拒绝；修复回合成本如实计入 metrics 与代理记账日志。
+- 网关以只读模式打开小说库，不执行迁移/恢复/写入；DSH 会话（推理轨迹）与小说事实分离，可整目录删除重建。
+- Supervisor 崩溃/取消通过 Job Object 整树回收；测试与端到端运行后零残留进程、代理端口释放。
+
+### 工程质量
+
+- `cargo test dsh::` 13 项全绿（Supervisor 生命周期/强杀重启续会话、Validator 全量规则含 spike 失败样本归一、网关漂移与凭据检测）；`cargo check` 零警告。
+- 真实 API 端到端（`deepseek-v4-flash`）：Rust 命令 → DSH 运行时 → MCP 网关（真实开发库只读）→ 本地代理 → DeepSeek → 校验通过的提案，单案例约 20.6k tokens，断言全过（`#[ignore]` e2e 测试，显式运行）。
+- TS 侧新增 18 项单测（镜像校验器 9 + 确定性映射 3 + 卡片行为 5 + 既有配套）；`tsc` 零错误、`eslint` 零告警、`npm run build` 通过。
+- 统一版本为 `3.1.0`（npm、Tauri、Cargo、应用常量、路线图与发布文档）。
+
+
 ## v3.0.0 (2026-07-28) - Multi-Agent 自主创作闭环
 
 > 当前条目包含尚未提交和发布的工作树增量；最终发布状态以完整门禁、提交和版本标签为准。

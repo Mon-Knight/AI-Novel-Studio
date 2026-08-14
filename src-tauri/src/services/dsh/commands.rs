@@ -230,7 +230,17 @@ fn prepare(
     drop(runtime);
     if let Some(guard) = proxy_guard {
         let tail = guard.log_tail();
-        eprintln!("[dsh] model proxy accounting log:\n{}", tail);
+        crate::errors::log_workspace_event(crate::errors::WorkspaceLogEvent {
+            level: "info",
+            event: "dsh_model_proxy_accounting",
+            trace_id: None,
+            operation_id: None,
+            novel_id: Some(input.novel_id.as_str()),
+            chapter_id: Some(input.chapter_id.as_str()),
+            draft_id: None,
+            error_code: None,
+            metadata: Some(serde_json::json!({ "logTail": tail })),
+        });
     }
     result
 }

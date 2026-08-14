@@ -25,7 +25,7 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v3.0.0**
+**当前版本：v3.1.0**
 
 **阶段：Multi-Agent 自主创作闭环**
 
@@ -99,6 +99,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 - **完整项目备份与恢复**：桌面 SQLite 导出带 `schemaVersion` 的完整项目 JSON；导入为新作品，不覆盖现有作品。
 - **设定库 AI 推演**：生成角色、势力、地点、规则候选，用户确认后才写入正式资产。
 - **AI 设置**：Mock 模式、API Key 本地管理、模型参数配置。
+- **DSH 进程外大脑（v3.1.0 实验）**：DeepSeek Harness 经只读 MCP 工具产出可验证的章节准备提案，与现有 Planner 双源并行；事实解释、预算、执行、事务与最终采用权全部留在本应用，提案不自动采用。含 Rust Supervisor（Windows Job Object 整树清理）、只读 novel-domain-gateway、权威 Proposal Validator（枚举归一不静默）、本地模型网关代理（usage 记账 + 上游 Key 隔离）与工作台双源提案卡片。
 - **真实桌面自动化**：在 Windows Tauri 窗口中验证 React、Rust IPC、SQLite 事务、Mock AI、网络阻断与进程清理。
 
 ### 百万字作品的生成、写入与二次编辑

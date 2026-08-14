@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v3.0.0（Multi-Agent 自主创作闭环）
+> 当前版本：v3.1.0（Multi-Agent 自主创作闭环）
 
 ---
 

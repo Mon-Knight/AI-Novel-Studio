@@ -188,7 +188,17 @@ fn scenario_a_normal_lifecycle() {
     let checkout = match checkout() {
         Some(path) => path,
         None => {
-            eprintln!("SKIP: DSH_CHECKOUT unset or checkout not built");
+            crate::errors::log_workspace_event(crate::errors::WorkspaceLogEvent {
+                level: "warn",
+                event: "dsh_test_skipped",
+                trace_id: None,
+                operation_id: None,
+                novel_id: None,
+                chapter_id: None,
+                draft_id: None,
+                error_code: None,
+                metadata: Some(serde_json::json!({ "reason": "DSH_CHECKOUT unset or checkout not built" })),
+            });
             return;
         }
     };
@@ -221,7 +231,17 @@ fn scenario_c_midstream_kill_restart_resume() {
     let checkout = match checkout() {
         Some(path) => path,
         None => {
-            eprintln!("SKIP: DSH_CHECKOUT unset or checkout not built");
+            crate::errors::log_workspace_event(crate::errors::WorkspaceLogEvent {
+                level: "warn",
+                event: "dsh_test_skipped",
+                trace_id: None,
+                operation_id: None,
+                novel_id: None,
+                chapter_id: None,
+                draft_id: None,
+                error_code: None,
+                metadata: Some(serde_json::json!({ "reason": "DSH_CHECKOUT unset or checkout not built" })),
+            });
             return;
         }
     };
