@@ -96,7 +96,16 @@ function copyTree(fromDir, toDir) {
         // Junction stores the absolute payload-local path (not relocatable).
         symlinkSync(path.join(payloadRoot, inside), to, 'junction');
       } else {
-        symlinkSync(path.resolve(toDir, target), to, 'junction');
+        // Relative targets resolve against the ORIGINAL link location (checkout),
+        // then remap into the payload — same semantics as the absolute branch.
+        const resolved = path.resolve(fromDir, target);
+        const inside = remapInside(resolved);
+        if (inside === null) {
+          console.error('relative link target escapes the checkout: ' + from + ' -> ' + target);
+          process.exit(2);
+        }
+        noteRoot(inside);
+        symlinkSync(path.join(payloadRoot, inside), to, 'junction');
       }
       relinked += 1;
     } else if (entry.isDirectory()) {
@@ -171,7 +180,14 @@ for (const entry of readdirSync(checkoutNodeModules, { withFileTypes: true })) {
     continue;
   }
   if (!path.isAbsolute(target)) {
-    symlinkSync(path.resolve(payloadNodeModules, target), to, 'junction');
+    const resolved = path.resolve(checkoutNodeModules, target);
+    const inside = remapInside(resolved);
+    if (inside === null) {
+      console.error('relative link target escapes the checkout: ' + from + ' -> ' + target);
+      process.exit(2);
+    }
+    noteRoot(inside);
+    symlinkSync(path.join(payloadRoot, inside), to, 'junction');
     relinked += 1;
     continue;
   }

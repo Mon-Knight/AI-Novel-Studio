@@ -11,9 +11,25 @@
 /// `{GATEWAY_DB}` are replaced at render time.
 const TEMPLATE: &str = include_str!("../../../../scripts/dsh/cordis-template.yml");
 
-/// Renders the cordis.yml for the given paths (backslashes normalized).
+/// Percent-encodes a path for use inside a file:// URL: unreserved chars,
+/// ':' and '/' stay literal; everything else (spaces, non-ASCII, %, #, ?) is
+/// encoded so Chinese user names or exotic install paths yield legal URLs.
+fn url_encode_path(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
+                encoded.push(*byte as char)
+            }
+            _ => encoded.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    encoded
+}
+
+/// Renders the cordis.yml for the given paths (backslashes normalized, URL-encoded).
 pub fn cordis_yml(checkout: &str, gateway_bin: &str, gateway_db: &str) -> String {
-    let checkout = checkout.replace(' ', "%20").replace('\\', "/");
+    let checkout = url_encode_path(&checkout.replace('\\', "/"));
     let gateway_bin = gateway_bin.replace('\\', "/");
     let gateway_db = gateway_db.replace('\\', "/");
     TEMPLATE
@@ -78,6 +94,13 @@ mod tests {
         assert!(!yaml.contains("{CHECKOUT}"));
         assert!(!yaml.contains("{GATEWAY_BIN}"));
         assert!(!yaml.contains("{GATEWAY_DB}"));
+    }
+
+    #[test]
+    fn encodes_non_ascii_and_special_chars() {
+        let yaml = cordis_yml("F:\\作品 目录#1", "g", "d");
+        assert!(yaml.contains("file:///F:/%E4%BD%9C%E5%93%81%20%E7%9B%AE%E5%BD%95%231"));
+        assert!(!yaml.contains("作品"));
     }
 
     #[test]

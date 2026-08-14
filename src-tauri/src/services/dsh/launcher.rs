@@ -75,10 +75,10 @@ impl NodeDshRuntime {
                 return Ok(bin);
             }
         }
-        let bin = format!(
-            "{}/packages/examples/jsonrpc-demo/lib/bin.js",
-            checkout.trim_end_matches(['/', '\\'])
-        );
+        let bin = std::path::Path::new(checkout)
+            .join("packages/examples/jsonrpc-demo/lib/bin.js")
+            .to_string_lossy()
+            .to_string();
         if std::path::Path::new(&bin).is_file() {
             Ok(bin)
         } else {
