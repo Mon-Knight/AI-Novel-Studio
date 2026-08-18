@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { generateId } from '../../../services/database/db';
 import {
   createDefaultChapterCard,
   createDefaultGenerationConstraints,
@@ -9,6 +10,7 @@ import type {
   ChapterCard,
   GenerationConstraints,
   QualityRules,
+  SceneBeat,
   ScenePlanItem,
 } from '../../../types/chapterEngineering';
 import { createEmptyScene, renumberScenes } from './chapterEngineeringPanelSupport';
@@ -59,6 +61,27 @@ export function useChapterEngineeringEditorState() {
     setDirty(true);
   };
 
+  const updateSceneBeats = (id: string, values: string[]) => {
+    setScenePlan((previous) =>
+      previous.map((item) => {
+        if (item.id !== id) return item;
+        const existing = item.beats ?? [];
+        const beats: SceneBeat[] = values.map((text, index) => ({
+          id: existing[index]?.id ?? generateId(),
+          order: index + 1,
+          text,
+          required: existing[index]?.required !== false,
+          ...(existing[index]?.characterIds?.length
+            ? { characterIds: existing[index].characterIds }
+            : {}),
+          ...(existing[index]?.stateChange ? { stateChange: existing[index].stateChange } : {}),
+        }));
+        return { ...item, beats };
+      }),
+    );
+    setDirty(true);
+  };
+
   const addScene = () => {
     setScenePlan((previous) => [...previous, createEmptyScene(previous.length + 1)]);
     setDirty(true);
@@ -85,6 +108,7 @@ export function useChapterEngineeringEditorState() {
     updateWordRange,
     updateQuality,
     updateScene,
+    updateSceneBeats,
     addScene,
     removeScene,
   };

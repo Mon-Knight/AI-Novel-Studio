@@ -4,7 +4,6 @@ import AppShell from './components/layout/AppShell';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import LoadingModal from './components/common/LoadingModal';
 import { useGlobalLoadingModal } from './lib/runWithLoading';
-import HomePage from './pages/Home/HomePage';
 import E2eDialogHost from './components/common/E2eDialogHost';
 import StartupRecoveryDialog, {
   type StartupRecoveryState,
@@ -14,6 +13,7 @@ import StartupContextMigrationDialog, {
 } from './components/common/StartupContextMigrationDialog';
 
 const NovelDetailPage = lazy(() => import('./pages/NovelDetail/NovelDetailPage'));
+const HomePage = lazy(() => import('./pages/Home/HomePage'));
 const WritingWorkspacePage = lazy(() => import('./pages/WritingWorkspace/WritingWorkspacePage'));
 const StyleProfilesPage = lazy(() => import('./pages/StyleProfiles/StyleProfilesPage'));
 const ReferenceLibraryPage = lazy(() => import('./pages/ReferenceLibrary/ReferenceLibraryPage'));

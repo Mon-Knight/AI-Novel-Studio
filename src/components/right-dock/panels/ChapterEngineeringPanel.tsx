@@ -20,6 +20,7 @@ import {
 } from './chapterEngineeringPanelSupport';
 import { ChapterEngineeringPanelView } from './ChapterEngineeringPanelView';
 import { useChapterEngineeringEditorState } from './useChapterEngineeringEditorState';
+import { useChapterScenePlanCandidate } from './useChapterScenePlanCandidate';
 import { buildEngineeringLoopItems } from './chapterEngineeringLoop';
 
 interface ChapterEngineeringPanelProps {
@@ -62,6 +63,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     updateWordRange,
     updateQuality,
     updateScene,
+    updateSceneBeats,
     addScene,
     removeScene,
   } = useChapterEngineeringEditorState();
@@ -126,7 +128,9 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     ])
       .then(async ([nextBundle, snapshot, jobs, quality]) => {
         if (!alive) return;
-        const source = nextBundle.latestDraft ?? nextBundle.activeState;
+        const source = nextBundle.hasUnappliedDraft
+          ? nextBundle.latestDraft
+          : (nextBundle.activeState ?? nextBundle.latestDraft);
         setBundle(nextBundle);
         setLatestSnapshot(snapshot);
         setQualityResult(quality);
@@ -181,10 +185,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     () => latestStepByName(jobSteps, 'patch_generation'),
     [jobSteps],
   );
-  const patchApplyStep = useMemo(
-    () => latestStepByName(jobSteps, 'patch_apply'),
-    [jobSteps],
-  );
+  const patchApplyStep = useMemo(() => latestStepByName(jobSteps, 'patch_apply'), [jobSteps]);
   const hasActiveJob = isActiveGenerationJob(latestJob);
   const visibleQualityItems = useMemo(
     () => qualityResult.items.filter((item) => item.status === 'pending').slice(0, 6),
@@ -202,20 +203,12 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     [bundle, latestJob, latestSnapshot, patchApplyStep, qualityResult],
   );
 
-  const persistDraft = async (): Promise<ChapterEngineeringState | null> => {
+  const persistDraft = async (scenePlanOverride = scenePlan): Promise<ChapterEngineeringState | null> => {
     if (!chapter?.id || !effectiveNovelId) {
       setError('请先选择章节');
       return null;
     }
-    const saved = await chapterEngineeringService.saveDraft({
-      novelId: effectiveNovelId,
-      volumeId: chapter.volumeId,
-      chapterId: chapter.id,
-      chapterCard: card,
-      scenePlan,
-      generationConstraints: constraints,
-      qualityRules,
-    }, chapter);
+    const saved = await chapterEngineeringService.saveDraft({ novelId: effectiveNovelId, volumeId: chapter.volumeId, chapterId: chapter.id, chapterCard: card, scenePlan: scenePlanOverride, generationConstraints: constraints, qualityRules }, chapter);
     const nextBundle = await chapterEngineeringService.getBundle(chapter.id, chapter);
     setBundle(nextBundle);
     setDirty(false);
@@ -243,7 +236,7 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     setError('');
     setMessage('正在保存并应用...');
     try {
-      const target = dirty ? await persistDraft() : (bundle?.latestDraft ?? bundle?.activeState ?? await persistDraft());
+      const target = dirty ? await persistDraft() : (bundle?.latestDraft ?? bundle?.activeState ?? (await persistDraft()));
       if (!target) return;
       const active = await chapterEngineeringService.activate(target.id, chapter.id, chapter);
       const nextBundle = await chapterEngineeringService.getBundle(chapter.id, chapter);
@@ -319,7 +312,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
           applyJobUpdate(job);
           setJobSteps(steps);
         }
-      });
+      },
+      );
       const steps = await generationJobService.getSteps(finalJob.id);
       if (jobRunEpochRef.current !== requestEpoch
         || liveNovelIdRef.current !== requestNovelId
@@ -384,7 +378,8 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
           applyJobUpdate(job);
           setJobSteps(steps);
         }
-      });
+      },
+      );
       const [steps, quality] = await Promise.all([
         generationJobService.getSteps(result.job.id),
         qualityCheckService.getChapterIssues(requestChapterId).catch(() => EMPTY_QUALITY_RESULT),
@@ -442,13 +437,9 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
     );
   };
 
-  if (!chapter) {
-    return (
-      <div className="engineering-empty">
-        请先在左侧目录树中选择一个章节。
-      </div>
-    );
-  }
+  const { scenePlanRunning, scenePlanCandidate, handleGenerateScenePlan, handleSaveScenePlanCandidate } = useChapterScenePlanCandidate({ chapter, effectiveNovelId, currentEditorContent, dirty, persistDraft, setActiveTab, setBundle, setScenePlan, setDirty, setBusy, setMessage, setError });
+
+  if (!chapter) return <div className="engineering-empty">请先在左侧目录树中选择一个章节。</div>;
 
   return (
     <ChapterEngineeringPanelView
@@ -477,13 +468,18 @@ function ChapterEngineeringPanel({ novelId, chapter, currentEditorContent, curre
       compiling={compiling}
       jobRunning={jobRunning}
       draftRunning={draftRunning}
+      scenePlanRunning={scenePlanRunning}
+      scenePlanCandidate={scenePlanCandidate}
       updateCard={updateCard}
       updateConstraints={updateConstraints}
       updateWordRange={updateWordRange}
       updateQuality={updateQuality}
       updateScene={updateScene}
+      updateSceneBeats={updateSceneBeats}
       addScene={addScene}
       removeScene={removeScene}
+      onGenerateScenePlan={handleGenerateScenePlan}
+      onSaveScenePlanCandidate={handleSaveScenePlanCandidate}
       toggleQualityCheck={toggleQualityCheck}
       handleCompileSnapshot={handleCompileSnapshot}
       handleRunDraftJob={handleRunDraftJob}

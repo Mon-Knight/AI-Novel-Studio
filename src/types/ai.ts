@@ -30,10 +30,30 @@ export interface AiSettings {
   dailyCostBudgetUsd?: number;
   /** Percentage at which the settings page reports a budget warning. */
   budgetWarningPercent?: number;
+  /** Optional task-specific local model used only for chapter prose generation. */
+  localChapterModel?: LocalChapterModelSettings;
   mockMode: boolean; // 兼容旧字段，从 runtimeMode 派生
   lastTestAt?: string;
   lastTestOk?: boolean;
   lastTestMessage?: string;
+}
+
+export interface LocalChapterModelSettings {
+  enabled: boolean;
+  providerId: string;
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+  timeoutSeconds: number;
+  contextTokens: number;
+  maxTokens: number;
+  temperature: number;
+  topP: number;
+  topK: number;
+  repeatPenalty: number;
+  minTokens?: number;
+  noRepeatNgramSize?: number;
+  seed?: number;
 }
 
 export interface AiConnectionTestResult {
@@ -55,6 +75,14 @@ export interface AiGenerateRequest {
   modelName?: string;
   temperature?: number;
   maxTokens?: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+  minTokens?: number;
+  noRepeatNgramSize?: number;
+  seed?: number;
+  /** Provider-supported thinking toggle for narrowly scoped governed tasks. */
+  thinkingMode?: 'enabled' | 'disabled';
   promptTemplateSource?: string;
   promptDebug?: ChapterPromptDebugInfo;
 }
@@ -129,6 +157,9 @@ export type AiTaskType =
   | 'character_generate'
   | 'event_suggest'
   | 'chapter_generate'
+  | 'chapter_beat_repair'
+  | 'chapter_scene_generate'
+  | 'chapter_scene_plan_generate'
   | 'chapter_rewrite'
   | 'chapter_polish'
   | 'quality_check'
@@ -192,6 +223,9 @@ export const AiTaskTypeLabels: Record<AiTaskType, string> = {
   character_generate: '角色生成',
   event_suggest: '事件推荐',
   chapter_generate: '章节生成',
+  chapter_beat_repair: '单 Beat 外部修稿',
+  chapter_scene_generate: '章节场景正文',
+  chapter_scene_plan_generate: 'Scene/Beat 规划候选',
   chapter_rewrite: '章节重写',
   chapter_polish: '章节润色',
   quality_check: '质量检查',

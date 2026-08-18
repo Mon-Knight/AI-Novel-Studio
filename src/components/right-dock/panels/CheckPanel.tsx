@@ -148,6 +148,7 @@ function CheckPanel({
     fixScopeValidation,
     fixError,
     sourceDraftId,
+    fixRoundUsed,
     lastFixRunId,
     setFixStage,
     setFixComparison,
@@ -454,6 +455,7 @@ function CheckPanel({
       fixStage={fixStage}
       fixProgress={fixProgress}
       fixError={fixError}
+      fixRoundUsed={fixRoundUsed}
       error={error}
       historyReports={historyReports}
       selectedReportId={selectedReportId}

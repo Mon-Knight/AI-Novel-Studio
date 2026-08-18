@@ -23,6 +23,11 @@ export interface CompileAiConstraintInput {
   model: string;
   temperature: number;
   maxTokens: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+  seed?: number;
+  thinkingMode?: 'enabled' | 'disabled';
   toolPolicy: AiToolPolicySnapshotV1;
 }
 
@@ -72,6 +77,37 @@ export async function compileAiConstraint(
   if (!Number.isInteger(input.maxTokens) || input.maxTokens < 1 || input.maxTokens > 1_000_000) {
     throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'maxTokens 无效。');
   }
+  if (
+    input.topP !== undefined &&
+    (!Number.isFinite(input.topP) || input.topP < 0 || input.topP > 1)
+  ) {
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'topP 必须位于 0～1。');
+  }
+  if (
+    input.topK !== undefined &&
+    (!Number.isInteger(input.topK) || input.topK < 0 || input.topK > 4096)
+  ) {
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'topK 必须是 0～4096 的整数。');
+  }
+  if (
+    input.repeatPenalty !== undefined &&
+    (!Number.isFinite(input.repeatPenalty) || input.repeatPenalty <= 0 || input.repeatPenalty > 3)
+  ) {
+    throw new AiCompilationError(
+      'AI_CONSTRAINT_POLICY_INVALID',
+      'repeatPenalty 必须大于 0 且不超过 3。',
+    );
+  }
+  if (input.seed !== undefined && !Number.isInteger(input.seed)) {
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'seed 必须是整数。');
+  }
+  if (
+    input.thinkingMode !== undefined &&
+    input.thinkingMode !== 'enabled' &&
+    input.thinkingMode !== 'disabled'
+  ) {
+    throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'thinkingMode 无效。');
+  }
   const promptTemplateBody = normalizeCompilationText(input.promptTemplateBody);
   if (!promptTemplateBody || unicodeLength(promptTemplateBody) > 100_000) {
     throw new AiCompilationError('AI_CONSTRAINT_POLICY_INVALID', 'Prompt 模板为空或超过长度限制。');
@@ -112,6 +148,11 @@ export async function compileAiConstraint(
       model,
       temperature: input.temperature,
       maxTokens: input.maxTokens,
+      ...(input.topP === undefined ? {} : { topP: input.topP }),
+      ...(input.topK === undefined ? {} : { topK: input.topK }),
+      ...(input.repeatPenalty === undefined ? {} : { repeatPenalty: input.repeatPenalty }),
+      ...(input.seed === undefined ? {} : { seed: input.seed }),
+      ...(input.thinkingMode === undefined ? {} : { thinkingMode: input.thinkingMode }),
     },
   };
 }

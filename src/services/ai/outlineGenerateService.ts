@@ -351,7 +351,7 @@ export const outlineGenerateService = {
         {
           title: 'AI 原始返回',
           outline: response.text.slice(0, 1000),
-          targetWordCount: 4000,
+          targetWordCount: 2500,
           rawText: response.text,
         },
       ];

@@ -16,12 +16,28 @@ import { safeJsonParse } from './jsonUtils';
 import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
 import { splitChapterText } from './chapterTextSegmentation';
 import { bindAiTaskCancellation } from './aiTaskCancellation';
+import { describeUnknownError } from '../../utils/errorMessage';
+
+export const QUALITY_CHECK_MIN_TIMEOUT_SECONDS = 300;
+
+export function qualityCheckThinkingModeForModel(modelName: string): 'disabled' | undefined {
+  return /^deepseek-v4-(?:flash|pro)(?:$|[-_.:])/i.test(modelName.trim()) ? 'disabled' : undefined;
+}
+
+export function withQualityCheckRequestSettings(
+  settings: ReturnType<typeof aiSettingsService.getSettings>,
+) {
+  return {
+    ...settings,
+    timeoutSeconds: Math.max(settings.timeoutSeconds ?? 0, QUALITY_CHECK_MIN_TIMEOUT_SECONDS),
+  };
+}
 
 export const qualityCheckAiService = {
   async runCheck(
     input: RunQualityCheckInput,
     aiOptions: AiGenerateOptions = {},
-  ): Promise<QualityCheckResult & { aiTaskId: string }> {
+  ): Promise<QualityCheckResult & { aiTaskId: string; model?: string }> {
     throwIfAiRequestCancelled(aiOptions.signal);
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId);
@@ -68,7 +84,7 @@ export const qualityCheckAiService = {
     const releaseCancellation = bindAiTaskCancellation(task.id, aiOptions);
 
     try {
-      const client = createAiClient(settings);
+      const client = createAiClient(withQualityCheckRequestSettings(settings));
       const results: Array<QualityCheckResult & { length: number }> = [];
       let tokenInput = 0;
       let tokenOutput = 0;
@@ -98,7 +114,13 @@ export const qualityCheckAiService = {
                 }
               : undefined,
         });
-        const response = await client.generate(request, aiOptions);
+        const response = await client.generate(
+          {
+            ...request,
+            thinkingMode: qualityCheckThinkingModeForModel(settings.modelName),
+          },
+          aiOptions,
+        );
         throwIfAiRequestCancelled(aiOptions.signal);
         const text = response.text || '';
         const parsed = safeJsonParse<QualityCheckResult>(text, {
@@ -146,15 +168,19 @@ export const qualityCheckAiService = {
         tokenTotal,
       });
 
-      return { ...parsed, aiTaskId: task.id };
+      return {
+        ...parsed,
+        aiTaskId: task.id,
+        model: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+      };
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '质量检查失败';
+      const msg = describeUnknownError(err, '质量检查失败');
       if (isAiRequestCancelled(err) || aiOptions.signal?.aborted) {
         await aiTaskService.markCancelled(task.id);
       } else {
         await aiTaskService.markFailed(task.id, msg);
       }
-      throw err;
+      throw err instanceof Error ? err : new Error(msg);
     } finally {
       releaseCancellation();
     }

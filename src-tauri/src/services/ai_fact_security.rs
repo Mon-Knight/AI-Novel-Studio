@@ -128,6 +128,8 @@ pub fn validate_provider_options(value: &Value) -> Result<(), AppError> {
         "model",
         "temperature",
         "topP",
+        "topK",
+        "repeatPenalty",
         "maxTokens",
         "responseFormat",
         "seed",
@@ -135,6 +137,7 @@ pub fn validate_provider_options(value: &Value) -> Result<(), AppError> {
         "frequencyPenalty",
         "presencePenalty",
         "reasoningEffort",
+        "thinkingMode",
     ];
     for (key, child) in map {
         if !ALLOWED.contains(&key.as_str()) || child.is_object() {

@@ -18,8 +18,16 @@ interface AutonomousSchedulerControlsProps {
 
 const MODES: Array<{ id: AutonomousAutomationMode; title: string; detail: string }> = [
   { id: 'draft_night', title: '夜间草稿', detail: '连续生成安全候选，全部保留给人工审阅。' },
-  { id: 'quality_gate', title: '质量门禁', detail: '六专家指标达标后自动采用，否则暂停复核。' },
-  { id: 'full_auto', title: '全自动', detail: '达标后采用正文并确认章节分析，持续推进上下文。' },
+  {
+    id: 'quality_gate',
+    title: '质量门禁',
+    detail: '达标后停在候选；在工作台确认采用后，调度队列自动继续。',
+  },
+  {
+    id: 'full_auto',
+    title: '全自动',
+    detail: '质量、预算与采用前复验通过后，自动采用正文并确认章节分析。',
+  },
 ];
 
 function minuteOfDay(value: string): number {

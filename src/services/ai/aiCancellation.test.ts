@@ -443,6 +443,51 @@ test('connection test reserves enough output budget for reasoning-compatible mod
   );
 });
 
+test('local scene request body carries llama.cpp sampling parameters', () => {
+  const body = realModule.buildOpenAiChatRequestBody(
+    {
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      apiKey: 'local-no-key-required',
+      modelName: 'qwen35-9b-novel-v3',
+      temperature: 0.7,
+      maxTokens: 1024,
+      topP: 0.8,
+      topK: 20,
+      repeatPenalty: 1.08,
+      seed: 7,
+    },
+    {
+      taskType: 'chapter_scene_generate',
+      messages: [{ role: 'user', content: 'scene smoke test' }],
+    },
+  );
+  assert.equal(body.model, 'qwen35-9b-novel-v3');
+  assert.equal(body.max_tokens, 1024);
+  assert.equal(body.top_p, 0.8);
+  assert.equal(body.top_k, 20);
+  assert.equal(body.repeat_penalty, 1.08);
+  assert.equal(body.seed, 7);
+  assert.equal(body.stream, undefined);
+});
+
+test('DeepSeek V4 Beat repair request body disables high-cost thinking', () => {
+  const body = realModule.buildOpenAiChatRequestBody(
+    {
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'test-key',
+      modelName: 'deepseek-v4-flash',
+    },
+    {
+      taskType: 'chapter_beat_repair',
+      messages: [{ role: 'user', content: 'repair one Beat' }],
+      thinkingMode: 'disabled',
+      maxTokens: 4_000,
+    },
+  );
+  assert.deepEqual(body.thinking, { type: 'disabled' });
+  assert.equal(body.max_tokens, 4_000);
+});
+
 test('chapter generation is registered as a candidate-only compiled contract', () => {
   const definition =
     compilationRegistryModule.productionCompilationRegistryPrivate.definitions.chapter_generate;
@@ -455,6 +500,37 @@ test('chapter generation is registered as a candidate-only compiled contract', (
     assert.match(
       definition.userPrompt({ chapterTitle: '第一章', contextHash: 'a'.repeat(64) }),
       /CHAPTER_GENERATE_REQUEST/,
+    );
+  }
+});
+
+test('external Beat repair has a dedicated reasoning-aware compiled contract', () => {
+  const definition =
+    compilationRegistryModule.productionCompilationRegistryPrivate.definitions.chapter_beat_repair;
+  assert.equal(definition?.expectedArtifactType, 'chapter_text');
+  assert.equal(definition?.constraints.outputMode, 'beat_prose');
+  assert.equal(definition?.constraints.candidateOnly, true);
+  assert.equal(definition?.maxOutputTokens, 4_000);
+  assert.equal(definition?.defaultTemperature, 0.35);
+  assert.equal(definition?.thinkingMode, 'disabled');
+  assert.match(definition?.promptTemplateBody ?? '', /exactly one rejected Beat/);
+  assert.equal(typeof definition?.userPrompt, 'function');
+  if (typeof definition?.userPrompt === 'function') {
+    assert.match(
+      definition.userPrompt({
+        chapterTitle: '第二章',
+        contextHash: 'b'.repeat(64),
+        sceneNo: 1,
+        beatOrder: 2,
+        targetWordCount: 1150,
+        minimumCharacterCount: 500,
+        maximumCharacterCount: 750,
+        rawMinimumCharacterCount: 1550,
+        rawMaximumCharacterCount: 1850,
+        paragraphCount: 14,
+        requiredBeatText: '多户案例指向海葵诊所，林舟决定次日伪装成患者调查。',
+      }),
+      /CHAPTER_BEAT_REPAIR_REQUEST[\s\S]*Minimum effective narrative characters[\s\S]*: 1150[\s\S]*Accepted envelope after safe complete-sentence trimming: 500-750[\s\S]*generation target intentionally exceeds[\s\S]*Required Beat[\s\S]*海葵诊所[\s\S]*until at least 1150 effective characters[\s\S]*must contain 1550-1850 characters[\s\S]*Use exactly 14 substantive prose paragraphs/,
     );
   }
 });
@@ -511,6 +587,27 @@ test('browser rejects non-string provider content instead of returning an invali
       error.message.includes('内容格式无效') &&
       !error.message.includes('unexpected content part'),
   );
+});
+
+test('browser fetch transport uses global timers when no window global exists', async () => {
+  clearMocks();
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: 'stop', message: { content: 'headless response' } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+
+  Reflect.deleteProperty(globalThis, 'window');
+  try {
+    const result = await createRealClient().generate(request);
+    assert.equal(result.text, 'headless response');
+    assert.equal(result.tokenTotal, 5);
+  } finally {
+    Object.defineProperty(globalThis, 'window', { value: globalThis, configurable: true });
+  }
 });
 
 test('browser streaming emits ordered UTF-8 deltas before returning the exact aggregate', async () => {

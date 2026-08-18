@@ -2660,6 +2660,9 @@ const AI_TASK_TYPE_FILTERS: &[&str] = &[
     "character_generate",
     "event_suggest",
     "chapter_generate",
+    "chapter_beat_repair",
+    "chapter_scene_generate",
+    "chapter_scene_plan_generate",
     "chapter_rewrite",
     "chapter_polish",
     "quality_check",
@@ -7385,6 +7388,22 @@ fn map_fix_run_row(row: &rusqlite::Row) -> rusqlite::Result<QualityFixRunDto> {
     })
 }
 
+fn has_other_quality_fix_round(
+    conn: &Connection,
+    chapter_id: &str,
+    source_draft_id: &str,
+    run_id: &str,
+) -> Result<bool, String> {
+    let existing_rounds: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM quality_fix_runs WHERE chapter_id=?1 AND source_draft_id=?2 AND id<>?3",
+            params![chapter_id, source_draft_id, run_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(existing_rounds > 0)
+}
+
 /// 保存修稿记录（创建或更新）
 #[tauri::command]
 pub fn save_quality_fix_run(input: SaveQualityFixRunInput) -> Result<QualityFixRunDto, String> {
@@ -7406,6 +7425,12 @@ pub fn save_quality_fix_run(input: SaveQualityFixRunInput) -> Result<QualityFixR
     ).map_err(|e| e.to_string())?;
 
     if updated == 0 {
+        if has_other_quality_fix_round(&conn, &input.chapter_id, &input.source_draft_id, &input.id)?
+        {
+            return Err(
+                "quality_fix_round_already_used: source draft already has a repair run".to_string(),
+            );
+        }
         conn.execute(
             "INSERT INTO quality_fix_runs (id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?29)",
             params![
@@ -11075,6 +11100,41 @@ mod tests {
         );
         assert!(normalize_ai_task_type_filter(Some("unknown".to_string())).is_err());
         assert!(normalize_ai_task_status_filter(Some("unknown".to_string())).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn quality_fix_round_guard_allows_idempotent_update_but_rejects_second_run(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE quality_fix_runs (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                source_draft_id TEXT NOT NULL
+            );
+            INSERT INTO quality_fix_runs (id, chapter_id, source_draft_id)
+            VALUES ('run-1', 'chapter-1', 'draft-1');",
+        )?;
+
+        assert!(!has_other_quality_fix_round(
+            &conn,
+            "chapter-1",
+            "draft-1",
+            "run-1",
+        )?);
+        assert!(has_other_quality_fix_round(
+            &conn,
+            "chapter-1",
+            "draft-1",
+            "run-2",
+        )?);
+        assert!(!has_other_quality_fix_round(
+            &conn,
+            "chapter-1",
+            "draft-2",
+            "run-2",
+        )?);
         Ok(())
     }
 }

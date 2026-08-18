@@ -688,7 +688,11 @@ export const draftVersionService = {
     }
   },
 
-  async adopt(draftId: string, chapterId: string): Promise<ChapterDraft> {
+  async adopt(
+    draftId: string,
+    chapterId: string,
+    options: { actor?: 'user' | 'autonomous_full_auto' } = {},
+  ): Promise<ChapterDraft> {
     const target = await this.getById(chapterId, draftId);
     if (!target) {
       throw { code: 'TARGET_DRAFT_NOT_FOUND', message: '目标草稿不存在。', retryable: false };
@@ -777,6 +781,12 @@ export const draftVersionService = {
       }
     } catch (error) {
       appLogger.warn('[AutonomousCreation] 章节采用进度同步失败', error);
+    }
+    if (options.actor !== 'autonomous_full_auto') {
+      const { autonomousSchedulerWorker } = await import(
+        '../autonomous-creation/autonomousSchedulerWorker'
+      );
+      await autonomousSchedulerWorker.promoteUserAdoptedDraft(adoptedWithContent);
     }
     return adoptedWithContent;
   },

@@ -276,6 +276,8 @@ test('桌面调度面板冻结三档策略、预算、时间窗和失败熔断�
   );
 
   assert.ok(screen.getByRole('region', { name: '跨进程无人值守调度' }));
+  assert.ok(screen.getByText('达标后停在候选；在工作台确认采用后，调度队列自动继续。'));
+  assert.ok(screen.getByText('质量、预算与采用前复验通过后，自动采用正文并确认章节分析。'));
   assert.ok(screen.getByLabelText('连续失败熔断'));
   assert.ok(screen.getByLabelText('每日 Token 上限'));
   fireEvent.click(screen.getByRole('button', { name: /全自动/ }));

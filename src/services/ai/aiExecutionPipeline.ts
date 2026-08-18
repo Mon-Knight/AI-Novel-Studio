@@ -48,11 +48,27 @@ export interface ExecuteAiTaskInput {
 export interface AiExecutionResult {
   persistence: AiExecutionPersistence;
   text: string;
+  externalRepairUsed?: boolean;
   structuredPayloadJson?: unknown;
   provider: ProviderAdapterResult;
   taskId?: string;
   attemptId?: string;
   artifactBundle?: ResultArtifactBundle;
+  sceneResults?: AiSceneExecutionResult[];
+}
+
+export interface AiSceneExecutionResult {
+  sceneNo: number;
+  beatOrder?: number;
+  generationUnitNo?: number;
+  generationUnitCount?: number;
+  title?: string;
+  text: string;
+  taskId?: string;
+  attemptId?: string;
+  provider: ProviderAdapterResult;
+  persistence: AiExecutionPersistence;
+  reusedFromJobId?: string;
 }
 
 interface RuntimePort {
@@ -80,7 +96,7 @@ export interface AiExecutionDependencies {
   runtime: RuntimePort;
   /** Compatibility projection for the current AI task center and draft foreign key. */
   projection?: AiTaskProjectionPort;
-  createAdapter: (settings: AiSettings) => ProviderAdapter;
+  createAdapter: (settings: AiSettings, taskType?: AiTaskType) => ProviderAdapter;
   compileContract: (input: {
     taskType: AiTaskType;
     scope: {
@@ -236,6 +252,10 @@ function unicodeLength(value: string): number {
   return Array.from(value).length;
 }
 
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
 function safeStructuredPayload(
   parser: ExecuteAiTaskInput['parseStructuredPayload'],
   text: string,
@@ -282,11 +302,14 @@ function providerMetadata(
     providerRequestId,
     responseHash,
     responseLength,
-    durationMs: provider.durationMs,
+    durationMs: nonNegativeInteger(provider.durationMs) ?? 0,
   };
-  if (provider.tokenInput !== undefined) metadata.tokenInput = provider.tokenInput;
-  if (provider.tokenOutput !== undefined) metadata.tokenOutput = provider.tokenOutput;
-  if (provider.tokenTotal !== undefined) metadata.tokenTotal = provider.tokenTotal;
+  const tokenInput = nonNegativeInteger(provider.tokenInput);
+  const tokenOutput = nonNegativeInteger(provider.tokenOutput);
+  const tokenTotal = nonNegativeInteger(provider.tokenTotal);
+  if (tokenInput !== undefined) metadata.tokenInput = tokenInput;
+  if (tokenOutput !== undefined) metadata.tokenOutput = tokenOutput;
+  if (tokenTotal !== undefined) metadata.tokenTotal = tokenTotal;
   if (provider.finishReason !== undefined) metadata.finishReason = provider.finishReason;
   if (provider.usageCost) {
     const costMetadata: Record<string, unknown> = {
@@ -570,7 +593,7 @@ async function executeAiTaskInternal(
   dependencies: AiExecutionDependencies = defaultDependencies,
 ): Promise<AiExecutionResult> {
   throwIfAiRequestCancelled(input.signal);
-  const adapter = dependencies.createAdapter(input.settings);
+  const adapter = dependencies.createAdapter(input.settings, input.taskType);
   const operationId = input.operationId ?? dependencies.createId();
   const traceId = input.traceId ?? operationId;
   let contract: CompiledAiExecutionContractV1;
@@ -640,9 +663,9 @@ async function executeAiTaskInternal(
         chapterId: input.scopeType === 'system' ? undefined : input.chapterId,
         modelName: adapter.modelId,
         inputSummary: `受治理的 ${input.taskType} 请求`,
-        runtimeMode: input.settings.runtimeMode,
+        runtimeMode: adapter.runtimeMode ?? input.settings.runtimeMode,
         provider: adapter.providerId,
-        pricing: createAiPricingSnapshot(input.settings),
+        pricing: adapter.pricingSnapshot ?? createAiPricingSnapshot(input.settings),
       });
       projectionCreated = true;
       if (input.cancel) {

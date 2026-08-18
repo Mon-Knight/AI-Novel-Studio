@@ -65,6 +65,84 @@ fn get_app_data_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(".")
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum InstanceStartup {
+    Primary,
+    Secondary,
+}
+
+/// Keeps the single-instance decision ahead of primary database initialization.
+///
+/// The callbacks make the ordering contract testable without starting a second
+/// Tauri window or opening the production database.
+fn run_instance_guarded_startup<Acquire, Focus, Initialize>(
+    app_data_dir: &std::path::PathBuf,
+    acquire_instance_lock: Acquire,
+    write_focus_request: Focus,
+    initialize_primary_instance: Initialize,
+) -> InstanceStartup
+where
+    Acquire: FnOnce(&std::path::PathBuf) -> bool,
+    Focus: FnOnce(&std::path::PathBuf),
+    Initialize: FnOnce(),
+{
+    if !acquire_instance_lock(app_data_dir) {
+        write_focus_request(app_data_dir);
+        return InstanceStartup::Secondary;
+    }
+
+    initialize_primary_instance();
+    InstanceStartup::Primary
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::{run_instance_guarded_startup, InstanceStartup};
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    #[test]
+    fn secondary_instance_requests_focus_without_initializing_database() {
+        let events = RefCell::new(Vec::new());
+        let app_data_dir = PathBuf::from("test-app-data");
+
+        let result = run_instance_guarded_startup(
+            &app_data_dir,
+            |_| {
+                events.borrow_mut().push("instance-check");
+                false
+            },
+            |_| events.borrow_mut().push("focus-request"),
+            || events.borrow_mut().push("database-initialization"),
+        );
+
+        assert_eq!(result, InstanceStartup::Secondary);
+        assert_eq!(events.into_inner(), ["instance-check", "focus-request"]);
+    }
+
+    #[test]
+    fn primary_instance_initializes_database_after_acquiring_lock() {
+        let events = RefCell::new(Vec::new());
+        let app_data_dir = PathBuf::from("test-app-data");
+
+        let result = run_instance_guarded_startup(
+            &app_data_dir,
+            |_| {
+                events.borrow_mut().push("instance-check");
+                true
+            },
+            |_| events.borrow_mut().push("focus-request"),
+            || events.borrow_mut().push("database-initialization"),
+        );
+
+        assert_eq!(result, InstanceStartup::Primary);
+        assert_eq!(
+            events.into_inner(),
+            ["instance-check", "database-initialization"]
+        );
+    }
+}
+
 fn main() {
     let startup_at = std::time::Instant::now();
     log_workspace_event(WorkspaceLogEvent {
@@ -109,27 +187,29 @@ fn main() {
     });
     let app_data_dir = e2e_data_dir.clone().unwrap_or_else(get_app_data_dir);
     crash_reports::install_native_crash_report_hook(&app_data_dir);
-    db::init_database();
-    runtime::append_e2e_log("startup: database initialized");
-    log_workspace_event(WorkspaceLogEvent {
-        level: "info",
-        event: "startup_database_ready",
-        trace_id: None,
-        operation_id: None,
-        novel_id: None,
-        chapter_id: None,
-        draft_id: None,
-        error_code: None,
-        metadata: Some(serde_json::json!({
-            "elapsedMs": startup_at.elapsed().as_millis(),
-        })),
-    });
-
-    // Native Feel P1.1: 确定应用数据目录
-    // 单实例检测
-    if !window_state::try_acquire_instance_lock(&app_data_dir) {
-        // 已有实例在运行，写入聚焦请求后退出
-        window_state::write_focus_request(&app_data_dir);
+    let instance_startup = run_instance_guarded_startup(
+        &app_data_dir,
+        window_state::try_acquire_instance_lock,
+        window_state::write_focus_request,
+        || {
+            db::init_database();
+            runtime::append_e2e_log("startup: database initialized");
+            log_workspace_event(WorkspaceLogEvent {
+                level: "info",
+                event: "startup_database_ready",
+                trace_id: None,
+                operation_id: None,
+                novel_id: None,
+                chapter_id: None,
+                draft_id: None,
+                error_code: None,
+                metadata: Some(serde_json::json!({
+                    "elapsedMs": startup_at.elapsed().as_millis(),
+                })),
+            });
+        },
+    );
+    if instance_startup == InstanceStartup::Secondary {
         std::process::exit(0);
     }
 
@@ -221,6 +301,7 @@ fn main() {
             commands::autonomous_scheduler::acquire_autonomous_run_lease,
             commands::autonomous_scheduler::heartbeat_autonomous_run,
             commands::autonomous_scheduler::claim_autonomous_run_chapter,
+            commands::autonomous_scheduler::authorize_full_auto_run_attempt,
             commands::autonomous_scheduler::finish_autonomous_run_chapter,
             commands::autonomous_scheduler::promote_autonomous_run_attempt,
             commands::autonomous_scheduler::list_autonomous_run_attempts,
@@ -270,6 +351,8 @@ fn main() {
             commands::get_ai_task_records_by_novel_id,
             ai::ai_chat_completion,
             ai::ai_chat_completion_stream,
+            ai::check_local_chapter_model,
+            ai::check_local_chapter_model_availability,
             ai::cancel_ai_request,
             runtime::get_e2e_diagnostics,
             runtime::get_e2e_novel_commit_state,

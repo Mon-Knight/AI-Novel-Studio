@@ -2,7 +2,7 @@
  * AI Novel Studio - AI settings service.
  */
 import type { AiGenerateOptions, AiSettings } from '../../types/ai';
-import { validateRealAiConfig } from './realAiClient';
+import { requireLoopbackAiBaseUrl, validateRealAiConfig } from './realAiClient';
 import { executeAiTask } from './aiExecutionPipeline';
 import { isAiRequestCancelled } from './aiCancellation';
 import { aiRequestPolicyService } from './aiRequestPolicyService';
@@ -32,6 +32,9 @@ export const aiSettingsService = {
 
   async saveSettings(settings: AiSettings): Promise<void> {
     const normalized = normalizeAiSettings(settings);
+    if (normalized.localChapterModel?.enabled) {
+      requireLoopbackAiBaseUrl(normalized.localChapterModel.baseUrl);
+    }
     await aiRequestPolicyService.configureGlobalPolicy(normalized);
     saveAiSettings(normalized);
   },

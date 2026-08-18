@@ -37,6 +37,11 @@ export interface RealAiClientConfig {
   modelName: string;
   temperature?: number;
   maxTokens?: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+  seed?: number;
+  allowTruncatedOutput?: boolean;
   timeoutSeconds?: number;
   provider?: AiSettings['provider'];
   inputPricePerMillionTokens?: number;
@@ -46,6 +51,7 @@ export interface RealAiClientConfig {
   dailyTokenBudget?: number;
   dailyCostBudgetUsd?: number;
   budgetWarningPercent?: number;
+  requireLoopback?: boolean;
 }
 
 interface TauriAiResponse {
@@ -85,6 +91,29 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
   return `${clean}/v1/chat/completions`;
 }
 
+export function isLoopbackAiBaseUrl(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (hostname === 'localhost' || hostname === '::1') return true;
+    const octets = hostname.split('.').map(Number);
+    return (
+      octets.length === 4 &&
+      octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) &&
+      octets[0] === 127
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function requireLoopbackAiBaseUrl(baseUrl: string): void {
+  if (!isLoopbackAiBaseUrl(baseUrl)) {
+    throw new Error('本地章节模型 Base URL 只允许 localhost、127.0.0.0/8 或 [::1] 回环地址。');
+  }
+}
+
 export function validateRealAiConfig(config: RealAiClientConfig): void {
   const missing: string[] = [];
   if (!config.baseUrl?.trim()) missing.push('API Base URL');
@@ -93,6 +122,7 @@ export function validateRealAiConfig(config: RealAiClientConfig): void {
   if (missing.length > 0) {
     throw new Error(`当前为 API 模式，但 ${missing.join(' / ')} 未配置，请先到设置中心配置。`);
   }
+  if (config.requireLoopback) requireLoopbackAiBaseUrl(config.baseUrl);
 
   const temperature = config.temperature ?? 0.7;
   if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
@@ -108,6 +138,56 @@ export function validateRealAiConfig(config: RealAiClientConfig): void {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
     throw new Error('timeoutSeconds 配置不合法，请在设置中心填写大于 0 的超时时间。');
   }
+
+  if (
+    config.topP !== undefined &&
+    (!Number.isFinite(config.topP) || config.topP < 0 || config.topP > 1)
+  ) {
+    throw new Error('topP 配置不合法，请填写 0 到 1 之间的数值。');
+  }
+  if (
+    config.topK !== undefined &&
+    (!Number.isInteger(config.topK) || config.topK < 0 || config.topK > 4096)
+  ) {
+    throw new Error('topK 配置不合法，请填写 0 到 4096 之间的整数。');
+  }
+  if (
+    config.repeatPenalty !== undefined &&
+    (!Number.isFinite(config.repeatPenalty) ||
+      config.repeatPenalty <= 0 ||
+      config.repeatPenalty > 3)
+  ) {
+    throw new Error('repeatPenalty 配置不合法，请填写大于 0 且不超过 3 的数值。');
+  }
+  if (config.seed !== undefined && !Number.isInteger(config.seed)) {
+    throw new Error('seed 配置不合法，请填写整数。');
+  }
+}
+
+export function buildOpenAiChatRequestBody(
+  config: RealAiClientConfig,
+  request: AiGenerateRequest,
+  stream = false,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: request.modelName || config.modelName.trim(),
+    messages: request.messages,
+    temperature: request.temperature ?? config.temperature ?? 0.7,
+    max_tokens: request.maxTokens ?? config.maxTokens ?? 8000,
+  };
+  const topP = request.topP ?? config.topP;
+  const topK = request.topK ?? config.topK;
+  const repeatPenalty = request.repeatPenalty ?? config.repeatPenalty;
+  const seed = request.seed ?? config.seed;
+  if (topP !== undefined) body.top_p = topP;
+  if (topK !== undefined) body.top_k = topK;
+  if (repeatPenalty !== undefined) body.repeat_penalty = repeatPenalty;
+  if (seed !== undefined) body.seed = seed;
+  if (request.thinkingMode !== undefined) {
+    body.thinking = { type: request.thinkingMode };
+  }
+  if (stream) body.stream = true;
+  return body;
 }
 
 function normalizeHttpError(status: number, errorBody: string, modelName: string): Error {
@@ -265,14 +345,7 @@ export class RealAiClient implements AiClient {
   }
 
   private buildRequestBody(request: AiGenerateRequest, stream = false): Record<string, unknown> {
-    const body: Record<string, unknown> = {
-      model: request.modelName || this.config.modelName.trim(),
-      messages: request.messages,
-      temperature: request.temperature ?? this.config.temperature ?? 0.7,
-      max_tokens: request.maxTokens ?? this.config.maxTokens ?? 8000,
-    };
-    if (stream) body.stream = true;
-    return body;
+    return buildOpenAiChatRequestBody(this.config, request, stream);
   }
 
   private async generateViaTauri(
@@ -287,11 +360,18 @@ export class RealAiClient implements AiClient {
       request: {
         requestId,
         baseUrl: this.config.baseUrl,
+        requireLoopback: this.config.requireLoopback === true,
         apiKey: this.config.apiKey,
         modelName: request.modelName || this.config.modelName,
         messages: request.messages,
         temperature: request.temperature ?? this.config.temperature ?? 0.7,
         maxTokens: request.maxTokens ?? this.config.maxTokens ?? 8000,
+        topP: request.topP ?? this.config.topP,
+        topK: request.topK ?? this.config.topK,
+        repeatPenalty: request.repeatPenalty ?? this.config.repeatPenalty,
+        seed: request.seed ?? this.config.seed,
+        thinkingMode: request.thinkingMode,
+        allowTruncatedOutput: this.config.allowTruncatedOutput,
         timeoutSeconds: this.config.timeoutSeconds ?? 120,
         policyLease: {
           reservationId: policyLease.id,
@@ -420,11 +500,18 @@ export class RealAiClient implements AiClient {
         request: {
           requestId,
           baseUrl: this.config.baseUrl,
+          requireLoopback: this.config.requireLoopback === true,
           apiKey: this.config.apiKey,
           modelName: request.modelName || this.config.modelName,
           messages: request.messages,
           temperature: request.temperature ?? this.config.temperature ?? 0.7,
           maxTokens: request.maxTokens ?? this.config.maxTokens ?? 8000,
+          topP: request.topP ?? this.config.topP,
+          topK: request.topK ?? this.config.topK,
+          repeatPenalty: request.repeatPenalty ?? this.config.repeatPenalty,
+          seed: request.seed ?? this.config.seed,
+          thinkingMode: request.thinkingMode,
+          allowTruncatedOutput: this.config.allowTruncatedOutput,
           timeoutSeconds: this.config.timeoutSeconds ?? 120,
           policyLease: {
             reservationId: policyLease.id,
@@ -478,7 +565,7 @@ export class RealAiClient implements AiClient {
     const onCallerAbort = () => abort('caller');
     options.signal?.addEventListener('abort', onCallerAbort, { once: true });
     if (options.signal?.aborted) onCallerAbort();
-    const timeout = window.setTimeout(() => abort('timeout'), timeoutSeconds * 1000);
+    const timeout = globalThis.setTimeout(() => abort('timeout'), timeoutSeconds * 1000);
 
     try {
       const response = await fetch(url, {
@@ -506,7 +593,9 @@ export class RealAiClient implements AiClient {
       const firstChoice = data.choices?.[0];
       const content = firstChoice?.message?.content;
 
-      if (firstChoice?.finish_reason === 'length') {
+      const finishReason =
+        typeof firstChoice?.finish_reason === 'string' ? firstChoice.finish_reason : undefined;
+      if (finishReason === 'length' && !this.config.allowTruncatedOutput) {
         throw new Error(OUTPUT_TOKEN_TRUNCATION_ERROR);
       }
       if (typeof content !== 'string') {
@@ -525,6 +614,7 @@ export class RealAiClient implements AiClient {
         tokenInput: data.usage?.prompt_tokens,
         tokenOutput: data.usage?.completion_tokens,
         tokenTotal: data.usage?.total_tokens,
+        finishReason,
       };
     } catch (err: unknown) {
       if (controller.signal.aborted && abortCause === 'caller') {
@@ -540,7 +630,7 @@ export class RealAiClient implements AiClient {
       }
       throw err;
     } finally {
-      window.clearTimeout(timeout);
+      globalThis.clearTimeout(timeout);
       options.signal?.removeEventListener('abort', onCallerAbort);
     }
   }
@@ -562,7 +652,7 @@ export class RealAiClient implements AiClient {
     const onCallerAbort = () => abort('caller');
     options.signal?.addEventListener('abort', onCallerAbort, { once: true });
     if (options.signal?.aborted) onCallerAbort();
-    const timeout = window.setTimeout(() => abort('timeout'), timeoutSeconds * 1000);
+    const timeout = globalThis.setTimeout(() => abort('timeout'), timeoutSeconds * 1000);
     emitAiStreamEvent(options.onStreamEvent, { type: 'started', requestId });
 
     try {
@@ -631,7 +721,9 @@ export class RealAiClient implements AiClient {
           if (nextFinishReason !== undefined && nextFinishReason !== null) {
             if (typeof nextFinishReason !== 'string') throw new Error(AI_STREAM_INVALID_ERROR);
             finishReason = nextFinishReason;
-            if (finishReason === 'length') throw new Error(OUTPUT_TOKEN_TRUNCATION_ERROR);
+            if (finishReason === 'length' && !this.config.allowTruncatedOutput) {
+              throw new Error(OUTPUT_TOKEN_TRUNCATION_ERROR);
+            }
           }
         }
 
@@ -705,7 +797,7 @@ export class RealAiClient implements AiClient {
       });
       throw normalized;
     } finally {
-      window.clearTimeout(timeout);
+      globalThis.clearTimeout(timeout);
       options.signal?.removeEventListener('abort', onCallerAbort);
     }
   }

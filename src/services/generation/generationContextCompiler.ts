@@ -128,13 +128,21 @@ function formatEngineeringState(state: ChapterEngineeringState): string {
               `${scene.sceneNo}. ${scene.title}`,
               scene.location ? `地点：${scene.location}` : '',
               scene.characters.length ? `角色：${scene.characters.join('、')}` : '',
+              scene.contextCapsule ? `状态胶囊：${scene.contextCapsule}` : '',
               scene.goal ? `目标：${scene.goal}` : '',
               scene.conflict ? `冲突：${scene.conflict}` : '',
               scene.keyActions.length ? `关键动作：${scene.keyActions.join('；')}` : '',
+              scene.beats.length
+                ? `有序节拍：\n${scene.beats
+                    .map((beat) => `${beat.order}. ${beat.text}${beat.required ? '' : '（可选）'}`)
+                    .join('\n')}`
+                : '',
               scene.informationRelease.length
                 ? `释放信息：${scene.informationRelease.join('；')}`
                 : '',
               scene.result ? `结果：${scene.result}` : '',
+              scene.expectedEndState ? `预期结束状态：${scene.expectedEndState}` : '',
+              scene.constraints?.length ? `场景限制：${scene.constraints.join('；')}` : '',
             ]
               .filter(Boolean)
               .join(' / '),

@@ -220,6 +220,151 @@ test('connection test locks deterministic temperature instead of inheriting crea
   assert.equal(compiled.request.maxTokens, 128);
 });
 
+test('local chapter scene compiles one user message with the verified sampling protocol', async () => {
+  const localDefinition: AiTaskCompilationDefinition = {
+    ...definition,
+    taskType: 'chapter_scene_generate',
+    expectedArtifactType: 'scene_text',
+    promptTemplateId: 'chapter/scene_generation_local',
+    promptTemplateBody: 'Only output continuous scene prose.',
+    userPrompt: (taskInput) =>
+      [
+        `Goal：\n${String(taskInput.sceneGoal)}`,
+        `Beats：\n${JSON.stringify(taskInput.sceneBeats)}`,
+        `Constraints：\n${JSON.stringify(taskInput.sceneConstraints)}`,
+      ].join('\n'),
+    responseSchema: 'scene_text_v1',
+    constraints: { outputMode: 'scene_prose', candidateOnly: true },
+    allowedSourceTypes: ['request_context'],
+    requiredSourceTypes: ['request_context'],
+    modelContextTokens: 64_000,
+    maxOutputTokens: 12_000,
+    defaultTemperature: 0.7,
+    messageMode: 'single_user',
+  };
+  const localSettings: AiSettings = {
+    ...settings,
+    localChapterModel: {
+      enabled: true,
+      providerId: 'local_llama_cpp',
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      apiKey: 'local-no-key-required',
+      modelName: 'qwen35-9b-novel-v3',
+      timeoutSeconds: 120,
+      contextTokens: 4096,
+      maxTokens: 1024,
+      temperature: 0.7,
+      topP: 0.8,
+      topK: 20,
+      repeatPenalty: 1.08,
+      seed: 7,
+    },
+  };
+  const compiled = await compileAiExecutionContract({
+    definition: localDefinition,
+    scope: { scopeType: 'chapter', novelId: 'novel-1', chapterId: 'chapter-1' },
+    compilation: {
+      sources: [
+        {
+          sourceType: 'request_context',
+          sourceId: 'chapter-1:scene',
+          sourceVersion: 'hash-1',
+          origin: 'request',
+          label: 'Scene context',
+          content: '夜雨中的旧车站，沈岚等待一列不该出现的列车。',
+          order: 0,
+          priority: 100,
+          required: true,
+        },
+      ],
+      taskInput: {
+        chapterTitle: '第一章',
+        contextHash: 'a'.repeat(64),
+        sceneGoal: '让主角确认列车与失踪案有关。',
+        sceneBeats: ['听见列车进站', '发现车票上的异常日期'],
+        sceneConstraints: ['第一人称', '不揭示幕后真相'],
+      },
+    },
+    settings: localSettings,
+    providerId: 'local_llama_cpp',
+    modelId: 'qwen35-9b-novel-v3',
+    toolRegistry: registry,
+  });
+
+  assert.equal(compiled.request.messages.length, 1);
+  assert.equal(compiled.request.messages[0].role, 'user');
+  assert.doesNotMatch(compiled.request.messages[0].content, /Instruction:/);
+  assert.match(compiled.request.messages[0].content, /Context：/);
+  assert.match(compiled.request.messages[0].content, /Goal：/);
+  assert.match(compiled.request.messages[0].content, /Beats：/);
+  assert.match(compiled.request.messages[0].content, /Constraints：/);
+  assert.doesNotMatch(compiled.request.messages[0].content, /## Scene context/);
+  assert.doesNotMatch(compiled.contextSnapshot.compiledContext, /^## /);
+  assert.equal(compiled.contextSnapshot.budgetJson.modelContextTokens, 4096);
+  assert.equal(compiled.request.maxTokens, 1024);
+  assert.equal(compiled.request.topP, 0.8);
+  assert.equal(compiled.request.topK, 20);
+  assert.equal(compiled.request.repeatPenalty, 1.08);
+  assert.equal(compiled.request.seed, 7);
+  assert.equal(compiled.constraintSnapshot.providerOptionsJson.providerId, 'local_llama_cpp');
+  assert.equal(compiled.constraintSnapshot.providerOptionsJson.maxTokens, 1024);
+  assert.equal(compiled.constraintSnapshot.providerOptionsJson.topK, 20);
+});
+
+test('DeepSeek V4 Beat repair compiles non-thinking mode into request and audit snapshot', async () => {
+  const beatRepairDefinition: AiTaskCompilationDefinition = {
+    ...definition,
+    taskType: 'chapter_beat_repair',
+    expectedArtifactType: 'chapter_text',
+    promptTemplateId: 'chapter/beat_repair_external',
+    promptTemplateBody: 'Return only the repaired Beat prose.',
+    userPrompt: 'Repair this Beat.',
+    responseSchema: 'chapter_text_v1',
+    constraints: { outputMode: 'beat_prose', candidateOnly: true },
+    allowedSourceTypes: ['request_context'],
+    requiredSourceTypes: ['request_context'],
+    modelContextTokens: 64_000,
+    maxOutputTokens: 4_000,
+    defaultTemperature: 0.35,
+    thinkingMode: 'disabled',
+  };
+  const source = {
+    sourceType: 'request_context' as const,
+    sourceId: 'chapter-1:beat-repair',
+    sourceVersion: 'hash-1',
+    origin: 'request' as const,
+    label: 'Rejected Beat',
+    content: '待修正文',
+    order: 0,
+    priority: 100,
+    required: true,
+  };
+  const compiled = await compileAiExecutionContract({
+    definition: beatRepairDefinition,
+    scope: { scopeType: 'chapter', novelId: 'novel-1', chapterId: 'chapter-1' },
+    compilation: { sources: [source], taskInput: { purpose: 'repair' } },
+    settings,
+    providerId: 'openai_compatible',
+    modelId: 'deepseek-v4-flash',
+    toolRegistry: registry,
+  });
+  const otherModel = await compileAiExecutionContract({
+    definition: beatRepairDefinition,
+    scope: { scopeType: 'chapter', novelId: 'novel-1', chapterId: 'chapter-1' },
+    compilation: { sources: [source], taskInput: { purpose: 'repair' } },
+    settings,
+    providerId: 'openai_compatible',
+    modelId: 'other-openai-compatible-model',
+    toolRegistry: registry,
+  });
+
+  assert.equal(compiled.request.thinkingMode, 'disabled');
+  assert.equal(compiled.request.maxTokens, 4_000);
+  assert.equal(compiled.constraintSnapshot.providerOptionsJson.thinkingMode, 'disabled');
+  assert.equal(otherModel.request.thinkingMode, undefined);
+  assert.equal(otherModel.constraintSnapshot.providerOptionsJson.thinkingMode, undefined);
+});
+
 test('compiler rejects unsupported sources, scope drift and unregistered tools', async () => {
   await assert.rejects(
     () =>

@@ -11,6 +11,8 @@ import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
 import AppearanceSettingsCard from '../../components/settings/AppearanceSettingsCard';
 import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSettingsCard';
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
+import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
+import { checkLocalChapterModel, type LocalChapterModelHealthResult } from '../../services/ai/localChapterModelHealthService';
 import DiagnosticsSettingsCard from '../../components/settings/DiagnosticsSettingsCard';
 import AppUpdateSettingsCard from '../../components/settings/AppUpdateSettingsCard';
 
@@ -19,9 +21,12 @@ function SettingsPage() {
   const [settings, setSettings] = useState<AiSettings>(aiSettingsService.getSettings());
   const [message, setMessage] = useState('');
   const [testing, setTesting] = useState(false);
+  const [localHealthChecking, setLocalHealthChecking] = useState(false);
+  const [localHealthResult, setLocalHealthResult] = useState<LocalChapterModelHealthResult | null>(null);
   const [repairMsg, setRepairMsg] = useState('');
   const [policySnapshotVersion, setPolicySnapshotVersion] = useState(0);
   const connectionAbortRef = useRef<AbortController | null>(null);
+  const localHealthAbortRef = useRef<AbortController | null>(null);
 
   const handleRepairData = async () => {
     if (
@@ -42,8 +47,41 @@ function SettingsPage() {
 
   useEffect(() => {
     setSettings(aiSettingsService.getSettings());
-    return () => connectionAbortRef.current?.abort();
+    return () => {
+      connectionAbortRef.current?.abort();
+      localHealthAbortRef.current?.abort();
+    };
   }, []);
+
+  const handleCheckLocalHealth = async () => {
+    if (localHealthAbortRef.current) return;
+    const local = settings.localChapterModel;
+    if (!local) {
+      setLocalHealthResult(null);
+      setMessage('请先填写并保存本地模型设置');
+      return;
+    }
+    const controller = new AbortController();
+    localHealthAbortRef.current = controller;
+    setLocalHealthChecking(true);
+    setLocalHealthResult(null);
+    try {
+      setLocalHealthResult(await checkLocalChapterModel(local, controller.signal));
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setLocalHealthResult({
+          healthOk: false,
+          modelOk: false,
+          smokeOk: false,
+          modelName: local.modelName,
+          message: describeUnknownError(error, '本地模型检查失败'),
+        });
+      }
+    } finally {
+      if (localHealthAbortRef.current === controller) localHealthAbortRef.current = null;
+      setLocalHealthChecking(false);
+    }
+  };
 
   const handleSave = async () => {
     // 保存前确保 mockMode 与 runtimeMode 一致
@@ -138,6 +176,14 @@ function SettingsPage() {
         handleTestConnection={handleTestConnection}
         onStopTest={() => connectionAbortRef.current?.abort()}
         handleSave={handleSave}
+      />
+      <LocalChapterModelSettingsCard
+        settings={settings}
+        onChange={update}
+        onSave={handleSave}
+        healthResult={localHealthResult}
+        healthChecking={localHealthChecking}
+        onCheckHealth={handleCheckLocalHealth}
       />
       <AiGovernanceSettingsCard
         settings={settings}

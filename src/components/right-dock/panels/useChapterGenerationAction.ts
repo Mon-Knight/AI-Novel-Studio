@@ -23,6 +23,7 @@ import {
   throwIfAiRequestCancelled,
 } from '../../../services/ai/aiCancellation';
 import { confirmInfo } from '../../../utils/nativeDialog';
+import { chapterEngineeringService } from '../../../services/engineering/chapterEngineeringService';
 import type { GenerationValidationState } from './aiGenerateValidation';
 import {
   buildValidationSnapshot,
@@ -70,6 +71,55 @@ interface UseChapterGenerationActionOptions {
   setLatestGeneratedDraft: Dispatch<SetStateAction<ChapterDraft | null>>;
   setLatestGeneratedTarget: Dispatch<SetStateAction<DraftResultMetadata | null>>;
   onGenerated?: (draft: ChapterDraft, metadata?: DraftResultMetadata) => void;
+}
+
+function buildLocalChapterSceneTaskInput(
+  context: ChapterGenerationContext,
+  requestSourceVersion: string,
+  mode: 'new' | 'rewrite',
+  sourceDraftId: string | undefined,
+  sourceRevision: number | undefined,
+  scenePlan?: unknown,
+): Record<string, unknown> {
+  const beats = [
+    ...(context.outlineKeyPoints ?? []).map((point) => point.text.trim()).filter(Boolean),
+    context.chapterEvents?.trim() ? `本章事件：${context.chapterEvents.trim()}` : '',
+  ].filter(Boolean);
+  const constraints = [
+    context.protagonistNames ? `主角/视角角色：${context.protagonistNames}` : '',
+    context.chapterCharacters ? `本章角色：${context.chapterCharacters}` : '',
+    context.styleProfile ? `文风要求：${context.styleProfile}` : '',
+    context.outputProfile ? `输出要求：${context.outputProfile}` : '',
+    context.forbiddenBehaviors ? `禁止行为：${context.forbiddenBehaviors}` : '',
+    '只生成当前场景候选正文，不提前替后续章节揭示未授权信息。',
+  ].filter(Boolean);
+  const sceneContext = [
+    `章节：${context.chapterTitle}`,
+    context.volumeTitle ? `分卷：${context.volumeTitle}` : '',
+    context.previousContext ? `前文上下文：\n${context.previousContext}` : '',
+    context.chapterOutline ? `章节大纲：\n${context.chapterOutline}` : '',
+    context.chapterGoal ? `本章目标：${context.chapterGoal}` : '',
+    context.chapterSettings ? `章节设定：\n${context.chapterSettings}` : '',
+    context.chapterCharacters ? `角色状态：\n${context.chapterCharacters}` : '',
+    context.styleProfile ? `风格方案：\n${context.styleProfile}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return {
+    chapterTitle: context.chapterTitle,
+    targetWordCount: context.targetWordCount,
+    contextHash: requestSourceVersion,
+    sceneGoal:
+      context.chapterGoal?.trim() || context.chapterOutline?.trim() || '推进当前章节的核心目标。',
+    sceneBeats: beats.length ? beats.slice(0, 12) : ['完成当前章节的核心事件推进。'],
+    sceneConstraints: constraints,
+    scenePlan,
+    sceneContext:
+      sceneContext || `章节：${context.chapterTitle}\n请依据当前章节目标推进一个连续场景。`,
+    mode,
+    sourceDraftId,
+    sourceRevision,
+  };
 }
 
 export function useChapterGenerationAction({
@@ -199,6 +249,10 @@ export function useChapterGenerationAction({
           const requestSourceVersion = hashTextContent(
             request.messages.map((message) => `${message.role}\n${message.content}`).join('\n\n'),
           );
+          const engineeringScenePlan =
+            settings.localChapterModel?.enabled && genMode !== 'rewrite'
+              ? (await chapterEngineeringService.getBundle(chapter.id)).activeState?.scenePlan
+              : undefined;
           const response = await executeChapterGeneration({
             novelId,
             chapterId: chapter.id,
@@ -215,6 +269,14 @@ export function useChapterGenerationAction({
               mode: genMode,
               sourceDraftId: currentDraftId,
               sourceRevision: currentDraftVersion,
+              ...buildLocalChapterSceneTaskInput(
+                ctx,
+                requestSourceVersion,
+                genMode,
+                currentDraftId,
+                currentDraftVersion,
+                engineeringScenePlan,
+              ),
             },
             targetHintJson: requestTarget,
             signal,

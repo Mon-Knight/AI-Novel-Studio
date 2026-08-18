@@ -118,6 +118,14 @@ export interface AutonomousRunChapterClaim {
   chapterPlan: Record<string, unknown>;
 }
 
+export interface AuthorizeFullAutoAttemptResult {
+  run: AutonomousBookRun;
+  attempt: AutonomousRunChapterAttempt;
+  authorizationId: string;
+  authorizationHash: string;
+  replayed: boolean;
+}
+
 export interface FinishAutonomousRunChapterResult {
   run: AutonomousBookRun;
   attempt: AutonomousRunChapterAttempt;

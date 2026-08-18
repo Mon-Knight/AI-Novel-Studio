@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -244,11 +245,18 @@ pub struct AiChatMessage {
 #[serde(rename_all = "camelCase")]
 pub struct AiChatCompletionRequest {
     pub base_url: String,
+    pub require_loopback: Option<bool>,
     pub api_key: String,
     pub model_name: String,
     pub messages: Vec<AiChatMessage>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<u32>,
+    pub top_p: Option<f64>,
+    pub top_k: Option<u32>,
+    pub repeat_penalty: Option<f64>,
+    pub seed: Option<i64>,
+    pub thinking_mode: Option<String>,
+    pub allow_truncated_output: Option<bool>,
     pub timeout_seconds: Option<u64>,
     pub request_id: Option<String>,
     pub policy_lease: Option<AiRequestPolicyLeaseProof>,
@@ -278,6 +286,27 @@ pub struct AiChatStreamEvent {
     pub token_total: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalChapterModelHealthRequest {
+    pub base_url: String,
+    pub api_key: String,
+    pub model_name: String,
+    pub timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalChapterModelHealthResponse {
+    pub health_ok: bool,
+    pub model_ok: bool,
+    pub smoke_ok: bool,
+    pub model_name: String,
+    pub finish_reason: Option<String>,
+    pub text_preview: Option<String>,
+    pub message: String,
+}
+
 type StreamEmitter = Arc<dyn Fn(AiChatStreamEvent) -> Result<(), String> + Send + Sync + 'static>;
 
 fn build_chat_completions_url(base_url: &str) -> String {
@@ -291,6 +320,51 @@ fn build_chat_completions_url(base_url: &str) -> String {
     format!("{}/v1/chat/completions", clean)
 }
 
+fn is_loopback_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_matches(['[', ']']);
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false)
+}
+
+fn http_client_builder(base_url: &str, timeout: Duration) -> reqwest::ClientBuilder {
+    let builder = Client::builder().timeout(timeout);
+    if is_loopback_url(base_url) {
+        builder.no_proxy()
+    } else {
+        builder
+    }
+}
+
+fn model_catalog_matches(body: &Value, model_name: &str) -> bool {
+    ["data", "models"].iter().any(|key| {
+        body.get(*key)
+            .and_then(Value::as_array)
+            .map(|items| {
+                items.iter().any(|item| {
+                    ["id", "model", "name"].iter().any(|field| {
+                        item.get(*field)
+                            .and_then(Value::as_str)
+                            .map(|value| value == model_name)
+                            .unwrap_or(false)
+                    })
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
 fn validate_request(request: &AiChatCompletionRequest) -> Result<(), String> {
     if request.base_url.trim().is_empty() {
         return Err("当前为 API 模式，但 API Base URL 未配置，请先到设置中心配置。".into());
@@ -298,12 +372,37 @@ fn validate_request(request: &AiChatCompletionRequest) -> Result<(), String> {
     if request.api_key.trim().is_empty() {
         return Err("当前为 API 模式，但 API Key 未配置，请先到设置中心配置。".into());
     }
+    if request.require_loopback.unwrap_or(false) && !is_loopback_url(&request.base_url) {
+        return Err(
+            "本地章节模型 Base URL 只允许 localhost、127.0.0.0/8 或 [::1] 回环地址。".into(),
+        );
+    }
     if request.model_name.trim().is_empty() {
         return Err("当前为 API 模式，但模型名称未配置，请先到设置中心配置。".into());
     }
     let temperature = request.temperature.unwrap_or(0.7);
     if !(0.0..=2.0).contains(&temperature) {
         return Err("temperature 必须在 0 到 2 之间，请检查设置中心配置。".into());
+    }
+    if let Some(top_p) = request.top_p {
+        if !top_p.is_finite() || !(0.0..=1.0).contains(&top_p) {
+            return Err("top_p 必须在 0 到 1 之间，请检查设置中心配置。".into());
+        }
+    }
+    if let Some(top_k) = request.top_k {
+        if top_k > 4096 {
+            return Err("top_k 必须在 0 到 4096 之间，请检查设置中心配置。".into());
+        }
+    }
+    if let Some(repeat_penalty) = request.repeat_penalty {
+        if !repeat_penalty.is_finite() || repeat_penalty <= 0.0 || repeat_penalty > 3.0 {
+            return Err("repeat_penalty 必须大于 0 且不超过 3，请检查设置中心配置。".into());
+        }
+    }
+    if let Some(thinking_mode) = request.thinking_mode.as_deref() {
+        if !matches!(thinking_mode, "enabled" | "disabled") {
+            return Err("thinkingMode 只允许 enabled 或 disabled。".into());
+        }
     }
     let max_tokens = request.max_tokens.unwrap_or(8000);
     if max_tokens == 0 || max_tokens > 200_000 {
@@ -317,6 +416,27 @@ fn validate_request(request: &AiChatCompletionRequest) -> Result<(), String> {
         return Err("AI 请求缺少 messages。".into());
     }
     Ok(())
+}
+
+fn add_optional_sampling_parameters(body: &mut Value, request: &AiChatCompletionRequest) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    if let Some(top_p) = request.top_p {
+        object.insert("top_p".to_string(), json!(top_p));
+    }
+    if let Some(top_k) = request.top_k {
+        object.insert("top_k".to_string(), json!(top_k));
+    }
+    if let Some(repeat_penalty) = request.repeat_penalty {
+        object.insert("repeat_penalty".to_string(), json!(repeat_penalty));
+    }
+    if let Some(seed) = request.seed {
+        object.insert("seed".to_string(), json!(seed));
+    }
+    if let Some(thinking_mode) = request.thinking_mode.as_deref() {
+        object.insert("thinking".to_string(), json!({ "type": thinking_mode }));
+    }
 }
 
 fn validate_request_id(request_id: &str) -> Result<(), String> {
@@ -433,6 +553,169 @@ pub async fn ai_chat_completion_stream(
             .map_err(|_| "AI_STREAM_EVENT_EMIT_FAILED".to_string())
     });
     execute_ai_chat_completion_stream(request, crate::runtime::is_network_blocked(), emitter).await
+}
+
+fn local_model_root_url(base_url: &str) -> String {
+    let clean = base_url.trim().trim_end_matches('/');
+    clean.strip_suffix("/v1").unwrap_or(clean).to_string()
+}
+
+fn local_model_smoke_prompt() -> &'static str {
+    "根据上下文、当前 Beat 目标和限制，续写这一个 Beat 的小说正文。严格保持人物身份、动作主体、因果顺序和既有设定；只完成输入中的一个 Beat，不提前写后续 Beat。只输出连贯小说正文，不要解释、总结、列提纲、输出 JSON 或思考过程。\n\nContext：\n夜雨中的旧车站，沈岚等待一列不该出现的列车。\n\nGoal：\n完成当前 Beat 并确认异常列车已经进站。\n\nBeat：\n听见本不该出现的列车进站。\n\nConstraints：\n- 只输出当前一个 Beat 的连续正文。"
+}
+
+async fn check_local_chapter_model_availability_internal(
+    request: &LocalChapterModelHealthRequest,
+) -> Result<LocalChapterModelHealthResponse, String> {
+    ensure_ai_network_allowed(crate::runtime::is_network_blocked())?;
+    if request.base_url.trim().is_empty() || request.model_name.trim().is_empty() {
+        return Err("本地模型检查缺少 Base URL 或模型名称。".into());
+    }
+    if !is_loopback_url(&request.base_url) {
+        return Err(
+            "本地章节模型 Base URL 只允许 localhost、127.0.0.0/8 或 [::1] 回环地址。".into(),
+        );
+    }
+    let timeout_seconds = request.timeout_seconds.unwrap_or(15);
+    if timeout_seconds == 0 || timeout_seconds > 1800 {
+        return Err("本地模型检查超时时间不合法。".into());
+    }
+    let client = http_client_builder(&request.base_url, Duration::from_secs(timeout_seconds))
+        .build()
+        .map_err(|_| "本地模型检查无法初始化 HTTP 客户端。".to_string())?;
+    let root_url = local_model_root_url(&request.base_url);
+    let auth_key = request.api_key.trim();
+    let health_url = format!("{}/health", root_url.trim_end_matches('/'));
+    let health = client
+        .get(health_url)
+        .bearer_auth(auth_key)
+        .send()
+        .await
+        .map_err(|_| "本地模型健康检查连接失败，请确认 llama-server 已启动。".to_string())?;
+    if !health.status().is_success() {
+        return Err(format!(
+            "本地模型 /health 返回 HTTP {}。",
+            health.status().as_u16()
+        ));
+    }
+
+    let models_url = format!("{}/v1/models", root_url.trim_end_matches('/'));
+    let models_response = client
+        .get(models_url)
+        .bearer_auth(auth_key)
+        .send()
+        .await
+        .map_err(|_| "本地模型 /v1/models 连接失败。".to_string())?;
+    if !models_response.status().is_success() {
+        return Err(format!(
+            "本地模型 /v1/models 返回 HTTP {}。",
+            models_response.status().as_u16()
+        ));
+    }
+    let models_body: Value = models_response
+        .json()
+        .await
+        .map_err(|_| "本地模型 /v1/models 返回了无效 JSON。".to_string())?;
+    let model_name = request.model_name.trim().to_string();
+    let model_ok = model_catalog_matches(&models_body, &model_name);
+    Ok(LocalChapterModelHealthResponse {
+        health_ok: true,
+        model_ok,
+        smoke_ok: false,
+        model_name,
+        finish_reason: None,
+        text_preview: None,
+        message: if model_ok {
+            "本地模型服务健康且模型身份匹配。".into()
+        } else {
+            "服务健康，但 /v1/models 中没有匹配的模型名称。".into()
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn check_local_chapter_model_availability(
+    request: LocalChapterModelHealthRequest,
+) -> Result<LocalChapterModelHealthResponse, String> {
+    check_local_chapter_model_availability_internal(&request).await
+}
+
+#[tauri::command]
+pub async fn check_local_chapter_model(
+    request: LocalChapterModelHealthRequest,
+) -> Result<LocalChapterModelHealthResponse, String> {
+    let availability = check_local_chapter_model_availability_internal(&request).await?;
+    if !availability.model_ok {
+        return Ok(availability);
+    }
+    let timeout_seconds = request.timeout_seconds.unwrap_or(15);
+    let client = http_client_builder(&request.base_url, Duration::from_secs(timeout_seconds))
+        .build()
+        .map_err(|_| "本地模型检查无法初始化 HTTP 客户端。".to_string())?;
+    let auth_key = request.api_key.trim();
+    let model_name = availability.model_name;
+
+    let completion_url = build_chat_completions_url(&request.base_url);
+    let smoke = client
+        .post(completion_url)
+        .bearer_auth(auth_key)
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "model": model_name,
+            "messages": [{ "role": "user", "content": local_model_smoke_prompt() }],
+            "temperature": 0.2,
+            "max_tokens": 96,
+            "top_p": 0.8,
+            "top_k": 20,
+            "repeat_penalty": 1.08,
+            "stream": false,
+        }))
+        .send()
+        .await
+        .map_err(|_| "本地模型 Beat smoke 连接失败。".to_string())?;
+    if !smoke.status().is_success() {
+        return Err(format!(
+            "本地模型 Beat smoke 返回 HTTP {}。",
+            smoke.status().as_u16()
+        ));
+    }
+    let smoke_body: Value = smoke
+        .json()
+        .await
+        .map_err(|_| "本地模型 Beat smoke 返回了无效 JSON。".to_string())?;
+    let text = smoke_body
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let finish_reason = smoke_body
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let smoke_ok = !text.is_empty() && !text.contains("<think>");
+    Ok(LocalChapterModelHealthResponse {
+        health_ok: true,
+        model_ok: true,
+        smoke_ok,
+        model_name,
+        finish_reason,
+        text_preview: if text.is_empty() {
+            None
+        } else {
+            Some(text.chars().take(240).collect())
+        },
+        message: if smoke_ok {
+            "本地模型健康、模型匹配，Beat smoke 通过。".into()
+        } else {
+            "服务和模型匹配，但 Beat smoke 未返回可采纳正文。".into()
+        },
+    })
 }
 
 async fn execute_ai_chat_completion_stream(
@@ -552,6 +835,7 @@ fn consume_stream_payload(
     request_id: &str,
     emitter: &StreamEmitter,
     aggregate: &mut StreamAggregate,
+    allow_truncated_output: bool,
 ) -> Result<(), String> {
     if payload.trim() == "[DONE]" {
         aggregate.saw_done = true;
@@ -589,7 +873,7 @@ fn consume_stream_payload(
                     .as_str()
                     .ok_or_else(|| AI_STREAM_INVALID.to_string())?
                     .to_string();
-                if finish_reason == "length" {
+                if finish_reason == "length" && !allow_truncated_output {
                     return Err(OUTPUT_TOKEN_TRUNCATION_ERROR.to_string());
                 }
                 aggregate.finish_reason = Some(finish_reason);
@@ -621,19 +905,20 @@ async fn perform_ai_chat_completion_stream(
 ) -> Result<AiChatCompletionResponse, String> {
     let url = build_chat_completions_url(&request.base_url);
     let timeout_seconds = request.timeout_seconds.unwrap_or(120);
-    let client_builder = Client::builder().timeout(Duration::from_secs(timeout_seconds));
-    #[cfg(test)]
-    let client_builder = client_builder.no_proxy();
+    let allow_truncated_output = request.allow_truncated_output.unwrap_or(false);
+    let client_builder =
+        http_client_builder(&request.base_url, Duration::from_secs(timeout_seconds));
     let client = client_builder
         .build()
         .map_err(|_| "AI 调用失败：HTTP 客户端初始化失败。".to_string())?;
-    let body = json!({
+    let mut body = json!({
         "model": request.model_name,
         "messages": request.messages,
         "temperature": request.temperature.unwrap_or(0.7),
         "max_tokens": request.max_tokens.unwrap_or(8000),
         "stream": true,
     });
+    add_optional_sampling_parameters(&mut body, &request);
     let mut response = client
         .post(url)
         .bearer_auth(request.api_key.trim())
@@ -676,11 +961,23 @@ async fn perform_ai_chat_completion_stream(
         }
     })? {
         for payload in decoder.push(&chunk)? {
-            consume_stream_payload(payload, &request_id, &emitter, &mut aggregate)?;
+            consume_stream_payload(
+                payload,
+                &request_id,
+                &emitter,
+                &mut aggregate,
+                allow_truncated_output,
+            )?;
         }
     }
     for payload in decoder.finish()? {
-        consume_stream_payload(payload, &request_id, &emitter, &mut aggregate)?;
+        consume_stream_payload(
+            payload,
+            &request_id,
+            &emitter,
+            &mut aggregate,
+            allow_truncated_output,
+        )?;
     }
     if !aggregate.saw_done && aggregate.finish_reason.is_none() {
         return Err(AI_STREAM_INTERRUPTED.to_string());
@@ -738,9 +1035,9 @@ async fn perform_ai_chat_completion(
 ) -> Result<AiChatCompletionResponse, String> {
     let url = build_chat_completions_url(&request.base_url);
     let timeout_seconds = request.timeout_seconds.unwrap_or(120);
-    let client_builder = Client::builder().timeout(Duration::from_secs(timeout_seconds));
-    #[cfg(test)]
-    let client_builder = client_builder.no_proxy();
+    let allow_truncated_output = request.allow_truncated_output.unwrap_or(false);
+    let client_builder =
+        http_client_builder(&request.base_url, Duration::from_secs(timeout_seconds));
     let client = client_builder
         .build()
         .map_err(|_| "AI 调用失败：HTTP 客户端初始化失败。".to_string())?;
@@ -773,12 +1070,13 @@ async fn perform_ai_chat_completion(
         });
     }
 
-    let body = json!({
+    let mut body = json!({
         "model": request.model_name,
         "messages": request.messages,
         "temperature": request.temperature.unwrap_or(0.7),
         "max_tokens": request.max_tokens.unwrap_or(8000),
     });
+    add_optional_sampling_parameters(&mut body, &request);
 
     let response = client
         .post(url)
@@ -837,7 +1135,7 @@ async fn perform_ai_chat_completion(
         .and_then(Value::as_str)
         .map(str::to_string);
 
-    if finish_reason.as_deref() == Some("length") {
+    if finish_reason.as_deref() == Some("length") && !allow_truncated_output {
         return Err(OUTPUT_TOKEN_TRUNCATION_ERROR.into());
     }
 
@@ -915,6 +1213,7 @@ mod tests {
     ) -> AiChatCompletionRequest {
         AiChatCompletionRequest {
             base_url,
+            require_loopback: None,
             api_key: "test-api-key".to_string(),
             model_name: "test-model".to_string(),
             messages: vec![AiChatMessage {
@@ -923,6 +1222,12 @@ mod tests {
             }],
             temperature: Some(0.2),
             max_tokens: Some(64),
+            top_p: None,
+            top_k: None,
+            repeat_penalty: None,
+            seed: None,
+            thinking_mode: None,
+            allow_truncated_output: None,
             timeout_seconds: Some(timeout_seconds),
             request_id: request_id.map(str::to_string),
             policy_lease: None,
@@ -940,6 +1245,59 @@ mod tests {
             verify_request_policy_lease(&request),
             Err(crate::errors::codes::AI_REQUEST_POLICY_LEASE_REQUIRED.to_string())
         );
+    }
+
+    #[test]
+    fn sampling_options_are_forwarded_without_null_fields() {
+        let mut request = test_request("http://127.0.0.1:8080/v1".to_string(), None, 1);
+        request.top_p = Some(0.8);
+        request.top_k = Some(20);
+        request.repeat_penalty = Some(1.08);
+        request.seed = Some(7);
+        request.thinking_mode = Some("disabled".to_string());
+        let mut body = json!({
+            "model": request.model_name,
+            "messages": request.messages,
+        });
+        add_optional_sampling_parameters(&mut body, &request);
+        assert_eq!(body["top_p"], json!(0.8));
+        assert_eq!(body["top_k"], json!(20));
+        assert_eq!(body["repeat_penalty"], json!(1.08));
+        assert_eq!(body["seed"], json!(7));
+        assert_eq!(body["thinking"], json!({ "type": "disabled" }));
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn local_only_request_rejects_remote_base_url_before_dispatch() {
+        let mut request = test_request("https://provider.example/v1".to_string(), None, 1);
+        request.require_loopback = Some(true);
+
+        assert!(validate_request(&request)
+            .unwrap_err()
+            .contains("只允许 localhost、127.0.0.0/8 或 [::1]"));
+    }
+
+    #[test]
+    fn local_model_health_accepts_loopback_and_llama_model_catalog_shapes() {
+        assert!(is_loopback_url("http://127.0.0.1:8080/v1"));
+        assert!(is_loopback_url("http://localhost:8080/v1"));
+        assert!(is_loopback_url("http://[::1]:8080/v1"));
+        assert!(!is_loopback_url("https://api.example.com/v1"));
+        assert!(!is_loopback_url("ftp://127.0.0.1:8080/v1"));
+
+        assert!(model_catalog_matches(
+            &json!({ "data": [{ "id": "openai-model" }] }),
+            "openai-model"
+        ));
+        assert!(model_catalog_matches(
+            &json!({ "models": [{ "name": "qwen35-9b-novel-v3", "model": "qwen35-9b-novel-v3" }] }),
+            "qwen35-9b-novel-v3"
+        ));
+        assert!(!model_catalog_matches(
+            &json!({ "models": [{ "name": "other-model" }] }),
+            "qwen35-9b-novel-v3"
+        ));
     }
 
     fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> io::Result<TcpStream> {
@@ -1259,6 +1617,20 @@ mod tests {
         assert_eq!(registry_counts(), (0, 0, 1));
         assert!(!cancel_ai_request(request_id.to_string()));
         assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn local_scene_request_preserves_truncated_text_for_orchestrator_continuation() {
+        let response_body = r#"{"choices":[{"message":{"content":"partial scene"},"finish_reason":"length"}],"usage":{"completion_tokens":64}}"#;
+        let (base_url, server_thread) = spawn_response_server(response_body);
+        let mut request = test_request(base_url, None, 3);
+        request.allow_truncated_output = Some(true);
+
+        let response = tauri::async_runtime::block_on(perform_ai_chat_completion(request)).unwrap();
+
+        server_thread.join().unwrap();
+        assert_eq!(response.text, "partial scene");
+        assert_eq!(response.finish_reason.as_deref(), Some("length"));
     }
 
     #[test]

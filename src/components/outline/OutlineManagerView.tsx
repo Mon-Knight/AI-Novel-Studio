@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import VolumeCard from './VolumeCard';
 import VolumeFormModal from './VolumeFormModal';
 import ChapterFormModal from './ChapterFormModal';
+import { OutlineCandidateResults } from './OutlineCandidateResults';
 import type { Volume, CreateVolumeInput, UpdateVolumeInput } from '../../types/volume';
 import type { Chapter, CreateChapterInput, UpdateChapterInput } from '../../types/chapter';
 import type {
@@ -256,148 +257,15 @@ export function OutlineManagerView({
           </div>
         )}
 
-        {volumeCandidate && (
-          <div
-            style={{
-              marginTop: 10,
-              padding: 10,
-              border: '1px solid var(--color-border-light)',
-              borderRadius: 6,
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>分卷大纲候选</div>
-            <input
-              className="form-input"
-              value={volumeCandidate.title}
-              onChange={(e) => setVolumeCandidate({ ...volumeCandidate, title: e.target.value })}
-              placeholder="分卷标题"
-              style={{ width: '100%', marginBottom: 6, fontSize: 13 }}
-            />
-            <textarea
-              className="form-textarea"
-              value={volumeCandidate.summary}
-              onChange={(e) => setVolumeCandidate({ ...volumeCandidate, summary: e.target.value })}
-              placeholder="分卷摘要..."
-              style={{
-                width: '100%',
-                height: 120,
-                resize: 'vertical',
-                fontSize: 13,
-                lineHeight: 1.7,
-              }}
-            />
-            {volumeCandidate.goal !== undefined && (
-              <input
-                className="form-input"
-                value={volumeCandidate.goal || ''}
-                onChange={(e) => setVolumeCandidate({ ...volumeCandidate, goal: e.target.value })}
-                placeholder="分卷目标"
-                style={{ width: '100%', marginTop: 6, fontSize: 13 }}
-              />
-            )}
-            {volumeCandidate.mainConflict !== undefined && (
-              <input
-                className="form-input"
-                value={volumeCandidate.mainConflict || ''}
-                onChange={(e) =>
-                  setVolumeCandidate({ ...volumeCandidate, mainConflict: e.target.value })
-                }
-                placeholder="主要冲突"
-                style={{ width: '100%', marginTop: 6, fontSize: 13 }}
-              />
-            )}
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={handleSaveVolumeCandidate}
-              style={{ marginTop: 8 }}
-            >
-              {targetVolumeId ? '确认更新分卷' : '确认创建分卷'}
-            </button>
-          </div>
-        )}
-
-        {chapterCandidates.length > 0 && (
-          <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-            {chapterCandidates.map((candidate, index) => (
-              <div
-                key={`${candidate.title}-${index}`}
-                style={{
-                  padding: 10,
-                  border: '1px solid var(--color-border-light)',
-                  borderRadius: 6,
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>章节候选 #{index + 1}</div>
-                <input
-                  className="form-input"
-                  value={candidate.title}
-                  onChange={(e) => {
-                    const updated = [...chapterCandidates];
-                    updated[index] = { ...candidate, title: e.target.value };
-                    setChapterCandidates(updated);
-                  }}
-                  placeholder="章节标题"
-                  style={{ width: '100%', marginBottom: 6, fontSize: 13 }}
-                />
-                <textarea
-                  className="form-textarea"
-                  value={candidate.rawText || candidate.outline}
-                  onChange={(e) => {
-                    const updated = [...chapterCandidates];
-                    if (candidate.rawText) {
-                      updated[index] = { ...candidate, rawText: e.target.value };
-                    } else {
-                      updated[index] = { ...candidate, outline: e.target.value };
-                    }
-                    setChapterCandidates(updated);
-                  }}
-                  placeholder="章节大纲..."
-                  style={{
-                    width: '100%',
-                    height: 100,
-                    resize: 'vertical',
-                    fontSize: 13,
-                    lineHeight: 1.7,
-                  }}
-                />
-                {candidate.goal !== undefined && (
-                  <input
-                    className="form-input"
-                    value={candidate.goal || ''}
-                    onChange={(e) => {
-                      const updated = [...chapterCandidates];
-                      updated[index] = { ...candidate, goal: e.target.value };
-                      setChapterCandidates(updated);
-                    }}
-                    placeholder="章节目标"
-                    style={{ width: '100%', marginTop: 6, fontSize: 13 }}
-                  />
-                )}
-                {candidate.targetWordCount !== undefined && (
-                  <input
-                    className="form-input"
-                    type="number"
-                    value={candidate.targetWordCount || 4000}
-                    onChange={(e) => {
-                      const updated = [...chapterCandidates];
-                      updated[index] = { ...candidate, targetWordCount: Number(e.target.value) };
-                      setChapterCandidates(updated);
-                    }}
-                    placeholder="建议字数"
-                    style={{ width: '100%', marginTop: 6, fontSize: 13 }}
-                  />
-                )}
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => handleSaveChapterCandidate(candidate)}
-                  style={{ marginTop: 8 }}
-                >
-                  确认保存为章节
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <OutlineCandidateResults
+          volumeCandidate={volumeCandidate}
+          setVolumeCandidate={setVolumeCandidate}
+          chapterCandidates={chapterCandidates}
+          setChapterCandidates={setChapterCandidates}
+          targetVolumeId={targetVolumeId}
+          onSaveVolumeCandidate={handleSaveVolumeCandidate}
+          onSaveChapterCandidate={handleSaveChapterCandidate}
+        />
       </div>
 
       {volumes.length === 0 ? (

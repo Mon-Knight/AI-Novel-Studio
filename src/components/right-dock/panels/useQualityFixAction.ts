@@ -8,21 +8,17 @@ import type {
   QualityCheckStatistics,
 } from '../../../types/qualityCheck';
 import type { AiTextApplyPayload, DraftResultMetadata } from '../../../types/workspaceSafety';
-import { qualityCheckAiService } from '../../../services/ai/qualityCheckAiService';
-import { qualityFixService } from '../../../services/ai/qualityFixService';
-import type {
-  FixComparison,
-  FixScopeValidation,
-  QualityFixRun,
+import { chapterQualityGateService } from '../../../services/ai/chapterQualityGateService';
+import {
+  getQualityFixRoundAvailability,
+  qualityFixService,
 } from '../../../services/ai/qualityFixService';
+import type { FixComparison, FixScopeValidation } from '../../../services/ai/qualityFixService';
 import { fixRunStore } from '../../../services/ai/fixRunStore';
 import {
   getContextForChapterTask,
   buildContextPromptSection,
 } from '../../../services/prompt/contextReaderService';
-import { draftVersionService } from '../../../services/database/draftVersionService';
-import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
-import { contextRecordService } from '../../../services/context/contextRecordService';
 import {
   qualityCheckService,
   computeStatistics,
@@ -31,7 +27,6 @@ import {
   isAiRequestCancelled,
   throwIfAiRequestCancelled,
 } from '../../../services/ai/aiCancellation';
-import { hashTextContent } from '../../../utils/contentHash';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import { resolveCurrentQualityRequest } from '../../../features/quality/qualityRequestSafety';
 import type { QualityOperationPhase } from './CheckPanelView';
@@ -107,6 +102,7 @@ export function useQualityFixAction({
   const [fixError, setFixError] = useState('');
   const [lastFixRunId, setLastFixRunId] = useState('');
   const [sourceDraftId, setSourceDraftId] = useState('');
+  const [fixRoundUsed, setFixRoundUsed] = useState(false);
 
   useEffect(() => {
     setFixLoading(false);
@@ -117,8 +113,33 @@ export function useQualityFixAction({
     setFixError('');
     setLastFixRunId('');
     setSourceDraftId('');
+    setFixRoundUsed(false);
     hideAiModal?.();
   }, [novelId, chapter?.id, hideAiModal]);
+
+  useEffect(() => {
+    let alive = true;
+    const chapterId = chapter?.id;
+    const draftId = currentDraft?.id;
+    if (!chapterId || !draftId) {
+      setFixRoundUsed(false);
+      return () => {
+        alive = false;
+      };
+    }
+    void getQualityFixRoundAvailability(chapterId, draftId)
+      .then((availability) => {
+        if (alive) {
+          setFixRoundUsed(availability === 'completed' || availability === 'exhausted');
+        }
+      })
+      .catch(() => {
+        if (alive) setFixRoundUsed(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [chapter?.id, currentDraft?.id]);
 
   const handleAIFix = async () => {
     if (!novelId || !chapter || !currentDraft || !activeReport || viewingHistory) return;
@@ -133,28 +154,27 @@ export function useQualityFixAction({
     }
     const pending = activeItems.filter((i) => i.status === 'pending');
     if (pending.length === 0) return;
+    if (fixRoundUsed) {
+      setFixError('当前正文已使用过唯一一轮外部 AI 修稿，请转人工处理。');
+      return;
+    }
 
     if (fixLoading || loading || activeOperationRef.current) return; // v1.7.20 防重复
     const controller = beginOperation();
     if (!controller) return;
     const { signal } = controller;
-    let activeFixRun: QualityFixRun | null = null;
-    let candidateDraft: ChapterDraft | null = null;
-    let terminalCommitStarted = false;
     setFixLoading(true);
     setFixError('');
     setFixComparison(null);
     setFixProgress(0);
     setSourceDraftId(currentDraft.id);
+    setFixRoundUsed(true);
     showAiModal?.('AI 正在修复并复检', 'AI 正在根据质量问题自动优化正文……');
     try {
       throwIfAiRequestCancelled(signal);
       updateAiModal?.('正在分析待处理问题...', 5);
-      const ignored = activeItems.filter((i) => i.status === 'ignored');
-
       updateAiModal?.('正在读取上下文...', 15);
 
-      // 读取章节上下文
       let chapterContext: string | undefined;
       let usedCtxIds = '';
       let skippedCtxIds = '';
@@ -181,145 +201,57 @@ export function useQualityFixAction({
       }
       throwIfAiRequestCancelled(signal);
 
-      updateAiModal?.('正在生成修订版正文...', 30);
-      const { fixResult, fixRun, scopeValidation } = await qualityFixService.runFix(
+      updateAiModal?.('正在定点修稿并复评...', 30);
+      setFixProgress(30);
+      const result = await chapterQualityGateService.runRepairAndRecheck(
         {
           novelId,
           chapterId: chapter.id,
-          chapterTitle: chapter.title,
-          chapterOutline: chapter.outline,
-          currentDraft,
-          pendingIssues: pending,
-          ignoredIssues: ignored,
-          beforeReportId: activeReport.id,
-          beforeScore: activeReport.overallScore || 0,
-          beforePendingCount: statistics.pending,
-          beforeSeriousCount: statistics.critical,
-          chapterContext,
-        },
-        { signal, cancel: () => controller.abort() },
-      );
-      activeFixRun = fixRun;
-      throwIfAiRequestCancelled(signal);
-      if (
-        liveNovelIdRef.current === requestNovelId &&
-        liveChapterIdRef.current === requestChapterId
-      ) {
-        setFixScopeValidation(scopeValidation);
-      }
-
-      // v1.7.19 修稿范围门控：范围越界 → 拒绝，不创建候选草稿
-      if (!scopeValidation.passed) {
-        fixRun.status = 'failed';
-        fixRun.failureReason = scopeValidation.rejectReason || '修稿范围校验未通过';
-        fixRun.warnings = JSON.stringify(scopeValidation.warnings);
-        throwIfAiRequestCancelled(signal);
-        terminalCommitStarted = true;
-        updateOperationPhase(controller, 'committing');
-        await fixRunStore.save(fixRun);
-        throw new Error(scopeValidation.rejectReason || '修稿范围越界，修订版未采用');
-      }
-
-      // 保存上下文信息到 fixRun
-      fixRun.usedContextIds = JSON.stringify(usedCtxIds);
-      fixRun.skippedContextIds = JSON.stringify(skippedCtxIds);
-      fixRun.warnings = JSON.stringify(ctxWarnings);
-      throwIfAiRequestCancelled(signal);
-      updateOperationPhase(controller, 'committing');
-      await fixRunStore.save(fixRun);
-      throwIfAiRequestCancelled(signal);
-      updateOperationPhase(controller, 'available');
-      if (
-        liveNovelIdRef.current === requestNovelId &&
-        liveChapterIdRef.current === requestChapterId
-      ) {
-        setLastFixRunId(fixRun.id);
-      }
-
-      if (fixRun.status === 'failed') {
-        if (
-          liveNovelIdRef.current === requestNovelId &&
-          liveChapterIdRef.current === requestChapterId
-        ) {
-          setFixError(fixRun.failureReason || 'AI 修稿失败');
-          setFixLoading(false);
-        }
-        return;
-      }
-
-      updateAiModal?.('正在保存新草稿版本...', 60);
-      throwIfAiRequestCancelled(signal);
-      updateOperationPhase(controller, 'committing');
-      candidateDraft = await draftVersionService.create({
-        novelId,
-        chapterId: chapter.id,
-        title: chapter.title,
-        content: fixResult.revisedContent,
-        source: 'ai_regenerated',
-      });
-      throwIfAiRequestCancelled(signal);
-      updateOperationPhase(controller, 'available');
-      const newDraft = candidateDraft;
-
-      fixRun.targetDraftId = newDraft.id;
-      fixRun.targetDraftVersion = newDraft.versionNo;
-
-      updateAiModal?.('正在重新质量检查...', 75);
-      const fixedContentHash = hashTextContent(fixResult.revisedContent);
-      const checkResult = await qualityCheckAiService.runCheck(
-        {
-          novelId,
-          chapterId: chapter.id,
-          draftId: newDraft.id,
           volumeId: chapter.volumeId,
-          draftContent: fixResult.revisedContent,
           chapterTitle: chapter.title,
           chapterOutline: chapter.outline,
           chapterGoal: chapter.goal,
-          contentHash: fixedContentHash,
-          wordCount: newDraft.wordCount,
+          draft: currentDraft,
+          report: activeReport,
+          items: activeItems,
+          chapterContext,
         },
-        { signal, cancel: () => controller.abort() },
+        {
+          signal,
+          cancel: () => controller.abort(),
+          requestIdPrefix: `quality-panel:${activeReport.id}`,
+        },
       );
       throwIfAiRequestCancelled(signal);
+      const fixRun = result.repairRun;
+      if (!fixRun) throw new Error('质量修稿没有返回运行记录。');
+      fixRun.usedContextIds = usedCtxIds;
+      fixRun.skippedContextIds = skippedCtxIds;
+      fixRun.warnings = ctxWarnings || fixRun.warnings;
+      await fixRunStore.save(fixRun);
+      if (
+        liveNovelIdRef.current === requestNovelId &&
+        liveChapterIdRef.current === requestChapterId
+      ) {
+        setFixScopeValidation(result.scopeValidation ?? null);
+        setLastFixRunId(fixRun.id);
+      }
 
       updateAiModal?.('正在对比修复效果...', 90);
-      const candidateCheckedAt = new Date().toISOString();
-      const afterItemsForStats: QualityCheckItem[] = checkResult.items.map((it, index) => ({
-        id: `candidate-${index}`,
-        reportId: 'candidate',
-        novelId,
-        chapterId: chapter.id,
-        draftId: newDraft.id,
-        issueType: (it.issueType || 'other') as QualityCheckItem['issueType'],
-        severity: (it.severity || 'medium') as QualityCheckItem['severity'],
-        title: it.title || '',
-        description: it.description || '',
-        category: it.category,
-        evidence: it.evidence,
-        suggestion: it.suggestion,
-        quote: it.quote,
-        startOffset: it.startOffset,
-        endOffset: it.endOffset,
-        paragraphIndex: it.paragraphIndex,
-        issueKey: `candidate-${index}`,
-        status: 'pending',
-        createdAt: candidateCheckedAt,
-        updatedAt: candidateCheckedAt,
-      }));
-      const afterStats = computeStatistics(afterItemsForStats);
+      setFixProgress(90);
+      const afterStats = computeStatistics(result.finalItems);
       const comparison = qualityFixService.compareResults(
-        fixRun.beforeScore,
-        checkResult.overallScore,
-        fixRun.beforePendingCount,
+        result.initialScore,
+        result.finalScore,
+        statistics.pending,
         afterStats.pending,
-        fixRun.beforeSeriousCount,
-        afterStats.critical,
+        statistics.critical + statistics.high,
+        afterStats.critical + afterStats.high,
         activeItems.length,
-        afterItemsForStats.length,
+        result.finalItems.length,
         statistics.high,
         afterStats.high,
-        fixResult.fixedIssueKeys.length,
+        fixRun.fixedIssueIds.length,
       );
       if (
         liveNovelIdRef.current === requestNovelId &&
@@ -327,136 +259,50 @@ export function useQualityFixAction({
       ) {
         setFixComparison(comparison);
       }
-      fixRun.targetContentHash = fixedContentHash;
-      fixRun.afterScore = checkResult.overallScore;
-      fixRun.afterPendingCount = afterStats.pending;
-      fixRun.afterSeriousCount = afterStats.critical;
-      fixRun.fixedIssueIds = activeItems
-        .filter((i) => fixResult.fixedIssueKeys.includes(i.issueKey))
-        .map((i) => i.id);
-      fixRun.newIssueIds = afterItemsForStats.map((i) => i.issueKey);
 
       throwIfAiRequestCancelled(signal);
-      terminalCommitStarted = true;
       updateOperationPhase(controller, 'committing');
-      if (comparison.isBetter) {
-        updateAiModal?.('正在保存通过复检的质量结果...', 95);
-        const rpt2 = await qualityCheckService.createReport({
-          novelId,
-          chapterId: chapter.id,
-          draftId: newDraft.id,
-          contentHash: fixedContentHash,
-          contentLength: fixResult.revisedContent.length,
-          checkedAt: candidateCheckedAt,
-        });
-        const saved2 = await qualityCheckService.saveResult({
-          reportId: rpt2.id,
-          novelId,
-          chapterId: chapter.id,
-          draftId: newDraft.id,
-          result: checkResult,
-          draftVersion: newDraft.versionNo,
-          contentHash: fixedContentHash,
-          contentLength: fixResult.revisedContent.length,
-          checkedAt: candidateCheckedAt,
-          aiTaskId: checkResult.aiTaskId,
-        });
-        fixRun.afterReportId = saved2.report?.id || rpt2.id;
-        fixRun.status = 'adopted';
-
-        updateAiModal?.('正在更新问题状态...', 98);
-        for (const key of fixResult.fixedIssueKeys) {
-          const item = activeItems.find((i) => i.issueKey === key);
-          if (item)
-            await qualityCheckService.updateIssueStatus(item.id, 'resolved').catch(() => {});
-        }
-
-        const refreshed = await qualityCheckService
-          .getChapterIssues(chapter.id)
-          .catch(() => saved2);
-        const reports = await resolveCurrentQualityRequest(
-          () => qualityCheckService.listReports(requestChapterId).catch(() => historyReports),
-          () =>
-            liveNovelIdRef.current === requestNovelId &&
-            liveChapterIdRef.current === requestChapterId,
-        );
-        if (reports) {
-          setHistoryReports(reports);
-          setSelectedReportId(refreshed.report?.id || '');
-        }
-
-        // 复检确认更好后，才同步新草稿到当前写作工作台。
-        const resultMetadata: DraftResultMetadata = {
-          resultId: newDraft.id,
-          novelId,
-          chapterId: requestChapterId,
-          sourceDraftId: requestSourceDraftId,
-          sourceRevision: requestSourceRevision,
-          baseContentHash: requestBaseHash,
-          source: 'quality_check',
-        };
-        if (
+      const reports = await resolveCurrentQualityRequest(
+        () => qualityCheckService.listReports(requestChapterId).catch(() => historyReports),
+        () =>
           liveNovelIdRef.current === requestNovelId &&
-          liveChapterIdRef.current === requestChapterId
-        ) {
-          setCurrentDraft(newDraft);
-        }
-        if (
-          liveNovelIdRef.current === requestNovelId &&
-          liveChapterIdRef.current === requestChapterId
-        ) {
-          if (onGenerated) {
-            onGenerated(newDraft, resultMetadata);
-          } else {
-            await onApplyAiText?.({
-              ...resultMetadata,
-              mode: 'replace_all',
-              text: fixResult.revisedContent,
-              source: 'quality_check',
-            });
-          }
-        }
-
-        if (
-          liveNovelIdRef.current === requestNovelId &&
-          liveChapterIdRef.current === requestChapterId
-        ) {
-          syncUp(
-            refreshed.report
-              ? {
-                  ...refreshed.report,
-                  contentHash: fixedContentHash,
-                  contentLength: fixResult.revisedContent.length,
-                  checkedAt: candidateCheckedAt,
-                }
-              : null,
-            refreshed.items,
-          );
-        }
-      } else {
-        fixRun.status = 'success';
-        if (
-          liveNovelIdRef.current === requestNovelId &&
-          liveChapterIdRef.current === requestChapterId
-        ) {
-          setFixStage('修复候选已保存为草稿，因复检未明显变好，当前正文保持不变');
-        }
+          liveChapterIdRef.current === requestChapterId,
+      );
+      if (reports) {
+        setHistoryReports(reports);
+        setSelectedReportId(result.finalReport.id);
       }
-      await fixRunStore.save(fixRun).catch(() => {});
 
-      // 标记旧章节上下文和卷上下文过期
-      if (comparison.isBetter) {
-        await chapterSummaryService.markExpired(chapter.id);
-        const allRecords = await contextRecordService.getByNovelId(novelId);
-        for (const r of allRecords) {
-          if (
-            r.contextType === 'volume_summary' &&
-            r.volumeId === chapter.volumeId &&
-            !r.isExpired
-          ) {
-            await contextRecordService.update(r.id, { isExpired: true });
-          }
+      const resultMetadata: DraftResultMetadata = {
+        resultId: result.finalDraft.id,
+        novelId,
+        chapterId: requestChapterId,
+        sourceDraftId: requestSourceDraftId,
+        sourceRevision: requestSourceRevision,
+        baseContentHash: requestBaseHash,
+        source: 'quality_check',
+      };
+      if (
+        liveNovelIdRef.current === requestNovelId &&
+        liveChapterIdRef.current === requestChapterId
+      ) {
+        setCurrentDraft(result.finalDraft);
+        syncUp(result.finalReport, result.finalItems);
+        if (onGenerated) {
+          onGenerated(result.finalDraft, resultMetadata);
+        } else {
+          await onApplyAiText?.({
+            ...resultMetadata,
+            mode: 'replace_all',
+            text: result.finalDraft.content,
+            source: 'quality_check',
+          });
         }
+        setFixStage(
+          result.qualityGatePassed
+            ? `质量门禁通过：${result.finalScore} 分，critical/high 均为 0`
+            : `修稿和复评已完成：${result.finalScore} 分，仍需人工确认处理`,
+        );
       }
 
       if (
@@ -475,21 +321,8 @@ export function useQualityFixAction({
         }, 3000);
       }
     } catch (e: unknown) {
-      const cancelled = !terminalCommitStarted && (signal.aborted || isAiRequestCancelled(e));
+      const cancelled = signal.aborted || isAiRequestCancelled(e);
       if (cancelled) {
-        const cleanup: Promise<unknown>[] = [];
-        if (candidateDraft) {
-          cleanup.push(draftVersionService.delete(candidateDraft.id, requestChapterId));
-        }
-        if (activeFixRun) {
-          activeFixRun.status = 'cancelled';
-          activeFixRun.failureReason = undefined;
-          activeFixRun.targetDraftId = undefined;
-          activeFixRun.targetDraftVersion = undefined;
-          activeFixRun.updatedAt = new Date().toISOString();
-          cleanup.push(fixRunStore.save(activeFixRun));
-        }
-        await Promise.allSettled(cleanup);
         if (
           mountedRef.current &&
           liveNovelIdRef.current === requestNovelId &&
@@ -534,6 +367,7 @@ export function useQualityFixAction({
     fixScopeValidation,
     fixError,
     sourceDraftId,
+    fixRoundUsed,
     lastFixRunId,
     setFixStage,
     setFixComparison,

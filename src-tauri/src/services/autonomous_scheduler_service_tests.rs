@@ -155,6 +155,42 @@ fn draft(db: &Connection, f: &Fixture, key: &str, adopted: bool) -> String {
     id
 }
 
+fn review_fact(db: &Connection, f: &Fixture, draft_id: &str, key: &str) -> String {
+    let session_id = format!("review-{key}");
+    let now = Utc::now().to_rfc3339();
+    db.execute(
+        "INSERT INTO multi_agent_sessions
+         (session_id,operation_id,novel_id,chapter_id,source_draft_id,
+          source_draft_version,source_content_hash,expert_types_json,max_rounds,
+          acceptance_threshold,minimum_average_score,minimum_successful_experts,
+          status,current_round,accepted,final_action,final_draft_id,total_tokens_input,
+          total_tokens_output,total_tokens_used,duration_ms,created_at,updated_at,completed_at)
+         VALUES(?1,?2,?3,?4,?5,1,?6,'[\"plot\",\"logic\"]',1,0.75,80,2,
+                'completed',1,1,'accept',?5,5,5,10,10,?7,?7,?7)",
+        params![
+            session_id,
+            format!("review-operation-{key}"),
+            f.novel,
+            f.chapter,
+            draft_id,
+            "1".repeat(64),
+            now,
+        ],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO multi_agent_rounds
+         (session_id,round_number,input_draft_id,input_draft_version,input_content_hash,
+          agreed,acceptance_rate,average_score,successful_experts,failed_experts,
+          required_successful_experts,action,major_concerns_json,merged_suggestions_json,
+          tokens_input,tokens_output,tokens_used,duration_ms,started_at,completed_at)
+         VALUES(?1,1,?2,1,?3,1,1.0,90.0,2,0,2,'accept','[]','[]',5,5,10,10,?4,?4)",
+        params![session_id, draft_id, "1".repeat(64), now],
+    )
+    .unwrap();
+    session_id
+}
+
 fn finish_input(
     run: &AutonomousBookRunDto,
     claim: &AutonomousRunChapterClaim,
@@ -178,6 +214,7 @@ fn finish_input(
         average_score: Some(90.0),
         acceptance_rate: Some(1.0),
         analysis_confirmed: Some(outcome == "confirmed"),
+        authorization_id: None,
         error: None,
     }
 }
@@ -337,7 +374,7 @@ fn three_modes_have_distinct_frozen_decisions() {
     );
     assert_eq!(
         expected_success_outcome(&policy("quality_gate"), true),
-        "adopted"
+        "candidate_ready"
     );
     assert_eq!(
         expected_success_outcome(&policy("full_auto"), false),
@@ -412,13 +449,18 @@ fn budget_window_and_failure_breaker_are_enforced() {
 }
 
 #[test]
-fn adoption_and_confirmed_analysis_are_revalidated() {
+fn review_modes_cannot_finish_adopted_and_full_auto_confirmation_is_revalidated() {
     let mut db = db();
-    let adopted_f = fixture(&db, "adopted");
-    let adopted_run = run(&mut db, &adopted_f, "adopted", policy("quality_gate"));
+    let adopted_f = fixture(&db, "review-mode-adopted");
+    let adopted_run = run(
+        &mut db,
+        &adopted_f,
+        "review-mode-adopted",
+        policy("quality_gate"),
+    );
     let adopted_lease = lease(&mut db, &adopted_run.run_id, "owner-a");
     let adopted_claim = claim(&mut db, &adopted_run.run_id, proof(&adopted_lease));
-    let adopted_draft = draft(&db, &adopted_f, "adopted", false);
+    let adopted_draft = draft(&db, &adopted_f, "review-mode-adopted", false);
     let adopted_input = finish_input(
         &adopted_run,
         &adopted_claim,
@@ -438,19 +480,30 @@ fn adoption_and_confirmed_analysis_are_revalidated() {
     )
     .unwrap();
     assert_eq!(
-        finish_chapter(&mut db, adopted_input)
-            .unwrap()
-            .attempt
-            .status,
-        "adopted"
+        finish_chapter(&mut db, adopted_input).unwrap_err().code,
+        codes::AUTONOMOUS_RUN_DECISION_INVALID
+    );
+    let disguised_candidate = finish_input(
+        &adopted_run,
+        &adopted_claim,
+        &adopted_lease,
+        "candidate_ready",
+        Some(&adopted_draft),
+    );
+    assert_eq!(
+        finish_chapter(&mut db, disguised_candidate)
+            .unwrap_err()
+            .code,
+        codes::AUTONOMOUS_RUN_DECISION_INVALID
     );
 
     let confirmed_f = fixture(&db, "confirmed");
     let confirmed_run = run(&mut db, &confirmed_f, "confirmed", policy("full_auto"));
     let confirmed_lease = lease(&mut db, &confirmed_run.run_id, "owner-b");
     let confirmed_claim = claim(&mut db, &confirmed_run.run_id, proof(&confirmed_lease));
-    let confirmed_draft = draft(&db, &confirmed_f, "confirmed", true);
-    let confirmed_input = finish_input(
+    let confirmed_draft = draft(&db, &confirmed_f, "confirmed", false);
+    let review_session_id = review_fact(&db, &confirmed_f, &confirmed_draft, "confirmed");
+    let mut confirmed_input = finish_input(
         &confirmed_run,
         &confirmed_claim,
         &confirmed_lease,
@@ -463,6 +516,47 @@ fn adoption_and_confirmed_analysis_are_revalidated() {
             .code,
         codes::AUTONOMOUS_RUN_DECISION_INVALID
     );
+    let authorization_input = AuthorizeFullAutoAttemptInput {
+        operation_id: "authorize-confirmed".into(),
+        run_id: confirmed_run.run_id.clone(),
+        attempt_id: confirmed_claim.attempt.attempt_id.clone(),
+        expected_revision: confirmed_claim.run.state_revision,
+        lease: proof(&confirmed_lease),
+        candidate_draft_id: confirmed_draft.clone(),
+        review_session_id: review_session_id.clone(),
+        token_input: Some(5),
+        token_output: Some(5),
+        cost_usd: Some(0.01),
+    };
+    let authorization = authorize_full_auto_attempt(&mut db, authorization_input.clone()).unwrap();
+    assert!(!authorization.replayed);
+    assert_eq!(
+        authorization
+            .attempt
+            .decision
+            .as_ref()
+            .and_then(|value| value.get("phase"))
+            .and_then(Value::as_str),
+        Some("full_auto_authorized")
+    );
+    assert!(
+        authorize_full_auto_attempt(&mut db, authorization_input.clone())
+            .unwrap()
+            .replayed
+    );
+    let mut conflicting_authorization = authorization_input;
+    conflicting_authorization.operation_id = "authorize-conflicting".into();
+    assert_eq!(
+        authorize_full_auto_attempt(&mut db, conflicting_authorization)
+            .unwrap_err()
+            .code,
+        codes::AUTONOMOUS_RUN_STATE_CONFLICT
+    );
+    db.execute(
+        "UPDATE chapter_drafts SET is_adopted=1 WHERE id=?1",
+        [&confirmed_draft],
+    )
+    .unwrap();
     let now = Utc::now().to_rfc3339();
     db.execute(
         "INSERT INTO chapter_summaries
@@ -471,12 +565,209 @@ fn adoption_and_confirmed_analysis_are_revalidated() {
         params![confirmed_f.novel, confirmed_f.chapter, confirmed_draft, now],
     )
     .unwrap();
+    confirmed_input.review_session_id = Some(review_session_id);
+    confirmed_input.authorization_id = Some(authorization.authorization_id);
     assert_eq!(
         finish_chapter(&mut db, confirmed_input)
             .unwrap()
             .attempt
             .status,
         "confirmed"
+    );
+}
+
+#[test]
+fn full_auto_authorization_blocks_budget_and_target_drift_before_adoption() {
+    let mut db = db();
+    let budget_f = fixture(&db, "authorize-budget");
+    let mut budget_policy = policy("full_auto");
+    budget_policy.book_token_budget = Some(10);
+    let budget_run = run(&mut db, &budget_f, "authorize-budget", budget_policy);
+    let budget_lease = lease(&mut db, &budget_run.run_id, "budget-owner");
+    let budget_claim = claim(&mut db, &budget_run.run_id, proof(&budget_lease));
+    let budget_draft = draft(&db, &budget_f, "authorize-budget", false);
+    let budget_review = review_fact(&db, &budget_f, &budget_draft, "authorize-budget");
+    db.execute(
+        "UPDATE autonomous_book_runs SET token_output=1 WHERE run_id=?1",
+        [&budget_run.run_id],
+    )
+    .unwrap();
+    let budget_error = authorize_full_auto_attempt(
+        &mut db,
+        AuthorizeFullAutoAttemptInput {
+            operation_id: "authorize-budget".into(),
+            run_id: budget_run.run_id.clone(),
+            attempt_id: budget_claim.attempt.attempt_id,
+            expected_revision: budget_claim.run.state_revision,
+            lease: proof(&budget_lease),
+            candidate_draft_id: budget_draft.clone(),
+            review_session_id: budget_review,
+            token_input: Some(5),
+            token_output: Some(5),
+            cost_usd: Some(0.01),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(budget_error.code, codes::AUTONOMOUS_RUN_BUDGET_EXCEEDED);
+    let budget_state: (i64, Option<String>) = db
+        .query_row(
+            "SELECT is_adopted, decision_json FROM chapter_drafts d
+             JOIN autonomous_run_chapter_attempts a ON a.candidate_draft_id IS NULL
+             WHERE d.id=?1 AND a.run_id=?2 LIMIT 1",
+            params![budget_draft, budget_run.run_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(budget_state, (0, None));
+
+    let target_f = fixture(&db, "authorize-target");
+    let target_run = run(&mut db, &target_f, "authorize-target", policy("full_auto"));
+    let target_lease = lease(&mut db, &target_run.run_id, "target-owner");
+    let target_claim = claim(&mut db, &target_run.run_id, proof(&target_lease));
+    let target_draft = draft(&db, &target_f, "authorize-target", false);
+    let target_review = review_fact(&db, &target_f, &target_draft, "authorize-target");
+    db.execute(
+        "UPDATE autonomous_book_runs SET next_chapter_number=2 WHERE run_id=?1",
+        [&target_run.run_id],
+    )
+    .unwrap();
+    let target_error = authorize_full_auto_attempt(
+        &mut db,
+        AuthorizeFullAutoAttemptInput {
+            operation_id: "authorize-target".into(),
+            run_id: target_run.run_id,
+            attempt_id: target_claim.attempt.attempt_id,
+            expected_revision: target_claim.run.state_revision,
+            lease: proof(&target_lease),
+            candidate_draft_id: target_draft.clone(),
+            review_session_id: target_review,
+            token_input: Some(5),
+            token_output: Some(5),
+            cost_usd: Some(0.01),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(target_error.code, codes::AUTONOMOUS_RUN_DECISION_INVALID);
+    assert_eq!(
+        db.query_row(
+            "SELECT is_adopted FROM chapter_drafts WHERE id=?1",
+            [&target_draft],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn recovered_full_auto_attempt_reauthorizes_only_a_previously_authorized_adoption() {
+    let mut db = db();
+    let f = fixture(&db, "authorize-recovery");
+    let recovery_run = run(&mut db, &f, "authorize-recovery", policy("full_auto"));
+    let first_lease = lease(&mut db, &recovery_run.run_id, "first-owner");
+    let first_claim = claim(&mut db, &recovery_run.run_id, proof(&first_lease));
+    let candidate = draft(&db, &f, "authorize-recovery", false);
+    let review = review_fact(&db, &f, &candidate, "authorize-recovery");
+    authorize_full_auto_attempt(
+        &mut db,
+        AuthorizeFullAutoAttemptInput {
+            operation_id: "authorize-before-crash".into(),
+            run_id: recovery_run.run_id.clone(),
+            attempt_id: first_claim.attempt.attempt_id.clone(),
+            expected_revision: first_claim.run.state_revision,
+            lease: proof(&first_lease),
+            candidate_draft_id: candidate.clone(),
+            review_session_id: review.clone(),
+            token_input: Some(5),
+            token_output: Some(5),
+            cost_usd: Some(0.01),
+        },
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE chapter_drafts SET is_adopted=1 WHERE id=?1",
+        [&candidate],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE autonomous_run_leases SET expires_at=?1 WHERE lease_id=?2",
+        params![
+            (Utc::now() - Duration::minutes(1)).to_rfc3339(),
+            first_lease.lease.lease_id,
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(
+        recover_interrupted_runs(&mut db).unwrap()[0].status,
+        "queued"
+    );
+    assert_eq!(
+        find_attempt(&db, &first_claim.attempt.attempt_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        "abandoned"
+    );
+    let second_lease = lease(&mut db, &recovery_run.run_id, "second-owner");
+    let second_claim = claim(&mut db, &recovery_run.run_id, proof(&second_lease));
+    let recovered_authorization = authorize_full_auto_attempt(
+        &mut db,
+        AuthorizeFullAutoAttemptInput {
+            operation_id: "authorize-after-crash".into(),
+            run_id: recovery_run.run_id,
+            attempt_id: second_claim.attempt.attempt_id,
+            expected_revision: second_claim.run.state_revision,
+            lease: proof(&second_lease),
+            candidate_draft_id: candidate,
+            review_session_id: review,
+            token_input: Some(5),
+            token_output: Some(5),
+            cost_usd: Some(0.01),
+        },
+    )
+    .unwrap();
+    assert!(!recovered_authorization.replayed);
+    assert_eq!(
+        recovered_authorization
+            .attempt
+            .decision
+            .as_ref()
+            .and_then(|value| value.get("phase"))
+            .and_then(Value::as_str),
+        Some("full_auto_authorized")
+    );
+
+    let rogue_f = fixture(&db, "authorize-rogue-adoption");
+    let rogue_run = run(
+        &mut db,
+        &rogue_f,
+        "authorize-rogue-adoption",
+        policy("full_auto"),
+    );
+    let rogue_lease = lease(&mut db, &rogue_run.run_id, "rogue-owner");
+    let rogue_claim = claim(&mut db, &rogue_run.run_id, proof(&rogue_lease));
+    let rogue_candidate = draft(&db, &rogue_f, "authorize-rogue-adoption", true);
+    let rogue_review = review_fact(&db, &rogue_f, &rogue_candidate, "authorize-rogue-adoption");
+    assert_eq!(
+        authorize_full_auto_attempt(
+            &mut db,
+            AuthorizeFullAutoAttemptInput {
+                operation_id: "authorize-rogue-adoption".into(),
+                run_id: rogue_run.run_id,
+                attempt_id: rogue_claim.attempt.attempt_id,
+                expected_revision: rogue_claim.run.state_revision,
+                lease: proof(&rogue_lease),
+                candidate_draft_id: rogue_candidate,
+                review_session_id: rogue_review,
+                token_input: Some(5),
+                token_output: Some(5),
+                cost_usd: Some(0.01),
+            },
+        )
+        .unwrap_err()
+        .code,
+        codes::AUTONOMOUS_RUN_DECISION_INVALID
     );
 }
 
@@ -488,7 +779,7 @@ fn operation_replay_is_idempotent_and_state_changes_use_cas() {
         operation_id: "run-replay".into(),
         novel_id: f.novel.clone(),
         plan_id: f.plan.clone(),
-        policy: policy("draft_night"),
+        policy: policy("quality_gate"),
     };
     let run = create_run(&mut db, input.clone()).unwrap();
     assert_eq!(create_run(&mut db, input).unwrap().run_id, run.run_id);
@@ -497,6 +788,12 @@ fn operation_replay_is_idempotent_and_state_changes_use_cas() {
     let draft = draft(&db, &f, "replay", false);
     let finish = finish_input(&run, &claim, &lease, "candidate_ready", Some(&draft));
     let done = finish_chapter(&mut db, finish.clone()).unwrap();
+    assert_eq!(done.run.status, "paused");
+    assert_eq!(done.run.pause_reason.as_deref(), Some("review_required"));
+    assert_eq!(
+        done.decision.get("reason").and_then(Value::as_str),
+        Some("quality_gate_passed_requires_user_confirmation")
+    );
     assert!(finish_chapter(&mut db, finish.clone()).unwrap().replayed);
     let mut conflicting = finish;
     conflicting.token_output = Some(6);
@@ -535,14 +832,25 @@ fn operation_replay_is_idempotent_and_state_changes_use_cas() {
     };
     let before_promote = get_run(&db, &promote.run_id).unwrap().unwrap();
     let before_attempt = list_attempts(&db, &promote.run_id, 10).unwrap().remove(0);
-    assert_eq!(before_promote.status, "completed");
+    assert_eq!(before_promote.status, "paused");
     assert_eq!(before_promote.state_revision, promote.expected_revision);
     assert_eq!(before_attempt.status, "candidate_ready");
     assert_eq!(
         before_attempt.candidate_draft_id.as_deref(),
         Some(promote.adopted_draft_id.as_str())
     );
-    assert!(!promote_attempt(&mut db, promote.clone()).unwrap().replayed);
+    let mut without_confirmation = promote.clone();
+    without_confirmation.user_confirmed = false;
+    assert_eq!(
+        promote_attempt(&mut db, without_confirmation)
+            .unwrap_err()
+            .code,
+        codes::AUTONOMOUS_RUN_INPUT_INVALID
+    );
+    let promoted = promote_attempt(&mut db, promote.clone()).unwrap();
+    assert!(!promoted.replayed);
+    assert_eq!(promoted.run.status, "completed");
+    assert_eq!(promoted.attempt.status, "adopted");
     assert!(promote_attempt(&mut db, promote.clone()).unwrap().replayed);
     let mut wrong_operation = promote;
     wrong_operation.operation_id = "promote-other".into();

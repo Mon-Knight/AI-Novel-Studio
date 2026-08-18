@@ -117,12 +117,14 @@ function delay(ms?: number, signal?: AbortSignal): Promise<void> {
 /** 从系统提示词中检测任务类型 */
 type MockTaskType =
   | 'chapter_generate'
+  | 'chapter_beat_repair'
   | 'character_generate'
   | 'event_suggest'
   | 'setting_expand'
   | 'setting_suggestion_generate'
   | 'quality_check'
   | 'chapter_polish'
+  | 'chapter_scene_plan_generate'
   | 'connection_test'
   | 'context_summarize'
   | 'outline_generate'
@@ -268,6 +270,31 @@ function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
     }
   }
   return result;
+}
+
+function mockChapterScenePlan(): string {
+  return JSON.stringify({
+    scenes: [
+      {
+        sceneNo: 1,
+        title: '线索进入现场',
+        contextCapsule: '主角刚进入当前场景，尚未确认线索来源。',
+        location: '当前章节主要地点',
+        characters: ['主角'],
+        goal: '让主角获得一个可验证的新线索。',
+        conflict: '时间压力迫使主角在信息不完整时做出选择。',
+        beats: [
+          { order: 1, text: '建立场景开场状态并明确当前行动目标。', required: true },
+          { order: 2, text: '出现阻力，使主角必须采取具体行动。', required: true },
+          { order: 3, text: '以新的线索或状态变化结束场景。', required: true },
+        ],
+        constraints: ['保持当前视角，不提前解释幕后真相。'],
+        expectedEndState: '主角获得下一步行动依据。',
+        result: '主角得到下一步行动依据。',
+        transition: '转入下一场景的行动准备。',
+      },
+    ],
+  });
 }
 
 function mockCharacterGenerate(_info: ReturnType<typeof extractInfo>): string {
@@ -623,19 +650,19 @@ function mockChapterOutlines(): string {
         title: '第一章 余波',
         outline: '主角处理上一事件的后果，并发现新的线索。',
         goal: '承接前文并开启新冲突',
-        targetWordCount: 4000,
+        targetWordCount: 2500,
       },
       {
         title: '第二章 暗线',
         outline: '同伴提供情报，隐藏势力第一次露出痕迹。',
         goal: '抛出新的调查方向',
-        targetWordCount: 4000,
+        targetWordCount: 2500,
       },
       {
         title: '第三章 试探',
         outline: '主角与对手进行间接交锋，确认危险等级。',
         goal: '制造冲突升级',
-        targetWordCount: 4000,
+        targetWordCount: 2500,
       },
     ],
   });
@@ -1050,6 +1077,10 @@ export class MockAiClient implements AiClient {
       case 'autonomous_chapter_batch':
         text = mockAutonomousChapterBatch(request.messages);
         break;
+      case 'chapter_scene_plan_generate':
+        text = mockChapterScenePlan();
+        break;
+      case 'chapter_beat_repair':
       case 'chapter_generate':
       default:
         text = mockChapterGenerate(info);

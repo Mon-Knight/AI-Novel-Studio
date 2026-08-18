@@ -77,7 +77,9 @@ async function executeMode(mode: AutonomousAutomationMode) {
   let finishedOutcome = '';
   let adopted = 0;
   let confirmed = 0;
+  let authorized = 0;
   let selection = '';
+  const sideEffectOrder: string[] = [];
   const scheduler = {
     capability: () => ({ persistent: true as const, runtime: 'tauri' as const }),
     async createRun(input: { policy: AutonomousAutomationPolicy }) {
@@ -126,6 +128,7 @@ async function executeMode(mode: AutonomousAutomationMode) {
       };
     },
     async finishChapter(input: { outcome: string }) {
+      sideEffectOrder.push('finish');
       finishedOutcome = input.outcome;
       run = { ...run, status: 'completed', stateRevision: 3, completedChapters: 1 };
       return { run, attempt: {}, decision: {}, replayed: false };
@@ -135,6 +138,17 @@ async function executeMode(mode: AutonomousAutomationMode) {
     },
     async heartbeat() {
       return {};
+    },
+    async authorizeFullAutoAttempt() {
+      authorized += 1;
+      sideEffectOrder.push('authorize');
+      return {
+        run,
+        attempt: {},
+        authorizationId: 'full-auto-authorization',
+        authorizationHash: 'authorization-hash',
+        replayed: false,
+      };
     },
   } as unknown as typeof autonomousSchedulerService;
 
@@ -163,6 +177,7 @@ async function executeMode(mode: AutonomousAutomationMode) {
     },
     adoptDraft: async () => {
       adopted += 1;
+      sideEffectOrder.push('adopt');
       return { id: 'draft-1', chapterId: 'chapter-1', isAdopted: true } as never;
     },
     getReview: async () =>
@@ -172,6 +187,7 @@ async function executeMode(mode: AutonomousAutomationMode) {
       }) as never,
     confirmAnalysis: async () => {
       confirmed += 1;
+      sideEffectOrder.push('confirm');
     },
     generateId: () => 'id',
     setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
@@ -179,27 +195,126 @@ async function executeMode(mode: AutonomousAutomationMode) {
   });
   await worker.start(story, policy(mode));
   await waitFor(() => worker.snapshot(story.planId).run?.status === 'completed');
-  return { finishedOutcome, adopted, confirmed, selection };
+  return { finishedOutcome, adopted, confirmed, authorized, selection, sideEffectOrder };
 }
 
-test('scheduler worker maps the three frozen modes to candidate, adopted and confirmed outcomes', async () => {
+test('scheduler worker keeps review modes as candidates and reserves adoption for full auto', async () => {
   assert.deepEqual(await executeMode('draft_night'), {
     finishedOutcome: 'candidate_ready',
     adopted: 0,
     confirmed: 0,
+    authorized: 0,
     selection: 'next_missing_candidate',
+    sideEffectOrder: ['finish'],
   });
   assert.deepEqual(await executeMode('quality_gate'), {
-    finishedOutcome: 'adopted',
-    adopted: 1,
+    finishedOutcome: 'candidate_ready',
+    adopted: 0,
     confirmed: 0,
+    authorized: 0,
     selection: 'next_missing_candidate',
+    sideEffectOrder: ['finish'],
   });
   assert.deepEqual(await executeMode('full_auto'), {
     finishedOutcome: 'confirmed',
     adopted: 1,
     confirmed: 1,
+    authorized: 1,
     selection: 'next_missing_candidate',
+    sideEffectOrder: ['authorize', 'adopt', 'confirm', 'finish'],
+  });
+});
+
+test('user adoption promotes the matching candidate with explicit confirmation and current CAS', async () => {
+  const story = plan();
+  const pausedRun = {
+    runId: 'run-user-promotion',
+    operationId: 'run-operation',
+    requestHash: 'request-hash',
+    novelId: story.novelId,
+    planId: story.planId,
+    mode: 'quality_gate',
+    policy: policy('quality_gate'),
+    policyHash: 'policy-hash',
+    status: 'paused',
+    stateRevision: 7,
+    nextChapterNumber: 1,
+    totalChapters: 1,
+    completedChapters: 0,
+    tokenInput: 0,
+    tokenOutput: 0,
+    costUsd: 0,
+    usageDay: '2026-08-18',
+    dailyTokenInput: 0,
+    dailyTokenOutput: 0,
+    dailyCostUsd: 0,
+    consecutiveFailures: 0,
+    createdAt: '',
+    updatedAt: '',
+  } satisfies AutonomousBookRun;
+  let received: Record<string, unknown> | undefined;
+  const scheduler = {
+    capability: () => ({ persistent: true as const, runtime: 'tauri' as const }),
+    listRuns: async () => [pausedRun],
+    listAttempts: async () => [
+      {
+        attemptId: 'attempt-user-promotion',
+        chapterId: 'chapter-1',
+        candidateDraftId: 'draft-1',
+        status: 'candidate_ready',
+      },
+    ],
+    getRun: async () => pausedRun,
+    async promoteAttempt(input: Record<string, unknown>) {
+      received = input;
+      return {
+        run: { ...pausedRun, status: 'completed', stateRevision: 8, completedChapters: 1 },
+        attempt: {
+          attemptId: 'attempt-user-promotion',
+          chapterId: 'chapter-1',
+          candidateDraftId: 'draft-1',
+          adoptedDraftId: 'draft-1',
+          status: 'adopted',
+        },
+        decision: {},
+        replayed: false,
+      };
+    },
+  } as unknown as typeof autonomousSchedulerService;
+  const worker = new AutonomousSchedulerWorker({
+    scheduler,
+    getPlan: async () => story,
+    generateCandidate: async () => {
+      throw new Error('unexpected generation');
+    },
+    adoptDraft: async () => {
+      throw new Error('unexpected adoption');
+    },
+    getReview: async () => null,
+    confirmAnalysis: async () => undefined,
+    generateId: () => 'id',
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
+    clearInterval: () => undefined,
+  });
+
+  assert.equal(
+    await worker.promoteUserAdoptedDraft({
+      id: 'draft-1',
+      novelId: 'novel-1',
+      chapterId: 'chapter-1',
+      isAdopted: true,
+    } as never),
+    true,
+  );
+  assert.deepEqual(received, {
+    operationId: 'user-promote:attempt-user-promotion:draft-1',
+    runId: 'run-user-promotion',
+    attemptId: 'attempt-user-promotion',
+    expectedRevision: 7,
+    outcome: 'adopted',
+    adoptedDraftId: 'draft-1',
+    analysisConfirmed: false,
+    userConfirmed: true,
   });
 });
 

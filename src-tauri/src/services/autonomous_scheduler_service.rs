@@ -1118,7 +1118,7 @@ fn verify_draft(
     novel_id: &str,
     chapter_id: &str,
     draft_id: &str,
-    require_adopted: bool,
+    expected_adopted: Option<bool>,
 ) -> Result<(), AppError> {
     let identity: Option<(String, String, i64)> = transaction
         .query_row(
@@ -1135,8 +1135,8 @@ fn verify_draft(
             false,
         ));
     };
-    if actual_novel != novel_id || actual_chapter != chapter_id || (require_adopted && adopted != 1)
-    {
+    let adoption_matches = expected_adopted.is_none_or(|expected| adopted == i64::from(expected));
+    if actual_novel != novel_id || actual_chapter != chapter_id || !adoption_matches {
         return Err(scheduler_error(
             codes::AUTONOMOUS_RUN_DECISION_INVALID,
             "调度决策引用的草稿作用域或采用状态无效",
@@ -1176,10 +1176,8 @@ fn expected_success_outcome(
     quality_passes: bool,
 ) -> &'static str {
     match policy.mode.as_str() {
-        "draft_night" => "candidate_ready",
-        "quality_gate" if quality_passes => "adopted",
+        "draft_night" | "quality_gate" => "candidate_ready",
         "full_auto" if quality_passes && policy.auto_confirm_analysis => "confirmed",
-        "full_auto" if quality_passes => "adopted",
         _ => "candidate_ready",
     }
 }
@@ -1219,6 +1217,443 @@ fn post_usage_exceeds_budget(run: &AutonomousBookRunDto) -> bool {
             .is_some_and(|budget| run.daily_cost_usd >= budget)
 }
 
+fn enforce_final_budget(
+    run: &AutonomousBookRunDto,
+    token_input: i64,
+    token_output: i64,
+    cost_usd: f64,
+) -> Result<(), AppError> {
+    let total_tokens = token_input.saturating_add(token_output);
+    let book_tokens = run
+        .token_input
+        .saturating_add(run.token_output)
+        .saturating_add(total_tokens);
+    let daily_tokens = run
+        .daily_token_input
+        .saturating_add(run.daily_token_output)
+        .saturating_add(total_tokens);
+    let book_cost = run.cost_usd + cost_usd;
+    let daily_cost = run.daily_cost_usd + cost_usd;
+    let blocked = run
+        .policy
+        .book_token_budget
+        .is_some_and(|budget| book_tokens > budget)
+        || run
+            .policy
+            .daily_token_budget
+            .is_some_and(|budget| daily_tokens > budget)
+        || run
+            .policy
+            .book_cost_budget_usd
+            .is_some_and(|budget| book_cost > budget)
+        || run
+            .policy
+            .daily_cost_budget_usd
+            .is_some_and(|budget| daily_cost > budget);
+    if blocked {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_BUDGET_EXCEEDED,
+            "本章实际用量会超过冻结预算，已阻止全自动正式副作用",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn verify_current_run_target(
+    transaction: &Transaction<'_>,
+    run: &AutonomousBookRunDto,
+    attempt: &AutonomousRunChapterAttemptDto,
+) -> Result<(), AppError> {
+    if run.completed_chapters >= run.policy.max_chapters
+        || run.next_chapter_number != attempt.chapter_number
+    {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动授权的章节已不再是冻结策略的当前目标",
+            false,
+        ));
+    }
+    let plan = autonomous_story_service::get_plan(transaction, &run.plan_id)?
+        .ok_or_else(|| invalid("全书计划不存在"))?;
+    if plan.get("status").and_then(Value::as_str) != Some("applied") {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动授权绑定的全书计划不再处于 applied",
+            false,
+        ));
+    }
+    let target = chapter_plan(&plan, run.next_chapter_number)?;
+    if target.get("id").and_then(Value::as_str) != Some(attempt.chapter_id.as_str()) {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动授权的章节与权威计划目标不一致",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn authoritative_review_metrics(
+    transaction: &Transaction<'_>,
+    run: &AutonomousBookRunDto,
+    attempt: &AutonomousRunChapterAttemptDto,
+    review_session_id: &str,
+    candidate_draft_id: &str,
+) -> Result<(i64, f64, f64), AppError> {
+    let fact: Option<(String, String, String, Option<String>, i64, f64, f64)> = transaction
+        .query_row(
+            "SELECT s.novel_id, s.chapter_id, s.status, s.final_draft_id,
+                    r.successful_experts, r.average_score, r.acceptance_rate
+             FROM multi_agent_sessions s
+             JOIN multi_agent_rounds r
+               ON r.session_id=s.session_id AND r.round_number=s.current_round
+             WHERE s.session_id=?1",
+            [review_session_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    let Some((novel_id, chapter_id, status, final_draft_id, successful, average, rate)) = fact
+    else {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动授权缺少可复验的六专家评审事实",
+            false,
+        ));
+    };
+    if novel_id != run.novel_id
+        || chapter_id != attempt.chapter_id
+        || status != "completed"
+        || final_draft_id.as_deref() != Some(candidate_draft_id)
+    {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动授权的评审事实与当前作品、章节或候选稿不一致",
+            false,
+        ));
+    }
+    Ok((successful, average, rate))
+}
+
+fn verify_authorizable_full_auto_candidate(
+    transaction: &Transaction<'_>,
+    run: &AutonomousBookRunDto,
+    attempt: &AutonomousRunChapterAttemptDto,
+    candidate_draft_id: &str,
+    review_session_id: &str,
+) -> Result<(), AppError> {
+    verify_draft(
+        transaction,
+        &run.novel_id,
+        &attempt.chapter_id,
+        candidate_draft_id,
+        None,
+    )?;
+    let adopted: i64 = transaction
+        .query_row(
+            "SELECT is_adopted FROM chapter_drafts WHERE id=?1",
+            [candidate_draft_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if adopted == 0 {
+        return Ok(());
+    }
+
+    let prior: Option<(String, Option<String>)> = transaction
+        .query_row(
+            "SELECT decision_json, decision_hash
+             FROM autonomous_run_chapter_attempts
+             WHERE run_id=?1 AND chapter_id=?2 AND candidate_draft_id=?3
+               AND attempt_number<?4 AND status='abandoned' AND decision_json IS NOT NULL
+             ORDER BY attempt_number DESC LIMIT 1",
+            params![
+                run.run_id,
+                attempt.chapter_id,
+                candidate_draft_id,
+                attempt.attempt_number,
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    let Some((decision_json, decision_hash)) = prior else {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "已采用候选缺少先前 Rust 全自动授权，不能重建正式副作用",
+            false,
+        ));
+    };
+    let decision: Value = serde_json::from_str(&decision_json).map_err(|_| {
+        scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "先前全自动授权记录不可解析",
+            false,
+        )
+    })?;
+    let hash_matches =
+        decision_hash.as_deref() == Some(large_text_repository::sha256(&decision_json).as_str());
+    let identity_matches = decision.get("phase").and_then(Value::as_str)
+        == Some("full_auto_authorized")
+        && decision.get("policyHash").and_then(Value::as_str) == Some(run.policy_hash.as_str())
+        && decision.get("candidateDraftId").and_then(Value::as_str) == Some(candidate_draft_id)
+        && decision.get("reviewSessionId").and_then(Value::as_str) == Some(review_session_id);
+    if !hash_matches || !identity_matches {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "已采用候选的先前全自动授权身份或 hash 无效",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn resolved_attempt_usage(
+    attempt: &AutonomousRunChapterAttemptDto,
+    token_input: Option<i64>,
+    token_output: Option<i64>,
+    cost_usd: Option<f64>,
+) -> (i64, i64, f64) {
+    let token_input = token_input.unwrap_or(0);
+    let token_output =
+        token_output.unwrap_or_else(|| attempt.estimated_tokens.saturating_sub(token_input));
+    let cost_usd = cost_usd.unwrap_or(attempt.estimated_cost_usd);
+    (token_input, token_output, cost_usd)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizeFullAutoAttemptInput {
+    pub operation_id: String,
+    pub run_id: String,
+    pub attempt_id: String,
+    pub expected_revision: i64,
+    pub lease: AutonomousRunLeaseProof,
+    pub candidate_draft_id: String,
+    pub review_session_id: String,
+    pub token_input: Option<i64>,
+    pub token_output: Option<i64>,
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizeFullAutoAttemptResult {
+    pub run: AutonomousBookRunDto,
+    pub attempt: AutonomousRunChapterAttemptDto,
+    pub authorization_id: String,
+    pub authorization_hash: String,
+    pub replayed: bool,
+}
+
+pub fn authorize_full_auto_attempt(
+    connection: &mut Connection,
+    input: AuthorizeFullAutoAttemptInput,
+) -> Result<AuthorizeFullAutoAttemptResult, AppError> {
+    let operation_id = require_id(&input.operation_id, "operationId", 200)?;
+    let candidate_draft_id = require_id(&input.candidate_draft_id, "candidateDraftId", 200)?;
+    let review_session_id = require_id(&input.review_session_id, "reviewSessionId", 160)?;
+    validate_usage(input.token_input, input.token_output, input.cost_usd)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(AppError::database)?;
+    let now = Utc::now().to_rfc3339();
+    validate_lease(&transaction, &input.run_id, &input.lease, &now)?;
+    let mut run = require_run(&transaction, &input.run_id)?;
+    let attempt = find_attempt(&transaction, &input.attempt_id)?
+        .ok_or_else(|| invalid("章节 Attempt 不存在"))?;
+    let replaying_authorization = attempt
+        .decision
+        .as_ref()
+        .and_then(|value| value.get("phase"))
+        .and_then(Value::as_str)
+        == Some("full_auto_authorized");
+    if run.status != "running"
+        || (!replaying_authorization && run.state_revision != input.expected_revision)
+        || run.mode != "full_auto"
+        || !run.policy.auto_confirm_analysis
+        || attempt.run_id != run.run_id
+        || attempt.status != "claimed"
+        || attempt.lease_id != input.lease.lease_id
+        || attempt.lease_epoch != input.lease.epoch
+    {
+        return Err(conflict("全自动授权所依据的 run、lease 或 Attempt 已变化"));
+    }
+
+    reset_daily_usage(&transaction, &run)?;
+    run = require_run(&transaction, &input.run_id)?;
+    verify_current_run_target(&transaction, &run, &attempt)?;
+    if !run.policy.window_open() {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_WINDOW_CLOSED,
+            "全自动正式副作用前运行时段已经关闭",
+            false,
+        ));
+    }
+    let (token_input, token_output, cost_usd) = resolved_attempt_usage(
+        &attempt,
+        input.token_input,
+        input.token_output,
+        input.cost_usd,
+    );
+    enforce_final_budget(&run, token_input, token_output, cost_usd)?;
+    let (successful_experts, average_score, acceptance_rate) = authoritative_review_metrics(
+        &transaction,
+        &run,
+        &attempt,
+        &review_session_id,
+        &candidate_draft_id,
+    )?;
+    if !run.policy.quality_passes(
+        Some(successful_experts),
+        Some(average_score),
+        Some(acceptance_rate),
+    ) {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "权威六专家评审事实未达到冻结的全自动阈值",
+            false,
+        ));
+    }
+
+    let request = serde_json::json!({
+        "operationId": operation_id,
+        "runId": run.run_id,
+        "attemptId": attempt.attempt_id,
+        "runRevision": run.state_revision,
+        "leaseId": input.lease.lease_id,
+        "leaseEpoch": input.lease.epoch,
+        "candidateDraftId": candidate_draft_id,
+        "reviewSessionId": review_session_id,
+        "tokenInput": token_input,
+        "tokenOutput": token_output,
+        "costUsd": cost_usd,
+        "successfulExperts": successful_experts,
+        "averageScore": average_score,
+        "acceptanceRate": acceptance_rate,
+    });
+    let request_hash = large_text_repository::sha256(&ai_fact_security::canonical_json(&request)?);
+    if let Some(existing) = attempt.decision.as_ref() {
+        let replay_matches = existing.get("phase").and_then(Value::as_str)
+            == Some("full_auto_authorized")
+            && existing.get("authorizationId").and_then(Value::as_str)
+                == Some(operation_id.as_str())
+            && existing.get("requestHash").and_then(Value::as_str) == Some(request_hash.as_str());
+        if !replay_matches {
+            return Err(conflict("全自动授权重放载荷与已持久化授权不一致"));
+        }
+        verify_draft(
+            &transaction,
+            &run.novel_id,
+            &attempt.chapter_id,
+            &candidate_draft_id,
+            None,
+        )?;
+        let authorization_hash = attempt
+            .decision_hash
+            .clone()
+            .ok_or_else(|| conflict("全自动授权 hash 缺失"))?;
+        drop(transaction);
+        return Ok(AuthorizeFullAutoAttemptResult {
+            run,
+            attempt,
+            authorization_id: operation_id,
+            authorization_hash,
+            replayed: true,
+        });
+    }
+
+    verify_authorizable_full_auto_candidate(
+        &transaction,
+        &run,
+        &attempt,
+        &candidate_draft_id,
+        &review_session_id,
+    )?;
+    let authorization = serde_json::json!({
+        "phase": "full_auto_authorized",
+        "authorizationId": operation_id,
+        "requestHash": request_hash,
+        "policyHash": run.policy_hash,
+        "runRevision": run.state_revision,
+        "leaseId": input.lease.lease_id,
+        "leaseEpoch": input.lease.epoch,
+        "candidateDraftId": candidate_draft_id,
+        "reviewSessionId": review_session_id,
+        "tokenInput": token_input,
+        "tokenOutput": token_output,
+        "costUsd": cost_usd,
+        "successfulExperts": successful_experts,
+        "averageScore": average_score,
+        "acceptanceRate": acceptance_rate,
+    });
+    let authorization_json = ai_fact_security::canonical_json(&authorization)?;
+    let authorization_hash = large_text_repository::sha256(&authorization_json);
+    let changed = transaction
+        .execute(
+            "UPDATE autonomous_run_chapter_attempts
+             SET token_input=?1, token_output=?2, cost_usd=?3,
+                 candidate_draft_id=?4, review_session_id=?5,
+                 successful_experts=?6, average_score=?7, acceptance_rate=?8,
+                 decision_json=?9, decision_hash=?10
+             WHERE attempt_id=?11 AND run_id=?12 AND status='claimed'
+               AND decision_json IS NULL",
+            params![
+                token_input,
+                token_output,
+                cost_usd,
+                candidate_draft_id,
+                review_session_id,
+                successful_experts,
+                average_score,
+                acceptance_rate,
+                authorization_json,
+                authorization_hash,
+                attempt.attempt_id,
+                run.run_id,
+            ],
+        )
+        .map_err(AppError::database)?;
+    if changed != 1 {
+        return Err(conflict("全自动授权提交发生并发冲突"));
+    }
+    insert_checkpoint(
+        &transaction,
+        &run,
+        "full_auto_authorized",
+        Some(&attempt.attempt_id),
+        &serde_json::json!({
+            "authorizationId": operation_id,
+            "authorizationHash": authorization_hash,
+            "candidateDraftId": candidate_draft_id,
+            "reviewSessionId": review_session_id,
+            "runRevision": run.state_revision,
+            "leaseEpoch": input.lease.epoch,
+        }),
+        &now,
+    )?;
+    commit(transaction, Some(&operation_id))?;
+    Ok(AuthorizeFullAutoAttemptResult {
+        run: require_run(connection, &input.run_id)?,
+        attempt: find_attempt(connection, &input.attempt_id)?
+            .ok_or_else(|| conflict("授权后的 Attempt 不可读"))?,
+        authorization_id: operation_id,
+        authorization_hash,
+        replayed: false,
+    })
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishAutonomousRunChapterInput {
@@ -1236,7 +1671,107 @@ pub struct FinishAutonomousRunChapterInput {
     pub average_score: Option<f64>,
     pub acceptance_rate: Option<f64>,
     pub analysis_confirmed: Option<bool>,
+    pub authorization_id: Option<String>,
     pub error: Option<Value>,
+}
+
+fn decision_authorization_id(decision: Option<&Value>) -> Option<&str> {
+    decision
+        .and_then(|value| value.get("authorizationId"))
+        .and_then(Value::as_str)
+}
+
+fn verify_full_auto_authorization(
+    transaction: &Transaction<'_>,
+    run: &AutonomousBookRunDto,
+    attempt: &AutonomousRunChapterAttemptDto,
+    input: &FinishAutonomousRunChapterInput,
+    candidate_draft_id: &str,
+) -> Result<(), AppError> {
+    let authorization_id = input.authorization_id.as_deref().ok_or_else(|| {
+        scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动终态缺少 Rust 权威预授权",
+            false,
+        )
+    })?;
+    let authorization = attempt.decision.as_ref().ok_or_else(|| {
+        scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动终态对应的权威预授权不存在",
+            false,
+        )
+    })?;
+    let canonical_hash =
+        large_text_repository::sha256(&ai_fact_security::canonical_json(authorization)?);
+    let persisted_hash_matches = attempt.decision_hash.as_deref() == Some(canonical_hash.as_str());
+    let authorization_matches = authorization.get("phase").and_then(Value::as_str)
+        == Some("full_auto_authorized")
+        && authorization.get("authorizationId").and_then(Value::as_str) == Some(authorization_id)
+        && authorization.get("policyHash").and_then(Value::as_str)
+            == Some(run.policy_hash.as_str())
+        && authorization.get("runRevision").and_then(Value::as_i64) == Some(run.state_revision)
+        && authorization.get("leaseId").and_then(Value::as_str)
+            == Some(input.lease.lease_id.as_str())
+        && authorization.get("leaseEpoch").and_then(Value::as_i64) == Some(input.lease.epoch)
+        && authorization
+            .get("candidateDraftId")
+            .and_then(Value::as_str)
+            == Some(candidate_draft_id);
+    if !persisted_hash_matches || !authorization_matches {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动终态与已持久化授权不一致",
+            false,
+        ));
+    }
+
+    let review_session_id = input.review_session_id.as_deref().ok_or_else(|| {
+        scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动终态缺少权威评审会话",
+            false,
+        )
+    })?;
+    let (successful_experts, average_score, acceptance_rate) = authoritative_review_metrics(
+        transaction,
+        run,
+        attempt,
+        review_session_id,
+        candidate_draft_id,
+    )?;
+    let metric_matches = attempt.review_session_id.as_deref() == Some(review_session_id)
+        && input.successful_experts == Some(successful_experts)
+        && input.average_score == Some(average_score)
+        && input.acceptance_rate == Some(acceptance_rate)
+        && attempt.successful_experts == Some(successful_experts)
+        && attempt.average_score == Some(average_score)
+        && attempt.acceptance_rate == Some(acceptance_rate);
+    let (token_input, token_output, cost_usd) = resolved_attempt_usage(
+        attempt,
+        input.token_input,
+        input.token_output,
+        input.cost_usd,
+    );
+    let usage_matches = attempt.token_input == Some(token_input)
+        && attempt.token_output == Some(token_output)
+        && attempt.cost_usd == Some(cost_usd);
+    if !metric_matches || !usage_matches {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "全自动终态的评审或用量事实与预授权不一致",
+            false,
+        ));
+    }
+    verify_current_run_target(transaction, run, attempt)?;
+    if !run.policy.window_open() {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_WINDOW_CLOSED,
+            "全自动终态提交时运行时段已经关闭",
+            false,
+        ));
+    }
+    enforce_final_budget(run, token_input, token_output, cost_usd)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1299,7 +1834,9 @@ pub fn finish_chapter(
             && input.successful_experts == attempt.successful_experts
             && input.average_score == attempt.average_score
             && input.acceptance_rate == attempt.acceptance_rate
-            && input.analysis_confirmed.unwrap_or(false) == attempt.analysis_confirmed;
+            && input.analysis_confirmed.unwrap_or(false) == attempt.analysis_confirmed
+            && input.authorization_id.as_deref()
+                == decision_authorization_id(attempt.decision.as_ref());
         if !replay_matches {
             return Err(conflict("Attempt 已终结，重放载荷与已提交结果不一致"));
         }
@@ -1309,7 +1846,7 @@ pub fn finish_chapter(
                 &run.novel_id,
                 &attempt.chapter_id,
                 candidate,
-                false,
+                (attempt.status == "candidate_ready").then_some(false),
             )?;
         }
         if let Some(adopted) = attempt.adopted_draft_id.as_deref() {
@@ -1318,7 +1855,7 @@ pub fn finish_chapter(
                 &run.novel_id,
                 &attempt.chapter_id,
                 adopted,
-                true,
+                Some(true),
             )?;
             if attempt.status == "confirmed" {
                 verify_analysis_confirmed(
@@ -1373,6 +1910,17 @@ pub fn finish_chapter(
         .as_deref()
         .map(|value| require_id(value, "adoptedDraftId", 200))
         .transpose()?;
+    if input.outcome == "candidate_ready"
+        && (adopted_draft_id.is_some()
+            || input.analysis_confirmed.unwrap_or(false)
+            || input.authorization_id.is_some())
+    {
+        return Err(scheduler_error(
+            codes::AUTONOMOUS_RUN_DECISION_INVALID,
+            "候选待确认终态不能携带采用稿或已确认章节分析",
+            false,
+        ));
+    }
     if !is_failure {
         let candidate = candidate_draft_id.as_deref().ok_or_else(|| {
             scheduler_error(
@@ -1381,12 +1929,21 @@ pub fn finish_chapter(
                 false,
             )
         })?;
+        if run.mode == "full_auto" && input.outcome == "confirmed" {
+            verify_full_auto_authorization(&transaction, &run, &attempt, &input, candidate)?;
+        } else if input.authorization_id.is_some() {
+            return Err(scheduler_error(
+                codes::AUTONOMOUS_RUN_DECISION_INVALID,
+                "只有全自动 confirmed 终态可以消费预授权",
+                false,
+            ));
+        }
         verify_draft(
             &transaction,
             &run.novel_id,
             &attempt.chapter_id,
             candidate,
-            false,
+            Some(input.outcome != "candidate_ready"),
         )?;
         if matches!(input.outcome.as_str(), "adopted" | "confirmed") {
             let adopted = adopted_draft_id.as_deref().ok_or_else(|| {
@@ -1408,7 +1965,7 @@ pub fn finish_chapter(
                 &run.novel_id,
                 &attempt.chapter_id,
                 adopted,
-                true,
+                Some(true),
             )?;
             if input.outcome == "confirmed" {
                 if input.analysis_confirmed != Some(true) {
@@ -1439,11 +1996,12 @@ pub fn finish_chapter(
     if is_failure && safe_error.is_none() {
         return Err(invalid("失败章节必须提供安全错误元数据"));
     }
-    let token_input = input.token_input.unwrap_or(0);
-    let token_output = input
-        .token_output
-        .unwrap_or_else(|| attempt.estimated_tokens.saturating_sub(token_input));
-    let cost_usd = input.cost_usd.unwrap_or(attempt.estimated_cost_usd);
+    let (token_input, token_output, cost_usd) = resolved_attempt_usage(
+        &attempt,
+        input.token_input,
+        input.token_output,
+        input.cost_usd,
+    );
     let decision = serde_json::json!({
         "policyHash": run.policy_hash,
         "mode": run.mode,
@@ -1455,14 +2013,19 @@ pub fn finish_chapter(
         "averageScore": input.average_score,
         "acceptanceRate": input.acceptance_rate,
         "outcome": input.outcome,
+        "authorizationId": input.authorization_id,
         "reason": if is_failure {
             "execution_failed"
-        } else if quality_passes {
-            "quality_gate_passed"
         } else if run.mode == "draft_night" {
             "draft_mode_requires_review"
-        } else {
+        } else if run.mode == "quality_gate" && quality_passes {
+            "quality_gate_passed_requires_user_confirmation"
+        } else if run.mode == "quality_gate" {
             "quality_gate_requires_review"
+        } else if quality_passes {
+            "full_auto_quality_gate_passed"
+        } else {
+            "full_auto_quality_gate_requires_review"
         },
     });
     let decision_json = ai_fact_security::canonical_json(&decision)?;
@@ -1506,7 +2069,7 @@ pub fn finish_chapter(
     }
 
     let success_counts = input.outcome == "candidate_ready" && run.mode == "draft_night"
-        || matches!(input.outcome.as_str(), "adopted" | "confirmed");
+        || input.outcome == "confirmed";
     let consecutive_failures = if is_failure {
         run.consecutive_failures + 1
     } else {
@@ -1651,7 +2214,7 @@ pub fn promote_attempt(
             &run.novel_id,
             &attempt.chapter_id,
             &input.adopted_draft_id,
-            true,
+            Some(true),
         )?;
         if input.outcome == "confirmed" {
             verify_analysis_confirmed(
@@ -1686,7 +2249,7 @@ pub fn promote_attempt(
         &run.novel_id,
         &attempt.chapter_id,
         &input.adopted_draft_id,
-        true,
+        Some(true),
     )?;
     if input.outcome == "confirmed" {
         if input.analysis_confirmed != Some(true) {
@@ -1736,34 +2299,45 @@ pub fn promote_attempt(
             .map_err(AppError::database)?
     } else {
         let completed = run.completed_chapters + 1;
-        let target = run.total_chapters.min(run.policy.max_chapters);
-        let status = if completed >= target {
-            "completed"
-        } else {
-            "queued"
-        };
-        let completed_at = (status == "completed").then_some(now.as_str());
         transaction
             .execute(
                 "UPDATE autonomous_book_runs
-                 SET status=?1, state_revision=state_revision+1,
-                     completed_chapters=?2, next_chapter_number=next_chapter_number+1,
+                 SET status='queued', state_revision=state_revision+1,
+                     completed_chapters=?1, next_chapter_number=next_chapter_number+1,
                      consecutive_failures=0, pause_reason=NULL, paused_at=NULL,
-                     completed_at=?3, updated_at=?4
-                 WHERE run_id=?5 AND state_revision=?6 AND status='paused'",
-                params![
-                    status,
-                    completed,
-                    completed_at,
-                    now,
-                    run.run_id,
-                    input.expected_revision,
-                ],
+                     completed_at=NULL, updated_at=?2
+                 WHERE run_id=?3 AND state_revision=?4 AND status='paused'",
+                params![completed, now, run.run_id, input.expected_revision,],
             )
             .map_err(AppError::database)?
     };
     if changed != 1 {
         return Err(conflict("人工审核晋级发生并发冲突"));
+    }
+    if !draft_night_already_counted {
+        let completed = run.completed_chapters + 1;
+        let target = run.total_chapters.min(run.policy.max_chapters);
+        if completed >= target {
+            // Installed migration 027 databases intentionally disallow paused -> completed.
+            // Keep the user-confirmed promotion atomic while traversing the legal edges.
+            let resumed = transaction
+                .execute(
+                    "UPDATE autonomous_book_runs SET status='running'
+                     WHERE run_id=?1 AND status='queued'",
+                    [&run.run_id],
+                )
+                .map_err(AppError::database)?;
+            let completed_transition = transaction
+                .execute(
+                    "UPDATE autonomous_book_runs SET status='completed', completed_at=?1
+                     WHERE run_id=?2 AND status='running'",
+                    params![now, run.run_id],
+                )
+                .map_err(AppError::database)?;
+            if resumed != 1 || completed_transition != 1 {
+                return Err(conflict("人工审核晋级完成状态收敛发生并发冲突"));
+            }
+        }
     }
     let updated_run = require_run(&transaction, &run.run_id)?;
     insert_checkpoint(

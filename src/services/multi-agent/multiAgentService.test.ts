@@ -185,7 +185,10 @@ class ScriptedProvider implements MultiAgentProvider {
   }
 }
 
-function harness(provider = new ScriptedProvider()) {
+function harness(
+  provider = new ScriptedProvider(),
+  overrides: Partial<MultiAgentServiceDependencies> = {},
+) {
   const persistence = new MemoryPersistence();
   const drafts = new MemoryDrafts();
   let id = 0;
@@ -197,6 +200,7 @@ function harness(provider = new ScriptedProvider()) {
     generateId: () => `id-${++id}`,
     now: () => new Date(Date.UTC(2026, 6, 27, 0, 0, clock++)).toISOString(),
     hashContent: async (content) => hash(content),
+    ...overrides,
   };
   return {
     service: new MultiAgentService(dependencies),
@@ -291,6 +295,27 @@ describe('MultiAgentService', () => {
     const result = await running;
     assert.equal(result.accepted, true);
     assert.equal(result.session.rounds.length, 1);
+  });
+
+  it('按全局并发额度分批评审且不会因默认额度丢失 quorum', async () => {
+    const provider = new ScriptedProvider();
+    let active = 0;
+    let maxActive = 0;
+    provider.review = async (input) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return opinion(input.expert, 85);
+    };
+    const { service } = harness(provider, { maxConcurrentProviderCalls: () => 2 });
+
+    const result = await service.review(baseRequest);
+
+    assert.equal(maxActive, 2);
+    assert.equal(provider.reviewCalls.length, 3);
+    assert.equal(result.session.rounds[0].consensus.successfulExperts, 3);
+    assert.equal(result.accepted, true);
   });
 
   it('单个专家失败时保留其他意见并按 quorum 决策', async () => {

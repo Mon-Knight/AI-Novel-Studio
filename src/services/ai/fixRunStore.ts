@@ -2,7 +2,7 @@
  * AI Novel Studio - 质量修稿记录持久化（Tauri SQLite + localStorage 回退）
  * v1.7.17: 升级为 Tauri SQLite 持久化
  */
-import { lsGet, lsSet, nowISO, dbCall } from '../database/db';
+import { lsGet, lsSet, nowISO, dbCall, getDbMode } from '../database/db';
 import type { QualityFixRun } from '../ai/qualityFixService';
 
 const KEY = 'ai_novel_studio_fix_runs';
@@ -79,18 +79,18 @@ function toTauriInput(fixRun: QualityFixRun): Record<string, unknown> {
     chapterId: fixRun.chapterId,
     sourceDraftId: fixRun.sourceDraftId,
     sourceDraftVersion: fixRun.sourceDraftVersion,
-    targetDraftId: fixRun.targetDraftId || null,
-    targetDraftVersion: fixRun.targetDraftVersion || null,
+    targetDraftId: fixRun.targetDraftId ?? null,
+    targetDraftVersion: fixRun.targetDraftVersion ?? null,
     sourceContentHash: fixRun.sourceContentHash || null,
     targetContentHash: fixRun.targetContentHash || null,
     beforeReportId: fixRun.beforeReportId || null,
     afterReportId: fixRun.afterReportId || null,
-    beforeScore: fixRun.beforeScore || null,
-    afterScore: fixRun.afterScore || null,
+    beforeScore: fixRun.beforeScore ?? null,
+    afterScore: fixRun.afterScore ?? null,
     beforePendingCount: fixRun.beforePendingCount,
-    afterPendingCount: fixRun.afterPendingCount || null,
+    afterPendingCount: fixRun.afterPendingCount ?? null,
     beforeSeriousCount: fixRun.beforeSeriousCount,
-    afterSeriousCount: fixRun.afterSeriousCount || null,
+    afterSeriousCount: fixRun.afterSeriousCount ?? null,
     fixedIssueIds: fixRun.fixedIssueIds.length > 0 ? JSON.stringify(fixRun.fixedIssueIds) : null,
     newIssueIds: fixRun.newIssueIds.length > 0 ? JSON.stringify(fixRun.newIssueIds) : null,
     mode: fixRun.mode,
@@ -107,15 +107,12 @@ function toTauriInput(fixRun: QualityFixRun): Record<string, unknown> {
 
 export const fixRunStore = {
   async getByChapterId(chapterId: string): Promise<QualityFixRun[]> {
-    try {
-      const dtos = await dbCall<QualityFixRunDto[]>('get_quality_fix_runs', { chapterId });
-      if (Array.isArray(dtos)) return dtos.map(fromTauriDto);
-    } catch {
-      /* fallback */
-    }
-    return getAllLocal()
-      .filter((r) => r.chapterId === chapterId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const dtos = await dbCall<QualityFixRunDto[]>('get_quality_fix_runs', { chapterId }, () =>
+      getAllLocal()
+        .filter((run) => run.chapterId === chapterId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+    );
+    return dtos.map(fromTauriDto);
   },
 
   async getLatest(chapterId: string): Promise<QualityFixRun | null> {
@@ -129,29 +126,31 @@ export const fixRunStore = {
 
   async save(fixRun: QualityFixRun): Promise<QualityFixRun> {
     const r = { ...fixRun, updatedAt: nowISO() };
-    try {
-      await dbCall('save_quality_fix_run', toTauriInput(r));
-    } catch {
-      /* fallback */
+    await dbCall('save_quality_fix_run', { input: toTauriInput(r) }, () => undefined);
+    if (getDbMode() !== 'tauri') {
+      const list = getAllLocal();
+      const idx = list.findIndex((x) => x.id === r.id);
+      if (idx >= 0) {
+        list[idx] = r;
+      } else {
+        if (
+          list.some(
+            (existing) =>
+              existing.chapterId === r.chapterId && existing.sourceDraftId === r.sourceDraftId,
+          )
+        ) {
+          throw new Error('quality_fix_round_already_used');
+        }
+        list.push(r);
+      }
+      saveAllLocal(list);
     }
-    // localStorage fallback
-    const list = getAllLocal();
-    const idx = list.findIndex((x) => x.id === r.id);
-    if (idx >= 0) {
-      list[idx] = r;
-    } else {
-      list.push(r);
-    }
-    saveAllLocal(list);
     return r;
   },
 
   async updateStatus(id: string, status: QualityFixRun['status']): Promise<QualityFixRun | null> {
-    try {
-      await dbCall('update_quality_fix_run_status', { id, status });
-    } catch {
-      /* fallback */
-    }
+    await dbCall('update_quality_fix_run_status', { id, status }, () => undefined);
+    if (getDbMode() === 'tauri') return null;
     const list = getAllLocal();
     const idx = list.findIndex((r) => r.id === id);
     if (idx === -1) return null;

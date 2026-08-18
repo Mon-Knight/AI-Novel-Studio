@@ -1,14 +1,11 @@
 export type ArtifactProcessingStatus =
-  | 'raw'
-  | 'parsing'
-  | 'valid'
-  | 'valid_with_warnings'
-  | 'invalid';
+  'raw' | 'parsing' | 'valid' | 'valid_with_warnings' | 'invalid';
 
 export type ResultArtifactType =
   | 'generic_text'
   | 'generic_json'
   | 'chapter_text'
+  | 'scene_text'
   | 'quality_report'
   | 'character_candidates'
   | 'event_candidates'

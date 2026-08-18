@@ -128,5 +128,13 @@ export function createEmptyScene(sceneNo: number): ScenePlanItem {
     informationRelease: [],
     result: '',
     transition: '',
+    beats: [
+      {
+        id: generateId(),
+        order: 1,
+        text: '完成当前场景的核心事件推进。',
+        required: true,
+      },
+    ],
   };
 }

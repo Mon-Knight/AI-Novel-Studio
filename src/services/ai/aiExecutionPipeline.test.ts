@@ -1068,3 +1068,64 @@ test('default Provider Adapter executes the existing Mock client through the sam
   assert.equal(adapter.modelId, 'Mock');
   assert.equal(result.text.trim(), 'OK');
 });
+
+test('local chapter adapter keeps real API and unpriced provenance separate from global Mock mode', () => {
+  const adapter = createProviderAdapter(
+    {
+      ...settings,
+      runtimeMode: 'mock',
+      provider: 'mock',
+      mockMode: true,
+      localChapterModel: {
+        enabled: true,
+        providerId: 'local_llama_cpp',
+        baseUrl: 'http://127.0.0.1:8080/v1',
+        apiKey: 'local-no-key-required',
+        modelName: 'qwen35-9b-novel-v3',
+        timeoutSeconds: 120,
+        contextTokens: 4096,
+        maxTokens: 1024,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+        repeatPenalty: 1.08,
+      },
+    },
+    'chapter_scene_generate',
+  );
+
+  assert.equal(adapter.runtimeMode, 'api');
+  assert.equal(adapter.pricingSnapshot?.source, 'unconfigured');
+  assert.equal(adapter.providerId, 'local_llama_cpp');
+  assert.equal(adapter.modelId, 'qwen35-9b-novel-v3');
+});
+
+test('local chapter adapter rejects a non-loopback endpoint before provider dispatch', () => {
+  assert.throws(
+    () =>
+      createProviderAdapter(
+        {
+          ...settings,
+          runtimeMode: 'mock',
+          provider: 'mock',
+          mockMode: true,
+          localChapterModel: {
+            enabled: true,
+            providerId: 'local_llama_cpp',
+            baseUrl: 'https://provider.example/v1',
+            apiKey: 'must-not-leave-device',
+            modelName: 'qwen35-9b-novel-v3',
+            timeoutSeconds: 120,
+            contextTokens: 4096,
+            maxTokens: 1024,
+            temperature: 0.7,
+            topP: 0.8,
+            topK: 20,
+            repeatPenalty: 1.08,
+          },
+        },
+        'chapter_scene_generate',
+      ),
+    /只允许 localhost、127\.0\.0\.0\/8 或 \[::1\]/,
+  );
+});

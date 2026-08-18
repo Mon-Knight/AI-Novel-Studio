@@ -38,6 +38,8 @@ export interface AiTaskCompilationDefinition {
   modelContextTokens: number;
   maxOutputTokens: number;
   defaultTemperature: number;
+  messageMode?: 'system_user' | 'single_user';
+  thinkingMode?: 'enabled' | 'disabled';
 }
 
 export interface CompileAiExecutionContractInput {
@@ -118,10 +120,66 @@ function validateScope(
   }
 }
 
-function temperature(definition: AiTaskCompilationDefinition, settings: AiSettings): number {
-  if (definition.taskType === 'connection_test') return definition.defaultTemperature;
+function localChapterSettings(definition: AiTaskCompilationDefinition, settings: AiSettings) {
+  if (definition.taskType !== 'chapter_scene_generate') return undefined;
+  const local = settings.localChapterModel;
+  if (!local?.enabled) {
+    throw new AiCompilationError(
+      'AI_COMPILATION_INPUT_INVALID',
+      '本地章节场景模型未启用，不能编译 chapter_scene_generate；系统不会自动回退到外部模型。',
+    );
+  }
+  return local;
+}
+
+interface CompiledSamplingOptions {
+  temperature: number;
+  maxTokens: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+  seed?: number;
+  thinkingMode?: 'enabled' | 'disabled';
+}
+
+function supportsDeepSeekV4ThinkingToggle(modelId: string): boolean {
+  return /^deepseek-v4-(?:flash|pro)(?:$|[-_.:])/i.test(modelId.trim());
+}
+
+function sampling(
+  definition: AiTaskCompilationDefinition,
+  settings: AiSettings,
+  modelId: string,
+): CompiledSamplingOptions {
+  const thinkingMode =
+    definition.thinkingMode && supportsDeepSeekV4ThinkingToggle(modelId)
+      ? definition.thinkingMode
+      : undefined;
+  const local = localChapterSettings(definition, settings);
+  if (local) {
+    return {
+      temperature: local.temperature,
+      maxTokens: 1024,
+      topP: local.topP,
+      topK: local.topK,
+      repeatPenalty: local.repeatPenalty,
+      seed: local.seed,
+      thinkingMode,
+    };
+  }
+  if (definition.taskType === 'connection_test') {
+    return {
+      temperature: definition.defaultTemperature,
+      maxTokens: definition.maxOutputTokens,
+      thinkingMode,
+    };
+  }
   const requested = settings.temperature ?? definition.defaultTemperature;
-  return Math.min(2, Math.max(0, requested));
+  return {
+    temperature: Math.min(2, Math.max(0, requested)),
+    maxTokens: definition.maxOutputTokens,
+    thinkingMode,
+  };
 }
 
 export async function compileAiExecutionContract(
@@ -149,31 +207,64 @@ export async function compileAiExecutionContract(
       : definition.userPrompt;
   const promptTemplateBody = normalizeCompilationText(definition.promptTemplateBody);
   const userPrompt = normalizeCompilationText(userPromptValue);
-  const fixedMessages = {
-    messages: [
-      { role: 'system', content: `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}` },
-      { role: 'user', content: userPrompt },
-    ],
-  };
+  const messageMode = definition.messageMode ?? 'system_user';
+  const fixedMessages =
+    messageMode === 'single_user'
+      ? {
+          messages: [
+            {
+              role: 'user',
+              content: `${promptTemplateBody}\n\nContext：\n[COMPILED_CONTEXT]\n\n${userPrompt}`,
+            },
+          ],
+        }
+      : {
+          messages: [
+            { role: 'system', content: `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}` },
+            { role: 'user', content: userPrompt },
+          ],
+        };
   const fixedMessageTokens = estimateTokens(JSON.stringify(fixedMessages)) + MESSAGE_SAFETY_TOKENS;
+  const local = localChapterSettings(definition, input.settings);
+  const modelContextTokens = local ? 4096 : definition.modelContextTokens;
+  const samplingOptions = sampling(definition, input.settings, input.modelId);
   const contextSnapshot = await compileAiContext({
     sources: compilation.sources,
     missingSourceTypes: compilation.missingSourceTypes,
-    modelContextTokens: definition.modelContextTokens,
-    reservedOutputTokens: definition.maxOutputTokens,
+    modelContextTokens,
+    reservedOutputTokens: samplingOptions.maxTokens,
     fixedMessageTokens,
+    renderSourceLabels: messageMode !== 'single_user',
   });
   const systemMessage = contextSnapshot.compiledContext
     ? `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}${contextSnapshot.compiledContext}`
     : promptTemplateBody;
-  const request = {
+  const contextText = contextSnapshot.compiledContext || '（无可用的额外编译上下文）';
+  const request: AiGenerateRequest = {
     taskType: definition.taskType as AiGenerateRequest['taskType'],
-    messages: [
-      { role: 'system' as const, content: systemMessage },
-      { role: 'user' as const, content: userPrompt },
-    ],
-    temperature: temperature(definition, input.settings),
-    maxTokens: definition.maxOutputTokens,
+    messages:
+      messageMode === 'single_user'
+        ? [
+            {
+              role: 'user' as const,
+              content: `${promptTemplateBody}\n\nContext：\n${contextText}\n\n${userPrompt}`,
+            },
+          ]
+        : [
+            { role: 'system' as const, content: systemMessage },
+            { role: 'user' as const, content: userPrompt },
+          ],
+    temperature: samplingOptions.temperature,
+    maxTokens: samplingOptions.maxTokens,
+    ...(samplingOptions.topP === undefined ? {} : { topP: samplingOptions.topP }),
+    ...(samplingOptions.topK === undefined ? {} : { topK: samplingOptions.topK }),
+    ...(samplingOptions.repeatPenalty === undefined
+      ? {}
+      : { repeatPenalty: samplingOptions.repeatPenalty }),
+    ...(samplingOptions.seed === undefined ? {} : { seed: samplingOptions.seed }),
+    ...(samplingOptions.thinkingMode === undefined
+      ? {}
+      : { thinkingMode: samplingOptions.thinkingMode }),
     promptTemplateSource: definition.promptTemplateId,
   };
   const requestBody = JSON.stringify({ messages: request.messages });
@@ -189,8 +280,13 @@ export async function compileAiExecutionContract(
     promptTemplateBody,
     providerId: input.providerId,
     model: input.modelId,
-    temperature: request.temperature,
-    maxTokens: request.maxTokens,
+    temperature: samplingOptions.temperature,
+    maxTokens: samplingOptions.maxTokens,
+    topP: request.topP,
+    topK: request.topK,
+    repeatPenalty: request.repeatPenalty,
+    seed: request.seed,
+    thinkingMode: request.thinkingMode,
     toolPolicy: {
       registryVersion: 'tool_registry_v1',
       registryHash: toolRegistry.registryHash,

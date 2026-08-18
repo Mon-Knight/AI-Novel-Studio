@@ -1,12 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type {
-  ChapterCard,
-  ChapterEngineeringBundle,
-  GenerationConstraints,
-  QualityRules,
-  QualityStrictness,
-  ScenePlanItem,
-} from '../../../types/chapterEngineering';
+import type { ChapterCard, ChapterEngineeringBundle, GenerationConstraints, QualityRules, QualityStrictness, ScenePlanItem } from '../../../types/chapterEngineering';
 import type { ChapterGenerationSnapshot } from '../../../types/generationContext';
 import type { GenerationJob, GenerationStepResult } from '../../../types/generationJob';
 import type { GetQualityCheckIssuesResult, QualityCheckItem } from '../../../types/qualityCheck';
@@ -22,6 +15,7 @@ import {
   type TabId,
 } from './chapterEngineeringPanelSupport';
 import { ListField, NumberField, TextField } from './ChapterEngineeringFields';
+import { ChapterEngineeringScenePlanView } from './ChapterEngineeringScenePlanView';
 
 interface ChapterEngineeringPanelViewProps {
   activeTab: TabId;
@@ -49,13 +43,18 @@ interface ChapterEngineeringPanelViewProps {
   compiling: boolean;
   jobRunning: boolean;
   draftRunning: boolean;
+  scenePlanRunning: boolean;
+  scenePlanCandidate: ScenePlanItem[] | null;
   updateCard: <K extends keyof ChapterCard>(key: K, value: ChapterCard[K]) => void;
   updateConstraints: <K extends keyof GenerationConstraints>(key: K, value: GenerationConstraints[K]) => void;
   updateWordRange: (key: 'min' | 'max', value?: number) => void;
   updateQuality: <K extends keyof QualityRules>(key: K, value: QualityRules[K]) => void;
   updateScene: <K extends keyof ScenePlanItem>(id: string, key: K, value: ScenePlanItem[K]) => void;
+  updateSceneBeats: (id: string, values: string[]) => void;
   addScene: () => void;
   removeScene: (id: string) => void;
+  onGenerateScenePlan: () => Promise<void>;
+  onSaveScenePlanCandidate: (apply: boolean) => Promise<void>;
   toggleQualityCheck: (id: string) => void;
   handleCompileSnapshot: () => Promise<void>;
   handleRunDraftJob: () => Promise<void>;
@@ -91,13 +90,18 @@ export function ChapterEngineeringPanelView({
   compiling,
   jobRunning,
   draftRunning,
+  scenePlanRunning,
+  scenePlanCandidate,
   updateCard,
   updateConstraints,
   updateWordRange,
   updateQuality,
   updateScene,
+  updateSceneBeats,
   addScene,
   removeScene,
+  onGenerateScenePlan,
+  onSaveScenePlanCandidate,
   toggleQualityCheck,
   handleCompileSnapshot,
   handleRunDraftJob,
@@ -167,28 +171,22 @@ export function ChapterEngineeringPanelView({
       )}
 
       {activeTab === 'scenes' && (
-        <div className="panel-section">
-          <div className="panel-section-title">Scene Plan</div>
-          {scenePlan.map((scene) => (
-            <div className="engineering-scene" key={scene.id}>
-              <div className="engineering-scene-header">
-                <strong>场景 {scene.sceneNo}</strong>
-                <button type="button" className="engineering-link-btn" onClick={() => removeScene(scene.id)}>删除</button>
-              </div>
-              <TextField label="场景标题" value={scene.title} onChange={(value) => updateScene(scene.id, 'title', value)} />
-              <TextField label="地点" value={scene.location} onChange={(value) => updateScene(scene.id, 'location', value)} />
-              <ListField label="角色" value={scene.characters} onChange={(value) => updateScene(scene.id, 'characters', value)} rows={3} />
-              <TextField label="目标" value={scene.goal} onChange={(value) => updateScene(scene.id, 'goal', value)} multiline />
-              <TextField label="冲突" value={scene.conflict} onChange={(value) => updateScene(scene.id, 'conflict', value)} multiline />
-              <ListField label="关键动作" value={scene.keyActions} onChange={(value) => updateScene(scene.id, 'keyActions', value)} />
-              <TextField label="关键对白" value={scene.keyDialogue} onChange={(value) => updateScene(scene.id, 'keyDialogue', value)} multiline />
-              <ListField label="释放信息" value={scene.informationRelease} onChange={(value) => updateScene(scene.id, 'informationRelease', value)} />
-              <TextField label="结果" value={scene.result} onChange={(value) => updateScene(scene.id, 'result', value)} multiline />
-              <TextField label="转场" value={scene.transition} onChange={(value) => updateScene(scene.id, 'transition', value)} multiline />
-            </div>
-          ))}
-          <button type="button" className="panel-btn panel-btn-secondary" onClick={addScene}>新增场景</button>
-        </div>
+        <ChapterEngineeringScenePlanView
+          scenePlan={scenePlan}
+          scenePlanRunning={scenePlanRunning}
+          scenePlanCandidate={scenePlanCandidate}
+          busy={busy}
+          loading={loading}
+          compiling={compiling}
+          jobRunning={jobRunning}
+          draftRunning={draftRunning}
+          updateScene={updateScene}
+          updateSceneBeats={updateSceneBeats}
+          addScene={addScene}
+          removeScene={removeScene}
+          onGenerateCandidate={onGenerateScenePlan}
+          onSaveCandidate={onSaveScenePlanCandidate}
+        />
       )}
 
       {activeTab === 'constraints' && (

@@ -82,3 +82,39 @@ test('settings persistence returns the same normalized pricing snapshot without 
   assert.deepEqual(getAiSettings(), settings);
   assert.equal(maskAiApiKey(settings.apiKey), '1234...cdef');
 });
+
+test('local chapter model settings normalize to the verified scene protocol', () => {
+  const normalized = normalizeAiSettings({
+    runtimeMode: 'mock',
+    provider: 'mock',
+    baseUrl: '',
+    apiKey: '',
+    modelName: '',
+    mockMode: true,
+    localChapterModel: {
+      enabled: true,
+      providerId: ' local_llama_cpp ',
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      apiKey: '',
+      modelName: 'qwen35-9b-novel-v3',
+      timeoutSeconds: 9999,
+      contextTokens: 128000,
+      maxTokens: 12000,
+      temperature: 3,
+      topP: 2,
+      topK: 5000,
+      repeatPenalty: 4,
+      seed: 42,
+    },
+  });
+
+  assert.equal(normalized.localChapterModel?.enabled, true);
+  assert.equal(normalized.localChapterModel?.providerId, 'local_llama_cpp');
+  assert.equal(normalized.localChapterModel?.contextTokens, 4096);
+  assert.equal(normalized.localChapterModel?.maxTokens, 1024);
+  assert.equal(normalized.localChapterModel?.temperature, 2);
+  assert.equal(normalized.localChapterModel?.topP, 1);
+  assert.equal(normalized.localChapterModel?.topK, 4096);
+  assert.equal(normalized.localChapterModel?.repeatPenalty, 3);
+  assert.equal(normalized.localChapterModel?.seed, 42);
+});

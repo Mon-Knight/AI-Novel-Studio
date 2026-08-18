@@ -754,6 +754,49 @@ export interface ChapterDraft {
 7. 触发后续章节总结任务
 ```
 
+## 8.4.1 章节工程中的 Scene/Beat JSON 契约
+
+`chapter_engineering_states.scene_plan_json` 继续作为 JSON 文本保存，不新增 SQLite 列。
+每个场景在归一化后包含有序、场景内的 Beat；它与 Autonomous 的跨章节人物演化
+`characterBeatIds` 不同：
+
+```ts
+interface SceneBeat {
+  id: string;
+  order: number;
+  text: string;
+  required: boolean;
+  characterIds?: string[];
+  stateChange?: string;
+}
+
+interface ScenePlanItem {
+  // 既有场景字段保持不变
+  beats: SceneBeat[];
+  contextCapsule?: string;
+  constraints?: string[];
+  expectedEndState?: string;
+  targetCharacters?: number;
+}
+```
+
+读取旧版本 ScenePlan 时，归一化器按 `keyActions → keyDialogue → informationRelease →
+result → transition` 的既有顺序生成 Beat，并重新编号 `sceneNo` 与 `order`；空场景使用一个
+可执行的默认 Beat。候选规划只作为 draft/Artifact 保存，用户确认后才可成为 active 状态。
+因此本扩展不改变迁移版本，也不改变章节草稿的采用规则。
+
+`generation_step_results` 中带有 `sceneNo / beatOrder / generationUnitNo /
+generationUnitCount` 的成功 `draft_generation` 步骤同时构成手动重跑断点。若旧 job 的外部
+`chapter_beat_repair` Task 已 `completed` 并绑定有效不可变 Artifact，但当时被语义门禁拒绝，
+断点发现也可从 Input Snapshot 的 `generationJobId / contextHash / sceneNo / beatOrder /
+scenePlan` 重建单元身份；仅允许 `finish_reason=stop` 的原始 Artifact 先按当前安全边界裁剪，
+`length`、来源不一致或旧兼容投影正文都不得参与。断点不新增表或列，只允许在来源 job 已失败、
+`compile_context.contextHash` 与当前冻结上下文完全一致、job 的本地 Provider/模型一致时选取
+同一 job 的最长连续前缀。编排器仍必须按当前规则重新验证每个 Beat；首个无效、缺失或顺序
+不一致的单元会关闭全部后续复用。复用记录通过新 job 步骤中的 `reusedFromJobId` 保留来源，
+Token 统计只计算本次真实请求；该机制由用户再次启动生成触发，不把应用重启或网络中断解释为
+自动重发授权。
+
 ---
 
 # 8.5 world_settings：世界背景表
@@ -1580,7 +1623,7 @@ export interface AiTaskRecord {
 
 ## 36.5 备份与恢复
 
-参考资料首次随完整项目备份 schema 6 加入；当前 schema 7 继续包含三张参考表与画像来源字段，并额外覆盖混合语义 Memory。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
+参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 9 继续包含这些表并追加 Scheduler 与正式故事资产。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
 
 ---
 
@@ -1629,9 +1672,9 @@ migration 026 `026_hybrid_semantic_memory` 建立 SQLite 权威的长期 Memory 
 
 检索模式显式区分 `hybrid / semantic_structured / fts_structured / lexical_structured / structured`，调用方可以识别降级，而不是把结构化或字面匹配标记成语义成功。
 
-## 37.5 备份 schema 7
+## 37.5 备份 schema 7（历史基线；当前为 schema 9）
 
-完整项目备份 schema 7 包含 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`。恢复为新作品时重映射文档、片段、向量和日志引用，并校验：
+完整项目备份 schema 7 首次包含 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`；当前 schema 9 在此基础上继续包含这些表，并追加 Scheduler 与正式故事资产。恢复为新作品时重映射文档、片段、向量和日志引用，并校验：
 
 - 来源、采用稿、章节与作品归属。
 - active 来源唯一性、版本与 SHA-256。
@@ -2338,6 +2381,26 @@ report ownership / AI Task / duplicate key validation
 
 `schemaVersion: 3` 导出 `quality_issue_states`。schema 2 导入仍被支持，但必须在恢复事务内按每个 `(chapter_id, issue_key)` 的 item `updated_at DESC, rowid DESC` 合成旧模型最后保存的可变状态，并按 `report_id` 分组补齐缺失的 `sort_order`，不得依赖导入后重启再修复。
 
+## 27.6 唯一质量修稿轮次与阶段恢复
+
+`quality_fix_runs` 以不可变源草稿身份约束外部质量修稿：同一
+`(chapter_id, source_draft_id)` 只能创建一条运行记录。失败或取消的 Provider 修稿也会耗尽该源草稿的唯一轮次；自动流程不得通过新建 generation job 绕过。
+
+质量闭环以已有 `chapter_drafts + quality_check_reports/items` 为恢复起点：
+
+```text
+源草稿 + 完整初评
+-> 一次 issue-bound changed_ranges
+-> 未采用目标草稿
+-> 一次复评报告
+```
+
+- `changed_ranges_json` 保存绑定 `issue_key` 的精确 `before / after` 与源草稿 UTF-16 offset。目标草稿尚未保存就中断时，只能在源草稿 ID、版本和正文 hash 全部一致后确定性重放这些替换；不得再次调用外部修稿。
+- 目标草稿创建使用修稿 run 派生的稳定 operation identity。`target_draft_id/version/content_hash` 写入后，恢复只允许读取该草稿并继续缺失的复评阶段。
+- `after_report_id` 存在时，重复继续操作只回读并复验目标草稿与不可变复评报告，不再次评分。
+- 修稿版始终保持 `chapter_drafts.is_adopted = 0`。复评通过只表示候选达到 `score >= 80` 且 pending critical/high 为 0，不得更新 `chapters.adopted_draft_id`，也不得提前使正式章节/分卷上下文过期。
+- 复评无论通过、改善或仍失败，只要 Provider 结果有效，都保存为独立 completed 报告；仍未过门禁时保留未采用候选并转人工处理。
+
 ---
 
 # 28. v2.1.8 章节上下文持久化一致性
@@ -2736,9 +2799,9 @@ running → pending_confirmation → confirmed
 
 `candidate_ready` 不等于正式采用；`pending_confirmation` 不等于正式上下文。正式采用继续以章节/草稿事务为权威，章节总结、上下文和角色状态只有在用户确认分析后才原子写入。
 
-## 34.5 完整备份 schema 5（当前 schema 7 继续包含）
+## 34.5 完整备份 schema 5（当前 schema 9 继续包含）
 
-schema 5 增加 `autonomous_story_plans`；当前 schema 7 在此基础上继续加入参考资料与 Memory。恢复为新作品时重映射 plan/operation、卷、章、角色、人物节点、世界元素、冲突、节奏阶段、chapter run 和草稿引用，再重算 `request_hash` 与 `plan_hash`。schema 4 备份允许缺少自主计划并恢复为空集合。
+schema 5 增加 `autonomous_story_plans`；当前 schema 9 在此基础上继续加入参考资料、Memory、Scheduler 与正式故事资产。恢复为新作品时重映射 plan/operation、卷、章、角色、人物节点、世界元素、冲突、节奏阶段、chapter run 和草稿引用，再重算 `request_hash` 与 `plan_hash`。schema 4 备份允许缺少自主计划并恢复为空集合。
 
 ---
 

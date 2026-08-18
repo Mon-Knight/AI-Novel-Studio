@@ -450,6 +450,8 @@ export function buildSettingExpandPrompt(ctx: SettingExpandPromptContext): AiGen
   };
 }
 
+export const QUALITY_CHECK_MAX_OUTPUT_TOKENS = 4096;
+
 /** 构建质量检查请求 */
 export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGenerateRequest {
   const system = [
@@ -471,6 +473,7 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
     typeof ctx.wordCount === 'number' ? `正文快照字数：${ctx.wordCount}` : '',
     '',
     '请从以下维度检查：逻辑一致性、设定违背、角色行为一致性、前后文割裂、节奏问题、文风问题、语言问题。',
+    '最多返回 8 个最重要的问题，同类问题必须合并；summary、description 和 suggestion 各不超过 120 个中文字。',
     '',
     '请严格按以下 JSON 格式返回检查结果，不要输出其他内容：',
     '```json',
@@ -512,7 +515,11 @@ export function buildQualityCheckPrompt(ctx: QualityCheckPromptContext): AiGener
   return {
     taskType: 'quality_check',
     messages: [systemPrompt(system), userPrompt('请对以上正文进行质量检查。')],
-    maxTokens: 6000,
+    // The response is bounded to eight compact issues. A 4k ceiling prevents
+    // verbose graders from drifting into 8k-13k outputs and timing out while
+    // still leaving headroom for the complete JSON. The local Scene model
+    // remains fixed at 1024.
+    maxTokens: QUALITY_CHECK_MAX_OUTPUT_TOKENS,
   };
 }
 
@@ -752,6 +759,7 @@ export function buildVolumeOutlineGeneratePrompt(
 export function buildChapterOutlineGeneratePrompt(
   ctx: ChapterOutlineGeneratePromptContext,
 ): AiGenerateRequest {
+  const chapterCount = Math.max(1, Math.trunc(ctx.chapterCount || 3));
   const system = [
     '你是长篇小说章节大纲策划。请严格基于当前分卷大纲和总纲，为当前分卷生成多个可执行章节大纲。',
     `作品：${ctx.novelTitle}`,
@@ -800,21 +808,22 @@ export function buildChapterOutlineGeneratePrompt(
     ctx.existingChapters ? `已有章节：\n${ctx.existingChapters}` : '',
     ctx.styleSummary ? `风格方案：\n${ctx.styleSummary}` : '',
     '',
-    `请生成 ${ctx.chapterCount || 6} 个章节候选。`,
+    `请生成且只生成 ${chapterCount} 个章节候选。`,
     '输出时请体现：',
     '1. 本章在分卷中的作用',
     '2. 本章推进分卷中的哪个关键事件',
     '3. 本章如何体现主角目标和冲突',
     '4. 本章结尾如何推动下一章',
     '',
-    '严格返回 JSON，不要输出解释文字：',
-    '```json',
+    '输出预算要求：每个 title 不超过 16 个汉字，outline 控制在 120～180 个汉字，goal 控制在 20～40 个汉字。',
+    '全部候选必须能写成 2000～3000 字正文，targetWordCount 固定为 2500。',
+    '整个响应控制在 900 tokens 内，必须在输出上限前闭合 JSON。',
+    '严格返回以下 JSON，不要输出解释、Markdown 或代码围栏：',
     '{',
     '  "chapters": [',
-    '    { "title": "章节标题", "outline": "章节大纲（详细描述本章的情节推进）", "goal": "本章目标（本章要达成的创作目标）", "targetWordCount": 4000 }',
+    '    { "title": "章节标题", "outline": "120～180 字的可执行情节推进", "goal": "20～40 字的本章目标", "targetWordCount": 2500 }',
     '  ]',
     '}',
-    '```',
   ]
     .filter(Boolean)
     .join('\n');
@@ -822,7 +831,7 @@ export function buildChapterOutlineGeneratePrompt(
   return {
     taskType: 'chapter_outline_generate',
     messages: [systemPrompt(system), userPrompt('请生成章节大纲。')],
-    maxTokens: 7000,
+    maxTokens: 1200,
   };
 }
 

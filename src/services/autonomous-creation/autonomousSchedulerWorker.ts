@@ -342,23 +342,34 @@ export class AutonomousSchedulerWorker {
           let outcome: 'candidate_ready' | 'adopted' | 'confirmed' = 'candidate_ready';
           let adoptedDraftId: string | undefined;
           let analysisConfirmed = false;
-          if (run.mode !== 'draft_night' && qualityPasses) {
+          let authorizationId: string | undefined;
+          if (run.mode === 'full_auto' && run.policy.autoConfirmAnalysis && qualityPasses) {
+            if (!generated.run.reviewSessionId) {
+              throw new Error('全自动候选缺少可由桌面端复验的评审会话。');
+            }
+            const authorization = await this.dependencies.scheduler.authorizeFullAutoAttempt({
+              operationId: `full-auto-authorize:${claimed.attempt.attemptId}`,
+              runId: run.runId,
+              attemptId: claimed.attempt.attemptId,
+              expectedRevision: claimed.run.stateRevision,
+              lease,
+              candidateDraftId: generated.run.candidateDraftId,
+              reviewSessionId: generated.run.reviewSessionId,
+            });
+            authorizationId = authorization.authorizationId;
             const adopted = await this.dependencies.adoptDraft(
               generated.run.candidateDraftId,
               generated.chapter.id,
             );
             adoptedDraftId = adopted.id;
-            outcome = 'adopted';
-            if (run.mode === 'full_auto') {
-              await this.dependencies.confirmAnalysis(
-                run.planId,
-                generated.chapter.id,
-                adopted.id,
-                signal,
-              );
-              analysisConfirmed = true;
-              outcome = 'confirmed';
-            }
+            await this.dependencies.confirmAnalysis(
+              run.planId,
+              generated.chapter.id,
+              adopted.id,
+              signal,
+            );
+            analysisConfirmed = true;
+            outcome = 'confirmed';
           }
           const finished = await this.dependencies.scheduler.finishChapter({
             runId: run.runId,
@@ -372,6 +383,7 @@ export class AutonomousSchedulerWorker {
             averageScore,
             acceptanceRate,
             analysisConfirmed,
+            authorizationId,
           });
           run = finished.run;
         } catch (reason) {
@@ -444,6 +456,56 @@ export class AutonomousSchedulerWorker {
   stop(run: AutonomousBookRun): Promise<AutonomousBookRun> {
     return this.changeState(run, 'stop');
   }
+
+  async promoteUserAdoptedDraft(draft: ChapterDraft): Promise<boolean> {
+    if (!this.dependencies.scheduler.capability().persistent) return false;
+    const runs = await this.dependencies.scheduler.listRuns(draft.novelId, 50);
+    for (const listedRun of runs) {
+      if (!['paused', 'queued', 'running', 'completed'].includes(listedRun.status)) continue;
+      const attempts = await this.dependencies.scheduler.listAttempts(listedRun.runId, 100);
+      const attempt = [...attempts]
+        .reverse()
+        .find(
+          (item) =>
+            item.status === 'candidate_ready' &&
+            item.chapterId === draft.chapterId &&
+            item.candidateDraftId === draft.id,
+        );
+      if (!attempt) continue;
+
+      const operationId = `user-promote:${attempt.attemptId}:${draft.id}`;
+      let current = (await this.dependencies.scheduler.getRun(listedRun.runId)) ?? listedRun;
+      for (let retry = 0; retry < 2; retry += 1) {
+        try {
+          const promoted = await this.dependencies.scheduler.promoteAttempt({
+            operationId,
+            runId: current.runId,
+            attemptId: attempt.attemptId,
+            expectedRevision: current.stateRevision,
+            outcome: 'adopted',
+            adoptedDraftId: draft.id,
+            analysisConfirmed: false,
+            userConfirmed: true,
+          });
+          this.publish(promoted.run.planId, {
+            run: promoted.run,
+            attempts: attempts.map((item) =>
+              item.attemptId === promoted.attempt.attemptId ? promoted.attempt : item,
+            ),
+            error: undefined,
+          });
+          if (promoted.run.status === 'queued') this.attach(promoted.run);
+          return true;
+        } catch (reason) {
+          if (retry !== 0 || errorCode(reason) !== 'AUTONOMOUS_RUN_STATE_CONFLICT') throw reason;
+          const latest = await this.dependencies.scheduler.getRun(listedRun.runId);
+          if (!latest) throw reason;
+          current = latest;
+        }
+      }
+    }
+    return false;
+  }
 }
 
 export const autonomousSchedulerWorker = new AutonomousSchedulerWorker({
@@ -459,7 +521,7 @@ export const autonomousSchedulerWorker = new AutonomousSchedulerWorker({
     });
   },
   async adoptDraft(draftId, chapterId) {
-    return draftVersionService.adopt(draftId, chapterId);
+    return draftVersionService.adopt(draftId, chapterId, { actor: 'autonomous_full_auto' });
   },
   async getReview(sessionId) {
     const { multiAgentService } = await import('../multi-agent/multiAgentRuntime');

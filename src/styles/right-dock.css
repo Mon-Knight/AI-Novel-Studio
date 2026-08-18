@@ -1077,6 +1077,28 @@
   border: 1px solid var(--color-border-light);
 }
 
+.engineering-help-text {
+  margin: calc(var(--spacing-xs) * -1) 0 var(--spacing-md);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.engineering-candidate-card {
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-primary-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+}
+
+.engineering-candidate-card > strong {
+  display: block;
+  margin-bottom: var(--spacing-sm);
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+}
+
 /* === v3.0.0 Multi-Agent 协作 === */
 .multi-agent-panel {
   min-width: 0;

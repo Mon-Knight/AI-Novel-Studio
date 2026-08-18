@@ -248,7 +248,10 @@ class DeterministicProvider implements AutonomousCreationProvider {
   }
 }
 
-function createService(provider = new DeterministicProvider()) {
+function createService(
+  provider = new DeterministicProvider(),
+  maxConcurrentProviderCalls?: number,
+) {
   const persistence = new MemoryPersistence();
   let id = 0;
   let tick = 0;
@@ -257,6 +260,8 @@ function createService(provider = new DeterministicProvider()) {
     persistence,
     createId: () => `id-${++id}`,
     now: () => new Date(Date.UTC(2026, 6, 27, 12, 0, tick++)).toISOString(),
+    maxConcurrentProviderCalls:
+      maxConcurrentProviderCalls === undefined ? undefined : () => maxConcurrentProviderCalls,
   });
   return { service, provider, persistence };
 }
@@ -304,6 +309,23 @@ test('生成精确 300 章的分层计划并让五类创作 Agent 形成可引�
     }),
     'operation-1-volume-1-chapters-1-5',
   );
+});
+
+test('创作维度按全局并发额度分批执行且全部结果仍可持久化', async () => {
+  const provider = new DeterministicProvider();
+  const { service } = createService(provider, 2);
+
+  const plan = await service.generate({
+    novelId: 'novel-1',
+    brief,
+    operationId: 'operation-bounded-dimensions',
+  });
+
+  assert.equal(provider.maxActiveDimensions, 2);
+  assert.ok(plan.worldElements.length > 0);
+  assert.ok(plan.conflicts.length > 0);
+  assert.equal(plan.pacingCurve.length, brief.targetChapterCount);
+  assert.ok(plan.agentRuns.every((item) => item.status === 'succeeded'));
 });
 
 test('章节子批次失败后保留已保存范围，继续时不重复付费调用成功批次', async () => {

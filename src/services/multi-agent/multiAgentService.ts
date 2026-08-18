@@ -14,6 +14,7 @@ import type {
 import { MULTI_AGENT_EXPERT_TYPES, getExpertLabel, isExpertType } from './expertRegistry';
 import type { MultiAgentProvider } from './multiAgentProvider';
 import type { MultiAgentPersistence } from './multiAgentPersistence';
+import { mapWithConcurrency } from '../../utils/asyncPool';
 
 const DEFAULT_MAX_ROUNDS = 3;
 const DEFAULT_ACCEPTANCE_THRESHOLD = 0.7;
@@ -32,6 +33,7 @@ export interface MultiAgentServiceDependencies {
   generateId: () => string;
   now: () => string;
   hashContent: (content: string) => Promise<string>;
+  maxConcurrentProviderCalls?: () => number;
 }
 
 function rounded(value: number): number {
@@ -281,8 +283,10 @@ export class MultiAgentService {
         if (params.signal?.aborted) throw new DOMException('评审已取消', 'AbortError');
         const roundStartedAt = this.dependencies.now();
         const roundStartedMs = Date.now();
-        const opinions = await Promise.all(
-          experts.map(async (expert) => {
+        const opinions = await mapWithConcurrency(
+          experts,
+          this.dependencies.maxConcurrentProviderCalls?.() ?? experts.length,
+          async (expert) => {
             const expertStartedAt = Date.now();
             try {
               return await this.dependencies.provider.reviewExpert({
@@ -306,7 +310,7 @@ export class MultiAgentService {
                 Math.max(0, Date.now() - expertStartedAt),
               );
             }
-          }),
+          },
         );
 
         const consensus = calculateConsensus(

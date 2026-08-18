@@ -1,5 +1,21 @@
 import type { AiGenerateRequest, AiSettings, AiStreamEvent } from '../../types/ai';
-import { executeAiTask, type AiExecutionResult } from './aiExecutionPipeline';
+import type { AiExecutionResult } from './aiExecutionPipeline';
+import type { AiSceneExecutionResult } from './aiExecutionPipeline';
+import { executeChapterProseOrchestrator } from './chapterProseOrchestrator';
+
+export interface ChapterProseResumeBeat {
+  sceneNo: number;
+  beatOrder: number;
+  generationUnitNo: number;
+  generationUnitCount: number;
+  text: string;
+  sourceJobId: string;
+  taskId?: string;
+  attemptId?: string;
+  providerId: string;
+  modelId: string;
+  finishReason?: string;
+}
 
 export interface ChapterGenerationExecutionInput {
   novelId: string;
@@ -15,13 +31,17 @@ export interface ChapterGenerationExecutionInput {
   signal?: AbortSignal;
   stream?: boolean;
   onStreamEvent?: AiStreamEventHandler;
+  /**
+   * A contiguous prefix persisted by an earlier failed job with the same
+   * frozen context and model route. The orchestrator validates every Beat
+   * again before reuse and stops at the first mismatch.
+   */
+  resumeBeats?: ChapterProseResumeBeat[];
+  /** Backward-compatible callback; local Beat orchestration emits once per completed Beat. */
+  onSceneCompleted?: (result: AiSceneExecutionResult) => void | Promise<void>;
 }
 
 export type AiStreamEventHandler = (event: AiStreamEvent) => void;
-
-function requestSource(request: AiGenerateRequest): string {
-  return request.messages.map((message) => `[${message.role}]\n${message.content}`).join('\n\n');
-}
 
 /**
  * Runs the main chapter-generation request through the compiled execution
@@ -30,36 +50,7 @@ function requestSource(request: AiGenerateRequest): string {
 export function executeChapterGeneration(
   input: ChapterGenerationExecutionInput,
 ): Promise<AiExecutionResult> {
-  return executeAiTask({
-    operationId: input.operationId,
-    traceId: input.traceId ?? input.operationId,
-    taskType: 'chapter_generate',
-    scopeType: 'chapter',
-    novelId: input.novelId,
-    chapterId: input.chapterId,
-    targetHintJson: input.targetHintJson,
-    settings: input.settings,
-    compilation: {
-      taskInput: input.taskInput,
-      sources: [
-        {
-          sourceType: 'request_context',
-          sourceId: input.sourceId,
-          sourceVersion: input.sourceVersion,
-          origin: 'request',
-          label: 'Frozen chapter generation prompt',
-          content: requestSource(input.request),
-          order: 0,
-          priority: 100,
-          required: true,
-          maxTokens: 48_000,
-        },
-      ],
-    },
-    signal: input.signal,
-    stream: input.stream,
-    onStreamEvent: input.onStreamEvent,
-  });
+  return executeChapterProseOrchestrator(input);
 }
 
 export type ChapterGenerationExecutionResult = AiExecutionResult;

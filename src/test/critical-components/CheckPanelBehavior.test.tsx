@@ -134,6 +134,7 @@ describe('CheckPanelView', () => {
       fixStage: '修复完成',
       fixProgress: 75,
       fixError: '修复提示',
+      fixRoundUsed: false,
       error: '检查提示',
       historyReports: [report, { ...report, id: 'report-old', overallScore: undefined }],
       selectedReportId: report.id,
@@ -206,11 +207,26 @@ describe('CheckPanelView', () => {
         viewingHistory
         fixComparison={{ ...props.fixComparison!, isBetter: false, isWorse: true }}
         fixScopeValidation={{ ...props.fixScopeValidation!, passed: false, warnings: [] }}
+        fixRoundUsed
         filter="resolved"
         filteredItems={[]}
       />,
     );
     expect(screen.getByTestId('quality-history-readonly')).not.toBeNull();
+
+    view.rerender(
+      <CheckPanelView
+        {...props}
+        aiSettings={{ ...settings, runtimeMode: 'mock', mockMode: true }}
+        fixComparison={{ ...props.fixComparison!, isBetter: false, isWorse: true }}
+        fixScopeValidation={{ ...props.fixScopeValidation!, passed: false, warnings: [] }}
+        fixRoundUsed
+        filter="resolved"
+        filteredItems={[]}
+      />,
+    );
+    expect(screen.getByTestId('quality-fix-run').textContent).toContain('已使用外部修稿轮次');
+    expect((screen.getByTestId('quality-fix-run') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('当前筛选条件下没有匹配的问题')).not.toBeNull();
   });
 
@@ -229,6 +245,7 @@ describe('CheckPanelView', () => {
       fixStage: '',
       fixProgress: 25,
       fixError: '',
+      fixRoundUsed: false,
       error: '',
       historyReports: [],
       selectedReportId: '',

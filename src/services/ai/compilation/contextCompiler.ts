@@ -30,6 +30,8 @@ export interface CompileAiContextInput {
   modelContextTokens: number;
   reservedOutputTokens: number;
   fixedMessageTokens: number;
+  /** Single-user protocols may require raw context without compiler section headings. */
+  renderSourceLabels?: boolean;
 }
 
 interface NormalizedSource extends AiContextSourceInput {
@@ -105,14 +107,21 @@ function sourceKey(source: Pick<AiContextSourceInput, 'sourceType' | 'sourceId'>
   return `${source.sourceType}:${source.sourceId}`;
 }
 
-function renderSection(source: NormalizedSource, content: string, truncated: boolean): string {
-  return `## ${source.label}\n${content}${truncated ? TRUNCATION_MARKER : ''}`;
+function renderSection(
+  source: NormalizedSource,
+  content: string,
+  truncated: boolean,
+  renderSourceLabels: boolean,
+): string {
+  const label = renderSourceLabels ? `## ${source.label}\n` : '';
+  return `${label}${content}${truncated ? TRUNCATION_MARKER : ''}`;
 }
 
 function truncateToBudget(
   source: NormalizedSource,
   compiledPrefix: string,
   tokenBudget: number,
+  renderSourceLabels: boolean,
 ): string {
   const characters = Array.from(source.content);
   const separator = compiledPrefix ? '\n\n' : '';
@@ -125,6 +134,7 @@ function truncateToBudget(
       source,
       characters.slice(0, midpoint).join(''),
       true,
+      renderSourceLabels,
     )}`;
     if (estimateTokens(candidate) - prefixTokens <= tokenBudget) low = midpoint;
     else high = midpoint - 1;
@@ -174,6 +184,7 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
   }
 
   const normalized = sortSources(input.sources.map(normalizeSource));
+  const renderSourceLabels = input.renderSourceLabels !== false;
   const identities = new Set<string>();
   for (const source of normalized) {
     const key = sourceKey(source);
@@ -203,7 +214,7 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
       const separator = renderedSections.length === 0 ? '' : '\n\n';
       const remaining = availableContextTokens - consumedTokens;
       const sourceLimit = Math.min(remaining, source.maxTokens ?? remaining);
-      const fullSection = renderSection(source, source.content, false);
+      const fullSection = renderSection(source, source.content, false, renderSourceLabels);
       const fullCost =
         estimateTokens(`${compiledPrefix}${separator}${fullSection}`) - consumedTokens;
       if (fullCost <= sourceLimit) {
@@ -212,7 +223,7 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
         renderedSections.push(fullSection);
         consumedTokens = estimateTokens(renderedSections.join('\n\n'));
       } else {
-        includedContent = truncateToBudget(source, compiledPrefix, sourceLimit);
+        includedContent = truncateToBudget(source, compiledPrefix, sourceLimit, renderSourceLabels);
         if (!includedContent) {
           if (source.required) {
             throw new AiCompilationError(
@@ -223,7 +234,7 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
           status = 'omitted_budget';
         } else {
           status = 'truncated';
-          const section = renderSection(source, includedContent, true);
+          const section = renderSection(source, includedContent, true, renderSourceLabels);
           renderedSections.push(section);
           consumedTokens = estimateTokens(renderedSections.join('\n\n'));
         }

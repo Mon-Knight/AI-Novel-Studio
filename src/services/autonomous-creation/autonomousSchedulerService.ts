@@ -2,6 +2,7 @@ import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 import type {
   AutonomousAutomationMode,
   AutonomousAutomationPolicy,
+  AuthorizeFullAutoAttemptResult,
   AutonomousBookRun,
   AutonomousRunChapterAttempt,
   AutonomousRunChapterClaim,
@@ -116,9 +117,25 @@ export const autonomousSchedulerService = {
     averageScore?: number;
     acceptanceRate?: number;
     analysisConfirmed?: boolean;
+    authorizationId?: string;
     error?: Record<string, unknown>;
   }): Promise<FinishAutonomousRunChapterResult> {
     return invokeInput('finish_autonomous_run_chapter', input);
+  },
+
+  authorizeFullAutoAttempt(input: {
+    operationId: string;
+    runId: string;
+    attemptId: string;
+    expectedRevision: number;
+    lease: AutonomousRunLeaseProof;
+    candidateDraftId: string;
+    reviewSessionId: string;
+    tokenInput?: number;
+    tokenOutput?: number;
+    costUsd?: number;
+  }): Promise<AuthorizeFullAutoAttemptResult> {
+    return invokeInput('authorize_full_auto_run_attempt', input);
   },
 
   promoteAttempt(input: {

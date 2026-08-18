@@ -32,6 +32,7 @@ interface CheckPanelViewProps {
   fixStage: string;
   fixProgress: number;
   fixError: string;
+  fixRoundUsed: boolean;
   error: string;
   historyReports: QualityCheckReport[];
   selectedReportId: string;
@@ -67,7 +68,7 @@ function statusStyle(status: QualityIssueStatus) {
 export function CheckPanelView({
   chapter, aiSettings, currentDraft, loading, operationPhase, activeReport,
   viewingHistory, statistics, fixLoading, fixStage, fixProgress, fixError,
-  error, historyReports, selectedReportId, historyLoading, reportOutdated,
+  fixRoundUsed, error, historyReports, selectedReportId, historyLoading, reportOutdated,
   fixComparison, fixScopeValidation, activeItems, filter, locateMessage,
   filteredItems, onRunCheck, onStopOperation, onAiFix, onHistoryChange,
   onFilterChange, onLocate, onStatusChange, onRevertFix, onConfirmFix,
@@ -131,20 +132,31 @@ export function CheckPanelView({
               className="btn btn-sm"
               data-testid="quality-fix-run"
               onClick={onAiFix}
-              disabled={fixLoading || loading || operationPhase !== 'idle'}
+              disabled={fixRoundUsed || fixLoading || loading || operationPhase !== 'idle'}
               style={{
                 width: '100%',
-                background: fixLoading ? 'var(--color-bg-hover)' : 'var(--color-secondary-accent)',
-                color: fixLoading ? 'var(--color-text-muted)' : 'var(--color-on-primary)',
-                border: 'none', cursor: fixLoading ? 'not-allowed' : 'pointer',
+                background:
+                  fixRoundUsed || fixLoading
+                    ? 'var(--color-bg-hover)'
+                    : 'var(--color-secondary-accent)',
+                color:
+                  fixRoundUsed || fixLoading
+                    ? 'var(--color-text-muted)'
+                    : 'var(--color-on-primary)',
+                border: 'none', cursor: fixRoundUsed || fixLoading ? 'not-allowed' : 'pointer',
               }}
             >
               {fixLoading ? (
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   ⏳ {fixStage || '修复中...'}
                 </span>
-              ) : '🤖 AI 修复并复检'}
+              ) : fixRoundUsed ? '已使用外部修稿轮次' : '🤖 AI 修复并复检'}
             </button>
+            {fixRoundUsed && !fixLoading && (
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                当前正文最多允许一轮外部 AI 修稿；如仍未通过，请人工处理。
+              </div>
+            )}
             {fixLoading && (
               <div style={{ marginTop: 6, background: 'var(--color-bg-primary)', borderRadius: 4, height: 4, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${fixProgress}%`, background: 'var(--color-secondary-accent)', transition: 'width 0.3s ease' }} />

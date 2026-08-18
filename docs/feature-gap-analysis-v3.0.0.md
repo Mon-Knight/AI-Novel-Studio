@@ -109,7 +109,7 @@
 - migration 025 已建立独立 `reference_works / reference_imports / reference_sections`，与作品卷章树严格分离。
 - TXT 导入记录原始字节 hash、解码正文 hash、编码来源、解析器/章节计划版本、码点数和 UTF-16 来源区间。
 - 重复 hash 必须由用户显式选择跳过、新建参考作品或创建新版本；版本切换使用 revision CAS，旧版本继续保留。
-- SQLite、浏览器 LocalStorage、项目备份 schema 7、ID 重映射、机器路径清理和篡改失败关闭已经形成闭环。
+- SQLite、浏览器 LocalStorage、项目备份 schema 9（含 schema 7 Memory 基线、schema 8 Scheduler 与 schema 9 故事资产）、ID 重映射、机器路径清理和篡改失败关闭已经形成闭环。
 - EPUB、PDF、Markdown 与 DOCX 文本提取仍属于后续格式扩展。
 
 证据：
@@ -220,8 +220,8 @@ migration 027 已把原先的进程内循环升级为可在应用重启后恢复
 三档产品策略也已经接入工作台与 worker：
 
 1. **`draft_night` / 夜间草稿**：连续生成候选并保留给人工审阅，不自动采用。
-2. **`quality_gate` / 质量门禁**：最小成功专家数、平均分与接受率全部达标后自动采用，章节分析仍保留审核边界。
-3. **`full_auto` / 全自动**：质量与预算门禁通过后采用正文，并按冻结策略确认章节分析、推进正式上下文。
+2. **`quality_gate` / 质量门禁**：最小成功专家数、平均分与接受率全部达标后仍只保存未采用候选，等待用户显式确认；未达标同样暂停复核。
+3. **`full_auto` / 全自动**：质量、预算、目标归属与采用前正文复验全部通过后，才采用正文并确认章节分析、推进正式上下文。
 
 应用启动时会把中断的 `running` run 收敛为 `queued`、active lease 收敛为 `expired`、claimed attempt 收敛为 `abandoned`；恢复命令每次都会返回全部持久 `queued` run，因此 Rust 初始化先执行恢复后，`main.tsx` 仍能在全局错误处理就绪后幂等调用 Scheduler Worker、获取新 lease/epoch 并接管队列。若重启发生在旧 lease 到期前，桌面 Worker 的 15 秒互斥恢复扫描会在 TTL 到期后完成接管。已持 lease 的 Worker 若在 claim 前异常，会先 heartbeat 复验 owner/epoch，再以 CAS 暂停 run 并释放 lease；已被 fencing 的旧 Worker 不改写替代 owner。规划页 Hook 仅刷新当前计划。旧 epoch 不会复活，也不会静默重放状态不明的 Provider 请求。
 
@@ -237,7 +237,7 @@ migration 027 已把原先的进程内循环升级为可在应用重启后恢复
 ### 已验证门禁
 
 - 两个连接竞争同一 run 时只有一个 owner 获得有效 lease，过期恢复会提升 epoch。
-- 三档策略产生不同的冻结决策；采用稿身份和章节分析确认在完成前再次复验。
+- 夜间草稿和质量门禁都停在 `candidate_ready`；只有全自动模式可在全部冻结门禁通过后采用并确认，采用稿身份和章节分析在完成前再次复验。
 - 日/整书预算、运行时段、每章重试和连续失败熔断会在派发边界阻断后续工作并保存状态。
 - 提交状态未知时可用相同 operation 重放；run 状态变化和 attempt 终结保持 CAS 与幂等。
 - 用户可显式暂停、继续和停止；默认模式仍是保留人工审核的 `draft_night`。
@@ -282,7 +282,7 @@ memory_retrieval_logs
 - embedding 必须由调用方显式传入真实有限非零向量；Rust 绑定 provider/model/dimension 和 chunk hash，不生成伪向量。
 - Rust 对最多 500 个候选计算余弦并综合 semantic、lexical、importance、recency；结果返回 `matchedBy` 与逐项评分原因。
 - `topK / candidateLimit / page / tokenBudget` 均有硬上限，选中证据总 Token 不超过预算；每次检索写入安全日志。
-- 项目备份 schema 7 覆盖四张 Memory 表、ID 重映射、向量 hash/norm/model dimension 与 retrieval log 引用校验；schema 2～6 兼容为空集合。
+- 项目备份 schema 9 覆盖四张 Memory 表、ID 重映射、向量 hash/norm/model dimension 与 retrieval log 引用校验，并继续携带 schema 8 Scheduler 与 schema 9 故事资产；schema 2～6 兼容为空集合。
 
 动态证据：TypeScript facade 校验、5 个 Rust Memory 服务测试、采用稿事务成功/回滚测试、迁移测试与完整备份往返测试均已通过。
 

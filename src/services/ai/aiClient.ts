@@ -9,6 +9,9 @@ import { attachAiUsageCost } from './aiCost';
 
 const GOVERNED_TASK_TYPES = new Set([
   'chapter_generate',
+  'chapter_beat_repair',
+  'chapter_scene_generate',
+  'chapter_scene_plan_generate',
   'autonomous_plot_plan',
   'autonomous_character_evolution',
   'autonomous_world_build',

@@ -12,11 +12,13 @@ import type {
   AiGenerateOptions,
   AiGenerateRequest,
   AiGenerateResponse,
+  AiSettings,
   ChapterDraft,
 } from '../../types/ai';
 import { splitChapterText, type ChapterTextSegment } from './chapterTextSegmentation';
 import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
 import { bindAiTaskCancellation, settleAiTaskError } from './aiTaskCancellation';
+import { hashTextContent } from '../../utils/contentHash';
 
 /** 修稿模式 */
 export type FixMode = 'conservative';
@@ -59,6 +61,7 @@ export interface QualityFixRun {
 /** AI 修稿返回结果 */
 export interface FixResult {
   mode: 'targeted_fix' | 'conservative';
+  applicationMode?: 'deterministic_ranges' | 'provider_full_text' | 'unchanged';
   revisionPlan?: Array<{
     issue_key: string;
     target_quote?: string;
@@ -67,7 +70,15 @@ export interface FixResult {
   }>;
   fixedIssueKeys: string[];
   revisionSummary: string;
-  changedRanges: Array<{ issue_key?: string; reason: string; before: string; after: string }>;
+  changedRanges: Array<{
+    issue_key?: string;
+    reason: string;
+    before: string;
+    after: string;
+    /** Deterministic UTF-16 offsets in the immutable full source draft. */
+    start_offset?: number;
+    end_offset?: number;
+  }>;
   revisedContent: string;
   unchangedPolicy?: string;
 }
@@ -131,15 +142,85 @@ export interface QualityFixGeneration {
   tokenTotal: number;
 }
 
+// The provider returns both exact changed_ranges and a full revised segment.
+// The latter is a recovery witness when several issue-bound ranges overlap;
+// output remains capped so prompt + completion stays inside common routes.
+export const QUALITY_FIX_MAX_OUTPUT_TOKENS = 8192;
+export const QUALITY_FIX_MIN_TIMEOUT_SECONDS = 300;
+
+export function qualityFixOutputTokenBudget(issueCount: number, sourceLength = 0): number {
+  const normalizedIssueCount = Math.max(1, Math.min(8, Math.trunc(issueCount) || 1));
+  const issueBudget = 1024 + normalizedIssueCount * 768;
+  const fullTextWitnessBudget = sourceLength > 0 ? 1536 + Math.ceil(sourceLength * 1.25) : 2048;
+  return Math.min(
+    QUALITY_FIX_MAX_OUTPUT_TOKENS,
+    Math.max(2048, issueBudget, fullTextWitnessBudget),
+  );
+}
+
+export function qualityFixThinkingModeForModel(modelName: string): 'disabled' | undefined {
+  return /^deepseek-v4-(?:flash|pro)(?:$|[-_.:])/i.test(modelName.trim()) ? 'disabled' : undefined;
+}
+
+export function withQualityFixRequestSettings(settings: AiSettings): AiSettings {
+  return {
+    ...settings,
+    timeoutSeconds: Math.max(settings.timeoutSeconds ?? 0, QUALITY_FIX_MIN_TIMEOUT_SECONDS),
+  };
+}
+
+export async function hasUsedQualityFixRound(
+  chapterId: string,
+  sourceDraftId: string,
+): Promise<boolean> {
+  const runs = await fixRunStore.getByChapterId(chapterId);
+  return runs.some((run) => run.sourceDraftId === sourceDraftId);
+}
+
+export type QualityFixRoundAvailability = 'available' | 'resumable' | 'completed' | 'exhausted';
+
+export async function getQualityFixRoundAvailability(
+  chapterId: string,
+  sourceDraftId: string,
+): Promise<QualityFixRoundAvailability> {
+  const matching = (await fixRunStore.getByChapterId(chapterId)).filter(
+    (run) => run.sourceDraftId === sourceDraftId,
+  );
+  if (matching.length === 0) return 'available';
+  if (matching.length > 1) return 'exhausted';
+  const run = matching[0];
+  if (run.targetDraftId && run.afterReportId) return 'completed';
+  if (
+    (run.status === 'running' || run.status === 'success' || run.status === 'adopted') &&
+    (Boolean(run.targetDraftId) || Boolean(run.changedRangesJson))
+  ) {
+    return 'resumable';
+  }
+  return 'exhausted';
+}
+
+export async function assertQualityFixRoundAvailable(
+  chapterId: string,
+  sourceDraftId: string,
+): Promise<void> {
+  if (await hasUsedQualityFixRound(chapterId, sourceDraftId)) {
+    throw new Error('当前正文已使用过唯一一轮外部 AI 修稿，请转人工处理。');
+  }
+}
+
 type FixGenerator = (request: AiGenerateRequest) => Promise<AiGenerateResponse>;
 
-/** 生成简单哈希 */
-function hashContent(content: string): string {
+/** Legacy hash retained only for rebuilding runs written before the durable hash fix. */
+function legacyHashContent(content: string): string {
   let hash = 0;
   for (let i = 0; i < Math.min(content.length, 5000); i++) {
     hash = ((hash << 5) - hash + content.charCodeAt(i)) | 0;
   }
   return 'fx_' + (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function qualityFixSourceHashMatches(storedHash: string, content: string): boolean {
+  return storedHash === hashTextContent(content) || storedHash === legacyHashContent(content);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -219,6 +300,7 @@ function normalizeFixResult(raw: RawFixResult, rawText: string, sourceContent: s
 
   return {
     mode: readString(record, ['mode']) === 'targeted_fix' ? 'targeted_fix' : 'conservative',
+    applicationMode: revisedContent === sourceContent ? 'unchanged' : 'provider_full_text',
     revisionPlan: normalizeRevisionPlan(record.revisionPlan ?? record.revision_plan),
     fixedIssueKeys,
     revisionSummary: readString(record, ['revisionSummary', 'revision_summary'], '无修复摘要'),
@@ -291,6 +373,289 @@ function issueTextRanges(content: string, item: QualityCheckItem): TextRange[] {
 
 function rangesOverlap(segment: ChapterTextSegment, range: TextRange): boolean {
   return range.start < segment.endOffset && range.end > segment.startOffset;
+}
+
+interface LocatedQualityFixRange {
+  issueKey: string;
+  start: number;
+  end: number;
+  before: string;
+  after: string;
+  reason: string;
+}
+
+function segmentIssueAnchorRanges(
+  fullSourceContent: string,
+  segment: ChapterTextSegment,
+  item: QualityCheckItem,
+): TextRange[] {
+  return issueTextRanges(fullSourceContent, item)
+    .filter((range) => rangesOverlap(segment, range))
+    .map((range) => ({
+      start: Math.max(0, range.start - segment.startOffset),
+      end: Math.min(segment.text.length, range.end - segment.startOffset),
+    }));
+}
+
+function rangesIntersect(left: TextRange, right: TextRange): boolean {
+  return left.start < right.end && left.end > right.start;
+}
+
+function locateChangedRange(
+  fullSourceContent: string,
+  segment: ChapterTextSegment,
+  item: QualityCheckItem,
+  range: FixResult['changedRanges'][number],
+): LocatedQualityFixRange {
+  if (!range.before) {
+    throw new Error(`质量修稿问题 ${item.issueKey} 的 before 为空，无法安全应用。`);
+  }
+  if (range.before === range.after) {
+    throw new Error(`质量修稿问题 ${item.issueKey} 没有产生实际文本变化。`);
+  }
+
+  const occurrences = findTextRanges(segment.text, range.before);
+  if (occurrences.length === 0) {
+    throw new Error(`质量修稿问题 ${item.issueKey} 的 before 与当前正文不匹配。`);
+  }
+
+  let target: TextRange | undefined;
+  if (occurrences.length === 1) {
+    target = occurrences[0];
+  } else {
+    const anchors = segmentIssueAnchorRanges(fullSourceContent, segment, item);
+    const anchored = occurrences.filter((occurrence) =>
+      anchors.some((anchor) => rangesIntersect(occurrence, anchor)),
+    );
+    if (anchored.length === 1) target = anchored[0];
+  }
+
+  if (!target) {
+    throw new Error(
+      `质量修稿问题 ${item.issueKey} 的 before 在正文中不唯一，且无法由问题位置消歧。`,
+    );
+  }
+
+  return {
+    issueKey: item.issueKey,
+    start: target.start,
+    end: target.end,
+    before: range.before,
+    after: range.after,
+    reason: range.reason,
+  };
+}
+
+export function applyDeterministicQualityFixRanges(input: {
+  fullSourceContent: string;
+  segment: ChapterTextSegment;
+  changedRanges: FixResult['changedRanges'];
+  pendingIssues: QualityCheckItem[];
+}): Pick<FixResult, 'revisedContent' | 'changedRanges' | 'fixedIssueKeys' | 'applicationMode'> {
+  if (input.changedRanges.length === 0) {
+    throw new Error('外部 AI 未返回可应用的 changed_ranges。');
+  }
+
+  const issueByKey = new Map(input.pendingIssues.map((item) => [item.issueKey, item]));
+  const seenIssueKeys = new Set<string>();
+  const located = input.changedRanges.map((range) => {
+    const issueKey = range.issue_key;
+    const issue = issueKey ? issueByKey.get(issueKey) : undefined;
+    if (!issue || !issueKey) {
+      throw new Error('质量修稿 changed_ranges 包含未绑定待处理问题的替换。');
+    }
+    if (seenIssueKeys.has(issueKey)) {
+      throw new Error(`质量修稿问题 ${issueKey} 返回了多个替换，超出单问题单替换协议。`);
+    }
+    seenIssueKeys.add(issueKey);
+    return locateChangedRange(input.fullSourceContent, input.segment, issue, range);
+  });
+
+  const ascending = [...located].sort((left, right) => left.start - right.start);
+  for (let index = 1; index < ascending.length; index += 1) {
+    if (ascending[index].start < ascending[index - 1].end) {
+      throw new Error('质量修稿 changed_ranges 相互重叠，无法安全应用。');
+    }
+  }
+
+  let revisedContent = input.segment.text;
+  for (const item of [...ascending].reverse()) {
+    if (revisedContent.slice(item.start, item.end) !== item.before) {
+      throw new Error(`质量修稿问题 ${item.issueKey} 的替换基线已漂移。`);
+    }
+    revisedContent =
+      revisedContent.slice(0, item.start) + item.after + revisedContent.slice(item.end);
+  }
+
+  return {
+    revisedContent,
+    changedRanges: ascending.map((item) => ({
+      issue_key: item.issueKey,
+      before: item.before,
+      after: item.after,
+      reason: item.reason,
+      start_offset: item.start,
+      end_offset: item.end,
+    })),
+    fixedIssueKeys: ascending.map((item) => item.issueKey),
+    applicationMode: 'deterministic_ranges',
+  };
+}
+
+interface ParagraphSpan extends TextRange {
+  text: string;
+  separatorAfter: string;
+}
+
+function paragraphSpans(value: string): ParagraphSpan[] {
+  const spans: ParagraphSpan[] = [];
+  const separator = /\n\n+/g;
+  let start = 0;
+  let match: RegExpExecArray | null;
+  while ((match = separator.exec(value)) !== null) {
+    spans.push({
+      start,
+      end: match.index,
+      text: value.slice(start, match.index),
+      separatorAfter: match[0],
+    });
+    start = separator.lastIndex;
+  }
+  spans.push({ start, end: value.length, text: value.slice(start), separatorAfter: '' });
+  return spans;
+}
+
+function locateRangeForFullTextRecovery(
+  fullSourceContent: string,
+  segment: ChapterTextSegment,
+  item: QualityCheckItem,
+  range: FixResult['changedRanges'][number],
+): LocatedQualityFixRange {
+  if (!range.before || range.before === range.after) {
+    return locateChangedRange(fullSourceContent, segment, item, range);
+  }
+  if (findTextRanges(segment.text, range.before).length > 0) {
+    return locateChangedRange(fullSourceContent, segment, item, range);
+  }
+
+  const anchors = segmentIssueAnchorRanges(fullSourceContent, segment, item);
+  if (anchors.length !== 1) {
+    return locateChangedRange(fullSourceContent, segment, item, range);
+  }
+  const [anchor] = anchors;
+  return {
+    issueKey: item.issueKey,
+    start: anchor.start,
+    end: anchor.end,
+    before: segment.text.slice(anchor.start, anchor.end),
+    after: range.after,
+    reason: range.reason,
+  };
+}
+
+function recoverIssueBoundRangesFromProviderFullText(input: {
+  fullSourceContent: string;
+  segment: ChapterTextSegment;
+  result: FixResult;
+  pendingIssues: QualityCheckItem[];
+}): Pick<FixResult, 'revisedContent' | 'changedRanges' | 'fixedIssueKeys' | 'applicationMode'> {
+  if (!input.result.revisedContent || input.result.revisedContent === input.segment.text) {
+    throw new Error('质量修稿局部替换无法精确应用，且没有可校验的完整修订正文。');
+  }
+
+  const sourceParagraphs = paragraphSpans(input.segment.text);
+  const revisedParagraphs = paragraphSpans(input.result.revisedContent);
+  if (
+    sourceParagraphs.length !== revisedParagraphs.length ||
+    sourceParagraphs.some(
+      (paragraph, index) => paragraph.separatorAfter !== revisedParagraphs[index].separatorAfter,
+    )
+  ) {
+    throw new Error('质量修稿重叠区间的完整修订正文改变了段落结构，无法安全恢复。');
+  }
+
+  const issueByKey = new Map(input.pendingIssues.map((item) => [item.issueKey, item]));
+  const seenIssueKeys = new Set<string>();
+  const located = input.result.changedRanges.map((range) => {
+    const issue = range.issue_key ? issueByKey.get(range.issue_key) : undefined;
+    if (!issue || !range.issue_key) {
+      throw new Error('质量修稿重叠区间包含未绑定待处理问题的替换。');
+    }
+    if (seenIssueKeys.has(range.issue_key)) {
+      throw new Error(`质量修稿问题 ${range.issue_key} 返回了多个替换，无法安全恢复。`);
+    }
+    seenIssueKeys.add(range.issue_key);
+    return locateRangeForFullTextRecovery(input.fullSourceContent, input.segment, issue, range);
+  });
+  const changedIndexes = sourceParagraphs
+    .map((paragraph, index) => (paragraph.text === revisedParagraphs[index].text ? -1 : index))
+    .filter((index) => index >= 0);
+  if (changedIndexes.length === 0) {
+    throw new Error('质量修稿重叠区间的完整修订正文没有实际变化。');
+  }
+
+  const issueKeysByParagraph = new Map<number, string[]>();
+  for (const item of located) {
+    for (let index = 0; index < sourceParagraphs.length; index += 1) {
+      if (rangesIntersect(item, sourceParagraphs[index])) {
+        const keys = issueKeysByParagraph.get(index) ?? [];
+        if (!keys.includes(item.issueKey)) keys.push(item.issueKey);
+        issueKeysByParagraph.set(index, keys);
+      }
+    }
+  }
+  if (changedIndexes.some((index) => (issueKeysByParagraph.get(index)?.length ?? 0) === 0)) {
+    throw new Error('质量修稿完整修订正文包含问题区间以外的段落变化。');
+  }
+
+  const clusters: Array<{ start: number; end: number }> = [];
+  for (const index of changedIndexes) {
+    const previous = clusters[clusters.length - 1];
+    if (previous && index === previous.end + 1) previous.end = index;
+    else clusters.push({ start: index, end: index });
+  }
+
+  const usedIssueKeys = new Set<string>();
+  const changedRanges: FixResult['changedRanges'] = clusters.map((cluster) => {
+    const candidateKeys = new Set<string>();
+    for (let index = cluster.start; index <= cluster.end; index += 1) {
+      for (const issueKey of issueKeysByParagraph.get(index) ?? []) candidateKeys.add(issueKey);
+    }
+    const issueKey = [...candidateKeys].find((key) => !usedIssueKeys.has(key));
+    if (!issueKey) {
+      throw new Error('质量修稿完整修订正文无法为每个改动段落绑定唯一问题。');
+    }
+    usedIssueKeys.add(issueKey);
+    const sourceStart = sourceParagraphs[cluster.start].start;
+    const sourceEnd = sourceParagraphs[cluster.end].end;
+    const revisedStart = revisedParagraphs[cluster.start].start;
+    const revisedEnd = revisedParagraphs[cluster.end].end;
+    return {
+      issue_key: issueKey,
+      before: input.segment.text.slice(sourceStart, sourceEnd),
+      after: input.result.revisedContent.slice(revisedStart, revisedEnd),
+      reason: '由问题绑定的完整修订正文恢复重叠局部替换。',
+      start_offset: sourceStart,
+      end_offset: sourceEnd,
+    };
+  });
+
+  let replayed = input.segment.text;
+  for (const range of [...changedRanges].reverse()) {
+    replayed =
+      replayed.slice(0, range.start_offset) + range.after + replayed.slice(range.end_offset);
+  }
+  if (replayed !== input.result.revisedContent) {
+    throw new Error('质量修稿完整修订正文无法由恢复后的局部替换确定性重放。');
+  }
+
+  const relevantKeys = new Set(input.pendingIssues.map((item) => item.issueKey));
+  return {
+    revisedContent: replayed,
+    changedRanges,
+    fixedIssueKeys: input.result.fixedIssueKeys.filter((key) => relevantKeys.has(key)),
+    applicationMode: 'deterministic_ranges',
+  };
 }
 
 /**
@@ -391,9 +756,11 @@ function buildFixPrompt(params: {
     '- 未涉及质量问题的段落保持原文不变。',
     '- 不改变章节核心目标、设定和人物关系。',
     '- 不新增设定、不提前暴露秘密。',
-    params.segment
-      ? '- 输出必须是完整的当前分段正文，不要重复前后衔接文本。'
-      : '- 输出必须是完整章节正文。',
+    '- 不要返回完整修订正文；应用层会把 changed_ranges 确定性合成到当前正文。',
+    '- 每个待修问题最多返回一个 changed_range；before 必须逐字复制当前正文中唯一、连续的原文，after 是它的完整替换文本。',
+    '- 所有 changed_ranges 在原文中的范围必须互不重叠；多个问题涉及同一段原文时合并为一个替换，并在 fixed_issue_keys 中列出被同时修复的问题。',
+    '- changed_range 必须绑定真实 issue_key；无法用一次局部替换安全修复的问题不要标记为 fixed。',
+    '- revised_content 必须是把 changed_ranges 应用到当前正文后的完整结果；除这些局部替换外逐字保持原文，用于应用层校验和中断恢复。',
     '',
     '【已忽略问题，不要修复】',
     ignoredText,
@@ -402,16 +769,13 @@ function buildFixPrompt(params: {
     pendingText,
     '',
     '请严格按以下 JSON 格式返回：',
+    '不要输出思考过程或解释，立即返回紧凑 JSON；禁止返回 revision_plan 或其他字段。',
     '{',
     '  "mode": "targeted_fix",',
-    '  "revision_plan": [{ "issue_key":"...", "target_quote":"...", "fix_strategy":"...", "change_scope":"只修改该段" }],',
     '  "changed_ranges": [{ "issue_key":"...", "before":"原文", "after":"修改后", "reason":"修复原因" }],',
     '  "fixed_issue_keys": ["qc_xxx"],',
     '  "revision_summary": "本次修复说明",',
-    '  "unchanged_policy": "未涉及质量问题的段落保持原文结构和表达。",',
-    params.segment
-      ? '  "revised_content": "完整修订后的当前分段正文"'
-      : '  "revised_content": "完整修订后章节正文"',
+    '  "revised_content": "应用以上局部替换后的完整章节正文"',
     '}',
     '',
     params.segment ? '以下是当前章节分段正文：' : '以下是当前章节全文：',
@@ -428,7 +792,10 @@ function buildFixPrompt(params: {
         content: `请根据以上 ${params.pendingIssues.length} 个待修复问题，进行精准局部修稿。只修改问题相关部分，其他内容尽量不变。`,
       },
     ],
-    maxTokens: 10000,
+    // Some reasoning-capable providers spend a large part of the completion
+    // budget before returning the compact revision JSON. This external budget
+    // does not alter the local Scene model's fixed 1024-token contract.
+    maxTokens: qualityFixOutputTokenBudget(params.pendingIssues.length, params.draftContent.length),
   };
 }
 
@@ -527,14 +894,46 @@ export async function generateSegmentedQualityFix(
       revisedContent: segment.text,
     });
     const result = normalizeFixResult(parsed, response.text, segment.text);
-    ensureSegmentRevisionIsComplete(segment, result.revisedContent);
-
     const relevantKeys = new Set(pendingIssues.map((item) => item.issueKey));
-    result.fixedIssueKeys = result.fixedIssueKeys.filter((key) => relevantKeys.has(key));
-    result.revisionPlan = result.revisionPlan?.filter((item) => relevantKeys.has(item.issue_key));
-    result.changedRanges = result.changedRanges.filter(
-      (item) => !item.issue_key || relevantKeys.has(item.issue_key),
+    if (result.changedRanges.length > 0) {
+      let applied: ReturnType<typeof applyDeterministicQualityFixRanges>;
+      try {
+        applied = applyDeterministicQualityFixRanges({
+          fullSourceContent: input.sourceContent,
+          segment,
+          changedRanges: result.changedRanges,
+          pendingIssues,
+        });
+      } catch {
+        applied = recoverIssueBoundRangesFromProviderFullText({
+          fullSourceContent: input.sourceContent,
+          segment,
+          result,
+          pendingIssues,
+        });
+      }
+      result.revisedContent = applied.revisedContent;
+      result.changedRanges = applied.changedRanges.map((range) => ({
+        ...range,
+        start_offset:
+          range.start_offset === undefined ? undefined : segment.startOffset + range.start_offset,
+        end_offset:
+          range.end_offset === undefined ? undefined : segment.startOffset + range.end_offset,
+      }));
+      result.fixedIssueKeys = applied.fixedIssueKeys;
+      result.applicationMode = applied.applicationMode;
+    } else {
+      result.fixedIssueKeys = result.fixedIssueKeys.filter((key) => relevantKeys.has(key));
+      result.changedRanges = [];
+      if (result.revisedContent === segment.text) {
+        throw new Error('外部 AI 未返回可安全应用的局部替换，正文保持不变。');
+      }
+      result.applicationMode = 'provider_full_text';
+    }
+    result.revisionPlan = result.revisionPlan?.filter((item) =>
+      result.fixedIssueKeys.includes(item.issue_key),
     );
+    ensureSegmentRevisionIsComplete(segment, result.revisedContent);
     segmentResults.set(segment.index, result);
     revisedBySegment.set(segment.index, result.revisedContent);
   }
@@ -571,6 +970,12 @@ export async function generateSegmentedQualityFix(
       revisionSummary,
       changedRanges,
       revisedContent,
+      applicationMode:
+        orderedResults.length === 0
+          ? 'unchanged'
+          : orderedResults.every(({ result }) => result.applicationMode === 'deterministic_ranges')
+            ? 'deterministic_ranges'
+            : 'provider_full_text',
       unchangedPolicy: '未命中待修复问题的连续分段保持原文不变。',
     },
     requestCount,
@@ -581,13 +986,147 @@ export async function generateSegmentedQualityFix(
   };
 }
 
+function parsePersistedChangedRanges(value: string): FixResult['changedRanges'] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('已保存的质量修稿补丁不是有效 JSON。');
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error('已保存的质量修稿没有可恢复的 changed_ranges。');
+  }
+  return parsed.map((item) => {
+    const record = asRecord(item);
+    const startOffset = record.start_offset;
+    const endOffset = record.end_offset;
+    return {
+      issue_key: readString(record, ['issue_key', 'issueKey']) || undefined,
+      reason: readString(record, ['reason']),
+      before: readString(record, ['before']),
+      after: readString(record, ['after']),
+      start_offset:
+        typeof startOffset === 'number' && Number.isInteger(startOffset) ? startOffset : undefined,
+      end_offset:
+        typeof endOffset === 'number' && Number.isInteger(endOffset) ? endOffset : undefined,
+    };
+  });
+}
+
+/**
+ * Rebuild a Provider-completed repair from its persisted exact replacements.
+ * This performs no AI request and is safe to use after a process interruption.
+ */
+export function restorePersistedQualityFixResult(input: {
+  fixRun: QualityFixRun;
+  sourceDraft: ChapterDraft;
+  pendingIssues: QualityCheckItem[];
+}): FixResult {
+  const { fixRun, sourceDraft, pendingIssues } = input;
+  if (fixRun.sourceDraftId !== sourceDraft.id || fixRun.chapterId !== sourceDraft.chapterId) {
+    throw new Error('质量修稿恢复目标与源草稿身份不一致。');
+  }
+  if (fixRun.sourceDraftVersion !== sourceDraft.versionNo) {
+    throw new Error('质量修稿恢复目标与源草稿版本不一致。');
+  }
+  if (!qualityFixSourceHashMatches(fixRun.sourceContentHash, sourceDraft.content)) {
+    throw new Error('质量修稿恢复时源草稿正文已发生变化。');
+  }
+  if (!fixRun.changedRangesJson) {
+    throw new Error('该质量修稿没有可恢复的局部补丁。');
+  }
+
+  const changedRanges = parsePersistedChangedRanges(fixRun.changedRangesJson);
+  const issueKeys = new Set(pendingIssues.map((item) => item.issueKey));
+  const seenIssueKeys = new Set<string>();
+  for (const range of changedRanges) {
+    if (!range.issue_key || !issueKeys.has(range.issue_key)) {
+      throw new Error('已保存的质量修稿包含未绑定当前待处理问题的替换。');
+    }
+    if (seenIssueKeys.has(range.issue_key)) {
+      throw new Error(`已保存的质量修稿问题 ${range.issue_key} 包含多个替换。`);
+    }
+    seenIssueKeys.add(range.issue_key);
+  }
+
+  const hasCompleteOffsets = changedRanges.every(
+    (range) => range.start_offset !== undefined && range.end_offset !== undefined,
+  );
+  let applied: Pick<
+    FixResult,
+    'revisedContent' | 'changedRanges' | 'fixedIssueKeys' | 'applicationMode'
+  >;
+  if (hasCompleteOffsets) {
+    const ordered = [...changedRanges].sort(
+      (left, right) => (left.start_offset ?? 0) - (right.start_offset ?? 0),
+    );
+    for (let index = 0; index < ordered.length; index += 1) {
+      const range = ordered[index];
+      const start = range.start_offset as number;
+      const end = range.end_offset as number;
+      if (
+        start < 0 ||
+        end <= start ||
+        end > sourceDraft.content.length ||
+        sourceDraft.content.slice(start, end) !== range.before ||
+        range.before === range.after
+      ) {
+        throw new Error(`已保存的质量修稿问题 ${range.issue_key} 与源草稿不匹配。`);
+      }
+      if (index > 0 && start < (ordered[index - 1].end_offset as number)) {
+        throw new Error('已保存的质量修稿补丁相互重叠。');
+      }
+    }
+    let revisedContent = sourceDraft.content;
+    for (const range of [...ordered].reverse()) {
+      revisedContent =
+        revisedContent.slice(0, range.start_offset) +
+        range.after +
+        revisedContent.slice(range.end_offset);
+    }
+    applied = {
+      revisedContent,
+      changedRanges: ordered,
+      fixedIssueKeys: ordered.map((range) => range.issue_key as string),
+      applicationMode: 'deterministic_ranges',
+    };
+  } else {
+    const [wholeDraft] = splitChapterText(
+      sourceDraft.content,
+      Math.max(500, sourceDraft.content.length + 1),
+    );
+    applied = applyDeterministicQualityFixRanges({
+      fullSourceContent: sourceDraft.content,
+      segment: wholeDraft,
+      changedRanges,
+      pendingIssues,
+    });
+  }
+
+  if (
+    fixRun.targetContentHash &&
+    !qualityFixSourceHashMatches(fixRun.targetContentHash, applied.revisedContent)
+  ) {
+    throw new Error('质量修稿恢复结果与已保存目标正文哈希不一致。');
+  }
+  return {
+    mode: 'targeted_fix',
+    applicationMode: applied.applicationMode,
+    fixedIssueKeys: applied.fixedIssueKeys,
+    revisionSummary: fixRun.revisionSummary || '恢复已完成的外部 AI 局部修稿。',
+    changedRanges: applied.changedRanges,
+    revisedContent: applied.revisedContent,
+    unchangedPolicy: '未命中待修复问题的正文保持原文不变。',
+  };
+}
+
 /** 修稿范围校验 (v1.7.19) */
-function validateFixScope(
+export function validateQualityFixScope(
   sourceContent: string,
   revisedContent: string,
   changedRanges: FixResult['changedRanges'],
   fixedIssueKeys: string[],
-  pendingIssueKeys: string[],
+  deterministicRangesApplied: boolean,
 ): FixScopeValidation {
   const warnings: string[] = [];
   if (!revisedContent || revisedContent.trim().length === 0) {
@@ -637,22 +1176,10 @@ function validateFixScope(
   const totalParagraphCount = Math.max(srcParas.length, revParas.length);
   const changeRatio = changedCount / Math.max(1, totalParagraphCount);
 
-  // 检查是否只修改了 pending issue 相关区域
-  const pendingQuoteTexts = pendingIssueKeys.join(' ').toLowerCase();
-  let unrelatedChangedCount = 0;
-
-  for (let i = 0; i < Math.min(srcParas.length, revParas.length); i++) {
-    const s = srcParas[i].trim();
-    const r = revParas[i] ? revParas[i].trim() : '';
-    if (s !== r) {
-      // 简单判断：是否包含 pending issue key 的引用
-      const paraText = (s + ' ' + r).toLowerCase();
-      if (!pendingQuoteTexts.includes(paraText.slice(0, 50))) {
-        // 粗略判断为无关修改
-      }
-      unrelatedChangedCount++;
-    }
-  }
+  // Deterministic range application changes only issue-bound exact spans.
+  // Provider full-text compatibility output remains conservatively treated as
+  // unrelated until the paragraph scope gate proves it is sufficiently small.
+  const unrelatedChangedCount = deterministicRangesApplied ? 0 : changedCount;
 
   if (changeRatio > 0.4 && changedCount > 3) {
     return {
@@ -704,9 +1231,15 @@ export const qualityFixService = {
       styleSummary?: string;
     },
     options: AiGenerateOptions = {},
-  ): Promise<{ fixResult: FixResult; fixRun: QualityFixRun; scopeValidation: FixScopeValidation }> {
+  ): Promise<{
+    fixResult: FixResult;
+    fixRun: QualityFixRun;
+    scopeValidation: FixScopeValidation;
+    aiTaskId?: string;
+  }> {
+    await assertQualityFixRoundAvailable(params.chapterId, params.currentDraft.id);
     const settings = aiSettingsService.getSettings();
-    const sourceHash = hashContent(params.currentDraft.content);
+    const sourceHash = hashTextContent(params.currentDraft.content);
 
     // 创建 fix run 记录并持久化
     const fixRun: QualityFixRun = {
@@ -728,7 +1261,7 @@ export const qualityFixService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    fixRunStore.save(fixRun);
+    await fixRunStore.save(fixRun);
 
     // 创建 AI 任务
     const task = await aiTaskService
@@ -744,7 +1277,7 @@ export const qualityFixService = {
     const releaseCancellation = bindAiTaskCancellation(task?.id, options);
 
     try {
-      const client = createAiClient(settings);
+      const client = createAiClient(withQualityFixRequestSettings(settings));
       const generation = await generateSegmentedQualityFix(
         {
           chapterTitle: params.chapterTitle,
@@ -758,7 +1291,13 @@ export const qualityFixService = {
         },
         (request) => {
           throwIfAiRequestCancelled(options.signal);
-          return client.generate(request, options);
+          return client.generate(
+            {
+              ...request,
+              thinkingMode: qualityFixThinkingModeForModel(settings.modelName),
+            },
+            options,
+          );
         },
       );
       throwIfAiRequestCancelled(options.signal);
@@ -771,35 +1310,43 @@ export const qualityFixService = {
 
       fixRun.revisionSummary = safeFixResult.revisionSummary;
       fixRun.changedRangesJson = JSON.stringify(safeFixResult.changedRanges);
-      fixRun.status = 'success';
+      fixRun.targetContentHash = hashTextContent(safeFixResult.revisedContent);
       fixRun.fixedIssueIds = params.pendingIssues
         .filter((i) => safeFixResult.fixedIssueKeys.includes(i.issueKey))
         .map((i) => i.id);
-      fixRunStore.save(fixRun);
 
       // v1.7.19 修稿范围校验
-      const scopeValidation = validateFixScope(
+      const scopeValidation = validateQualityFixScope(
         params.currentDraft.content,
         safeFixResult.revisedContent,
         safeFixResult.changedRanges,
         safeFixResult.fixedIssueKeys,
-        params.pendingIssues.map((i) => i.issueKey),
+        safeFixResult.applicationMode === 'deterministic_ranges',
       );
+      fixRun.status = scopeValidation.passed ? 'success' : 'failed';
+      fixRun.failureReason = scopeValidation.passed
+        ? undefined
+        : scopeValidation.rejectReason || '修稿范围校验未通过';
+      await fixRunStore.save(fixRun);
 
       await aiTaskService.markSucceeded(task?.id || '', {
         resultText: safeFixResult.revisionSummary,
+        resultJson: JSON.stringify({
+          fixedIssueKeys: safeFixResult.fixedIssueKeys,
+          applicationMode: safeFixResult.applicationMode,
+        }),
         tokenInput: generation.tokenInput,
         tokenOutput: generation.tokenOutput,
         tokenTotal: generation.tokenTotal,
       });
 
-      return { fixResult: safeFixResult, fixRun, scopeValidation };
+      return { fixResult: safeFixResult, fixRun, scopeValidation, aiTaskId: task?.id };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'AI 修稿失败';
       const cancelled = options.signal?.aborted || isAiRequestCancelled(e);
       fixRun.status = cancelled ? 'cancelled' : 'failed';
       fixRun.failureReason = cancelled ? undefined : message;
-      fixRunStore.save(fixRun);
+      await fixRunStore.save(fixRun);
       await settleAiTaskError({
         taskId: task?.id,
         error: e,

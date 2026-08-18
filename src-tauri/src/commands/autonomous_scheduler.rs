@@ -1,7 +1,8 @@
 use crate::db::get_connection;
 use crate::errors::AppError;
 use crate::services::autonomous_scheduler_service::{
-    self, AcquireAutonomousRunLeaseInput, AutonomousBookRunDto, AutonomousRunChapterAttemptDto,
+    self, AcquireAutonomousRunLeaseInput, AuthorizeFullAutoAttemptInput,
+    AuthorizeFullAutoAttemptResult, AutonomousBookRunDto, AutonomousRunChapterAttemptDto,
     AutonomousRunChapterClaim, AutonomousRunLeaseDto, AutonomousRunLeaseGrant,
     ChangeAutonomousRunStateInput, ClaimAutonomousRunChapterInput, CreateAutonomousBookRunInput,
     FinishAutonomousRunChapterInput, FinishAutonomousRunChapterResult, HeartbeatAutonomousRunInput,
@@ -91,6 +92,15 @@ pub fn finish_autonomous_run_chapter(
     input: FinishAutonomousRunChapterInput,
 ) -> Result<FinishAutonomousRunChapterResult, AppError> {
     with_connection(|connection| autonomous_scheduler_service::finish_chapter(connection, input))
+}
+
+#[tauri::command]
+pub fn authorize_full_auto_run_attempt(
+    input: AuthorizeFullAutoAttemptInput,
+) -> Result<AuthorizeFullAutoAttemptResult, AppError> {
+    with_connection(|connection| {
+        autonomous_scheduler_service::authorize_full_auto_attempt(connection, input)
+    })
 }
 
 #[tauri::command]

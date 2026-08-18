@@ -21,6 +21,8 @@ import { masterOutlineService } from '../../services/outlines/outlineService';
 import type { MasterOutline } from '../../types/outline';
 import { describeUnknownError } from '../../utils/errorMessage';
 
+const CHAPTER_OUTLINE_BATCH_SIZE = 3;
+
 interface OutlineManagerProps {
   novelId: string;
 }
@@ -310,7 +312,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
             {
               novelId,
               volumeId,
-              chapterCount: 6,
+              chapterCount: CHAPTER_OUTLINE_BATCH_SIZE,
             },
             { signal, cancel: () => cancelLoadingOperation(operationId) },
           );

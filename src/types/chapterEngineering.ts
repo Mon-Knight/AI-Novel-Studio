@@ -25,6 +25,15 @@ export interface ChapterCard {
   forbiddenWriting: string[];
 }
 
+export interface SceneBeat {
+  id: string;
+  order: number;
+  text: string;
+  required: boolean;
+  characterIds?: string[];
+  stateChange?: string;
+}
+
 export interface ScenePlanItem {
   id: string;
   sceneNo: number;
@@ -38,6 +47,12 @@ export interface ScenePlanItem {
   informationRelease: string[];
   result: string;
   transition: string;
+  /** Ordered scene-local beats. Legacy fields are retained for editing compatibility. */
+  beats: SceneBeat[];
+  contextCapsule?: string;
+  constraints?: string[];
+  expectedEndState?: string;
+  targetCharacters?: number;
 }
 
 export interface GenerationWordRange {

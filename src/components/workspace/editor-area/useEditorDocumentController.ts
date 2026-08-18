@@ -378,12 +378,8 @@ export function useEditorDocumentController({
       draftToAdopt = await handleSave();
     } else {
       const existingDraft = draftToAdopt;
-      if (existingDraft.isAdopted) {
-        setSaveMsg('已采用');
-        setTimeout(() => setSaveMsg(''), 2000);
-        return;
-      }
       if (
+        !existingDraft.isAdopted &&
         !(await confirmInfo({
           title: '采用草稿',
           message: `确认采用草稿 v${existingDraft.versionNo} 作为正式正文？`,

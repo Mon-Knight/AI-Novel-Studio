@@ -28,6 +28,7 @@ pub fn is_supported_artifact_type(value: &str) -> bool {
         "generic_text"
             | "generic_json"
             | "chapter_text"
+            | "scene_text"
             | "quality_report"
             | "character_candidates"
             | "event_candidates"

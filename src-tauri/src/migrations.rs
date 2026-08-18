@@ -193,9 +193,9 @@ fn create_ledger(transaction: &Transaction<'_>) -> Result<(), AppError> {
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), AppError> {
     for migration in migrations() {
-        // Startup currently opens the database before the single-instance fence. An IMMEDIATE
-        // transaction makes two concurrent processes serialize before either reads the ledger,
-        // avoiding a deferred-read / write-upgrade SQLITE_BUSY_SNAPSHOT race.
+        // Serialize concurrent connections before either reads the ledger, avoiding a
+        // deferred-read / write-upgrade SQLITE_BUSY_SNAPSHOT race in tests, recovery tools, or
+        // any future multi-process maintenance path. Normal desktop startup is fenced earlier.
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(AppError::database)?;
@@ -3701,9 +3701,14 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         {
-            let connection = Connection::open(&path)?;
+            let mut connection = Connection::open(&path)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+            // The single-instance fence serializes the legacy pre-ledger schema bootstrap in
+            // production. Seed that base once here, then remove only the ledger rows so the two
+            // connections below exercise the cross-connection migration ledger race itself.
+            crate::db::create_tables(&mut connection)?;
+            connection.execute("DELETE FROM schema_migrations", [])?;
         }
 
         let barrier = Arc::new(Barrier::new(2));
@@ -3721,7 +3726,7 @@ mod tests {
                         .execute_batch("PRAGMA foreign_keys=ON;")
                         .map_err(|error| error.to_string())?;
                     barrier.wait();
-                    crate::db::create_tables(&mut connection).map_err(|error| error.to_string())
+                    run_migrations(&mut connection).map_err(|error| error.to_string())
                 })
             })
             .collect::<Vec<_>>();

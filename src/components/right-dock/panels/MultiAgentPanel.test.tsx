@@ -23,10 +23,20 @@ Object.defineProperties(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true, writable: true },
 });
 
-const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react');
+const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react');
 
 afterEach(() => cleanup());
 after(() => dom.window.close());
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 const sourceDraft: ChapterDraft = {
   id: 'draft-1',
@@ -68,6 +78,15 @@ const chapter: Chapter = {
   drafts: [],
   createdAt: '2026-07-27T00:00:00.000Z',
   updatedAt: '2026-07-27T00:00:00.000Z',
+};
+
+const secondChapter: Chapter = {
+  ...chapter,
+  id: 'chapter-2',
+  title: '第二章',
+  chapterNumber: 2,
+  orderIndex: 2,
+  sortOrder: 2,
 };
 
 function completedBundle(): MultiAgentSessionBundle {
@@ -349,4 +368,157 @@ test('running 历史可按原 operation 和冻结配置显式继续', async () =
   assert.equal(calls[0].operationId, running.session.operationId);
   assert.deepEqual(calls[0].experts, running.session.expertTypes);
   assert.equal(calls[0].contentHash, running.session.sourceContentHash);
+});
+
+test('卸载面板会中止在途评审且迟到结果不会写回界面', async () => {
+  const pending = deferred<MultiAgentReviewResult>();
+  let requestSignal: AbortSignal | undefined;
+  const service: MultiAgentPanelService = {
+    async review(params) {
+      requestSignal = params.signal;
+      return pending.promise;
+    },
+    async getSession() {
+      return null;
+    },
+    async listSessionsByChapter() {
+      return [];
+    },
+  };
+  const rendered = render(
+    React.createElement(MultiAgentPanel, {
+      service,
+      novelId: 'novel-1',
+      chapter,
+      currentEditorContent: sourceDraft.content,
+      currentDraftId: sourceDraft.id,
+      currentDraftVersion: sourceDraft.versionNo,
+    }),
+  );
+
+  fireEvent.click(screen.getByTestId('multi-agent-run'));
+  await waitFor(() => assert.ok(requestSignal));
+  rendered.unmount();
+  assert.equal(requestSignal?.aborted, true);
+  pending.resolve({
+    success: true,
+    accepted: true,
+    finalAction: 'accept',
+    finalDraft: candidateDraft,
+    session: completedBundle(),
+    totalTokensUsed: 90,
+    durationMs: 20,
+  });
+  await pending.promise;
+});
+
+test('切换章节后忽略旧评审迟到结果并恢复新章节操作状态', async () => {
+  const pending = deferred<MultiAgentReviewResult>();
+  let requestSignal: AbortSignal | undefined;
+  const service: MultiAgentPanelService = {
+    async review(params) {
+      requestSignal = params.signal;
+      return pending.promise;
+    },
+    async getSession() {
+      return null;
+    },
+    async listSessionsByChapter() {
+      return [];
+    },
+  };
+  const rendered = render(
+    React.createElement(MultiAgentPanel, {
+      service,
+      novelId: 'novel-1',
+      chapter,
+      currentEditorContent: sourceDraft.content,
+      currentDraftId: sourceDraft.id,
+      currentDraftVersion: sourceDraft.versionNo,
+    }),
+  );
+
+  fireEvent.click(screen.getByTestId('multi-agent-run'));
+  await waitFor(() => assert.ok(requestSignal));
+  rendered.rerender(
+    React.createElement(MultiAgentPanel, {
+      service,
+      novelId: 'novel-1',
+      chapter: secondChapter,
+      currentEditorContent: '第二章正文',
+      currentDraftId: 'draft-chapter-2',
+      currentDraftVersion: 1,
+    }),
+  );
+  await waitFor(() => assert.equal(requestSignal?.aborted, true));
+  pending.resolve({
+    success: true,
+    accepted: true,
+    finalAction: 'accept',
+    finalDraft: candidateDraft,
+    session: completedBundle(),
+    totalTokensUsed: 90,
+    durationMs: 20,
+  });
+  await pending.promise;
+  await waitFor(() => assert.ok(screen.getByTestId('multi-agent-run')));
+  assert.equal(screen.queryByText('整体质量达到候选稿标准。'), null);
+});
+
+test('候选确认等待期间切章不会把旧候选载入新编辑器', async () => {
+  const beforeChange = deferred<boolean>();
+  const generated: ChapterDraft[] = [];
+  let draftLoads = 0;
+  const bundle = completedBundle();
+  const service: MultiAgentPanelService = {
+    async review() {
+      throw new Error('not used');
+    },
+    async getSession() {
+      return bundle;
+    },
+    async listSessionsByChapter(chapterId) {
+      return chapterId === chapter.id ? [bundle.session] : [];
+    },
+  };
+  const rendered = render(
+    React.createElement(MultiAgentPanel, {
+      service,
+      novelId: 'novel-1',
+      chapter,
+      currentEditorContent: sourceDraft.content,
+      currentDraftId: sourceDraft.id,
+      currentDraftVersion: sourceDraft.versionNo,
+      onBeforeDocumentChange: () => beforeChange.promise,
+      onGenerated: (draft) => generated.push(draft),
+      loadDrafts: async () => {
+        draftLoads += 1;
+        return [candidateDraft];
+      },
+    }),
+  );
+
+  fireEvent.click(await screen.findByRole('button', { name: '载入候选草稿' }));
+  rendered.rerender(
+    React.createElement(MultiAgentPanel, {
+      service,
+      novelId: 'novel-1',
+      chapter: secondChapter,
+      currentEditorContent: '第二章正文',
+      currentDraftId: 'draft-chapter-2',
+      currentDraftVersion: 1,
+      onBeforeDocumentChange: () => beforeChange.promise,
+      onGenerated: (draft) => generated.push(draft),
+      loadDrafts: async () => {
+        draftLoads += 1;
+        return [candidateDraft];
+      },
+    }),
+  );
+  await act(async () => {
+    beforeChange.resolve(true);
+    await beforeChange.promise;
+  });
+  await waitFor(() => assert.equal(generated.length, 0));
+  assert.equal(draftLoads, 0);
 });

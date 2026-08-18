@@ -17,6 +17,7 @@ import { AUTONOMOUS_PLAN_SCHEMA_VERSION } from '../../types/autonomousCreation';
 import type { AutonomousCreationProvider, AutonomousProviderResult } from './autonomousProvider';
 import type { AutonomousPlanPersistence } from './autonomousPersistence';
 import { AUTONOMOUS_CHAPTER_BATCH_SIZE } from './autonomousChapterBatchPolicy';
+import { mapSettledWithConcurrency } from '../../utils/asyncPool';
 import {
   buildChapterBatch,
   buildCharacters,
@@ -282,6 +283,7 @@ export interface AutonomousStoryServiceDependencies {
   persistence: AutonomousPlanPersistence;
   createId?: () => string;
   now?: () => string;
+  maxConcurrentProviderCalls?: () => number;
 }
 
 function runTemplate(agent: AutonomousAgentType, now: string): AutonomousAgentRun {
@@ -358,6 +360,7 @@ export class AutonomousStoryService {
   private readonly persistence: AutonomousPlanPersistence;
   private readonly createId: () => string;
   private readonly now: () => string;
+  private readonly maxConcurrentProviderCalls: () => number;
   private readonly inFlight = new Map<string, Promise<AutonomousStoryPlan>>();
 
   constructor(dependencies: AutonomousStoryServiceDependencies) {
@@ -365,6 +368,8 @@ export class AutonomousStoryService {
     this.persistence = dependencies.persistence;
     this.createId = dependencies.createId ?? generateId;
     this.now = dependencies.now ?? nowISO;
+    this.maxConcurrentProviderCalls =
+      dependencies.maxConcurrentProviderCalls ?? (() => Number.POSITIVE_INFINITY);
   }
 
   async generate(input: GenerateAutonomousPlanInput): Promise<AutonomousStoryPlan> {
@@ -665,83 +670,94 @@ export class AutonomousStoryService {
     for (const agent of missing) plan = updateRun(plan, agent, { status: 'running' }, this.now());
     plan = await this.save(plan, input.onProgress);
 
-    const jobs: Array<
-      Promise<{
+    const jobs: Array<{
+      agent: AutonomousAgentType;
+      run: () => Promise<{
         agent: AutonomousAgentType;
         result: AutonomousProviderResult<unknown>;
         value: unknown;
-      }>
-    > = [];
+      }>;
+    }> = [];
     if (missing.includes('world_builder')) {
-      jobs.push(
-        this.provider
-          .buildWorld({
-            novelId: plan.novelId,
-            operationId: plan.operationId,
-            brief,
-            storyBible,
-            arcs: plan.arcs,
-            volumes: plan.volumes,
-            planningMode: plan.planningMode,
-            baseline: promptBaseline(plan.baseline),
-            signal: input.signal,
-          })
-          .then((result) => ({
-            agent: 'world_builder',
-            result,
-            value: buildWorldElements(brief.targetChapterCount, result.value, this.createId),
-          })),
-      );
+      jobs.push({
+        agent: 'world_builder',
+        run: () =>
+          this.provider
+            .buildWorld({
+              novelId: plan.novelId,
+              operationId: plan.operationId,
+              brief,
+              storyBible,
+              arcs: plan.arcs,
+              volumes: plan.volumes,
+              planningMode: plan.planningMode,
+              baseline: promptBaseline(plan.baseline),
+              signal: input.signal,
+            })
+            .then((result) => ({
+              agent: 'world_builder',
+              result,
+              value: buildWorldElements(brief.targetChapterCount, result.value, this.createId),
+            })),
+      });
     }
     if (missing.includes('conflict_generator')) {
-      jobs.push(
-        this.provider
-          .generateConflicts({
-            novelId: plan.novelId,
-            operationId: plan.operationId,
-            brief,
-            storyBible,
-            arcs: plan.arcs,
-            volumes: plan.volumes,
-            characters: plan.characters,
-            planningMode: plan.planningMode,
-            baseline: promptBaseline(plan.baseline),
-            signal: input.signal,
-          })
-          .then((result) => ({
-            agent: 'conflict_generator',
-            result,
-            value: buildConflicts(brief.targetChapterCount, result.value, this.createId),
-          })),
-      );
+      jobs.push({
+        agent: 'conflict_generator',
+        run: () =>
+          this.provider
+            .generateConflicts({
+              novelId: plan.novelId,
+              operationId: plan.operationId,
+              brief,
+              storyBible,
+              arcs: plan.arcs,
+              volumes: plan.volumes,
+              characters: plan.characters,
+              planningMode: plan.planningMode,
+              baseline: promptBaseline(plan.baseline),
+              signal: input.signal,
+            })
+            .then((result) => ({
+              agent: 'conflict_generator',
+              result,
+              value: buildConflicts(brief.targetChapterCount, result.value, this.createId),
+            })),
+      });
     }
     if (missing.includes('pacing_controller')) {
-      jobs.push(
-        this.provider
-          .controlPacing({
-            novelId: plan.novelId,
-            operationId: plan.operationId,
-            brief,
-            storyBible,
-            arcs: plan.arcs,
-            volumes: plan.volumes,
-            planningMode: plan.planningMode,
-            baseline: promptBaseline(plan.baseline),
-            signal: input.signal,
-          })
-          .then((result) => ({
-            agent: 'pacing_controller',
-            result,
-            value: buildPacing(plan.arcs, result.value, this.createId),
-          })),
-      );
+      jobs.push({
+        agent: 'pacing_controller',
+        run: () =>
+          this.provider
+            .controlPacing({
+              novelId: plan.novelId,
+              operationId: plan.operationId,
+              brief,
+              storyBible,
+              arcs: plan.arcs,
+              volumes: plan.volumes,
+              planningMode: plan.planningMode,
+              baseline: promptBaseline(plan.baseline),
+              signal: input.signal,
+            })
+            .then((result) => ({
+              agent: 'pacing_controller',
+              result,
+              value: buildPacing(plan.arcs, result.value, this.createId),
+            })),
+      });
     }
 
-    const settled = await Promise.allSettled(jobs);
+    const settled = await mapSettledWithConcurrency(
+      jobs,
+      this.maxConcurrentProviderCalls(),
+      (job) => job.run(),
+    );
     let failure: unknown;
     for (let index = 0; index < settled.length; index += 1) {
       const item = settled[index];
-      const agent = missing[index];
+      const agent = jobs[index].agent;
       if (item.status === 'rejected') {
         failure ??= item.reason;
         plan = updateRun(
