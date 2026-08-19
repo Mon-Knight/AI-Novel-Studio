@@ -41,7 +41,7 @@
 - `npm run test`：Node 原生 `node:test`，运行正文安全门和备份服务动态测试。
 - `npm run test:workspace-safety`：正文变更安全门定向测试。
 - `cargo test`：Rust / SQLite 命令、事务和备份恢复测试。
-- `test:setting-suggestions`、`test:quality-workspace`、`test:ai-tasks-delete:*`：PowerShell 静态契约或 Rust 运行时检查。
+- `npm run test:ai-tasks-delete`：AI Task 删除的真实 Rust / SQLite 运行时检查。
 - `npm run lint`、`npm run build`、`cargo check`、`npm run tauri:build`：质量和生产构建入口。
 
 接入前没有：
