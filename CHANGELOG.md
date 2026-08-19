@@ -1,5 +1,20 @@
 # AI Novel Studio - CHANGELOG
 
+
+## v3.2.1 (2026-08-19) - 发布资产 URL 热修复
+
+### 修复
+
+- 修复 Tauri 生成的 Windows 安装包文件名包含空格时，GitHub Release 将空格规范化为点号、而 Stable updater manifest 仍发布 `%20` URL，导致自动更新下载返回 404 的问题。
+- `latest.json`、`release.json` 现在统一记录 GitHub 实际发布的 updater、签名和 MSI 资产名；其他不受支持的资产名字符继续失败关闭。
+- 已修复 `v3.2.0` 与 `updates-stable` 的在线 manifest，未移动既有 tag，也未替换安装包、updater 或签名文件。
+
+### 验证
+
+- `node --test scripts/release/build-release-manifest.test.mjs`
+- `npm run test:version-sync`
+- 对修复后的 `updates-stable/latest.json` updater URL 执行真实 HTTP HEAD，返回 `200` 并重定向到 `release-assets.githubusercontent.com`。
+
 ## v3.2.0 (2026-08-19) - 本地章节正文流水线与 DSH 稳定整合
 
 ### 修复

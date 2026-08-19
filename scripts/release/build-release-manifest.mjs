@@ -59,6 +59,14 @@ function assertHttpsUrl(value, label) {
   return url.toString();
 }
 
+function publishedAssetName(fileName) {
+  const normalized = fileName.replaceAll(' ', '.');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(normalized)) {
+    throw new Error(`Release asset name contains unsupported characters: ${fileName}`);
+  }
+  return normalized;
+}
+
 function downloadUrl(repository, tag, fileName) {
   return `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(fileName)}`;
 }
@@ -77,7 +85,7 @@ function sanitizeReleaseNotes(value) {
 async function artifactMetadata(file, repository, tag) {
   const bytes = await readFile(file);
   const metadata = await stat(file);
-  const fileName = path.basename(file);
+  const fileName = publishedAssetName(path.basename(file));
   return {
     fileName,
     byteLength: metadata.size,
@@ -172,7 +180,7 @@ const release = {
   publishedAt,
   updaterArtifact: {
     ...updaterArtifact,
-    signatureFileName: path.basename(signatureFile),
+    signatureFileName: publishedAssetName(path.basename(signatureFile)),
   },
   installerArtifact,
 };
