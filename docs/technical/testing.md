@@ -1,6 +1,6 @@
 # 测试策略与用例
 
-> 当前版本：v3.2.0（本地章节正文流水线与 DSH 稳定整合）
+> 当前版本：v3.2.1（发布资产 URL 热修复）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、可靠取消与请求治理、真实流式预览、参考资料与分层风格、混合语义 Memory、跨进程三档调度、多目标事务与正式故事资产、正文变更动态回归、性能基准、真实浏览器模式 E2E、Windows 真实 Tauri E2E、签名更新发布、前端构建与 Rust/Tauri 编译。
 
 ---
@@ -685,6 +685,7 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml commands::app_update::t
 - 浏览器 E2E 启动真实 Vite，驱动 Chromium/Edge，证明 StoryAssets lazy route、无 Tauri bridge 时不伪造 SQLite 资产，以及手动 dark/light 的 root dataset、`color-scheme`、语义 token 和 computed surface 均切换。主题 spec 还会等待 Splash 真正移除，解析 WebDriver RGB/RGBA PNG，并按页面校验亮度分位数、不透明率、颜色桶范围及 Light/Dark 平均亮度差 `> 0.55`。
 - updater 单元测试证明 Stable/Beta 版本隔离、发布说明限长/控制字符清理、普通本地包的公钥槽位不被视为已配置。
 - release manifest 测试使用临时 MSI updater/signature fixture，验证静态 Tauri v1 `latest.json`、artifact SHA-256、上一版 HTTPS installer 和 rollback backup 要求；稳定版本不得进入 Beta 索引。
+- release manifest 测试还必须使用含空格的 Tauri bundle 文件名，证明 GitHub Release 规范化后的点号资产名同时写入 `latest.json` URL 与 `release.json` 的 updater、signature、installer 字段，避免发布成功但更新 URL 返回 404。
 - `.github/workflows/release.yml` 只有在 `TAURI_PUBLIC_KEY / TAURI_PRIVATE_KEY` secrets 存在时构建 `msi,updater`，并在发布前检查 `.msi.zip.sig`。普通本地构建不会读取或生成私钥。
 
 ---

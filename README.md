@@ -25,9 +25,9 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v3.2.0**
+**当前版本：v3.2.1**
 
-**阶段：本地章节正文流水线与 DSH 稳定整合**
+**阶段：发布资产 URL 热修复**
 
 v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统：用户提交小说 Brief 后，Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller 协作生成 12～500 章全书计划；计划确认后，用户可以显式启动、暂停和继续全书候选队列，系统按章生成候选、执行六专家评审，并在用户采用正文后提取人物变化与世界扩展候选。
 

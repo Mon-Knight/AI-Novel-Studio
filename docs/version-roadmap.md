@@ -3,7 +3,7 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v3.2.0（本地章节正文流水线与 DSH 稳定整合）
+> 当前版本：v3.2.1（发布资产 URL 热修复）
 
 ---
 
@@ -152,7 +152,8 @@ v2.5.0  Chapter Readiness Planner Runtime
 v2.6.1  文档规范化与版本统一
 v3.0.0  Multi-Agent 自主创作闭环
 v3.1.0  DSH 进程外大脑接入
-v3.2.0  本地章节正文流水线与 DSH 稳定整合（当前）
+v3.2.0  本地章节正文流水线与 DSH 稳定整合
+v3.2.1  发布资产 URL 热修复（当前）
 ```
 
 ---

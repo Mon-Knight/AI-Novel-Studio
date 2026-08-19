@@ -11,13 +11,13 @@ const script = path.join(
   'build-release-manifest.mjs',
 );
 
-async function fixture() {
+async function fixture(baseName = 'AI Novel Studio_3.1.0_x64-setup') {
   const workspace = await mkdtemp(path.join(tmpdir(), 'ai-novel-studio-release-'));
   const bundleDirectory = path.join(workspace, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
   await mkdir(bundleDirectory, { recursive: true });
-  const updater = path.join(bundleDirectory, 'AI Novel Studio_3.1.0_x64-setup.nsis.zip');
+  const updater = path.join(bundleDirectory, `${baseName}.nsis.zip`);
   const signature = `${updater}.sig`;
-  const installer = path.join(bundleDirectory, 'AI Novel Studio_3.1.0_x64-setup.exe');
+  const installer = path.join(bundleDirectory, `${baseName}.exe`);
   const notes = path.join(workspace, 'release-notes.md');
   await writeFile(updater, 'signed updater bytes');
   await writeFile(signature, 'untrusted comment: signature\nRWQfixture-signature');
@@ -63,11 +63,19 @@ test('builds a Tauri v1 static updater index and rollback metadata', async () =>
     const release = JSON.parse(await readFile(path.join(output, 'release.json'), 'utf8'));
     const rollback = JSON.parse(await readFile(path.join(output, 'rollback.json'), 'utf8'));
     assert.equal(latest.version, '3.1.0');
-    assert.match(latest.platforms['windows-x86_64'].url, /\.nsis\.zip$/u);
+    assert.equal(
+      latest.platforms['windows-x86_64'].url,
+      'https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/v3.1.0/AI.Novel.Studio_3.1.0_x64-setup.nsis.zip',
+    );
     assert.match(latest.platforms['windows-x86_64'].signature, /RWQfixture-signature/u);
     assert.doesNotMatch(latest.notes, /\0/u);
     assert.equal(release.schemaVersion, 2);
-    assert.equal(release.updaterArtifact.signatureFileName, path.basename(files.signature));
+    assert.equal(release.updaterArtifact.fileName, 'AI.Novel.Studio_3.1.0_x64-setup.nsis.zip');
+    assert.equal(
+      release.updaterArtifact.signatureFileName,
+      'AI.Novel.Studio_3.1.0_x64-setup.nsis.zip.sig',
+    );
+    assert.equal(release.installerArtifact.fileName, 'AI.Novel.Studio_3.1.0_x64-setup.exe');
     assert.equal(rollback.previousVersion, '3.0.0');
     assert.equal(rollback.backupRequired, true);
   } finally {
@@ -99,6 +107,35 @@ test('rejects a stable version on the beta channel', async () => {
     );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /does not belong to the beta channel/u);
+  } finally {
+    await rm(files.workspace, { recursive: true, force: true });
+  }
+});
+
+test('rejects release asset names GitHub cannot publish verbatim', async () => {
+  const files = await fixture('AI Novel Studio#3.1.0_x64-setup');
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        script,
+        '--version',
+        '3.1.0',
+        '--channel',
+        'stable',
+        '--artifact',
+        files.updater,
+        '--signature',
+        files.signature,
+      ],
+      {
+        cwd: files.workspace,
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_REPOSITORY: 'Mon-Knight/AI-Novel-Studio' },
+      },
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /release asset name contains unsupported characters/iu);
   } finally {
     await rm(files.workspace, { recursive: true, force: true });
   }
