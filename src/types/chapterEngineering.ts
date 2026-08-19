@@ -17,7 +17,7 @@ export interface ChapterCard {
   knownInformation: string[];
   unknownInformation: string[];
   releasedInformation: string[];
-  reservedSecrets: string[];
+  reservedMysteries: string[];
   emotionalCurve: string;
   endingHook: string;
   targetWordCount?: number;

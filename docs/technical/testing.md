@@ -689,37 +689,21 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml commands::app_update::t
 
 ---
 
-## 3. 静态文本契约检查
+## 3. 专项运行时回归
 
 ```powershell
-npm run test:setting-suggestions
-npm run test:quality-workspace
-npm run test:ai-tasks-delete:static
+npm run test:ai-tasks-delete
+npm run test:project-backup
 ```
 
-对应脚本：
+对应脚本直接运行 Rust 行为测试并传播真实退出码：
 
 ```text
-scripts/agent-workflow/check_setting_suggestions.ps1
-scripts/agent-workflow/check_quality_workspace.ps1
-scripts/agent-workflow/check_ai_task_delete.ps1
+scripts/agent-workflow/runtime_check_ai_task_delete.ps1
+scripts/agent-workflow/runtime_check_project_backup.ps1
 ```
 
-这些脚本适合检查：
-
-- 目标文件、路由、字段、命令注册和关键调用是否存在。
-- 候选状态、质量快照字段和任务删除入口是否仍保留。
-- 明确禁止的旧 fallback 或危险字符串结构是否重新出现。
-
-这些脚本不能证明：
-
-- 快速切换章节时异步响应不会串线。
-- 未保存正文不会丢失。
-- apply 会校验目标、基础版本和幂等状态。
-- SQLite 多步写入失败时会整体回滚。
-- 取消、超时、进程重启和桌面 WebView 生命周期行为正确。
-
-因此，静态检查通过只能作为补充证据，不能单独满足 v2.2.0 发布验收。
+原有的 PowerShell 源码字符串检查已删除：换行、封装边界或结构化日志升级会造成误报，而且字符串存在不能证明行为正确。路由、组件交互、任务记账、SQLite 原子性和删除保护分别由 React、Node 与 Rust 动态测试承担。
 
 ---
 
@@ -759,7 +743,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-`verify_project.ps1` 会顺序运行版本同步、文档同步、覆盖率、组件体积、Node 测试、ESLint、前端构建、包体预算、静态补充检查、AI Task 删除和项目备份运行时测试、`cargo check`、完整 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
+`verify_project.ps1` 会顺序运行版本同步、文档同步、覆盖率、组件体积、Node 测试、ESLint、前端构建、包体预算、AI Task 删除和项目备份运行时测试、`cargo check`、完整 `cargo test`、完整桌面 E2E、Tauri 生产构建、清单与 Git 状态。任一步失败或工作树不干净都返回非零；`release_workflow.ps1` 会再次检查干净工作树，不能从未提交修改获得发布建议。
 
 GitHub Actions 分为四层：`ci.yml` 提供 Linux lint / test / build、真实 Chromium 浏览器模式 E2E 和包体预算；`windows-desktop-e2e.yml` 在 Windows 运行版本、文档、覆盖率、Rust、无 bundle 生产构建、包体预算和真实 Tauri E2E；`security.yml` 定期运行 npm / Cargo 审计与 CodeQL；`release.yml` 在 tag 或手动 Beta / Stable 通道先调用 full Windows 门禁，再构建 MSI、签名 updater 与回滚 manifest。浏览器快速 CI 通过不等于桌面发布通过。
 

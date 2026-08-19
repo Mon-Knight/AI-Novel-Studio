@@ -33,8 +33,13 @@ class MemoryStorage implements Storage {
 const storage = new MemoryStorage();
 Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
 
-const { getAiSettings, maskAiApiKey, normalizeAiSettings, saveAiSettings } =
-  await import('./aiSettingsStore');
+const {
+  getAiSettings,
+  getDefaultLocalChapterModelSettings,
+  maskAiApiKey,
+  normalizeAiSettings,
+  saveAiSettings,
+} = await import('./aiSettingsStore');
 
 beforeEach(() => storage.clear());
 
@@ -80,7 +85,37 @@ test('settings persistence returns the same normalized pricing snapshot without 
   saveAiSettings(settings);
 
   assert.deepEqual(getAiSettings(), settings);
+  const persisted = storage.getItem('ai_novel_studio_ai_settings');
+  assert.ok(persisted);
+  assert.equal(persisted.includes(settings.apiKey), false);
+  assert.equal(persisted.includes('"apiKey"'), false);
   assert.equal(maskAiApiKey(settings.apiKey), '1234...cdef');
+});
+
+test('legacy persistent credentials are moved into session memory and removed from storage', () => {
+  const legacy = normalizeAiSettings({
+    runtimeMode: 'api',
+    provider: 'deepseek',
+    baseUrl: 'https://provider.invalid/v1',
+    apiKey: 'legacy-provider-secret',
+    modelName: 'model',
+    mockMode: false,
+    localChapterModel: {
+      ...getDefaultLocalChapterModelSettings(),
+      apiKey: 'legacy-local-secret',
+    },
+  });
+  storage.setItem('ai_novel_studio_ai_settings', JSON.stringify(legacy));
+
+  const loaded = getAiSettings();
+
+  assert.equal(loaded.apiKey, 'legacy-provider-secret');
+  assert.equal(loaded.localChapterModel?.apiKey, 'legacy-local-secret');
+  const migrated = storage.getItem('ai_novel_studio_ai_settings');
+  assert.ok(migrated);
+  assert.equal(migrated.includes('legacy-provider-secret'), false);
+  assert.equal(migrated.includes('legacy-local-secret'), false);
+  assert.equal(migrated.includes('"apiKey"'), false);
 });
 
 test('local chapter model settings normalize to the verified scene protocol', () => {

@@ -162,7 +162,7 @@ export function ChapterEngineeringPanelView({
           <ListField label="已知信息" value={card.knownInformation} onChange={(value) => updateCard('knownInformation', value)} />
           <ListField label="未知信息" value={card.unknownInformation} onChange={(value) => updateCard('unknownInformation', value)} />
           <ListField label="本章释放信息" value={card.releasedInformation} onChange={(value) => updateCard('releasedInformation', value)} />
-          <ListField label="保留悬念" value={card.reservedSecrets} onChange={(value) => updateCard('reservedSecrets', value)} />
+          <ListField label="保留悬念" value={card.reservedMysteries} onChange={(value) => updateCard('reservedMysteries', value)} />
           <TextField label="情绪曲线" value={card.emotionalCurve} onChange={(value) => updateCard('emotionalCurve', value)} multiline />
           <TextField label="章末钩子" value={card.endingHook} onChange={(value) => updateCard('endingHook', value)} multiline />
           <ListField label="文风要求" value={card.styleRequirements} onChange={(value) => updateCard('styleRequirements', value)} />

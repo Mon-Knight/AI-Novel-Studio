@@ -4,6 +4,10 @@
 
 ### 修复
 
+- 修复 v3.2.0 发布门禁：同步 README 阶段与 Agent Runtime 版本，统一使用 Web Crypto 生成业务/追踪 ID；API Key 不再写入 LocalStorage，旧持久化密钥会在首次读取时迁入当前会话内存并从持久存储移除。
+- 将 Chapter Card 的“保留悬念”内部字段改为非凭据语义名称并兼容读取旧字段，消除安全扫描对小说情节数据的误判而不丢失旧草稿。
+- 将应用 Provider 的直接 `reqwest` 升级到 0.12，并更新可独立升级的 Rust 传递依赖；安全审计限定 Windows 目标，只对 Tauri 1.8.3 updater 固定的 reqwest 0.11/h2 0.3 advisory 保留具名例外。
+- 删除三份只匹配源码字符串、会随换行和封装调整误报的 PowerShell 伪测试；AI Task 删除保留真实 Rust 运行时回归，设定建议与质量工作台继续由现有 React/Node/Rust 动态测试覆盖。桌面启动 E2E 改为验证 migration 至少完整到 031，不再因未来新增迁移而修改写死计数。
 - 将 migration 030/031 纳入正式迁移账本；输出控制方案字段迁移现在兼容缺失基础表、旧版精简表、空数据库和重复启动，并补充动态回归测试。
 - DSH preparation 运行记录改为显式失败关闭：成功提案或失败事实无法写入 SQLite 时不再吞掉错误；相同运行身份可幂等重放，冲突事实会被拒绝。
 - 新增 DSH preparation 用量汇总 IPC，按作品和章节聚合已完成运行的输入 Token、输出 Token 与耗时，失败运行保留审计但不混入成功汇总。

@@ -414,6 +414,15 @@ describe('AiGeneratePanelView', () => {
     fireEvent.blur(screen.getByRole('spinbutton'));
     expect(callbacks.onWordCountChange).toHaveBeenCalledWith(4_000);
 
+    view.rerender(
+      <AiGeneratePanelView
+        {...props}
+        wordCountDraft={1_800}
+        contextSummary={{ ...context, targetWordCount: 0 }}
+      />,
+    );
+    expect(screen.getAllByText(/目标字数：1800 字/).length).toBeGreaterThan(0);
+
     view.rerender(<AiGeneratePanelView {...props} contextCount={null} contextSummary={null} />);
     expect(screen.getByTestId('generation-context-count').getAttribute('data-context-count')).toBe(
       'error',

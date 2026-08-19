@@ -768,7 +768,7 @@ function buildLocalSceneTaskInput(snapshot: ChapterGenerationSnapshot): Record<s
     card?.endingState ? `章节预期结束状态：${card.endingState}` : '',
     card?.knownInformation?.length ? `已知信息：${card.knownInformation.join('；')}` : '',
     card?.releasedInformation?.length ? `已释放信息：${card.releasedInformation.join('；')}` : '',
-    card?.reservedSecrets?.length ? `保留悬念：${card.reservedSecrets.join('；')}` : '',
+    card?.reservedMysteries?.length ? `保留悬念：${card.reservedMysteries.join('；')}` : '',
     scene?.conflict
       ? `场景冲突：${scene.conflict}`
       : card?.coreConflict

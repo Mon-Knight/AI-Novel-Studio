@@ -27,7 +27,7 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 **当前版本：v3.2.0**
 
-**阶段：DSH 进程外大脑接入**
+**阶段：本地章节正文流水线与 DSH 稳定整合**
 
 v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统：用户提交小说 Brief 后，Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller 协作生成 12～500 章全书计划；计划确认后，用户可以显式启动、暂停和继续全书候选队列，系统按章生成候选、执行六专家评审，并在用户采用正文后提取人物变化与世界扩展候选。
 
@@ -337,10 +337,9 @@ npm run test:all
 # 全量生产源码覆盖率与非回退门禁
 npm run test:coverage
 
-# 静态文本契约检查（不能替代动态行为测试）
-npm run test:setting-suggestions
-npm run test:quality-workspace
-npm run test:ai-tasks-delete:static
+# AI Task 删除与项目备份的真实 Rust 运行时回归
+npm run test:ai-tasks-delete
+npm run test:project-backup
 
 # ESLint 与显式 any 非回退预算
 npm run lint:ci

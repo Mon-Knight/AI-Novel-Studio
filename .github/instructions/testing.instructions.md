@@ -31,16 +31,14 @@ npm run build
 - `npm run lint` 不允许 error；warning 必须在完成汇报中如实记录。
 - `npm run build` 必须同时通过 TypeScript 类型检查与 Vite 生产构建。
 
-### 1.3 补充静态与运行时回归
+### 1.3 补充运行时回归
 
 ```powershell
-npm run test:quality-workspace
-npm run test:setting-suggestions
 npm run test:ai-tasks-delete
 npm run test:project-backup
 ```
 
-PowerShell 文本契约检查只能证明入口或结构存在；`test:ai-tasks-delete` 和 `test:project-backup` 中的 Rust 运行时部分必须传播真实失败退出码。
+`test:ai-tasks-delete` 和 `test:project-backup` 必须执行真实 Rust 行为并传播失败退出码。不得用源码字符串匹配代替组件、服务或数据库运行时测试。
 
 ### 1.4 Rust / SQLite
 

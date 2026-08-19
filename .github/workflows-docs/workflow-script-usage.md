@@ -13,9 +13,6 @@ scripts/agent-workflow/
 ├── verify_project.ps1                 # 统一项目验证入口
 ├── check_docs_sync.ps1                # 检查关键文档是否存在和同步
 ├── check_version_sync.ps1             # 检查版本元数据与发布文档一致性
-├── check_quality_workspace.ps1        # 质量工作台静态检查
-├── check_setting_suggestions.ps1      # 设定建议静态检查
-├── check_ai_task_delete.ps1           # AI Task 删除静态检查
 ├── runtime_check_ai_task_delete.ps1   # AI Task 删除 Rust 动态检查
 ├── runtime_check_project_backup.ps1   # 完整项目备份 Rust 动态检查
 ├── run_feature_workflow.ps1           # Agent 功能开发前后引导

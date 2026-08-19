@@ -90,7 +90,7 @@ function SettingsPage() {
       await aiSettingsService.saveSettings(final);
       setSettings(aiSettingsService.getSettings());
       setPolicySnapshotVersion((version) => version + 1);
-      setMessage('✅ AI 设置已保存');
+      setMessage('✅ AI 设置已保存，API Key 仅保留到本次应用会话结束');
     } catch (error) {
       setMessage(`❌ AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
     }

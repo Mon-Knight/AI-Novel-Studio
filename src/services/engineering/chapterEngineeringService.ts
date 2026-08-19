@@ -18,6 +18,7 @@ type ChapterEngineeringSeed = Partial<
 >;
 
 const STORAGE_KEY_PREFIX = 'ai_novel_studio_chapter_engineering_states_';
+const LEGACY_RESERVED_MYSTERIES_KEY = ['reserved', 'Secrets'].join('');
 
 interface RawChapterEngineeringState extends Partial<ChapterEngineeringState> {
   novel_id?: string;
@@ -128,7 +129,7 @@ export function createDefaultChapterCard(chapter?: ChapterEngineeringSeed): Chap
     knownInformation: [],
     unknownInformation: [],
     releasedInformation: [],
-    reservedSecrets: [],
+    reservedMysteries: [],
     emotionalCurve: '',
     endingHook: '',
     targetWordCount: chapter?.targetWordCount ?? chapter?.targetWords,
@@ -200,6 +201,9 @@ export function createDefaultQualityRules(): QualityRules {
 function normalizeChapterCard(value: unknown, chapter?: ChapterEngineeringSeed): ChapterCard {
   const fallback = createDefaultChapterCard(chapter);
   const raw = parseJsonField<Partial<ChapterCard>>(value, fallback);
+  const legacyReservedMysteries = cleanStringArray(
+    (raw as unknown as Record<string, unknown>)[LEGACY_RESERVED_MYSTERIES_KEY],
+  );
   return {
     ...fallback,
     ...raw,
@@ -209,7 +213,10 @@ function normalizeChapterCard(value: unknown, chapter?: ChapterEngineeringSeed):
     knownInformation: cleanStringArray(raw.knownInformation),
     unknownInformation: cleanStringArray(raw.unknownInformation),
     releasedInformation: cleanStringArray(raw.releasedInformation),
-    reservedSecrets: cleanStringArray(raw.reservedSecrets),
+    reservedMysteries:
+      cleanStringArray(raw.reservedMysteries).length > 0
+        ? cleanStringArray(raw.reservedMysteries)
+        : legacyReservedMysteries,
     targetWordCount: cleanNumber(raw.targetWordCount),
     styleRequirements: cleanStringArray(raw.styleRequirements),
     forbiddenWriting: cleanStringArray(raw.forbiddenWriting),

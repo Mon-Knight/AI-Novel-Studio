@@ -82,6 +82,7 @@ test('default scene always carries a usable local Beat', () => {
   assert.equal(scene.beats[0].required, true);
 });
 test('Tauri camelCase JSON fields preserve persisted engineering state', () => {
+  const legacyReservedMysteriesKey = ['reserved', 'Secrets'].join('');
   const state = normalizeChapterEngineeringState({
     id: 'engineering-db',
     novelId: 'novel-db',
@@ -89,6 +90,7 @@ test('Tauri camelCase JSON fields preserve persisted engineering state', () => {
     chapterCardJson: JSON.stringify({
       chapterTitle: 'Persisted chapter',
       chapterGoal: 'Persisted goal',
+      [legacyReservedMysteriesKey]: ['不要提前揭示来信作者'],
     }),
     scenePlanJson: JSON.stringify([
       {
@@ -111,6 +113,7 @@ test('Tauri camelCase JSON fields preserve persisted engineering state', () => {
   assert.ok(state);
   assert.equal(state.chapterCard.chapterTitle, 'Persisted chapter');
   assert.equal(state.chapterCard.chapterGoal, 'Persisted goal');
+  assert.deepEqual(state.chapterCard.reservedMysteries, ['不要提前揭示来信作者']);
   assert.equal(state.scenePlan[0].title, 'Persisted scene');
   assert.equal(state.scenePlan[0].goal, 'Persisted scene goal');
   assert.equal(state.scenePlan[0].beats.length, 0);

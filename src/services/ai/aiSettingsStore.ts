@@ -4,6 +4,16 @@ import { lsGet, lsSet } from '../database/db';
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
 
+interface SessionCredentials {
+  providerApiKey: string;
+  localChapterModelApiKey: string;
+}
+
+let sessionCredentials: SessionCredentials = {
+  providerApiKey: '',
+  localChapterModelApiKey: 'local-no-key-required',
+};
+
 export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings {
   return {
     enabled: false,
@@ -138,14 +148,97 @@ export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
   return merged;
 }
 
+function withoutCredentials(settings: AiSettings): Record<string, unknown> {
+  const local = settings.localChapterModel;
+  return {
+    runtimeMode: settings.runtimeMode,
+    provider: settings.provider,
+    baseUrl: settings.baseUrl,
+    modelName: settings.modelName,
+    temperature: settings.temperature,
+    maxTokens: settings.maxTokens,
+    timeoutSeconds: settings.timeoutSeconds,
+    inputPricePerMillionTokens: settings.inputPricePerMillionTokens,
+    outputPricePerMillionTokens: settings.outputPricePerMillionTokens,
+    maxRequestsPerMinute: settings.maxRequestsPerMinute,
+    maxConcurrentAiRequests: settings.maxConcurrentAiRequests,
+    dailyTokenBudget: settings.dailyTokenBudget,
+    dailyCostBudgetUsd: settings.dailyCostBudgetUsd,
+    budgetWarningPercent: settings.budgetWarningPercent,
+    mockMode: settings.mockMode,
+    lastTestAt: settings.lastTestAt,
+    lastTestOk: settings.lastTestOk,
+    lastTestMessage: settings.lastTestMessage,
+    ...(local
+      ? {
+          localChapterModel: {
+            enabled: local.enabled,
+            providerId: local.providerId,
+            baseUrl: local.baseUrl,
+            modelName: local.modelName,
+            timeoutSeconds: local.timeoutSeconds,
+            contextTokens: local.contextTokens,
+            maxTokens: local.maxTokens,
+            temperature: local.temperature,
+            topP: local.topP,
+            topK: local.topK,
+            repeatPenalty: local.repeatPenalty,
+            minTokens: local.minTokens,
+            noRepeatNgramSize: local.noRepeatNgramSize,
+            seed: local.seed,
+          },
+        }
+      : {}),
+  };
+}
+
+function withSessionCredentials(settings: AiSettings): AiSettings {
+  return {
+    ...settings,
+    apiKey: sessionCredentials.providerApiKey,
+    ...(settings.localChapterModel
+      ? {
+          localChapterModel: {
+            ...settings.localChapterModel,
+            apiKey: sessionCredentials.localChapterModelApiKey,
+          },
+        }
+      : {}),
+  };
+}
+
 export function getAiSettings(): AiSettings {
   if (E2E_ENABLED) return { ...defaultSettings };
   const stored = lsGet<Partial<AiSettings>>(AI_SETTINGS_KEY);
-  return stored ? normalizeAiSettings(stored) : { ...defaultSettings };
+  if (!stored) return withSessionCredentials({ ...defaultSettings });
+
+  const hasLegacyProviderKey = Object.prototype.hasOwnProperty.call(stored, 'apiKey');
+  const hasLegacyLocalKey = Object.prototype.hasOwnProperty.call(
+    stored.localChapterModel ?? {},
+    'apiKey',
+  );
+  if (hasLegacyProviderKey && typeof stored.apiKey === 'string') {
+    sessionCredentials.providerApiKey = stored.apiKey;
+  }
+  if (hasLegacyLocalKey && typeof stored.localChapterModel?.apiKey === 'string') {
+    sessionCredentials.localChapterModelApiKey = stored.localChapterModel.apiKey;
+  }
+
+  const normalized = normalizeAiSettings(stored);
+  if (hasLegacyProviderKey || hasLegacyLocalKey) {
+    lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
+  }
+  return withSessionCredentials(normalized);
 }
 
 export function saveAiSettings(settings: AiSettings): void {
-  lsSet(AI_SETTINGS_KEY, normalizeAiSettings(settings));
+  const normalized = normalizeAiSettings(settings);
+  sessionCredentials = {
+    providerApiKey: normalized.apiKey,
+    localChapterModelApiKey:
+      normalized.localChapterModel?.apiKey ?? sessionCredentials.localChapterModelApiKey,
+  };
+  lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
 }
 
 export function maskAiApiKey(key: string): string {

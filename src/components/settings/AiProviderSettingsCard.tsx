@@ -160,7 +160,7 @@ function AiProviderSettingsCard({
                 />
                 {settings.apiKey ? (
                   <div style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4 }}>
-                    ✅ 已保存：{aiSettingsService.maskApiKey(settings.apiKey)}
+                    ✅ 本次会话已加载：{aiSettingsService.maskApiKey(settings.apiKey)}
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>

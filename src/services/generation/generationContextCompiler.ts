@@ -118,7 +118,7 @@ function formatEngineeringState(state: ChapterEngineeringState): string {
     card.releasedInformation.length
       ? `本章释放信息：\n${formatList(card.releasedInformation)}`
       : '',
-    card.reservedSecrets.length ? `保留悬念：\n${formatList(card.reservedSecrets)}` : '',
+    card.reservedMysteries.length ? `保留悬念：\n${formatList(card.reservedMysteries)}` : '',
     card.styleRequirements.length ? `文风要求：\n${formatList(card.styleRequirements)}` : '',
     card.forbiddenWriting.length ? `写法禁区：\n${formatList(card.forbiddenWriting)}` : '',
     state.scenePlan.length

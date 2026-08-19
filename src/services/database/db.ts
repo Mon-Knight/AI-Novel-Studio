@@ -7,6 +7,7 @@ import { appLogger } from '../observability/appLogger';
 import { safeJsonParse } from '../../utils/dataGuard';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { normalizeAppError } from '../../types/appError';
+import { createUniqueId } from '../../utils/uniqueId';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 
 // ==================== localStorage 回退实现 ====================
@@ -34,11 +35,7 @@ function lsRemove(key: string): void {
 }
 
 function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return createUniqueId();
 }
 
 function nowISO(): string {

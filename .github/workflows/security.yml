@@ -31,7 +31,11 @@ jobs:
       - name: Audit Rust dependencies
         run: |
           cargo install cargo-audit --locked
-          cargo audit --file src-tauri/Cargo.lock
+          # Tauri 1.8.3's updater is the last supported v1 line and still pins
+          # reqwest 0.11/h2 0.3. The app's own Provider uses reqwest 0.12; this
+          # remaining advisory requires a Tauri major migration.
+          cargo audit --file src-tauri/Cargo.lock --target-os windows --target-arch x86_64 \
+            --ignore RUSTSEC-2026-0258
 
   codeql:
     runs-on: ubuntu-24.04
