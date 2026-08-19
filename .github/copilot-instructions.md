@@ -5,7 +5,7 @@
 目标平台：Windows 桌面端  
 技术路线：Tauri + React + TypeScript + SQLite  
 主要开发工具：VS Code + GitHub Copilot / Agent  
-文档用途：约束 Copilot / Agent 在本项目中的开发方向、代码结构、UI 风格、数据边界和版本管理流程。  
+文档用途：约束 Copilot / Agent 在本项目中的开发方向、代码结构、UI 风格、数据边界和版本管理流程。
 
 ---
 
@@ -875,12 +875,19 @@ git status
 每个稳定版本完成后执行：
 
 ```powershell
+git switch -c codex/v0.1.0-release
 git add .
 git commit -m "feat: initialize AI Novel Studio v0.1.0"
+git push -u origin codex/v0.1.0-release
+
+# PR 审查和门禁通过并合并后
+git switch main
+git pull --ff-only origin main
 git tag v0.1.0
-git push origin main
 git push origin v0.1.0
 ```
+
+分支、PR、hotfix 与回滚以 `docs/project/git-workflow.md` 为准，不在日常开发中直接提交到 `main`。
 
 后续版本提交信息应清晰，例如：
 
@@ -986,11 +993,7 @@ src/styles/
 推荐字体：
 
 ```css
-font-family:
-  "Microsoft YaHei",
-  "Segoe UI",
-  Arial,
-  sans-serif;
+font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
 ```
 
 ---
@@ -1045,7 +1048,7 @@ ComingSoon 页面
 
 ```text
 该功能将在后续版本开放。
-当前版本重点是作品管理首页、写作工作台和 AI 章节生成基础流程。
+当前版本范围以 `package.json` 与 `docs/version-roadmap.md` 的当前版本声明为准。
 ```
 
 ---
@@ -1107,31 +1110,38 @@ npm run lint
 # ✅ 完成汇报
 
 ## 一、当前版本
+
 - 分支：
 - 版本：
 - Tag：
 
 ## 二、本次目标
+
 - ...
 
 ## 三、已完成内容
+
 - ...
 
 ## 四、新增 / 修改文件
+
 - ...
 
 ## 五、运行与验证
+
 - npm install：
 - npm run dev：
 - npm run tauri dev：
 - npm run lint：
 
 ## 六、GitHub 备份
+
 - commit：
 - push：
 - tag：
 
 ## 七、后续建议
+
 - ...
 ```
 

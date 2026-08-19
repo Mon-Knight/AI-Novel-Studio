@@ -1,8 +1,11 @@
 # Dependencies
-node_modules/
+node_modules
+dsh-runtime/
+.npm-cache/
 
 # Build outputs
 dist/
+coverage/
 target/
 dist-release/
 *.msi
@@ -36,7 +39,13 @@ Thumbs.db
 
 # Tauri
 src-tauri/target/
+src-tauri/bin/
+src-tauri/.payload-staging/
+src-tauri/.payload-verify/
 
 # Local WebDriver binaries and desktop E2E artifacts
 .e2e-tools/
 test-results/e2e/
+test-results/browser-theme/
+test-results/production-exe-smoke-*/
+tmp/

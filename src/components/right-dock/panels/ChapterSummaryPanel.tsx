@@ -1,3 +1,4 @@
+import { appLogger } from '../../../services/observability/appLogger';
 /**
  * AI Novel Studio - 章节总结查看面板 (v1.7.13 升级为章节上下文)
  */
@@ -11,8 +12,9 @@ import { chapterSummarizeService } from '../../../services/ai/chapterSummarizeSe
 import { validateSummary, hashContent } from '../../../services/ai/summaryValidator';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { formatDateTime } from '../../../utils/date';
-import { runWithLoading } from '../../../lib/runWithLoading';
+import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoading';
 import type { ChapterDraft } from '../../../types/ai';
+import { describeUnknownError } from '../../../utils/errorMessage';
 
 interface ChapterSummaryPanelProps {
   novelId?: string;
@@ -60,11 +62,11 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
       } else {
         setSummary(null);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (requestId !== loadRequestIdRef.current) return;
-      console.error(error);
+      appLogger.error(error);
       setSummary(null);
-      setGenError(error?.message || '章节上下文读取或过期同步失败');
+      setGenError(describeUnknownError(error, '章节上下文读取或过期同步失败'));
     }
     finally {
       if (requestId === loadRequestIdRef.current) setLoading(false);
@@ -96,10 +98,10 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
     let draft: ChapterDraft | null;
     try {
       draft = await draftVersionService.getAdoptedByChapterId(chapter.id);
-    } catch (error: any) {
-      console.error(error);
+    } catch (error: unknown) {
+      appLogger.error(error);
       setAdoptedDraft(null);
-      setGenError(error?.message || '读取当前采用正文失败，请重试。');
+      setGenError(describeUnknownError(error, '读取当前采用正文失败，请重试。'));
       return;
     }
     setAdoptedDraft(draft);
@@ -123,14 +125,21 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           initialMessage: '正在准备上下文数据……',
           successMessage: '章节总结生成完成，正在进行一致性校验……',
           errorMessage: '总结生成失败',
+          cancelable: true,
         },
-        async ({ setStage, setMessage }) => {
+        async ({ setStage, setMessage, signal, operationId }) => {
           setStage('正在分析章节内容……');
-          const result = await chapterSummarizeService.summarize({
-            novelId, chapterId: chapter.id, adoptedDraftId: draft.id,
-            chapterTitle: chapter.title, chapterOutline: chapter.outline,
-            adoptedContent: draft.content.slice(0, 5000),
-          });
+          const result = await chapterSummarizeService.summarize(
+            {
+              novelId,
+              chapterId: chapter.id,
+              adoptedDraftId: draft.id,
+              chapterTitle: chapter.title,
+              chapterOutline: chapter.outline,
+              adoptedContent: draft.content,
+            },
+            { signal, cancel: () => cancelLoadingOperation(operationId) },
+          );
           setGenResult(result);
 
           // 自动一致性校验
@@ -140,8 +149,8 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           setValidation(v);
         },
       );
-    } catch (e: any) {
-      setGenError(e.message || '总结生成失败');
+    } catch (e: unknown) {
+      setGenError(describeUnknownError(e, '总结生成失败'));
     } finally {
       setGenLoading(false);
     }
@@ -175,8 +184,8 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
               adoptedDraftId: adoptedDraft?.id || '',
               summary: genResult.summary,
               keyEvents: genResult.keyEvents,
-              characterChanges: genResult.characterChanges as any,
-              relationshipChanges: genResult.relationshipChanges as any,
+              characterChanges: genResult.characterChanges,
+              relationshipChanges: genResult.relationshipChanges,
               newForeshadows: genResult.newForeshadows,
               resolvedForeshadows: genResult.resolvedForeshadows,
               nextChapterHints: genResult.nextChapterHints,
@@ -226,8 +235,8 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           setTimeout(() => setSaveSuccess(false), 3000);
         },
       );
-    } catch (e: any) {
-      setGenError(e.message || '保存总结失败');
+    } catch (e: unknown) {
+      setGenError(describeUnknownError(e, '保存总结失败'));
     } finally {
       setGenLoading(false);
     }
@@ -271,9 +280,9 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
 
       {/* 过期提示 */}
       {summary?.isExpired && (
-        <div className="panel-section" style={{ border: '1px solid #f59e0b40', background: '#f59e0b10', borderRadius: 6, padding: 8 }}>
-          <div style={{ fontSize: 12, color: '#d97706', fontWeight: 500 }}>⚠️ 章节正文已修改</div>
-          <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>
+        <div className="panel-section" style={{ border: '1px solid color-mix(in srgb, var(--color-warning) 25%, transparent)', background: 'color-mix(in srgb, var(--color-warning) 6%, transparent)', borderRadius: 6, padding: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-warning-text)', fontWeight: 500 }}>⚠️ 章节正文已修改</div>
+          <div style={{ fontSize: 11, color: 'var(--color-warning-text)', marginTop: 2 }}>
             当前章节上下文可能不再准确，建议重新生成。
           </div>
         </div>
@@ -307,10 +316,10 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           {validation && (
             <div style={{
               fontSize: 11, padding: '6px 8px', borderRadius: 4, marginBottom: 8,
-              background: validation.passed ? '#22c55e10' : validation.safeToContext ? '#f59e0b10' : '#ef444410',
-              border: `1px solid ${validation.passed ? '#22c55e40' : validation.safeToContext ? '#f59e0b40' : '#ef444440'}`,
+              background: validation.passed ? 'color-mix(in srgb, var(--color-success) 6%, transparent)' : validation.safeToContext ? 'color-mix(in srgb, var(--color-warning) 6%, transparent)' : 'color-mix(in srgb, var(--color-error) 6%, transparent)',
+              border: `1px solid ${validation.passed ? 'color-mix(in srgb, var(--color-success) 25%, transparent)' : validation.safeToContext ? 'color-mix(in srgb, var(--color-warning) 25%, transparent)' : 'color-mix(in srgb, var(--color-error) 25%, transparent)'}`,
             }}>
-              <div style={{ fontWeight: 600, color: validation.passed ? '#16a34a' : validation.safeToContext ? '#d97706' : '#dc2626' }}>
+              <div style={{ fontWeight: 600, color: validation.passed ? 'var(--color-success)' : validation.safeToContext ? 'var(--color-warning-text)' : 'var(--color-error)' }}>
                 {validation.passed ? '✅ 校验通过' : validation.safeToContext ? '⚠️ 校验有警告' : '❌ 校验失败'}
                 （{validation.score} 分）
               </div>
@@ -318,7 +327,7 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
                 <div key={i} style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>• {p.message}</div>
               ))}
               {!validation.safeToContext && (
-                <div style={{ color: '#dc2626', marginTop: 4, fontWeight: 500 }}>
+                <div style={{ color: 'var(--color-error)', marginTop: 4, fontWeight: 500 }}>
                   校验未通过，保存后不会自动启用为可用上下文。你可以手动启用或重新生成。
                 </div>
               )}
@@ -372,16 +381,16 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
           {/* 状态标签 */}
           <div className="panel-section" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {summary.validationStatus === 'passed' && (
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: '#22c55e20', color: '#16a34a' }}>✅ 校验通过</span>
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--color-success) 13%, transparent)', color: 'var(--color-success)' }}>✅ 校验通过</span>
             )}
             {summary.validationStatus === 'failed' && (
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: '#ef444420', color: '#dc2626' }}>❌ 校验未通过</span>
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--color-error) 13%, transparent)', color: 'var(--color-error)' }}>❌ 校验未通过</span>
             )}
             {summary.enabled && (
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: '#3b82f620', color: '#2563eb' }}>📌 已启用</span>
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--color-primary) 13%, transparent)', color: 'var(--color-primary)' }}>📌 已启用</span>
             )}
             {!summary.enabled && (
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: '#6b728020', color: '#6b7280' }}>⏸ 已停用</span>
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--color-text-muted) 13%, transparent)', color: 'var(--color-text-muted)' }}>⏸ 已停用</span>
             )}
             {summary.volumeId && (
               <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>📂 已归卷</span>
@@ -454,9 +463,9 @@ function ChapterSummaryPanel({ novelId, chapter }: ChapterSummaryPanelProps) {
                 try {
                   await chapterSummaryService.setEnabled(summary.id, !summary.enabled);
                   setSummary({ ...summary, enabled: !summary.enabled });
-                } catch (error: any) {
-                  console.error(error);
-                  setGenError(error?.message || '章节上下文启用状态保存失败');
+                } catch (error: unknown) {
+                  appLogger.error(error);
+                  setGenError(describeUnknownError(error, '章节上下文启用状态保存失败'));
                 }
               }}
             >

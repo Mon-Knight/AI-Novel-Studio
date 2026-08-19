@@ -10,15 +10,15 @@
 
 ### 1.1 必须更新的文档
 
-| 变更类型 | 必须更新 |
-|----------|----------|
-| 新功能 | README + CHANGELOG |
-| 架构变更 | docs/project-architecture.md |
-| 数据模型变更 | docs/data-model.md |
-| UI 方向调整 | docs/ui-reference.md |
-| 新版本发布 | CHANGELOG + version-roadmap.md |
-| 开发规则变更 | docs/development-rules.md |
-| Agent 基础设施 | AGENTS.md + 相关 instructions |
+| 变更类型       | 必须更新                       |
+| -------------- | ------------------------------ |
+| 新功能         | README + CHANGELOG             |
+| 架构变更       | docs/project-architecture.md   |
+| 数据模型变更   | docs/data-model.md             |
+| UI 方向调整    | docs/ui-reference.md           |
+| 新版本发布     | CHANGELOG + version-roadmap.md |
+| 开发规则变更   | docs/development-rules.md      |
+| Agent 基础设施 | AGENTS.md + 相关 instructions  |
 
 ### 1.2 文档原则
 
@@ -53,18 +53,23 @@ README 是项目的第一入口，必须保持准确：
 ## vX.X.X (YYYY-MM-DD)
 
 ### 新增
+
 - ...
 
 ### 修改
+
 - ...
 
 ### 修复
+
 - ...
 
 ### 移除
+
 - ...
 
 ### 开发者备注
+
 - ...
 ```
 
@@ -78,21 +83,21 @@ README 是项目的第一入口，必须保持准确：
 
 ---
 
-## 4. Release Notes
+## 4. Release Notes 与历史归档
 
 ### 4.1 存储
 
-- `docs/release-notes-vX.X.X.md`
-- 每个重要版本生成一份 release notes
+- 当前与未来版本以根目录 `CHANGELOG.md` 为唯一持续维护入口。
+- 历史逐版本说明统一归档在 `docs/project/release-history.md`，不再新增 `docs/release-notes-v*.md`。
+- 发布流水线从 CHANGELOG 精确提取目标版本段落，生成 GitHub Release 正文和 updater notes。
 
 ### 4.2 内容
 
 - 版本号与日期
-- 新增功能列表
-- 修改文件清单
-- 测试结果
-- 已知问题
-- 后续计划
+- 新增、修改、修复和安全边界
+- 已完成的测试与安装包验证
+- 已知限制、兼容性与回滚说明
+- 不写入未经验证的未来计划
 
 ---
 

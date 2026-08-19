@@ -28,6 +28,28 @@ Mock 模式允许你在没有 API Key 的情况下体验完整工作流。
 - DeepSeek：`deepseek-chat`、`deepseek-coder`
 - 其他 OpenAI 兼容模型
 
+## 本地章节场景模型
+
+设置中心还提供独立的“本地章节场景模型”配置，不受全局 Mock/API 开关切换影响。推荐将本地
+llama-server 配置为：
+
+- Base URL：`http://127.0.0.1:8080/v1`
+- 模型：`qwen35-9b-novel-v3`
+- API Key：`local-no-key-required`（按本地服务实际要求填写）
+- 协议预算：4096 context / 1024 max output
+- 采样参数：Temperature、Top P、Top K、Repeat penalty、可选 Seed
+
+启用后，本地路由只用于章节首次生成和 Autonomous 候选正文；章节改写、润色、质检、修稿及其他
+AI 任务继续使用全局 Provider。本地服务不可用时不会自动回退到外部模型。
+
+保存设置后可点击「检查本地模型」。桌面端会依次检查 `/health`、`/v1/models` 和单 Beat
+smoke 请求，并校验返回模型 ID；检查失败只显示诊断结果，不会改变模型路由或自动改用外部模型。
+
+章节工程面板的「AI 生成候选」使用全局 Provider 规划 Scene/Beat，只生成待确认 JSON 候选；
+用户选择「保存候选草稿」或「保存并应用候选」后，才会进入章节工程状态。首次正文生成和
+Autonomous 候选会读取已应用的 Scene/Beat，按 Beat 串行调用本地模型并在合并前检查空正文、
+`<think>`、required Beat 覆盖和 `finish_reason=length`。
+
 ## API Key 安全
 
 - API Key **仅保存在本地**，不会上传到任何服务器
@@ -37,6 +59,7 @@ Mock 模式允许你在没有 API Key 的情况下体验完整工作流。
 ## 模型参数
 
 可在设置中调整：
+
 - **Temperature**：生成随机性（0-2）
 - **Max Tokens**：最大输出长度
 - **Top P**：核采样参数

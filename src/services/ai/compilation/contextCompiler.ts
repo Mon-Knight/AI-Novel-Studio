@@ -30,6 +30,8 @@ export interface CompileAiContextInput {
   modelContextTokens: number;
   reservedOutputTokens: number;
   fixedMessageTokens: number;
+  /** Single-user protocols may require raw context without compiler section headings. */
+  renderSourceLabels?: boolean;
 }
 
 interface NormalizedSource extends AiContextSourceInput {
@@ -76,9 +78,10 @@ function normalizeSource(source: AiContextSourceInput): NormalizedSource {
     order: boundedInteger(source.order, 'source order', 0, 100_000),
     priority: boundedInteger(source.priority, 'source priority', 0, 100),
     required: source.required === true,
-    maxTokens: source.maxTokens === undefined
-      ? undefined
-      : boundedInteger(source.maxTokens, 'source maxTokens', 1, 1_000_000),
+    maxTokens:
+      source.maxTokens === undefined
+        ? undefined
+        : boundedInteger(source.maxTokens, 'source maxTokens', 1, 1_000_000),
   };
   if (normalized.required && !normalized.content) {
     throw new AiCompilationError(
@@ -90,27 +93,35 @@ function normalizeSource(source: AiContextSourceInput): NormalizedSource {
 }
 
 function sortSources(sources: NormalizedSource[]): NormalizedSource[] {
-  return [...sources].sort((left, right) => (
-    left.order - right.order
-    || Number(right.required) - Number(left.required)
-    || right.priority - left.priority
-    || compareCanonicalText(left.sourceType, right.sourceType)
-    || compareCanonicalText(left.sourceId, right.sourceId)
-  ));
+  return [...sources].sort(
+    (left, right) =>
+      left.order - right.order ||
+      Number(right.required) - Number(left.required) ||
+      right.priority - left.priority ||
+      compareCanonicalText(left.sourceType, right.sourceType) ||
+      compareCanonicalText(left.sourceId, right.sourceId),
+  );
 }
 
 function sourceKey(source: Pick<AiContextSourceInput, 'sourceType' | 'sourceId'>): string {
   return `${source.sourceType}:${source.sourceId}`;
 }
 
-function renderSection(source: NormalizedSource, content: string, truncated: boolean): string {
-  return `## ${source.label}\n${content}${truncated ? TRUNCATION_MARKER : ''}`;
+function renderSection(
+  source: NormalizedSource,
+  content: string,
+  truncated: boolean,
+  renderSourceLabels: boolean,
+): string {
+  const label = renderSourceLabels ? `## ${source.label}\n` : '';
+  return `${label}${content}${truncated ? TRUNCATION_MARKER : ''}`;
 }
 
 function truncateToBudget(
   source: NormalizedSource,
   compiledPrefix: string,
   tokenBudget: number,
+  renderSourceLabels: boolean,
 ): string {
   const characters = Array.from(source.content);
   const separator = compiledPrefix ? '\n\n' : '';
@@ -123,6 +134,7 @@ function truncateToBudget(
       source,
       characters.slice(0, midpoint).join(''),
       true,
+      renderSourceLabels,
     )}`;
     if (estimateTokens(candidate) - prefixTokens <= tokenBudget) low = midpoint;
     else high = midpoint - 1;
@@ -135,9 +147,7 @@ function uniqueMissingTypes(
   sources: NormalizedSource[],
 ): AiContextSourceType[] {
   const present = new Set(sources.map((source) => source.sourceType));
-  return [...new Set(values ?? [])]
-    .filter((sourceType) => !present.has(sourceType))
-    .sort();
+  return [...new Set(values ?? [])].filter((sourceType) => !present.has(sourceType)).sort();
 }
 
 export async function compileAiContext(input: CompileAiContextInput): Promise<CompiledAiContextV1> {
@@ -174,14 +184,12 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
   }
 
   const normalized = sortSources(input.sources.map(normalizeSource));
+  const renderSourceLabels = input.renderSourceLabels !== false;
   const identities = new Set<string>();
   for (const source of normalized) {
     const key = sourceKey(source);
     if (identities.has(key)) {
-      throw new AiCompilationError(
-        'AI_COMPILATION_INPUT_INVALID',
-        `上下文来源身份重复：${key}。`,
-      );
+      throw new AiCompilationError('AI_COMPILATION_INPUT_INVALID', `上下文来源身份重复：${key}。`);
     }
     identities.add(key);
   }
@@ -206,15 +214,16 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
       const separator = renderedSections.length === 0 ? '' : '\n\n';
       const remaining = availableContextTokens - consumedTokens;
       const sourceLimit = Math.min(remaining, source.maxTokens ?? remaining);
-      const fullSection = renderSection(source, source.content, false);
-      const fullCost = estimateTokens(`${compiledPrefix}${separator}${fullSection}`) - consumedTokens;
+      const fullSection = renderSection(source, source.content, false, renderSourceLabels);
+      const fullCost =
+        estimateTokens(`${compiledPrefix}${separator}${fullSection}`) - consumedTokens;
       if (fullCost <= sourceLimit) {
         includedContent = source.content;
         status = 'included';
         renderedSections.push(fullSection);
         consumedTokens = estimateTokens(renderedSections.join('\n\n'));
       } else {
-        includedContent = truncateToBudget(source, compiledPrefix, sourceLimit);
+        includedContent = truncateToBudget(source, compiledPrefix, sourceLimit, renderSourceLabels);
         if (!includedContent) {
           if (source.required) {
             throw new AiCompilationError(
@@ -225,7 +234,7 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
           status = 'omitted_budget';
         } else {
           status = 'truncated';
-          const section = renderSection(source, includedContent, true);
+          const section = renderSection(source, includedContent, true, renderSourceLabels);
           renderedSections.push(section);
           consumedTokens = estimateTokens(renderedSections.join('\n\n'));
         }
@@ -283,7 +292,8 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
     compiledContextBytes: utf8Length(compiledContext),
     includedSourceCount: manifestSources.filter((source) => source.status === 'included').length,
     truncatedSourceCount: manifestSources.filter((source) => source.status === 'truncated').length,
-    omittedSourceCount: manifestSources.filter((source) => source.status.startsWith('omitted_')).length,
+    omittedSourceCount: manifestSources.filter((source) => source.status.startsWith('omitted_'))
+      .length,
   };
   return {
     schemaVersion: 2,
@@ -323,8 +333,8 @@ export async function verifyAiContextSourceDrift(
     }
     current.delete(key);
     const actualHash = await sha256(actual.content);
-    const unchanged = actual.sourceVersion === expected.sourceVersion
-      && actualHash === expected.contentHash;
+    const unchanged =
+      actual.sourceVersion === expected.sourceVersion && actualHash === expected.contentHash;
     items.push({
       sourceType: expected.sourceType,
       sourceId: expected.sourceId,
@@ -344,10 +354,11 @@ export async function verifyAiContextSourceDrift(
       actualHash: await sha256(source.content),
     });
   }
-  items.sort((left, right) => (
-    compareCanonicalText(left.sourceType, right.sourceType)
-    || compareCanonicalText(left.sourceId, right.sourceId)
-  ));
+  items.sort(
+    (left, right) =>
+      compareCanonicalText(left.sourceType, right.sourceType) ||
+      compareCanonicalText(left.sourceId, right.sourceId),
+  );
   return {
     matches: items.every((item) => item.status === 'unchanged'),
     items,

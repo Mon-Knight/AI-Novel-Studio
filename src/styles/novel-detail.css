@@ -24,7 +24,7 @@
 .detail-cover {
   width: 140px;
   height: 180px;
-  background: linear-gradient(135deg, #e8effe, #dce3f5);
+  background: var(--gradient-cover);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -92,17 +92,6 @@
   flex-wrap: wrap;
 }
 
-/* Native Feel P1.1: 暗色模式适配 */
-@media (prefers-color-scheme: dark) {
-  .detail-cover {
-    background: linear-gradient(135deg, #1e2a45, #252540);
-  }
-
-  .modal-overlay {
-    background: rgba(0, 0, 0, 0.6);
-  }
-}
-
 /* === 按钮样式 === */
 .btn {
   display: inline-flex;
@@ -118,7 +107,7 @@
 
 .btn-primary {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   border-color: var(--color-primary);
 }
 
@@ -234,7 +223,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -248,7 +237,7 @@
   padding: var(--spacing-2xl);
   width: 480px;
   max-width: 90vw;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 40px var(--color-shadow-hover);
   animation: slideUp 0.25s ease;
 }
 
@@ -280,11 +269,21 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

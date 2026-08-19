@@ -150,9 +150,7 @@ pub struct OutlineGenerationContext {
 // --- Master Outline ---
 
 #[tauri::command]
-pub fn save_master_outline(
-    input: SaveMasterOutlineInput,
-) -> Result<MasterOutlineDto, String> {
+pub fn save_master_outline(input: SaveMasterOutlineInput) -> Result<MasterOutlineDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
@@ -219,14 +217,13 @@ pub fn get_master_outline_versions(project_id: String) -> Result<Vec<MasterOutli
 }
 
 #[tauri::command]
-pub fn set_active_master_outline(
-    input: SetActiveMasterOutlineInput,
-) -> Result<(), String> {
+pub fn set_active_master_outline(input: SetActiveMasterOutlineInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE master_outlines SET is_active = 0 WHERE project_id = ?1",
         params![&input.project_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE master_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
         params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
@@ -237,9 +234,7 @@ pub fn set_active_master_outline(
 // --- Volume Outline ---
 
 #[tauri::command]
-pub fn save_volume_outline(
-    input: SaveVolumeOutlineInput,
-) -> Result<VolumeOutlineDto, String> {
+pub fn save_volume_outline(input: SaveVolumeOutlineInput) -> Result<VolumeOutlineDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
@@ -262,7 +257,11 @@ pub fn save_volume_outline(
         ).map_err(|e| e.to_string())?;
         get_volume_outline_by_id_internal(&conn, &id)
     } else {
-        let existing = get_active_volume_outline_by_volume_internal(&conn, &input.project_id, &input.volume_id);
+        let existing = get_active_volume_outline_by_volume_internal(
+            &conn,
+            &input.project_id,
+            &input.volume_id,
+        );
         if let Ok(current) = existing {
             conn.execute(
                 "UPDATE volume_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6",
@@ -310,14 +309,13 @@ pub fn get_volume_outline_versions(
 }
 
 #[tauri::command]
-pub fn set_active_volume_outline(
-    input: SetActiveVolumeOutlineInput,
-) -> Result<(), String> {
+pub fn set_active_volume_outline(input: SetActiveVolumeOutlineInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE volume_outlines SET is_active = 0 WHERE project_id = ?1",
         params![&input.project_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE volume_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
         params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
@@ -328,9 +326,7 @@ pub fn set_active_volume_outline(
 // --- Chapter Outline ---
 
 #[tauri::command]
-pub fn save_chapter_outline(
-    input: SaveChapterOutlineInput,
-) -> Result<ChapterOutlineDto, String> {
+pub fn save_chapter_outline(input: SaveChapterOutlineInput) -> Result<ChapterOutlineDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
@@ -353,7 +349,11 @@ pub fn save_chapter_outline(
         ).map_err(|e| e.to_string())?;
         get_chapter_outline_by_id_internal(&conn, &id)
     } else {
-        let existing = get_active_chapter_outline_by_chapter_internal(&conn, &input.project_id, &input.chapter_id);
+        let existing = get_active_chapter_outline_by_chapter_internal(
+            &conn,
+            &input.project_id,
+            &input.chapter_id,
+        );
         if let Ok(current) = existing {
             conn.execute(
                 "UPDATE chapter_outlines SET title = ?1, content = ?2, source_type = ?3, context_snapshot = ?4, updated_at = ?5 WHERE id = ?6",
@@ -401,14 +401,13 @@ pub fn get_chapter_outline_versions(
 }
 
 #[tauri::command]
-pub fn set_active_chapter_outline(
-    input: SetActiveChapterOutlineInput,
-) -> Result<(), String> {
+pub fn set_active_chapter_outline(input: SetActiveChapterOutlineInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE chapter_outlines SET is_active = 0 WHERE project_id = ?1",
         params![&input.project_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE chapter_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
         params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
@@ -424,17 +423,36 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
 
     // Read novel
     let novel_title: String = conn
-        .query_row("SELECT title FROM novels WHERE id = ?1 AND deleted_at IS NULL", params![&project_id], |r| r.get(0))
+        .query_row(
+            "SELECT title FROM novels WHERE id = ?1 AND deleted_at IS NULL",
+            params![&project_id],
+            |r| r.get(0),
+        )
         .unwrap_or_else(|_| "未命名作品".to_string());
     let novel_genre: Option<String> = conn
-        .query_row("SELECT genre FROM novels WHERE id = ?1", params![&project_id], |r| r.get(0))
-        .ok().flatten();
+        .query_row(
+            "SELECT genre FROM novels WHERE id = ?1",
+            params![&project_id],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
     let description: Option<String> = conn
-        .query_row("SELECT description FROM novels WHERE id = ?1", params![&project_id], |r| r.get(0))
-        .ok().flatten();
+        .query_row(
+            "SELECT description FROM novels WHERE id = ?1",
+            params![&project_id],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
     let target_word_count: Option<i64> = conn
-        .query_row("SELECT target_word_count FROM novels WHERE id = ?1", params![&project_id], |r| r.get(0))
-        .ok().flatten();
+        .query_row(
+            "SELECT target_word_count FROM novels WHERE id = ?1",
+            params![&project_id],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
 
     // Read world settings
     let world_background = conn
@@ -445,7 +463,7 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
 
     // Read rule systems
     let rule_systems: Option<String> = {
-        let mut stmt = conn
+        let stmt = conn
             .prepare("SELECT title, content FROM rule_systems WHERE novel_id = ?1 AND is_active = 1 LIMIT 10")
             .ok();
         if let Some(mut s) = stmt {
@@ -453,13 +471,23 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
                 .query_map(params![&project_id], |r| {
                     let t: String = r.get(0)?;
                     let c: String = r.get(1)?;
-                    Ok(format!("《{}》{}", t, c.chars().take(300).collect::<String>()))
+                    Ok(format!(
+                        "《{}》{}",
+                        t,
+                        c.chars().take(300).collect::<String>()
+                    ))
                 })
                 .ok()
                 .map(|iter| iter.filter_map(|i| i.ok()).collect())
                 .unwrap_or_default();
-            if items.is_empty() { None } else { Some(items.join("\n")) }
-        } else { None }
+            if items.is_empty() {
+                None
+            } else {
+                Some(items.join("\n"))
+            }
+        } else {
+            None
+        }
     };
 
     // Read protagonist
@@ -480,13 +508,14 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
         ).unwrap_or((None, None, None, None, None, None, None));
 
     // Read active master outline
-    let active_master_outline: Option<String> = get_active_master_outline_internal(&conn, &project_id)
-        .ok()
-        .map(|dto| dto.content);
+    let active_master_outline: Option<String> =
+        get_active_master_outline_internal(&conn, &project_id)
+            .ok()
+            .map(|dto| dto.content);
 
     // Read existing volumes
     let existing_volumes: Option<String> = {
-        let mut stmt = conn
+        let stmt = conn
             .prepare("SELECT title, summary, goal FROM volumes WHERE novel_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC")
             .ok();
         if let Some(mut s) = stmt {
@@ -495,18 +524,28 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
                     let t: String = r.get(0)?;
                     let sum: Option<String> = r.get(1)?;
                     let g: Option<String> = r.get(2)?;
-                    Ok(format!("- {}：{}", t, sum.or(g).unwrap_or_else(|| "暂无摘要".to_string())))
+                    Ok(format!(
+                        "- {}：{}",
+                        t,
+                        sum.or(g).unwrap_or_else(|| "暂无摘要".to_string())
+                    ))
                 })
                 .ok()
                 .map(|iter| iter.filter_map(|i| i.ok()).collect())
                 .unwrap_or_default();
-            if items.is_empty() { None } else { Some(items.join("\n")) }
-        } else { None }
+            if items.is_empty() {
+                None
+            } else {
+                Some(items.join("\n"))
+            }
+        } else {
+            None
+        }
     };
 
     // Read existing chapters
     let existing_chapters: Option<String> = {
-        let mut stmt = conn
+        let stmt = conn
             .prepare("SELECT title, outline, goal FROM chapters WHERE novel_id = ?1 AND deleted_at IS NULL ORDER BY order_index ASC LIMIT 50")
             .ok();
         if let Some(mut s) = stmt {
@@ -516,18 +555,28 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
                     let o: Option<String> = r.get(1)?;
                     let g: Option<String> = r.get(2)?;
                     let desc = o.or(g).unwrap_or_else(|| "暂无".to_string());
-                    Ok(format!("- {}：{}", t, desc.chars().take(200).collect::<String>()))
+                    Ok(format!(
+                        "- {}：{}",
+                        t,
+                        desc.chars().take(200).collect::<String>()
+                    ))
                 })
                 .ok()
                 .map(|iter| iter.filter_map(|i| i.ok()).collect())
                 .unwrap_or_default();
-            if items.is_empty() { None } else { Some(items.join("\n")) }
-        } else { None }
+            if items.is_empty() {
+                None
+            } else {
+                Some(items.join("\n"))
+            }
+        } else {
+            None
+        }
     };
 
     // Read style/profile summary
     let style_summary: Option<String> = {
-        let mut stmt = conn
+        let stmt = conn
             .prepare("SELECT style_summary, narrative_perspective, tone, pace, dialogue_ratio, description_ratio, forbidden_styles, battle_intensity, emotion_tendency FROM style_profiles WHERE novel_id = ?1 AND is_active = 1 ORDER BY updated_at DESC LIMIT 1")
             .ok();
         if let Some(mut s) = stmt {
@@ -545,17 +594,32 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
                     np.map(|v| format!("叙事人称：{}", v)),
                     tone.map(|v| format!("文风：{}", v)),
                     pace.map(|v| format!("节奏：{}", v)),
-                    Some(format!("对话比例：{}%，描写比例：{}%", (dr * 100.0) as i32, (der * 100.0) as i32)),
+                    Some(format!(
+                        "对话比例：{}%，描写比例：{}%",
+                        (dr * 100.0) as i32,
+                        (der * 100.0) as i32
+                    )),
                     bi.map(|v| format!("战斗强度：{}", v)),
                     et.map(|v| format!("情绪倾向：{}", v)),
                     summary.map(|v| format!("总结：{}", v)),
                     fs.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
                         .filter(|v| !v.is_empty())
                         .map(|v| format!("禁用：{}", v.join("、"))),
-                ].into_iter().flatten().collect();
-                Ok::<Option<String>, rusqlite::Error>(if parts.is_empty() { None } else { Some(parts.join("\n")) })
-            }).ok().flatten()
-        } else { None }
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                Ok::<Option<String>, rusqlite::Error>(if parts.is_empty() {
+                    None
+                } else {
+                    Some(parts.join("\n"))
+                })
+            })
+            .ok()
+            .flatten()
+        } else {
+            None
+        }
     };
 
     let output_config_summary: Option<String> = conn

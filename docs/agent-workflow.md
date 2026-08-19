@@ -48,6 +48,7 @@ graph TD
 **目标**：充分理解任务背景
 
 **操作**：
+
 1. 仔细阅读用户的任务描述
 2. 阅读 `AGENTS.md` 了解项目全局约束
 3. 阅读相关 `docs/` 文档：
@@ -61,6 +62,7 @@ graph TD
 **目标**：明确要改什么、不改什么
 
 **操作**：
+
 1. 定位相关源文件
 2. 分析修改对其它模块的影响
 3. 列出要新增/修改的文件清单
@@ -72,6 +74,7 @@ graph TD
 **目标**：精准执行修改
 
 **操作**：
+
 1. 严格按计划修改
 2. 一次只改一个文件
 3. 每改完一个文件检查是否有错误
@@ -83,6 +86,7 @@ graph TD
 **目标**：确保修改没有破坏项目
 
 **操作**：
+
 1. `cargo check` — Rust 编译检查
 2. `npm run build` — 前端构建
 3. `npm run tauri build` — 完整构建
@@ -93,6 +97,7 @@ graph TD
 **目标**：更新文档、提交代码
 
 **操作**：
+
 1. 更新 `CHANGELOG.md`
 2. 如果涉及新功能，更新 `README.md`
 3. 生成完成汇报
@@ -129,28 +134,38 @@ graph TD
 ### 4.5 release-package
 
 ```text
-验证构建 → 更新版本号 → 更新 CHANGELOG → 创建 release notes → Git tag
+验证构建 → 更新版本号 → 更新 CHANGELOG → 从 CHANGELOG 提取发布正文 → Git tag
 ```
 
 ---
 
 ## 5. Agent 交互模式
 
-### 5.1 单 Agent 模式（当前）
+### 5.1 项目开发协作：用户主导的 Agent 任务执行模式
 
 ```
 用户 → Agent → 完成任务 → 汇报
 ```
 
-### 5.2 Multi-Agent 模式（未来）
+### 5.2 产品运行时：Multi-Agent 自主创作模式（v3.0.0）
 
 ```
-用户 → Orchestrator Agent
-           ├→ Planner Agent（规划）
-           ├→ Coder Agent（实现）
-           ├→ Reviewer Agent（审查）
-           └→ QA Agent（测试）
+小说 Brief → Plot Planner → 人物 / 世界 / 冲突 / 节奏 Agent → 全书章节计划
+                                                        ↓
+                                                   用户确认应用
+                                                        ↓
+章节候选 → Outline / Character / Setting / Logic / Polish / Quality
+                                                        ↓
+                                              共识 / 主编修订候选
+                                                        ↓
+                                                   用户采用正文
+                                                        ↓
+                                      章节总结 / 人物变化 / 世界候选
+                                                        ↓
+                                                   用户确认沉淀
 ```
+
+上述产品运行时模式已覆盖全书规划和受审核逐章推进。任何候选都不会自动采用，章节分析和世界扩展也不会绕过用户确认。
 
 ---
 

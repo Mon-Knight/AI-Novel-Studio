@@ -1,0 +1,44 @@
+# AI Novel Studio v3.1.0 — DSH runtime composition (production).
+# `{CHECKOUT}`, `{GATEWAY_BIN}` and `{GATEWAY_DB}` are replaced at render time.
+# stdout is the protocol: no stdout loggers, no web/UI, no bash/fs/terminal tools.
+# No API keys anywhere in this file; credentials flow via env only.
+- id: sdk-jsonrpc-server
+  name: 'file:///{CHECKOUT}/packages/sdk/server/lib/index.js'
+  config:
+    maxTokensAsSuccess: !!js 'process.env.DSH_MAX_TOKENS_AS_SUCCESS === undefined ? true : JSON.parse(process.env.DSH_MAX_TOKENS_AS_SUCCESS)'
+
+- id: llm-deepseek
+  name: 'file:///{CHECKOUT}/packages/llm/llm-deepseek/lib/index.js'
+  config:
+    thinking: enabled
+    reasoningEffort: max
+
+- id: agent-spine
+  name: 'file:///{CHECKOUT}/packages/examples/agent-spine-demo/lib/index.js'
+  config:
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a chapter preparation planner for a web novel studio. Reply in Chinese. Only answer from tool-provided facts.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash:
+      enableRunInBackground: false
+    toolJobs: false
+
+- id: sessions
+  name: 'file:///{CHECKOUT}/packages/session/session-persistence-jsonl/lib/index.js'
+  config:
+    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
+    compression: none
+
+- id: token-meter
+  name: 'file:///{CHECKOUT}/packages/llm/token-meter/lib/index.js'
+
+- id: mcp-novel
+  name: 'file:///{CHECKOUT}/packages/mcp/mcp-client/lib/index.js'
+  config:
+    serverName: novel
+    transport: stdio
+    command: '{GATEWAY_BIN}'
+    args: ['--db', '{GATEWAY_DB}']
+    toolCallTimeoutMs: 30000
+    failOnStartupError: true

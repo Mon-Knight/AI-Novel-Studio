@@ -4,6 +4,7 @@ import type {
   CompleteProjectBackup,
   LocalProjectBackupData,
 } from './projectBackupSchema';
+import { canonicalHash } from '../ai/compilation/canonical.ts';
 
 export interface LocalStorageLike {
   readonly length: number;
@@ -40,9 +41,13 @@ const PROJECT_COLLECTION_KEYS = [
   'ai_novel_studio_fix_runs',
   'ai_novel_studio_setting_suggestions',
   'ai_novel_studio_generation_jobs',
+  'ai_novel_studio_multi_agent_sessions',
+  'ai_novel_studio_autonomous_story_plans',
 ] as const;
 
+const AUTONOMOUS_PLANS_KEY = 'ai_novel_studio_autonomous_story_plans';
 const GENERATION_JOBS_KEY = 'ai_novel_studio_generation_jobs';
+const REFERENCE_LIBRARY_KEY = 'ai_novel_studio_reference_library_v1';
 const CHAPTER_SCOPED_PREFIXES = [
   'ai_novel_studio_drafts_list_',
   'ai_novel_studio_draft_',
@@ -62,8 +67,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isBackupRecord(value: BackupValue): value is { [key: string]: BackupValue } {
+  return isRecord(value);
+}
+
 function isBackupValue(value: unknown): value is BackupValue {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'number' ||
+    typeof value === 'string'
+  ) {
     return true;
   }
   if (Array.isArray(value)) return value.every(isBackupValue);
@@ -81,7 +95,7 @@ function getString(record: Record<string, unknown>, ...keys: string[]): string |
 function getRecordIdSet(rows: BackupRow[] | undefined): Set<string> {
   return new Set(
     (rows ?? [])
-      .map((row) => typeof row.id === 'string' ? row.id : undefined)
+      .map((row) => (typeof row.id === 'string' ? row.id : undefined))
       .filter((id): id is string => Boolean(id)),
   );
 }
@@ -105,6 +119,16 @@ function belongsToProject(
   jobIds: Set<string>,
 ): boolean {
   if (!isRecord(value)) return false;
+  if (isRecord(value.session)) {
+    return belongsToProject(
+      value.session as BackupValue,
+      novelId,
+      chapterIds,
+      volumeIds,
+      referencedProfileIds,
+      jobIds,
+    );
+  }
   const owner = getString(value, 'novelId', 'novel_id', 'projectId', 'project_id');
   if (owner === novelId) return true;
   const chapterId = getString(value, 'chapterId', 'chapter_id');
@@ -126,7 +150,16 @@ function sanitizePortableValue(value: BackupValue): BackupValue {
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => {
-      if (key === 'coverPath' || key === 'cover_path' || key === 'filePath' || key === 'file_path') {
+      if (
+        [
+          'coverPath',
+          'cover_path',
+          'filePath',
+          'file_path',
+          'sourceFilePath',
+          'source_file_path',
+        ].includes(key)
+      ) {
         return [key, null];
       }
       return [key, sanitizePortableValue(entry as BackupValue)];
@@ -146,8 +179,24 @@ function isChapterScopedKey(key: string, chapterIds: Set<string>): boolean {
 
 function addRecordId(value: BackupValue, ids: Set<string>): void {
   if (!isRecord(value)) return;
-  const id = value.id;
-  if (typeof id === 'string' && id) ids.add(id);
+  for (const key of [
+    'id',
+    'sessionId',
+    'session_id',
+    'opinionId',
+    'opinion_id',
+    'operationId',
+    'operation_id',
+    'planId',
+    'plan_id',
+  ]) {
+    const id = value[key];
+    if (typeof id === 'string' && id) ids.add(id);
+  }
+  for (const nested of Object.values(value)) {
+    if (Array.isArray(nested)) nested.forEach((entry) => addRecordId(entry as BackupValue, ids));
+    else if (isRecord(nested)) addRecordId(nested as BackupValue, ids);
+  }
 }
 
 function collectLocalEntityIds(data: LocalProjectBackupData): Set<string> {
@@ -198,7 +247,12 @@ export function collectLocalProjectData(
   const jobIds = getRecordIdSet(backup.tables.generation_jobs);
   const referencedProfileIds = new Set<string>();
   for (const snapshot of backup.tables.chapter_generation_snapshots ?? []) {
-    for (const key of ['style_profile_id', 'output_profile_id', 'styleProfileId', 'outputProfileId']) {
+    for (const key of [
+      'style_profile_id',
+      'output_profile_id',
+      'styleProfileId',
+      'outputProfileId',
+    ]) {
       const id = snapshot[key];
       if (typeof id === 'string') referencedProfileIds.add(id);
     }
@@ -208,11 +262,11 @@ export function collectLocalProjectData(
   for (const key of PROJECT_COLLECTION_KEYS) {
     const stored = safeParse(resolvedStorage.getItem(key));
     if (!Array.isArray(stored)) continue;
-    const scoped = stored.filter((entry) => (
+    const scoped = stored.filter((entry) =>
       key === 'ai_novel_studio_novels'
         ? isSourceNovel(entry, novelId)
-        : belongsToProject(entry, novelId, chapterIds, volumeIds, referencedProfileIds, jobIds)
-    ));
+        : belongsToProject(entry, novelId, chapterIds, volumeIds, referencedProfileIds, jobIds),
+    );
     if (key === GENERATION_JOBS_KEY) {
       for (const entry of scoped) addRecordId(entry, jobIds);
     }
@@ -221,6 +275,42 @@ export function collectLocalProjectData(
 
   const entries: Record<string, BackupValue> = {};
   const rawEntries: Record<string, string> = {};
+  const referenceState = safeParse(resolvedStorage.getItem(REFERENCE_LIBRARY_KEY));
+  if (
+    isRecord(referenceState) &&
+    Array.isArray(referenceState.works) &&
+    Array.isArray(referenceState.imports) &&
+    Array.isArray(referenceState.sections)
+  ) {
+    const works = referenceState.works.filter(
+      (work): work is { [key: string]: BackupValue } =>
+        isBackupRecord(work) && getString(work, 'novelId', 'novel_id') === novelId,
+    );
+    const workIds = new Set(
+      works.map((work) => getString(work, 'id')).filter((id): id is string => Boolean(id)),
+    );
+    const imports = referenceState.imports.filter(
+      (item): item is { [key: string]: BackupValue } =>
+        isBackupRecord(item) && workIds.has(getString(item, 'workId', 'reference_work_id') ?? ''),
+    );
+    const importIds = new Set(
+      imports.map((item) => getString(item, 'id')).filter((id): id is string => Boolean(id)),
+    );
+    const sections = referenceState.sections.filter(
+      (item): item is { [key: string]: BackupValue } =>
+        isBackupRecord(item) &&
+        importIds.has(getString(item, 'importId', 'reference_import_id') ?? ''),
+    );
+    if (works.length > 0) {
+      entries[REFERENCE_LIBRARY_KEY] = sanitizePortableValue({
+        schemaVersion: 1,
+        works,
+        imports,
+        sections,
+        operations: {},
+      } as BackupValue);
+    }
+  }
   for (let index = 0; index < resolvedStorage.length; index += 1) {
     const key = resolvedStorage.key(index);
     if (!key) continue;
@@ -277,11 +367,55 @@ function remapStorageKey(key: string, idMap: Record<string, string>): string {
   );
 }
 
-export function restoreLocalProjectData(
+function mergeReferenceLibraryState(
+  current: BackupValue | null,
+  incoming: BackupValue,
+): BackupValue {
+  const empty = { schemaVersion: 1, works: [], imports: [], sections: [], operations: {} };
+  const currentState = isRecord(current) ? current : empty;
+  const incomingState = isRecord(incoming) ? incoming : empty;
+  return {
+    schemaVersion: 1,
+    works: [
+      ...(Array.isArray(currentState.works) ? currentState.works : []),
+      ...(Array.isArray(incomingState.works) ? incomingState.works : []),
+    ],
+    imports: [
+      ...(Array.isArray(currentState.imports) ? currentState.imports : []),
+      ...(Array.isArray(incomingState.imports) ? incomingState.imports : []),
+    ],
+    sections: [
+      ...(Array.isArray(currentState.sections) ? currentState.sections : []),
+      ...(Array.isArray(incomingState.sections) ? incomingState.sections : []),
+    ],
+    operations: isRecord(currentState.operations) ? currentState.operations : {},
+  } as BackupValue;
+}
+
+async function refreshLocalAutonomousPlan(value: BackupValue): Promise<BackupValue> {
+  if (
+    !isRecord(value) ||
+    typeof value.schemaVersion !== 'number' ||
+    typeof value.novelId !== 'string' ||
+    !isRecord(value.brief)
+  ) {
+    throw new Error('Restored autonomous plan has an invalid identity.');
+  }
+  return {
+    ...value,
+    requestHash: await canonicalHash({
+      schemaVersion: value.schemaVersion,
+      novelId: value.novelId,
+      brief: value.brief,
+    }),
+  } as BackupValue;
+}
+
+export async function restoreLocalProjectData(
   data: LocalProjectBackupData | undefined,
   idMap: Record<string, string>,
   storage?: LocalStorageLike,
-): void {
+): Promise<void> {
   const resolvedStorage = resolveStorage(storage);
   if (!data || !resolvedStorage) return;
   const touched = new Map<string, string | null>();
@@ -293,14 +427,22 @@ export function restoreLocalProjectData(
     for (const [key, rows] of Object.entries(data.collections)) {
       const current = safeParse(resolvedStorage.getItem(key));
       const currentRows = Array.isArray(current) ? current : [];
-      const remappedRows = rows.map((row) => remapValue(row, idMap));
+      let remappedRows = rows.map((row) => remapValue(row, idMap));
+      if (key === AUTONOMOUS_PLANS_KEY) {
+        remappedRows = await Promise.all(remappedRows.map(refreshLocalAutonomousPlan));
+      }
       remember(key);
       resolvedStorage.setItem(key, JSON.stringify([...currentRows, ...remappedRows]));
     }
     for (const [sourceKey, value] of Object.entries(data.entries)) {
       const key = remapStorageKey(sourceKey, idMap);
       remember(key);
-      resolvedStorage.setItem(key, JSON.stringify(remapValue(value, idMap)));
+      const remapped = remapValue(value, idMap);
+      const restored =
+        key === REFERENCE_LIBRARY_KEY
+          ? mergeReferenceLibraryState(safeParse(resolvedStorage.getItem(key)), remapped)
+          : remapped;
+      resolvedStorage.setItem(key, JSON.stringify(restored));
     }
     for (const [sourceKey, value] of Object.entries(data.rawEntries ?? {})) {
       if (typeof value !== 'string') continue;

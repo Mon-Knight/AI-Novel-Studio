@@ -18,7 +18,8 @@
 - [ ] `CHANGELOG.md` 已新增当前版本条目
 - [ ] CHANGELOG 条目按类型分组（新增/修改/修复/移除）
 - [ ] CHANGELOG 日期已填写
-- [ ] 如有必要，已创建 `docs/release-notes-vX.X.X.md`
+- [ ] `npm run test:version-sync` 已确认当前版本可从 CHANGELOG 唯一提取
+- [ ] 未新增逐版本 release notes 文档；历史快照统一保存在 `docs/project/release-history.md`
 
 ---
 
@@ -41,6 +42,8 @@
 ## 构建验证
 
 - [ ] `npm run build` 通过
+- [ ] `npm run test:bundle-size` 通过，入口和任一 chunk 的真实字节/gzip 预算未回退
+- [ ] `npm run test:component-size` 通过，所有生产 TSX 不超过 500 行
 - [ ] `cargo check` 通过
 - [ ] `npm run tauri build` 通过
 - [ ] 安装包或 release 产物路径已记录
@@ -66,6 +69,7 @@
 
 ## Tag 与推送
 
+- [ ] 版本分支已通过 PR 审查并合入 `main`
+- [ ] 本地 `main` 已使用 `git pull --ff-only origin main` 同步
 - [ ] `git tag vX.X.X` 已创建
-- [ ] `git push origin main` 已推送
 - [ ] `git push origin vX.X.X` 已推送

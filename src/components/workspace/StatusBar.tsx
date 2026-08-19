@@ -37,19 +37,28 @@ function StatusBar({
       )}
       <div className="statusbar-item">
         <span>字数：</span>
-        <strong data-testid="chapter-word-count" data-word-count={wordCount}>{formatNumber(wordCount)}</strong>
+        <strong data-testid="chapter-word-count" data-word-count={wordCount}>
+          {formatNumber(wordCount)}
+        </strong>
         <span className="text-muted"> / {formatNumber(targetWords)}</span>
       </div>
       <span className="statusbar-separator" />
       <div className="statusbar-item">
         <span>状态：</span>
-        <span style={{
-          color:
-            status === 'not_started' ? 'var(--color-text-muted)' :
-            status === 'outline_ready' ? 'var(--color-primary)' :
-            status === 'adopted' ? 'var(--color-success)' :
-            status === 'summarized' ? '#059669' : 'var(--color-warning)',
-        }}>
+        <span
+          style={{
+            color:
+              status === 'not_started'
+                ? 'var(--color-text-muted)'
+                : status === 'outline_ready'
+                  ? 'var(--color-primary)'
+                  : status === 'adopted'
+                    ? 'var(--color-success)'
+                    : status === 'summarized'
+                      ? 'var(--color-success)'
+                      : 'var(--color-warning)',
+          }}
+        >
           {ChapterStatusLabels[status]}
         </span>
       </div>

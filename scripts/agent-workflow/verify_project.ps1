@@ -110,11 +110,12 @@ if (Test-Path -LiteralPath $cargo) {
 
 $npmSteps = @(
     @{ Name = "npm run test:version-sync"; Arguments = @("run", "test:version-sync") },
-    @{ Name = "npm run test"; Arguments = @("run", "test") },
-    @{ Name = "npm run lint"; Arguments = @("run", "lint") },
+    @{ Name = "npm run test:docs-sync"; Arguments = @("run", "test:docs-sync") },
+    @{ Name = "npm run test:coverage"; Arguments = @("run", "test:coverage") },
+    @{ Name = "npm run test:component-size"; Arguments = @("run", "test:component-size") },
+    @{ Name = "npm run lint:ci"; Arguments = @("run", "lint:ci") },
     @{ Name = "npm run build"; Arguments = @("run", "build") },
-    @{ Name = "npm run test:quality-workspace"; Arguments = @("run", "test:quality-workspace") },
-    @{ Name = "npm run test:setting-suggestions"; Arguments = @("run", "test:setting-suggestions") },
+    @{ Name = "npm run test:bundle-size"; Arguments = @("run", "test:bundle-size") },
     @{ Name = "npm run test:ai-tasks-delete"; Arguments = @("run", "test:ai-tasks-delete") },
     @{ Name = "npm run test:project-backup"; Arguments = @("run", "test:project-backup") }
 )

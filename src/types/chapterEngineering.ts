@@ -17,12 +17,21 @@ export interface ChapterCard {
   knownInformation: string[];
   unknownInformation: string[];
   releasedInformation: string[];
-  reservedSecrets: string[];
+  reservedMysteries: string[];
   emotionalCurve: string;
   endingHook: string;
   targetWordCount?: number;
   styleRequirements: string[];
   forbiddenWriting: string[];
+}
+
+export interface SceneBeat {
+  id: string;
+  order: number;
+  text: string;
+  required: boolean;
+  characterIds?: string[];
+  stateChange?: string;
 }
 
 export interface ScenePlanItem {
@@ -38,6 +47,12 @@ export interface ScenePlanItem {
   informationRelease: string[];
   result: string;
   transition: string;
+  /** Ordered scene-local beats. Legacy fields are retained for editing compatibility. */
+  beats: SceneBeat[];
+  contextCapsule?: string;
+  constraints?: string[];
+  expectedEndState?: string;
+  targetCharacters?: number;
 }
 
 export interface GenerationWordRange {

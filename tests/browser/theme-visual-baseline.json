@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "minimumWidth": 1200,
+  "minimumHeight": 700,
+  "minimumOpaqueRatio": 0.99,
+  "minimumThemeLuminanceDelta": 0.55,
+  "routes": {
+    "home": {
+      "light": { "meanLuminance": [0.88, 0.99], "minimumColorBuckets": 180 },
+      "dark": { "meanLuminance": [0.1, 0.28], "minimumColorBuckets": 180 }
+    },
+    "settings": {
+      "light": { "meanLuminance": [0.9, 0.995], "minimumColorBuckets": 140 },
+      "dark": { "meanLuminance": [0.09, 0.28], "minimumColorBuckets": 140 }
+    },
+    "story-assets": {
+      "light": { "meanLuminance": [0.92, 1], "minimumColorBuckets": 100 },
+      "dark": { "meanLuminance": [0.08, 0.25], "minimumColorBuckets": 100 }
+    }
+  }
+}

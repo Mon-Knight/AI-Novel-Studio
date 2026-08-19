@@ -1,10 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Novel Studio</title>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const storageKey = 'ai_novel_studio_theme_preference';
+        let preference = 'system';
+        let systemPrefersDark = false;
+
+        try {
+          const storedPreference = window.localStorage.getItem(storageKey);
+          if (
+            storedPreference === 'system' ||
+            storedPreference === 'light' ||
+            storedPreference === 'dark'
+          ) {
+            preference = storedPreference;
+          }
+        } catch {
+          preference = 'system';
+        }
+
+        try {
+          systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        } catch {
+          systemPrefersDark = false;
+        }
+
+        const effectiveTheme =
+          preference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : preference;
+        root.dataset.theme = preference;
+        root.dataset.effectiveTheme = effectiveTheme;
+        root.style.colorScheme = effectiveTheme;
+      })();
+    </script>
     <style>
       html,
       body {
@@ -24,8 +57,10 @@
         justify-content: center;
         background: #f5f6f8;
         color: #1a1a2e;
-        font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
-        transition: opacity 180ms ease, visibility 180ms ease;
+        font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+        transition:
+          opacity 180ms ease,
+          visibility 180ms ease;
       }
 
       #startup-splash.is-hidden {
@@ -64,7 +99,7 @@
       }
 
       .startup-progress::before {
-        content: "";
+        content: '';
         display: block;
         width: 42%;
         height: 100%;
@@ -82,31 +117,29 @@
         }
       }
 
-      @media (prefers-color-scheme: dark) {
-        html,
-        body,
-        #startup-splash {
-          background: #1f1f1f;
-          color: #f3f3f3;
-        }
+      :root[data-effective-theme='dark'],
+      :root[data-effective-theme='dark'] body,
+      :root[data-effective-theme='dark'] #startup-splash {
+        background: #1f1f1f;
+        color: #f3f3f3;
+      }
 
-        .startup-card {
-          background: #252526;
-          border-color: #3c3c3c;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-        }
+      :root[data-effective-theme='dark'] .startup-card {
+        background: #252526;
+        border-color: #3c3c3c;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      }
 
-        .startup-message {
-          color: #c8c8c8;
-        }
+      :root[data-effective-theme='dark'] .startup-message {
+        color: #c8c8c8;
+      }
 
-        .startup-progress {
-          background: #1e2a45;
-        }
+      :root[data-effective-theme='dark'] .startup-progress {
+        background: #1e2a45;
+      }
 
-        .startup-progress::before {
-          background: #7aa2ff;
-        }
+      :root[data-effective-theme='dark'] .startup-progress::before {
+        background: #7aa2ff;
       }
     </style>
   </head>

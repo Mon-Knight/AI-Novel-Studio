@@ -45,6 +45,16 @@
 
 ---
 
+## Git 与发布治理
+
+- [ ] `docs/project/git-workflow.md` 明确分支、PR、required checks、tag、hotfix 与回滚边界
+- [ ] `CHANGELOG.md` 是唯一持续维护的版本入口
+- [ ] `docs/project/release-history.md` 保留 40 份历史快照及合并前 SHA-256
+- [ ] `docs/` 根目录不存在 `release-notes-v*.md` 碎片
+- [ ] CI、Security、Release workflow、Dependabot 与 PR 模板均存在
+
+---
+
 ## AGENTS.md
 
 - [ ] 无需更新或已更新
@@ -55,11 +65,13 @@
 
 ## 版本号一致性
 
+- [ ] `package.json` 是当前版本事实源
 - [ ] `package.json` → `version` 字段
 - [ ] `src-tauri/Cargo.toml` → `version` 字段
 - [ ] `src-tauri/tauri.conf.json` → `package.version` 字段
 - [ ] `README.md` → 当前版本
 - [ ] `CHANGELOG.md` → 最新条目
+- [ ] README 与版本路线图的当前阶段声明唯一且一致
 
 ---
 
@@ -69,3 +81,6 @@
 - [ ] 文档未包含过时信息
 - [ ] 文档与代码实际行为一致
 - [ ] 多个文档对同一事物的描述不矛盾
+- [ ] 旧版本或旧阶段未被继续标记为“当前”
+- [ ] 必需文档、Checklist、Skill 或工作流脚本缺失时检查会失败
+- [ ] 文档同步负向回归测试通过

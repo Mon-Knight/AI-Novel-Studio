@@ -8,10 +8,17 @@ import { generationJobService } from './services/generation/generationJobService
 import { legacyChapterContextMigrationService } from './services/context/legacyChapterContextMigrationService';
 import { tauriInvoke } from './services/tauri/runtime';
 import { describeUnknownError } from './utils/errorMessage';
+import { initializeTheme } from './store/themeStore';
+import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
+import { autonomousSchedulerWorker } from './services/autonomous-creation/autonomousSchedulerWorker';
 import './styles/variables.css';
 import './styles/global.css';
+import './styles/theme.css';
 
 performance.mark('app-script-start');
+initializeTheme();
+installGlobalErrorHandlers();
+void autonomousSchedulerWorker.recoverStartup();
 
 const startupScriptStartedAt = performance.now();
 const MIN_STARTUP_SPLASH_MS = 700;
@@ -30,9 +37,13 @@ function logStartupTimings() {
   const scriptStart = get('app-script-start');
   const reactMounted = get('react-mounted');
   const firstReady = get('first-page-ready');
-  console.info(`[Startup] script start -> React mounted: ${Math.round(reactMounted - scriptStart)} ms`);
-  console.info(`[Startup] React mounted -> first page ready: ${Math.round(firstReady - reactMounted)} ms`);
-  console.info(`[Startup] total startup: ${Math.round(firstReady - scriptStart)} ms`);
+  appLogger.info(
+    `[Startup] script start -> React mounted: ${Math.round(reactMounted - scriptStart)} ms`,
+  );
+  appLogger.info(
+    `[Startup] React mounted -> first page ready: ${Math.round(firstReady - reactMounted)} ms`,
+  );
+  appLogger.info(`[Startup] total startup: ${Math.round(firstReady - scriptStart)} ms`);
 }
 
 function hideStartupSplash() {
@@ -85,7 +96,7 @@ async function bootstrapApplication() {
     startupContextMigration = await legacyChapterContextMigrationService.migrate();
   } catch (error) {
     const message = describeUnknownError(error, '旧章节上下文迁移失败');
-    console.error('[STARTUP_CONTEXT_MIGRATION_FAILED]', { message });
+    appLogger.error('[STARTUP_CONTEXT_MIGRATION_FAILED]', { message });
     startupContextMigration = {
       performed: false,
       chapterSummaries: { inserted: 0, matched: 0, skipped: 0 },
@@ -103,7 +114,7 @@ async function bootstrapApplication() {
     startupRecovery = await generationJobService.recoverInterruptedAtStartup();
   } catch (error) {
     const message = describeUnknownError(error, '生成任务恢复检查失败');
-    console.error('[STARTUP_TASK_RECOVERY_FAILED]', { message });
+    appLogger.error('[STARTUP_TASK_RECOVERY_FAILED]', { message });
     startupRecovery = {
       recoveredJobs: 0,
       recoveredAt: new Date().toISOString(),

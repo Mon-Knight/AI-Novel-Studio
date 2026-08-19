@@ -1,0 +1,58 @@
+AI Novel Studio v3.2.0 closeout verification
+
+Changed branch/field:
+  branch=codex/v3.2.0-dsh-closeout
+  field=package.json:version
+  baseline=3.1.0
+  modified=3.2.0
+  restored_behavior=rollback test copy reports CURRENT=3.1.0 and STATUS=restored; worktree package.json and MODIFIED_FILE remain at 3.2.0/modified
+
+Four artifacts:
+  MODIFIED_FILE=F:\ai-novel-studio-v320\reports\v3.2.0-closeout\MODIFIED_FILE
+  DIFF_FILE=F:\ai-novel-studio-v320\reports\v3.2.0-closeout\DIFF_FILE
+  VERIFICATION=F:\ai-novel-studio-v320\reports\v3.2.0-closeout\VERIFICATION.txt
+  ROLLBACK=F:\ai-novel-studio-v320\reports\v3.2.0-closeout\ROLLBACK.sh
+
+BASELINE
+  command=git show HEAD:package.json | Select-String '"version"' | Select-Object -First 1
+  input=HEAD:package.json
+  literal_output=  "version": "3.1.0",
+  exit_status=0
+  git_object_hash=9630a6bae18963ee37f1114df7904b8d18041970
+
+MODIFIED
+  command=Get-Content package.json | Select-String '"version"' | Select-Object -First 1
+  input=F:\ai-novel-studio-v320\package.json
+  literal_output=  "version": "3.2.0",
+  exit_status=0
+  git_object_hash=0e46f91ddf3074681fef7d671a24f180b98b7e2c
+
+ROLLBACK
+  command=bash reports/v3.2.0-closeout/ROLLBACK.sh reports/v3.2.0-closeout/rollback-test
+  input=copy of MODIFIED_FILE
+  literal_output=restored package.version=3.1.0 status=restored
+  exit_status=0
+  restored_status=CURRENT=3.1.0; STATUS=restored
+
+Project verification:
+  npm test => 298 passed, 0 failed, exit 0
+  cargo test --locked --manifest-path src-tauri/Cargo.toml => 276 passed, 0 failed, 2 ignored, exit 0
+  npm run build => passed, exit 0
+  cargo check --manifest-path src-tauri/Cargo.toml => passed, exit 0
+  npx tauri build --bundles msi,nsis => MSI and NSIS generated, exit 0
+  npm run test:version-sync => passed, exit 0
+  git diff --check => passed, exit 0
+
+DSH carrier verification:
+  source_commit=47f943859bef60e4160492346772ded9b24f765a
+  runtime_hash=569c08372f3fb9770a044f5bb616dbcc0bf4d2bb46bdb70997cc78ebc70d9320
+  junction_manifest_count=5452
+  rebuilt_junction_count=5452
+  staging_target_count=0
+  release_missing_resource_gate_exit=101 (expected failure)
+  restored_zip_size=464867387
+
+Release artifacts:
+  runtime_zip_sha256=17E91544E089ED6C47538A8C84F749604F6427901AEC114FF5E6181817DAEA45
+  msi_sha256=EBC5237CC846DCDD8AD54F97EF5E1AEF855E5F34CDCBE2ABAA939DD63B5B85C7
+  nsis_sha256=621F822A18C02AFA231D542211FFF82CA3B3E14EE8A05B06788D7C55401ED8B2

@@ -1,0 +1,234 @@
+name: Windows signed release and channel rollback
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: beta
+        type: choice
+        options: [beta, stable]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  desktop-gate:
+    name: Required Windows desktop quality and E2E
+    uses: ./.github/workflows/windows-desktop-e2e.yml
+    with:
+      suite: full
+
+  windows-release:
+    needs: desktop-gate
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      RELEASE_CHANNEL: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel) || (contains(github.ref_name, '-') && 'beta') || 'stable' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: npm ci
+      - run: npm run test:version-sync
+      - run: npm run lint:ci
+      - run: npm run test:all
+      - run: npm run build
+      - run: npm run test:bundle-size
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Checkout pinned DSH runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: .dsh-checkout
+          fetch-depth: 1
+      - name: Build pinned DSH host libraries
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm --dir .dsh-checkout install --frozen-lockfile
+          pnpm --dir .dsh-checkout run build:lib:host
+          "DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prepare signed updater configuration
+        shell: pwsh
+        env:
+          TAURI_PUBLIC_KEY: ${{ secrets.TAURI_PUBLIC_KEY }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_PUBLIC_KEY)) {
+            throw 'Missing repository secret TAURI_PUBLIC_KEY.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_PRIVATE_KEY)) {
+            throw 'Missing repository secret TAURI_PRIVATE_KEY.'
+          }
+
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF -like 'refs/tags/*' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version v$version."
+          }
+
+          $stableEndpoint = 'https://github.com/Mon-Knight/AI-Novel-Studio/releases/download/updates-stable/latest.json'
+          $releaseConfig = @{
+            tauri = @{
+              updater = @{
+                active = $true
+                dialog = $false
+                endpoints = @($stableEndpoint)
+                pubkey = $env:TAURI_PUBLIC_KEY
+                windows = @{
+                  installMode = 'passive'
+                  installerArgs = @()
+                }
+              }
+            }
+          }
+          $configPath = Join-Path $env:RUNNER_TEMP 'tauri-release.conf.json'
+          $releaseConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding utf8
+          "TAURI_RELEASE_CONFIG=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build installers and signed updater archives
+        shell: pwsh
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        # Tauri 1's Windows bundler supports MSI plus the signed updater archive.
+        run: npm run tauri:build:release -- --config "$env:TAURI_RELEASE_CONFIG"
+
+      - name: Verify signed Windows artifacts
+        shell: pwsh
+        run: |
+          $bundleRoot = 'src-tauri/target/release/bundle'
+          $msi = @(Get-ChildItem $bundleRoot -Recurse -File | Where-Object { $_.Extension -eq '.msi' })
+          $updaters = @(Get-ChildItem $bundleRoot -Recurse -File | Where-Object { $_.Name -match '\.msi\.zip$' })
+          if ($msi.Count -eq 0) { throw 'No MSI installer was produced.' }
+          if ($updaters.Count -eq 0) { throw 'No Tauri updater archive was produced.' }
+          foreach ($updater in $updaters) {
+            $signature = "$($updater.FullName).sig"
+            if (-not (Test-Path -LiteralPath $signature)) {
+              throw "Missing updater signature for $($updater.Name)."
+            }
+            if ((Get-Item -LiteralPath $signature).Length -eq 0) {
+              throw "Updater signature is empty for $($updater.Name)."
+            }
+          }
+
+      - name: Build Tauri channel and rollback manifests
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $bundleRoot = 'src-tauri/target/release/bundle'
+          $updaterBundle = Get-ChildItem $bundleRoot -Recurse -File |
+            Where-Object { $_.Name -match '\.msi\.zip$' } |
+            Sort-Object FullName |
+            Select-Object -First 1
+          if (-not $updaterBundle) { throw 'No updater bundle is available for the manifest.' }
+          $signature = "$($updaterBundle.FullName).sig"
+
+          $installer = Get-ChildItem $bundleRoot -Recurse -File |
+            Where-Object { $_.Extension -eq '.msi' } |
+            Sort-Object FullName |
+            Select-Object -First 1
+          if (-not $installer) { throw 'No matching rollback installer was produced.' }
+
+          $releases = gh release list --limit 50 --json tagName,isPrerelease | ConvertFrom-Json
+          $wantPrerelease = $env:RELEASE_CHANNEL -eq 'beta'
+          $previous = $releases |
+            Where-Object {
+              $_.tagName -ne "v$version" -and
+              $_.tagName -match '^v\d+\.\d+\.\d+' -and
+              $_.isPrerelease -eq $wantPrerelease
+            } |
+            Select-Object -First 1
+
+          $arguments = @(
+            'scripts/release/build-release-manifest.mjs',
+            '--version', $version,
+            '--channel', $env:RELEASE_CHANNEL,
+            '--artifact', $updaterBundle.FullName,
+            '--signature', $signature,
+            '--installer', $installer.FullName
+          )
+          $notesFile = "dist-release/release-notes-v$version.md"
+          node scripts/release/extract-release-notes.mjs --version $version --output $notesFile
+          $arguments += @('--notes-file', (Resolve-Path $notesFile).Path)
+          if ($previous) {
+            $previousVersion = $previous.tagName.TrimStart('v')
+            $arguments += @('--previous-version', $previousVersion)
+            $previousRelease = gh release view $previous.tagName --json assets | ConvertFrom-Json
+            $previousInstaller = $previousRelease.assets |
+              Where-Object { $_.name -match '(\.msi|setup\.exe)$' } |
+              Sort-Object @{ Expression = { if ($_.name -match 'setup\.exe$') { 0 } else { 1 } } }, name |
+              Select-Object -First 1
+            if ($previousInstaller.url) {
+              $arguments += @('--previous-installer-url', $previousInstaller.url)
+            }
+          }
+          node @arguments
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-novel-studio-${{ env.RELEASE_CHANNEL }}-${{ github.ref_name }}
+          path: |
+            src-tauri/target/release/bundle/**
+            dist-release/channels/**
+            dist-release/release-notes-*.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish tagged GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ env.RELEASE_CHANNEL == 'beta' }}
+          body_path: dist-release/release-notes-${{ github.ref_name }}.md
+          files: |
+            src-tauri/target/release/bundle/**/*
+            dist-release/channels/${{ env.RELEASE_CHANNEL }}/release.json
+            dist-release/channels/${{ env.RELEASE_CHANNEL }}/rollback.json
+
+      - name: Publish rolling channel index
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $pointerTag = "updates-$env:RELEASE_CHANNEL"
+          $channelRoot = "dist-release/channels/$env:RELEASE_CHANNEL"
+          $rollback = Get-Content -LiteralPath "$channelRoot/rollback.json" -Raw | ConvertFrom-Json
+          $pointerNotes = "Rolling signed update metadata for the $env:RELEASE_CHANNEL channel."
+          if ($rollback.previousInstallerUrl) {
+            $pointerNotes += "`n`nRollback target: v$($rollback.previousVersion)`n`n[Download the retained previous installer]($($rollback.previousInstallerUrl))"
+          } else {
+            $pointerNotes += "`n`nNo previous installer is available for this channel yet."
+          }
+          gh release view $pointerTag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $pointerTag --target $env:GITHUB_SHA --prerelease --title "AI Novel Studio $env:RELEASE_CHANNEL update index" --notes $pointerNotes
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create rolling release $pointerTag." }
+          } else {
+            gh release edit $pointerTag --prerelease --title "AI Novel Studio $env:RELEASE_CHANNEL update index" --notes $pointerNotes
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update rolling release $pointerTag." }
+          }
+
+          gh release upload $pointerTag "$channelRoot/latest.json" "$channelRoot/release.json" "$channelRoot/rollback.json" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish rolling release assets for $pointerTag." }

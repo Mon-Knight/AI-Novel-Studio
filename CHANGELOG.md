@@ -1,5 +1,254 @@
 # AI Novel Studio - CHANGELOG
 
+## v3.2.0 (2026-08-19) - 本地章节正文流水线与 DSH 稳定整合
+
+### 修复
+
+- 修复 v3.2.0 发布门禁：同步 README 阶段与 Agent Runtime 版本，统一使用 Web Crypto 生成业务/追踪 ID；API Key 不再写入 LocalStorage，旧持久化密钥会在首次读取时迁入当前会话内存并从持久存储移除。
+- 将 Chapter Card 的“保留悬念”内部字段改为非凭据语义名称并兼容读取旧字段，消除安全扫描对小说情节数据的误判而不丢失旧草稿。
+- 将应用 Provider 的直接 `reqwest` 升级到 0.12，并更新可独立升级的 Rust 传递依赖；安全审计限定 Windows 目标，只对 Tauri 1.8.3 updater 固定的 reqwest 0.11/h2 0.3 advisory 保留具名例外。
+- 删除三份只匹配源码字符串、会随换行和封装调整误报的 PowerShell 伪测试；AI Task 删除保留真实 Rust 运行时回归，设定建议与质量工作台继续由现有 React/Node/Rust 动态测试覆盖。桌面启动 E2E 改为验证 migration 至少完整到 031，不再因未来新增迁移而修改写死计数。
+- 将 migration 030/031 纳入正式迁移账本；输出控制方案字段迁移现在兼容缺失基础表、旧版精简表、空数据库和重复启动，并补充动态回归测试。
+- DSH preparation 运行记录改为显式失败关闭：成功提案或失败事实无法写入 SQLite 时不再吞掉错误；相同运行身份可幂等重放，冲突事实会被拒绝。
+- 新增 DSH preparation 用量汇总 IPC，按作品和章节聚合已完成运行的输入 Token、输出 Token 与耗时，失败运行保留审计但不混入成功汇总。
+- DSH preparation 用量账本只提供运行观测，不替代 migration 029 的全局 AI 预算预留、派发与结算门禁。
+- DSH 启动进程和调用 Provider 前，由 Rust 对大纲、章节工程、风格、输出控制、人物状态和 Memory 六类 SQLite 权威修订号重新取值；任一来源读取失败、缺失或发生漂移都会失败关闭。
+- 输出控制方案在 Tauri 桌面端改用 SQLite CRUD，并以一次性、可重试的幂等桥接迁移现有 LocalStorage 数据；浏览器开发模式保持原有 LocalStorage 行为，DSH 网关和前端不再读取不同事实源。
+- DSH 安装载体改为带 `JUNCTIONS.json` 的可重定位 zip：安装后在可写应用数据目录原子解包、重建 pnpm junction 并校验 runtime hash；release 构建拒绝空资源，debug 构建使用 Git 忽略的占位资源。
+- Windows release、PR 质量门和桌面 E2E CI 固定检出 DSH commit `47f943859bef60e4160492346772ded9b24f765a`，冻结安装依赖并构建 host libraries 后才执行 Tauri release profile 构建；空载体继续失败关闭，本地 MSI/NSIS 已验证包含真实 runtime zip 与解包器。
+
+
+## v3.1.0 (2026-08-14) - DSH 进程外大脑接入
+
+> 当前条目包含尚未提交和发布的工作树增量；最终发布状态以完整门禁、提交和版本标签为准。
+
+### 新增
+
+- 新增 DSH（DeepSeek Harness）进程外大脑接入：DSH 只经只读 MCP 工具产出可验证的 `ChapterPreparationProposal`，与现有章节准备 Planner 双源并行；事实解释、策略否决、预算、执行、事务与最终采用权全部留在 ANS（设计文档 `docs/architecture/dsh-feasibility-spike.md`，可行性证据 `reports/dsh-spike/spike-report.md`：12 案例六项门槛全过、盲评胜率 100%）。
+- 新增 Rust DSH Supervisor（`src-tauri/src/services/dsh/`）：stdio JSON-RPC 帧编解码、initialize/prompt/shutdown、崩溃检测、取消=重启语义，子进程树纳入 Windows Job Object（`KILL_ON_JOB_CLOSE`，含 MCP 网关后代）；会话遥测（工具调用、文本/推理、token usage）随事件流记录。
+- 新增 `novel-domain-gateway`（workspace 成员 crate）：MCP stdio 只读网关，暴露 `get_metadata / get_chapter_context / search_memory / get_character_states` 四个只读工具；`SQLITE_OPEN_READONLY`、参数校验、camel/snake 双名兼容、2 MiB 输出上限，输入与输出均拒绝疑似凭据（镜像 `ai_fact_security` 规则并带漂移测试）。
+- 新增 Rust 权威 Proposal Validator：schemaVersion/顶层键/目标章节/baseline 回显/revision 漂移/写动作拒绝全量校验；planner 枚举支持唯一近邻归一（Levenshtein ≤2，写入 `metrics.plannerCoerced`，绝不静默）。
+- 新增 `dsh_prepare_chapter` 命令：驱动 Supervisor 完成 initialize→MCP settle→规划回合，解析失败或校验失败时执行最多 3 次修复回合（回喂校验错误并逐字符拼写枚举），adapter 注入运行时 metrics 后返回类型化提案。
+- 新增本地 OpenAI 兼容模型网关代理（`scripts/dsh/model-proxy.mjs`）：流式透传 + usage 记账日志（预算网关挂钩点）；上游 Key 只存在于代理进程，DSH 侧使用隔离的下游假 Key；命令自动分配空闲端口并管理代理生命周期。
+- 新增 TS 端口：`src/types/chapterPreparation.ts` 类型层与 `ChapterPreparationPlannerPort`；`CurrentPlannerAdapter`（编排现有 readiness 计划并确定性映射，零模型成本）与 `DshPlannerAdapter`（invoke 薄 facade，浏览器模式明确不可用）；TS 镜像校验器与 13 项单测。
+- 写作工作台 AI 生成面板新增“章节准备提案（DSH 融合实验）”卡片：双源切换（当前 Planner 零成本 / DSH 真实 API）、运行计时、提案摘要（目标/场景/人物约束/风险分级/未决问题/建议动作）、度量展示与枚举归一标记；提案不自动采用。
+- 新增章节准备规划 persona 提示词（`prompts/dsh_chapter_preparation.md`）与生产 cordis 组合模板（`scripts/dsh/cordis-template.yml`，六插件、stdout 纯净、零 Key 落盘）。
+- 新增自包含运行时载体：`scripts/dsh/build-runtime-payload.mjs` 把固定版本 harness 运行时装配为 `dsh-runtime/` 载荷（全部包 lib + package.json + node_modules junction 农场 + `VERSION_MATRIX.json`；junction 感知拷贝器 + 构建期目标存在性门禁）；启动解析链 `DSH_RUNTIME_ROOT` → 应用目录 `dsh-runtime/`（或 `resources/dsh-runtime/`）→ `DSH_CHECKOUT`，载荷完整性五判据不足时回退，载荷载体 e2e 实测通过（无 `DSH_CHECKOUT`，真实 API 66s）。
+- 新增逐来源基线修订号接线：六来源真实修订号（大纲 version / 工程 activeVersion / 风格·输出·角色状态·记忆 updatedAt→unix 毫秒）在发起提案前加载并原样回显校验；修订号与章节身份原子绑定防竞态，单来源读取失败降级不阻断（结构化告警），记忆源只取 active 文档。
+- 修复网关只读查询两处语义：工程状态按 `status='active'` 选取（原 `active_version=1` 误把版本号当布尔，真实库上下文 2386B→7300B）；角色状态修订号改读 `MAX(created_at)`（表无 updated_at）。
+
+### 安全与一致性
+
+- API Key 全程零落盘：只经环境变量注入 DSH 子进程；启用本地代理时上游 Key 仅存在于代理进程，DSH 进程拿到的是隔离假 Key。
+- 提案校验失败、越权写动作、revision 漂移、超长文档一律整体拒绝；修复回合成本如实计入 metrics 与代理记账日志。
+- 网关以只读模式打开小说库，不执行迁移/恢复/写入；DSH 会话（推理轨迹）与小说事实分离，可整目录删除重建。
+- Supervisor 崩溃/取消通过 Job Object 整树回收；测试与端到端运行后零残留进程、代理端口释放。
+
+### 工程质量
+
+- `cargo test dsh::` 13 项全绿（Supervisor 生命周期/强杀重启续会话、Validator 全量规则含 spike 失败样本归一、网关漂移与凭据检测）；`cargo check` 零警告。
+- 真实 API 端到端（`deepseek-v4-flash`）：Rust 命令 → DSH 运行时 → MCP 网关（真实开发库只读）→ 本地代理 → DeepSeek → 校验通过的提案，单案例约 20.6k tokens，断言全过（`#[ignore]` e2e 测试，显式运行）。
+- TS 侧新增 18 项单测（镜像校验器 9 + 确定性映射 3 + 卡片行为 5 + 既有配套）；`tsc` 零错误、`eslint` 零告警、`npm run build` 通过。
+- 统一版本为 `3.1.0`（npm、Tauri、Cargo、应用常量、路线图与发布文档）。
+
+
+## v3.0.0 (2026-07-28) - Multi-Agent 自主创作闭环
+
+> 当前条目包含尚未提交和发布的工作树增量；最终发布状态以完整门禁、提交和版本标签为准。
+
+### 新增
+
+- 增加本地逐 Beat 正文的手动重跑断点：用户重新启动失败章节时，只复用同一冻结上下文哈希、同一本地模型路线和同一 Scene/Beat 顺序下持久化的最长连续合格前缀；每个候选 Beat 必须先按当前字数、required 事件、重复与跨 Scene 连续性门禁重新验证，首个不匹配处及其后全部重新生成，并在新作业步骤中记录来源 job，不自动重发中断请求。
+- 扩展手动重跑断点到旧 failed 作业的不可变外部 Beat 修稿 Artifact：仅当正式 Task 已完成、Artifact 有效、`generationJobId/contextHash/Scene/Beat` 身份一致且 `finish_reason=stop` 时，才按当前安全边界裁剪并交给编排器完整复验；校验规则修正后可零 Token 接管曾被误判的正文，`length` 截断、兼容投影摘要或来源漂移均失败关闭。
+- 增加独立的本地章节 Scene 正文生成路由：可配置本地 OpenAI-Compatible 模型，仅接管章节首次生成与 Autonomous 候选正文，不自动回退到外部 Provider。
+- 增加 `chapter_scene_generate` 编译契约、`scene_text` 候选产物类型，以及 qwen35-9b-novel-v3 的单 user / 4096 context / 1024 output 协议。
+- 本地章节请求支持并审计 `top_p`、`top_k`、`repeat_penalty`、`seed` 采样参数；本地模型成本保持未定价状态。
+- 新增有序 `SceneBeat[]` 数据契约与旧 ScenePlan 字段归一化；章节工程支持全局 Provider 生成 `chapter_scene_plan_generate` JSON 候选，用户确认保存或应用后才写入工程状态。
+- 新增统一 Chapter Prose Orchestrator：常规生成、章节工程任务和 Autonomous 候选共享逐 Scene 串行编排、前一场景状态胶囊、每 Scene 任务审计、required Beat 覆盖/连续性/截断校验及合并草稿边界。
+- 设置中心新增本地模型 `/health`、`/v1/models` 与短场景 smoke 检查；本地模型使用独立串行队列，服务不可用时不静默回退外部 Provider。
+
+### 修复
+
+- 修复 required Beat 语义门禁与超长外部修稿的两个真实误判边界：分句有序覆盖现在通用识别“并成/并表/整理成结构化集合”、稳定口径，以及外部角色的制止/审视/追问等警觉反应，同时不会把主角自身观察误作对手警觉；`finish_reason=stop` 的超长修稿在前缀或逐段删减无法安全收束时，会按原顺序搜索有界的完整句/段子集（最多 120,000 个状态，优先保留首尾），每个候选都重新执行 required Beat 完整动作、篇幅、重复与跨 Scene 连续性门禁，无合法候选仍失败关闭。
+- 修复跨进程自主调度的质量门禁越过用户确认直接采用正文：`draft_night` 与 `quality_gate` 现在都只产生未采用的 `candidate_ready`，后者即使六专家指标达标也必须携带 `userConfirmed` 显式晋级；只有 `full_auto` 在冻结质量、预算与目标复验通过后才自动采用并确认章节分析。
+
+- 修复外部章节质量修稿返回完整 `revised_content`、但某个局部 `before` 因标点或措辞轻微偏差而整轮失败的问题：精确替换无法应用时，仅允许依据唯一质量问题锚点和同段落结构的完整修订见证恢复确定性局部补丁；无完整见证、问题锚点不唯一、段落结构变化或改动越出问题段落时继续失败关闭，并新增真实失败形态回归测试。
+- 修复本地 Beat 两次校验失败后外部定点修稿遇到可重试的 429/5xx/超时就直接终止整章的问题：同一逻辑修复轮现在最多进行 2 次传输尝试并复用任务身份，成功后才进入 Beat 校验，不重复本地 Beat 调用；同时修复真实章节生成链路遗漏传递前一章未采用候选上下文的问题，保证断点续跑和跨章连续性。
+- 为真实章节生成增加无正文消耗的本地模型预检：正式编译上下文和逐 Beat 请求前只调用 `/health` 与 `/v1/models`，不执行 smoke 生成；服务离线或模型身份不匹配时在 preflight 阶段显式失败，避免等待到首个 Beat 才发现配置不可用。
+
+- 将章节生成任务与检查面板的整章质量闭环收敛到同一服务：已有未采用草稿和首次评分报告可直接进入“问题绑定修稿 → 保存未采用候选 → 复评”，不再为了重试质量阶段重新生成 Beat、复制同文草稿或重复首评。Provider 已完成并持久化 `changed_ranges`、但进程在候选保存前中断时，可从源草稿确定性重建补丁，不再次调用外部修稿；目标草稿与复评报告均使用稳定身份保存，仍失败则保留候选并转人工处理。复评结果无论是否提高都会进入不可变质量历史，质量修稿候选不会提前过期正式采用稿的章节/分卷上下文，也不会自动采用。
+- 将外部整章评分和质量修稿的结构化输出治理改为紧凑预算：DeepSeek V4 flash/pro 的这两类 JSON 任务均关闭高成本 thinking；评分上限由 20000 收敛为 8192，修稿按 1～8 个问题动态预留 2048～7168（硬上限仍为 8192），减少 32K 路由上的预留冲突与等待时间，不改变本地 Beat 的 1024 output 训练契约。
+- 修复本地正文整章评分未达标后的唯一外部质量修稿仍为 DeepSeek V4 启用高思考、并以约 17k 输入叠加 16k 输出预算越过常见 32k 上下文边界的问题：质量修稿现显式关闭该模型的 thinking，紧凑 `changed_ranges` JSON 输出预算收敛为 8192；同时修正 `quality_fix_runs` Tauri 参数封装并取消桌面端静默降级，确保修稿轮次、失败原因和唯一轮次门禁可靠写入 SQLite。
+- 修复最新真实诊所修稿用“录了下来”“脉冲节律”完成接口取证，却因词形未覆盖而被误判缺少记频的问题；同时收紧“目光落在备用监测口”的警觉归一化，避免把主角观察接口误当作技师起疑并跨段吞掉真实触碰、记录与离场事件。新增完整 Artifact、跨 Scene 连续性、安全裁剪和明确未获数据的负向回归。
+- 修复最新真实诊所 Artifact 已写出“跟随技师进入检查室并贴电极启动、指尖按在备用接口、把频率数字记在收据、技师审视挡门、下楼推开临街铁门”，却被误判缺少检查、触口记频和警觉离场的问题；新增高置信等价动作与明确否定触口回归，模型真实未触碰或未记录时仍不能通过。
+- 修复断点续跑后的新真实诊所 Artifact 中，“摸到松动插孔。随后记下接口旁频率”被跨句触口正则错误合并、吞掉“记下”动作，导致有序事件游标被后文重复频率推进到离场之后的问题；触口与否定触口现在都只在同一句内关联监测口/接口，并补充“具名技师小周引导检查、看到缩回的手后制止、林舟下楼离场”的完整回归，未触碰、未记录或技师未察觉仍不能通过。
+- 修复最新真实 Scene 2 / Beat 1 外部修稿已完成“以失眠为由入诊、坐到仪器前并戴电极启动检查、技师抬头制止和皱眉后立即离开诊所”，却因只写“椅子”且未直说“警觉”而被误判、无法在 500–750 有效字内安全收束的问题；新增的高置信等价规则同时要求医护引导就位、电极启动，以及医护明确制止后人物真实离场，仅在门外、未接受检查或无人察觉时仍失败关闭。
+- 修复真实外部 Beat 修稿已经完成“敲门、孙婶开门邀请、林舟进屋落座”，却因“进来坐”没有显式宾语而被误判缺少走访的问题；新等价规则同时要求计数敲门、被访者邀请进入和主角实际落座，只停在门外或门链未解仍失败关闭。
+- 修复章节真实重跑在后续 Beat 失败后总是丢弃 `generation_step_results` 中已经通过的前置 Beat、从 Beat 1 重做全部本地/外部调用的问题；同上下文同模型的显式重跑现在从首个问题 Beat 继续，真实第二章现有历史可安全复用前两个连续 Beat。
+- 修复第三章实际前的 Scene 2 / Beat 1 外部修稿虽已写出“躺上诊床、贴电极、摸向备用监测口、录下脉冲、发现干扰、推开玻璃门离开”，却因训练分布中的动作表达未进入等价词表而被全部判缺的问题；新增患者检查、物理触口、脉冲记录、仪器异常警觉和玻璃门离开映射，并以完整真实 artifact 增加回归测试，仍保留“仅远观接口、无警觉或不离开”失败门禁。
+- 修复真实 Beat 2 外部修稿已写出“决定明天亲自去一趟，以患者身份混进去看看”，并在下一段实际换装进入海葵记忆诊所，却因决定句省略重复出现的诊所名称而被误判缺少“次日伪装成患者进诊所调查”的问题；有序门禁现在识别“未来时间 + 患者身份 + 混入意图”这一高置信决定表达，仍要求此前分句已经按序建立海葵诊所、封存与维稳证据，只有路过或明确不进入仍不能通过。
+- 修复最新真实外部 Beat 修稿已经收到 v4 的 700–750 有效字、700–930 原始字符与 8 段合同，仍以 `finish_reason=stop` 在 565 原始字符 / 483 有效字 / 7 段提前结束的问题：v5 合同把有效字目标推到动态硬上限，把原始字符脚手架提高为 800–1050，并严格要求 10 个至少含两个完整句子的实质自然段；计数不确定时允许正常结束地轻微超写，再由既有完整句边界裁剪回 500–750 字。外部定点修稿仍最多调用一次，短稿、截断或裁剪后语义不完整继续失败关闭。
+- 修复真实外部单 Beat 定点修稿虽在完整 Artifact 中写全 required Beat、却把末尾“技师警觉后离开诊所”拖到 750 字裁剪线之外的问题：最终合同现在要求在动态上限 65% 前完成全部事件与终态、开场铺垫不超过 80 个有效字，并把请求区间收紧为动态上限前 50 字至动态上限，同时为标点换行预留 180 个原始字符；最终编译 user 指令也使用同一 700–750 有效字目标与 930 原始字符上限，不再回落到 625/500/830；写完终态后仍必须用当前 Beat 内动作阻力、现场感官、即时反应或短对白补足最低字数，不能在 500 字前提前结束；“接触备用监测口 + 记下频率”同时加入高置信有序语义锚点，只有远观接口或只记频率仍不能通过。
+- 修复最新真实外部 Beat Artifact 已明确写出“明天一早去海葵诊所、以长期失眠为由挂号进去调查”，却因该决定跨句表达而被误判为缺少次日伪装潜入的问题；高置信等价动作现在同时要求未来时间、目标诊所、患者借口以及挂号/进入意图，只有门外路过或明确不进入仍不能通过。
+- 修复 DeepSeek 外部 Beat 修稿虽收到 700–750 有效字要求、仍以 `finish_reason=stop` 在 322 有效字结束的问题：最终合同增加 700–930 原始字符双门槛和 8 个实质自然段的可执行篇幅脚手架，并去除已接受前文与上一 Beat 的重复注入；仍只允许一次外部修稿，低于 500 有效字继续失败关闭。
+- 修复真实外部 Beat 修稿以“孙婶家窗户正对货运巷、她给林舟倒水”直接建立屋内走访场景时被误判缺少“走访孙婶”的问题；句首人物住处的窗户现在可作为高置信场景锚点，并先消除“没有/未/不曾登门”等否定表达，再应用正向拜访等价词，因此在巷口远望窗户并明确未登门仍不能通过。
+- 修复复合 required Beat 分句门禁把“影响稳定”误判为缺少“维稳”、把技师检查异常接口后主角推门脱身误判为缺少“警觉/离开”、把填写日期地点等结构化事件信息误判为未“补录”，以及开场用“孙婶家的门”建立拜访场景时把走访游标错误推到证词之后的问题：覆盖比较会先归一化受限的高置信语义等价动作，并把 required 分句中的关键概念设为强制有序锚点；真实诊所修稿中的“递病历卡、坐检查椅、贴电极”“默记脉冲周期”“辅助通道波动后挡路”“推门走进夜风”也分别识别为患者检查、记频、警觉与离开，“第二天换装、练习失眠说辞并实际推门进入诊所”识别为次日潜入决定；只有“封存”而没有稳定口径、只有离开而没有警觉、只有警觉而未离开，或仅提到记录但未执行填写/提交动作的正文仍会失败关闭。
+- 修复复合 required Beat 仅命中任意两个短语就被误判为完整覆盖的问题：覆盖门禁现在按逗号/分号拆分有序事件与终态分句，逐句要求正文锚点；真实测试中“多户并表、海葵诊所、市政封存、维稳”已出现但“次日伪装潜入”被收束裁掉的候选将明确失败，不再进入整章评分。
+- 修复外部单 Beat 定点修稿虽完整生成必需事件、却因最终 user 指令未重复动态硬上限而扩写超长，随后前缀自然收束裁掉 Beat 终态的问题：最终指令现在直接携带 500 字下限、动态上限和完整 required Beat，并将该任务温度上限收紧到 0.35（保留更低用户值）；仍只调用外部 AI 一次，收束后语义不完整仍失败关闭。
+- 修复真实外部单 Beat 修稿在 DeepSeek V4 默认 high thinking 下耗尽 32k 输出 Token、约 270 秒后仍以 `finish_reason=length` 失败的问题：仅对 `deepseek-v4-flash/pro` 的 `chapter_beat_repair` 治理合同显式发送 `thinking: { type: "disabled" }`，并把只输出 500–900 字正文的最终预算收回 4k；`thinkingMode` 同步进入不可变 Provider 选项快照，其他 OpenAI-Compatible 模型不接收 DeepSeek 专用字段。
+- 修复外部单 Beat 定点修稿正常结束但越过动态篇幅上限时整章直接失败的问题：提示目标为硬上限预留 50 个有效叙事字，且仅对 `finish_reason=stop` 的超长结果按最后一个安全句末或段落末收束；收束后重新执行最低字数、required Beat、重复和跨 Scene 连续性门禁，无安全边界、关键内容被裁掉或 `finish_reason=length` 时仍失败关闭，不增加外部调用次数。
+- 为外部 AI 单 Beat 定点修稿增加独立执行合同与最低 300 秒任务级超时，避免误用整章生成的 12k 输出预算或继承全局 120 秒导致推理模型截断/超时；最终正文仍按动态 Beat 字数上下限校验。
+- 统一外部单 Beat 修稿的字数口径：汉字与字母数字计入有效叙事字数，标点和空白不计；提示目标在 500 字硬下限上预留 100 字缓冲，避免外部模型按含标点字符数提前结束后被门禁拒绝。
+- 修复真实本地 Beat 只校验 500 字下限、未执行 900 字上限而把 2500 字章节膨胀到 3739 字的问题：按章节目标和 Beat 数计算 500–900 字内的动态上限（2500 字 / 4 Beat 为 750 字），过长正文与提前出现的“本章完/全文完”均触发同一 Beat 的有界完整重写。
+- 修复首 Beat 只读取过度简化 Scene 胶囊导致主角职业身份漂移的问题：在 4096 context 内同时注入场景胶囊和冻结章节上下文的头尾压缩片段；Scene 规划候选也必须把主要角色身份、开场状态和不可变事实写入 contextCapsule。
+- 修复真实 Scene/Beat 规划在推理型外部模型上连续出现空内容或 6000-token 截断的问题：规划契约改为紧凑 JSON、输出预算提高到 12000 tokens，并对空响应、截断和无效候选执行最多 3 次有界安全重试；重试仍只产生待确认候选，不直接修改章节工程。
+- 优化逐 Beat 连续性输入与采纳门禁：本地模型在 4096 context 内读取本章已接受正文的紧凑前缀和明确的 500–900 字目标，外部定点修稿读取完整已接受前缀并检查事实冲突、同类信息重复和节奏堆叠；当前 Beat 若大段复述已接受前文或把 Beat 规划句原样夹入正文，会先触发本地完整重写，避免跨 Beat 重复引入秘密、证据或摘要残留。
+- 修复真实逐 Beat 生成中仅把 500–900 字写入提示词、却未在采纳校验中执行最低 500 字门槛的问题；短 Beat 现在会触发且最多触发一次本地完整重写。
+- 补齐本地 Beat 两次仍未通过后的外部 AI 定点修稿：每个问题 Beat 最多外部重写一次，并复用 500 字、截断、覆盖与连续性校验；该合并前救援不再错误占用已保存源草稿的唯一质量修稿轮，整章首轮评分失败后仍可执行一次问题绑定的局部修稿并重新评分。
+- 将外部质量评分的独立输出预算从 12000 提高到 20000 tokens，并把评分请求最低超时提高到 300 秒，避免推理模型在 JSON 评分输出前因 `finish_reason=length` 被截断。
+- 修复作品详情页一次请求 6 个章节大纲时容易触发 `finish_reason=length` 的问题：默认批次缩为 3 章，单章大纲和总响应增加明确输出预算，目标字数改为 2500，并在生成后自动定位候选结果。
+- 修复章节工程刷新时旧草稿版本优先于较新 active 版本加载的问题，避免后续保存把已应用的 Scene/Beat 回退为过期内容。
+- 修复章节工程应用 Scene/Beat 候选后仍显示“待确认候选”的状态残留，避免用户误以为候选尚未应用并重复提交。
+- 修复推理型外部模型在质检/定点修稿 JSON 输出前耗尽预算的问题：质检和修稿分别使用 12000/16000 output token，定点修稿最低超时提高为 300 秒，并限制质检最多 8 个合并问题、修稿返回紧凑 JSON；本地 Scene 模型仍保持 1024 output token 训练契约。
+- 修复外部质量修稿虽然返回 `changed_ranges`、实际却仍以完整重写正文落地的问题：现在只接受绑定待处理问题的唯一 `before → after` 替换，并在不可变源草稿上确定性合成；歧义、重复、未绑定或重叠替换全部失败关闭。质量面板与章节生成任务共用同一范围门禁和 300 秒超时，每个源草稿持久限制为最多一轮外部修稿。
+- 修复桌面端访问 loopback 本地模型时继承系统代理导致健康检查 502 的问题，并兼容 llama.cpp `/v1/models` 的 `models[].name` / `model` 返回形状。
+- 修复本地模型达到 1024 输出上限后的 Scene 响应 metadata 归一化；`finish_reason=length` 直接判定为未完成，单个生成单元最多执行“首次生成 + 1 次完整重写”。
+- 修复本地正文生成偏离训练粒度的问题：外部候选按 2000–3000 字章节规划总计 3–5 个有序 Beat，每个 Beat 目标 500–900 字并独立执行一次单 user / 4096 context / 1024 output 本地调用；单 Beat 首次失败最多完整重写一次。
+- 新增本地正文质量门禁：外部 Provider 评分须达到 80 且 pending critical/high 为 0；不通过时最多执行一轮外部定点修稿并重新评分，仍不通过则保留候选并转人工处理，不自动采用。
+- 修复 Tauri 返回的 camelCase 工程 JSON 字段未归一化的问题，避免已保存的 Chapter Card、Scene Plan、约束和质检规则退回通用占位 Beat。
+
+- 新增情节、角色、设定、逻辑、语言和整体质量六类专家，使用当前 Mock 或真实 API Provider 并行评审章节草稿。
+- 新增确定性共识算法：最小成功专家数、接受率和平均分共同决定 `accept / revise / regenerate`，Rust 在持久化前根据专家意见独立复算。
+- 新增主编 Agent 候选修订链路。未通过时生成新的未采用草稿版本，下一轮评审真实的新正文；达到最大轮数后明确保留未接受状态。
+- 新增 migration 021～023，持久化 `multi_agent_sessions`、`multi_agent_rounds` 和 `multi_agent_opinions`，支持 operation 重放、顺序约束、草稿归属校验和终态重放。
+- 写作工作台新增“协作”面板，可选择专家、轮数和阈值，启动或取消评审，查看历史 session、逐轮共识和专家意见，并显式载入候选草稿。
+- 新增八份独立 Markdown Prompt 模板、确定性编排/解析测试、React 面板测试和 Rust 事务测试。
+- 新增 Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller，从小说 Brief 生成 12～500 章的故事圣经、人物弧、世界、冲突、节奏、分卷和连续章节计划。
+- 新增自主创作规划工作台。世界/冲突/节奏三类 Agent 并行执行；Chapter Batch Planner 将每卷拆成最多 5 章的子批次，每批成功后立即保存章节与 CAS 检查点，失败后从连续已保存范围继续，不重复调用成功批次。
+- 新增受审核逐章执行：生成下一章候选、六专家评审、最多三轮修订、用户工作台采用、计划进度推进和下一章选择。
+- 新增用户显式启动的全书候选队列，按章节串行生成，支持暂停 / 继续，跳过已有 `candidate_ready / adopted` 章节，并显示已有候选数 / 总章节数。
+- 全书队列将前一章候选作为临时连续性上下文，同时保存前序草稿 ID 与正文 hash；临时上下文不写入正式章节事实。
+- 自主规划候选使用 `chapterId + draftId` 精确打开写作工作台；工作台定时刷新卷章状态，当前空章节在后台生成完成后自动载入，存在未保存正文时保持编辑器原状。
+- 长章节润色与质量检查改为最多 7,000 字符分段处理，携带前后 400 字衔接参考；润色按原顺序合并，质检按段长加权并将 offset / 段落索引还原为全文位置。
+- 长章节质量修稿按问题位置只处理命中的连续分段，未命中正文逐字符保留；章节总结改为完整正文 map-reduce，并移除工作台 3,000 字符与 Autonomous 12,000 字符的上游截断；章节改写与卷总结也不再静默丢弃后半部分。
+- 新增章节收束候选：从已采用正文提取章节总结、人物变化、新地点与世界规则候选；用户确认前不写正式上下文，世界条目继续保持待确认候选。
+- 新增 migration 024 `autonomous_story_plans`，保存 request hash、revision、计划 JSON/hash、阶段、进度、Agent 运行和逐章运行状态。
+- 新增统一 `AiStreamEvent` 与 OpenAI-compatible SSE 管线：浏览器 `ReadableStream` 和 Tauri Rust 均支持跨 chunk UTF-8、按 requestId 有序 delta、最终 usage/finish reason 聚合及取消；正文生成在请求结束前显示临时候选预览。
+- 新增 AI usage 成本估算：设置中心可配置输入/输出 USD / 百万 Token 单价，任务创建时冻结价格；`ai_task_records`、正式 Provider response metadata 和章节生成 step 保存 `complete / mock / unpriced / usage_missing` 状态，AI 任务页展示单项成本与当前列表已计价合计。
+- 新增独立 TXT 参考资料库：migration 025 持久化 `reference_works / reference_imports / reference_sections`，记录原始字节 hash、解码正文 hash、编码、解析器版本、UTF-16 章节边界与显式重复导入决策；参考作品不进入小说卷章树。
+- 新增长文本分层风格画像：确定性覆盖开篇、发展、对话密集、描写密集、高潮和收束，保存模型、Prompt 版本、来源 hash、采样范围及字段置信度；生成侧只读取抽象画像，不持久化或注入参考原文片段。
+- 作品详情新增“参考资料库”入口和独立桌面工作区，支持版本切换、CAS 冲突保护、来源删除、可取消的画像分析及画像来源状态展示。
+- 新增 migration 026 混合语义 Memory：`memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs` 保存带版本和 hash 的采用稿来源、结构化片段、显式真实向量及不可变检索审计；采用稿改变时旧 Memory 与正文改采在同一事务内失效。
+- Memory 检索支持小说作用域内的 FTS5 / substring、实体与时间过滤、真实向量余弦重排、importance / recency 综合评分、分页和硬 Token 预算；没有向量或 FTS5 时显式降级，不生成伪 embedding。
+- 设置中心新增每分钟请求数、并发数、每日 Token / 估算成本硬预算和预警阈值；请求派发前先做保守预留，超限请求不会进入 Provider，缺少完整单价时不能启用成本硬预算。
+- 写作工作台新增 Zustand 会话状态，统一持有作品、卷章、当前草稿、编辑器、质量检查和 AI 弹窗状态；切换作品时原子重置会话归属，避免跨作品残留。
+- 新增 migration 027 跨进程 Autonomous Scheduler：持久 `book_run / lease / attempt / checkpoint`，使用 owner、单调 epoch、heartbeat、CAS、重试、熔断、预算和时间窗恢复中断任务，并提供夜间草稿、质量门禁、全自动三档策略。
+- 新增 migration 028 多目标事务与正式故事资产：冻结目标集合、base revision/hash 与 candidate hash，在单个 `IMMEDIATE` 事务中执行 `all_or_nothing / reviewed_partial` CAS；跨章节批处理只更新受限 metadata，不绕过正文草稿和采用指针。
+- 新增自主创作续写协议：读取卷章、角色和世界设定基线，按最终章节号生成增量计划，支持新建分卷或接续最后一卷；应用前复验基线 hash、卷序、章节 ID 和引用，既有卷章不会被覆盖。
+- 自主创作六类 Agent 统一接入 `executeAiTask` 与生产编译注册表；直接绕过治理边界的自主任务请求会失败关闭，并新增架构说明 `docs/project/ai-generation-governance.md`。
+- 主章节生成路径统一接入 `executeChapterGeneration` 与生产编译注册表；写作工作台和 generation job 共享编译、取消、流式事件和候选 Artifact 边界，历史直接 Provider 调用对 `chapter_generate` 失败关闭。
+- 修复风格分析 Prompt 的构建期加载与字段契约校验，避免运行时静默回退到不完整 Prompt。
+- 新增势力、地点、势力关系、地点连接，以及角色/章节/章节事件与势力或地点的正式关系表；地点父子图按拓扑顺序写入并拒绝环。
+- 作品资产中心新增“势力与地点”工作区，可创建和审核正式资产候选、显式选择跨章节批处理子集，并查看事务历史；浏览器开发模式明确保持只读，不伪造 SQLite 事务。
+- 完整项目备份升级至 schema 9：schema 8 加入调度运行事实，恢复时把 `running / active / claimed` 分别收敛为 `queued / expired / abandoned` 并重算身份与 hash；schema 9 加入全部正式故事资产及关系，按父子拓扑恢复地点。
+- 设置中心新增 Stable/Beta 更新通道、显式检查、签名安装进度和回滚入口；Tauri 1 updater 在安装前重新核对通道与版本，发布流水线注入 minisign 公钥/私钥并生成静态 updater、release 与 rollback manifest。
+
+### 安全与一致性
+
+- 修复真实 OpenAI-compatible API 调用的三处边界：连接测试的 TypeScript 编译器与 Rust 持久化校验共同读取冻结策略，统一使用 `temperature = 0`、128-token 输出预算，以兼容推理型模型并避免旧 8-token policy 被误用；章节规划保留至少 600 秒客户端超时，同时将原先可能一次请求 30 章的长响应降为最多 5 章、2,100～4,500 token 的子批次；自主创作与 Multi-Agent 每次网络尝试使用经清理、限长并带摘要的唯一传输 ID，避免继续操作命中 `AI_REQUEST_ID_RECENTLY_SETTLED`。API Key 与持久设置保持不变。
+- Rust 与浏览器路径在响应正文读取阶段保留 timeout 分类；非超时正文中断会明确报告“上游服务在响应完成前中断连接”，任何 `finish_reason=length` 响应（包括非空部分正文）都会被判定为未完成并丢弃。错误路径不暴露 Provider 正文或推理内容。
+- Chapter Batch Planner 不再固定截取首个 Markdown fence 或首尾大括号：解析器会逐一检查字符串与转义感知的平衡 JSON 候选，优先选择包含 `chapters` 的最完整对象，并仅受控修复字符串外的尾逗号；章节数量、连续编号和引用校验继续严格失败关闭。解析失败只记录 finish reason、响应字符数和输出 Token 数，不持久化 Provider 正文。
+- 修复 `update_volume` 与 `update_chapter` IPC 将 `id`、`status` 和 `volume_id` 拼接进 SQL 的注入风险；改为固定 SQL 与参数绑定，并在 Rust 边界验证分卷/章节状态白名单。
+- 新增恶意 `id`、`status`、`volume_id` 回归测试，证明构造输入不会修改其他分卷或章节，同时保留含单引号合法文本的更新能力。
+- 草稿不存在、版本变化、完整正文不可用、正文为空或超限时失败关闭，不再使用占位正文。
+- 单专家失败被记录为失败意见；未达到 quorum 时不能接受。空专家、零轮次和伪造共识均被拒绝。
+- 候选只保存为草稿，不自动采用；载入候选前经过工作区离开保护，当前编辑器不会被后台结果静默覆盖。
+- 完整项目备份先以 schema 6 加入参考作品，以 schema 7 加入四张 Memory 表，现升级为 schema 9 并纳入跨进程调度和势力/地点正式资产；恢复会重映射身份、复验来源与 hash，并继续兼容 schema 2～8 的历史能力边界。
+- 应用全书计划必须由用户确认；桌面端在一个事务内创建卷、章、角色、世界设定、必需冲突事件和章节角色关系，重放时复验全部物化目标。
+- 页面恢复会按权威采用稿修复计划进度并重启缺失的章节分析；改采不同草稿会清除旧分析和已确认人物节点，避免旧结论继续生效。
+- 章节正文生成成功后立即把源草稿 ID 和 generation job 写入自主计划检查点；后续质量检查、专家评审或进程中断时可复用已保存正文，不重复生成。
+- 写作工作台按章节与草稿双重身份读取候选，并继续复用大文本原子协议：正文超过 100 KiB 时写入 `large_text_documents / large_text_chunks`，完整正文校验失败时不以预览替代。
+- 移除润色和质量检查对正文前 8,000 字符的静默截断；分段缺失、空结果、异常短结果或全文位置映射异常时失败关闭。
+- 全局 `runWithLoading` 现在以 operationId 持有真实 `AbortController`；大纲、设定、角色、事件、风格、润色、质检、修稿和总结等独立 AI 入口统一传播 signal、请求 owner 与取消结算。AI 任务中心可停止当前进程持有的运行任务；自持 controller 的面板会在卸载/目标变化时中止，其他全局 operation 在完成时复验原始目标，迟到结果不能污染新目标，`cancelled` 终态也不被迟到成功复活。
+- 正式 `ai_tasks` 以相同 task ID 幂等投影到兼容任务中心 `ai_task_records`，使候选草稿外键、任务可见性、停止 owner 和成本结算保持同一身份；系统级任务不写伪造作品外键，同 ID 不同归属失败关闭，重复投影不替换终态父记录。Provider 停止后完成两阶段取消，同任务的全部进程内 owner 都会收到停止信号，失败任务重试时兼容投影恢复运行态；迟到响应与无效 Artifact 会同步结算为取消或失败。任务中心和 Rust 删除命令共同保护等待/运行记录，避免执行期间清空草稿 provenance。
+- 流式 delta 仅进入瞬时预览缓冲；无完成标记 EOF、非法帧、`finish_reason=length`、取消或空正文均不创建成功草稿/Artifact，只有完整最终响应可沿既有原子协议保存未采用候选。
+- 成本快照使用用户配置价格而非 Provider 自报价格；缺价格或缺 usage 时保持显式未知，Mock 才固定为零。Rust 校验币种、来源、状态组合和数值范围，篡改或不一致 metadata 在 Artifact 写入前失败关闭。
+- 新增 migration 029 桌面全局 AI 请求治理：单例 revision 策略、滚动分钟窗口、跨进程并发、每日 Token/定点成本与 owner/TTL reservation 全部由 SQLite `IMMEDIATE` 事务裁决；Rust Provider command 强制复验 request-bound 哈希 lease 并只允许一次派发。snapshot 不隐式建策略，设置页固定首次观察的 CAS revision；UTF-8 字节上界与 chat envelope 避免输入低估，实际 usage 超预留仍全量入账。结算可幂等重放，派发和终态计量字段由 trigger 冻结；失败、取消、缺失 usage 和 TTL 回收保守计量，未定价成本保持显式未知。浏览器开发继续使用 LocalStorage 回退并对失败/过期执行相同保守计量，桌面 IPC 错误不降级。
+- 统一 npm、Tauri、Cargo、应用常量、路线图、测试说明和发布文档版本为 `3.0.0`。
+
+### 工程质量
+
+- Autonomous Scheduler 的执行接管固定在应用入口：`main.tsx` 在全局错误处理就绪后幂等接管后端确认可恢复的 run，规划页 Hook 只刷新当前计划；Rust 数据库初始化与前端入口连续执行恢复扫描时，后端会重新返回全部持久 `queued` run，避免首轮恢复结果被初始化阶段消费后无人获取新 lease。桌面 Worker 每 15 秒执行一次互斥恢复扫描，使应用在旧进程 lease 尚未到期时重启，也能在 lease 到期后自动获取更高 epoch；已持 lease 的 Worker 若在 claim 前发生未处理异常，会先 heartbeat 复验 owner/epoch，再以 CAS 暂停 run 并释放 lease，已被新 epoch fencing 的旧 Worker 不会暂停替代 owner。新增 SQLite 回归同时断言 claim 前失败后的 run 为 `paused`、lease 为 `released`、最新 checkpoint 为 `run_pause`，且 Attempt、AI Task 与 generation job 均保持 0。浏览器模式继续保持零持久化调用。
+- 抽离无执行管线依赖的 AI 设置持久化模块，任务价格快照不再通过动态导入重建 `aiTaskService → aiSettingsService → aiExecutionPipeline` 循环；统一清理 Tool Registry、Repository 与 Scheduler 的无效静态/动态重复导入，生产构建相关告警归零，同时保留 Autonomous 章节运行时按需加载。
+- Vite 新增稳定的 React、Router、Zustand、Tauri vendor chunk 和构建 manifest；`test:bundle-size` 以真实文件字节和 gzip-9 双门槛失败关闭，并校验单一入口、全部 JS 归属和稳定 vendor 名称。入口由 527,482 B / 171,797 B gzip 降至 324,172 B / 104,328 B gzip-9；快速 CI、Windows 质量门和签名发布均执行该门禁，签名发布还显式依赖可复用的完整 Windows 桌面 E2E。
+- 新增生产 AI 请求静态门禁：使用 TypeScript AST 扫描全部非测试 TS/TSX，`client.generate` 与 `createAiClient(...).generate` 必须显式传递非空 `AiGenerateOptions`；零命中、缺参、`undefined` 或 `null` 都失败关闭，并以负向夹具防止门禁退化。
+- 编辑器高频输入改为单次 `setEditorActivity` 原子 Store 更新；卷树和 AI 任务卡使用稳定 memo 边界，任务轮询 reconciliation 保留未变化对象引用，并以渲染身份预算测试防止无关卡片/树节点重复渲染。
+- 大纲加载/采用、AI 草稿采用和工作区刷新失败统一进入脱敏诊断与桌面错误呈现；Provider 失败后的 reservation 结算异常只记录次级诊断并保留原始 Provider 错误，Provider 成功但结算失败则扣留结果、保持失败关闭。
+- 浏览器 Light/Dark E2E 在 Splash 移除后解析真实 WebDriver PNG，校验亮度分位数、不透明率、颜色桶和每页明暗均值差，不再只以 DOM 属性或 computed style 代替像素证据。
+- Rust 原始 `println!/eprintln!/dbg!` 已收敛到唯一结构化 stderr sink；任务删除、读取、质量检查和启动日志不再输出数据库路径或原始实体 ID，`test:rust-logging` 及负向夹具阻止新增旁路日志。
+- 新增 `docs/feature-gap-analysis-v3.0.0.md`，以当前代码和 schema 逐项核验流式输出、参考小说、风格画像、无人值守、语义 Memory、跨章节检索、多目标放置、可靠取消及势力/地点资产九类缺口；校正“风格画像完全缺失”“取消仅覆盖 generation_jobs”“只存在简单全文检索”和“每章均需单独触发生成”等过时结论，并给出依赖、验收门禁和建议版本顺序。
+- 开启 TypeScript `noUnusedLocals`、`noUnusedParameters` 与 `noImplicitReturns`，同时收紧 `tsconfig.node.json`；修复严格检查发现的风格方案和输出方案删除未实际执行的问题。
+- ESLint 已将显式 `any` 提升为 error，并以 `--max-warnings 0` 运行 CI；生产源码散落的 `console.*` 已收敛到统一、脱敏的 `appLogger` sink，Rust 编译 warning 同步清零。
+- 新增 Prettier、Husky、lint-staged 与 Commitlint，提交时增量格式化变更文件并校验 Conventional Commit 信息，避免对历史文件进行一次性大规模格式化。
+- 新增 `test:all`、`test:vitest`、`test:performance` 与 C8 `test:coverage`，把 Node/tsx、独立 AI 面板、44 个 Vitest 文件和性能基准纳入统一入口；650 条 AI 任务分页回归也已进入标准门禁。当前全局非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合阈值为 lines/statements 85%、functions/branches 80%。最新干净实测全局为 35.14% / 47.34% / 66.41%，核心集合为 87.90% / 85.89% / 82.01%，关键组件集合为 91.67% / 90.00% / 78.74%（依次为 lines、functions、branches）。
+- 新增 120 万字符分段、500 章索引窗口和重复长文本堆增长基准；当前分段和索引实测约 5 ms / 0.6 ms，并以 1.5 s、100 ms 和 96 MiB 堆增长作为稳定门禁。
+- 新增 AI P50 / P95 延迟与成功、失败、取消计量；设置中心可导出或清理本机脱敏诊断，前端错误最多保存 50 条、性能样本最多 500 条，正文、Prompt、API Key 和 Provider 原始响应不进入报告。
+- 新增桌面原生 panic 最小信封：在数据库与窗口初始化前安装 Rust panic hook，只保存时间、应用版本和源码文件名 / 行列号，排除 panic payload、堆栈、绝对路径与用户内容；设置中心统一展示、导出和清理最近 50 条原生报告，默认不上传。
+- GitHub Actions 新增快速浏览器 CI、定期依赖审计 / CodeQL 和 Windows Beta / Stable 发布工作流；发布产物包含安装包、通道与回滚 manifest，并保留既有真实 Tauri 桌面 E2E。npm/Cargo Dependabot 继续提供依赖更新入口。
+- 新增 `docs/project/git-workflow.md`，明确 `main` 保护、`codex/` 任务分支、PR 审查 / required checks、hotfix、tag、回滚和禁止 force push 的治理边界；远端保护规则由仓库管理员配置，不把文档声明冒充为已启用设置。
+- 将 40 份 `docs/release-notes-v*.md` 合并为带源文件 SHA-256 的单一 `docs/project/release-history.md` 只读归档；`CHANGELOG.md` 成为唯一活动版本入口，版本脚本不再生成碎片，发布工作流按目标版本失败关闭提取 GitHub Release 与 updater notes。
+- 拆分本地安装包与签名发布入口：`tauri:build` 只生成 MSI/NSIS，普通开发机不再因缺少 updater 私钥而在产物生成后返回失败；`tauri:build:release` 仅供 release workflow 注入密钥并生成签名 MSI updater。
+- 真实浏览器开发模式 E2E 使用 Vite + WebdriverIO 驱动 Chromium/Edge，覆盖懒加载 StoryAssets 路由、无 Tauri bridge 的持久化边界，以及手动 Light/Dark 主题的真实 computed style；Windows 桌面 E2E 新增正式势力创建和 reviewed-partial 跨章节事务场景。
+- 所有生产 React/TSX 文件已控制在 500 行以内；自主规划、主角卡和 Multi-Agent 面板进一步拆为 controller、字段、展示和 presentation 模块。补齐缺失 CSS 语义 token，移除会覆盖手动浅色选择的组件级系统暗色媒体查询。
+- AI 任务页与卷树继续拆分为 controller / view / card / dialog 模块，并新增对应渲染回归；`npm run test:component-size` 已纳入 `verify_project.ps1`、发布 Checklist 与 PR 模板，当前 109 个生产 TSX 文件全部不超过 500 行。
+- 修复浏览器主题矩阵在 localStorage 写入后未刷新页面的问题，补齐系统主题测试的存储键传递，并为首页容器补上主题语义背景色；启动 Splash 还会在首屏绘制前同步读取手动主题，截图门禁等待 Splash 真正移除后再采集目标页面。
+- 更新 Store 状态所有权与模块边界文档，明确 Zustand 只保存当前 WebView 的运行时投影，组件局部状态保持局部，Service / Tauri IPC / SQLite 继续持有业务事实与跨进程事务。
+- Vitest 从存在 critical advisory 的 3.2.4 升级至 3.2.7，并通过非破坏性 `npm audit fix` 更新 Babel、PostCSS、js-yaml、brace-expansion 等可兼容传递依赖；生产审计继续以 high 为失败阈值。
+- 浏览器开发回退的 LocalStorage 写入失败改为失败关闭，并保留恢复快照的可重试错误契约；自主计划多集合应用使用原始快照补偿，任一写入失败时恢复全部集合并显式报告回滚失败，不再返回部分写入的伪成功。
+- 文档同步检查改为失败关闭：必需文档、Checklist、Skill、工作流脚本、重复或错版的权威声明及过期“当前”标记都会返回非零状态；新增临时夹具负向回归并同步修正旧阶段表述。
+- 同步自主续写数据模型：明确 schema 1 可选 baseline、最终章节号、两类分卷物化策略及应用前 compare-and-swap；生成治理文档区分全产品传输/请求治理与分阶段编译 Artifact 治理，并统一新增续写错误提示语言。
+- 补充 Chapter Batch Planner 子批次 / 恢复测试、全书候选队列与临时连续性测试、长章节分段测试、规划页执行面板测试和 Rust 响应正文中断测试。
+- 补充浏览器与 Rust SSE 顺序/UTF-8/usage/无标记 EOF 回归，新增独立 AI 面板停止与卸载测试、LocalStorage/SQLite 冻结单价结算测试，以及正式 Provider 成本 metadata 篡改与重放复验；`test:ai-panels` 将三个 Vite SSR 重用例拆为独立进程，`test:all` 串联 Node/tsx、面板和 Vitest 入口。
+- Windows release 使用既有本地 API 配置真实续跑原失败计划：当前解析修复构建从第 156 章检查点连续完成 6 个五章 Chapter Batch（第 156～185 章），每批均成功解析并立即保存；随后受控取消第 186～190 章请求。生产 SQLite 已核验 1～185 章连续且无重复、成功任务 6/6、取消任务不写入章节、`quick_check=ok` 且外键检查为空，API 设置未改写。
+- 同一 release 使用既有本地 API 配置执行连接测试，界面显示“连接成功！（2577ms）”；测试期间未编辑、读取或输出 API Key，也未保存设置。
+- 同一 release 继续完成真实流式正文验收：工作台“实时候选预览”从等待首段增长到 2,170 字符，并以“已完成 · 3,514 字符”结束；`chapter_generate` 任务成功（输入 2,914 / 输出 2,349 Token），原子保存为未采用的 `AI 初稿 v21`（2,867 字）并自动载入中央编辑器。草稿正文 SHA-256 与 SQLite `content_hash` 完全一致，编辑、保存、润色、检查和采用入口继续可用，未覆盖既有采用稿。
+- 关键工作台视图测试中的 `EditorArea` mock 现与生产组件一致地转发 ref，移除 React 的 ref 噪声，同时保留编辑器、目录、历史和右侧面板的行为覆盖。
+
+### 版本边界
+
+- v3.0.0 工作树已完成长篇自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式安全预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory、多目标事务、跨章节受审核批处理和势力 / 地点正式资产。夜间草稿与质量门禁不自动采用；`full_auto` 仅在冻结策略、预算、专家阈值和采用前复验全部通过时采用。
+- 自动 embedding/增量向量化/模型重建、召回评估集、EPUB/PDF/OCR/Markdown/DOCX 参考资料、全书分析/项目驾驶舱、系统级无人值守、正文级批处理、资产图谱、受控模型 Tool Calling 与出版交付属于后续独立版本目标；成本仍是冻结单价的 USD 估算，不等同 Provider 账单对账。
+- 当前工作树的动态测试、真实浏览器 10/10、完整 Tauri 桌面 E2E 14/14 与独立 Windows EXE 已完成；本轮按测试顺序只使用 `--bundles none` 刷新 EXE，既有 MSI/NSIS 保留为较早产物，待独立 EXE 验收后再进入安装包阶段。签名 updater、正式 GitHub Release 与线上回滚仍由 release workflow 在注入仓库密钥后执行。
+
+---
+
+## v2.6.1 (2026-07-27) - 文档规范化与版本统一
+
+### 说明
+
+本版本为 v2.6.0 Memory Facts 系统的文档更新版本，主要完成项目文档规范化和版本号统一工作。
+
+### 变更
+
+- 统一所有配置文件版本号为 `2.6.1`（package.json、Cargo.toml、tauri.conf.json）
+- 更新 README.md 版本描述和功能列表
+- 补充 CHANGELOG 历史记录
+- 规范化发布历史文档
+
+### 技术栈
+
+- React 18 + TypeScript
+- Tauri 1.x + Rust  
+- SQLite + Migrations (001-020)
+- Chapter Readiness Planner
+- Memory Snapshot System
+
+### 版本边界
+
+本版本不包含自主生成（Autonomous Generation）功能，该功能规划在 v3.0。
+
+---
+
 ## v2.5.0 (2026-07-26) - Chapter Readiness Planner Runtime
 
 ### 新增
@@ -47,7 +296,7 @@
 
 ### 安全与可靠性
 
-- `executeAiTask` 不再接受调用方自拼 Provider request 或三类 Snapshot；同一编译契约同时驱动实际派发与持久执行事实。
+- 受治理的 `executeAiTask` 入口不接受调用方自拼 Provider request 或三类 Snapshot；同一编译契约同时驱动实际派发与持久执行事实。普通历史任务在迁移完成前仍保留兼容入口，边界见 `docs/project/ai-generation-governance.md`。
 - Rust 在创建 Task 前复算 requestBodyHash、compilationHash、Context hash/预算、Constraint hash、固定 Prompt hash、Provider messages 和冻结 Registry hash；改写 Artifact type 也不能绕过正式验证。
 - 来源与 Registry 使用区域设置无关的固定排序；设定来源按 createdAt/id 稳定整理，避免不同电脑对相同事实产生不同 hash。
 - Registry manifest 返回隔离副本，调用方不能篡改缓存权威值；allowlist、权限、参数/输出 schema 与 novel/chapter/draft scope 在 handler 前后动态验证。

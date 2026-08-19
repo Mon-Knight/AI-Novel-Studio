@@ -6,9 +6,14 @@ import { buildEventSuggestPrompt } from './promptBuilder';
 import { aiTaskService } from './aiTaskService';
 import { novelRepository } from '../database/novelRepository';
 import { volumeRepository } from '../database/volumeRepository';
+import { chapterRepository } from '../database/chapterRepository';
 import { contextRecordService, buildContextSummary } from '../context/contextRecordService';
 import type { Character } from '../../types/character';
 import { safeJsonParse } from './jsonUtils';
+import { describeUnknownError } from '../../utils/errorMessage';
+import type { AiGenerateOptions } from '../../types/ai';
+import { throwIfAiRequestCancelled } from './aiCancellation';
+import { bindAiTaskCancellation, settleAiTaskError } from './aiTaskCancellation';
 
 export interface EventSuggestion {
   title: string;
@@ -22,14 +27,17 @@ export interface EventSuggestion {
 }
 
 export const eventSuggestService = {
-  async suggestEvents(input: {
-    novelId: string;
-    chapterId: string;
-    chapterTitle?: string;
-    chapterOutline: string;
-    characters: Character[];
-    previousSummary?: string;
-  }): Promise<EventSuggestion[]> {
+  async suggestEvents(
+    input: {
+      novelId: string;
+      chapterId: string;
+      chapterTitle?: string;
+      chapterOutline: string;
+      characters: Character[];
+      previousSummary?: string;
+    },
+    options: AiGenerateOptions = {},
+  ): Promise<EventSuggestion[]> {
     const settings = aiSettingsService.getSettings();
     const novel = await novelRepository.getById(input.novelId);
     const characterNames = input.characters.map((c) => c.name);
@@ -38,17 +46,24 @@ export const eventSuggestService = {
     let volumeGoal: string | undefined;
     let previousContext: string | undefined;
     try {
-      const chapters = await (await import('../database/chapterRepository')).chapterRepository.getByNovelId(input.novelId);
+      const chapters = await chapterRepository.getByNovelId(input.novelId);
       const chapter = chapters.find((c) => c.id === input.chapterId);
       if (chapter?.volumeId) {
         const vol = await volumeRepository.getById(chapter.volumeId);
         volumeGoal = vol?.goal?.trim() || undefined;
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
     try {
-      const records = await contextRecordService.getForGeneration({ novelId: input.novelId, maxCount: 10 });
+      const records = await contextRecordService.getForGeneration({
+        novelId: input.novelId,
+        maxCount: 10,
+      });
       if (records.length > 0) previousContext = buildContextSummary(records);
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
 
     const request = buildEventSuggestPrompt({
       novelTitle: novel?.title || '未命名作品',
@@ -62,18 +77,22 @@ export const eventSuggestService = {
       characterNames,
     });
 
-    const task = await aiTaskService.create('event_suggest', {
-      novelId: input.novelId,
-      chapterId: input.chapterId,
-      runtimeMode: settings.runtimeMode,
-      provider: settings.provider,
-      modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-      inputSummary: `为章节推荐关键事件（出场角色：${characterNames.join('、') || '无'}）`,
-    }).catch(() => null);
+    const task = await aiTaskService
+      .create('event_suggest', {
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        runtimeMode: settings.runtimeMode,
+        provider: settings.provider,
+        modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
+        inputSummary: `为章节推荐关键事件（出场角色：${characterNames.join('、') || '无'}）`,
+      })
+      .catch(() => null);
+    const releaseCancellation = bindAiTaskCancellation(task?.id, options);
 
     try {
       const client = createAiClient(settings);
-      const response = await client.generate(request);
+      const response = await client.generate(request, options);
+      throwIfAiRequestCancelled(options.signal);
       const text = response.text || '';
 
       const parsed = safeJsonParse<{ events: EventSuggestion[] }>(text, { events: [] });
@@ -98,17 +117,24 @@ export const eventSuggestService = {
         tokenOutput: response.tokenOutput,
         tokenTotal: response.tokenTotal,
       });
-      return [{
-        title: 'AI 原始返回',
-        description: text.slice(0, 1000),
-        rawText: text,
-        mustHappen: false,
-      }];
-    } catch (err: any) {
-      const msg = err instanceof Error ? err.message : '事件推荐失败';
-      if (task) await aiTaskService.markFailed(task.id, msg);
+      return [
+        {
+          title: 'AI 原始返回',
+          description: text.slice(0, 1000),
+          rawText: text,
+          mustHappen: false,
+        },
+      ];
+    } catch (err: unknown) {
+      await settleAiTaskError({
+        taskId: task?.id,
+        error: err,
+        signal: options.signal,
+        fallbackMessage: describeUnknownError(err, '事件推荐失败'),
+      });
       throw err;
+    } finally {
+      releaseCancellation();
     }
   },
 };
-

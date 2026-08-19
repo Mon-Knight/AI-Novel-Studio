@@ -120,6 +120,11 @@ export interface CompiledAiConstraintV1 {
     model: string;
     temperature: number;
     maxTokens: number;
+    topP?: number;
+    topK?: number;
+    repeatPenalty?: number;
+    seed?: number;
+    thinkingMode?: 'enabled' | 'disabled';
   };
 }
 

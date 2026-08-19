@@ -74,22 +74,31 @@ if (-not $versionMatch.Success) { throw "Unable to read APP_VERSION from src/con
 Assert-Equal "src/constants/version.ts" $expected $versionMatch.Groups[1].Value
 
 $readme = Read-Utf8Text "README.md"
-Assert-RegexVersion "README.md current version" $readme '(?m)^\*\*[^*\r\n]*v([0-9]+\.[0-9]+\.[0-9]+)\*\*\r?$' $expected
+Assert-RegexVersion "README.md current version" $readme '(?m)^\*\*[^*\r\n]*v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\*\*\r?$' $expected
 
 $changelog = Read-Utf8Text "CHANGELOG.md"
-Assert-RegexVersion "CHANGELOG.md newest entry" $changelog '(?m)^##\s+v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
+Assert-RegexVersion "CHANGELOG.md newest entry" $changelog '(?m)^##\s+v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\b' $expected
 
 $roadmap = Read-Utf8Text "docs/version-roadmap.md"
-Assert-RegexVersion "docs/version-roadmap.md current version" $roadmap '(?m)^>\s*[^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
+Assert-RegexVersion "docs/version-roadmap.md current version" $roadmap '(?m)^>\s*[^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\b' $expected
 
 $testing = Read-Utf8Text "docs/technical/testing.md"
-Assert-RegexVersion "docs/technical/testing.md current version" $testing '(?m)^>\s*[^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
+Assert-RegexVersion "docs/technical/testing.md current version" $testing '(?m)^>\s*[^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\b' $expected
 
 $docsIndex = Read-Utf8Text "docs/README.md"
-Assert-RegexVersion "docs/README.md testing index version" $docsIndex '(?m)^\|\s*\[testing\.md\][^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
+Assert-RegexVersion "docs/README.md testing index version" $docsIndex '(?m)^\|\s*\[testing\.md\][^\r\n]*v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\b' $expected
 
-$releaseNotesPath = "docs/release-notes-v$expected.md"
-$releaseNotes = Read-Utf8Text $releaseNotesPath
-Assert-RegexVersion "$releaseNotesPath heading" $releaseNotes '(?m)^#\s+AI Novel Studio v([0-9]+\.[0-9]+\.[0-9]+)\b' $expected
+$releaseHistory = Read-Utf8Text "docs/project/release-history.md"
+if (-not $releaseHistory.Contains('[`CHANGELOG.md`](../../CHANGELOG.md)')) {
+  throw "docs/project/release-history.md must point to CHANGELOG.md as the current release source."
+}
+Write-Host "  [OK] release history delegates current notes to CHANGELOG.md"
+
+$fragmentedNotes = @(Get-ChildItem -LiteralPath (Join-Path $root "docs") -File -Filter "release-notes-v*.md")
+if ($fragmentedNotes.Count -ne 0) {
+  $names = ($fragmentedNotes | Select-Object -ExpandProperty Name) -join ", "
+  throw "Per-version release note fragments are not allowed; merge them into docs/project/release-history.md: $names"
+}
+Write-Host "  [OK] no per-version release note fragments"
 
 Write-Host "Version sync checks passed."

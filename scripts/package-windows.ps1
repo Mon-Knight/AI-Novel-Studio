@@ -68,8 +68,8 @@ if (Test-Path $BundlePath) {
 # 8. Tauri 正式打包
 Write-Host ""
 Write-Host "--- 执行 Tauri Windows 打包 ---"
-npm run tauri build
-if ($LASTEXITCODE -ne 0) { throw "npm run tauri build 失败" }
+npm run tauri:build
+if ($LASTEXITCODE -ne 0) { throw "npm run tauri:build 失败" }
 
 # 9. 检查输出
 Write-Host ""

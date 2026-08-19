@@ -15,6 +15,28 @@ use serde_json::Value;
 const PRODUCTION_TOOL_REGISTRY_HASH: &str =
     "846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871";
 
+fn connection_test_policy() -> Result<(i64, f64), AppError> {
+    let policy: Value = serde_json::from_str(include_str!(
+        "../../../src/constants/providerRequestPolicy.json"
+    ))
+    .map_err(|_| compilation_error("共享 Provider request policy 不是有效 JSON"))?;
+    let connection = policy
+        .get("connectionTest")
+        .and_then(Value::as_object)
+        .ok_or_else(|| compilation_error("共享 Provider request policy 缺少 connectionTest"))?;
+    let max_output_tokens = connection
+        .get("maxOutputTokens")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| compilation_error("共享连接测试 maxOutputTokens 无效"))?;
+    let temperature = connection
+        .get("temperature")
+        .and_then(Value::as_f64)
+        .filter(|value| (0.0..=2.0).contains(value))
+        .ok_or_else(|| compilation_error("共享连接测试 temperature 无效"))?;
+    Ok((max_output_tokens, temperature))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputSnapshotInput {
@@ -505,10 +527,16 @@ fn validate_formal_constraint(input: &CreateAiTaskInput) -> Result<(), AppError>
         .get("maxTokens")
         .and_then(Value::as_i64)
         .ok_or_else(|| compilation_error("Provider maxTokens 无效"))?;
+    let temperature = provider_options
+        .get("temperature")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| compilation_error("Provider temperature 无效"))?;
     let expected_template = if input.task_type == "connection_test" {
+        let (expected_max_tokens, expected_temperature) = connection_test_policy()?;
         if payload.get("responseSchema").and_then(Value::as_str) != Some("exact_text_ok_v1")
             || constraints.get("exactText").and_then(Value::as_str) != Some("OK")
-            || max_tokens != 8
+            || max_tokens != expected_max_tokens
+            || temperature != expected_temperature
         {
             return Err(compilation_error("连接测试 Constraint policy 无效"));
         }
@@ -1877,6 +1905,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn formal_connection_task_input(operation_id: &str) -> CreateAiTaskInput {
+        let (max_output_tokens, temperature) =
+            connection_test_policy().expect("shared connection test policy");
         let template = include_str!("../../../prompts/system_connection_test.md")
             .replace("\r\n", "\n")
             .trim()
@@ -1893,9 +1923,9 @@ pub(crate) mod tests {
             "contractVersion": "context_budget_v1",
             "tokenEstimator": "utf8_bytes_div3_v1",
             "modelContextTokens": 512,
-            "reservedOutputTokens": 8,
-            "fixedMessageTokens": 400,
-            "availableContextTokens": 104,
+            "reservedOutputTokens": max_output_tokens,
+            "fixedMessageTokens": 347,
+            "availableContextTokens": 37,
             "compiledContextTokens": 0,
             "compiledContextChars": 0,
             "compiledContextBytes": 0,
@@ -1925,8 +1955,8 @@ pub(crate) mod tests {
         let provider_options = serde_json::json!({
             "providerId": "mock",
             "model": "Mock",
-            "temperature": 0.0,
-            "maxTokens": 8,
+            "temperature": temperature,
+            "maxTokens": max_output_tokens,
         });
         let input_body = serde_json::to_string(&serde_json::json!({
             "messages": [
@@ -2084,6 +2114,7 @@ pub(crate) mod tests {
             formal_connection_task_input("formal-connection"),
         )?;
         let detail = get_task_detail(&connection, &created.task_id)?;
+        let (max_output_tokens, temperature) = connection_test_policy()?;
         assert_eq!(detail.task.expected_artifact_type, "generic_text");
         assert_eq!(detail.input_snapshot.snapshot.schema_version, 2);
         assert_eq!(detail.context_snapshot.compiled_context, "");
@@ -2093,8 +2124,39 @@ pub(crate) mod tests {
         );
         assert_eq!(
             detail.constraint_snapshot.snapshot.provider_options_json["maxTokens"],
-            8
+            max_output_tokens
         );
+        assert_eq!(
+            detail.constraint_snapshot.snapshot.provider_options_json["temperature"],
+            temperature
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn task09_rejects_stale_connection_test_provider_policy(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+
+        let mut stale_budget = formal_connection_task_input("formal-connection-stale-budget");
+        stale_budget.constraint_snapshot.provider_options_json["maxTokens"] = serde_json::json!(8);
+        let error = create_task(&mut connection, stale_budget)
+            .expect_err("legacy eight-token connection policy must fail");
+        assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
+        assert!(error.message.contains("连接测试 Constraint policy 无效"));
+
+        let mut stale_temperature =
+            formal_connection_task_input("formal-connection-stale-temperature");
+        stale_temperature.constraint_snapshot.provider_options_json["temperature"] =
+            serde_json::json!(0.7);
+        let error = create_task(&mut connection, stale_temperature)
+            .expect_err("non-deterministic connection temperature must fail");
+        assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
+        assert!(error.message.contains("连接测试 Constraint policy 无效"));
+
+        let task_count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get(0))?;
+        assert_eq!(task_count, 0);
         Ok(())
     }
 

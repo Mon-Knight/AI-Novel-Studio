@@ -1,14 +1,24 @@
 use crate::db::{get_connection, get_database_path};
+use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub mod ai_tasks;
 pub mod agent_plans;
+pub mod ai_request_policy;
+pub mod ai_tasks;
+pub mod app_update;
 pub mod artifacts;
+pub mod autonomous_scheduler;
+pub mod autonomous_story;
+pub mod content_transactions;
 pub mod drafts;
+pub mod memory;
+pub mod multi_agent;
+pub mod output_profiles;
 pub mod placements;
 pub mod recovery;
+pub mod reference_library;
 
 // ==================== Novel ====================
 
@@ -688,6 +698,17 @@ pub struct UpdateVolumeInput {
     pub status: Option<String>,
 }
 
+const VOLUME_STATUSES: [&str; 3] = ["planned", "writing", "completed"];
+
+fn validate_volume_update_input(input: &UpdateVolumeInput) -> Result<(), String> {
+    if let Some(status) = input.status.as_deref() {
+        if !VOLUME_STATUSES.contains(&status) {
+            return Err("volume_status_invalid".to_string());
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_volumes_by_novel_id(novel_id: String) -> Result<Vec<VolumeDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
@@ -742,28 +763,39 @@ pub fn create_volume(input: CreateVolumeInput) -> Result<VolumeDto, String> {
 pub fn update_volume(id: String, input: UpdateVolumeInput) -> Result<VolumeDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let mut sets = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref v) = input.title {
-        sets.push(format!("title = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.summary {
-        sets.push(format!("summary = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.goal {
-        sets.push(format!("goal = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.main_conflict {
-        sets.push(format!("main_conflict = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(v) = input.order_index {
-        sets.push(format!("order_index = {}", v));
-    }
-    if let Some(ref v) = input.status {
-        sets.push(format!("status = '{}'", v));
-    }
-    let sql = format!("UPDATE volumes SET {} WHERE id = '{}'", sets.join(", "), id);
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
-    get_volume_by_id_internal(&conn, &id)
+    update_volume_internal(&conn, &id, input, &now)
+}
+
+fn update_volume_internal(
+    conn: &Connection,
+    id: &str,
+    input: UpdateVolumeInput,
+    now: &str,
+) -> Result<VolumeDto, String> {
+    validate_volume_update_input(&input)?;
+    conn.execute(
+        "UPDATE volumes
+         SET title = COALESCE(?1, title),
+             summary = COALESCE(?2, summary),
+             goal = COALESCE(?3, goal),
+             main_conflict = COALESCE(?4, main_conflict),
+             order_index = COALESCE(?5, order_index),
+             status = COALESCE(?6, status),
+             updated_at = ?7
+         WHERE id = ?8",
+        params![
+            input.title.as_deref(),
+            input.summary.as_deref(),
+            input.goal.as_deref(),
+            input.main_conflict.as_deref(),
+            input.order_index,
+            input.status.as_deref(),
+            now,
+            id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    get_volume_by_id_internal(conn, id)
 }
 
 #[tauri::command]
@@ -849,6 +881,25 @@ pub struct UpdateChapterInput {
     pub order_index: Option<i64>,
     pub status: Option<String>,
     pub target_word_count: Option<i64>,
+}
+
+const CHAPTER_STATUSES: [&str; 7] = [
+    "not_started",
+    "outline_ready",
+    "draft_generated",
+    "editing",
+    "polished",
+    "adopted",
+    "summarized",
+];
+
+fn validate_chapter_update_input(input: &UpdateChapterInput) -> Result<(), String> {
+    if let Some(status) = input.status.as_deref() {
+        if !CHAPTER_STATUSES.contains(&status) {
+            return Err("chapter_status_invalid".to_string());
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -943,35 +994,41 @@ pub fn create_chapter(input: CreateChapterInput) -> Result<ChapterDto, String> {
 pub fn update_chapter(id: String, input: UpdateChapterInput) -> Result<ChapterDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let mut sets = vec![format!("updated_at = '{}'", now)];
-    if let Some(ref v) = input.volume_id {
-        sets.push(format!("volume_id = '{}'", v));
-    }
-    if let Some(ref v) = input.title {
-        sets.push(format!("title = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.outline {
-        sets.push(format!("outline = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(ref v) = input.goal {
-        sets.push(format!("goal = '{}'", v.replace('\'', "''")));
-    }
-    if let Some(v) = input.order_index {
-        sets.push(format!("order_index = {}", v));
-    }
-    if let Some(ref v) = input.status {
-        sets.push(format!("status = '{}'", v));
-    }
-    if let Some(v) = input.target_word_count {
-        sets.push(format!("target_word_count = {}", v));
-    }
-    let sql = format!(
-        "UPDATE chapters SET {} WHERE id = '{}'",
-        sets.join(", "),
-        id
-    );
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
-    get_chapter_by_id_internal(&conn, &id)
+    update_chapter_internal(&conn, &id, input, &now)
+}
+
+fn update_chapter_internal(
+    conn: &Connection,
+    id: &str,
+    input: UpdateChapterInput,
+    now: &str,
+) -> Result<ChapterDto, String> {
+    validate_chapter_update_input(&input)?;
+    conn.execute(
+        "UPDATE chapters
+         SET volume_id = COALESCE(?1, volume_id),
+             title = COALESCE(?2, title),
+             outline = COALESCE(?3, outline),
+             goal = COALESCE(?4, goal),
+             order_index = COALESCE(?5, order_index),
+             status = COALESCE(?6, status),
+             target_word_count = COALESCE(?7, target_word_count),
+             updated_at = ?8
+         WHERE id = ?9",
+        params![
+            input.volume_id.as_deref(),
+            input.title.as_deref(),
+            input.outline.as_deref(),
+            input.goal.as_deref(),
+            input.order_index,
+            input.status.as_deref(),
+            input.target_word_count,
+            now,
+            id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    get_chapter_by_id_internal(conn, id)
 }
 
 #[tauri::command]
@@ -988,19 +1045,17 @@ pub fn delete_chapter(id: String) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     let affected = transaction
         .execute(
-        "UPDATE chapters SET deleted_at = ?1 WHERE id = ?2",
-        params![now, &id],
-    ).map_err(|e| e.to_string())?;
+            "UPDATE chapters SET deleted_at = ?1 WHERE id = ?2",
+            params![now, &id],
+        )
+        .map_err(|e| e.to_string())?;
     if affected != 1 {
         return Err("TARGET_CHAPTER_NOT_FOUND: 章节删除未命中唯一目标".to_string());
     }
-    let recovery_document_id = crate::repositories::recovery_repository::get(
-        &transaction,
-        &novel_id,
-        &id,
-    )
-    .map_err(|error| error.to_string())?
-    .and_then(|snapshot| snapshot.large_text_ref_id);
+    let recovery_document_id =
+        crate::repositories::recovery_repository::get(&transaction, &novel_id, &id)
+            .map_err(|error| error.to_string())?
+            .and_then(|snapshot| snapshot.large_text_ref_id);
     crate::repositories::recovery_repository::delete_exact(&transaction, &novel_id, &id)
         .map_err(|error| error.to_string())?;
     if let Some(document_id) = recovery_document_id {
@@ -1136,17 +1191,45 @@ pub(crate) fn get_draft_by_id_and_chapter_internal(
 }
 
 #[tauri::command]
-pub fn get_drafts_by_chapter_id(chapter_id: String) -> Result<Vec<ChapterDraftDto>, String> {
+pub fn get_drafts_by_chapter_id(
+    chapter_id: String,
+    page: Option<i64>,
+    size: Option<i64>,
+) -> Result<Vec<ChapterDraftDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC")
-        .map_err(|e| e.to_string())?;
-    let items = stmt
-        .query_map(params![chapter_id], map_draft_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    let paged = page.is_some() || size.is_some();
+    let page = page.unwrap_or(1).max(1);
+    let size = size.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * size;
+    let sql = if paged {
+        "SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no DESC LIMIT ?2 OFFSET ?3"
+    } else {
+        "SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 ORDER BY version_no ASC"
+    };
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let items = if paged {
+        stmt.query_map(params![chapter_id, size, offset], map_draft_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    } else {
+        stmt.query_map(params![chapter_id], map_draft_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
     Ok(items)
+}
+
+#[tauri::command]
+pub fn count_drafts_by_chapter_id(chapter_id: String) -> Result<i64, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT COUNT(*) FROM chapter_drafts WHERE chapter_id = ?1",
+        params![chapter_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1161,6 +1244,37 @@ pub fn get_latest_draft_by_chapter_id(
         Ok(draft) => Ok(Some(draft)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_adopted_draft_by_chapter_id(
+    chapter_id: String,
+) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, novel_id, chapter_id, title, content, source, version_no, word_count, is_adopted, ai_task_id, note, large_text_ref_id, created_at, updated_at FROM chapter_drafts WHERE chapter_id = ?1 AND is_adopted = 1 ORDER BY version_no DESC LIMIT 1")
+        .map_err(|e| e.to_string())?;
+    match stmt.query_row(params![chapter_id], map_draft_row) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_draft_by_chapter_and_id(
+    chapter_id: String,
+    draft_id: String,
+) -> Result<Option<ChapterDraftDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT d.id, d.novel_id, d.chapter_id, d.title, d.content, d.source, d.version_no, d.word_count, d.is_adopted, d.ai_task_id, d.note, d.large_text_ref_id, d.created_at, d.updated_at FROM chapter_drafts AS d INNER JOIN chapters AS c ON c.id = d.chapter_id AND c.novel_id = d.novel_id WHERE d.id = ?1 AND d.chapter_id = ?2 AND c.deleted_at IS NULL")
+        .map_err(|e| e.to_string())?;
+    match stmt.query_row(params![draft_id, chapter_id], map_draft_row) {
+        Ok(draft) => Ok(Some(draft)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -1403,11 +1517,12 @@ fn adopt_chapter_draft_internal(
         .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
 
     let word_count = validate_live_draft_target_internal(&transaction, draft_id, chapter_id)?;
-    let previous_adopted_draft_id = transaction
+    let (chapter_novel_id, previous_adopted_draft_id) = transaction
         .query_row(
-            "SELECT adopted_draft_id FROM chapters WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT novel_id, adopted_draft_id FROM chapters
+             WHERE id = ?1 AND deleted_at IS NULL",
             params![chapter_id],
-            |row| row.get::<_, Option<String>>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .map_err(|e| format!("adopt_previous_draft_lookup_failed: {}", e))?;
     let adopted_draft_changed = previous_adopted_draft_id.as_deref() != Some(draft_id);
@@ -1443,6 +1558,14 @@ fn adopt_chapter_draft_internal(
 
     if adopted_draft_changed {
         expire_chapter_context_rows(&transaction, chapter_id, &now)?;
+        crate::services::memory_service::invalidate_for_adopted_draft_change(
+            &transaction,
+            &chapter_novel_id,
+            chapter_id,
+            draft_id,
+            &now,
+        )
+        .map_err(|e| format!("adopt_memory_invalidation_failed: {}", e))?;
     }
 
     let adopted = get_draft_by_id_and_chapter_internal(&transaction, draft_id, chapter_id)
@@ -2354,6 +2477,12 @@ pub struct AiTaskRecordDto {
     pub token_input: Option<i64>,
     pub token_output: Option<i64>,
     pub token_total: Option<i64>,
+    pub input_price_per_million_tokens: Option<f64>,
+    pub output_price_per_million_tokens: Option<f64>,
+    pub cost_estimate: Option<f64>,
+    pub cost_currency: Option<String>,
+    pub cost_status: Option<String>,
+    pub pricing_source: Option<String>,
     pub duration_ms: Option<i64>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -2371,6 +2500,10 @@ pub struct CreateAiTaskRecordInput {
     pub runtime_mode: Option<String>,
     pub provider: Option<String>,
     pub model_name: Option<String>,
+    pub input_price_per_million_tokens: Option<f64>,
+    pub output_price_per_million_tokens: Option<f64>,
+    pub cost_currency: Option<String>,
+    pub pricing_source: Option<String>,
     pub input_summary: Option<String>,
     pub started_at: Option<String>,
     pub created_at: String,
@@ -2387,6 +2520,20 @@ pub struct MarkAiTaskSucceededInput {
     pub token_total: Option<i64>,
     pub duration_ms: Option<i64>,
     pub finished_at: String,
+}
+
+fn validate_mark_ai_task_succeeded_input(input: &MarkAiTaskSucceededInput) -> Result<(), String> {
+    for (field, value) in [
+        ("tokenInput", input.token_input),
+        ("tokenOutput", input.token_output),
+        ("tokenTotal", input.token_total),
+        ("durationMs", input.duration_ms),
+    ] {
+        if value.is_some_and(|number| number < 0) {
+            return Err(format!("{field} must be non-negative"));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -2439,15 +2586,21 @@ fn map_ai_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTaskRecordDto>
         token_input: row.get(14)?,
         token_output: row.get(15)?,
         token_total: row.get(16)?,
-        duration_ms: row.get(17)?,
-        started_at: row.get(18)?,
-        finished_at: row.get(19)?,
-        created_at: row.get(20)?,
+        input_price_per_million_tokens: row.get(17)?,
+        output_price_per_million_tokens: row.get(18)?,
+        cost_estimate: row.get(19)?,
+        cost_currency: row.get(20)?,
+        cost_status: row.get(21)?,
+        pricing_source: row.get(22)?,
+        duration_ms: row.get(23)?,
+        started_at: row.get(24)?,
+        finished_at: row.get(25)?,
+        created_at: row.get(26)?,
     })
 }
 
 fn ai_task_select_sql() -> &'static str {
-    "SELECT id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, prompt_template_id, input_summary, prompt_snapshot, result_text, result_json, error_message, token_input, token_output, token_total, duration_ms, started_at, finished_at, created_at FROM ai_task_records"
+    "SELECT id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, prompt_template_id, input_summary, prompt_snapshot, result_text, result_json, error_message, token_input, token_output, token_total, input_price_per_million_tokens, output_price_per_million_tokens, cost_estimate, cost_currency, cost_status, pricing_source, duration_ms, started_at, finished_at, created_at FROM ai_task_records"
 }
 
 fn ai_task_db_path_for_log() -> String {
@@ -2490,6 +2643,79 @@ fn ensure_ai_task_records_table(conn: &Connection, db_path: &str) -> Result<(), 
 fn count_ai_task_records_in_conn(conn: &Connection) -> Result<i64, String> {
     conn.query_row("SELECT COUNT(*) FROM ai_task_records", [], |row| row.get(0))
         .map_err(|e| e.to_string())
+}
+
+const AI_TASK_TYPE_FILTERS: &[&str] = &[
+    "connection_test",
+    "setting_expand",
+    "setting_suggestion_generate",
+    "outline_generate",
+    "volume_outline_generate",
+    "context_summarize",
+    "setting_structure",
+    "rule_structure",
+    "protagonist_structure",
+    "volume_outline_expand",
+    "chapter_outline_generate",
+    "style_analyze",
+    "character_generate",
+    "event_suggest",
+    "chapter_generate",
+    "chapter_beat_repair",
+    "chapter_scene_generate",
+    "chapter_scene_plan_generate",
+    "chapter_rewrite",
+    "chapter_polish",
+    "quality_check",
+    "quality_fix",
+    "multi_agent_review",
+    "multi_agent_revision",
+    "autonomous_plot_plan",
+    "autonomous_character_evolution",
+    "autonomous_world_build",
+    "autonomous_conflict_generate",
+    "autonomous_pacing_control",
+    "autonomous_chapter_batch",
+    "chapter_summarize",
+    "context_update",
+];
+const AI_TASK_STATUS_FILTERS: &[&str] = &["pending", "running", "succeeded", "failed", "cancelled"];
+
+fn normalize_ai_task_filter(
+    value: Option<String>,
+    allowed: &[&str],
+    label: &str,
+) -> Result<Option<String>, String> {
+    let value = value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty());
+    if let Some(candidate) = value.as_deref() {
+        if !allowed.contains(&candidate) {
+            return Err(format!("invalid AI task {} filter", label));
+        }
+    }
+    Ok(value)
+}
+
+fn normalize_ai_task_type_filter(value: Option<String>) -> Result<Option<String>, String> {
+    normalize_ai_task_filter(value, AI_TASK_TYPE_FILTERS, "type")
+}
+
+fn normalize_ai_task_status_filter(value: Option<String>) -> Result<Option<String>, String> {
+    normalize_ai_task_filter(value, AI_TASK_STATUS_FILTERS, "status")
+}
+
+fn count_ai_task_records_filtered_in_conn(
+    conn: &Connection,
+    task_type: Option<&str>,
+    status: Option<&str>,
+) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM ai_task_records WHERE (?1 IS NULL OR task_type = ?1) AND (?2 IS NULL OR status = ?2)",
+        params![task_type, status],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn count_ai_task_records_by_ids(conn: &Connection, ids: &[String]) -> Result<i64, String> {
@@ -2539,6 +2765,34 @@ fn ensure_ai_tasks_are_not_bound_to_completed_quality_reports(
     Ok(())
 }
 
+fn ensure_ai_tasks_are_terminal(conn: &Connection, ids: Option<&[String]>) -> Result<(), String> {
+    let active_count = if let Some(ids) = ids {
+        let mut count = 0_i64;
+        for id in ids {
+            count += conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_task_records
+                     WHERE id = ?1 AND status IN ('pending', 'running')",
+                    params![id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        count
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*) FROM ai_task_records WHERE status IN ('pending', 'running')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+    };
+    if active_count > 0 {
+        return Err("ai_task_running_delete_protected".to_string());
+    }
+    Ok(())
+}
+
 fn sample_ai_task_ids(conn: &Connection, limit: i64) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT id FROM ai_task_records ORDER BY created_at DESC LIMIT ?1")
@@ -2559,18 +2813,35 @@ fn delete_ai_task_records_by_ids_internal(
     let ids = normalize_ai_task_ids(ids);
     let requested_count = ids.len() as i64;
     let table_exists = ai_task_records_table_exists(conn)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_many command_entered db_path={} table_exists={} requested_count={} ids={:?}",
-        db_path, table_exists, requested_count, ids
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_delete_many_started",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "tableExists": table_exists,
+            "requestedCount": requested_count,
+        })),
+    });
     ensure_ai_task_records_table(conn, &db_path)?;
     let before_count = count_ai_task_records_in_conn(conn)?;
 
     if ids.is_empty() {
-        println!(
-            "[AI_TASK_DELETE_RUST] delete_many skipped empty ids db_path={} before_count={}",
-            db_path, before_count
-        );
+        log_workspace_event(WorkspaceLogEvent {
+            level: "info",
+            event: "ai_task_delete_many_empty",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: None,
+            metadata: Some(serde_json::json!({ "beforeCount": before_count })),
+        });
         return Ok(DeleteAiTaskRecordsResult {
             deleted_count: 0,
             requested_count,
@@ -2585,22 +2856,26 @@ fn delete_ai_task_records_by_ids_internal(
     }
 
     let before_match_count = count_ai_task_records_by_ids(conn, &ids)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_many called ids={:?} db_path={} before_count={} before_match_count={}",
-        ids, db_path, before_count, before_match_count
-    );
-
     if before_match_count == 0 {
         let sample_ids = sample_ai_task_ids(conn, 5)?;
-        println!(
-            "[AI_TASK_DELETE_RUST] delete_many no matching ids requested={:?} sample_existing_ids={:?}",
-            ids, sample_ids
-        );
-        return Err(format!(
-            "No AI task records matched selected ids. requested_ids={:?}, sample_existing_ids={:?}, db_path={}",
-            ids, sample_ids, db_path
-        ));
+        log_workspace_event(WorkspaceLogEvent {
+            level: "warn",
+            event: "ai_task_delete_many_no_match",
+            trace_id: None,
+            operation_id: None,
+            novel_id: None,
+            chapter_id: None,
+            draft_id: None,
+            error_code: Some("AI_TASK_NOT_FOUND"),
+            metadata: Some(serde_json::json!({
+                "requestedCount": requested_count,
+                "sampleCount": sample_ids.len(),
+                "beforeCount": before_count,
+            })),
+        });
+        return Err("No AI task records matched selected ids.".to_string());
     }
+    ensure_ai_tasks_are_terminal(conn, Some(&ids))?;
     ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, Some(&ids))?;
 
     // 构建 IN 子句占位符
@@ -2636,16 +2911,33 @@ fn delete_ai_task_records_by_ids_internal(
         match conn.execute(&sql, rusqlite::params_from_iter(params_refs.iter())) {
             Ok(rows) => {
                 if rows > 0 {
-                    println!(
-                        "[AI_TASK_DELETE_RUST] delete_many cleaned child table {} rows={}",
-                        table, rows
-                    );
+                    log_workspace_event(WorkspaceLogEvent {
+                        level: "info",
+                        event: "ai_task_delete_many_child_cleanup",
+                        trace_id: None,
+                        operation_id: None,
+                        novel_id: None,
+                        chapter_id: None,
+                        draft_id: None,
+                        error_code: None,
+                        metadata: Some(serde_json::json!({ "table": table, "rows": rows })),
+                    });
                     deleted_child_rows.insert(table.to_string(), rows as i64);
                 }
             }
             Err(e) => {
                 let msg = format!("Failed to clean child table {}: {}", table, e);
-                println!("[AI_TASK_DELETE_RUST] delete_many rollback: {}", msg);
+                log_workspace_event(WorkspaceLogEvent {
+                    level: "error",
+                    event: "ai_task_delete_many_child_cleanup_failed",
+                    trace_id: None,
+                    operation_id: None,
+                    novel_id: None,
+                    chapter_id: None,
+                    draft_id: None,
+                    error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                    metadata: Some(serde_json::json!({ "table": table })),
+                });
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(msg);
             }
@@ -2658,8 +2950,18 @@ fn delete_ai_task_records_by_ids_internal(
         match conn.execute("DELETE FROM ai_task_records WHERE id = ?1", params![id]) {
             Ok(rows) => affected_rows += rows as i64,
             Err(e) => {
-                let msg = format!("Failed to delete ai_task_record {}: {}", id, e);
-                println!("[AI_TASK_DELETE_RUST] delete_many rollback: {}", msg);
+                let msg = format!("Failed to delete ai_task_record: {}", e);
+                log_workspace_event(WorkspaceLogEvent {
+                    level: "error",
+                    event: "ai_task_delete_many_parent_delete_failed",
+                    trace_id: None,
+                    operation_id: None,
+                    novel_id: None,
+                    chapter_id: None,
+                    draft_id: None,
+                    error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                    metadata: None,
+                });
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(msg);
             }
@@ -2670,23 +2972,31 @@ fn delete_ai_task_records_by_ids_internal(
     let after_count = count_ai_task_records_in_conn(conn)?;
     let deleted_count = before_match_count - after_match_count;
 
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_many result db_path={} before_count={} before_match_count={} affected_rows={} after_match_count={} after_count={} deleted_count={} deleted_child_rows={:?}",
-        db_path,
-        before_count,
-        before_match_count,
-        affected_rows,
-        after_match_count,
-        after_count,
-        deleted_count,
-        deleted_child_rows
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_delete_many_completed",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "beforeCount": before_count,
+            "matchedCount": before_match_count,
+            "affectedRows": affected_rows,
+            "afterMatchCount": after_match_count,
+            "afterCount": after_count,
+            "deletedCount": deleted_count,
+            "childTableCount": deleted_child_rows.len(),
+        })),
+    });
 
     if before_match_count > 0 && after_match_count > 0 {
         let _ = conn.execute_batch("ROLLBACK");
         return Err(format!(
-            "AI task records still exist after delete. requested_ids={:?}, after_match_count={}, db_path={}",
-            ids, after_match_count, db_path
+            "AI task records still exist after delete. after_match_count={}",
+            after_match_count
         ));
     }
 
@@ -2711,16 +3021,20 @@ fn clear_ai_task_records_internal(
     db_path: String,
 ) -> Result<DeleteAiTaskRecordsResult, String> {
     let table_exists = ai_task_records_table_exists(conn)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] clear_all command_entered db_path={} table_exists={}",
-        db_path, table_exists
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_clear_all_started",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({ "tableExists": table_exists })),
+    });
     ensure_ai_task_records_table(conn, &db_path)?;
     let before_count = count_ai_task_records_in_conn(conn)?;
-    println!(
-        "[AI_TASK_DELETE_RUST] clear_all called db_path={} before_count={}",
-        db_path, before_count
-    );
+    ensure_ai_tasks_are_terminal(conn, None)?;
     ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, None)?;
 
     // 开启事务
@@ -2749,16 +3063,33 @@ fn clear_ai_task_records_internal(
         match conn.execute(&sql, []) {
             Ok(rows) => {
                 if rows > 0 {
-                    println!(
-                        "[AI_TASK_DELETE_RUST] clear_all cleaned child table {} rows={}",
-                        table, rows
-                    );
+                    log_workspace_event(WorkspaceLogEvent {
+                        level: "info",
+                        event: "ai_task_clear_all_child_cleanup",
+                        trace_id: None,
+                        operation_id: None,
+                        novel_id: None,
+                        chapter_id: None,
+                        draft_id: None,
+                        error_code: None,
+                        metadata: Some(serde_json::json!({ "table": table, "rows": rows })),
+                    });
                     deleted_child_rows.insert(table.to_string(), rows as i64);
                 }
             }
             Err(e) => {
                 let msg = format!("Failed to clean child table {}: {}", table, e);
-                println!("[AI_TASK_DELETE_RUST] clear_all rollback: {}", msg);
+                log_workspace_event(WorkspaceLogEvent {
+                    level: "error",
+                    event: "ai_task_clear_all_child_cleanup_failed",
+                    trace_id: None,
+                    operation_id: None,
+                    novel_id: None,
+                    chapter_id: None,
+                    draft_id: None,
+                    error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                    metadata: Some(serde_json::json!({ "table": table })),
+                });
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(msg);
             }
@@ -2770,23 +3101,46 @@ fn clear_ai_task_records_internal(
         .execute("DELETE FROM ai_task_records", [])
         .map_err(|e| {
             let msg = format!("Failed to delete ai_task_records: {}", e);
-            println!("[AI_TASK_DELETE_RUST] clear_all rollback: {}", msg);
+            log_workspace_event(WorkspaceLogEvent {
+                level: "error",
+                event: "ai_task_clear_all_parent_delete_failed",
+                trace_id: None,
+                operation_id: None,
+                novel_id: None,
+                chapter_id: None,
+                draft_id: None,
+                error_code: Some("DATABASE_TRANSACTION_FAILED"),
+                metadata: None,
+            });
             let _ = conn.execute_batch("ROLLBACK");
             msg
         })? as i64;
 
     let after_count = count_ai_task_records_in_conn(conn)?;
     let deleted_count = before_count - after_count;
-    println!(
-        "[AI_TASK_DELETE_RUST] clear_all result db_path={} before_count={} affected_rows={} after_count={} deleted_count={} deleted_child_rows={:?}",
-        db_path, before_count, affected_rows, after_count, deleted_count, deleted_child_rows
-    );
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "ai_task_clear_all_completed",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: Some(serde_json::json!({
+            "beforeCount": before_count,
+            "affectedRows": affected_rows,
+            "afterCount": after_count,
+            "deletedCount": deleted_count,
+            "childTableCount": deleted_child_rows.len(),
+        })),
+    });
 
     if after_count != 0 {
         let _ = conn.execute_batch("ROLLBACK");
         return Err(format!(
-            "AI task records still exist after clear. after_count={}, db_path={}",
-            after_count, db_path
+            "AI task records still exist after clear. after_count={}",
+            after_count
         ));
     }
 
@@ -2806,39 +3160,178 @@ fn clear_ai_task_records_internal(
     })
 }
 
+fn validate_ai_task_pricing(input: &CreateAiTaskRecordInput) -> Result<(), String> {
+    const MAX_PRICE_PER_MILLION: f64 = 1_000_000.0;
+    let valid_price = |value: Option<f64>| {
+        value
+            .is_none_or(|price| price.is_finite() && (0.0..=MAX_PRICE_PER_MILLION).contains(&price))
+    };
+    if !valid_price(input.input_price_per_million_tokens)
+        || !valid_price(input.output_price_per_million_tokens)
+    {
+        return Err("AI task pricing must be finite and non-negative".to_string());
+    }
+
+    match input.pricing_source.as_deref() {
+        None => {
+            if input.input_price_per_million_tokens.is_some()
+                || input.output_price_per_million_tokens.is_some()
+                || input.cost_currency.is_some()
+            {
+                return Err(
+                    "AI task pricing source is required when pricing is present".to_string()
+                );
+            }
+        }
+        Some("mock") => {
+            if input.input_price_per_million_tokens != Some(0.0)
+                || input.output_price_per_million_tokens != Some(0.0)
+                || input.cost_currency.as_deref() != Some("USD")
+            {
+                return Err("Mock AI task pricing must be zero USD".to_string());
+            }
+        }
+        Some("user_configured") => {
+            if input.input_price_per_million_tokens.is_none()
+                || input.output_price_per_million_tokens.is_none()
+                || input.cost_currency.as_deref() != Some("USD")
+            {
+                return Err("Configured AI task pricing requires both USD token rates".to_string());
+            }
+        }
+        Some("unconfigured") => {
+            if input.input_price_per_million_tokens.is_some()
+                || input.output_price_per_million_tokens.is_some()
+                || input.cost_currency.as_deref() != Some("USD")
+            {
+                return Err("Unconfigured AI task pricing cannot contain token rates".to_string());
+            }
+        }
+        Some(_) => return Err("Unsupported AI task pricing source".to_string()),
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn create_ai_task_record(input: CreateAiTaskRecordInput) -> Result<AiTaskRecordDto, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    create_ai_task_record_internal(&conn, &input)
+}
+
+fn create_ai_task_record_internal(
+    conn: &Connection,
+    input: &CreateAiTaskRecordInput,
+) -> Result<AiTaskRecordDto, String> {
+    validate_ai_task_pricing(input)?;
     let id = input.id.clone();
+    let existing_count = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ai_task_records WHERE id = ?1",
+            params![&input.id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if existing_count > 0 {
+        let existing = get_ai_task_record_by_id_internal(conn, &id)?;
+        validate_ai_task_projection_identity(&existing, input)?;
+        return Ok(existing);
+    }
     conn.execute(
-        "INSERT OR REPLACE INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        "INSERT INTO ai_task_records (id, novel_id, chapter_id, task_type, status, runtime_mode, provider, model_name, input_price_per_million_tokens, output_price_per_million_tokens, cost_currency, pricing_source, input_summary, started_at, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15) ON CONFLICT(id) DO NOTHING",
         params![
-            input.id,
-            input.novel_id,
-            input.chapter_id,
-            input.task_type,
-            input.status,
-            input.runtime_mode,
-            input.provider,
-            input.model_name,
-            input.input_summary,
-            input.started_at,
-            input.created_at,
+            &input.id,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.task_type,
+            &input.status,
+            &input.runtime_mode,
+            &input.provider,
+            &input.model_name,
+            input.input_price_per_million_tokens,
+            input.output_price_per_million_tokens,
+            &input.cost_currency,
+            &input.pricing_source,
+            &input.input_summary,
+            &input.started_at,
+            &input.created_at,
         ],
     ).map_err(|e| e.to_string())?;
 
-    get_ai_task_record_by_id_internal(&conn, &id)
+    let created = get_ai_task_record_by_id_internal(conn, &id)?;
+    validate_ai_task_projection_identity(&created, input)?;
+    Ok(created)
+}
+
+fn validate_ai_task_projection_identity(
+    existing: &AiTaskRecordDto,
+    input: &CreateAiTaskRecordInput,
+) -> Result<(), String> {
+    if existing.task_type != input.task_type
+        || existing.novel_id != input.novel_id
+        || existing.chapter_id != input.chapter_id
+        || existing.runtime_mode != input.runtime_mode
+        || existing.provider != input.provider
+        || existing.model_name != input.model_name
+    {
+        return Err("ai_task_projection_identity_conflict".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn mark_ai_task_running_for_retry(id: String, started_at: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    mark_ai_task_running_for_retry_internal(&conn, &id, &started_at)?;
+    Ok(())
+}
+
+fn mark_ai_task_running_for_retry_internal(
+    conn: &Connection,
+    id: &str,
+    started_at: &str,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE ai_task_records
+         SET status = 'running', error_message = NULL, duration_ms = NULL,
+             finished_at = NULL, started_at = ?1
+         WHERE id = ?2 AND status = 'failed'",
+        params![started_at, id],
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Result<(), String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    mark_ai_task_succeeded_internal(&conn, &id, &input)?;
+    Ok(())
+}
+
+fn mark_ai_task_succeeded_internal(
+    conn: &Connection,
+    id: &str,
+    input: &MarkAiTaskSucceededInput,
+) -> Result<usize, String> {
+    validate_mark_ai_task_succeeded_input(input)?;
     conn.execute(
-        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6, duration_ms = ?7, finished_at = ?8 WHERE id = ?9 AND status IN ('pending', 'running')",
+        "UPDATE ai_task_records SET status = 'succeeded', result_text = ?1, prompt_snapshot = ?2, result_json = ?3, error_message = NULL, token_input = ?4, token_output = ?5, token_total = ?6,
+         cost_estimate = CASE
+           WHEN pricing_source = 'mock' THEN 0.0
+           WHEN input_price_per_million_tokens IS NOT NULL AND output_price_per_million_tokens IS NOT NULL AND ?4 IS NOT NULL AND ?5 IS NOT NULL
+             THEN ROUND(((?4 * input_price_per_million_tokens) + (?5 * output_price_per_million_tokens)) / 1000000.0, 8)
+           ELSE NULL
+         END,
+         cost_status = CASE
+           WHEN pricing_source = 'mock' THEN 'mock'
+           WHEN input_price_per_million_tokens IS NULL OR output_price_per_million_tokens IS NULL THEN 'unpriced'
+           WHEN ?4 IS NULL OR ?5 IS NULL THEN 'usage_missing'
+           ELSE 'complete'
+         END,
+         duration_ms = ?7, finished_at = ?8 WHERE id = ?9 AND status IN ('pending', 'running')",
         params![
-            input.result_text,
-            input.prompt_snapshot,
-            input.result_json,
+            &input.result_text,
+            &input.prompt_snapshot,
+            &input.result_json,
             input.token_input,
             input.token_output,
             input.token_total,
@@ -2846,8 +3339,7 @@ pub fn mark_ai_task_succeeded(id: String, input: MarkAiTaskSucceededInput) -> Re
             input.finished_at,
             id,
         ],
-    ).map_err(|e| e.to_string())?;
-    Ok(())
+    ).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2893,43 +3385,41 @@ pub fn mark_ai_task_cancelled(
 pub fn get_ai_task_records(
     page: Option<i64>,
     size: Option<i64>,
+    task_type: Option<String>,
+    status: Option<String>,
 ) -> Result<Vec<AiTaskRecordDto>, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let db_path = ai_task_db_path_for_log();
     let page = page.unwrap_or(1).max(1);
     let size = size.unwrap_or(20).clamp(1, 500);
     let offset = (page - 1) * size;
+    let task_type = normalize_ai_task_type_filter(task_type)?;
+    let status = normalize_ai_task_status_filter(status)?;
     let sql = format!(
-        "{} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+        "{} WHERE (?3 IS NULL OR task_type = ?3) AND (?4 IS NULL OR status = ?4) ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
         ai_task_select_sql()
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let result = stmt
-        .query_map(params![size, offset], map_ai_task_row)
+        .query_map(
+            params![size, offset, task_type.as_deref(), status.as_deref()],
+            map_ai_task_row,
+        )
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string());
-    if let Ok(items) = &result {
-        println!(
-            "[AI_TASK_READ_RUST] get_ai_task_records db_path={} page={} size={} returned={}",
-            db_path,
-            page,
-            size,
-            items.len()
-        );
-    }
     result
 }
 
 #[tauri::command]
-pub fn count_ai_task_records() -> Result<i64, String> {
+pub fn count_ai_task_records(
+    task_type: Option<String>,
+    status: Option<String>,
+) -> Result<i64, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    let db_path = ai_task_db_path_for_log();
-    let count = count_ai_task_records_in_conn(&conn)?;
-    println!(
-        "[AI_TASK_READ_RUST] count_ai_task_records db_path={} count={}",
-        db_path, count
-    );
+    let task_type = normalize_ai_task_type_filter(task_type)?;
+    let status = normalize_ai_task_status_filter(status)?;
+    let count =
+        count_ai_task_records_filtered_in_conn(&conn, task_type.as_deref(), status.as_deref())?;
     Ok(count)
 }
 
@@ -2937,10 +3427,6 @@ pub fn count_ai_task_records() -> Result<i64, String> {
 pub fn delete_ai_task_record(id: String) -> Result<DeleteAiTaskRecordsResult, String> {
     let conn = get_connection().lock().map_err(|e| e.to_string())?;
     let db_path = ai_task_db_path_for_log();
-    println!(
-        "[AI_TASK_DELETE_RUST] delete_one called id={} db_path={}",
-        id, db_path
-    );
     delete_ai_task_records_by_ids_internal(&conn, vec![id], db_path)
 }
 
@@ -2987,10 +3473,6 @@ pub fn get_ai_task_records_debug_state(
     } else {
         Vec::new()
     };
-    println!(
-        "[AI_TASK_DEBUG_RUST] state db_path={} table_exists={} total_count={} matched_count={:?} ids={:?} sample_ids={:?}",
-        db_path, table_exists, total_count, matched_count, normalized_ids, sample_ids
-    );
     Ok(AiTaskRecordsDebugState {
         db_path,
         table_exists,
@@ -3069,6 +3551,12 @@ pub struct StyleProfileDto {
     pub raw_config_json: Option<String>,
     pub is_active: bool,
     pub source_type: String,
+    pub source_asset_id: Option<String>,
+    pub source_reference_work_id: Option<String>,
+    pub source_reference_import_id: Option<String>,
+    pub source_content_sha256: Option<String>,
+    pub source_state: String,
+    pub analysis_metadata_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -3094,10 +3582,17 @@ pub struct SaveStyleProfileInput {
     pub style_summary: Option<String>,
     pub raw_config_json: Option<String>,
     pub source_type: Option<String>,
+    pub source_asset_id: Option<String>,
+    pub source_reference_work_id: Option<String>,
+    pub source_reference_import_id: Option<String>,
+    pub source_content_sha256: Option<String>,
+    pub source_state: Option<String>,
+    pub analysis_metadata_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // Kept for backwards-compatible IPC payload deserialization.
 pub struct UpdateStyleProfileInput {
     pub id: String,
     pub project_id: String,
@@ -3152,11 +3647,17 @@ fn map_style_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StyleProfi
         source_type: row.get(19)?,
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
+        source_asset_id: row.get(22)?,
+        source_reference_work_id: row.get(23)?,
+        source_reference_import_id: row.get(24)?,
+        source_content_sha256: row.get(25)?,
+        source_state: row.get(26)?,
+        analysis_metadata_json: row.get(27)?,
     })
 }
 
 fn style_select_sql() -> &'static str {
-    "SELECT id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at FROM style_profiles"
+    "SELECT id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at, source_asset_id, source_reference_work_id, source_reference_import_id, source_content_sha256, source_state, analysis_metadata_json FROM style_profiles"
 }
 
 #[tauri::command]
@@ -3213,10 +3714,79 @@ pub fn save_style_profile(
     let forbidden_json = serde_json::to_string(&input.forbidden_styles.unwrap_or_default())
         .unwrap_or_else(|_| "[]".to_string());
     let source_type = input.source_type.unwrap_or_else(|| "manual".to_string());
+    let source_state = input.source_state.clone().unwrap_or_else(|| {
+        if input.source_reference_import_id.is_some() {
+            "available".to_string()
+        } else {
+            "none".to_string()
+        }
+    });
+    if !matches!(
+        source_state.as_str(),
+        "none" | "available" | "outdated" | "missing" | "legacy_unverified"
+    ) {
+        return Err("REFERENCE_INPUT_INVALID: invalid style source state".to_string());
+    }
+    if let Some(metadata) = input.analysis_metadata_json.as_deref() {
+        let parsed = serde_json::from_str::<serde_json::Value>(metadata)
+            .map_err(|_| "REFERENCE_INPUT_INVALID: invalid analysis metadata".to_string())?;
+        if !parsed.is_object() || metadata.len() > 500_000 {
+            return Err("REFERENCE_INPUT_INVALID: invalid analysis metadata".to_string());
+        }
+    }
+    let reference_fields = [
+        input.source_reference_work_id.as_deref(),
+        input.source_reference_import_id.as_deref(),
+        input.source_content_sha256.as_deref(),
+    ];
+    let populated_reference_fields = reference_fields
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    if populated_reference_fields != 0 && populated_reference_fields != reference_fields.len() {
+        return Err("REFERENCE_INPUT_INVALID: incomplete style reference identity".to_string());
+    }
+    if populated_reference_fields == reference_fields.len() {
+        let source_hash = input.source_content_sha256.as_deref().unwrap_or_default();
+        if source_hash.len() != 64
+            || !source_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("REFERENCE_INPUT_INVALID: invalid style source hash".to_string());
+        }
+        let valid_scope: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM reference_imports i
+                 INNER JOIN reference_works w
+                   ON w.id = i.reference_work_id AND w.novel_id = i.novel_id
+                 WHERE w.novel_id = ?1 AND w.id = ?2 AND i.id = ?3 AND i.source_sha256 = ?4
+                   AND (?5 <> 'available' OR i.is_current = 1)",
+                params![
+                    input.project_id,
+                    input.source_reference_work_id,
+                    input.source_reference_import_id,
+                    input.source_content_sha256,
+                    source_state,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if valid_scope != 1 {
+            return Err(
+                "REFERENCE_SCOPE_MISMATCH: style reference does not belong to project".to_string(),
+            );
+        }
+    }
+    let source_state_update = if populated_reference_fields == reference_fields.len() {
+        Some(source_state.clone())
+    } else {
+        input.source_state.clone()
+    };
 
     if let Some(existing_id) = id {
         conn.execute(
-            "UPDATE style_profiles SET name = ?1, description = ?2, narrative_perspective = ?3, tone = ?4, pace = ?5, sentence_style = ?6, dialogue_ratio = ?7, description_ratio = ?8, psychological_ratio = ?9, battle_style = ?10, battle_intensity = ?11, emotion_tendency = ?12, chapter_ending = ?13, forbidden_styles = ?14, style_summary = ?15, raw_config_json = ?16, source_type = ?17, updated_at = ?18 WHERE id = ?19 AND novel_id = ?20",
+            "UPDATE style_profiles SET name = ?1, description = ?2, narrative_perspective = ?3, tone = ?4, pace = ?5, sentence_style = ?6, dialogue_ratio = ?7, description_ratio = ?8, psychological_ratio = ?9, battle_style = ?10, battle_intensity = ?11, emotion_tendency = ?12, chapter_ending = ?13, forbidden_styles = ?14, style_summary = ?15, raw_config_json = ?16, source_type = ?17, updated_at = ?18, source_asset_id = COALESCE(?21, source_asset_id), source_reference_work_id = COALESCE(?22, source_reference_work_id), source_reference_import_id = COALESCE(?23, source_reference_import_id), source_content_sha256 = COALESCE(?24, source_content_sha256), source_state = COALESCE(?25, source_state), analysis_metadata_json = COALESCE(?26, analysis_metadata_json) WHERE id = ?19 AND novel_id = ?20",
             params![
                 &input.name, &input.description,
                 &input.narrative_perspective, &input.tone, &input.pace, &input.sentence_style,
@@ -3225,13 +3795,16 @@ pub fn save_style_profile(
                 &input.emotion_tendency, &input.chapter_ending,
                 &forbidden_json, &input.style_summary, &input.raw_config_json,
                 &source_type, &now, &existing_id, &input.project_id,
+                &input.source_asset_id, &input.source_reference_work_id,
+                &input.source_reference_import_id, &input.source_content_sha256,
+                &source_state_update, &input.analysis_metadata_json,
             ],
         ).map_err(|e| e.to_string())?;
         get_style_profile_by_id_internal(&conn, &existing_id)
     } else {
         let new_id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO style_profiles (id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,0,?18,?19,?20,?20)",
+            "INSERT INTO style_profiles (id, novel_id, name, description, narrative_perspective, tone, pace, sentence_style, dialogue_ratio, description_ratio, psychological_ratio, battle_style, battle_intensity, emotion_tendency, chapter_ending, forbidden_styles, style_summary, is_active, raw_config_json, source_type, created_at, updated_at, source_asset_id, source_reference_work_id, source_reference_import_id, source_content_sha256, source_state, analysis_metadata_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,0,?18,?19,?20,?20,?21,?22,?23,?24,?25,?26)",
             params![
                 &new_id, &input.project_id, &input.name, &input.description,
                 &input.narrative_perspective, &input.tone, &input.pace, &input.sentence_style,
@@ -3240,6 +3813,9 @@ pub fn save_style_profile(
                 &input.emotion_tendency, &input.chapter_ending,
                 &forbidden_json, &input.style_summary, &input.raw_config_json,
                 &source_type, &now,
+                &input.source_asset_id, &input.source_reference_work_id,
+                &input.source_reference_import_id, &input.source_content_sha256,
+                &source_state, &input.analysis_metadata_json,
             ],
         ).map_err(|e| e.to_string())?;
         get_style_profile_by_id_internal(&conn, &new_id)
@@ -4200,11 +4776,6 @@ pub fn create_quality_check_report(
     if draft_target.0 != input.novel_id || draft_target.1 != input.chapter_id {
         return Err("quality_check_draft_ownership_mismatch".to_string());
     }
-    println!(
-        "[QUALITY_CHECK] create_report start id={} novel_id={} chapter_id={} draft_id={}",
-        id, input.novel_id, input.chapter_id, input.draft_id
-    );
-
     conn.execute(
         "INSERT INTO quality_check_reports (id, novel_id, chapter_id, draft_id, scope, status, content_hash, content_length, checked_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ?9, ?9)",
         params![
@@ -4220,11 +4791,6 @@ pub fn create_quality_check_report(
         ],
     )
     .map_err(|e| e.to_string())?;
-    println!(
-        "[QUALITY_CHECK] create_report done id={} chapter_id={}",
-        id, input.chapter_id
-    );
-
     let mut stmt = conn
         .prepare(&format!("{} WHERE id = ?1", quality_report_select_sql()))
         .map_err(|e| e.to_string())?;
@@ -4774,21 +5340,8 @@ fn save_quality_check_result_internal(
 pub fn save_quality_check_result(
     input: SaveQualityCheckResultInput,
 ) -> Result<GetQualityCheckIssuesResult, String> {
-    println!(
-        "[QUALITY_CHECK] save_result start report_id={} chapter_id={} item_count={}",
-        input.report_id,
-        input.chapter_id,
-        input.result.items.len()
-    );
     let mut conn = get_connection().lock().map_err(|error| error.to_string())?;
-    let result = save_quality_check_result_internal(&mut conn, &input);
-    if result.is_ok() {
-        println!(
-            "[QUALITY_CHECK] save_result done report_id={} chapter_id={}",
-            input.report_id, input.chapter_id
-        );
-    }
-    result
+    save_quality_check_result_internal(&mut conn, &input)
 }
 
 // ==================== Chapter Summary ====================
@@ -6836,6 +7389,22 @@ fn map_fix_run_row(row: &rusqlite::Row) -> rusqlite::Result<QualityFixRunDto> {
     })
 }
 
+fn has_other_quality_fix_round(
+    conn: &Connection,
+    chapter_id: &str,
+    source_draft_id: &str,
+    run_id: &str,
+) -> Result<bool, String> {
+    let existing_rounds: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM quality_fix_runs WHERE chapter_id=?1 AND source_draft_id=?2 AND id<>?3",
+            params![chapter_id, source_draft_id, run_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(existing_rounds > 0)
+}
+
 /// 保存修稿记录（创建或更新）
 #[tauri::command]
 pub fn save_quality_fix_run(input: SaveQualityFixRunInput) -> Result<QualityFixRunDto, String> {
@@ -6857,6 +7426,12 @@ pub fn save_quality_fix_run(input: SaveQualityFixRunInput) -> Result<QualityFixR
     ).map_err(|e| e.to_string())?;
 
     if updated == 0 {
+        if has_other_quality_fix_round(&conn, &input.chapter_id, &input.source_draft_id, &input.id)?
+        {
+            return Err(
+                "quality_fix_round_already_used: source draft already has a repair run".to_string(),
+            );
+        }
         conn.execute(
             "INSERT INTO quality_fix_runs (id, novel_id, chapter_id, source_draft_id, source_draft_version, target_draft_id, target_draft_version, source_content_hash, target_content_hash, before_report_id, after_report_id, before_score, after_score, before_pending_count, after_pending_count, before_serious_count, after_serious_count, fixed_issue_ids, new_issue_ids, mode, status, model, revision_summary, changed_ranges_json, used_context_ids, skipped_context_ids, warnings, failure_reason, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?29)",
             params![
@@ -6955,6 +7530,236 @@ mod tests {
         assert_eq!(count_words("你好，世界！ Hello world 2026."), 7);
         assert_eq!(count_words("# 标题\nalpha-beta `42`"), 5);
         assert_eq!(count_words(" \n\t，。！？ "), 0);
+    }
+
+    fn create_volume_chapter_update_test_schema(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE volumes (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT,
+                goal TEXT,
+                main_conflict TEXT,
+                order_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE chapters (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                volume_id TEXT,
+                title TEXT NOT NULL,
+                outline TEXT,
+                goal TEXT,
+                order_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                word_count INTEGER NOT NULL,
+                target_word_count INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (volume_id) REFERENCES volumes(id)
+            );
+
+            INSERT INTO volumes
+                (id, novel_id, title, summary, goal, main_conflict, order_index, status, created_at, updated_at)
+            VALUES
+                ('volume-a', 'novel-a', 'volume-original-a', NULL, NULL, NULL, 0, 'planned', 'before', 'before'),
+                ('volume-b', 'novel-a', 'volume-original-b', NULL, NULL, NULL, 1, 'planned', 'before', 'before');
+
+            INSERT INTO chapters
+                (id, novel_id, volume_id, title, outline, goal, order_index, status, adopted_draft_id, word_count, target_word_count, created_at, updated_at)
+            VALUES
+                ('chapter-a', 'novel-a', 'volume-a', 'chapter-original-a', NULL, NULL, 0, 'not_started', NULL, 0, 3000, 'before', 'before'),
+                ('chapter-b', 'novel-a', 'volume-b', 'chapter-original-b', NULL, NULL, 1, 'not_started', NULL, 0, 3000, 'before', 'before');
+            ",
+        )
+    }
+
+    #[test]
+    fn update_volume_binds_ipc_values_and_rejects_invalid_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_volume_chapter_update_test_schema(&conn).unwrap();
+
+        let injection_result = update_volume_internal(
+            &conn,
+            "volume-a' OR 1=1 --",
+            UpdateVolumeInput {
+                title: Some("injected".to_string()),
+                summary: None,
+                goal: None,
+                main_conflict: None,
+                order_index: None,
+                status: None,
+            },
+            "after-injection",
+        );
+        assert!(injection_result.is_err());
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM volumes WHERE title LIKE 'volume-original-%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 2);
+
+        let updated = update_volume_internal(
+            &conn,
+            "volume-a",
+            UpdateVolumeInput {
+                title: Some("Writer's volume".to_string()),
+                summary: None,
+                goal: None,
+                main_conflict: None,
+                order_index: Some(2),
+                status: Some("writing".to_string()),
+            },
+            "after-valid-update",
+        )
+        .unwrap();
+        assert_eq!(updated.title, "Writer's volume");
+        assert_eq!(updated.status, "writing");
+        assert_eq!(updated.order_index, 2);
+
+        let invalid_status = update_volume_internal(
+            &conn,
+            "volume-a",
+            UpdateVolumeInput {
+                title: Some("must-not-apply".to_string()),
+                summary: None,
+                goal: None,
+                main_conflict: None,
+                order_index: None,
+                status: Some("writing', title = 'injected".to_string()),
+            },
+            "after-invalid-status",
+        )
+        .unwrap_err();
+        assert_eq!(invalid_status, "volume_status_invalid");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM volumes WHERE id = 'volume-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Writer's volume");
+    }
+
+    #[test]
+    fn update_chapter_binds_ipc_values_and_rejects_invalid_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_volume_chapter_update_test_schema(&conn).unwrap();
+
+        let injection_result = update_chapter_internal(
+            &conn,
+            "chapter-a' OR 1=1 --",
+            UpdateChapterInput {
+                volume_id: None,
+                title: Some("injected".to_string()),
+                outline: None,
+                goal: None,
+                order_index: None,
+                status: None,
+                target_word_count: None,
+            },
+            "after-injection",
+        );
+        assert!(injection_result.is_err());
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chapters WHERE title LIKE 'chapter-original-%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 2);
+
+        let injected_volume_id = "volume-b' OR 1=1 --";
+        let volume_injection = update_chapter_internal(
+            &conn,
+            "chapter-a",
+            UpdateChapterInput {
+                volume_id: Some(injected_volume_id.to_string()),
+                title: Some("must-not-apply".to_string()),
+                outline: None,
+                goal: None,
+                order_index: Some(2),
+                status: Some("editing".to_string()),
+                target_word_count: Some(4500),
+            },
+            "after-volume-injection",
+        );
+        assert!(volume_injection.is_err());
+        let unchanged_title: String = conn
+            .query_row(
+                "SELECT title FROM chapters WHERE id = 'chapter-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unchanged_title, "chapter-original-a");
+
+        let updated = update_chapter_internal(
+            &conn,
+            "chapter-a",
+            UpdateChapterInput {
+                volume_id: Some("volume-b".to_string()),
+                title: Some("Editor's chapter".to_string()),
+                outline: Some("The hero's choice".to_string()),
+                goal: None,
+                order_index: Some(2),
+                status: Some("editing".to_string()),
+                target_word_count: Some(4500),
+            },
+            "after-valid-update",
+        )
+        .unwrap();
+        assert_eq!(updated.volume_id.as_deref(), Some("volume-b"));
+        assert_eq!(updated.title, "Editor's chapter");
+        assert_eq!(updated.outline.as_deref(), Some("The hero's choice"));
+        assert_eq!(updated.status, "editing");
+        assert_eq!(updated.target_word_count, Some(4500));
+        let other_title: String = conn
+            .query_row(
+                "SELECT title FROM chapters WHERE id = 'chapter-b'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(other_title, "chapter-original-b");
+
+        let invalid_status = update_chapter_internal(
+            &conn,
+            "chapter-a",
+            UpdateChapterInput {
+                volume_id: None,
+                title: Some("must-not-apply".to_string()),
+                outline: None,
+                goal: None,
+                order_index: None,
+                status: Some("editing', title = 'injected".to_string()),
+                target_word_count: None,
+            },
+            "after-invalid-status",
+        )
+        .unwrap_err();
+        assert_eq!(invalid_status, "chapter_status_invalid");
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM chapters WHERE id = 'chapter-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Editor's chapter");
     }
 
     #[test]
@@ -7113,6 +7918,17 @@ mod tests {
                 id TEXT PRIMARY KEY,
                 chapter_id TEXT NOT NULL,
                 is_expired INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE memory_documents (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                invalidated_at TEXT,
+                invalidation_reason TEXT,
                 updated_at TEXT NOT NULL
             );
             ",
@@ -7726,6 +8542,74 @@ mod tests {
     }
 
     #[test]
+    fn adopting_different_draft_invalidates_old_memory_atomically(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "old body", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "new body", false)?;
+        conn.execute(
+            "INSERT INTO memory_documents
+                (id, novel_id, chapter_id, adopted_draft_id, status, updated_at)
+             VALUES ('memory-old', 'novel-1', 'chapter-a', 'draft-old', 'active', 'before')",
+            [],
+        )?;
+
+        adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")?;
+
+        let memory: (String, Option<String>) = conn.query_row(
+            "SELECT status, invalidation_reason FROM memory_documents WHERE id = 'memory-old'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(memory.0, "invalidated");
+        assert_eq!(memory.1.as_deref(), Some("adopted_draft_changed"));
+        Ok(())
+    }
+
+    #[test]
+    fn memory_invalidation_failure_rolls_back_adoption() -> Result<(), Box<dyn std::error::Error>> {
+        let mut conn = Connection::open_in_memory()?;
+        create_chapter_draft_test_schema(&conn)?;
+        insert_test_chapter(&conn, "chapter-a", Some("draft-old"), 3, "adopted")?;
+        insert_test_draft(&conn, "draft-old", "chapter-a", "old body", true)?;
+        insert_test_draft(&conn, "draft-new", "chapter-a", "new body", false)?;
+        conn.execute(
+            "INSERT INTO memory_documents
+                (id, novel_id, chapter_id, adopted_draft_id, status, updated_at)
+             VALUES ('memory-old', 'novel-1', 'chapter-a', 'draft-old', 'active', 'before')",
+            [],
+        )?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_memory_invalidation
+             BEFORE UPDATE OF status ON memory_documents
+             BEGIN SELECT RAISE(ABORT, 'forced memory failure'); END;",
+        )?;
+
+        let error = adopt_chapter_draft_internal(&mut conn, "draft-new", "chapter-a")
+            .expect_err("memory invalidation failure must roll back adoption");
+
+        assert!(
+            error.starts_with("adopt_memory_invalidation_failed:"),
+            "{error}"
+        );
+        assert_eq!(get_test_draft_adopted(&conn, "draft-old")?, 1);
+        assert_eq!(get_test_draft_adopted(&conn, "draft-new")?, 0);
+        assert_eq!(
+            get_test_chapter_state(&conn, "chapter-a")?.0.as_deref(),
+            Some("draft-old")
+        );
+        let status: String = conn.query_row(
+            "SELECT status FROM memory_documents WHERE id = 'memory-old'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(status, "active");
+        Ok(())
+    }
+
+    #[test]
     fn readopting_same_draft_keeps_summary_and_context_valid(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = Connection::open_in_memory()?;
@@ -8227,10 +9111,6 @@ mod tests {
         insert_runtime_ai_task_children(&conn, &second_id, "clear-child")?;
 
         let before_count = count_ai_task_records_in_conn(&conn)?;
-        println!(
-            "[AI_TASK_DELETE_RUNTIME_TEST] inserted db_path={} ids=[{}, {}] before_count={}",
-            db_path_text, first_id, second_id, before_count
-        );
         assert_eq!(before_count, 2);
         assert_eq!(count_runtime_ai_task_child_refs(&conn, &first_id)?, 5);
         assert_eq!(count_runtime_ai_task_child_refs(&conn, &second_id)?, 5);
@@ -8241,10 +9121,6 @@ mod tests {
             vec![first_id.clone()],
             db_path_text.clone(),
         )?;
-        println!(
-            "[AI_TASK_DELETE_RUNTIME_TEST] delete_result={:?}",
-            delete_result
-        );
         assert_eq!(delete_result.requested_count, 1);
         assert_eq!(delete_result.before_count, 2);
         assert_eq!(delete_result.before_match_count, 1);
@@ -8264,10 +9140,6 @@ mod tests {
         assert_eq!(count_runtime_ai_task_child_rows(&conn)?, 10);
 
         let clear_result = clear_ai_task_records_internal(&conn, db_path_text.clone())?;
-        println!(
-            "[AI_TASK_DELETE_RUNTIME_TEST] clear_result={:?}",
-            clear_result
-        );
         assert_eq!(clear_result.before_count, 1);
         assert_eq!(clear_result.deleted_count, 1);
         assert_eq!(clear_result.after_count, 0);
@@ -8279,6 +9151,42 @@ mod tests {
 
         drop(conn);
         let _ = fs::remove_file(db_path);
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_delete_rejects_running_records_without_clearing_provenance(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_runtime_ai_task_table(&conn)?;
+        insert_runtime_ai_task(&conn, "terminal-task")?;
+        conn.execute(
+            "INSERT INTO ai_task_records (id, task_type, status, created_at)
+             VALUES ('running-task', 'chapter_generate', 'running', '2026-07-29T00:00:00Z')",
+            [],
+        )?;
+        insert_runtime_ai_task_children(&conn, "running-task", "running-child")?;
+
+        for result in [
+            delete_ai_task_records_by_ids_internal(
+                &conn,
+                vec!["running-task".to_string()],
+                "memory".to_string(),
+            ),
+            delete_ai_task_records_by_ids_internal(
+                &conn,
+                vec!["terminal-task".to_string(), "running-task".to_string()],
+                "memory".to_string(),
+            ),
+            clear_ai_task_records_internal(&conn, "memory".to_string()),
+        ] {
+            assert_eq!(
+                result.expect_err("running AI task must be protected"),
+                "ai_task_running_delete_protected"
+            );
+        }
+        assert_eq!(count_ai_task_records_in_conn(&conn)?, 2);
+        assert_eq!(count_runtime_ai_task_child_refs(&conn, "running-task")?, 5);
         Ok(())
     }
 
@@ -9696,6 +10604,136 @@ mod tests {
     }
 
     #[test]
+    fn ai_task_projection_replay_preserves_terminal_record_and_draft_foreign_key(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT,
+                chapter_id TEXT,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                runtime_mode TEXT,
+                provider TEXT,
+                model_name TEXT,
+                prompt_template_id TEXT,
+                input_summary TEXT,
+                prompt_snapshot TEXT,
+                result_text TEXT,
+                result_json TEXT,
+                error_message TEXT,
+                token_input INTEGER,
+                token_output INTEGER,
+                token_total INTEGER,
+                input_price_per_million_tokens REAL,
+                output_price_per_million_tokens REAL,
+                cost_estimate REAL,
+                cost_currency TEXT,
+                cost_status TEXT,
+                pricing_source TEXT,
+                duration_ms INTEGER,
+                started_at TEXT,
+                finished_at TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE chapter_drafts (
+                id TEXT PRIMARY KEY,
+                ai_task_id TEXT,
+                FOREIGN KEY (ai_task_id) REFERENCES ai_task_records(id)
+            );
+            ",
+        )?;
+        let input = CreateAiTaskRecordInput {
+            id: "formal-task-1".to_string(),
+            novel_id: Some("novel-1".to_string()),
+            chapter_id: Some("chapter-1".to_string()),
+            task_type: "chapter_generate".to_string(),
+            status: "running".to_string(),
+            runtime_mode: Some("mock".to_string()),
+            provider: Some("mock".to_string()),
+            model_name: Some("Mock".to_string()),
+            input_price_per_million_tokens: Some(0.0),
+            output_price_per_million_tokens: Some(0.0),
+            cost_currency: Some("USD".to_string()),
+            pricing_source: Some("mock".to_string()),
+            input_summary: Some("first projection".to_string()),
+            started_at: Some("2026-07-29T00:00:00Z".to_string()),
+            created_at: "2026-07-29T00:00:00Z".to_string(),
+        };
+        assert_eq!(
+            create_ai_task_record_internal(&conn, &input)?.status,
+            "running"
+        );
+        mark_ai_task_succeeded_internal(
+            &conn,
+            &input.id,
+            &MarkAiTaskSucceededInput {
+                result_text: Some("terminal result".to_string()),
+                prompt_snapshot: None,
+                result_json: None,
+                token_input: Some(2),
+                token_output: Some(3),
+                token_total: Some(5),
+                duration_ms: Some(10),
+                finished_at: "2026-07-29T00:00:01Z".to_string(),
+            },
+        )?;
+        conn.execute(
+            "INSERT INTO chapter_drafts (id, ai_task_id) VALUES ('draft-1', ?1)",
+            params![&input.id],
+        )?;
+
+        let replayed = create_ai_task_record_internal(
+            &conn,
+            &CreateAiTaskRecordInput {
+                input_summary: Some("replayed projection".to_string()),
+                created_at: "2026-07-29T00:00:02Z".to_string(),
+                ..input
+            },
+        )?;
+        assert_eq!(replayed.status, "succeeded");
+        assert_eq!(replayed.result_text.as_deref(), Some("terminal result"));
+        assert_eq!(replayed.input_summary.as_deref(), Some("first projection"));
+        let conflict = create_ai_task_record_internal(
+            &conn,
+            &CreateAiTaskRecordInput {
+                id: "formal-task-1".to_string(),
+                novel_id: Some("other-novel".to_string()),
+                chapter_id: Some("chapter-1".to_string()),
+                task_type: "chapter_generate".to_string(),
+                status: "running".to_string(),
+                runtime_mode: Some("mock".to_string()),
+                provider: Some("mock".to_string()),
+                model_name: Some("Mock".to_string()),
+                input_price_per_million_tokens: Some(0.0),
+                output_price_per_million_tokens: Some(0.0),
+                cost_currency: Some("USD".to_string()),
+                pricing_source: Some("mock".to_string()),
+                input_summary: None,
+                started_at: Some("2026-07-29T00:00:03Z".to_string()),
+                created_at: "2026-07-29T00:00:03Z".to_string(),
+            },
+        )
+        .expect_err("same projection id with different ownership must fail");
+        assert_eq!(conflict, "ai_task_projection_identity_conflict");
+        let draft_task_id: Option<String> = conn.query_row(
+            "SELECT ai_task_id FROM chapter_drafts WHERE id = 'draft-1'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(draft_task_id.as_deref(), Some("formal-task-1"));
+        let foreign_key_violations: i64 =
+            conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(foreign_key_violations, 0);
+        Ok(())
+    }
+
+    #[test]
     fn ai_task_cancellation_is_terminal_and_idempotent() -> Result<(), Box<dyn std::error::Error>> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(
@@ -9755,6 +10793,349 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(succeeded, "succeeded");
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_retry_reopens_only_failed_compatibility_projection(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                duration_ms INTEGER,
+                started_at TEXT,
+                finished_at TEXT
+            );
+            INSERT INTO ai_task_records
+                (id, status, error_message, duration_ms, started_at, finished_at)
+            VALUES
+                ('failed-task', 'failed', 'retryable', 10, 'before', 'finished'),
+                ('succeeded-task', 'succeeded', NULL, 12, 'before', 'finished');
+            ",
+        )?;
+
+        assert_eq!(
+            mark_ai_task_running_for_retry_internal(&conn, "failed-task", "retry-start")?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_running_for_retry_internal(&conn, "succeeded-task", "must-not-change")?,
+            0
+        );
+        let failed: (String, Option<String>, Option<i64>, String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error_message, duration_ms, started_at, finished_at
+                 FROM ai_task_records WHERE id = 'failed-task'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+        assert_eq!(
+            failed,
+            (
+                "running".to_string(),
+                None,
+                None,
+                "retry-start".to_string(),
+                None
+            )
+        );
+        let succeeded: (String, String) = conn.query_row(
+            "SELECT status, started_at FROM ai_task_records WHERE id = 'succeeded-task'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(succeeded, ("succeeded".to_string(), "before".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_success_calculates_cost_from_frozen_pricing(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                result_text TEXT,
+                prompt_snapshot TEXT,
+                result_json TEXT,
+                error_message TEXT,
+                token_input INTEGER,
+                token_output INTEGER,
+                token_total INTEGER,
+                input_price_per_million_tokens REAL,
+                output_price_per_million_tokens REAL,
+                cost_estimate REAL,
+                cost_status TEXT,
+                pricing_source TEXT,
+                duration_ms INTEGER,
+                finished_at TEXT
+            );
+            INSERT INTO ai_task_records
+                (id, status, input_price_per_million_tokens, output_price_per_million_tokens, pricing_source)
+            VALUES ('configured', 'running', 2.0, 8.0, 'user_configured');
+            INSERT INTO ai_task_records (id, status, pricing_source)
+            VALUES ('unpriced', 'running', 'unconfigured');
+            INSERT INTO ai_task_records
+                (id, status, input_price_per_million_tokens, output_price_per_million_tokens, pricing_source)
+            VALUES ('mock', 'running', 0.0, 0.0, 'mock');
+            ",
+        )?;
+
+        let success = |input_tokens, output_tokens| MarkAiTaskSucceededInput {
+            result_text: Some("ok".to_string()),
+            prompt_snapshot: None,
+            result_json: None,
+            token_input: input_tokens,
+            token_output: output_tokens,
+            token_total: input_tokens
+                .zip(output_tokens)
+                .map(|(left, right)| left + right),
+            duration_ms: Some(10),
+            finished_at: "2026-07-28T10:00:00Z".to_string(),
+        };
+        assert_eq!(
+            mark_ai_task_succeeded_internal(
+                &conn,
+                "configured",
+                &success(Some(250_000), Some(125_000)),
+            )?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_succeeded_internal(&conn, "unpriced", &success(Some(10), Some(20)),)?,
+            1
+        );
+        assert_eq!(
+            mark_ai_task_succeeded_internal(&conn, "mock", &success(None, None))?,
+            1
+        );
+
+        let configured: (f64, String) = conn.query_row(
+            "SELECT cost_estimate, cost_status FROM ai_task_records WHERE id = 'configured'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(configured, (1.5, "complete".to_string()));
+        let unpriced: (Option<f64>, String) = conn.query_row(
+            "SELECT cost_estimate, cost_status FROM ai_task_records WHERE id = 'unpriced'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(unpriced, (None, "unpriced".to_string()));
+        let mock: (f64, String) = conn.query_row(
+            "SELECT cost_estimate, cost_status FROM ai_task_records WHERE id = 'mock'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(mock, (0.0, "mock".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_success_rejects_negative_usage_and_duration() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (field, token_input, token_output, token_total, duration_ms) in [
+            ("tokenInput", Some(-1), Some(0), Some(0), Some(0)),
+            ("tokenOutput", Some(0), Some(-1), Some(0), Some(0)),
+            ("tokenTotal", Some(0), Some(0), Some(-1), Some(0)),
+            ("durationMs", Some(0), Some(0), Some(0), Some(-1)),
+        ] {
+            let input = MarkAiTaskSucceededInput {
+                result_text: Some("must-not-persist".to_string()),
+                prompt_snapshot: None,
+                result_json: None,
+                token_input,
+                token_output,
+                token_total,
+                duration_ms,
+                finished_at: "2026-07-28T10:00:00Z".to_string(),
+            };
+            assert_eq!(
+                mark_ai_task_succeeded_internal(&conn, "task", &input).unwrap_err(),
+                format!("{field} must be non-negative")
+            );
+        }
+    }
+
+    #[test]
+    fn save_style_profile_rejects_cross_novel_reference_binding(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        crate::db::init_test_database();
+        let suffix = uuid::Uuid::new_v4().to_string();
+        let source_novel_id = format!("style-source-novel-{suffix}");
+        let target_novel_id = format!("style-target-novel-{suffix}");
+        let work_id = format!("style-reference-work-{suffix}");
+        let import_id = format!("style-reference-import-{suffix}");
+        let profile_name = format!("cross-scope-profile-{suffix}");
+        let source_hash = "a".repeat(64);
+        {
+            let connection = crate::db::get_connection()
+                .lock()
+                .expect("lock style reference test database");
+            connection.execute(
+                "INSERT INTO novels (id, title, created_at, updated_at)
+                 VALUES (?1, 'source novel', 'now', 'now'), (?2, 'target novel', 'now', 'now')",
+                params![source_novel_id, target_novel_id],
+            )?;
+            connection.execute(
+                "INSERT INTO reference_works
+                    (id, novel_id, title, purpose, revision, created_at, updated_at)
+                 VALUES (?1, ?2, 'reference', 'style', 1, 'now', 'now')",
+                params![work_id, source_novel_id],
+            )?;
+            connection.execute(
+                "INSERT INTO reference_imports
+                    (id, reference_work_id, novel_id, version_no, is_current, operation_id,
+                     request_hash, file_name, source_format, source_sha256, source_byte_count,
+                     selected_encoding, encoding_source, decoded_text_sha256,
+                     decoded_char_count, decoded_utf8_byte_count, source_text, section_count,
+                     parser_version, section_plan_sha256, warnings_json, imported_at)
+                 VALUES (?1, ?2, ?3, 1, 1, ?4, ?5, 'reference.txt', 'txt', ?6, 1,
+                         'utf-8', 'utf8_valid', ?7, 1, 1, 'x', 1,
+                         'reference_txt_parser_v1', ?8, '[]', 'now')",
+                params![
+                    import_id,
+                    work_id,
+                    source_novel_id,
+                    format!("style-reference-operation-{suffix}"),
+                    "b".repeat(64),
+                    source_hash,
+                    "c".repeat(64),
+                    "d".repeat(64),
+                ],
+            )?;
+        }
+
+        let error = save_style_profile(
+            None,
+            SaveStyleProfileInput {
+                project_id: target_novel_id.clone(),
+                name: profile_name.clone(),
+                description: None,
+                narrative_perspective: None,
+                tone: None,
+                pace: None,
+                sentence_style: None,
+                dialogue_ratio: None,
+                description_ratio: None,
+                psychological_ratio: None,
+                battle_style: None,
+                battle_intensity: None,
+                emotion_tendency: None,
+                chapter_ending: None,
+                forbidden_styles: None,
+                style_summary: None,
+                raw_config_json: None,
+                source_type: Some("ai_analyzed".to_string()),
+                source_asset_id: None,
+                source_reference_work_id: Some(work_id),
+                source_reference_import_id: Some(import_id),
+                source_content_sha256: Some(source_hash),
+                source_state: Some("available".to_string()),
+                analysis_metadata_json: Some("{}".to_string()),
+            },
+        )
+        .expect_err("cross-novel reference binding must fail");
+        assert!(error.starts_with("REFERENCE_SCOPE_MISMATCH:"), "{error}");
+        let connection = crate::db::get_connection()
+            .lock()
+            .expect("lock style reference test database");
+        let persisted: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM style_profiles WHERE novel_id = ?1 AND name = ?2",
+            params![target_novel_id, profile_name],
+            |row| row.get(0),
+        )?;
+        assert_eq!(persisted, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_count_applies_server_side_type_and_status_filters(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE ai_task_records (
+                id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL
+            );
+            INSERT INTO ai_task_records (id, task_type, status) VALUES
+                ('a', 'chapter_generate', 'succeeded'),
+                ('b', 'chapter_generate', 'failed'),
+                ('c', 'quality_check', 'succeeded');",
+        )?;
+
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(&conn, None, None)?,
+            3
+        );
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(&conn, Some("chapter_generate"), None)?,
+            2
+        );
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(&conn, None, Some("succeeded"))?,
+            2
+        );
+        assert_eq!(
+            count_ai_task_records_filtered_in_conn(
+                &conn,
+                Some("chapter_generate"),
+                Some("succeeded"),
+            )?,
+            1
+        );
+        assert!(normalize_ai_task_type_filter(Some("unknown".to_string())).is_err());
+        assert!(normalize_ai_task_status_filter(Some("unknown".to_string())).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn quality_fix_round_guard_allows_idempotent_update_but_rejects_second_run(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE quality_fix_runs (
+                id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                source_draft_id TEXT NOT NULL
+            );
+            INSERT INTO quality_fix_runs (id, chapter_id, source_draft_id)
+            VALUES ('run-1', 'chapter-1', 'draft-1');",
+        )?;
+
+        assert!(!has_other_quality_fix_round(
+            &conn,
+            "chapter-1",
+            "draft-1",
+            "run-1",
+        )?);
+        assert!(has_other_quality_fix_round(
+            &conn,
+            "chapter-1",
+            "draft-1",
+            "run-2",
+        )?);
+        assert!(!has_other_quality_fix_round(
+            &conn,
+            "chapter-1",
+            "draft-2",
+            "run-2",
+        )?);
         Ok(())
     }
 }

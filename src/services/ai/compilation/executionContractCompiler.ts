@@ -1,4 +1,4 @@
-import type { AiSettings } from '../../../types/ai';
+import type { AiGenerateRequest, AiSettings } from '../../../types/ai';
 import type {
   AiCompilationScope,
   AiContextSourceType,
@@ -29,7 +29,7 @@ export interface AiTaskCompilationDefinition {
   promptTemplateId: string;
   promptTemplateVersion: string;
   promptTemplateBody: string;
-  userPrompt: string;
+  userPrompt: string | ((taskInput: Record<string, unknown>) => string);
   responseSchema: string;
   constraints: Record<string, unknown>;
   allowedSourceTypes: AiContextSourceType[];
@@ -38,6 +38,8 @@ export interface AiTaskCompilationDefinition {
   modelContextTokens: number;
   maxOutputTokens: number;
   defaultTemperature: number;
+  messageMode?: 'system_user' | 'single_user';
+  thinkingMode?: 'enabled' | 'disabled';
 }
 
 export interface CompileAiExecutionContractInput {
@@ -56,11 +58,13 @@ function validateScope(
   compilation: AiExecutionCompilationInput,
 ): void {
   if (definition.taskType === 'connection_test') {
-    if (scope.scopeType !== 'system'
-      || scope.novelId !== 'system'
-      || scope.chapterId
-      || scope.draftId
-      || compilation.sources.length > 0) {
+    if (
+      scope.scopeType !== 'system' ||
+      scope.novelId !== 'system' ||
+      scope.chapterId ||
+      scope.draftId ||
+      compilation.sources.length > 0
+    ) {
       throw new AiCompilationError(
         'AI_COMPILATION_INPUT_INVALID',
         '连接测试必须使用无来源的 system scope。',
@@ -87,9 +91,7 @@ function validateScope(
         'Novel 来源与 Task scope 不一致。',
       );
     }
-    if (source.sourceType === 'chapter'
-      && scope.chapterId
-      && source.sourceId !== scope.chapterId) {
+    if (source.sourceType === 'chapter' && scope.chapterId && source.sourceId !== scope.chapterId) {
       throw new AiCompilationError(
         'AI_COMPILATION_INPUT_INVALID',
         'Chapter 来源与 Task scope 不一致。',
@@ -105,9 +107,11 @@ function validateScope(
     }
   }
   for (const requiredType of definition.requiredSourceTypes) {
-    if (!compilation.sources.some((source) => (
-      source.sourceType === requiredType && source.content.trim()
-    ))) {
+    if (
+      !compilation.sources.some(
+        (source) => source.sourceType === requiredType && source.content.trim(),
+      )
+    ) {
       throw new AiCompilationError(
         'AI_CONTEXT_SOURCE_REQUIRED',
         `任务 ${definition.taskType} 缺少必需来源 ${requiredType}。`,
@@ -116,9 +120,66 @@ function validateScope(
   }
 }
 
-function temperature(definition: AiTaskCompilationDefinition, settings: AiSettings): number {
+function localChapterSettings(definition: AiTaskCompilationDefinition, settings: AiSettings) {
+  if (definition.taskType !== 'chapter_scene_generate') return undefined;
+  const local = settings.localChapterModel;
+  if (!local?.enabled) {
+    throw new AiCompilationError(
+      'AI_COMPILATION_INPUT_INVALID',
+      '本地章节场景模型未启用，不能编译 chapter_scene_generate；系统不会自动回退到外部模型。',
+    );
+  }
+  return local;
+}
+
+interface CompiledSamplingOptions {
+  temperature: number;
+  maxTokens: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+  seed?: number;
+  thinkingMode?: 'enabled' | 'disabled';
+}
+
+function supportsDeepSeekV4ThinkingToggle(modelId: string): boolean {
+  return /^deepseek-v4-(?:flash|pro)(?:$|[-_.:])/i.test(modelId.trim());
+}
+
+function sampling(
+  definition: AiTaskCompilationDefinition,
+  settings: AiSettings,
+  modelId: string,
+): CompiledSamplingOptions {
+  const thinkingMode =
+    definition.thinkingMode && supportsDeepSeekV4ThinkingToggle(modelId)
+      ? definition.thinkingMode
+      : undefined;
+  const local = localChapterSettings(definition, settings);
+  if (local) {
+    return {
+      temperature: local.temperature,
+      maxTokens: 1024,
+      topP: local.topP,
+      topK: local.topK,
+      repeatPenalty: local.repeatPenalty,
+      seed: local.seed,
+      thinkingMode,
+    };
+  }
+  if (definition.taskType === 'connection_test') {
+    return {
+      temperature: definition.defaultTemperature,
+      maxTokens: definition.maxOutputTokens,
+      thinkingMode,
+    };
+  }
   const requested = settings.temperature ?? definition.defaultTemperature;
-  return Math.min(2, Math.max(0, requested));
+  return {
+    temperature: Math.min(2, Math.max(0, requested)),
+    maxTokens: definition.maxOutputTokens,
+    thinkingMode,
+  };
 }
 
 export async function compileAiExecutionContract(
@@ -126,15 +187,10 @@ export async function compileAiExecutionContract(
 ): Promise<CompiledAiExecutionContractV1> {
   const { definition, scope, compilation, toolRegistry } = input;
   if (!isPlainRecord(compilation.taskInput ?? {})) {
-    throw new AiCompilationError(
-      'AI_COMPILATION_INPUT_INVALID',
-      'taskInput 必须是 JSON object。',
-    );
+    throw new AiCompilationError('AI_COMPILATION_INPUT_INVALID', 'taskInput 必须是 JSON object。');
   }
   validateScope(definition, scope, compilation);
-  const availableTools = new Set(
-    toolRegistry.tools.map((tool) => `${tool.name}@${tool.version}`),
-  );
+  const availableTools = new Set(toolRegistry.tools.map((tool) => `${tool.name}@${tool.version}`));
   const allowedTools = [...new Set(definition.allowedTools)].sort();
   for (const toolName of allowedTools) {
     if (!availableTools.has(toolName)) {
@@ -144,32 +200,71 @@ export async function compileAiExecutionContract(
       );
     }
   }
+  const taskInput = compilation.taskInput ?? {};
+  const userPromptValue =
+    typeof definition.userPrompt === 'function'
+      ? definition.userPrompt(taskInput)
+      : definition.userPrompt;
   const promptTemplateBody = normalizeCompilationText(definition.promptTemplateBody);
-  const userPrompt = normalizeCompilationText(definition.userPrompt);
-  const fixedMessages = {
-    messages: [
-      { role: 'system', content: `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}` },
-      { role: 'user', content: userPrompt },
-    ],
-  };
+  const userPrompt = normalizeCompilationText(userPromptValue);
+  const messageMode = definition.messageMode ?? 'system_user';
+  const fixedMessages =
+    messageMode === 'single_user'
+      ? {
+          messages: [
+            {
+              role: 'user',
+              content: `${promptTemplateBody}\n\nContext：\n[COMPILED_CONTEXT]\n\n${userPrompt}`,
+            },
+          ],
+        }
+      : {
+          messages: [
+            { role: 'system', content: `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}` },
+            { role: 'user', content: userPrompt },
+          ],
+        };
   const fixedMessageTokens = estimateTokens(JSON.stringify(fixedMessages)) + MESSAGE_SAFETY_TOKENS;
+  const local = localChapterSettings(definition, input.settings);
+  const modelContextTokens = local ? 4096 : definition.modelContextTokens;
+  const samplingOptions = sampling(definition, input.settings, input.modelId);
   const contextSnapshot = await compileAiContext({
     sources: compilation.sources,
     missingSourceTypes: compilation.missingSourceTypes,
-    modelContextTokens: definition.modelContextTokens,
-    reservedOutputTokens: definition.maxOutputTokens,
+    modelContextTokens,
+    reservedOutputTokens: samplingOptions.maxTokens,
     fixedMessageTokens,
+    renderSourceLabels: messageMode !== 'single_user',
   });
   const systemMessage = contextSnapshot.compiledContext
     ? `${promptTemplateBody}\n\n${CONTEXT_ENVELOPE}${contextSnapshot.compiledContext}`
     : promptTemplateBody;
-  const request = {
-    messages: [
-      { role: 'system' as const, content: systemMessage },
-      { role: 'user' as const, content: userPrompt },
-    ],
-    temperature: temperature(definition, input.settings),
-    maxTokens: definition.maxOutputTokens,
+  const contextText = contextSnapshot.compiledContext || '（无可用的额外编译上下文）';
+  const request: AiGenerateRequest = {
+    taskType: definition.taskType as AiGenerateRequest['taskType'],
+    messages:
+      messageMode === 'single_user'
+        ? [
+            {
+              role: 'user' as const,
+              content: `${promptTemplateBody}\n\nContext：\n${contextText}\n\n${userPrompt}`,
+            },
+          ]
+        : [
+            { role: 'system' as const, content: systemMessage },
+            { role: 'user' as const, content: userPrompt },
+          ],
+    temperature: samplingOptions.temperature,
+    maxTokens: samplingOptions.maxTokens,
+    ...(samplingOptions.topP === undefined ? {} : { topP: samplingOptions.topP }),
+    ...(samplingOptions.topK === undefined ? {} : { topK: samplingOptions.topK }),
+    ...(samplingOptions.repeatPenalty === undefined
+      ? {}
+      : { repeatPenalty: samplingOptions.repeatPenalty }),
+    ...(samplingOptions.seed === undefined ? {} : { seed: samplingOptions.seed }),
+    ...(samplingOptions.thinkingMode === undefined
+      ? {}
+      : { thinkingMode: samplingOptions.thinkingMode }),
     promptTemplateSource: definition.promptTemplateId,
   };
   const requestBody = JSON.stringify({ messages: request.messages });
@@ -185,15 +280,19 @@ export async function compileAiExecutionContract(
     promptTemplateBody,
     providerId: input.providerId,
     model: input.modelId,
-    temperature: request.temperature,
-    maxTokens: request.maxTokens,
+    temperature: samplingOptions.temperature,
+    maxTokens: samplingOptions.maxTokens,
+    topP: request.topP,
+    topK: request.topK,
+    repeatPenalty: request.repeatPenalty,
+    seed: request.seed,
+    thinkingMode: request.thinkingMode,
     toolPolicy: {
       registryVersion: 'tool_registry_v1',
       registryHash: toolRegistry.registryHash,
       allowedTools,
     },
   });
-  const taskInput = compilation.taskInput ?? {};
   const compilationHash = await canonicalHash({
     contractVersion: 'compiled_ai_execution_v1',
     taskType: definition.taskType,

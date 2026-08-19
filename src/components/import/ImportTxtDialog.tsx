@@ -11,6 +11,7 @@ import { readTextFile, analyzeTxtForChapters } from '../../services/import/txtIm
 import type { TxtAnalyzeResult } from '../../services/import/txtImportService';
 import { formatNumber } from '../../utils/format';
 import { runWithLoading } from '../../lib/runWithLoading';
+import { describeUnknownError } from '../../utils/errorMessage';
 
 interface ImportTxtDialogProps {
   onClose: () => void;
@@ -36,17 +37,23 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
     setFileName(file.name);
     try {
       const text = await readTextFile(file);
-      if (!text.trim()) { setError('文件内容为空'); return; }
+      if (!text.trim()) {
+        setError('文件内容为空');
+        return;
+      }
       const result = analyzeTxtForChapters(text);
       setAnalyzeResult(result);
       setNovelTitle(file.name.replace(/\.(txt|TXT)$/, '').slice(0, 40));
       setStep('analyze');
-    } catch (err: any) { setError(err.message || '读取失败'); }
+    } catch (err: unknown) {
+      setError(describeUnknownError(err, '读取失败'));
+    }
   };
 
   const handleImport = async () => {
     if (!analyzeResult || !novelTitle.trim()) return;
-    setImporting(true); setError('');
+    setImporting(true);
+    setError('');
     try {
       await runWithLoading(
         {
@@ -58,8 +65,16 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         },
         async ({ setMessage, setStage, setPercent }) => {
           setStage('创建作品……');
-          const novel = await novelService.createNovel({ title: novelTitle.trim(), genre: genre.trim() || undefined, description: desc.trim() || '由 TXT 导入' });
-          const volume = await volumeRepository.create({ novelId: novel.id, title: '第一卷', orderIndex: 1 });
+          const novel = await novelService.createNovel({
+            title: novelTitle.trim(),
+            genre: genre.trim() || undefined,
+            description: desc.trim() || '由 TXT 导入',
+          });
+          const volume = await volumeRepository.create({
+            novelId: novel.id,
+            title: '第一卷',
+            orderIndex: 1,
+          });
           let count = 0;
           const totalCh = analyzeResult.chapters.length;
           for (const ch of analyzeResult.chapters) {
@@ -67,12 +82,18 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             setMessage(`正在导入章节 ${count + 1} / ${totalCh}……`);
             setPercent(Math.round(((count + 1) / totalCh) * 90));
             const chapter = await chapterRepository.create({
-              novelId: novel.id, volumeId: volume.id, title: ch.title,
-              orderIndex: ch.orderIndex, targetWordCount: undefined, outline: '',
+              novelId: novel.id,
+              volumeId: volume.id,
+              title: ch.title,
+              orderIndex: ch.orderIndex,
+              targetWordCount: undefined,
+              outline: '',
             });
             await draftVersionService.create({
-              novelId: novel.id, chapterId: chapter.id,
-              content: ch.content, source: 'imported',
+              novelId: novel.id,
+              chapterId: chapter.id,
+              content: ch.content,
+              source: 'imported',
             });
             count++;
           }
@@ -80,19 +101,41 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
           setImporting(false);
           setResultMsg(`导入成功！已创建作品《${novelTitle}》，共导入 ${count} 章。`);
           setStep('done');
-          setTimeout(() => { onClose(); navigate(`/novels/${novel.id}`); }, 1500);
+          setTimeout(() => {
+            onClose();
+            navigate(`/novels/${novel.id}`);
+          }, 1500);
         },
       );
-    } catch (err: any) { setError(err.message || '导入失败'); setImporting(false); }
+    } catch (err: unknown) {
+      setError(describeUnknownError(err, '导入失败'));
+      setImporting(false);
+    }
   };
 
   return (
     <>
       <div className="modal-overlay" onClick={onClose} />
-      <div className="modal-content" style={{ maxWidth: 580, width: '90%', maxHeight: '80vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div
+        className="modal-content"
+        style={{ maxWidth: 580, width: '90%', maxHeight: '80vh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 16,
+          }}
+        >
           <span style={{ fontSize: 18, fontWeight: 700 }}>📄 导入 TXT</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
+          >
+            ✕
+          </button>
         </div>
 
         {step === 'select' && (
@@ -100,50 +143,114 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
               选择要导入的 TXT 文件，支持 UTF-8 编码的中文小说文本。
             </div>
-            <div onClick={() => fileInputRef.current?.click()} style={{ padding: 32, border: '2px dashed var(--color-border-light)', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: 32,
+                border: '2px dashed var(--color-border-light)',
+                borderRadius: 8,
+                textAlign: 'center',
+                cursor: 'pointer',
+              }}
+            >
               <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
               <div style={{ fontSize: 14 }}>点击选择 TXT 文件</div>
             </div>
-            <input ref={fileInputRef} type="file" accept=".txt,.TXT" onChange={handleFileSelect} style={{ display: 'none' }} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.TXT"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
           </div>
         )}
 
         {step === 'analyze' && analyzeResult && (
           <div>
-            <div style={{ fontSize: 13, marginBottom: 12, padding: 8, background: '#f0f9ff', borderRadius: 6, border: '1px solid #bae6fd' }}>
-              📄 {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 · {formatNumber(analyzeResult.totalWords)} 字
-              {analyzeResult.detectedChapterCount > 0 && <> · 识别到 <strong>{analyzeResult.detectedChapterCount}</strong> 个章节</>}
+            <div
+              style={{
+                fontSize: 13,
+                marginBottom: 12,
+                padding: 8,
+                background: 'var(--color-info-bg)',
+                borderRadius: 6,
+                border: '1px solid var(--color-info-border)',
+              }}
+            >
+              📄 {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 ·{' '}
+              {formatNumber(analyzeResult.totalWords)} 字
+              {analyzeResult.detectedChapterCount > 0 && (
+                <>
+                  {' '}
+                  · 识别到 <strong>{analyzeResult.detectedChapterCount}</strong> 个章节
+                </>
+              )}
             </div>
             {analyzeResult.warnings.map((w, i) => (
-              <div key={i} style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>⚠️ {w}</div>
+              <div key={i} style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>
+                ⚠️ {w}
+              </div>
             ))}
             {analyzeResult.chapters.length <= 6 && (
               <div style={{ fontSize: 12, marginBottom: 12, maxHeight: 150, overflowY: 'auto' }}>
-                {analyzeResult.chapters.map((ch, i) => <div key={i} style={{ padding: '2px 0' }}>· {ch.title}（{ch.wordCount} 字）</div>)}
+                {analyzeResult.chapters.map((ch, i) => (
+                  <div key={i} style={{ padding: '2px 0' }}>
+                    · {ch.title}（{ch.wordCount} 字）
+                  </div>
+                ))}
               </div>
             )}
             {analyzeResult.chapters.length > 6 && (
               <div style={{ fontSize: 12, marginBottom: 12, color: 'var(--color-text-muted)' }}>
-                前 6 章：{analyzeResult.chapters.slice(0, 6).map((c) => c.title).join(' / ')} ……
+                前 6 章：
+                {analyzeResult.chapters
+                  .slice(0, 6)
+                  .map((c) => c.title)
+                  .join(' / ')}{' '}
+                ……
               </div>
             )}
             <div style={{ display: 'grid', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12 }}>作品名称 *</label>
-                <input className="input" value={novelTitle} onChange={(e) => setNovelTitle(e.target.value)} style={{ width: '100%' }} />
+                <input
+                  className="input"
+                  value={novelTitle}
+                  onChange={(e) => setNovelTitle(e.target.value)}
+                  style={{ width: '100%' }}
+                />
               </div>
               <div>
                 <label style={{ fontSize: 12 }}>题材</label>
-                <input className="input" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="如：玄幻/科幻/都市" style={{ width: '100%' }} />
+                <input
+                  className="input"
+                  value={genre}
+                  onChange={(e) => setGenre(e.target.value)}
+                  placeholder="如：玄幻/科幻/都市"
+                  style={{ width: '100%' }}
+                />
               </div>
               <div>
                 <label style={{ fontSize: 12 }}>简介</label>
-                <textarea className="input" value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} />
+                <textarea
+                  className="input"
+                  value={desc}
+                  onChange={(e) => setDesc(e.target.value)}
+                  rows={2}
+                  style={{ width: '100%', resize: 'vertical' }}
+                />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button className="btn btn-secondary btn-sm" onClick={onClose}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing || !novelTitle.trim()}>
+              <button className="btn btn-secondary btn-sm" onClick={onClose}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleImport}
+                disabled={importing || !novelTitle.trim()}
+              >
                 {importing ? '⏳ 导入中...' : '✅ 确认导入'}
               </button>
             </div>
@@ -153,11 +260,26 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
         {step === 'done' && (
           <div style={{ textAlign: 'center', padding: 32 }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>{resultMsg}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>
+              {resultMsg}
+            </div>
           </div>
         )}
 
-        {error && <div style={{ padding: 8, background: '#fee2e2', borderRadius: 6, color: 'var(--color-error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
+        {error && (
+          <div
+            style={{
+              padding: 8,
+              background: 'var(--color-error-bg)',
+              borderRadius: 6,
+              color: 'var(--color-error)',
+              fontSize: 13,
+              marginTop: 8,
+            }}
+          >
+            {error}
+          </div>
+        )}
       </div>
     </>
   );

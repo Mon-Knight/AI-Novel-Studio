@@ -7,7 +7,11 @@ import {
   type E2eMockAiGateState,
 } from '../ai/mockAiClient';
 import { redactDiagnosticText, serializeConsoleArguments } from './e2eDiagnosticSanitizer';
-import { installE2eNetworkGuard, type E2eNetworkAttempts, type E2eNetworkGuard } from './e2eNetworkGuard';
+import {
+  installE2eNetworkGuard,
+  type E2eNetworkAttempts,
+  type E2eNetworkGuard,
+} from './e2eNetworkGuard';
 
 type E2eLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -36,8 +40,11 @@ const SAFE_COMMANDS = new Set([
   'get_e2e_diagnostics',
   'get_all_novels',
   'get_novel_by_id',
+  'get_chapter_by_id',
   'get_chapters_by_novel_id',
   'get_drafts_by_chapter_id',
+  'count_drafts_by_chapter_id',
+  'get_adopted_draft_by_chapter_id',
   'get_chapter_summary',
   'get_chapter_summaries_by_novel',
   'get_context_records',
@@ -54,6 +61,7 @@ const SAFE_COMMANDS = new Set([
   'get_placement_proposal',
   'apply_placement_plan',
   'get_world_settings',
+  'list_faction_assets',
   'get_quality_check_issues',
   'list_quality_check_reports',
   'get_quality_check_report_snapshot',
@@ -71,7 +79,9 @@ let networkGuard: E2eNetworkGuard | undefined;
 
 function record(level: E2eLogLevel, args: unknown[]): void {
   const message = serializeConsoleArguments(args);
-  consoleEntries = [...consoleEntries, { level, message, at: new Date().toISOString() }].slice(-MAX_ENTRIES);
+  consoleEntries = [...consoleEntries, { level, message, at: new Date().toISOString() }].slice(
+    -MAX_ENTRIES,
+  );
 }
 
 function getNetworkAttempts(): E2eNetworkAttempts {
@@ -89,11 +99,14 @@ function installCapture(): void {
     consoleObject[level] = ((...args: unknown[]) => {
       record(level, args);
       original(...args);
-    }) as typeof consoleObject[typeof level];
+    }) as (typeof consoleObject)[typeof level];
   });
 
   window.addEventListener('error', (event) => {
-    unhandledErrors = [...unhandledErrors, redactDiagnosticText(event.error?.message ?? event.message)].slice(-MAX_ENTRIES);
+    unhandledErrors = [
+      ...unhandledErrors,
+      redactDiagnosticText(event.error?.message ?? event.message),
+    ].slice(-MAX_ENTRIES);
   });
   window.addEventListener('unhandledrejection', (event) => {
     unhandledErrors = [...unhandledErrors, redactDiagnosticText(event.reason)].slice(-MAX_ENTRIES);

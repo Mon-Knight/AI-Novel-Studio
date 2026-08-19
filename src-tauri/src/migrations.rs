@@ -1,11 +1,11 @@
 use crate::errors::{codes, AppError};
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 #[cfg(test)]
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "2.5.0";
+const MIGRATION_VERSION: &str = "3.2.0";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 20] {
+fn migrations() -> [Migration; 31] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -124,6 +124,61 @@ fn migrations() -> [Migration; 20] {
             definition: "agent_plan_checkpoints_v1(plan_sequence,event,optional_step_attempt,status_snapshot,payload_hash,created,monotonic_sequence,validated_identity,append_only)",
             apply: apply_agent_plan_checkpoints,
         },
+        Migration {
+            id: "021_multi_agent_sessions",
+            definition: "multi_agent_sessions_v1(identity,operation,scope,source_draft,configuration,status,result,token_totals,timestamps,indexes)",
+            apply: apply_multi_agent_sessions,
+        },
+        Migration {
+            id: "022_multi_agent_rounds",
+            definition: "multi_agent_rounds_v1(session_round,input_output_draft,consensus,concerns,suggestions,token_totals,timestamps,indexes)",
+            apply: apply_multi_agent_rounds,
+        },
+        Migration {
+            id: "023_multi_agent_opinions",
+            definition: "multi_agent_opinions_v1(identity,session_round,expert,status,score,verdict,issues,suggestions,provider_task,token_totals,timing,indexes)",
+            apply: apply_multi_agent_opinions,
+        },
+        Migration {
+            id: "024_autonomous_story_plans",
+            definition: "autonomous_story_plans_v1(identity,operation,novel,request_hash,schema,status,stage,revision,target_and_completed_chapters,validated_plan_json,plan_hash,error,timestamps,indexes,immutable_identity,status_edges)",
+            apply: apply_autonomous_story_plans,
+        },
+        Migration {
+            id: "025_reference_library",
+            definition: "reference_library_v1(works_scope_revision,immutable_import_versions,current_version_uniqueness,operation_replay_identity,source_and_decoded_hashes,encoding_and_parser_provenance,authoritative_source_text,derived_sections_utf16_ranges,large_text_refs,indexes,foreign_keys)",
+            apply: apply_reference_library,
+        },
+        Migration {
+            id: "026_hybrid_semantic_memory",
+            definition: "hybrid_semantic_memory_v1(source_version_hash_and_adopted_draft_binding,active_invalidation,scoped_chunks_with_structured_metadata,explicit_model_dimension_bound_vectors,bounded_hybrid_retrieval_logs,optional_fts5_sync,indexes,foreign_keys)",
+            apply: apply_hybrid_semantic_memory,
+        },
+        Migration {
+            id: "027_autonomous_book_scheduler",
+            definition: "autonomous_book_scheduler_v1(frozen_three_mode_policy,book_and_daily_revisioned_budget_counters,cross_process_hashed_lease_epoch,chapter_attempt_reservations_decisions_and_review_promotions,append_only_checkpoints,restart_recovery,indexes,scope_foreign_keys,status_edges)",
+            apply: apply_autonomous_book_scheduler,
+        },
+        Migration {
+            id: "028_multi_target_transactions_and_story_assets",
+            definition: "multi_target_transactions_and_story_assets_v1(frozen_ordered_target_set_and_hash,operation_request_idempotency,per_target_base_revision_hash,all_or_nothing_and_explicit_reviewed_partial,prepared_candidates,immediate_cas_apply,replay_target_revalidation,factions,locations,faction_relations,location_hierarchy_and_links,character_chapter_conflict_asset_relations,novel_scope,immutable_identity,revision_cas,indexes,foreign_keys)",
+            apply: apply_multi_target_transactions_and_story_assets,
+        },
+        Migration {
+            id: "029_global_ai_request_policy",
+            definition: "global_ai_request_policy_v1(singleton_revisioned_policy,global_rolling_minute_and_concurrency,day_token_and_fixed_point_cost_counters,explicit_unpriced_usage,immediate_budget_reservations,provider_request_bound_single_dispatch,owner_hashed_lease_ttl_conservative_reclaim,frozen_policy_and_pricing,idempotent_settlement,indexes,immutable_identity,dispatch_once,terminal_accounting_immutable,status_edges,no_delete)",
+            apply: apply_global_ai_request_policy,
+        },
+        Migration {
+            id: "030_output_profile_fields",
+            definition: "output_profile_fields_v1(add:paragraph_length,pov_type,tense_type,description)",
+            apply: apply_output_profile_fields,
+        },
+        Migration {
+            id: "031_dsh_preparation_runs",
+            definition: "dsh_preparation_runs_v1(id,novel_id,chapter_id,planner,status,prompt_tokens,completion_tokens,duration_ms,planner_coerced,created_at,indexes)",
+            apply: apply_dsh_preparation_runs,
+        },
     ]
 }
 
@@ -148,7 +203,12 @@ fn create_ledger(transaction: &Transaction<'_>) -> Result<(), AppError> {
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), AppError> {
     for migration in migrations() {
-        let transaction = connection.transaction().map_err(AppError::database)?;
+        // Serialize concurrent connections before either reads the ledger, avoiding a
+        // deferred-read / write-upgrade SQLITE_BUSY_SNAPSHOT race in tests, recovery tools, or
+        // any future multi-process maintenance path. Normal desktop startup is fenced earlier.
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(AppError::database)?;
         create_ledger(&transaction)?;
         let expected_checksum = checksum(migration.definition);
         let existing_checksum = transaction
@@ -1527,11 +1587,1492 @@ fn apply_agent_plan_checkpoints(transaction: &Transaction<'_>) -> Result<(), App
         .map_err(AppError::database)
 }
 
+fn apply_multi_agent_sessions(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS multi_agent_sessions (
+                session_id TEXT PRIMARY KEY CHECK (length(session_id) BETWEEN 1 AND 160),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                source_draft_id TEXT NOT NULL,
+                source_draft_version INTEGER NOT NULL CHECK (source_draft_version >= 1),
+                source_content_hash TEXT NOT NULL CHECK (
+                    length(source_content_hash) = 64
+                    AND source_content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                expert_types_json TEXT NOT NULL CHECK (
+                    json_valid(expert_types_json) AND json_type(expert_types_json) = 'array'
+                    AND json_array_length(expert_types_json) BETWEEN 1 AND 6
+                ),
+                max_rounds INTEGER NOT NULL CHECK (max_rounds BETWEEN 1 AND 3),
+                acceptance_threshold REAL NOT NULL CHECK (
+                    acceptance_threshold >= 0 AND acceptance_threshold <= 1
+                ),
+                minimum_average_score REAL NOT NULL CHECK (
+                    minimum_average_score >= 0 AND minimum_average_score <= 100
+                ),
+                minimum_successful_experts INTEGER NOT NULL CHECK (
+                    minimum_successful_experts BETWEEN 1 AND 6
+                ),
+                status TEXT NOT NULL CHECK (
+                    status IN ('running','completed','failed','cancelled')
+                ),
+                current_round INTEGER NOT NULL DEFAULT 0 CHECK (current_round BETWEEN 0 AND 3),
+                accepted INTEGER NOT NULL DEFAULT 0 CHECK (accepted IN (0,1)),
+                final_action TEXT CHECK (
+                    final_action IS NULL OR final_action IN ('accept','revise','regenerate')
+                ),
+                final_draft_id TEXT,
+                total_tokens_input INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens_input >= 0),
+                total_tokens_output INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens_output >= 0),
+                total_tokens_used INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens_used >= 0),
+                duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
+                error_message TEXT CHECK (error_message IS NULL OR length(error_message) <= 500),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY (source_draft_id) REFERENCES chapter_drafts(id) ON DELETE RESTRICT,
+                FOREIGN KEY (final_draft_id) REFERENCES chapter_drafts(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_multi_agent_sessions_chapter_created
+                ON multi_agent_sessions(chapter_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_multi_agent_sessions_novel_created
+                ON multi_agent_sessions(novel_id, created_at DESC);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_multi_agent_rounds(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS multi_agent_rounds (
+                session_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL CHECK (round_number BETWEEN 1 AND 3),
+                input_draft_id TEXT NOT NULL,
+                input_draft_version INTEGER NOT NULL CHECK (input_draft_version >= 1),
+                input_content_hash TEXT NOT NULL CHECK (
+                    length(input_content_hash) = 64
+                    AND input_content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                output_draft_id TEXT,
+                output_draft_version INTEGER CHECK (
+                    output_draft_version IS NULL OR output_draft_version >= 1
+                ),
+                output_content_hash TEXT CHECK (
+                    output_content_hash IS NULL OR (
+                        length(output_content_hash) = 64
+                        AND output_content_hash NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                agreed INTEGER NOT NULL CHECK (agreed IN (0,1)),
+                acceptance_rate REAL NOT NULL CHECK (acceptance_rate >= 0 AND acceptance_rate <= 1),
+                average_score REAL NOT NULL CHECK (average_score >= 0 AND average_score <= 100),
+                successful_experts INTEGER NOT NULL CHECK (successful_experts BETWEEN 0 AND 6),
+                failed_experts INTEGER NOT NULL CHECK (failed_experts BETWEEN 0 AND 6),
+                required_successful_experts INTEGER NOT NULL CHECK (
+                    required_successful_experts BETWEEN 1 AND 6
+                ),
+                action TEXT NOT NULL CHECK (action IN ('accept','revise','regenerate')),
+                major_concerns_json TEXT NOT NULL CHECK (
+                    json_valid(major_concerns_json) AND json_type(major_concerns_json) = 'array'
+                    AND length(major_concerns_json) <= 32768
+                ),
+                merged_suggestions_json TEXT NOT NULL CHECK (
+                    json_valid(merged_suggestions_json) AND json_type(merged_suggestions_json) = 'array'
+                    AND length(merged_suggestions_json) <= 49152
+                ),
+                tokens_input INTEGER NOT NULL CHECK (tokens_input >= 0),
+                tokens_output INTEGER NOT NULL CHECK (tokens_output >= 0),
+                tokens_used INTEGER NOT NULL CHECK (tokens_used >= 0),
+                duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+                started_at TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, round_number),
+                FOREIGN KEY (session_id) REFERENCES multi_agent_sessions(session_id) ON DELETE CASCADE,
+                FOREIGN KEY (input_draft_id) REFERENCES chapter_drafts(id) ON DELETE RESTRICT,
+                FOREIGN KEY (output_draft_id) REFERENCES chapter_drafts(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_multi_agent_rounds_input_draft
+                ON multi_agent_rounds(input_draft_id);
+            CREATE INDEX IF NOT EXISTS idx_multi_agent_rounds_output_draft
+                ON multi_agent_rounds(output_draft_id);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_multi_agent_opinions(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS multi_agent_opinions (
+                opinion_id TEXT PRIMARY KEY CHECK (length(opinion_id) BETWEEN 1 AND 160),
+                session_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL CHECK (round_number BETWEEN 1 AND 3),
+                expert_type TEXT NOT NULL CHECK (
+                    expert_type IN ('outline','character','setting','logic','polish','quality')
+                ),
+                status TEXT NOT NULL CHECK (status IN ('succeeded','failed')),
+                score INTEGER CHECK (score IS NULL OR score BETWEEN 0 AND 100),
+                accepted INTEGER NOT NULL CHECK (accepted IN (0,1)),
+                summary TEXT NOT NULL CHECK (length(summary) BETWEEN 1 AND 500),
+                issues_json TEXT NOT NULL CHECK (
+                    json_valid(issues_json) AND json_type(issues_json) = 'array'
+                    AND length(issues_json) <= 32768
+                ),
+                suggestions_json TEXT NOT NULL CHECK (
+                    json_valid(suggestions_json) AND json_type(suggestions_json) = 'array'
+                    AND length(suggestions_json) <= 32768
+                ),
+                provider TEXT CHECK (provider IS NULL OR length(provider) <= 120),
+                model TEXT CHECK (model IS NULL OR length(model) <= 200),
+                ai_task_id TEXT CHECK (ai_task_id IS NULL OR length(ai_task_id) <= 160),
+                tokens_input INTEGER NOT NULL CHECK (tokens_input >= 0),
+                tokens_output INTEGER NOT NULL CHECK (tokens_output >= 0),
+                tokens_used INTEGER NOT NULL CHECK (tokens_used >= 0),
+                duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+                error_message TEXT CHECK (error_message IS NULL OR length(error_message) <= 500),
+                FOREIGN KEY (session_id, round_number)
+                    REFERENCES multi_agent_rounds(session_id, round_number) ON DELETE CASCADE,
+                UNIQUE(session_id, round_number, expert_type),
+                CHECK (
+                    (status = 'succeeded' AND score IS NOT NULL AND error_message IS NULL)
+                    OR (status = 'failed' AND score IS NULL AND accepted = 0)
+                )
+            );
+            CREATE INDEX IF NOT EXISTS idx_multi_agent_opinions_session_round
+                ON multi_agent_opinions(session_id, round_number);",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_autonomous_story_plans(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS autonomous_story_plans (
+                plan_id TEXT PRIMARY KEY CHECK (length(plan_id) BETWEEN 1 AND 160),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                request_hash TEXT NOT NULL CHECK (
+                    length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+                status TEXT NOT NULL CHECK (
+                    status IN ('running','ready','failed','cancelled','applied')
+                ),
+                stage TEXT NOT NULL CHECK (
+                    stage IN ('foundation','creative_dimensions','chapter_batches','ready','applied')
+                ),
+                revision INTEGER NOT NULL CHECK (revision >= 1),
+                target_chapter_count INTEGER NOT NULL CHECK (target_chapter_count BETWEEN 12 AND 500),
+                completed_chapter_count INTEGER NOT NULL CHECK (
+                    completed_chapter_count BETWEEN 0 AND target_chapter_count
+                ),
+                plan_json TEXT NOT NULL CHECK (
+                    json_valid(plan_json) AND json_type(plan_json) = 'object'
+                    AND length(plan_json) BETWEEN 2 AND 2000000
+                ),
+                plan_hash TEXT NOT NULL CHECK (
+                    length(plan_hash) = 64 AND plan_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                error_message TEXT CHECK (error_message IS NULL OR length(error_message) <= 1000),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                applied_at TEXT,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_autonomous_story_plans_novel_created
+                ON autonomous_story_plans(novel_id, created_at DESC, plan_id DESC);
+            CREATE INDEX IF NOT EXISTS idx_autonomous_story_plans_status
+                ON autonomous_story_plans(status, updated_at DESC);
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_story_plans_immutable_identity
+            BEFORE UPDATE OF plan_id, operation_id, novel_id, request_hash, schema_version, created_at
+            ON autonomous_story_plans
+            BEGIN SELECT RAISE(ABORT, 'autonomous plan identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_story_plans_status_edges
+            BEFORE UPDATE OF status ON autonomous_story_plans
+            WHEN NOT (
+                OLD.status = NEW.status
+                OR (OLD.status = 'running' AND NEW.status IN ('ready','failed','cancelled'))
+                OR (OLD.status IN ('failed','cancelled') AND NEW.status = 'running')
+                OR (OLD.status = 'ready' AND NEW.status = 'applied')
+            )
+            BEGIN SELECT RAISE(ABORT, 'invalid autonomous plan status transition'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_reference_library(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS reference_works (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                novel_id TEXT NOT NULL,
+                title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 200),
+                purpose TEXT NOT NULL CHECK (purpose IN ('style','research','inspiration')),
+                description TEXT CHECK (description IS NULL OR length(description) <= 2000),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_reference_works_novel_updated
+                ON reference_works(novel_id, updated_at DESC, id DESC);
+
+            CREATE TABLE IF NOT EXISTS reference_imports (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                reference_work_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                version_no INTEGER NOT NULL CHECK (version_no >= 1),
+                is_current INTEGER NOT NULL CHECK (is_current IN (0,1)),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 200),
+                request_hash TEXT NOT NULL CHECK (
+                    length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                file_name TEXT NOT NULL CHECK (length(trim(file_name)) BETWEEN 1 AND 255),
+                source_file_path TEXT,
+                source_format TEXT NOT NULL CHECK (source_format = 'txt'),
+                source_sha256 TEXT NOT NULL CHECK (
+                    length(source_sha256) = 64 AND source_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+                source_byte_count INTEGER NOT NULL CHECK (source_byte_count BETWEEN 1 AND 67108864),
+                detected_encoding TEXT CHECK (
+                    detected_encoding IS NULL OR detected_encoding IN ('utf-8','utf-16le','utf-16be','gb18030')
+                ),
+                selected_encoding TEXT NOT NULL CHECK (
+                    selected_encoding IN ('utf-8','utf-16le','utf-16be','gb18030')
+                ),
+                encoding_source TEXT NOT NULL CHECK (
+                    encoding_source IN ('bom','utf8_valid','fallback','user_override')
+                ),
+                decoded_text_sha256 TEXT NOT NULL CHECK (
+                    length(decoded_text_sha256) = 64 AND decoded_text_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+                decoded_char_count INTEGER NOT NULL CHECK (decoded_char_count BETWEEN 1 AND 20000000),
+                decoded_utf8_byte_count INTEGER NOT NULL CHECK (decoded_utf8_byte_count >= 1),
+                source_text TEXT NOT NULL,
+                large_text_ref_id TEXT,
+                section_count INTEGER NOT NULL CHECK (section_count BETWEEN 1 AND 10000),
+                parser_version TEXT NOT NULL CHECK (length(parser_version) BETWEEN 1 AND 96),
+                section_plan_sha256 TEXT NOT NULL CHECK (
+                    length(section_plan_sha256) = 64 AND section_plan_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+                warnings_json TEXT NOT NULL CHECK (
+                    json_valid(warnings_json) AND json_type(warnings_json) = 'array'
+                    AND length(warnings_json) <= 32768
+                ),
+                imported_at TEXT NOT NULL,
+                UNIQUE(reference_work_id, version_no),
+                UNIQUE(id, reference_work_id, novel_id),
+                FOREIGN KEY (reference_work_id, novel_id)
+                    REFERENCES reference_works(id, novel_id) ON DELETE CASCADE,
+                FOREIGN KEY (large_text_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_reference_imports_one_current
+                ON reference_imports(reference_work_id) WHERE is_current = 1;
+            CREATE INDEX IF NOT EXISTS idx_reference_imports_novel_source_hash
+                ON reference_imports(novel_id, source_sha256, imported_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_reference_imports_work_version
+                ON reference_imports(reference_work_id, version_no DESC);
+
+            CREATE TABLE IF NOT EXISTS reference_sections (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 160),
+                reference_import_id TEXT NOT NULL,
+                reference_work_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                order_index INTEGER NOT NULL CHECK (order_index >= 1),
+                section_kind TEXT NOT NULL CHECK (
+                    section_kind IN ('front_matter','chapter','part','unstructured')
+                ),
+                title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 160),
+                content TEXT NOT NULL,
+                large_text_ref_id TEXT,
+                content_hash TEXT NOT NULL CHECK (
+                    length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                char_count INTEGER NOT NULL CHECK (char_count >= 1),
+                utf8_byte_count INTEGER NOT NULL CHECK (utf8_byte_count >= 1),
+                source_start_utf16 INTEGER NOT NULL CHECK (source_start_utf16 >= 0),
+                source_end_utf16 INTEGER NOT NULL CHECK (source_end_utf16 > source_start_utf16),
+                created_at TEXT NOT NULL,
+                UNIQUE(reference_import_id, order_index),
+                FOREIGN KEY (reference_import_id, reference_work_id, novel_id)
+                    REFERENCES reference_imports(id, reference_work_id, novel_id) ON DELETE CASCADE,
+                FOREIGN KEY (large_text_ref_id) REFERENCES large_text_documents(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_reference_sections_work_import_order
+                ON reference_sections(reference_work_id, reference_import_id, order_index);",
+        )
+        .map_err(AppError::database)
+}
+
+fn install_memory_fts(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    let trigram = transaction.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_fts
+         USING fts5(chunk_id UNINDEXED, novel_id UNINDEXED, text, tokenize='trigram');",
+    );
+    if trigram.is_err() {
+        let unicode = transaction.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks_fts
+             USING fts5(chunk_id UNINDEXED, novel_id UNINDEXED, text, tokenize='unicode61');",
+        );
+        if let Err(error) = unicode {
+            let message = error.to_string().to_ascii_lowercase();
+            if message.contains("no such module") && message.contains("fts5") {
+                return Ok(());
+            }
+            return Err(AppError::database(error));
+        }
+    }
+
+    transaction
+        .execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS trg_memory_chunks_fts_insert
+             AFTER INSERT ON memory_chunks
+             BEGIN
+                 INSERT INTO memory_chunks_fts(rowid, chunk_id, novel_id, text)
+                 VALUES (NEW.rowid, NEW.id, NEW.novel_id, NEW.text);
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS trg_memory_chunks_fts_delete
+             AFTER DELETE ON memory_chunks
+             BEGIN
+                 DELETE FROM memory_chunks_fts WHERE rowid = OLD.rowid;
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS trg_memory_chunks_fts_update
+             AFTER UPDATE OF text, novel_id ON memory_chunks
+             BEGIN
+                 DELETE FROM memory_chunks_fts WHERE rowid = OLD.rowid;
+                 INSERT INTO memory_chunks_fts(rowid, chunk_id, novel_id, text)
+                 VALUES (NEW.rowid, NEW.id, NEW.novel_id, NEW.text);
+             END;
+
+             DELETE FROM memory_chunks_fts;
+             INSERT INTO memory_chunks_fts(rowid, chunk_id, novel_id, text)
+             SELECT rowid, id, novel_id, text FROM memory_chunks;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_hybrid_semantic_memory(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_documents (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                source_type TEXT NOT NULL CHECK (
+                    source_type IN ('adopted_draft','chapter_summary','context_record')
+                ),
+                source_id TEXT NOT NULL CHECK (length(source_id) BETWEEN 1 AND 200),
+                source_version INTEGER NOT NULL CHECK (source_version >= 1),
+                source_hash TEXT NOT NULL CHECK (
+                    length(source_hash) = 64 AND source_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                adopted_draft_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active' CHECK (
+                    status IN ('active','invalidated')
+                ),
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (
+                    json_valid(metadata_json) AND json_type(metadata_json) = 'object'
+                    AND length(metadata_json) <= 65536
+                ),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                invalidated_at TEXT,
+                invalidation_reason TEXT CHECK (
+                    invalidation_reason IS NULL OR length(invalidation_reason) <= 160
+                ),
+                UNIQUE(id, novel_id),
+                CHECK (
+                    (status = 'active' AND invalidated_at IS NULL AND invalidation_reason IS NULL)
+                    OR
+                    (status = 'invalidated' AND invalidated_at IS NOT NULL
+                     AND invalidation_reason IS NOT NULL)
+                ),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+                FOREIGN KEY (adopted_draft_id) REFERENCES chapter_drafts(id) ON DELETE CASCADE
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_documents_one_active_source
+                ON memory_documents(novel_id, source_type, source_id) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_memory_documents_identity
+                ON memory_documents(
+                    novel_id, source_type, source_id, source_version, source_hash, created_at DESC
+                );
+            CREATE INDEX IF NOT EXISTS idx_memory_documents_chapter_status
+                ON memory_documents(novel_id, chapter_id, status, updated_at DESC);
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_documents_validate_scope_insert
+            BEFORE INSERT ON memory_documents
+            WHEN NOT EXISTS (
+                SELECT 1
+                FROM chapters c
+                INNER JOIN chapter_drafts d
+                    ON d.id = NEW.adopted_draft_id
+                   AND d.chapter_id = c.id
+                   AND d.novel_id = c.novel_id
+                WHERE c.id = NEW.chapter_id AND c.novel_id = NEW.novel_id
+            )
+            BEGIN SELECT RAISE(ABORT, 'memory document scope mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_documents_immutable_identity
+            BEFORE UPDATE OF id, novel_id, source_type, source_id, source_version,
+                             source_hash, adopted_draft_id, chapter_id, metadata_json, created_at
+            ON memory_documents
+            BEGIN SELECT RAISE(ABORT, 'memory document identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_documents_status_edges
+            BEFORE UPDATE OF status ON memory_documents
+            WHEN NOT (
+                OLD.status = NEW.status
+                OR (OLD.status = 'active' AND NEW.status = 'invalidated')
+            )
+            BEGIN SELECT RAISE(ABORT, 'invalid memory document status transition'); END;
+
+            CREATE TABLE IF NOT EXISTS memory_chunks (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                document_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+                text TEXT NOT NULL CHECK (length(trim(text)) >= 1),
+                token_count INTEGER NOT NULL CHECK (token_count BETWEEN 1 AND 100000),
+                importance REAL NOT NULL CHECK (importance BETWEEN 0.0 AND 1.0),
+                chapter_order_index INTEGER CHECK (chapter_order_index IS NULL OR chapter_order_index >= 0),
+                temporal_start_chapter INTEGER CHECK (
+                    temporal_start_chapter IS NULL OR temporal_start_chapter >= 0
+                ),
+                temporal_end_chapter INTEGER CHECK (
+                    temporal_end_chapter IS NULL OR temporal_end_chapter >= 0
+                ),
+                entity_keys_json TEXT NOT NULL DEFAULT '[]' CHECK (
+                    json_valid(entity_keys_json) AND json_type(entity_keys_json) = 'array'
+                    AND length(entity_keys_json) <= 32768
+                ),
+                metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (
+                    json_valid(metadata_json) AND json_type(metadata_json) = 'object'
+                    AND length(metadata_json) <= 32768
+                ),
+                content_hash TEXT NOT NULL CHECK (
+                    length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                UNIQUE(document_id, ordinal),
+                UNIQUE(id, novel_id),
+                CHECK (
+                    temporal_start_chapter IS NULL OR temporal_end_chapter IS NULL
+                    OR temporal_end_chapter >= temporal_start_chapter
+                ),
+                FOREIGN KEY (document_id, novel_id)
+                    REFERENCES memory_documents(id, novel_id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_chunks_novel_chapter
+                ON memory_chunks(novel_id, chapter_order_index, chapter_id, importance DESC);
+            CREATE INDEX IF NOT EXISTS idx_memory_chunks_document_ordinal
+                ON memory_chunks(document_id, ordinal);
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_chunks_validate_scope_insert
+            BEFORE INSERT ON memory_chunks
+            WHEN NOT EXISTS (
+                SELECT 1 FROM memory_documents d
+                WHERE d.id = NEW.document_id AND d.novel_id = NEW.novel_id
+                  AND d.chapter_id = NEW.chapter_id
+            )
+            BEGIN SELECT RAISE(ABORT, 'memory chunk scope mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_chunks_immutable_content
+            BEFORE UPDATE OF id, document_id, novel_id, chapter_id, ordinal, text, token_count,
+                             importance, chapter_order_index, temporal_start_chapter,
+                             temporal_end_chapter, entity_keys_json, metadata_json,
+                             content_hash, created_at
+            ON memory_chunks
+            BEGIN SELECT RAISE(ABORT, 'memory chunk is immutable'); END;
+
+            CREATE TABLE IF NOT EXISTS memory_embeddings (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                chunk_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                provider TEXT NOT NULL CHECK (length(trim(provider)) BETWEEN 1 AND 80),
+                model TEXT NOT NULL CHECK (length(trim(model)) BETWEEN 1 AND 160),
+                dimension INTEGER NOT NULL CHECK (dimension BETWEEN 1 AND 8192),
+                vector_json TEXT NOT NULL CHECK (
+                    json_valid(vector_json) AND json_type(vector_json) = 'array'
+                    AND json_array_length(vector_json) = dimension
+                ),
+                vector_norm REAL NOT NULL CHECK (vector_norm > 0.0),
+                vector_hash TEXT NOT NULL CHECK (
+                    length(vector_hash) = 64 AND vector_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                chunk_content_hash TEXT NOT NULL CHECK (
+                    length(chunk_content_hash) = 64
+                    AND chunk_content_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                UNIQUE(chunk_id, provider, model),
+                FOREIGN KEY (chunk_id, novel_id)
+                    REFERENCES memory_chunks(id, novel_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_embeddings_model_scope
+                ON memory_embeddings(novel_id, provider, model, dimension, chunk_id);
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_embeddings_validate_chunk_insert
+            BEFORE INSERT ON memory_embeddings
+            WHEN NOT EXISTS (
+                SELECT 1 FROM memory_chunks c
+                WHERE c.id = NEW.chunk_id AND c.novel_id = NEW.novel_id
+                  AND c.content_hash = NEW.chunk_content_hash
+            )
+            BEGIN SELECT RAISE(ABORT, 'memory embedding chunk hash mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_embeddings_validate_chunk_update
+            BEFORE UPDATE OF vector_json, vector_norm, vector_hash, chunk_content_hash, created_at
+            ON memory_embeddings
+            WHEN NOT EXISTS (
+                SELECT 1 FROM memory_chunks c
+                WHERE c.id = NEW.chunk_id AND c.novel_id = NEW.novel_id
+                  AND c.content_hash = NEW.chunk_content_hash
+            )
+            BEGIN SELECT RAISE(ABORT, 'memory embedding chunk hash mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_embeddings_immutable_identity
+            BEFORE UPDATE OF id, chunk_id, novel_id, provider, model, dimension
+            ON memory_embeddings
+            BEGIN SELECT RAISE(ABORT, 'memory embedding identity is immutable'); END;
+
+            CREATE TABLE IF NOT EXISTS memory_retrieval_logs (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                query_hash TEXT NOT NULL CHECK (
+                    length(query_hash) = 64 AND query_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                query_embedding_hash TEXT CHECK (
+                    query_embedding_hash IS NULL OR (
+                        length(query_embedding_hash) = 64
+                        AND query_embedding_hash NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                filters_json TEXT NOT NULL CHECK (
+                    json_valid(filters_json) AND json_type(filters_json) = 'object'
+                ),
+                retrieval_mode TEXT NOT NULL CHECK (
+                    retrieval_mode IN (
+                        'hybrid','semantic_structured','fts_structured',
+                        'lexical_structured','structured'
+                    )
+                ),
+                embedding_provider TEXT,
+                embedding_model TEXT,
+                embedding_dimension INTEGER CHECK (
+                    embedding_dimension IS NULL OR embedding_dimension BETWEEN 1 AND 8192
+                ),
+                fts_available INTEGER NOT NULL CHECK (fts_available IN (0,1)),
+                candidate_count INTEGER NOT NULL CHECK (candidate_count BETWEEN 0 AND 500),
+                selected_chunk_ids_json TEXT NOT NULL CHECK (
+                    json_valid(selected_chunk_ids_json)
+                    AND json_type(selected_chunk_ids_json) = 'array'
+                ),
+                score_reasons_json TEXT NOT NULL CHECK (
+                    json_valid(score_reasons_json) AND json_type(score_reasons_json) = 'array'
+                ),
+                top_k INTEGER NOT NULL CHECK (top_k BETWEEN 1 AND 50),
+                page_offset INTEGER NOT NULL CHECK (page_offset >= 0),
+                token_budget INTEGER NOT NULL CHECK (token_budget BETWEEN 1 AND 100000),
+                used_tokens INTEGER NOT NULL CHECK (
+                    used_tokens >= 0 AND used_tokens <= token_budget
+                ),
+                created_at TEXT NOT NULL,
+                CHECK (
+                    (query_embedding_hash IS NULL AND embedding_provider IS NULL
+                     AND embedding_model IS NULL AND embedding_dimension IS NULL)
+                    OR
+                    (query_embedding_hash IS NOT NULL AND embedding_provider IS NOT NULL
+                     AND embedding_model IS NOT NULL AND embedding_dimension IS NOT NULL)
+                ),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_novel_created
+                ON memory_retrieval_logs(novel_id, created_at DESC, id DESC);
+
+            CREATE TRIGGER IF NOT EXISTS trg_memory_retrieval_logs_immutable
+            BEFORE UPDATE ON memory_retrieval_logs
+            BEGIN SELECT RAISE(ABORT, 'memory retrieval log is immutable'); END;",
+        )
+        .map_err(AppError::database)?;
+    install_memory_fts(transaction)
+}
+
+fn apply_autonomous_book_scheduler(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS autonomous_book_runs (
+                run_id TEXT PRIMARY KEY CHECK (length(run_id) BETWEEN 1 AND 200),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 200),
+                request_hash TEXT NOT NULL CHECK (
+                    length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                novel_id TEXT NOT NULL,
+                plan_id TEXT NOT NULL,
+                mode TEXT NOT NULL CHECK (
+                    mode IN ('draft_night','quality_gate','full_auto')
+                ),
+                policy_json TEXT NOT NULL CHECK (
+                    json_valid(policy_json) AND json_type(policy_json) = 'object'
+                    AND length(policy_json) <= 65536
+                ),
+                policy_hash TEXT NOT NULL CHECK (
+                    length(policy_hash) = 64 AND policy_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                status TEXT NOT NULL DEFAULT 'queued' CHECK (
+                    status IN ('queued','running','paused','completed','failed','stopped')
+                ),
+                state_revision INTEGER NOT NULL DEFAULT 1 CHECK (state_revision >= 1),
+                next_chapter_number INTEGER NOT NULL CHECK (next_chapter_number >= 1),
+                total_chapters INTEGER NOT NULL CHECK (total_chapters BETWEEN 1 AND 10000),
+                completed_chapters INTEGER NOT NULL DEFAULT 0 CHECK (
+                    completed_chapters >= 0 AND completed_chapters <= total_chapters
+                ),
+                token_input INTEGER NOT NULL DEFAULT 0 CHECK (token_input >= 0),
+                token_output INTEGER NOT NULL DEFAULT 0 CHECK (token_output >= 0),
+                cost_usd REAL NOT NULL DEFAULT 0 CHECK (cost_usd >= 0.0),
+                usage_day TEXT NOT NULL,
+                daily_token_input INTEGER NOT NULL DEFAULT 0 CHECK (daily_token_input >= 0),
+                daily_token_output INTEGER NOT NULL DEFAULT 0 CHECK (daily_token_output >= 0),
+                daily_cost_usd REAL NOT NULL DEFAULT 0 CHECK (daily_cost_usd >= 0.0),
+                consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+                pause_reason TEXT CHECK (pause_reason IS NULL OR length(pause_reason) <= 240),
+                error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                paused_at TEXT,
+                completed_at TEXT,
+                UNIQUE(run_id, novel_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (plan_id) REFERENCES autonomous_story_plans(plan_id) ON DELETE RESTRICT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_autonomous_book_runs_active_plan
+                ON autonomous_book_runs(plan_id)
+                WHERE status IN ('queued','running','paused');
+            CREATE INDEX IF NOT EXISTS idx_autonomous_book_runs_novel_status
+                ON autonomous_book_runs(novel_id, status, updated_at DESC, run_id DESC);
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_book_runs_validate_scope_insert
+            BEFORE INSERT ON autonomous_book_runs
+            WHEN NOT EXISTS (
+                SELECT 1 FROM autonomous_story_plans p
+                WHERE p.plan_id = NEW.plan_id AND p.novel_id = NEW.novel_id
+                  AND p.status = 'applied'
+            )
+            BEGIN SELECT RAISE(ABORT, 'autonomous book run scope mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_book_runs_immutable_identity
+            BEFORE UPDATE OF run_id, operation_id, request_hash, novel_id, plan_id,
+                             mode, policy_json, policy_hash, total_chapters, created_at
+            ON autonomous_book_runs
+            BEGIN SELECT RAISE(ABORT, 'autonomous book run identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_book_runs_status_edges
+            BEFORE UPDATE OF status ON autonomous_book_runs
+            WHEN NOT (
+                OLD.status = NEW.status
+                OR (OLD.status = 'queued' AND NEW.status IN ('running','paused','stopped','failed'))
+                OR (OLD.status = 'running' AND NEW.status IN ('queued','paused','completed','failed','stopped'))
+                OR (OLD.status = 'paused' AND NEW.status IN ('queued','stopped','failed'))
+            )
+            BEGIN SELECT RAISE(ABORT, 'invalid autonomous book run status transition'); END;
+
+            CREATE TABLE IF NOT EXISTS autonomous_run_leases (
+                lease_id TEXT PRIMARY KEY CHECK (length(lease_id) BETWEEN 1 AND 200),
+                run_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                epoch INTEGER NOT NULL CHECK (epoch >= 1),
+                owner_id TEXT NOT NULL CHECK (length(owner_id) BETWEEN 1 AND 200),
+                token_hash TEXT NOT NULL CHECK (
+                    length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                expires_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('active','released','expired')),
+                acquired_at TEXT NOT NULL,
+                renewed_at TEXT,
+                released_at TEXT,
+                UNIQUE(run_id, epoch),
+                UNIQUE(lease_id, run_id, epoch),
+                FOREIGN KEY (run_id, novel_id)
+                    REFERENCES autonomous_book_runs(run_id, novel_id) ON DELETE CASCADE
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_autonomous_run_leases_active
+                ON autonomous_run_leases(run_id) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_autonomous_run_leases_expiry
+                ON autonomous_run_leases(status, expires_at, run_id);
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_leases_monotonic_epoch
+            BEFORE INSERT ON autonomous_run_leases
+            WHEN NEW.epoch <= COALESCE((
+                SELECT MAX(epoch) FROM autonomous_run_leases WHERE run_id = NEW.run_id
+            ), 0)
+            BEGIN SELECT RAISE(ABORT, 'autonomous run lease epoch must increase'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_leases_immutable_identity
+            BEFORE UPDATE OF lease_id, run_id, novel_id, epoch, owner_id, token_hash, acquired_at
+            ON autonomous_run_leases
+            BEGIN SELECT RAISE(ABORT, 'autonomous run lease identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_leases_status_edges
+            BEFORE UPDATE OF status ON autonomous_run_leases
+            WHEN NOT (
+                OLD.status = NEW.status
+                OR (OLD.status = 'active' AND NEW.status IN ('released','expired'))
+            )
+            BEGIN SELECT RAISE(ABORT, 'invalid autonomous run lease status transition'); END;
+
+            CREATE TABLE IF NOT EXISTS autonomous_run_chapter_attempts (
+                attempt_id TEXT PRIMARY KEY CHECK (length(attempt_id) BETWEEN 1 AND 200),
+                run_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                chapter_number INTEGER NOT NULL CHECK (chapter_number >= 1),
+                attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 240),
+                lease_id TEXT NOT NULL,
+                lease_epoch INTEGER NOT NULL CHECK (lease_epoch >= 1),
+                status TEXT NOT NULL CHECK (
+                    status IN (
+                        'claimed','candidate_ready','adopted','confirmed',
+                        'failed','cancelled','abandoned'
+                    )
+                ),
+                estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+                estimated_cost_usd REAL NOT NULL CHECK (estimated_cost_usd >= 0.0),
+                token_input INTEGER CHECK (token_input IS NULL OR token_input >= 0),
+                token_output INTEGER CHECK (token_output IS NULL OR token_output >= 0),
+                cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0.0),
+                candidate_draft_id TEXT,
+                adopted_draft_id TEXT,
+                review_session_id TEXT,
+                successful_experts INTEGER CHECK (
+                    successful_experts IS NULL OR successful_experts BETWEEN 0 AND 64
+                ),
+                average_score REAL CHECK (
+                    average_score IS NULL OR average_score BETWEEN 0.0 AND 100.0
+                ),
+                acceptance_rate REAL CHECK (
+                    acceptance_rate IS NULL OR acceptance_rate BETWEEN 0.0 AND 1.0
+                ),
+                analysis_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (analysis_confirmed IN (0,1)),
+                decision_json TEXT CHECK (decision_json IS NULL OR json_valid(decision_json)),
+                decision_hash TEXT CHECK (
+                    decision_hash IS NULL OR (
+                        length(decision_hash) = 64 AND decision_hash NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+                claimed_at TEXT NOT NULL,
+                finished_at TEXT,
+                UNIQUE(run_id, chapter_number, attempt_number),
+                UNIQUE(attempt_id, run_id),
+                FOREIGN KEY (run_id, novel_id)
+                    REFERENCES autonomous_book_runs(run_id, novel_id) ON DELETE CASCADE,
+                FOREIGN KEY (lease_id, run_id, lease_epoch)
+                    REFERENCES autonomous_run_leases(lease_id, run_id, epoch) ON DELETE RESTRICT,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE RESTRICT,
+                FOREIGN KEY (candidate_draft_id) REFERENCES chapter_drafts(id) ON DELETE RESTRICT,
+                FOREIGN KEY (adopted_draft_id) REFERENCES chapter_drafts(id) ON DELETE RESTRICT,
+                CHECK (
+                    (status = 'claimed' AND finished_at IS NULL)
+                    OR (status <> 'claimed' AND finished_at IS NOT NULL)
+                )
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_autonomous_run_attempts_claimed_chapter
+                ON autonomous_run_chapter_attempts(run_id, chapter_number)
+                WHERE status = 'claimed';
+            CREATE INDEX IF NOT EXISTS idx_autonomous_run_attempts_progress
+                ON autonomous_run_chapter_attempts(run_id, chapter_number, attempt_number DESC);
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_attempts_validate_scope_insert
+            BEFORE INSERT ON autonomous_run_chapter_attempts
+            WHEN NOT EXISTS (
+                SELECT 1 FROM autonomous_book_runs r
+                JOIN chapters c ON c.id = NEW.chapter_id AND c.novel_id = r.novel_id
+                WHERE r.run_id = NEW.run_id AND r.novel_id = NEW.novel_id
+            )
+            BEGIN SELECT RAISE(ABORT, 'autonomous run attempt scope mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_attempts_immutable_identity
+            BEFORE UPDATE OF attempt_id, run_id, novel_id, chapter_id, chapter_number,
+                             attempt_number, operation_id, lease_id, lease_epoch,
+                             estimated_tokens, estimated_cost_usd, claimed_at
+            ON autonomous_run_chapter_attempts
+            BEGIN SELECT RAISE(ABORT, 'autonomous run attempt identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_attempts_status_edges
+            BEFORE UPDATE OF status ON autonomous_run_chapter_attempts
+            WHEN NOT (
+                OLD.status = NEW.status
+                OR (OLD.status = 'claimed' AND NEW.status IN (
+                    'candidate_ready','adopted','confirmed','failed','cancelled','abandoned'
+                ))
+                OR (OLD.status = 'candidate_ready' AND NEW.status IN ('adopted','confirmed'))
+                OR (OLD.status = 'adopted' AND NEW.status = 'confirmed')
+            )
+            BEGIN SELECT RAISE(ABORT, 'invalid autonomous run attempt status transition'); END;
+
+            CREATE TABLE IF NOT EXISTS autonomous_run_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY CHECK (length(checkpoint_id) BETWEEN 1 AND 200),
+                run_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL CHECK (sequence >= 1),
+                event_type TEXT NOT NULL CHECK (length(event_type) BETWEEN 1 AND 80),
+                attempt_id TEXT,
+                run_status TEXT NOT NULL,
+                payload_json TEXT NOT NULL CHECK (
+                    json_valid(payload_json) AND json_type(payload_json) = 'object'
+                    AND length(payload_json) <= 65536
+                ),
+                payload_hash TEXT NOT NULL CHECK (
+                    length(payload_hash) = 64 AND payload_hash NOT GLOB '*[^0-9a-f]*'
+                ),
+                created_at TEXT NOT NULL,
+                UNIQUE(run_id, sequence),
+                FOREIGN KEY (run_id, novel_id)
+                    REFERENCES autonomous_book_runs(run_id, novel_id) ON DELETE CASCADE,
+                FOREIGN KEY (attempt_id, run_id)
+                    REFERENCES autonomous_run_chapter_attempts(attempt_id, run_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_autonomous_run_checkpoints_run_sequence
+                ON autonomous_run_checkpoints(run_id, sequence DESC);
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_checkpoints_monotonic_sequence
+            BEFORE INSERT ON autonomous_run_checkpoints
+            WHEN NEW.sequence <= COALESCE((
+                SELECT MAX(sequence) FROM autonomous_run_checkpoints WHERE run_id = NEW.run_id
+            ), 0)
+            BEGIN SELECT RAISE(ABORT, 'autonomous run checkpoint sequence must increase'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_checkpoints_append_only_update
+            BEFORE UPDATE ON autonomous_run_checkpoints
+            BEGIN SELECT RAISE(ABORT, 'autonomous run checkpoint is append only'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_autonomous_run_checkpoints_append_only_delete
+            BEFORE DELETE ON autonomous_run_checkpoints
+            BEGIN SELECT RAISE(ABORT, 'autonomous run checkpoint is append only'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_multi_target_transactions_and_story_assets(
+    transaction: &Transaction<'_>,
+) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS factions (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 240),
+                kind TEXT CHECK (kind IS NULL OR length(kind) <= 120),
+                description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 100000),
+                goals TEXT NOT NULL DEFAULT '' CHECK (length(goals) <= 50000),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id),
+                UNIQUE(novel_id, name),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_factions_novel_name
+                ON factions(novel_id, name, id);
+
+            CREATE TABLE IF NOT EXISTS locations (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 240),
+                kind TEXT CHECK (kind IS NULL OR length(kind) <= 120),
+                description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 100000),
+                parent_location_id TEXT,
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id),
+                UNIQUE(novel_id, name),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (parent_location_id, novel_id)
+                    REFERENCES locations(id, novel_id) ON DELETE RESTRICT,
+                CHECK (parent_location_id IS NULL OR parent_location_id <> id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_locations_novel_parent
+                ON locations(novel_id, parent_location_id, name, id);
+
+            CREATE TABLE IF NOT EXISTS faction_relations (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                source_faction_id TEXT NOT NULL,
+                target_faction_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL CHECK (length(relation_type) BETWEEN 1 AND 120),
+                description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 50000),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id),
+                UNIQUE(novel_id, source_faction_id, target_faction_id, relation_type),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_faction_id, novel_id)
+                    REFERENCES factions(id, novel_id) ON DELETE RESTRICT,
+                FOREIGN KEY (target_faction_id, novel_id)
+                    REFERENCES factions(id, novel_id) ON DELETE RESTRICT,
+                CHECK (source_faction_id <> target_faction_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_faction_relations_novel_source
+                ON faction_relations(novel_id, source_faction_id, target_faction_id);
+
+            CREATE TABLE IF NOT EXISTS location_links (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                source_location_id TEXT NOT NULL,
+                target_location_id TEXT NOT NULL,
+                link_type TEXT NOT NULL CHECK (length(link_type) BETWEEN 1 AND 120),
+                description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 50000),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id),
+                UNIQUE(novel_id, source_location_id, target_location_id, link_type),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_location_id, novel_id)
+                    REFERENCES locations(id, novel_id) ON DELETE RESTRICT,
+                FOREIGN KEY (target_location_id, novel_id)
+                    REFERENCES locations(id, novel_id) ON DELETE RESTRICT,
+                CHECK (source_location_id <> target_location_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_location_links_novel_source
+                ON location_links(novel_id, source_location_id, target_location_id);
+
+            CREATE TABLE IF NOT EXISTS character_factions (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL,
+                character_id TEXT NOT NULL,
+                faction_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '' CHECK (length(role) <= 240),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id), UNIQUE(novel_id, character_id, faction_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE RESTRICT,
+                FOREIGN KEY (faction_id, novel_id) REFERENCES factions(id, novel_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS chapter_factions (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL, faction_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '' CHECK (length(role) <= 240),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id), UNIQUE(novel_id, chapter_id, faction_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE RESTRICT,
+                FOREIGN KEY (faction_id, novel_id) REFERENCES factions(id, novel_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS chapter_locations (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL, chapter_id TEXT NOT NULL, location_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '' CHECK (length(role) <= 240),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id), UNIQUE(novel_id, chapter_id, location_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE RESTRICT,
+                FOREIGN KEY (location_id, novel_id) REFERENCES locations(id, novel_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS chapter_event_factions (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL, chapter_event_id TEXT NOT NULL, faction_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '' CHECK (length(role) <= 240),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id), UNIQUE(novel_id, chapter_event_id, faction_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_event_id) REFERENCES chapter_events(id) ON DELETE RESTRICT,
+                FOREIGN KEY (faction_id, novel_id) REFERENCES factions(id, novel_id) ON DELETE RESTRICT
+            );
+            CREATE TABLE IF NOT EXISTS chapter_event_locations (
+                id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+                novel_id TEXT NOT NULL, chapter_event_id TEXT NOT NULL, location_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT '' CHECK (length(role) <= 240),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(id, novel_id), UNIQUE(novel_id, chapter_event_id, location_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+                FOREIGN KEY (chapter_event_id) REFERENCES chapter_events(id) ON DELETE RESTRICT,
+                FOREIGN KEY (location_id, novel_id) REFERENCES locations(id, novel_id) ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_character_factions_scope ON character_factions(novel_id, character_id);
+            CREATE INDEX IF NOT EXISTS idx_chapter_factions_scope ON chapter_factions(novel_id, chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_chapter_locations_scope ON chapter_locations(novel_id, chapter_id);
+            CREATE INDEX IF NOT EXISTS idx_event_factions_scope ON chapter_event_factions(novel_id, chapter_event_id);
+            CREATE INDEX IF NOT EXISTS idx_event_locations_scope ON chapter_event_locations(novel_id, chapter_event_id);
+
+            CREATE TABLE IF NOT EXISTS content_target_revisions (
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK (revision >= 1),
+                content_hash TEXT NOT NULL CHECK (length(content_hash)=64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(target_type, target_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS content_transactions (
+                transaction_id TEXT PRIMARY KEY CHECK (length(transaction_id) BETWEEN 1 AND 200),
+                operation_id TEXT NOT NULL UNIQUE CHECK (length(operation_id) BETWEEN 1 AND 240),
+                request_hash TEXT NOT NULL CHECK (length(request_hash)=64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+                novel_id TEXT NOT NULL,
+                strategy TEXT NOT NULL CHECK (strategy IN ('all_or_nothing','reviewed_partial')),
+                target_set_json TEXT NOT NULL CHECK (json_valid(target_set_json) AND json_type(target_set_json)='array'),
+                target_set_hash TEXT NOT NULL CHECK (length(target_set_hash)=64 AND target_set_hash NOT GLOB '*[^0-9a-f]*'),
+                transaction_hash TEXT NOT NULL CHECK (length(transaction_hash)=64 AND transaction_hash NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL DEFAULT 'prepared' CHECK (status IN ('prepared','applied','conflict')),
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+                result_json TEXT CHECK (result_json IS NULL OR json_valid(result_json)),
+                created_at TEXT NOT NULL,
+                applied_at TEXT,
+                UNIQUE(transaction_id, novel_id),
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT,
+                CHECK ((status='prepared' AND applied_at IS NULL AND result_json IS NULL) OR
+                       (status='applied' AND applied_at IS NOT NULL AND result_json IS NOT NULL) OR
+                       status='conflict')
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_transactions_novel_status
+                ON content_transactions(novel_id, status, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS content_transaction_targets (
+                transaction_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+                target_type TEXT NOT NULL CHECK (target_type IN (
+                    'faction','location','faction_relation','location_link',
+                    'character_faction','chapter_faction','chapter_location',
+                    'chapter_event_faction','chapter_event_location','chapter_metadata'
+                )),
+                target_id TEXT NOT NULL CHECK (length(target_id) BETWEEN 1 AND 200),
+                effect_type TEXT NOT NULL CHECK (effect_type IN ('create','update')),
+                base_revision INTEGER NOT NULL CHECK (base_revision >= 0),
+                base_hash TEXT NOT NULL CHECK (length(base_hash)=64 AND base_hash NOT GLOB '*[^0-9a-f]*'),
+                candidate_payload_json TEXT NOT NULL CHECK (json_valid(candidate_payload_json) AND json_type(candidate_payload_json)='object'),
+                candidate_hash TEXT NOT NULL CHECK (length(candidate_hash)=64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'),
+                applied_revision INTEGER,
+                applied_hash TEXT CHECK (applied_hash IS NULL OR (length(applied_hash)=64 AND applied_hash NOT GLOB '*[^0-9a-f]*')),
+                applied_at TEXT,
+                PRIMARY KEY(transaction_id, ordinal),
+                UNIQUE(transaction_id, target_type, target_id),
+                FOREIGN KEY (transaction_id, novel_id)
+                    REFERENCES content_transactions(transaction_id, novel_id) ON DELETE RESTRICT,
+                CHECK ((applied_revision IS NULL AND applied_hash IS NULL AND applied_at IS NULL) OR
+                       (applied_revision IS NOT NULL AND applied_hash IS NOT NULL AND applied_at IS NOT NULL))
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_transaction_targets_identity
+                ON content_transaction_targets(target_type, target_id, transaction_id);
+
+            CREATE TRIGGER IF NOT EXISTS trg_content_transactions_immutable_identity
+            BEFORE UPDATE OF transaction_id, operation_id, request_hash, novel_id, strategy,
+                             target_set_json, target_set_hash, transaction_hash, created_at
+            ON content_transactions
+            BEGIN SELECT RAISE(ABORT, 'content transaction identity is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_content_transactions_status_edges
+            BEFORE UPDATE OF status ON content_transactions
+            WHEN NOT (OLD.status=NEW.status OR (OLD.status='prepared' AND NEW.status IN ('applied','conflict')))
+            BEGIN SELECT RAISE(ABORT, 'invalid content transaction status transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_content_transaction_targets_immutable_candidate
+            BEFORE UPDATE OF transaction_id, novel_id, ordinal, target_type, target_id, effect_type,
+                             base_revision, base_hash, candidate_payload_json, candidate_hash
+            ON content_transaction_targets
+            BEGIN SELECT RAISE(ABORT, 'content transaction target candidate is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_content_transaction_targets_no_delete
+            BEFORE DELETE ON content_transaction_targets
+            BEGIN SELECT RAISE(ABORT, 'content transaction target cannot be deleted'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_locations_no_hierarchy_cycle_insert
+            BEFORE INSERT ON locations WHEN NEW.parent_location_id IS NOT NULL AND EXISTS (
+                WITH RECURSIVE ancestors(id) AS (
+                    SELECT NEW.parent_location_id
+                    UNION ALL SELECT l.parent_location_id FROM locations l JOIN ancestors a ON l.id=a.id
+                    WHERE l.parent_location_id IS NOT NULL
+                ) SELECT 1 FROM ancestors WHERE id=NEW.id
+            ) BEGIN SELECT RAISE(ABORT, 'location hierarchy cycle'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_locations_no_hierarchy_cycle_update
+            BEFORE UPDATE OF parent_location_id ON locations WHEN NEW.parent_location_id IS NOT NULL AND EXISTS (
+                WITH RECURSIVE ancestors(id) AS (
+                    SELECT NEW.parent_location_id
+                    UNION ALL SELECT l.parent_location_id FROM locations l JOIN ancestors a ON l.id=a.id
+                    WHERE l.parent_location_id IS NOT NULL
+                ) SELECT 1 FROM ancestors WHERE id=NEW.id
+            ) BEGIN SELECT RAISE(ABORT, 'location hierarchy cycle'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_character_factions_scope_insert BEFORE INSERT ON character_factions
+            WHEN NOT EXISTS (SELECT 1 FROM characters c WHERE c.id=NEW.character_id AND c.novel_id=NEW.novel_id)
+            BEGIN SELECT RAISE(ABORT, 'character faction scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_character_factions_scope_update BEFORE UPDATE OF character_id ON character_factions
+            WHEN NOT EXISTS (SELECT 1 FROM characters c WHERE c.id=NEW.character_id AND c.novel_id=NEW.novel_id)
+            BEGIN SELECT RAISE(ABORT, 'character faction scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_chapter_factions_scope_insert BEFORE INSERT ON chapter_factions
+            WHEN NOT EXISTS (SELECT 1 FROM chapters c WHERE c.id=NEW.chapter_id AND c.novel_id=NEW.novel_id AND c.deleted_at IS NULL)
+            BEGIN SELECT RAISE(ABORT, 'chapter faction scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_chapter_factions_scope_update BEFORE UPDATE OF chapter_id ON chapter_factions
+            WHEN NOT EXISTS (SELECT 1 FROM chapters c WHERE c.id=NEW.chapter_id AND c.novel_id=NEW.novel_id AND c.deleted_at IS NULL)
+            BEGIN SELECT RAISE(ABORT, 'chapter faction scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_chapter_locations_scope_insert BEFORE INSERT ON chapter_locations
+            WHEN NOT EXISTS (SELECT 1 FROM chapters c WHERE c.id=NEW.chapter_id AND c.novel_id=NEW.novel_id AND c.deleted_at IS NULL)
+            BEGIN SELECT RAISE(ABORT, 'chapter location scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_chapter_locations_scope_update BEFORE UPDATE OF chapter_id ON chapter_locations
+            WHEN NOT EXISTS (SELECT 1 FROM chapters c WHERE c.id=NEW.chapter_id AND c.novel_id=NEW.novel_id AND c.deleted_at IS NULL)
+            BEGIN SELECT RAISE(ABORT, 'chapter location scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_event_factions_scope_insert BEFORE INSERT ON chapter_event_factions
+            WHEN NOT EXISTS (SELECT 1 FROM chapter_events e WHERE e.id=NEW.chapter_event_id AND e.novel_id=NEW.novel_id)
+            BEGIN SELECT RAISE(ABORT, 'event faction scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_event_factions_scope_update BEFORE UPDATE OF chapter_event_id ON chapter_event_factions
+            WHEN NOT EXISTS (SELECT 1 FROM chapter_events e WHERE e.id=NEW.chapter_event_id AND e.novel_id=NEW.novel_id)
+            BEGIN SELECT RAISE(ABORT, 'event faction scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_event_locations_scope_insert BEFORE INSERT ON chapter_event_locations
+            WHEN NOT EXISTS (SELECT 1 FROM chapter_events e WHERE e.id=NEW.chapter_event_id AND e.novel_id=NEW.novel_id)
+            BEGIN SELECT RAISE(ABORT, 'event location scope mismatch'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_event_locations_scope_update BEFORE UPDATE OF chapter_event_id ON chapter_event_locations
+            WHEN NOT EXISTS (SELECT 1 FROM chapter_events e WHERE e.id=NEW.chapter_event_id AND e.novel_id=NEW.novel_id)
+            BEGIN SELECT RAISE(ABORT, 'event location scope mismatch'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_factions_revision_cas BEFORE UPDATE ON factions
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'faction revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_locations_revision_cas BEFORE UPDATE ON locations
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'location revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_faction_relations_revision_cas BEFORE UPDATE ON faction_relations
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'faction relation revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_location_links_revision_cas BEFORE UPDATE ON location_links
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'location link revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_character_factions_revision_cas BEFORE UPDATE ON character_factions
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'character faction revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_chapter_factions_revision_cas BEFORE UPDATE ON chapter_factions
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'chapter faction revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_chapter_locations_revision_cas BEFORE UPDATE ON chapter_locations
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'chapter location revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_event_factions_revision_cas BEFORE UPDATE ON chapter_event_factions
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'event faction revision cas or identity violation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_event_locations_revision_cas BEFORE UPDATE ON chapter_event_locations
+            WHEN NEW.revision<>OLD.revision+1 OR NEW.id<>OLD.id OR NEW.novel_id<>OLD.novel_id OR NEW.created_at<>OLD.created_at
+            BEGIN SELECT RAISE(ABORT, 'event location revision cas or identity violation'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_global_ai_request_policy(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_request_policy (
+                policy_id INTEGER PRIMARY KEY CHECK (policy_id=1),
+                revision INTEGER NOT NULL CHECK (revision>=1),
+                policy_hash TEXT NOT NULL
+                    CHECK (length(policy_hash)=64 AND policy_hash NOT GLOB '*[^0-9a-f]*'),
+                max_requests_per_minute INTEGER NOT NULL
+                    CHECK (max_requests_per_minute BETWEEN 1 AND 10000),
+                max_concurrent_requests INTEGER NOT NULL
+                    CHECK (max_concurrent_requests BETWEEN 1 AND 1024),
+                daily_token_budget INTEGER
+                    CHECK (daily_token_budget IS NULL OR daily_token_budget>0),
+                daily_cost_budget_units INTEGER
+                    CHECK (daily_cost_budget_units IS NULL OR daily_cost_budget_units>0),
+                input_price_per_million_tokens REAL
+                    CHECK (input_price_per_million_tokens IS NULL OR input_price_per_million_tokens>=0),
+                output_price_per_million_tokens REAL
+                    CHECK (output_price_per_million_tokens IS NULL OR output_price_per_million_tokens>=0),
+                warning_percent INTEGER NOT NULL
+                    CHECK (warning_percent BETWEEN 1 AND 100),
+                updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms>=0),
+                CHECK (
+                    (input_price_per_million_tokens IS NULL
+                     AND output_price_per_million_tokens IS NULL
+                     AND daily_cost_budget_units IS NULL)
+                    OR
+                    (input_price_per_million_tokens IS NOT NULL
+                     AND output_price_per_million_tokens IS NOT NULL)
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_request_daily_usage (
+                day_key TEXT PRIMARY KEY
+                    CHECK (length(day_key)=10),
+                token_input INTEGER NOT NULL DEFAULT 0
+                    CHECK (token_input>=0),
+                token_output INTEGER NOT NULL DEFAULT 0
+                    CHECK (token_output>=0),
+                cost_units INTEGER NOT NULL DEFAULT 0
+                    CHECK (cost_units>=0),
+                usage_missing_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (usage_missing_count>=0),
+                unpriced_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (unpriced_request_count>=0),
+                failed_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (failed_request_count>=0),
+                expired_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (expired_request_count>=0),
+                settled_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (settled_request_count>=0),
+                updated_at_ms INTEGER NOT NULL
+                    CHECK (updated_at_ms>=0)
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_request_reservations (
+                reservation_id TEXT PRIMARY KEY
+                    CHECK (length(reservation_id) BETWEEN 1 AND 128),
+                owner_id TEXT NOT NULL
+                    CHECK (length(owner_id) BETWEEN 1 AND 128),
+                provider_request_id TEXT NOT NULL UNIQUE
+                    CHECK (length(provider_request_id) BETWEEN 1 AND 128),
+                lease_token_hash TEXT NOT NULL
+                    CHECK (length(lease_token_hash)=64 AND lease_token_hash NOT GLOB '*[^0-9a-f]*'),
+                policy_revision INTEGER NOT NULL CHECK (policy_revision>=1),
+                policy_hash TEXT NOT NULL
+                    CHECK (length(policy_hash)=64 AND policy_hash NOT GLOB '*[^0-9a-f]*'),
+                day_key TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL
+                    CHECK (started_at_ms>=0),
+                expires_at_ms INTEGER NOT NULL
+                    CHECK (expires_at_ms>started_at_ms),
+                estimated_input_tokens INTEGER NOT NULL
+                    CHECK (estimated_input_tokens>=0),
+                estimated_output_tokens INTEGER NOT NULL
+                    CHECK (estimated_output_tokens>=0),
+                estimated_cost_units INTEGER
+                    CHECK (estimated_cost_units IS NULL OR estimated_cost_units>=0),
+                input_price_per_million_tokens REAL
+                    CHECK (input_price_per_million_tokens IS NULL OR input_price_per_million_tokens>=0),
+                output_price_per_million_tokens REAL
+                    CHECK (output_price_per_million_tokens IS NULL OR output_price_per_million_tokens>=0),
+                status TEXT NOT NULL
+                    CHECK (status IN ('active','settled','failed','expired')),
+                dispatched_at_ms INTEGER
+                    CHECK (dispatched_at_ms IS NULL OR dispatched_at_ms>=started_at_ms),
+                settlement_hash TEXT
+                    CHECK (settlement_hash IS NULL OR (length(settlement_hash)=64 AND settlement_hash NOT GLOB '*[^0-9a-f]*')),
+                accounted_input_tokens INTEGER
+                    CHECK (accounted_input_tokens IS NULL OR accounted_input_tokens>=0),
+                accounted_output_tokens INTEGER
+                    CHECK (accounted_output_tokens IS NULL OR accounted_output_tokens>=0),
+                accounted_cost_units INTEGER
+                    CHECK (accounted_cost_units IS NULL OR accounted_cost_units>=0),
+                accounted_cost_status TEXT
+                    CHECK (accounted_cost_status IS NULL OR accounted_cost_status IN ('complete','unpriced')),
+                settled_at_ms INTEGER
+                    CHECK (settled_at_ms IS NULL OR settled_at_ms>=started_at_ms),
+                FOREIGN KEY (day_key) REFERENCES ai_request_daily_usage(day_key),
+                CHECK (
+                    (input_price_per_million_tokens IS NULL
+                     AND output_price_per_million_tokens IS NULL
+                     AND estimated_cost_units IS NULL)
+                    OR
+                    (input_price_per_million_tokens IS NOT NULL
+                     AND output_price_per_million_tokens IS NOT NULL
+                     AND estimated_cost_units IS NOT NULL)
+                ),
+                CHECK (
+                    (status='active' AND settlement_hash IS NULL
+                     AND accounted_input_tokens IS NULL
+                     AND accounted_output_tokens IS NULL
+                     AND accounted_cost_units IS NULL
+                     AND accounted_cost_status IS NULL
+                     AND settled_at_ms IS NULL)
+                    OR
+                    (status<>'active' AND settlement_hash IS NOT NULL
+                     AND accounted_input_tokens IS NOT NULL
+                     AND accounted_output_tokens IS NOT NULL
+                     AND accounted_cost_status IS NOT NULL
+                     AND ((accounted_cost_status='complete' AND accounted_cost_units IS NOT NULL)
+                          OR (accounted_cost_status='unpriced' AND accounted_cost_units IS NULL))
+                     AND settled_at_ms IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ai_request_reservations_started
+            ON ai_request_reservations(started_at_ms DESC);
+            CREATE INDEX IF NOT EXISTS idx_ai_request_reservations_day_status
+            ON ai_request_reservations(day_key,status);
+            CREATE INDEX IF NOT EXISTS idx_ai_request_reservations_active_expiry
+            ON ai_request_reservations(expires_at_ms)
+            WHERE status='active';
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_immutable_identity
+            BEFORE UPDATE ON ai_request_reservations
+            WHEN NEW.reservation_id<>OLD.reservation_id
+              OR NEW.owner_id<>OLD.owner_id
+              OR NEW.provider_request_id<>OLD.provider_request_id
+              OR NEW.lease_token_hash<>OLD.lease_token_hash
+              OR NEW.policy_revision<>OLD.policy_revision
+              OR NEW.policy_hash<>OLD.policy_hash
+              OR NEW.day_key<>OLD.day_key
+              OR NEW.started_at_ms<>OLD.started_at_ms
+              OR NEW.expires_at_ms<>OLD.expires_at_ms
+              OR NEW.estimated_input_tokens<>OLD.estimated_input_tokens
+              OR NEW.estimated_output_tokens<>OLD.estimated_output_tokens
+              OR NEW.estimated_cost_units IS NOT OLD.estimated_cost_units
+              OR NEW.input_price_per_million_tokens IS NOT OLD.input_price_per_million_tokens
+              OR NEW.output_price_per_million_tokens IS NOT OLD.output_price_per_million_tokens
+            BEGIN SELECT RAISE(ABORT, 'ai request reservation identity is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_dispatch_once
+            BEFORE UPDATE OF dispatched_at_ms ON ai_request_reservations
+            WHEN NOT (
+                OLD.status='active'
+                AND OLD.dispatched_at_ms IS NULL
+                AND NEW.dispatched_at_ms IS NOT NULL
+                AND NEW.dispatched_at_ms>=OLD.started_at_ms
+                AND NEW.dispatched_at_ms<=OLD.expires_at_ms
+            )
+            BEGIN SELECT RAISE(ABORT, 'ai request reservation dispatch is single use'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_terminal_accounting_immutable
+            BEFORE UPDATE OF settlement_hash,accounted_input_tokens,accounted_output_tokens,
+                             accounted_cost_units,accounted_cost_status,settled_at_ms
+            ON ai_request_reservations
+            WHEN NOT (
+                OLD.status='active'
+                AND NEW.status IN ('settled','failed','expired')
+            )
+            BEGIN SELECT RAISE(ABORT, 'ai request reservation accounting is terminal'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_status_edges
+            BEFORE UPDATE OF status ON ai_request_reservations
+            WHEN NOT (
+                OLD.status='active'
+                AND NEW.status IN ('settled','failed','expired')
+            )
+            BEGIN SELECT RAISE(ABORT, 'illegal ai request reservation status transition'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_reservations_no_delete
+            BEFORE DELETE ON ai_request_reservations
+            BEGIN SELECT RAISE(ABORT, 'ai request reservations are durable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_policy_revision_cas
+            BEFORE UPDATE ON ai_request_policy
+            WHEN NEW.policy_id<>OLD.policy_id OR NEW.revision<>OLD.revision+1
+            BEGIN SELECT RAISE(ABORT, 'ai request policy revision conflict'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_ai_request_policy_no_delete
+            BEFORE DELETE ON ai_request_policy
+            BEGIN SELECT RAISE(ABORT, 'ai request policy is durable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn ensure_output_profile_column(
+    transaction: &Transaction<'_>,
+    column: &str,
+    definition: &str,
+) -> Result<(), AppError> {
+    let exists: bool = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('output_profiles') WHERE name = ?1
+            )",
+            params![column],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if !exists {
+        // Column names and definitions are private constants at every call site;
+        // keeping the SQL construction here avoids SQLite's lack of a bound
+        // identifier while still making the compatibility path explicit.
+        transaction
+            .execute(
+                &format!("ALTER TABLE output_profiles ADD COLUMN {column} {definition}"),
+                [],
+            )
+            .map_err(AppError::database)?;
+    }
+    Ok(())
+}
+
+fn apply_output_profile_fields(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    // Normal desktop startup creates this base table before migrations. The
+    // CREATE IF NOT EXISTS keeps migration-only upgrades and empty/legacy test
+    // databases valid as well, while the column checks make replay idempotent.
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS output_profiles (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT,
+                target_word_count INTEGER,
+                min_word_count INTEGER,
+                max_word_count INTEGER,
+                paragraph_length TEXT,
+                pov_type TEXT,
+                tense_type TEXT,
+                pace_level TEXT,
+                dialogue_ratio REAL,
+                description_ratio REAL,
+                battle_intensity TEXT,
+                emotion_tendency TEXT,
+                ending_hook_required INTEGER NOT NULL DEFAULT 0,
+                extra_requirements TEXT,
+                forbidden_items TEXT,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (novel_id) REFERENCES novels(id)
+            );",
+        )
+        .map_err(AppError::database)?;
+
+    ensure_output_profile_column(transaction, "paragraph_length", "TEXT")?;
+    ensure_output_profile_column(transaction, "pov_type", "TEXT")?;
+    ensure_output_profile_column(transaction, "tense_type", "TEXT")?;
+    ensure_output_profile_column(transaction, "description", "TEXT")?;
+    Ok(())
+}
+
+fn apply_dsh_preparation_runs(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS dsh_preparation_runs (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT,
+                chapter_id TEXT,
+                planner TEXT NOT NULL,
+                status TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                planner_coerced TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_dsh_preparation_runs_novel
+                ON dsh_preparation_runs(novel_id);
+            CREATE INDEX IF NOT EXISTS idx_dsh_preparation_runs_chapter
+                ON dsh_preparation_runs(novel_id, chapter_id);",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+    use std::time::Duration;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 20] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 31] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -1611,6 +3152,50 @@ mod tests {
         (
             "020_agent_plan_checkpoints",
             "4341b1035cd13cf6dca38397377d45575363bee98ffdad746d02862764607045",
+        ),
+        (
+            "021_multi_agent_sessions",
+            "e8878c39009e7830db32d3be64dc22e387ea8e96d644ba8a16d0a56c3e705367",
+        ),
+        (
+            "022_multi_agent_rounds",
+            "f7421084435da8a403c7178f3bbedfee80fa499be21f7449ffc4cd027cc57919",
+        ),
+        (
+            "023_multi_agent_opinions",
+            "d49e6ba3cb7961c35579bd01b9c5dd7e0dda208b54fff6317f16821058e34911",
+        ),
+        (
+            "024_autonomous_story_plans",
+            "3a5e391fa6ed9c360472a71cdfd0f09a759112fba283e180d8c3cba113b3eb53",
+        ),
+        (
+            "025_reference_library",
+            "8980119b08c81d8b48d986150fa8a835390fb85594677f3c296a37dc740f9293",
+        ),
+        (
+            "026_hybrid_semantic_memory",
+            "a8622dab5bf60ec4cc7177437fe2e2c5c5da753045b339cac01b0083ce163b0b",
+        ),
+        (
+            "027_autonomous_book_scheduler",
+            "bfe8cc7dd1fbe7d9da6664b611d2f5c2aef97ace02ea768862e74b4a01d085c4",
+        ),
+        (
+            "028_multi_target_transactions_and_story_assets",
+            "57a0165d8f5e5f75db523325476a5187763c17ee7eb56c76c9faac767150d3e9",
+        ),
+        (
+            "029_global_ai_request_policy",
+            "cc2caf7c92d84eef722b109d67bba83b4c8015f893dedae099cb3662d0d4ebdc",
+        ),
+        (
+            "030_output_profile_fields",
+            "b3b5f6759e3d8dd8ff58229b2f0baf3d39295903e474120c598a941d56a067de",
+        ),
+        (
+            "031_dsh_preparation_runs",
+            "4ebb60ca4e56603635cbc20f8065a7c0643c9e267d73cf27872fce2ed8b202ff",
         ),
     ];
 
@@ -1694,6 +3279,11 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let first = list_applied(&connection)?;
+        assert!(first
+            .iter()
+            .rev()
+            .take(2)
+            .all(|migration| migration.version == "3.2.0"));
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, first);
         let content: String = connection.query_row(
@@ -1937,7 +3527,7 @@ mod tests {
         let first = list_applied(&connection)?;
         crate::db::create_tables(&mut connection)?;
         assert_eq!(list_applied(&connection)?, first);
-        assert_eq!(first.len(), 20);
+        assert_eq!(first.len(), migrations().len());
         Ok(())
     }
 
@@ -1959,8 +3549,9 @@ mod tests {
                 OR name GLOB 'idx_artifact_validation_*'
                 OR name GLOB 'trg_ai_*'
                 OR name GLOB 'trg_result_artifacts_*'
-                OR name GLOB 'trg_artifact_validation_*'
+              OR name GLOB 'trg_artifact_validation_*'
              )
+             AND name NOT GLOB '*ai_request*'
              ORDER BY type ASC, name ASC",
         )?;
         let rows = statement
@@ -2017,7 +3608,7 @@ mod tests {
         let once = list_applied(&connection)?;
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, once);
-        assert_eq!(once.len(), 20);
+        assert_eq!(once.len(), migrations().len());
         for (table, expected_count, expected_columns) in before {
             let quoted = table.replace('"', "\"\"");
             let actual_count =
@@ -2101,6 +3692,220 @@ mod tests {
                 .count(),
             0
         );
+        Ok(())
+    }
+
+    #[test]
+    fn db29_global_ai_policy_schema_has_hashed_leases_and_durable_status_guards(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        crate::db::create_tables(&mut connection)?;
+        for table in [
+            "ai_request_policy",
+            "ai_request_daily_usage",
+            "ai_request_reservations",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing global AI policy table {table}");
+        }
+        for index in [
+            "idx_ai_request_reservations_started",
+            "idx_ai_request_reservations_day_status",
+            "idx_ai_request_reservations_active_expiry",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                params![index],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing global AI policy index {index}");
+        }
+        for trigger in [
+            "trg_ai_request_reservations_immutable_identity",
+            "trg_ai_request_reservations_dispatch_once",
+            "trg_ai_request_reservations_terminal_accounting_immutable",
+            "trg_ai_request_reservations_status_edges",
+            "trg_ai_request_reservations_no_delete",
+            "trg_ai_request_policy_revision_cas",
+            "trg_ai_request_policy_no_delete",
+        ] {
+            let exists: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?1",
+                params![trigger],
+                |row| row.get(0),
+            )?;
+            assert_eq!(exists, 1, "missing global AI policy trigger {trigger}");
+        }
+        let columns = table_columns(&connection, "ai_request_reservations")?;
+        assert!(columns.iter().any(|column| column == "lease_token_hash"));
+        assert!(!columns.iter().any(|column| column == "lease_token"));
+
+        let grant = crate::services::ai_request_policy_service::reserve_request(
+            &mut connection,
+            crate::services::ai_request_policy_service::ReserveAiRequestInput {
+                owner_id: "migration-trigger-owner".to_string(),
+                provider_request_id: "migration-trigger-request".to_string(),
+                max_requests_per_minute: 12,
+                max_concurrent_requests: 2,
+                daily_token_budget: Some(10_000),
+                daily_cost_budget_usd: Some(10.0),
+                estimated_input_tokens: 100,
+                estimated_output_tokens: 200,
+                input_price_per_million_tokens: Some(1.0),
+                output_price_per_million_tokens: Some(2.0),
+                warning_percent: 80,
+                ttl_ms: 120_000,
+            },
+        )?;
+        crate::services::ai_request_policy_service::verify_provider_dispatch(
+            &mut connection,
+            &crate::services::ai_request_policy_service::AiRequestPolicyLeaseProof {
+                reservation_id: grant.reservation_id.clone(),
+                owner_id: grant.owner_id.clone(),
+                provider_request_id: grant.provider_request_id.clone(),
+                lease_token: grant.lease_token.clone(),
+            },
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE ai_request_reservations
+                 SET dispatched_at_ms=dispatched_at_ms+1 WHERE reservation_id=?1",
+                params![&grant.reservation_id],
+            )
+            .is_err());
+        crate::services::ai_request_policy_service::settle_request(
+            &mut connection,
+            crate::services::ai_request_policy_service::SettleAiRequestInput {
+                reservation_id: grant.reservation_id.clone(),
+                owner_id: grant.owner_id,
+                lease_token: grant.lease_token,
+                outcome: "succeeded".to_string(),
+                token_input: Some(40),
+                token_output: Some(60),
+            },
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE ai_request_reservations
+                 SET accounted_input_tokens=accounted_input_tokens+1
+                 WHERE reservation_id=?1",
+                params![&grant.reservation_id],
+            )
+            .is_err());
+        assert_eq!(
+            connection
+                .prepare("PRAGMA foreign_key_check")?
+                .query_map([], |_| Ok(()))?
+                .count(),
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn db30_and_db31_upgrade_missing_base_tables_and_replay_idempotently(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+
+        run_migrations(&mut connection)?;
+        for column in ["description", "paragraph_length", "pov_type", "tense_type"] {
+            assert!(table_columns(&connection, "output_profiles")?.contains(&column.to_string()));
+        }
+        assert!(
+            table_columns(&connection, "dsh_preparation_runs")?.contains(&"planner".to_string())
+        );
+
+        let first = list_applied(&connection)?;
+        run_migrations(&mut connection)?;
+        assert_eq!(list_applied(&connection)?, first);
+
+        let mut legacy_output_profile = Connection::open_in_memory()?;
+        legacy_output_profile.execute_batch(
+            "CREATE TABLE output_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+        )?;
+        legacy_schema(&legacy_output_profile)?;
+        run_migrations(&mut legacy_output_profile)?;
+        for column in ["description", "paragraph_length", "pov_type", "tense_type"] {
+            assert!(table_columns(&legacy_output_profile, "output_profiles")?
+                .contains(&column.to_string()));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_startup_migrations_serialize_before_reading_the_ledger(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "ai-novel-studio-concurrent-migrations-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let mut connection = Connection::open(&path)?;
+            connection.busy_timeout(Duration::from_secs(10))?;
+            connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+            // The single-instance fence serializes the legacy pre-ledger schema bootstrap in
+            // production. Seed that base once here, then remove only the ledger rows so the two
+            // connections below exercise the cross-connection migration ledger race itself.
+            crate::db::create_tables(&mut connection)?;
+            connection.execute("DELETE FROM schema_migrations", [])?;
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = (0..2)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || -> Result<(), String> {
+                    let mut connection =
+                        Connection::open(path).map_err(|error| error.to_string())?;
+                    connection
+                        .busy_timeout(Duration::from_secs(10))
+                        .map_err(|error| error.to_string())?;
+                    connection
+                        .execute_batch("PRAGMA foreign_keys=ON;")
+                        .map_err(|error| error.to_string())?;
+                    barrier.wait();
+                    run_migrations(&mut connection).map_err(|error| error.to_string())
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle
+                .join()
+                .map_err(|_| "concurrent migration thread panicked")??;
+        }
+
+        let connection = Connection::open(&path)?;
+        let migration_count: i64 =
+            connection.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(migration_count, EXPECTED_MIGRATION_CHECKSUMS.len() as i64);
+        let duplicate_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM (SELECT migration_id FROM schema_migrations GROUP BY migration_id HAVING COUNT(*)<>1)",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(duplicate_count, 0);
+        drop(connection);
+        for candidate in [
+            path.clone(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            fs::remove_file(candidate).ok();
+        }
         Ok(())
     }
 }

@@ -41,7 +41,7 @@
 - `npm run test`：Node 原生 `node:test`，运行正文安全门和备份服务动态测试。
 - `npm run test:workspace-safety`：正文变更安全门定向测试。
 - `cargo test`：Rust / SQLite 命令、事务和备份恢复测试。
-- `test:setting-suggestions`、`test:quality-workspace`、`test:ai-tasks-delete:*`：PowerShell 静态契约或 Rust 运行时检查。
+- `npm run test:ai-tasks-delete`：AI Task 删除的真实 Rust / SQLite 运行时检查。
 - `npm run lint`、`npm run build`、`cargo check`、`npm run tauri:build`：质量和生产构建入口。
 
 接入前没有：
@@ -172,7 +172,7 @@ AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER 指定的绝对路径
 
 CI 从 Microsoft 文档规定的 WebView2 Runtime 注册表键读取 `pv`，下载该精确版本的 Microsoft Edge WebDriver，并在执行前验证双方版本号前三段一致。它同时固定 `tauri-driver 0.1.5`、关闭 EdgeDriver 遥测，并在驱动下载后暂停 Evergreen WebView2 更新，避免准备和启动之间发生版本漂移。
 
-所有依赖、Rust crates、`tauri-driver` 和 EdgeDriver 都在准备阶段下载。专用 E2E EXE 随后使用 Cargo / npm offline 模式构建；真正的 WDIO 步骤设置 `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`、`CARGO_NET_OFFLINE=true` 和 `NPM_CONFIG_OFFLINE=true`，不会在场景执行时补装依赖。应用侧仍由 WebView 网络 guard、强制 Mock Provider 和 Rust AI IPC 阻断共同保证零外部业务请求；WebDriver 只使用本机 loopback 端口。失败时 CI 上传脱敏后的 `test-results/e2e`，保留 7 天。
+所有依赖、Rust crates、`tauri-driver` 和 EdgeDriver 都在准备阶段下载。质量门和桌面 E2E job 还会分别检出固定 commit 的 DSH 源码、构建 host libraries，并在 Tauri release profile 构建前生成和校验真实可重定位 runtime carrier；空占位资源不能通过 release 构建。专用 E2E EXE 随后使用 Cargo / npm offline 模式构建；真正的 WDIO 步骤设置 `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`、`CARGO_NET_OFFLINE=true` 和 `NPM_CONFIG_OFFLINE=true`，不会在场景执行时补装依赖。应用侧仍由 WebView 网络 guard、强制 Mock Provider 和 Rust AI IPC 阻断共同保证零外部业务请求；WebDriver 只使用本机 loopback 端口。失败时 CI 上传脱敏后的 `test-results/e2e`，保留 7 天。
 
 ---
 

@@ -18,10 +18,8 @@ module.exports = {
   parser: '@typescript-eslint/parser',
   plugins: ['react-refresh'],
   rules: {
-    'react-refresh/only-export-components': [
-      'warn',
-      { allowConstantExport: true },
-    ],
+    'no-console': 'error',
+    'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     '@typescript-eslint/no-unused-vars': [
       'warn',
       {
@@ -29,6 +27,20 @@ module.exports = {
         varsIgnorePattern: '^_',
       },
     ],
-    '@typescript-eslint/no-explicit-any': 'off',
+    '@typescript-eslint/no-explicit-any': 'error',
   },
+  overrides: [
+    {
+      files: ['src/services/observability/appLogger.ts'],
+      rules: { 'no-console': 'off' },
+    },
+    {
+      files: ['scripts/e2e/run-e2e.ts'],
+      rules: { 'no-console': 'off' },
+    },
+    {
+      files: ['**/*.test.ts', '**/*.test.tsx', '**/*.test.mjs'],
+      rules: { 'no-console': 'off' },
+    },
+  ],
 };

@@ -1,3 +1,4 @@
+import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
@@ -17,6 +18,8 @@ import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
 import { formatNumber } from '../../utils/format';
+import { describeUnknownError } from '../../utils/errorMessage';
+import { showError } from '../../utils/nativeDialog';
 import '../../styles/novel-detail.css';
 
 const statusLabels: Record<string, string> = {
@@ -46,7 +49,11 @@ function NovelDetailPage() {
     try {
       // 分阶段加载：先加载核心数据，再加载次要数据
       const n = await novelService.getNovelById(novelId);
-      if (!n) { setError('作品未找到'); setLoading(false); return; }
+      if (!n) {
+        setError('作品未找到');
+        setLoading(false);
+        return;
+      }
       setNovel(n);
       setLoading(false); // 核心数据完成，立即渲染
 
@@ -55,43 +62,63 @@ function NovelDetailPage() {
         settingRepository.getWorldSettings(novelId),
         settingRepository.getRuleSystems(novelId),
         protagonistRepository.getByNovelId(novelId),
-      ]).then(([ws, rs, p]) => {
-        setWorldSettings(ws);
-        setRuleSystems(rs);
-        setProtagonist(p);
-      }).catch((e) => {
-        console.error('次要数据加载失败:', e);
-      });
+      ])
+        .then(([ws, rs, p]) => {
+          setWorldSettings(ws);
+          setRuleSystems(rs);
+          setProtagonist(p);
+        })
+        .catch((e) => {
+          appLogger.error('次要数据加载失败:', e);
+        });
     } catch (e) {
       setError('加载作品失败，请返回首页重试');
-      console.error(e);
+      appLogger.error(e);
       setLoading(false);
     }
   }, [novelId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleSaveBasicInfo = async (data: {
-    title: string; subtitle: string; genre: string;
-    description: string; status: string; targetWordCount: number;
+    title: string;
+    subtitle: string;
+    genre: string;
+    description: string;
+    status: string;
+    targetWordCount: number;
   }) => {
     if (!novelId) return;
     const updated = await novelService.updateNovel(novelId, {
-      title: data.title, subtitle: data.subtitle, genre: data.genre,
-      description: data.description, status: data.status as Novel['status'],
+      title: data.title,
+      subtitle: data.subtitle,
+      genre: data.genre,
+      description: data.description,
+      status: data.status as Novel['status'],
       targetWordCount: data.targetWordCount,
     });
     if (updated) setNovel(updated);
   };
 
-  const handleSaveWorldSetting = async (id: string | null, data: { title: string; content: string }) => {
+  const handleSaveWorldSetting = async (
+    id: string | null,
+    data: { title: string; content: string },
+  ) => {
     if (!novelId) return;
     const result = await settingRepository.saveWorldSetting(id, {
-      novelId, title: data.title, content: data.content,
+      novelId,
+      title: data.title,
+      content: data.content,
     });
     setWorldSettings((prev) => {
       const idx = prev.findIndex((s) => s.id === result.id);
-      if (idx >= 0) { const next = [...prev]; next[idx] = result; return next; }
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = result;
+        return next;
+      }
       return [...prev, result];
     });
   };
@@ -102,13 +129,19 @@ function NovelDetailPage() {
   ) => {
     if (!novelId) return;
     const result = await settingRepository.saveRuleSystem(id, {
-      novelId, title: data.title,
+      novelId,
+      title: data.title,
       category: data.category as RuleSystem['category'],
-      content: data.content, forbiddenRules: data.forbiddenRules,
+      content: data.content,
+      forbiddenRules: data.forbiddenRules,
     });
     setRuleSystems((prev) => {
       const idx = prev.findIndex((r) => r.id === result.id);
-      if (idx >= 0) { const next = [...prev]; next[idx] = result; return next; }
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = result;
+        return next;
+      }
       return [...prev, result];
     });
   };
@@ -134,7 +167,9 @@ function NovelDetailPage() {
         <div className="flex-center" style={{ height: '100%', flexDirection: 'column', gap: 16 }}>
           <span style={{ fontSize: 48, opacity: 0.3 }}>📖</span>
           <span className="text-secondary">{error || '作品未找到'}</span>
-          <button className="btn btn-secondary" onClick={() => navigate('/')}>返回首页</button>
+          <button className="btn btn-secondary" onClick={() => navigate('/')}>
+            返回首页
+          </button>
         </div>
       </div>
     );
@@ -154,20 +189,42 @@ function NovelDetailPage() {
               <div className="detail-progress-label">总字数</div>
             </div>
             <div className="detail-progress-item">
-              <div className="detail-progress-value">{formatNumber(novel.targetWordCount || 0)}</div>
+              <div className="detail-progress-value">
+                {formatNumber(novel.targetWordCount || 0)}
+              </div>
               <div className="detail-progress-label">目标字数</div>
             </div>
             <div className="detail-progress-item">
-              <div className="detail-progress-value">{statusLabels[novel.status] || novel.status}</div>
+              <div className="detail-progress-value">
+                {statusLabels[novel.status] || novel.status}
+              </div>
               <div className="detail-progress-label">状态</div>
             </div>
           </div>
           <div className="detail-actions">
-            <button className="btn btn-primary" onClick={() => navigate(`/novels/${novel.id}/workspace`)}>
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate(`/novels/${novel.id}/workspace`)}
+            >
               ✏️ 进入写作工作台
             </button>
-            <button className="btn btn-secondary" onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}
+            >
               设定库 AI 推演
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => navigate(`/novels/${novel.id}/autonomous-planning`)}
+            >
+              自主创作规划
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => navigate(`/novels/${novel.id}/references`)}
+            >
+              参考资料库
             </button>
           </div>
         </div>
@@ -175,10 +232,18 @@ function NovelDetailPage() {
 
       <div className="detail-cards-grid">
         <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
-        <WorldSettingCard novelId={novel.id} settings={worldSettings} onSave={handleSaveWorldSetting} />
+        <WorldSettingCard
+          novelId={novel.id}
+          settings={worldSettings}
+          onSave={handleSaveWorldSetting}
+        />
         <div style={{ gridColumn: '1 / -1' }}>
-          <RuleSystemCard novelId={novel.id} ruleSystems={ruleSystems}
-            onSave={handleSaveRuleSystem} onDelete={handleDeleteRuleSystem} />
+          <RuleSystemCard
+            novelId={novel.id}
+            ruleSystems={ruleSystems}
+            onSave={handleSaveRuleSystem}
+            onDelete={handleDeleteRuleSystem}
+          />
         </div>
         <ProtagonistCard
           novelId={novel.id}
@@ -193,8 +258,12 @@ function NovelDetailPage() {
                 dualProtagonistRelation: data.dualProtagonistRelation,
               });
               if (updated) setNovel(updated);
-            } catch (e: any) {
-              alert('保存失败：' + (e?.message || '未知错误'));
+            } catch (e: unknown) {
+              appLogger.captureError('NOVEL_PROTAGONIST_SAVE_FAILED', e, { novelId: novel.id });
+              await showError({
+                title: '保存主角设定失败',
+                message: describeUnknownError(e, '保存主角设定失败'),
+              });
               throw e; // 重新抛出让卡片组件显示错误
             }
           }}

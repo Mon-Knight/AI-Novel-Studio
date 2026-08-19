@@ -117,9 +117,10 @@ Write-Host "========================================" -ForegroundColor Cyan
 if ($allOk) {
     Write-Host "  [OK] All checks passed." -ForegroundColor Green
     Write-Host ""
-    Write-Host "  You may now create the release:" -ForegroundColor White
+    Write-Host "  After the release branch PR is reviewed, passes required checks, and is merged:" -ForegroundColor White
+    Write-Host "    git switch main" -ForegroundColor White
+    Write-Host "    git pull --ff-only origin main" -ForegroundColor White
     Write-Host "    git tag v$CURRENT_VERSION" -ForegroundColor White
-    Write-Host "    git push origin main" -ForegroundColor White
     Write-Host "    git push origin v$CURRENT_VERSION" -ForegroundColor White
 } else {
     Write-Host "  [BLOCKED] Some checks failed." -ForegroundColor Red

@@ -38,6 +38,16 @@ export const APP_ERROR_CODES = [
   'AI_PROVIDER_SERVER_ERROR',
   'AI_PROVIDER_NETWORK_ERROR',
   'AI_PROVIDER_MALFORMED_RESPONSE',
+  'AI_RATE_LIMIT_EXCEEDED',
+  'AI_CONCURRENCY_LIMIT_EXCEEDED',
+  'AI_DAILY_TOKEN_BUDGET_EXCEEDED',
+  'AI_DAILY_COST_BUDGET_EXCEEDED',
+  'AI_BUDGET_PRICING_REQUIRED',
+  'AI_REQUEST_POLICY_INPUT_INVALID',
+  'AI_REQUEST_POLICY_CONFIG_CONFLICT',
+  'AI_REQUEST_POLICY_LEASE_NOT_FOUND',
+  'AI_REQUEST_POLICY_LEASE_CONFLICT',
+  'AI_REQUEST_POLICY_LEASE_REQUIRED',
   'AI_CONTEXT_BUILD_FAILED',
   'AI_COMPILATION_INPUT_INVALID',
   'AI_CONTEXT_SOURCE_REQUIRED',
@@ -63,12 +73,20 @@ export const APP_ERROR_CODES = [
   'AGENT_PLAN_LEASE_CONFLICT',
   'AGENT_PLAN_LEASE_EXPIRED',
   'AGENT_PLAN_OUTPUT_INVALID',
+  'APP_UPDATE_PLATFORM_UNSUPPORTED',
+  'APP_UPDATE_NOT_CONFIGURED',
+  'APP_UPDATE_CHANNEL_INVALID',
+  'APP_UPDATE_CHECK_FAILED',
+  'APP_UPDATE_MANIFEST_INVALID',
+  'APP_UPDATE_NOT_AVAILABLE',
+  'APP_UPDATE_CHANGED',
+  'APP_UPDATE_INSTALL_FAILED',
   'WORKSPACE_LEAVE_CANCELLED',
   'WORKSPACE_SAVE_FAILED',
   'WINDOW_CLOSE_BLOCKED',
 ] as const;
 
-export type AppErrorCode = typeof APP_ERROR_CODES[number] | 'UNKNOWN_ERROR';
+export type AppErrorCode = (typeof APP_ERROR_CODES)[number] | 'UNKNOWN_ERROR';
 
 /** Serializable error contract shared with Tauri commands. */
 export interface AppError {
@@ -112,10 +130,12 @@ function unwrapError(value: unknown, depth = 0): unknown {
 
 export function isAppError(value: unknown): value is AppError {
   const unwrapped = unwrapError(value);
-  return isRecord(unwrapped)
-    && typeof unwrapped.code === 'string'
-    && typeof unwrapped.message === 'string'
-    && typeof unwrapped.retryable === 'boolean';
+  return (
+    isRecord(unwrapped) &&
+    typeof unwrapped.code === 'string' &&
+    typeof unwrapped.message === 'string' &&
+    typeof unwrapped.retryable === 'boolean'
+  );
 }
 
 export function normalizeAppError(
@@ -128,20 +148,23 @@ export function normalizeAppError(
     const details = isRecord(unwrapped.details) ? unwrapped.details : undefined;
     return {
       code: unwrapped.code,
-      message: typeof unwrapped.message === 'string' && unwrapped.message.trim()
-        ? unwrapped.message
-        : fallbackMessage,
+      message:
+        typeof unwrapped.message === 'string' && unwrapped.message.trim()
+          ? unwrapped.message
+          : fallbackMessage,
       retryable: unwrapped.retryable === true,
-      traceId: typeof unwrapped.traceId === 'string'
-        ? unwrapped.traceId
-        : typeof unwrapped.trace_id === 'string'
-          ? unwrapped.trace_id
-          : context.traceId,
-      operationId: typeof unwrapped.operationId === 'string'
-        ? unwrapped.operationId
-        : typeof unwrapped.operation_id === 'string'
-          ? unwrapped.operation_id
-          : context.operationId,
+      traceId:
+        typeof unwrapped.traceId === 'string'
+          ? unwrapped.traceId
+          : typeof unwrapped.trace_id === 'string'
+            ? unwrapped.trace_id
+            : context.traceId,
+      operationId:
+        typeof unwrapped.operationId === 'string'
+          ? unwrapped.operationId
+          : typeof unwrapped.operation_id === 'string'
+            ? unwrapped.operation_id
+            : context.operationId,
       details,
     };
   }
@@ -194,6 +217,16 @@ const USER_MESSAGES: Partial<Record<AppErrorCode, string>> = {
   AI_PROVIDER_SERVER_ERROR: 'AI 服务暂时不可用。',
   AI_PROVIDER_NETWORK_ERROR: 'AI 服务网络连接失败。',
   AI_PROVIDER_MALFORMED_RESPONSE: 'AI 服务返回格式无效。',
+  AI_RATE_LIMIT_EXCEEDED: 'AI 请求过于集中，请等待一分钟窗口释放后重试。',
+  AI_CONCURRENCY_LIMIT_EXCEEDED: '已有过多 AI 请求正在运行，请等待当前任务完成。',
+  AI_DAILY_TOKEN_BUDGET_EXCEEDED: '今日 AI Token 预算已达到上限。',
+  AI_DAILY_COST_BUDGET_EXCEEDED: '今日 AI 成本预算已达到上限。',
+  AI_BUDGET_PRICING_REQUIRED: '启用成本预算前必须配置输入与输出单价。',
+  AI_REQUEST_POLICY_INPUT_INVALID: 'AI 请求全局治理参数无效。',
+  AI_REQUEST_POLICY_CONFIG_CONFLICT: 'AI 请求全局策略已被其他进程更新，请刷新后重试。',
+  AI_REQUEST_POLICY_LEASE_NOT_FOUND: 'AI 请求全局 reservation 不存在。',
+  AI_REQUEST_POLICY_LEASE_CONFLICT: 'AI 请求全局 reservation 所有权或结算载荷冲突。',
+  AI_REQUEST_POLICY_LEASE_REQUIRED: 'AI Provider 派发缺少全局预算 reservation。',
   AI_CONTEXT_BUILD_FAILED: 'AI 上下文构建失败。',
   AI_COMPILATION_INPUT_INVALID: 'AI 编译契约无效，任务未执行。',
   AI_CONTEXT_SOURCE_REQUIRED: '缺少任务必需的上下文来源。',
@@ -219,6 +252,14 @@ const USER_MESSAGES: Partial<Record<AppErrorCode, string>> = {
   AGENT_PLAN_LEASE_CONFLICT: '该计划正在由另一执行流程处理。',
   AGENT_PLAN_LEASE_EXPIRED: '计划执行租约已过期，请重新继续。',
   AGENT_PLAN_OUTPUT_INVALID: '本地工具输出无效，已阻止持久化。',
+  APP_UPDATE_PLATFORM_UNSUPPORTED: '当前平台未启用桌面更新。',
+  APP_UPDATE_NOT_CONFIGURED: '当前安装包未配置签名更新，请使用正式发布包。',
+  APP_UPDATE_CHANNEL_INVALID: '更新通道无效，请重新选择。',
+  APP_UPDATE_CHECK_FAILED: '更新检查失败，请稍后重试。',
+  APP_UPDATE_MANIFEST_INVALID: '更新索引校验失败，已停止更新。',
+  APP_UPDATE_NOT_AVAILABLE: '当前没有可安装的更新。',
+  APP_UPDATE_CHANGED: '更新版本已变化，请重新检查后安装。',
+  APP_UPDATE_INSTALL_FAILED: '更新下载或签名校验失败，现有版本保持不变。',
   WORKSPACE_LEAVE_CANCELLED: '已取消离开工作区。',
   WORKSPACE_SAVE_FAILED: '正文保存失败，已留在当前工作区。',
   WINDOW_CLOSE_BLOCKED: '窗口关闭已取消。',

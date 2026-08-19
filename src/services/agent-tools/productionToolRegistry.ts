@@ -1,16 +1,4 @@
 import {
-  readChapterContext,
-  readChapterOutline,
-} from '../../agent-tools/chapter-tools';
-import {
-  readProjectContext,
-  readProjectSettings,
-} from '../../agent-tools/project-tools';
-import {
-  readOutputControl,
-  readStyleProfile,
-} from '../../agent-tools/style-tools';
-import {
   checkChapterReadiness,
   verifyOutlineCompliance,
   verifyStyleCompliance,
@@ -99,12 +87,10 @@ function contextFrom(
 ): AgentToolContext {
   return {
     novelId: String(argumentsJson.novelId ?? context.novelId ?? ''),
-    chapterId: typeof argumentsJson.chapterId === 'string'
-      ? argumentsJson.chapterId
-      : context.chapterId,
-    styleProfileId: typeof argumentsJson.styleProfileId === 'string'
-      ? argumentsJson.styleProfileId
-      : undefined,
+    chapterId:
+      typeof argumentsJson.chapterId === 'string' ? argumentsJson.chapterId : context.chapterId,
+    styleProfileId:
+      typeof argumentsJson.styleProfileId === 'string' ? argumentsJson.styleProfileId : undefined,
     dryRun: context.dryRun ?? true,
   };
 }
@@ -127,10 +113,10 @@ const definitions: ToolDefinition[] = [
       ...descriptor({
         name: 'verification.check_readiness',
         description: '确定性检查章节生成所需上下文是否准备完成，不调用外部 AI。',
-        inputSchema: objectSchema(
-          { novelId: idSchema, chapterId: idSchema },
-          ['novelId', 'chapterId'],
-        ),
+        inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema }, [
+          'novelId',
+          'chapterId',
+        ]),
         permissions: ['novel.read', 'chapter.read', 'style.read', 'verification.execute'],
         scope: 'chapter',
         timeoutMs: 30_000,
@@ -148,7 +134,10 @@ const definitions: ToolDefinition[] = [
       scope: 'novel',
       timeoutMs: 20_000,
     }),
-    handler: (args, context) => readProjectContext(contextFrom(args, context)),
+    handler: async (args, context) => {
+      const { readProjectContext } = await import('../../agent-tools/project-tools');
+      return readProjectContext(contextFrom(args, context));
+    },
   },
   {
     descriptor: descriptor({
@@ -159,29 +148,44 @@ const definitions: ToolDefinition[] = [
       scope: 'novel',
       timeoutMs: 15_000,
     }),
-    handler: (args, context) => readProjectSettings(contextFrom(args, context)),
+    handler: async (args, context) => {
+      const { readProjectSettings } = await import('../../agent-tools/project-tools');
+      return readProjectSettings(contextFrom(args, context));
+    },
   },
   {
     descriptor: descriptor({
       name: 'chapter.read_outline',
       description: '读取指定章节、所属分卷和草稿版本概要。',
-      inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema }, ['novelId', 'chapterId']),
+      inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema }, [
+        'novelId',
+        'chapterId',
+      ]),
       permissions: ['novel.read', 'chapter.read'],
       scope: 'chapter',
       timeoutMs: 15_000,
     }),
-    handler: (args, context) => readChapterOutline(contextFrom(args, context)),
+    handler: async (args, context) => {
+      const { readChapterOutline } = await import('../../agent-tools/chapter-tools');
+      return readChapterOutline(contextFrom(args, context));
+    },
   },
   {
     descriptor: descriptor({
       name: 'chapter.read_context',
       description: '读取指定章节及本章角色和事件上下文。',
-      inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema }, ['novelId', 'chapterId']),
+      inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema }, [
+        'novelId',
+        'chapterId',
+      ]),
       permissions: ['novel.read', 'chapter.read'],
       scope: 'chapter',
       timeoutMs: 15_000,
     }),
-    handler: (args, context) => readChapterContext(contextFrom(args, context)),
+    handler: async (args, context) => {
+      const { readChapterContext } = await import('../../agent-tools/chapter-tools');
+      return readChapterContext(contextFrom(args, context));
+    },
   },
   {
     descriptor: descriptor({
@@ -192,7 +196,10 @@ const definitions: ToolDefinition[] = [
       scope: 'novel',
       timeoutMs: 15_000,
     }),
-    handler: (args, context) => readStyleProfile(contextFrom(args, context)),
+    handler: async (args, context) => {
+      const { readStyleProfile } = await import('../../agent-tools/style-tools');
+      return readStyleProfile(contextFrom(args, context));
+    },
   },
   {
     descriptor: descriptor({
@@ -203,41 +210,38 @@ const definitions: ToolDefinition[] = [
       scope: 'novel',
       timeoutMs: 15_000,
     }),
-    handler: (args, context) => readOutputControl(contextFrom(args, context)),
+    handler: async (args, context) => {
+      const { readOutputControl } = await import('../../agent-tools/style-tools');
+      return readOutputControl(contextFrom(args, context));
+    },
   },
   {
     descriptor: descriptor({
       name: 'verification.check_outline',
       description: '对指定章节候选正文执行本地大纲和基础完整性检查。',
-      inputSchema: objectSchema(
-        { novelId: idSchema, chapterId: idSchema, draft: draftSchema },
-        ['novelId', 'chapterId', 'draft'],
-      ),
+      inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema, draft: draftSchema }, [
+        'novelId',
+        'chapterId',
+        'draft',
+      ]),
       permissions: ['novel.read', 'chapter.read', 'verification.execute'],
       scope: 'chapter',
       timeoutMs: 20_000,
     }),
-    handler: (args, context) => verifyOutlineCompliance(
-      contextFrom(args, context),
-      String(args.draft),
-    ),
+    handler: (args, context) =>
+      verifyOutlineCompliance(contextFrom(args, context), String(args.draft)),
   },
   {
     descriptor: descriptor({
       name: 'verification.check_style',
       description: '对候选正文执行本地风格方案和禁用写法检查。',
-      inputSchema: objectSchema(
-        { novelId: idSchema, draft: draftSchema },
-        ['novelId', 'draft'],
-      ),
+      inputSchema: objectSchema({ novelId: idSchema, draft: draftSchema }, ['novelId', 'draft']),
       permissions: ['novel.read', 'style.read', 'verification.execute'],
       scope: 'novel',
       timeoutMs: 20_000,
     }),
-    handler: (args, context) => verifyStyleCompliance(
-      contextFrom(args, context),
-      String(args.draft),
-    ),
+    handler: (args, context) =>
+      verifyStyleCompliance(contextFrom(args, context), String(args.draft)),
   },
 ];
 

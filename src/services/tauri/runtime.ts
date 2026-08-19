@@ -1,3 +1,4 @@
+import { appLogger } from '../observability/appLogger';
 import { invoke } from '@tauri-apps/api/tauri';
 
 type TauriWindow = Window & {
@@ -16,17 +17,14 @@ export function isTauriRuntime(): boolean {
   );
 }
 
-export async function tauriInvoke<T>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
+export async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauriRuntime()) {
     throw new Error(`当前不是 Tauri 环境，无法调用命令：${command}`);
   }
 
   if (command.includes('ai_task')) {
     // Snapshot bodies, prompts and provider metadata must never enter ordinary logs.
-    console.log('[TAURI_RUNTIME] invoke', { command });
+    appLogger.debug('[TAURI_RUNTIME] invoke', { command });
   }
   return invoke<T>(command, args);
 }

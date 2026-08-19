@@ -1,4 +1,4 @@
-import { computeContentSha256 } from '../../../utils/contentIntegrity';
+import { computeContentSha256 } from '../../../utils/contentIntegrity.ts';
 
 export function normalizeCompilationText(value: string): string {
   return value.replace(/\r\n?/g, '\n').trim();

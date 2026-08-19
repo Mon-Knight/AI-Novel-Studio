@@ -3,6 +3,9 @@ use rusqlite::{Connection, Result as SqliteResult};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
+
+use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
@@ -52,17 +55,33 @@ pub fn init_database() {
     let mut connection = Connection::open(&db_path).expect("Failed to open database");
 
     connection
+        .busy_timeout(Duration::from_secs(5))
+        .expect("Failed to set database busy timeout");
+
+    connection
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .expect("Failed to set pragmas");
 
     create_tables(&mut connection).expect("Failed to create tables");
     crate::services::agent_plan_service::recover_interrupted_plans(&mut connection)
         .expect("Failed to recover interrupted Agent Plans");
+    crate::services::autonomous_scheduler_service::recover_interrupted_runs(&mut connection)
+        .expect("Failed to recover interrupted autonomous book runs");
 
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");
 
-    println!("Database initialized at: {:?}", db_path);
+    log_workspace_event(WorkspaceLogEvent {
+        level: "info",
+        event: "database_initialized",
+        trace_id: None,
+        operation_id: None,
+        novel_id: None,
+        chapter_id: None,
+        draft_id: None,
+        error_code: None,
+        metadata: None,
+    });
 }
 
 pub fn get_connection() -> &'static Mutex<Connection> {
@@ -343,6 +362,12 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
             token_input INTEGER,
             token_output INTEGER,
             token_total INTEGER,
+            input_price_per_million_tokens REAL,
+            output_price_per_million_tokens REAL,
+            cost_estimate REAL,
+            cost_currency TEXT,
+            cost_status TEXT,
+            pricing_source TEXT,
             duration_ms INTEGER,
             started_at TEXT,
             finished_at TEXT,
@@ -361,6 +386,11 @@ fn create_base_tables(conn: &Connection) -> SqliteResult<()> {
             description TEXT,
             source_type TEXT NOT NULL DEFAULT 'manual',
             source_asset_id TEXT,
+            source_reference_work_id TEXT,
+            source_reference_import_id TEXT,
+            source_content_sha256 TEXT,
+            source_state TEXT NOT NULL DEFAULT 'none',
+            analysis_metadata_json TEXT,
             narrative_perspective TEXT,
             tone TEXT,
             pace TEXT,
@@ -762,7 +792,18 @@ fn add_column_if_missing(
 }
 
 fn migrate_style_profiles_table(conn: &Connection) -> SqliteResult<()> {
-    ensure_column(conn, "style_profiles", "description", "TEXT")
+    ensure_column(conn, "style_profiles", "description", "TEXT")?;
+    ensure_column(conn, "style_profiles", "source_asset_id", "TEXT")?;
+    ensure_column(conn, "style_profiles", "source_reference_work_id", "TEXT")?;
+    ensure_column(conn, "style_profiles", "source_reference_import_id", "TEXT")?;
+    ensure_column(conn, "style_profiles", "source_content_sha256", "TEXT")?;
+    ensure_column(
+        conn,
+        "style_profiles",
+        "source_state",
+        "TEXT NOT NULL DEFAULT 'none'",
+    )?;
+    ensure_column(conn, "style_profiles", "analysis_metadata_json", "TEXT")
 }
 
 fn ensure_novel_columns(conn: &Connection) -> SqliteResult<()> {
@@ -876,6 +917,42 @@ fn ensure_ai_task_record_columns(conn: &Connection) -> SqliteResult<()> {
     if !has_column("duration_ms") {
         conn.execute(
             "ALTER TABLE ai_task_records ADD COLUMN duration_ms INTEGER",
+            [],
+        )?;
+    }
+    if !has_column("input_price_per_million_tokens") {
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN input_price_per_million_tokens REAL",
+            [],
+        )?;
+    }
+    if !has_column("output_price_per_million_tokens") {
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN output_price_per_million_tokens REAL",
+            [],
+        )?;
+    }
+    if !has_column("cost_estimate") {
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN cost_estimate REAL",
+            [],
+        )?;
+    }
+    if !has_column("cost_currency") {
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN cost_currency TEXT",
+            [],
+        )?;
+    }
+    if !has_column("cost_status") {
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN cost_status TEXT",
+            [],
+        )?;
+    }
+    if !has_column("pricing_source") {
+        conn.execute(
+            "ALTER TABLE ai_task_records ADD COLUMN pricing_source TEXT",
             [],
         )?;
     }
@@ -1562,8 +1639,8 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_style_profiles_description_column(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn migrates_legacy_style_profiles_description_column() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut conn = Connection::open_in_memory()?;
         conn.execute_batch(
             "CREATE TABLE style_profiles (

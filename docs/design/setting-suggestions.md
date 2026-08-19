@@ -118,13 +118,13 @@ Mock AI 客户端已支持 `setting_suggestion_generate`，可在无 API Key 的
 - 候选池尚未进入 SQLite，卸载应用或清理浏览器数据可能丢失候选记录。
 - 势力、地点尚未拥有独立正式 CRUD 模块。
 - 编辑后采纳以 JSON 文本方式修改，后续可升级为字段化表单。
-- 当前测试以静态回归检查为主，尚未引入端到端自动化。
+- 设定建议页面与采纳行为进入 React/Node 动态回归；源码字符串存在性不再作为功能通过证据。
 
 ---
 
 ## 9. 验证命令
 
 ```powershell
-npm run test:setting-suggestions
+npm run test:all
 npm run build
 ```

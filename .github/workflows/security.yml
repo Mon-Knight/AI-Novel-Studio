@@ -1,0 +1,48 @@
+name: Scheduled security audit
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+  schedule:
+    - cron: '30 18 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Audit Rust dependencies
+        run: |
+          cargo install cargo-audit --locked
+          # Tauri 1.8.3's updater is the last supported v1 line and still pins
+          # reqwest 0.11/h2 0.3. The app's own Provider uses reqwest 0.12; this
+          # remaining advisory requires a Tauri major migration.
+          cargo audit --file src-tauri/Cargo.lock --target-os windows --target-arch x86_64 \
+            --ignore RUSTSEC-2026-0258
+
+  codeql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v3

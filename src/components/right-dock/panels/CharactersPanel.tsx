@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { appLogger } from '../../../services/observability/appLogger';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Chapter } from '../../../types/chapter';
+import type { ChapterDraft } from '../../../types/ai';
 import type { Character, ChapterCharacter, CharacterCandidate, ChapterCharacterRole } from '../../../types/character';
 import { CharacterRoleLabels, ChapterCharacterRoleLabels } from '../../../types/character';
 import { characterService } from '../../../services/characters/characterService';
@@ -7,11 +9,16 @@ import { chapterCharacterService } from '../../../services/characters/chapterCha
 import { characterGenerateService } from '../../../services/ai/characterGenerateService';
 import { aiSettingsService } from '../../../services/ai/aiClient';
 import { runWithLoading } from '../../../lib/runWithLoading';
+import { describeUnknownError } from '../../../utils/errorMessage';
+import {
+  isAiRequestCancelled,
+  throwIfAiRequestCancelled,
+} from '../../../services/ai/aiCancellation';
 
 interface CharactersPanelProps {
   novelId?: string;
   chapter?: Chapter;
-  onGenerated?: (draft: any) => void;
+  onGenerated?: (draft: ChapterDraft) => void;
   onAdopted?: () => void;
   onChapterCharactersChanged?: () => void;
 }
@@ -26,6 +33,7 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [protagonists, setProtagonists] = useState<Character[]>([]);
+  const candidateAbortRef = useRef<AbortController | null>(null);
 
   // 加载角色库 & 同步主角
   const load = useCallback(async () => {
@@ -45,9 +53,10 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
       });
       setProtagonists(syncedProtagonists);
       setSyncing(false);
-    } catch (e: any) {
-      console.warn('[CharactersPanel] 主角同步失败:', e.message);
-      setError(`主角同步失败：${e.message || '未知错误'}`);
+    } catch (e: unknown) {
+      const message = describeUnknownError(e, '未知错误');
+      appLogger.warn('[CharactersPanel] 主角同步失败:', message);
+      setError(`主角同步失败：${message}`);
       setSyncing(false);
     }
 
@@ -67,23 +76,32 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
       } else if (syncedProtagonists.length > 0) {
         setProtagonists(syncedProtagonists);
       }
-    } catch (e: any) {
-      console.error('[CharactersPanel] 加载角色失败:', e.message);
+    } catch (e: unknown) {
+      appLogger.error('[CharactersPanel] 加载角色失败:', describeUnknownError(e, '未知错误'));
     }
   }, [novelId, chapter?.id]);
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => () => {
+    candidateAbortRef.current?.abort();
+  }, [novelId, chapter?.id]);
+
   const handleGenerateCandidates = async () => {
-    if (!novelId || !chapter) return;
-    setLoading(true); setError('');
+    if (!novelId || !chapter || candidateAbortRef.current) return;
+    const controller = new AbortController();
+    candidateAbortRef.current = controller;
+    setLoading(true);
+    setError('');
+    setNotice('正在生成本章候选角色…');
     try {
       const list = await characterGenerateService.generateCandidates({
         novelId, chapterId: chapter.id,
         chapterTitle: chapter.title,
         chapterOutline: chapter.outline || chapter.goal || chapter.title,
         existingCharacters: characters,
-      });
+      }, { signal: controller.signal, cancel: () => controller.abort() });
+      throwIfAiRequestCancelled(controller.signal);
       // 过滤掉与主角同名的候选角色
       const filtered = list.filter((c) => {
         const isDuplicate = characters.some(
@@ -91,9 +109,29 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
         );
         return !isDuplicate;
       });
+      throwIfAiRequestCancelled(controller.signal);
       setCandidates(filtered);
-    } catch (e: any) { setError(e.message || '生成失败'); }
-    finally { setLoading(false); }
+      setNotice(`已生成 ${filtered.length} 个候选角色`);
+    } catch (e: unknown) {
+      if (controller.signal.aborted || isAiRequestCancelled(e)) {
+        setNotice('已停止生成候选角色');
+      } else {
+        setError(describeUnknownError(e, '生成失败'));
+        setNotice('');
+      }
+    } finally {
+      if (candidateAbortRef.current === controller) {
+        candidateAbortRef.current = null;
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleStopGeneratingCandidates = () => {
+    const controller = candidateAbortRef.current;
+    if (!controller || controller.signal.aborted) return;
+    setNotice('正在停止生成候选角色…');
+    controller.abort();
   };
 
   const handleConfirmCandidate = async (candidate: CharacterCandidate) => {
@@ -107,7 +145,7 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
     }
     const ch = await characterService.create({
       novelId, name: candidate.name,
-      roleType: candidate.roleType as any, identity: candidate.identity,
+      roleType: candidate.roleType, identity: candidate.identity,
       faction: candidate.faction, relationToProtagonist: candidate.relationToProtagonist,
       goal: candidate.goal, personality: candidate.personality,
       behaviorLimits: candidate.behaviorLimits, forbiddenBehaviors: candidate.forbiddenBehaviors,
@@ -162,8 +200,8 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
       setNotice(isProtagonist ? '主角已加入本章出场角色' : '角色已加入本章');
       setError('');
       onChapterCharactersChanged?.();
-    } catch (e: any) {
-      setError(e?.message || '添加本章出场角色失败');
+    } catch (e: unknown) {
+      setError(describeUnknownError(e, '添加本章出场角色失败'));
     } finally {
       setActionBusy(false);
     }
@@ -187,8 +225,8 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
       setNotice(isProtagonist ? '已设置主角本章不出场' : '已移除本章出场角色');
       setError('');
       onChapterCharactersChanged?.();
-    } catch (e: any) {
-      setError(e?.message || '移除本章出场角色失败');
+    } catch (e: unknown) {
+      setError(describeUnknownError(e, '移除本章出场角色失败'));
     } finally {
       setActionBusy(false);
     }
@@ -265,8 +303,8 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
           protagonists.map((protag) => {
             const protagChapterChar = chapterChars.find((cc) => cc.characterId === protag.id);
             return (
-              <div key={protag.id} className="character-item" style={{ borderColor: 'var(--color-primary)', borderWidth: 1, background: 'rgba(99, 102, 241, 0.04)' }}>
-                <div className="character-avatar" style={{ background: 'var(--color-primary)', color: '#fff', fontWeight: 'bold' }}>
+              <div key={protag.id} className="character-item" style={{ borderColor: 'var(--color-primary)', borderWidth: 1, background: 'color-mix(in srgb, var(--color-primary) 4%, transparent)' }}>
+                <div className="character-avatar" style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontWeight: 'bold' }}>
                   ⭐
                 </div>
                 <div className="character-info" style={{ flex: 1 }}>
@@ -295,7 +333,7 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
                 </div>
                 <button
                   className="btn btn-sm"
-                  style={{ background: protagChapterChar ? 'var(--color-bg-secondary)' : 'var(--color-primary)', color: protagChapterChar ? 'var(--color-text-secondary)' : '#fff', border: 'none', whiteSpace: 'nowrap' }}
+                  style={{ background: protagChapterChar ? 'var(--color-bg-hover)' : 'var(--color-primary)', color: protagChapterChar ? 'var(--color-text-secondary)' : 'var(--color-on-primary)', border: 'none', whiteSpace: 'nowrap' }}
                   onClick={() => handleSetProtagonistAppearance(protag, !protagChapterChar)}
                   disabled={!chapter?.id || actionBusy}
                   title={!chapter?.id ? '请先选择章节' : protagChapterChar ? `设置${protag.name}本章不出场` : `将${protag.name}加入本章`}
@@ -325,7 +363,7 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
             <div key={cc.id} className="character-item" style={isProtagonist ? { borderColor: 'var(--color-primary)', borderWidth: 2 } : undefined}>
               <div
                 className="character-avatar"
-                style={isProtagonist ? { background: 'var(--color-primary)', color: '#fff', fontWeight: 'bold' } : undefined}
+                style={isProtagonist ? { background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontWeight: 'bold' } : undefined}
               >
                 {isProtagonist ? '⭐' : (char?.name || cc.characterName || '?')[0]}
               </div>
@@ -358,10 +396,10 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
         {availableChars.map((char) => {
           const isProtagonist = isProtagonistCharacter(char);
           return (
-            <div key={char.id} className="character-item" style={isProtagonist ? { borderColor: 'var(--color-primary)', borderWidth: 1, background: 'rgba(99, 102, 241, 0.03)' } : undefined}>
+            <div key={char.id} className="character-item" style={isProtagonist ? { borderColor: 'var(--color-primary)', borderWidth: 1, background: 'color-mix(in srgb, var(--color-primary) 3%, transparent)' } : undefined}>
               <div
                 className="character-avatar"
-                style={isProtagonist ? { background: 'var(--color-primary)', color: '#fff', fontWeight: 'bold' } : undefined}
+                style={isProtagonist ? { background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontWeight: 'bold' } : undefined}
               >
                 {isProtagonist ? '⭐' : char.name[0]}
               </div>
@@ -386,7 +424,7 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
               </div>
               <button
                 className="btn btn-sm"
-                style={isProtagonist ? { background: 'var(--color-primary)', color: '#fff', border: 'none', whiteSpace: 'nowrap' } : { whiteSpace: 'nowrap' }}
+                style={isProtagonist ? { background: 'var(--color-primary)', color: 'var(--color-on-primary)', border: 'none', whiteSpace: 'nowrap' } : { whiteSpace: 'nowrap' }}
                 onClick={() => handleAddToChapter(char.id, char.name, isProtagonist ? 'main' : 'supporting')}
                 disabled={!chapter?.id || actionBusy}
                 title={!chapter?.id ? '请先选择章节' : (isProtagonist ? '将主角加入本章' : '加入本章')}
@@ -401,17 +439,27 @@ function CharactersPanel({ novelId, chapter, onChapterCharactersChanged }: Chara
       {/* AI 候选角色 */}
       <div className="panel-section">
         <div className="panel-section-title">🤖 AI 推荐候选角色</div>
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={handleGenerateCandidates}
-          disabled={loading || !chapter}
-          style={{ marginBottom: 8, width: '100%' }}
-        >
-          {loading ? '⏳  生成中...' : '✨ 生成本章候选角色'}
-        </button>
+        {loading ? (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleStopGeneratingCandidates}
+            style={{ marginBottom: 8, width: '100%' }}
+          >
+            停止生成
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleGenerateCandidates}
+            disabled={!chapter}
+            style={{ marginBottom: 8, width: '100%' }}
+          >
+            ✨ 生成本章候选角色
+          </button>
+        )}
         {candidates.map((candidate, i) => (
           <div key={i} className="character-item" style={{ borderColor: 'var(--color-primary-light)' }}>
-            <div className="character-avatar" style={{ background: 'var(--color-primary)', color: '#fff' }}>{candidate.name[0]}</div>
+            <div className="character-avatar" style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)' }}>{candidate.name[0]}</div>
             <div className="character-info">
               <div className="character-name">{candidate.name}</div>
               <div className="character-role">

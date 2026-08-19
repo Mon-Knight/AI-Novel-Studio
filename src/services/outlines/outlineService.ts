@@ -2,8 +2,15 @@
  * AI Novel Studio - 大纲服务
  */
 import { dbCall } from '../database/db';
+import { chapterRepository } from '../database/chapterRepository';
+import { novelRepository } from '../database/novelRepository';
+import { protagonistRepository } from '../database/protagonistRepository';
+import { settingRepository } from '../database/settingRepository';
+import { volumeRepository } from '../database/volumeRepository';
 import type {
-  MasterOutline, VolumeOutline, ChapterOutline,
+  MasterOutline,
+  VolumeOutline,
+  ChapterOutline,
   OutlineGenerationContext,
 } from '../../types/outline';
 
@@ -19,8 +26,12 @@ export const masterOutlineService = {
   },
 
   async save(input: {
-    projectId: string; title: string; content: string;
-    sourceType?: string; contextSnapshot?: string; saveAsNewVersion?: boolean;
+    projectId: string;
+    title: string;
+    content: string;
+    sourceType?: string;
+    contextSnapshot?: string;
+    saveAsNewVersion?: boolean;
   }): Promise<MasterOutline> {
     return dbCall<MasterOutline>('save_master_outline', { input }, () => {
       throw new Error('浏览器模式暂不支持大纲持久化');
@@ -40,13 +51,23 @@ export const volumeOutlineService = {
   },
 
   async getVersions(projectId: string, volumeId?: string): Promise<VolumeOutline[]> {
-    return dbCall<VolumeOutline[]>('get_volume_outline_versions', { projectId, volumeId }, () => []);
+    return dbCall<VolumeOutline[]>(
+      'get_volume_outline_versions',
+      { projectId, volumeId },
+      () => [],
+    );
   },
 
   async save(input: {
-    projectId: string; masterOutlineId?: string; volumeId?: string;
-    volumeIndex?: number; title: string; content: string;
-    sourceType?: string; contextSnapshot?: string; saveAsNewVersion?: boolean;
+    projectId: string;
+    masterOutlineId?: string;
+    volumeId?: string;
+    volumeIndex?: number;
+    title: string;
+    content: string;
+    sourceType?: string;
+    contextSnapshot?: string;
+    saveAsNewVersion?: boolean;
   }): Promise<VolumeOutline> {
     return dbCall<VolumeOutline>('save_volume_outline', { input }, () => {
       throw new Error('浏览器模式暂不支持大纲持久化');
@@ -62,17 +83,31 @@ export const volumeOutlineService = {
 
 export const chapterOutlineService = {
   async getActive(projectId: string, chapterId?: string): Promise<ChapterOutline | null> {
-    return dbCall<ChapterOutline | null>('get_chapter_outline', { projectId, chapterId }, () => null);
+    return dbCall<ChapterOutline | null>(
+      'get_chapter_outline',
+      { projectId, chapterId },
+      () => null,
+    );
   },
 
   async getVersions(projectId: string, chapterId?: string): Promise<ChapterOutline[]> {
-    return dbCall<ChapterOutline[]>('get_chapter_outline_versions', { projectId, chapterId }, () => []);
+    return dbCall<ChapterOutline[]>(
+      'get_chapter_outline_versions',
+      { projectId, chapterId },
+      () => [],
+    );
   },
 
   async save(input: {
-    projectId: string; volumeOutlineId?: string; chapterId?: string;
-    chapterIndex?: number; title: string; content: string;
-    sourceType?: string; contextSnapshot?: string; saveAsNewVersion?: boolean;
+    projectId: string;
+    volumeOutlineId?: string;
+    chapterId?: string;
+    chapterIndex?: number;
+    title: string;
+    content: string;
+    sourceType?: string;
+    contextSnapshot?: string;
+    saveAsNewVersion?: boolean;
   }): Promise<ChapterOutline> {
     return dbCall<ChapterOutline>('save_chapter_outline', { input }, () => {
       throw new Error('浏览器模式暂不支持大纲持久化');
@@ -89,18 +124,18 @@ export const chapterOutlineService = {
 export async function loadOutlineContext(projectId: string): Promise<OutlineGenerationContext> {
   // 优先使用后端 Rust 命令，降级使用前端 fallback
   try {
-    const result = await dbCall<OutlineGenerationContext | null>('build_outline_context', { projectId }, () => null);
+    const result = await dbCall<OutlineGenerationContext | null>(
+      'build_outline_context',
+      { projectId },
+      () => null,
+    );
     if (result && result.novelTitle) return result;
-  } catch { /* 降级到前端构建 */ }
+  } catch {
+    /* 降级到前端构建 */
+  }
 
   // 前端 fallback：从 localStorage 构建基础上下文
   try {
-    const { novelRepository } = await import('../database/novelRepository');
-    const { settingRepository } = await import('../database/settingRepository');
-    const { protagonistRepository } = await import('../database/protagonistRepository');
-    const { volumeRepository } = await import('../database/volumeRepository');
-    const { chapterRepository } = await import('../database/chapterRepository');
-
     const [novel, worldSettings, ruleSystems, protagonist, volumes, chapters] = await Promise.all([
       novelRepository.getById(projectId),
       settingRepository.getWorldSettings(projectId).catch(() => []),
@@ -122,7 +157,9 @@ export async function loadOutlineContext(projectId: string): Promise<OutlineGene
         const versions = await masterOutlineService.getVersions(projectId);
         if (versions.length > 0) activeMasterOutline = versions[0].content;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     return {
       novelTitle: novel?.title || '未命名作品',
@@ -130,7 +167,10 @@ export async function loadOutlineContext(projectId: string): Promise<OutlineGene
       description: novel?.description,
       targetWordCount: novel?.targetWordCount,
       worldBackground: activeWorld?.content?.slice(0, 1600),
-      ruleSystems: activeRules.map((item) => `《${item.title}》${item.content}`).join('\n').slice(0, 2400),
+      ruleSystems: activeRules
+        .map((item) => `《${item.title}》${item.content}`)
+        .join('\n')
+        .slice(0, 2400),
       protagonistName: protagonist?.name,
       protagonistIdentity: protagonist?.identity,
       protagonistPersonality: protagonist?.personality,
@@ -139,8 +179,13 @@ export async function loadOutlineContext(projectId: string): Promise<OutlineGene
       protagonistAbilityLimits: protagonist?.abilityLimits,
       protagonistForbidden: protagonist?.forbiddenBehaviors,
       activeMasterOutline,
-      existingVolumes: volumes.map((item) => `- ${item.title}：${item.summary || item.goal || ''}`).join('\n'),
-      existingChapters: chapters.map((item) => `- ${item.title}：${item.outline || item.goal || ''}`).join('\n').slice(0, 3000),
+      existingVolumes: volumes
+        .map((item) => `- ${item.title}：${item.summary || item.goal || ''}`)
+        .join('\n'),
+      existingChapters: chapters
+        .map((item) => `- ${item.title}：${item.outline || item.goal || ''}`)
+        .join('\n')
+        .slice(0, 3000),
     };
   } catch {
     return {

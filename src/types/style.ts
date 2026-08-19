@@ -2,7 +2,10 @@
  * AI Novel Studio - 风格方案类型定义（v0.6.0 增强版）
  */
 
-export type StyleSourceType = 'manual' | 'txt_analysis' | 'json_import' | 'system_default' | 'ai_analyzed';
+export type StyleSourceType =
+  'manual' | 'txt_analysis' | 'json_import' | 'system_default' | 'ai_analyzed';
+
+export type StyleSourceState = 'none' | 'available' | 'outdated' | 'missing' | 'legacy_unverified';
 
 export interface StyleProfile {
   id: string;
@@ -10,6 +13,11 @@ export interface StyleProfile {
   name: string;
   sourceType: StyleSourceType;
   sourceAssetId?: string;
+  sourceReferenceWorkId?: string;
+  sourceReferenceImportId?: string;
+  sourceContentHash?: string;
+  sourceState?: StyleSourceState;
+  analysisMetadataJson?: string;
   description?: string;
   targetWordsPerChapter: number;
   rhythmPreference: 'fast' | 'moderate' | 'slow';
@@ -50,6 +58,12 @@ export interface CreateStyleProfileInput {
   chapterEnding?: string;
   forbiddenStyles?: string[];
   styleSummary?: string;
+  sourceAssetId?: string;
+  sourceReferenceWorkId?: string;
+  sourceReferenceImportId?: string;
+  sourceContentHash?: string;
+  sourceState?: StyleSourceState;
+  analysisMetadataJson?: string;
 }
 
 export interface UpdateStyleProfileInput extends Partial<CreateStyleProfileInput> {

@@ -1,3 +1,4 @@
+import { appLogger } from '../../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ChapterDraft } from '../../../types/ai';
 import { confirmInfo } from '../../../utils/nativeDialog';
@@ -25,46 +26,80 @@ const sourceLabels: Record<string, string> = {
   manual_placeholder: '手动占位',
 };
 
-function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdopted, onBeforeDocumentChange, onClose }: DraftHistoryPanelProps) {
+const DRAFT_PAGE_SIZE = 20;
+
+function DraftHistoryPanel({
+  chapterId,
+  currentDraftId,
+  onLoadDraft,
+  onDraftAdopted,
+  onBeforeDocumentChange,
+  onClose,
+}: DraftHistoryPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const liveChapterIdRef = useRef(chapterId);
   const loadEpochRef = useRef(0);
   liveChapterIdRef.current = chapterId;
   const [drafts, setDrafts] = useState<ChapterDraft[]>([]);
+  const [total, setTotal] = useState(0);
   const [latestReport, setLatestReport] = useState<QualityCheckReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [busyDraftId, setBusyDraftId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
-  const load = useCallback(async () => {
-    const requestEpoch = ++loadEpochRef.current;
-    const requestChapterId = chapterId;
-    if (!requestChapterId) { setLoading(false); return; }
-    setLoading(true);
-    try {
-      const [list, report] = await Promise.all([
-        draftVersionService.getByChapterId(requestChapterId),
-        qualityCheckService.getLatestReport(requestChapterId).catch(() => null),
-      ]);
-      if (loadEpochRef.current !== requestEpoch || liveChapterIdRef.current !== requestChapterId) return;
-      if (list.some((draft) => draft.chapterId !== requestChapterId)
-        || (report && report.chapterId !== requestChapterId)) {
-        throw new Error('草稿历史与目标章节不一致');
+  const load = useCallback(
+    async (requestedPage: number) => {
+      const requestEpoch = ++loadEpochRef.current;
+      const requestChapterId = chapterId;
+      if (!requestChapterId) {
+        setLoading(false);
+        return;
       }
-      setDrafts(list.sort((a, b) => b.versionNo - a.versionNo));
-      setLatestReport(report);
-    } catch (error) {
+      setLoading(true);
+      try {
+        const [result, report] = await Promise.all([
+          draftVersionService.getPageByChapterId(requestChapterId, requestedPage, DRAFT_PAGE_SIZE),
+          qualityCheckService.getLatestReport(requestChapterId).catch(() => null),
+        ]);
+        if (loadEpochRef.current !== requestEpoch || liveChapterIdRef.current !== requestChapterId)
+          return;
+        if (
+          result.items.some((draft) => draft.chapterId !== requestChapterId) ||
+          (report && report.chapterId !== requestChapterId)
+        ) {
+          throw new Error('草稿历史与目标章节不一致');
+        }
+        setDrafts(result.items);
+        setTotal(result.total);
+        const lastPage = Math.max(1, Math.ceil(result.total / DRAFT_PAGE_SIZE));
+        if (requestedPage > lastPage) setPage(lastPage);
+        setLatestReport(report);
+      } catch (error) {
+        if (
+          loadEpochRef.current === requestEpoch &&
+          liveChapterIdRef.current === requestChapterId
+        ) {
+          appLogger.error('[DraftHistory] failed to load chapter drafts', error);
+          setMsg('草稿历史加载失败');
+        }
+      }
       if (loadEpochRef.current === requestEpoch && liveChapterIdRef.current === requestChapterId) {
-        console.error('[DraftHistory] failed to load chapter drafts', error);
-        setMsg('草稿历史加载失败');
+        setLoading(false);
       }
-    }
-    if (loadEpochRef.current === requestEpoch && liveChapterIdRef.current === requestChapterId) {
-      setLoading(false);
-    }
+    },
+    [chapterId],
+  );
+
+  useEffect(() => {
+    setPage(1);
+    setDrafts([]);
+    setTotal(0);
   }, [chapterId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load(page);
+  }, [load, page]);
 
   useEffect(() => {
     function handleDocumentMouseDown(e: MouseEvent) {
@@ -83,11 +118,22 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
     setBusyDraftId(draft.id);
     try {
       if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) return;
-      if (!(await confirmInfo({ title: '采用草稿', message: `确认采用 v${draft.versionNo} 作为正式正文？`, testId: 'apply-confirm' }))) return;
+      if (
+        !(await confirmInfo({
+          title: '采用草稿',
+          message: `确认采用 v${draft.versionNo} 作为正式正文？`,
+          testId: 'apply-confirm',
+        }))
+      )
+        return;
       const adoptedDraft = await draftVersionService.adopt(draft.id, chapterId);
       const syncedDraft = await draftVersionService.getAdoptedByChapterId(chapterId);
       const verifiedDraft = syncedDraft ?? adoptedDraft;
-      if (verifiedDraft.id !== draft.id || verifiedDraft.chapterId !== chapterId || !verifiedDraft.isAdopted) {
+      if (
+        verifiedDraft.id !== draft.id ||
+        verifiedDraft.chapterId !== chapterId ||
+        !verifiedDraft.isAdopted
+      ) {
         throw new Error('正文采用结果与目标章节不一致');
       }
       // Adoption is authoritative once the transaction commits, but the user
@@ -95,15 +141,15 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
       // live editor before replacing it with the adopted version.
       if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) {
         setMsg(`v${draft.versionNo} 已采用，当前未保存正文已保留`);
-        await load();
+        await load(page);
         setTimeout(() => setMsg(''), 3000);
         return;
       }
       onDraftAdopted?.(verifiedDraft);
       setMsg(`v${draft.versionNo} 已采用`);
-      await load();
+      await load(page);
     } catch (error) {
-      console.error('[DraftHistory] failed to adopt draft', error);
+      appLogger.error('[DraftHistory] failed to adopt draft', error);
       setMsg('采用失败，原正式正文未改变');
     } finally {
       setBusyDraftId(null);
@@ -121,15 +167,26 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
     if (busyDraftId) return;
     setBusyDraftId(draft.id);
     try {
-      if (!(await confirmInfo({ title: '废弃草稿', message: `确认废弃 v${draft.versionNo}？此操作不会删除已采用正文。`, testId: 'apply-confirm' }))) return;
+      if (
+        !(await confirmInfo({
+          title: '废弃草稿',
+          message: `确认废弃 v${draft.versionNo}？此操作不会删除已采用正文。`,
+          testId: 'apply-confirm',
+        }))
+      )
+        return;
       await draftVersionService.delete(draft.id, chapterId);
       setMsg(`v${draft.versionNo} 已废弃`);
       setTimeout(() => setMsg(''), 2000);
-      await load();
+      await load(page);
     } finally {
       setBusyDraftId(null);
     }
   };
+
+  const totalPages = Math.max(1, Math.ceil(total / DRAFT_PAGE_SIZE));
+  const visiblePage = Math.min(page, totalPages);
+  const visibleDrafts = drafts;
 
   return (
     <>
@@ -143,61 +200,144 @@ function DraftHistoryPanel({ chapterId, currentDraftId, onLoadDraft, onDraftAdop
       >
         <div className="right-panel-header">
           <span className="right-panel-title">📋 草稿历史</span>
-          <button className="right-panel-close" onClick={onClose}>✕</button>
+          <button className="right-panel-close" onClick={onClose}>
+            ✕
+          </button>
         </div>
         <div className="right-panel-body" data-testid="draft-history">
           {msg && (
-            <div style={{ fontSize: 13, padding: '6px 12px', background: '#e8f5e9', borderRadius: 6, marginBottom: 12, color: '#2e7d32' }}>
+            <div
+              style={{
+                fontSize: 13,
+                padding: '6px 12px',
+                background: 'var(--color-success-bg)',
+                borderRadius: 6,
+                marginBottom: 12,
+                color: 'var(--color-success-text)',
+              }}
+            >
               {msg}
             </div>
           )}
 
           {loading ? (
-            <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 16 }}>加载中...</div>
+            <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 16 }}>
+              加载中...
+            </div>
           ) : drafts.length === 0 ? (
             <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
               📄 暂无草稿
-              <br /><span style={{ fontSize: 12 }}>使用 AI 生成或手动保存创建草稿版本</span>
+              <br />
+              <span style={{ fontSize: 12 }}>使用 AI 生成或手动保存创建草稿版本</span>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {drafts.map((draft) => (
-                <div key={draft.id} data-testid="draft-history-item" data-draft-id={draft.id} data-adopted={draft.isAdopted ? 'true' : 'false'} style={{
-                  border: `1px solid ${draft.id === currentDraftId ? 'var(--color-primary)' : 'var(--color-border-light)'}`,
-                  borderRadius: 8, padding: 12,
-                  background: draft.isAdopted ? '#e8f5e9' : draft.id === currentDraftId ? 'var(--color-primary-light)' : 'var(--color-bg-card)',
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              {visibleDrafts.map((draft) => (
+                <div
+                  key={draft.id}
+                  data-testid="draft-history-item"
+                  data-draft-id={draft.id}
+                  data-adopted={draft.isAdopted ? 'true' : 'false'}
+                  style={{
+                    border: `1px solid ${draft.id === currentDraftId ? 'var(--color-primary)' : 'var(--color-border-light)'}`,
+                    borderRadius: 8,
+                    padding: 12,
+                    background: draft.isAdopted
+                      ? 'var(--color-success-bg)'
+                      : draft.id === currentDraftId
+                        ? 'var(--color-primary-light)'
+                        : 'var(--color-bg-card)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: 4,
+                    }}
+                  >
                     <span style={{ fontWeight: 600, fontSize: 14 }}>
                       v{draft.versionNo}
-                      {draft.isAdopted && <span style={{ color: 'var(--color-success)', fontSize: 12, marginLeft: 6 }}>✅ 已采用</span>}
+                      {draft.isAdopted && (
+                        <span
+                          style={{ color: 'var(--color-success)', fontSize: 12, marginLeft: 6 }}
+                        >
+                          ✅ 已采用
+                        </span>
+                      )}
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                       {formatNumber(draft.wordCount)} 字
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>
+                  <div
+                    style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}
+                  >
                     {sourceLabels[draft.source] || draft.source} · {formatDateTime(draft.createdAt)}
                     {latestReport?.draftId === draft.id && latestReport.overallScore != null && (
-                      <span style={{ marginLeft: 8, color: 'var(--color-primary)', fontWeight: 600 }}>
+                      <span
+                        style={{ marginLeft: 8, color: 'var(--color-primary)', fontWeight: 600 }}
+                      >
                         质检 {latestReport.overallScore}
                       </span>
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => { void handleLoad(draft); }} disabled={!!busyDraftId}
-                      style={{ fontSize: 12 }}>📖 恢复</button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        void handleLoad(draft);
+                      }}
+                      disabled={!!busyDraftId}
+                      style={{ fontSize: 12 }}
+                    >
+                      📖 恢复
+                    </button>
                     {!draft.isAdopted && (
-                      <button className="btn btn-primary btn-sm" onClick={() => handleAdopt(draft)} disabled={!!busyDraftId}
-                        style={{ fontSize: 12 }}>✅ 采用</button>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleAdopt(draft)}
+                        disabled={!!busyDraftId}
+                        style={{ fontSize: 12 }}
+                      >
+                        ✅ 采用
+                      </button>
                     )}
                     {!draft.isAdopted && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(draft)} disabled={!!busyDraftId}
-                        style={{ fontSize: 12 }}>废弃</button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleDelete(draft)}
+                        disabled={!!busyDraftId}
+                        style={{ fontSize: 12 }}
+                      >
+                        废弃
+                      </button>
                     )}
                   </div>
                 </div>
               ))}
+              {totalPages > 1 && (
+                <nav className="list-pagination" aria-label="草稿历史分页">
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={visiblePage <= 1}
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    {visiblePage} / {totalPages} · 共 {total} 条
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={visiblePage >= totalPages}
+                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                  >
+                    下一页
+                  </button>
+                </nav>
+              )}
             </div>
           )}
         </div>

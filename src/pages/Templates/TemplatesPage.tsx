@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import BackButton from '../../components/common/BackButton';
 import { confirmDanger } from '../../utils/nativeDialog';
 import { templateService, type UserTemplate, type TemplateType, TemplateTypeLabels } from '../../services/templates/templateService';
+import { describeUnknownError } from '../../utils/errorMessage';
 
 interface BuiltInTemplate {
   id: string; type: string; title: string; genre: string; description: string; content: string;
@@ -23,6 +24,14 @@ const BUILTIN_TEMPLATES: BuiltInTemplate[] = [
 
 const TYPE_FILTERS = ['全部', '系统内置', '我的模板', '作品模板', '章节大纲', '角色模板', '输出控制'];
 const TEMPLATE_TYPES: { value: TemplateType; label: string }[] = Object.entries(TemplateTypeLabels).map(([value, label]) => ({ value: value as TemplateType, label }));
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isTemplateType(value: unknown): value is TemplateType {
+  return typeof value === 'string' && value in TemplateTypeLabels;
+}
 
 function TemplatesPage() {
   const [filter, setFilter] = useState('全部');
@@ -62,17 +71,23 @@ function TemplatesPage() {
 
       // 如果是 JSON
       if (ext === 'json') {
-        let parsed: any;
+        let parsed: unknown;
         try { parsed = JSON.parse(text); }
         catch { throw new Error('JSON 解析失败，请检查文件格式'); }
 
-        if (!parsed.content) throw new Error('JSON 缺少 content 字段，模板内容不能为空');
+        if (!isRecord(parsed) || !parsed.content) {
+          throw new Error('JSON 缺少 content 字段，模板内容不能为空');
+        }
 
-        setFormName(parsed.name || file.name.replace(/\.json$/, ''));
-        setFormType(parsed.type || 'custom');
-        setFormDesc(parsed.description || '');
+        setFormName(typeof parsed.name === 'string' && parsed.name.trim()
+          ? parsed.name
+          : file.name.replace(/\.json$/, ''));
+        setFormType(isTemplateType(parsed.type) ? parsed.type : 'custom');
+        setFormDesc(typeof parsed.description === 'string' ? parsed.description : '');
         setFormContent(typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content, null, 2));
-        setFormTags(Array.isArray(parsed.tags) ? parsed.tags.join(', ') : '');
+        setFormTags(Array.isArray(parsed.tags)
+          ? parsed.tags.filter((tag): tag is string => typeof tag === 'string').join(', ')
+          : '');
       } else {
         // TXT / MD
         setFormName(file.name.replace(/\.(txt|md)$/i, ''));
@@ -86,8 +101,8 @@ function TemplatesPage() {
       setShowForm(true);
       setMsg(`已加载文件「${file.name}」，请确认并保存。`);
 
-    } catch (err: any) {
-      setMsg('导入失败：' + (err?.message || '未知错误'));
+    } catch (err: unknown) {
+      setMsg('导入失败：' + describeUnknownError(err, '未知错误'));
     }
 
     e.target.value = '';
@@ -125,8 +140,8 @@ function TemplatesPage() {
       setFormName(''); setFormType('custom'); setFormDesc(''); setFormContent(''); setFormTags('');
       loadUserTemplates();
       setTimeout(() => setMsg(''), 3000);
-    } catch (err: any) {
-      setMsg('保存失败：' + (err?.message || '未知错误'));
+    } catch (err: unknown) {
+      setMsg('保存失败：' + describeUnknownError(err, '未知错误'));
     } finally {
       setSaving(false);
     }
@@ -170,7 +185,7 @@ function TemplatesPage() {
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>📋 模板中心</div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>提供内置创作模板，并支持上传和管理自定义模板</div>
 
-      {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: msg.includes('失败') ? '#ffebee' : 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: msg.includes('失败') ? '#c62828' : 'var(--color-primary)' }}>{msg}</div>}
+      {msg && <div style={{ padding: '8px 16px', marginBottom: 16, background: msg.includes('失败') ? 'var(--color-error-bg)' : 'var(--color-primary-light)', borderRadius: 6, fontSize: 13, color: msg.includes('失败') ? 'var(--color-error-text)' : 'var(--color-primary)' }}>{msg}</div>}
 
       {/* 操作按钮区 */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>

@@ -129,6 +129,9 @@ pub fn is_supported_task_type(value: &str) -> bool {
         value,
         "connection_test"
             | "chapter_generate"
+            | "chapter_beat_repair"
+            | "chapter_scene_generate"
+            | "chapter_scene_plan_generate"
             | "chapter_rewrite"
             | "chapter_polish"
             | "character_generate"

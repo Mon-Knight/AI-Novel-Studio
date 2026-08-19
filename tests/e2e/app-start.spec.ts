@@ -6,15 +6,19 @@ describe('desktop startup', () => {
     await waitForTestId('app-shell');
     await waitForTestId('project-list');
     const bridgeProbe = await browser.execute(() => {
-      const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: unknown }).__AI_NOVEL_STUDIO_E2E__;
-      return { type: typeof bridge, invoke: typeof (bridge as { invoke?: unknown } | undefined)?.invoke };
+      const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: unknown })
+        .__AI_NOVEL_STUDIO_E2E__;
+      return {
+        type: typeof bridge,
+        invoke: typeof (bridge as { invoke?: unknown } | undefined)?.invoke,
+      };
     });
     expect(bridgeProbe).toEqual({ type: 'object', invoke: 'function' });
     await assertCleanDiagnostics();
     const diagnostics = await bridgeDiagnostics();
     expect(diagnostics.databasePath).toContain('ai-novel-studio.db');
-    expect(diagnostics.migrationCount).toBe(20);
-    expect(diagnostics.latestMigrationId).toBe('020_agent_plan_checkpoints');
+    expect(diagnostics.migrationCount).toBeGreaterThanOrEqual(31);
+    expect(diagnostics.latestMigrationId).toMatch(/^\d{3}_[a-z0-9_]+$/);
     expect(diagnostics.counts?.novels).toBe(0);
     expect(diagnostics.counts?.executionTasks).toBe(0);
     expect(diagnostics.counts?.resultArtifacts).toBe(0);

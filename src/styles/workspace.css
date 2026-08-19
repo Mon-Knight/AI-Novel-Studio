@@ -9,6 +9,44 @@
   position: relative;
 }
 
+.workspace-full-state {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-app);
+}
+
+.workspace-full-state-content {
+  text-align: center;
+}
+.workspace-muted {
+  color: var(--color-text-muted);
+}
+.workspace-state-icon {
+  margin-bottom: 12px;
+  font-size: 32px;
+}
+.workspace-empty-icon {
+  margin-bottom: 16px;
+  font-size: 48px;
+  opacity: 0.3;
+}
+.workspace-error-message {
+  margin-bottom: 12px;
+  color: var(--color-error);
+}
+.workspace-state-copy {
+  margin-bottom: 12px;
+}
+.workspace-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
 /* === 左侧卷章目录树 === */
 .workspace-sidebar {
   width: 240px;
@@ -150,6 +188,86 @@
   transition: margin-right var(--transition-normal);
 }
 
+.workspace-novel-title {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.workspace-topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workspace-current-chapter {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.workspace-empty-state {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-app);
+}
+
+.workspace-empty-content {
+  max-width: 420px;
+  text-align: center;
+}
+.workspace-empty-title {
+  margin-bottom: 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.workspace-empty-copy {
+  margin-bottom: 20px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.workspace-document-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 16px 0;
+  padding: 10px 12px;
+  color: var(--color-error);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.workspace-summary-panel {
+  z-index: 200;
+  width: 360px;
+}
+.workspace-summary-state {
+  padding: 24px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+.workspace-summary-stop {
+  display: block;
+  margin: 16px auto 0;
+}
+.workspace-summary-error {
+  padding: 16px;
+  color: var(--color-error);
+  font-size: 13px;
+}
+.workspace-summary-actions {
+  padding: 0 16px 16px;
+}
+
 .workspace-page.has-right-panel .workspace-editor {
   margin-right: var(--right-panel-width);
 }
@@ -200,7 +318,7 @@
 
 .editor-toolbar .toolbar-btn.primary {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   border-color: var(--color-primary);
 }
 
@@ -241,30 +359,6 @@
   color: var(--color-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* Native Feel P1.1: 暗色模式编辑区背景覆盖 */
-@media (prefers-color-scheme: dark) {
-  .editor-paper {
-    background: var(--color-bg-editor, #1e1e1e);
-    border-color: var(--color-border, #3c3c3c);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  }
-
-  .editor-content {
-    background: var(--color-bg-app, #1f1f1f);
-  }
-
-  .editor-hint-banner {
-    background: #3a2a1a;
-    border-color: #5a4a2a;
-    color: #ffb74d;
-  }
-
-  .editor-info-card {
-    background: #1e2a45;
-    border-color: var(--color-border);
-  }
 }
 
 .editor-body:focus {
@@ -338,8 +432,13 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 /* === v0.4.0 新增：工作台顶部栏 === */
@@ -368,7 +467,7 @@
   background: var(--color-bg-card, #ffffff);
   border: 1px solid var(--color-border, #e5eaf0);
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   overflow: hidden;
 }
 

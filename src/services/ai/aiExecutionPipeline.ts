@@ -1,4 +1,4 @@
-import type { AiSettings } from '../../types/ai';
+import type { AiSettings, AiStreamEvent, AiTaskType as LegacyAiTaskType } from '../../types/ai';
 import type {
   AiExecutionCompilationInput,
   CompiledAiExecutionContractV1,
@@ -10,21 +10,14 @@ import type {
   AiTaskType,
   CreateAiTaskInput,
 } from '../../types/ai-task';
-import type {
-  CreateResultArtifactInput,
-  ResultArtifactBundle,
-} from '../../types/result-artifact';
-import {
-  normalizeAppError,
-  type AppError,
-} from '../../types/appError';
+import type { CreateResultArtifactInput, ResultArtifactBundle } from '../../types/result-artifact';
+import { normalizeAppError, type AppError } from '../../types/appError';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { isTauri } from '../database/db';
 import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
-import {
-  isAiRequestCancelled,
-  throwIfAiRequestCancelled,
-} from './aiCancellation';
+import { isAiRequestCancelled, throwIfAiRequestCancelled } from './aiCancellation';
+import { createAiPricingSnapshot } from './aiCost';
+import { aiTaskService } from './aiTaskService';
 import {
   createProviderAdapter,
   type ProviderAdapter,
@@ -46,16 +39,36 @@ export interface ExecuteAiTaskInput {
   compilation: AiExecutionCompilationInput;
   parseStructuredPayload?: (text: string) => unknown | undefined;
   signal?: AbortSignal;
+  /** Internal cancellation owner used by the legacy task-center projection. */
+  cancel?: () => void;
+  stream?: boolean;
+  onStreamEvent?: (event: AiStreamEvent) => void;
 }
 
 export interface AiExecutionResult {
   persistence: AiExecutionPersistence;
   text: string;
+  externalRepairUsed?: boolean;
   structuredPayloadJson?: unknown;
   provider: ProviderAdapterResult;
   taskId?: string;
   attemptId?: string;
   artifactBundle?: ResultArtifactBundle;
+  sceneResults?: AiSceneExecutionResult[];
+}
+
+export interface AiSceneExecutionResult {
+  sceneNo: number;
+  beatOrder?: number;
+  generationUnitNo?: number;
+  generationUnitCount?: number;
+  title?: string;
+  text: string;
+  taskId?: string;
+  attemptId?: string;
+  provider: ProviderAdapterResult;
+  persistence: AiExecutionPersistence;
+  reusedFromJobId?: string;
 }
 
 interface RuntimePort {
@@ -70,9 +83,20 @@ interface RuntimePort {
   getArtifact: typeof aiTaskRuntimeService.getArtifact;
 }
 
+interface AiTaskProjectionPort {
+  create: typeof aiTaskService.create;
+  markRunningForRetry?: typeof aiTaskService.markRunningForRetry;
+  markSucceeded: typeof aiTaskService.markSucceeded;
+  markFailed: typeof aiTaskService.markFailed;
+  markCancelled: typeof aiTaskService.markCancelled;
+  registerActiveExecution: typeof aiTaskService.registerActiveExecution;
+}
+
 export interface AiExecutionDependencies {
   runtime: RuntimePort;
-  createAdapter: (settings: AiSettings) => ProviderAdapter;
+  /** Compatibility projection for the current AI task center and draft foreign key. */
+  projection?: AiTaskProjectionPort;
+  createAdapter: (settings: AiSettings, taskType?: AiTaskType) => ProviderAdapter;
   compileContract: (input: {
     taskType: AiTaskType;
     scope: {
@@ -92,16 +116,16 @@ export interface AiExecutionDependencies {
 
 const defaultDependencies: AiExecutionDependencies = {
   runtime: aiTaskRuntimeService,
+  projection: aiTaskService,
   createAdapter: createProviderAdapter,
   compileContract: async (input) => {
-    const { compileProductionAiExecution } = await import(
-      './compilation/productionCompilationRegistry'
-    );
+    const { compileProductionAiExecution } =
+      await import('./compilation/productionCompilationRegistry');
     return compileProductionAiExecution(input);
   },
   isTauriRuntime: isTauri,
-  createId: () => globalThis.crypto?.randomUUID?.()
-    ?? `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  createId: () =>
+    globalThis.crypto?.randomUUID?.() ?? `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`,
 };
 
 export class AiExecutionError extends Error implements AppError {
@@ -143,9 +167,7 @@ function mapProviderError(
   // Tauri 1.x commands may reject with a plain string instead of an Error.
   // Preserve that already-sanitized backend message so HTTP/config failures do
   // not collapse into the generic network bucket.
-  const message = typeof error === 'string' && error.trim()
-    ? error.trim()
-    : normalized.message;
+  const message = typeof error === 'string' && error.trim() ? error.trim() : normalized.message;
   const lower = message.toLowerCase();
   if (lower.includes('cancel') || message.includes('取消')) {
     return new AiExecutionError({
@@ -171,12 +193,14 @@ function mapProviderError(
       ...context,
     });
   }
-  if (/\b(?:401|403)\b/.test(lower)
-    || lower.includes('unauthorized')
-    || lower.includes('forbidden')
-    || message.includes('API Key 无效')
-    || message.includes('无权访问模型')
-    || message.includes('服务拒绝访问')) {
+  if (
+    /\b(?:401|403)\b/.test(lower) ||
+    lower.includes('unauthorized') ||
+    lower.includes('forbidden') ||
+    message.includes('API Key 无效') ||
+    message.includes('无权访问模型') ||
+    message.includes('服务拒绝访问')
+  ) {
     return new AiExecutionError({
       code: 'AI_PROVIDER_AUTHENTICATION_FAILED',
       message,
@@ -200,6 +224,14 @@ function mapProviderError(
       ...context,
     });
   }
+  if (message.includes('输出 Token 上限')) {
+    return new AiExecutionError({
+      code: 'AI_PROVIDER_MALFORMED_RESPONSE',
+      message,
+      retryable: true,
+      ...context,
+    });
+  }
   if (message.includes('解析') || message.includes('格式') || message.includes('空内容')) {
     return new AiExecutionError({
       code: 'AI_PROVIDER_MALFORMED_RESPONSE',
@@ -218,6 +250,10 @@ function mapProviderError(
 
 function unicodeLength(value: string): number {
   return Array.from(value).length;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function safeStructuredPayload(
@@ -266,12 +302,39 @@ function providerMetadata(
     providerRequestId,
     responseHash,
     responseLength,
-    durationMs: provider.durationMs,
+    durationMs: nonNegativeInteger(provider.durationMs) ?? 0,
   };
-  if (provider.tokenInput !== undefined) metadata.tokenInput = provider.tokenInput;
-  if (provider.tokenOutput !== undefined) metadata.tokenOutput = provider.tokenOutput;
-  if (provider.tokenTotal !== undefined) metadata.tokenTotal = provider.tokenTotal;
+  const tokenInput = nonNegativeInteger(provider.tokenInput);
+  const tokenOutput = nonNegativeInteger(provider.tokenOutput);
+  const tokenTotal = nonNegativeInteger(provider.tokenTotal);
+  if (tokenInput !== undefined) metadata.tokenInput = tokenInput;
+  if (tokenOutput !== undefined) metadata.tokenOutput = tokenOutput;
+  if (tokenTotal !== undefined) metadata.tokenTotal = tokenTotal;
   if (provider.finishReason !== undefined) metadata.finishReason = provider.finishReason;
+  if (provider.usageCost) {
+    const costMetadata: Record<string, unknown> = {
+      costStatus: provider.usageCost.status,
+      costCurrency: provider.usageCost.currency,
+      pricingSource: provider.usageCost.source,
+    };
+    if (provider.usageCost.estimatedCost !== undefined) {
+      costMetadata.costEstimate = provider.usageCost.estimatedCost;
+    }
+    if (provider.usageCost.inputPricePerMillionTokens !== undefined) {
+      costMetadata.inputPricePerMillionTokens = provider.usageCost.inputPricePerMillionTokens;
+    }
+    if (provider.usageCost.outputPricePerMillionTokens !== undefined) {
+      costMetadata.outputPricePerMillionTokens = provider.usageCost.outputPricePerMillionTokens;
+    }
+    if (!usageCostFromMetadata(costMetadata)) {
+      throw new AiExecutionError({
+        code: 'AI_RESPONSE_METADATA_INVALID',
+        message: 'Provider cost metadata is invalid.',
+        retryable: false,
+      });
+    }
+    Object.assign(metadata, costMetadata);
+  }
   return metadata;
 }
 
@@ -281,6 +344,85 @@ function optionalNumber(value: unknown): number | undefined {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+const MAX_COST_METADATA_VALUE = 1_000_000;
+const COST_METADATA_KEYS = [
+  'costStatus',
+  'costCurrency',
+  'pricingSource',
+  'costEstimate',
+  'inputPricePerMillionTokens',
+  'outputPricePerMillionTokens',
+] as const;
+
+function hasOwn(object: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function optionalCostNumber(value: unknown): number | undefined {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_COST_METADATA_VALUE
+    ? value
+    : undefined;
+}
+
+function usageCostFromMetadata(
+  metadata: Record<string, unknown>,
+): ProviderAdapterResult['usageCost'] {
+  if (!COST_METADATA_KEYS.some((key) => hasOwn(metadata, key))) return undefined;
+  const status = optionalString(metadata.costStatus);
+  const source = optionalString(metadata.pricingSource);
+  if (
+    !['complete', 'mock', 'unpriced', 'usage_missing'].includes(status ?? '') ||
+    !['user_configured', 'mock', 'unconfigured'].includes(source ?? '') ||
+    metadata.costCurrency !== 'USD'
+  ) {
+    return undefined;
+  }
+  const estimatedCost = optionalCostNumber(metadata.costEstimate);
+  const inputPricePerMillionTokens = optionalCostNumber(metadata.inputPricePerMillionTokens);
+  const outputPricePerMillionTokens = optionalCostNumber(metadata.outputPricePerMillionTokens);
+  if (
+    (hasOwn(metadata, 'costEstimate') && estimatedCost === undefined) ||
+    (hasOwn(metadata, 'inputPricePerMillionTokens') && inputPricePerMillionTokens === undefined) ||
+    (hasOwn(metadata, 'outputPricePerMillionTokens') && outputPricePerMillionTokens === undefined)
+  ) {
+    return undefined;
+  }
+  const validStatusFields =
+    status === 'complete'
+      ? source === 'user_configured' &&
+        estimatedCost !== undefined &&
+        inputPricePerMillionTokens !== undefined &&
+        outputPricePerMillionTokens !== undefined
+      : status === 'mock'
+        ? source === 'mock' &&
+          estimatedCost === 0 &&
+          inputPricePerMillionTokens === 0 &&
+          outputPricePerMillionTokens === 0
+        : status === 'unpriced'
+          ? source === 'unconfigured' &&
+            estimatedCost === undefined &&
+            (inputPricePerMillionTokens === undefined || outputPricePerMillionTokens === undefined)
+          : status === 'usage_missing' &&
+            source === 'user_configured' &&
+            estimatedCost === undefined &&
+            inputPricePerMillionTokens !== undefined &&
+            outputPricePerMillionTokens !== undefined;
+  if (!validStatusFields) {
+    return undefined;
+  }
+  return {
+    status: status as NonNullable<ProviderAdapterResult['usageCost']>['status'],
+    currency: 'USD',
+    source: source as NonNullable<ProviderAdapterResult['usageCost']>['source'],
+    estimatedCost,
+    inputPricePerMillionTokens,
+    outputPricePerMillionTokens,
+  };
 }
 
 function providerFromReplay(
@@ -296,6 +438,7 @@ function providerFromReplay(
     tokenOutput: optionalNumber(metadata.tokenOutput),
     tokenTotal: optionalNumber(metadata.tokenTotal),
     finishReason: optionalString(metadata.finishReason),
+    usageCost: usageCostFromMetadata(metadata),
     durationMs: optionalNumber(metadata.durationMs) ?? 0,
   };
 }
@@ -329,10 +472,12 @@ async function buildTaskInput(
   adapter: ProviderAdapter,
   operationId: string,
 ): Promise<CreateAiTaskInput> {
-  if (contract.contractVersion !== 'compiled_ai_execution_v1'
-    || contract.taskType !== input.taskType
-    || contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId
-    || contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId) {
+  if (
+    contract.contractVersion !== 'compiled_ai_execution_v1' ||
+    contract.taskType !== input.taskType ||
+    contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId ||
+    contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId
+  ) {
     throw new AiExecutionError({
       code: 'AI_COMPILATION_INPUT_INVALID',
       message: '编译契约与 Task 或 Provider identity 不一致。',
@@ -341,13 +486,13 @@ async function buildTaskInput(
   }
   const serializedMessages = JSON.stringify({ messages: contract.request.messages });
   const requestBodyHash = await requireSha256(serializedMessages);
-  const promptTemplateHash = await requireSha256(
-    contract.constraintSnapshot.promptTemplateBody,
-  );
+  const promptTemplateHash = await requireSha256(contract.constraintSnapshot.promptTemplateBody);
   const compiledContextHash = await requireSha256(contract.contextSnapshot.compiledContext);
-  if (requestBodyHash !== contract.inputPayloadJson.requestBodyHash
-    || promptTemplateHash !== contract.constraintSnapshot.promptTemplateHash
-    || compiledContextHash !== contract.contextSnapshot.sourceManifestJson.compiledContextHash) {
+  if (
+    requestBodyHash !== contract.inputPayloadJson.requestBodyHash ||
+    promptTemplateHash !== contract.constraintSnapshot.promptTemplateHash ||
+    compiledContextHash !== contract.contextSnapshot.sourceManifestJson.compiledContextHash
+  ) {
     throw new AiExecutionError({
       code: 'AI_COMPILATION_INPUT_INVALID',
       message: '编译契约 hash 校验失败。',
@@ -399,29 +544,56 @@ async function cleanupFailedExecution(
 ): Promise<void> {
   if (!task) return;
   if (error.code === 'AI_PROVIDER_CANCELLED' || !attemptId) {
-    await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
+    const cancelled = await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
+    if (cancelled.status === 'cancel_requested') {
+      await withCommitReplay(() => runtime.cancel(task.taskId, task.traceId));
+    }
     return;
   }
-  await withCommitReplay(() => runtime.failAttempt(
-    task.taskId,
-    attemptId,
-    {
-      code: error.code,
-      message: error.message,
-      retryable: error.retryable,
-      traceId: task.traceId,
-      operationId: task.operationId,
-    },
-    task.traceId,
-  ));
+  await withCommitReplay(() =>
+    runtime.failAttempt(
+      task.taskId,
+      attemptId,
+      {
+        code: error.code,
+        message: error.message,
+        retryable: error.retryable,
+        traceId: task.traceId,
+        operationId: task.operationId,
+      },
+      task.traceId,
+    ),
+  );
 }
 
 export async function executeAiTask(
   input: ExecuteAiTaskInput,
   dependencies: AiExecutionDependencies = defaultDependencies,
 ): Promise<AiExecutionResult> {
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort();
+  input.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  if (input.signal?.aborted) onCallerAbort();
+  try {
+    return await executeAiTaskInternal(
+      {
+        ...input,
+        signal: controller.signal,
+        cancel: () => controller.abort(),
+      },
+      dependencies,
+    );
+  } finally {
+    input.signal?.removeEventListener('abort', onCallerAbort);
+  }
+}
+
+async function executeAiTaskInternal(
+  input: ExecuteAiTaskInput,
+  dependencies: AiExecutionDependencies = defaultDependencies,
+): Promise<AiExecutionResult> {
   throwIfAiRequestCancelled(input.signal);
-  const adapter = dependencies.createAdapter(input.settings);
+  const adapter = dependencies.createAdapter(input.settings, input.taskType);
   const operationId = input.operationId ?? dependencies.createId();
   const traceId = input.traceId ?? operationId;
   let contract: CompiledAiExecutionContractV1;
@@ -439,10 +611,12 @@ export async function executeAiTask(
       providerId: adapter.providerId,
       modelId: adapter.modelId,
     });
-    if (contract.contractVersion !== 'compiled_ai_execution_v1'
-      || contract.taskType !== input.taskType
-      || contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId
-      || contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId) {
+    if (
+      contract.contractVersion !== 'compiled_ai_execution_v1' ||
+      contract.taskType !== input.taskType ||
+      contract.constraintSnapshot.providerOptionsJson.providerId !== adapter.providerId ||
+      contract.constraintSnapshot.providerOptionsJson.model !== adapter.modelId
+    ) {
       throw new AiExecutionError({
         code: 'AI_COMPILATION_INPUT_INVALID',
         message: '编译契约与 Task 或 Provider identity 不一致。',
@@ -455,7 +629,12 @@ export async function executeAiTask(
 
   if (!dependencies.isTauriRuntime()) {
     try {
-      const provider = await adapter.execute(contract.request, { signal: input.signal });
+      const provider = await adapter.execute(contract.request, {
+        signal: input.signal,
+        requestId: operationId,
+        stream: input.stream,
+        onStreamEvent: input.onStreamEvent,
+      });
       throwIfAiRequestCancelled(input.signal);
       return {
         persistence: 'ephemeral_browser',
@@ -471,35 +650,89 @@ export async function executeAiTask(
   let task: AiTask | undefined;
   let attemptId: string | undefined;
   let providerCompleted = false;
+  let projectionCreated = false;
+  let projectionSettled = false;
+  let releaseProjection: () => void = () => {};
   try {
     const taskInput = await buildTaskInput({ ...input, traceId }, contract, adapter, operationId);
     task = await withCommitReplay(() => dependencies.runtime.create(taskInput));
+    if (dependencies.projection) {
+      await dependencies.projection.create(input.taskType as LegacyAiTaskType, {
+        id: task.taskId,
+        novelId: input.scopeType === 'system' ? undefined : input.novelId,
+        chapterId: input.scopeType === 'system' ? undefined : input.chapterId,
+        modelName: adapter.modelId,
+        inputSummary: `受治理的 ${input.taskType} 请求`,
+        runtimeMode: adapter.runtimeMode ?? input.settings.runtimeMode,
+        provider: adapter.providerId,
+        pricing: adapter.pricingSnapshot ?? createAiPricingSnapshot(input.settings),
+      });
+      projectionCreated = true;
+      if (input.cancel) {
+        releaseProjection = dependencies.projection.registerActiveExecution(
+          task.taskId,
+          input.cancel,
+        );
+      }
+    }
     const completedReplay = await replayCompletedTask(dependencies.runtime, task);
-    if (completedReplay) return completedReplay;
-    const queued = await withCommitReplay(() => dependencies.runtime.queueAttempt(task!.taskId, traceId));
+    if (completedReplay) {
+      providerCompleted = true;
+      if (completedReplay.artifactBundle?.artifact.processingStatus === 'invalid') {
+        throw new AiExecutionError({
+          code: 'ARTIFACT_VALIDATION_FAILED',
+          message: 'AI 结果未通过校验。',
+          retryable: true,
+          traceId,
+          operationId,
+          details: {
+            artifactId: completedReplay.artifactBundle.artifact.artifactId,
+            issueCodes: completedReplay.artifactBundle.issues.map((issue) => issue.code),
+          },
+        });
+      }
+      await dependencies.projection?.markSucceeded(task.taskId, {
+        resultText: completedReplay.text,
+        tokenInput: completedReplay.provider.tokenInput,
+        tokenOutput: completedReplay.provider.tokenOutput,
+        tokenTotal: completedReplay.provider.tokenTotal,
+      });
+      projectionSettled = true;
+      return completedReplay;
+    }
+    const queued = await withCommitReplay(() =>
+      dependencies.runtime.queueAttempt(task!.taskId, traceId),
+    );
     attemptId = queued.attempt.attemptId;
     const providerRequestId = attemptId;
-    await withCommitReplay(() => dependencies.runtime.claimAttempt({
-      taskId: task!.taskId,
-      attemptId: providerRequestId,
-      providerId: adapter.providerId,
-      modelId: adapter.modelId,
-      providerRequestId,
-    }));
+    await withCommitReplay(() =>
+      dependencies.runtime.claimAttempt({
+        taskId: task!.taskId,
+        attemptId: providerRequestId,
+        providerId: adapter.providerId,
+        modelId: adapter.modelId,
+        providerRequestId,
+      }),
+    );
+    await dependencies.projection?.markRunningForRetry?.(task.taskId);
 
     const provider = await adapter.execute(contract.request, {
       signal: input.signal,
       requestId: providerRequestId,
+      stream: input.stream,
+      onStreamEvent: input.onStreamEvent,
     });
     throwIfAiRequestCancelled(input.signal);
     const responseHash = await requireSha256(provider.text);
     const responseLength = unicodeLength(provider.text);
-    const succeeded = await withCommitReplay(() => dependencies.runtime.markProviderSucceeded(
-      task!.taskId,
-      providerRequestId,
-      providerMetadata(provider, responseHash, responseLength, providerRequestId),
-      traceId,
-    ));
+    const succeeded = await withCommitReplay(() =>
+      dependencies.runtime.markProviderSucceeded(
+        task!.taskId,
+        providerRequestId,
+        providerMetadata(provider, responseHash, responseLength, providerRequestId),
+        traceId,
+      ),
+    );
     providerCompleted = true;
     if (succeeded.task.status !== 'validating') {
       throw new AiExecutionError({
@@ -523,9 +756,29 @@ export async function executeAiTask(
       rawContent: provider.text,
       structuredPayloadJson,
     };
-    const artifactBundle = await withCommitReplay(
-      () => dependencies.runtime.createArtifact(artifactInput),
+    const artifactBundle = await withCommitReplay(() =>
+      dependencies.runtime.createArtifact(artifactInput),
     );
+    if (artifactBundle.artifact.processingStatus === 'invalid') {
+      throw new AiExecutionError({
+        code: 'ARTIFACT_VALIDATION_FAILED',
+        message: 'AI 结果未通过校验。',
+        retryable: true,
+        traceId,
+        operationId,
+        details: {
+          artifactId: artifactBundle.artifact.artifactId,
+          issueCodes: artifactBundle.issues.map((issue) => issue.code),
+        },
+      });
+    }
+    await dependencies.projection?.markSucceeded(task.taskId, {
+      resultText: provider.text,
+      tokenInput: provider.tokenInput,
+      tokenOutput: provider.tokenOutput,
+      tokenTotal: provider.tokenTotal,
+    });
+    projectionSettled = true;
     return {
       persistence: 'sqlite',
       text: provider.text,
@@ -537,17 +790,33 @@ export async function executeAiTask(
     };
   } catch (error) {
     const mapped = mapProviderError(error, { traceId, operationId });
+    let cleanupError: unknown;
     if (!providerCompleted) {
       try {
         await cleanupFailedExecution(dependencies.runtime, task, attemptId, mapped);
-      } catch (cleanupError) {
-        throw toExecutionError(normalizeAppError(
-          cleanupError,
-          mapped.message,
-          { traceId, operationId },
-        ));
+      } catch (errorDuringCleanup) {
+        cleanupError = errorDuringCleanup;
       }
     }
+    if (task && projectionCreated && !projectionSettled && dependencies.projection) {
+      try {
+        if (mapped.code === 'AI_PROVIDER_CANCELLED' || isAiRequestCancelled(error)) {
+          await dependencies.projection.markCancelled(task.taskId);
+        } else {
+          await dependencies.projection.markFailed(task.taskId, mapped.message);
+        }
+        projectionSettled = true;
+      } catch (projectionError) {
+        cleanupError ??= projectionError;
+      }
+    }
+    if (cleanupError) {
+      throw toExecutionError(
+        normalizeAppError(cleanupError, mapped.message, { traceId, operationId }),
+      );
+    }
     throw mapped;
+  } finally {
+    releaseProjection();
   }
 }

@@ -13,8 +13,12 @@ pub struct VerifiedContent {
 }
 
 pub fn sha256(content: &str) -> String {
+    sha256_bytes(content.as_bytes())
+}
+
+pub fn sha256_bytes(content: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
+    hasher.update(content);
     format!("{:x}", hasher.finalize())
 }
 
@@ -334,7 +338,20 @@ pub fn delete_if_unreferenced(connection: &Connection, document_id: &str) -> Res
             |row| row.get(0),
         )
         .map_err(AppError::database)?;
-    if draft_references == 0 && recovery_references == 0 && ai_references == 0 {
+    let reference_library_references: i64 = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM reference_imports WHERE large_text_ref_id = ?1) +
+                (SELECT COUNT(*) FROM reference_sections WHERE large_text_ref_id = ?1)",
+            params![document_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if draft_references == 0
+        && recovery_references == 0
+        && ai_references == 0
+        && reference_library_references == 0
+    {
         connection
             .execute(
                 "DELETE FROM large_text_documents WHERE id = ?1",
