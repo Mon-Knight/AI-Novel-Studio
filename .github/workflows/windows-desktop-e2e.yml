@@ -107,6 +107,27 @@ jobs:
       - name: Run Rust tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
+      - name: Checkout pinned DSH runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: .dsh-checkout
+          fetch-depth: 1
+
+      - name: Build pinned DSH host libraries
+        shell: pwsh
+        run: |
+          corepack enable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          corepack prepare pnpm@11.7.0 --activate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir .dsh-checkout install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir .dsh-checkout run build:lib:host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build production Tauri executable
         run: npm run tauri:build -- --bundles none --ci
 
@@ -158,6 +179,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Checkout pinned DSH runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: .dsh-checkout
+          fetch-depth: 1
+
+      - name: Build pinned DSH host libraries
+        shell: pwsh
+        run: |
+          corepack enable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          corepack prepare pnpm@11.7.0 --activate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir .dsh-checkout install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir .dsh-checkout run build:lib:host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install tauri-driver 0.1.5
         shell: pwsh
@@ -243,6 +285,9 @@ jobs:
           "EDGE_DRIVER_VERSION=$driverVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WebView2 Runtime: $runtimeVersion"
           "Microsoft Edge WebDriver: $driverVersion"
+
+      - name: Prepare pinned DSH runtime carrier
+        run: npm run dsh:assets
 
       - name: Build the isolated E2E application
         shell: pwsh
