@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "3.0.0";
+const MIGRATION_VERSION: &str = "3.2.0";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 29] {
+fn migrations() -> [Migration; 31] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -168,6 +168,16 @@ fn migrations() -> [Migration; 29] {
             id: "029_global_ai_request_policy",
             definition: "global_ai_request_policy_v1(singleton_revisioned_policy,global_rolling_minute_and_concurrency,day_token_and_fixed_point_cost_counters,explicit_unpriced_usage,immediate_budget_reservations,provider_request_bound_single_dispatch,owner_hashed_lease_ttl_conservative_reclaim,frozen_policy_and_pricing,idempotent_settlement,indexes,immutable_identity,dispatch_once,terminal_accounting_immutable,status_edges,no_delete)",
             apply: apply_global_ai_request_policy,
+        },
+        Migration {
+            id: "030_output_profile_fields",
+            definition: "output_profile_fields_v1(add:paragraph_length,pov_type,tense_type,description)",
+            apply: apply_output_profile_fields,
+        },
+        Migration {
+            id: "031_dsh_preparation_runs",
+            definition: "dsh_preparation_runs_v1(id,novel_id,chapter_id,planner,status,prompt_tokens,completion_tokens,duration_ms,planner_coerced,created_at,indexes)",
+            apply: apply_dsh_preparation_runs,
         },
     ]
 }
@@ -2963,6 +2973,97 @@ fn apply_global_ai_request_policy(transaction: &Transaction<'_>) -> Result<(), A
         .map_err(AppError::database)
 }
 
+fn ensure_output_profile_column(
+    transaction: &Transaction<'_>,
+    column: &str,
+    definition: &str,
+) -> Result<(), AppError> {
+    let exists: bool = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('output_profiles') WHERE name = ?1
+            )",
+            params![column],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if !exists {
+        // Column names and definitions are private constants at every call site;
+        // keeping the SQL construction here avoids SQLite's lack of a bound
+        // identifier while still making the compatibility path explicit.
+        transaction
+            .execute(
+                &format!("ALTER TABLE output_profiles ADD COLUMN {column} {definition}"),
+                [],
+            )
+            .map_err(AppError::database)?;
+    }
+    Ok(())
+}
+
+fn apply_output_profile_fields(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    // Normal desktop startup creates this base table before migrations. The
+    // CREATE IF NOT EXISTS keeps migration-only upgrades and empty/legacy test
+    // databases valid as well, while the column checks make replay idempotent.
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS output_profiles (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT,
+                target_word_count INTEGER,
+                min_word_count INTEGER,
+                max_word_count INTEGER,
+                paragraph_length TEXT,
+                pov_type TEXT,
+                tense_type TEXT,
+                pace_level TEXT,
+                dialogue_ratio REAL,
+                description_ratio REAL,
+                battle_intensity TEXT,
+                emotion_tendency TEXT,
+                ending_hook_required INTEGER NOT NULL DEFAULT 0,
+                extra_requirements TEXT,
+                forbidden_items TEXT,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (novel_id) REFERENCES novels(id)
+            );",
+        )
+        .map_err(AppError::database)?;
+
+    ensure_output_profile_column(transaction, "paragraph_length", "TEXT")?;
+    ensure_output_profile_column(transaction, "pov_type", "TEXT")?;
+    ensure_output_profile_column(transaction, "tense_type", "TEXT")?;
+    ensure_output_profile_column(transaction, "description", "TEXT")?;
+    Ok(())
+}
+
+fn apply_dsh_preparation_runs(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS dsh_preparation_runs (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT,
+                chapter_id TEXT,
+                planner TEXT NOT NULL,
+                status TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                planner_coerced TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_dsh_preparation_runs_novel
+                ON dsh_preparation_runs(novel_id);
+            CREATE INDEX IF NOT EXISTS idx_dsh_preparation_runs_chapter
+                ON dsh_preparation_runs(novel_id, chapter_id);",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2971,7 +3072,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 29] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 31] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -3088,6 +3189,14 @@ mod tests {
             "029_global_ai_request_policy",
             "cc2caf7c92d84eef722b109d67bba83b4c8015f893dedae099cb3662d0d4ebdc",
         ),
+        (
+            "030_output_profile_fields",
+            "b3b5f6759e3d8dd8ff58229b2f0baf3d39295903e474120c598a941d56a067de",
+        ),
+        (
+            "031_dsh_preparation_runs",
+            "4ebb60ca4e56603635cbc20f8065a7c0643c9e267d73cf27872fce2ed8b202ff",
+        ),
     ];
 
     fn run_migrations_through(connection: &mut Connection, count: usize) -> Result<(), AppError> {
@@ -3170,6 +3279,11 @@ mod tests {
         legacy_schema(&connection)?;
         run_migrations(&mut connection)?;
         let first = list_applied(&connection)?;
+        assert!(first
+            .iter()
+            .rev()
+            .take(2)
+            .all(|migration| migration.version == "3.2.0"));
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, first);
         let content: String = connection.query_row(
@@ -3690,6 +3804,42 @@ mod tests {
                 .count(),
             0
         );
+        Ok(())
+    }
+
+    #[test]
+    fn db30_and_db31_upgrade_missing_base_tables_and_replay_idempotently(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        legacy_schema(&connection)?;
+
+        run_migrations(&mut connection)?;
+        for column in ["description", "paragraph_length", "pov_type", "tense_type"] {
+            assert!(table_columns(&connection, "output_profiles")?.contains(&column.to_string()));
+        }
+        assert!(
+            table_columns(&connection, "dsh_preparation_runs")?.contains(&"planner".to_string())
+        );
+
+        let first = list_applied(&connection)?;
+        run_migrations(&mut connection)?;
+        assert_eq!(list_applied(&connection)?, first);
+
+        let mut legacy_output_profile = Connection::open_in_memory()?;
+        legacy_output_profile.execute_batch(
+            "CREATE TABLE output_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+        )?;
+        legacy_schema(&legacy_output_profile)?;
+        run_migrations(&mut legacy_output_profile)?;
+        for column in ["description", "paragraph_length", "pov_type", "tense_type"] {
+            assert!(table_columns(&legacy_output_profile, "output_profiles")?
+                .contains(&column.to_string()));
+        }
         Ok(())
     }
 

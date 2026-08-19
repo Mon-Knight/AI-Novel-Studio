@@ -103,7 +103,10 @@ pub fn coerce_planner(raw: Option<&str>) -> Option<(String, Option<PlannerCoerci
 }
 
 fn is_non_empty_string(value: &Value) -> bool {
-    value.as_str().map(|text| !text.trim().is_empty()).unwrap_or(false)
+    value
+        .as_str()
+        .map(|text| !text.trim().is_empty())
+        .unwrap_or(false)
 }
 
 fn has_keys(object: &Value, allowed: &[&str], required: &[&str]) -> bool {
@@ -135,7 +138,9 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
             coerced: None,
         };
     };
-    if object.len() != PROPOSAL_KEYS.len() || !PROPOSAL_KEYS.iter().all(|key| object.contains_key(*key)) {
+    if object.len() != PROPOSAL_KEYS.len()
+        || !PROPOSAL_KEYS.iter().all(|key| object.contains_key(*key))
+    {
         errors.push(format!(
             "top-level keys must be exactly: {}",
             PROPOSAL_KEYS.join(", ")
@@ -170,16 +175,15 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
             }
         }
         None => {
-            errors.push(format!(
-                "planner must be one of {}",
-                PLANNERS.join("|")
-            ));
+            errors.push(format!("planner must be one of {}", PLANNERS.join("|")));
         }
     }
 
     if let Some(target) = proposal.get("targetChapter") {
-        let novel_ok = target.get("novelId").and_then(Value::as_str) == Some(input.novel_id.as_str());
-        let chapter_ok = target.get("chapterId").and_then(Value::as_str) == Some(input.chapter_id.as_str());
+        let novel_ok =
+            target.get("novelId").and_then(Value::as_str) == Some(input.novel_id.as_str());
+        let chapter_ok =
+            target.get("chapterId").and_then(Value::as_str) == Some(input.chapter_id.as_str());
         if !novel_ok || !chapter_ok {
             errors.push("targetChapter must match the input novel/chapter ids".to_string());
         }
@@ -195,12 +199,14 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
     match proposal.get("baselineRevisions").and_then(Value::as_array) {
         Some(revisions) if revisions.len() == PROPOSAL_SOURCES.len() => {
             for source in PROPOSAL_SOURCES {
-                let entry = revisions.iter().find(|entry| {
-                    entry.get("source").and_then(Value::as_str) == Some(source)
-                });
+                let entry = revisions
+                    .iter()
+                    .find(|entry| entry.get("source").and_then(Value::as_str) == Some(source));
                 match entry {
                     Some(entry) => {
-                        if entry.get("revision").and_then(Value::as_i64) != input_revisions.get(source).copied() {
+                        if entry.get("revision").and_then(Value::as_i64)
+                            != input_revisions.get(source).copied()
+                        {
                             errors.push(format!("baselineRevisions {} revision mismatch", source));
                         }
                     }
@@ -217,14 +223,20 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
     match proposal.get("retrievedEvidence").and_then(Value::as_array) {
         Some(evidence) => {
             for item in evidence {
-                if !has_keys(item, &["source", "revision", "summary", "detailRef"], &["source", "revision", "summary"]) {
+                if !has_keys(
+                    item,
+                    &["source", "revision", "summary", "detailRef"],
+                    &["source", "revision", "summary"],
+                ) {
                     errors.push("retrievedEvidence item keys invalid".to_string());
                     continue;
                 }
                 let source = item.get("source").and_then(Value::as_str).unwrap_or("");
                 if !PROPOSAL_SOURCES.contains(&source) {
                     errors.push(format!("retrievedEvidence source invalid: {}", source));
-                } else if item.get("revision").and_then(Value::as_i64) != input_revisions.get(source).copied() {
+                } else if item.get("revision").and_then(Value::as_i64)
+                    != input_revisions.get(source).copied()
+                {
                     errors.push(format!("retrievedEvidence {} revision mismatch", source));
                 }
                 if !is_non_empty_string(item.get("summary").unwrap_or(&Value::Null)) {
@@ -249,8 +261,11 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
         .and_then(Value::as_array)
         .map(|items| {
             items.iter().all(|item| {
-                has_keys(item, &["title", "purpose", "conflicts"], &["title", "purpose"])
-                    && is_non_empty_string(item.get("title").unwrap_or(&Value::Null))
+                has_keys(
+                    item,
+                    &["title", "purpose", "conflicts"],
+                    &["title", "purpose"],
+                ) && is_non_empty_string(item.get("title").unwrap_or(&Value::Null))
                     && is_non_empty_string(item.get("purpose").unwrap_or(&Value::Null))
                     && field_len_ok(item.get("title").unwrap_or(&Value::Null))
                     && field_len_ok(item.get("purpose").unwrap_or(&Value::Null))
@@ -258,7 +273,10 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
         })
         .unwrap_or(false);
     if !scenes_ok {
-        errors.push("scenePlan items must be {title, purpose, conflicts?} with non-empty strings".to_string());
+        errors.push(
+            "scenePlan items must be {title, purpose, conflicts?} with non-empty strings"
+                .to_string(),
+        );
     }
 
     let constraints_ok = proposal
@@ -266,8 +284,11 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
         .and_then(Value::as_array)
         .map(|items| {
             items.iter().all(|item| {
-                has_keys(item, &["characterId", "constraint"], &["characterId", "constraint"])
-                    && is_non_empty_string(item.get("characterId").unwrap_or(&Value::Null))
+                has_keys(
+                    item,
+                    &["characterId", "constraint"],
+                    &["characterId", "constraint"],
+                ) && is_non_empty_string(item.get("characterId").unwrap_or(&Value::Null))
                     && is_non_empty_string(item.get("constraint").unwrap_or(&Value::Null))
             })
         })
@@ -281,8 +302,11 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
         .and_then(Value::as_array)
         .map(|items| {
             items.iter().all(|item| {
-                has_keys(item, &["kind", "description", "severity"], &["kind", "description", "severity"])
-                    && is_non_empty_string(item.get("kind").unwrap_or(&Value::Null))
+                has_keys(
+                    item,
+                    &["kind", "description", "severity"],
+                    &["kind", "description", "severity"],
+                ) && is_non_empty_string(item.get("kind").unwrap_or(&Value::Null))
                     && is_non_empty_string(item.get("description").unwrap_or(&Value::Null))
                     && item
                         .get("severity")
@@ -293,7 +317,10 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
         })
         .unwrap_or(false);
     if !risks_ok {
-        errors.push("continuityRisks items must be {kind, description, severity in low|medium|high}".to_string());
+        errors.push(
+            "continuityRisks items must be {kind, description, severity in low|medium|high}"
+                .to_string(),
+        );
     }
 
     let questions_ok = proposal
@@ -308,7 +335,11 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
     match proposal.get("recommendedActions").and_then(Value::as_array) {
         Some(actions) if !actions.is_empty() => {
             for action in actions {
-                if !has_keys(action, &["type", "target", "description"], &["type", "description"]) {
+                if !has_keys(
+                    action,
+                    &["type", "target", "description"],
+                    &["type", "description"],
+                ) {
                     errors.push("recommendedActions item keys invalid".to_string());
                     continue;
                 }
@@ -324,7 +355,9 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
                 }
                 if let Some(target) = action.get("target") {
                     if !is_non_empty_string(target) {
-                        errors.push("recommendedActions target must be a string when present".to_string());
+                        errors.push(
+                            "recommendedActions target must be a string when present".to_string(),
+                        );
                     }
                 }
             }
@@ -335,7 +368,11 @@ pub fn validate(input: &ChapterPreparationInput, proposal: &mut Value) -> Valida
     if !is_non_empty_string(proposal.get("producedAt").unwrap_or(&Value::Null)) {
         errors.push("producedAt must be a non-empty string".to_string());
     }
-    if !proposal.get("metrics").map(Value::is_object).unwrap_or(false) {
+    if !proposal
+        .get("metrics")
+        .map(Value::is_object)
+        .unwrap_or(false)
+    {
         errors.push("metrics must be an object".to_string());
     }
 
@@ -409,7 +446,10 @@ mod tests {
         let coercion = report.coerced.unwrap();
         assert_eq!(coercion.original, "dsp_spike_v0");
         assert_eq!(coercion.distance, 1);
-        assert_eq!(proposal["metrics"]["plannerCoerced"]["original"], "dsp_spike_v0");
+        assert_eq!(
+            proposal["metrics"]["plannerCoerced"]["original"],
+            "dsp_spike_v0"
+        );
     }
 
     #[test]
@@ -431,7 +471,10 @@ mod tests {
         ]);
         let report = validate(&input, &mut proposal);
         assert!(!report.valid);
-        assert!(report.errors.iter().any(|error| error.contains("read_tool|ask_user")));
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("read_tool|ask_user")));
     }
 
     #[test]
@@ -443,7 +486,10 @@ mod tests {
         ]);
         let report = validate(&input, &mut proposal);
         assert!(!report.valid);
-        assert!(report.errors.iter().any(|error| error.contains("revision mismatch")));
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("revision mismatch")));
     }
 
     #[test]
@@ -453,7 +499,10 @@ mod tests {
         proposal["extra"] = Value::String("nope".to_string());
         let report = validate(&input, &mut proposal);
         assert!(!report.valid);
-        assert!(report.errors.iter().any(|error| error.contains("top-level keys")));
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("top-level keys")));
     }
 
     #[test]

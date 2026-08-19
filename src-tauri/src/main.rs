@@ -378,6 +378,10 @@ fn main() {
             outline_commands::build_outline_context,
             commands::list_style_profiles,
             commands::get_active_style_profile,
+            commands::output_profiles::list_output_profiles,
+            commands::output_profiles::save_output_profile,
+            commands::output_profiles::set_default_output_profile,
+            commands::output_profiles::delete_output_profile,
             commands::save_style_profile,
             commands::set_active_style_profile,
             commands::delete_style_profile,
@@ -441,6 +445,7 @@ fn main() {
             project_backup::discard_imported_project_backup,
             system_accent::get_system_accent_color,
             services::dsh::commands::dsh_prepare_chapter,
+            services::dsh::commands::get_dsh_preparation_summary,
         ])
         .setup(move |app| {
             log_workspace_event(WorkspaceLogEvent {

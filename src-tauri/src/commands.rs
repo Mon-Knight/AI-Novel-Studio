@@ -15,6 +15,7 @@ pub mod content_transactions;
 pub mod drafts;
 pub mod memory;
 pub mod multi_agent;
+pub mod output_profiles;
 pub mod placements;
 pub mod recovery;
 pub mod reference_library;

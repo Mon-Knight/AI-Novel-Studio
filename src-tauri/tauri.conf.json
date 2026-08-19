@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "AI Novel Studio",
-    "version": "3.1.0"
+    "version": "3.2.0"
   },
   "tauri": {
     "allowlist": {
@@ -24,7 +24,12 @@
         "all": false,
         "readFile": true,
         "writeFile": true,
-        "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
+        "scope": [
+          "$HOME/**",
+          "$DOCUMENT/**",
+          "$DOWNLOAD/**",
+          "$DESKTOP/**"
+        ]
       },
       "notification": {
         "all": true
@@ -44,6 +49,10 @@
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
+      ],
+      "resources": [
+        "bin/unpack-payload.mjs",
+        "bin/dsh-runtime.zip"
       ]
     },
     "security": {

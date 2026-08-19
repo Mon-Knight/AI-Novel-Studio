@@ -1,5 +1,18 @@
 # AI Novel Studio - CHANGELOG
 
+## v3.2.0 (2026-08-19) - 本地章节正文流水线与 DSH 稳定整合
+
+### 修复
+
+- 将 migration 030/031 纳入正式迁移账本；输出控制方案字段迁移现在兼容缺失基础表、旧版精简表、空数据库和重复启动，并补充动态回归测试。
+- DSH preparation 运行记录改为显式失败关闭：成功提案或失败事实无法写入 SQLite 时不再吞掉错误；相同运行身份可幂等重放，冲突事实会被拒绝。
+- 新增 DSH preparation 用量汇总 IPC，按作品和章节聚合已完成运行的输入 Token、输出 Token 与耗时，失败运行保留审计但不混入成功汇总。
+- DSH preparation 用量账本只提供运行观测，不替代 migration 029 的全局 AI 预算预留、派发与结算门禁。
+- DSH 启动进程和调用 Provider 前，由 Rust 对大纲、章节工程、风格、输出控制、人物状态和 Memory 六类 SQLite 权威修订号重新取值；任一来源读取失败、缺失或发生漂移都会失败关闭。
+- 输出控制方案在 Tauri 桌面端改用 SQLite CRUD，并以一次性、可重试的幂等桥接迁移现有 LocalStorage 数据；浏览器开发模式保持原有 LocalStorage 行为，DSH 网关和前端不再读取不同事实源。
+- DSH 安装载体改为带 `JUNCTIONS.json` 的可重定位 zip：安装后在可写应用数据目录原子解包、重建 pnpm junction 并校验 runtime hash；release 构建拒绝空资源，debug 构建使用 Git 忽略的占位资源。
+- Windows release CI 固定检出 DSH commit `47f943859bef60e4160492346772ded9b24f765a`，冻结安装依赖并构建 host libraries 后才执行 Tauri 签名打包；本地 MSI/NSIS 已验证包含真实 runtime zip 与解包器。
+
 
 ## v3.1.0 (2026-08-14) - DSH 进程外大脑接入
 

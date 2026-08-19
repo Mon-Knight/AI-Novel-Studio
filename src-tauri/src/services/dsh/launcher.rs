@@ -53,10 +53,7 @@ impl NodeDshRuntime {
             .next()
             .and_then(|part| part.parse().ok())
             .ok_or_else(|| format!("unparseable node version: {}", version))?;
-        let minor: u32 = parts
-            .next()
-            .and_then(|part| part.parse().ok())
-            .unwrap_or(0);
+        let minor: u32 = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
         let ok = major > 24 || (major == 24) || (major == 22 && minor >= 19);
         if !ok {
             return Err(format!(

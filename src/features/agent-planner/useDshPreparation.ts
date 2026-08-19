@@ -13,7 +13,22 @@ import { CHAPTER_PREPARATION_SOURCES } from '../../types/chapterPreparation';
 import { currentPlannerAdapter } from '../../services/dsh/currentPlannerAdapter';
 import { dshPlannerAdapter } from '../../services/dsh/dshPlannerAdapter';
 import { loadBaselineRevisions } from '../../services/dsh/baselineRevisionService';
+import { isTauriRuntime, tauriInvoke } from '../../services/tauri/runtime';
 import { describeUnknownError } from '../../utils/errorMessage';
+
+export interface DshPreparationSummary {
+  runs: number;
+  promptTokens: number;
+  completionTokens: number;
+  durationMs: number;
+}
+
+const EMPTY_SUMMARY: DshPreparationSummary = {
+  runs: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  durationMs: 0,
+};
 
 export interface DshPreparationDependencies {
   current: { prepare(input: ChapterPreparationInput): Promise<ChapterPreparationProposal> };
@@ -24,12 +39,25 @@ export interface DshPreparationDependencies {
     ): Promise<ChapterPreparationProposal>;
   };
   revisions: typeof loadBaselineRevisions;
+  summary: (novelId: string, chapterId: string) => Promise<DshPreparationSummary>;
+}
+
+async function loadPreparationSummary(
+  novelId: string,
+  chapterId: string,
+): Promise<DshPreparationSummary> {
+  if (!isTauriRuntime()) return EMPTY_SUMMARY;
+  return tauriInvoke<DshPreparationSummary>('get_dsh_preparation_summary', {
+    novelId,
+    chapterId,
+  });
 }
 
 const defaultDependencies: DshPreparationDependencies = {
   current: currentPlannerAdapter,
   dsh: dshPlannerAdapter,
   revisions: loadBaselineRevisions,
+  summary: loadPreparationSummary,
 };
 
 export function buildPreparationInput(
@@ -60,6 +88,8 @@ export function useDshPreparation(
   const [revisions, setRevisions] = useState<ChapterBaselineRevision[] | null>(null);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [revisionsError, setRevisionsError] = useState('');
+  const [summary, setSummary] = useState<DshPreparationSummary>(EMPTY_SUMMARY);
+  const [summaryError, setSummaryError] = useState('');
   const targetRef = useRef({ novelId, chapterId });
   // 修订号与章节身份原子绑定：run() 只使用与当前目标一致的快照，
   // 防止"旧章节的修订号 + 新章节的输入"竞态。
@@ -84,12 +114,16 @@ export function useDshPreparation(
     if (!novelId || !chapterId) {
       setRevisions(null);
       setRevisionsError('');
+      setSummary(EMPTY_SUMMARY);
+      setSummaryError('');
       return;
     }
     let stale = false;
     setRevisions(null);
     setRevisionsLoading(true);
     setRevisionsError('');
+    setSummary(EMPTY_SUMMARY);
+    setSummaryError('');
     revisionsRef.current = null;
     dependencies
       .revisions(novelId, chapterId)
@@ -104,6 +138,16 @@ export function useDshPreparation(
       })
       .finally(() => {
         if (!stale) setRevisionsLoading(false);
+      });
+    dependencies
+      .summary(novelId, chapterId)
+      .then((loaded) => {
+        if (!stale) setSummary(loaded);
+      })
+      .catch((reason) => {
+        if (!stale) {
+          setSummaryError(describeUnknownError(reason, 'DSH 用量汇总读取失败'));
+        }
       });
     return () => {
       stale = true;
@@ -138,6 +182,27 @@ export function useDshPreparation(
           targetRef.current.chapterId === target.chapterId
         ) {
           setProposal(result);
+          if (mode === 'dsh') {
+            dependencies
+              .summary(target.novelId, target.chapterId)
+              .then((loaded) => {
+                if (
+                  targetRef.current.novelId === target.novelId &&
+                  targetRef.current.chapterId === target.chapterId
+                ) {
+                  setSummary(loaded);
+                  setSummaryError('');
+                }
+              })
+              .catch((reason) => {
+                if (
+                  targetRef.current.novelId === target.novelId &&
+                  targetRef.current.chapterId === target.chapterId
+                ) {
+                  setSummaryError(describeUnknownError(reason, 'DSH 用量汇总读取失败'));
+                }
+              });
+          }
         }
       } catch (reason) {
         if (
@@ -168,6 +233,8 @@ export function useDshPreparation(
     revisions,
     revisionsLoading,
     revisionsError,
+    summary,
+    summaryError,
     run,
   };
 }

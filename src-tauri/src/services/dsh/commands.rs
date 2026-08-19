@@ -19,6 +19,7 @@ use tauri::async_runtime;
 
 use super::config::{cordis_yml, runtime_root};
 use super::launcher::{DshLaunchConfig, DshRuntimeLauncher, NodeDshRuntime};
+use super::ledger::{record_run, summary, PreparationRunRecord, PreparationSummary};
 use super::models::{ChapterPreparationInput, ChapterPreparationProposal};
 use super::proposal_validator::{self, ValidationReport};
 use super::supervisor::RuntimeHandle;
@@ -57,6 +58,17 @@ pub async fn dsh_prepare_chapter(
         .map_err(|error| format!("DSH 准备任务失败: {}", error))?
 }
 
+#[tauri::command]
+pub fn get_dsh_preparation_summary(
+    novel_id: String,
+    chapter_id: String,
+) -> Result<PreparationSummary, String> {
+    let connection = crate::db::get_connection()
+        .lock()
+        .map_err(|error| format!("DSH 用量汇总数据库锁失败: {}", error))?;
+    summary(&connection, &novel_id, &chapter_id)
+}
+
 /// Owns the local model-gateway proxy process; killed on drop.
 struct ProxyGuard {
     child: Mutex<Option<Child>>,
@@ -90,12 +102,17 @@ fn spawn_proxy(work: &Path, upstream_key: &str) -> Result<(ProxyGuard, String), 
     let port = {
         let listener =
             TcpListener::bind("127.0.0.1:0").map_err(|error| format!("端口分配失败: {}", error))?;
-        listener.local_addr().map(|address| address.port()).map_err(|error| error.to_string())?
+        listener
+            .local_addr()
+            .map(|address| address.port())
+            .map_err(|error| error.to_string())?
     };
     let script_path = work.join("model-proxy.mjs");
-    std::fs::write(&script_path, PROXY_SCRIPT).map_err(|error| format!("代理脚本写入失败: {}", error))?;
+    std::fs::write(&script_path, PROXY_SCRIPT)
+        .map_err(|error| format!("代理脚本写入失败: {}", error))?;
 
-    let upstream = std::env::var("DSH_PROXY_UPSTREAM").unwrap_or_else(|_| "https://api.deepseek.com".to_string());
+    let upstream = std::env::var("DSH_PROXY_UPSTREAM")
+        .unwrap_or_else(|_| "https://api.deepseek.com".to_string());
     let mut command = Command::new("node");
     command
         .arg(&script_path)
@@ -104,10 +121,15 @@ fn spawn_proxy(work: &Path, upstream_key: &str) -> Result<(ProxyGuard, String), 
         .env("PROXY_UPSTREAM_KEY", upstream_key)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| format!("代理启动失败: {}", error))?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("代理启动失败: {}", error))?;
 
     let log = Arc::new(Mutex::new(String::new()));
-    let stdout = child.stdout.take().ok_or_else(|| "代理 stdout 未接管".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "代理 stdout 未接管".to_string())?;
     {
         let log = log.clone();
         std::thread::spawn(move || {
@@ -128,7 +150,10 @@ fn spawn_proxy(work: &Path, upstream_key: &str) -> Result<(ProxyGuard, String), 
             }
         });
     }
-    let stderr = child.stderr.take().ok_or_else(|| "代理 stderr 未接管".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "代理 stderr 未接管".to_string())?;
     {
         let log = log.clone();
         std::thread::spawn(move || {
@@ -159,7 +184,10 @@ fn spawn_proxy(work: &Path, upstream_key: &str) -> Result<(ProxyGuard, String), 
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!("代理未在 10 秒内就绪；日志: {}", log.lock().unwrap()));
+            return Err(format!(
+                "代理未在 10 秒内就绪；日志: {}",
+                log.lock().unwrap()
+            ));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -181,6 +209,7 @@ fn prepare(
     if options.api_key.trim().is_empty() {
         return Err("apiKey 不能为空（从设置中的 DeepSeek Provider 读取）".to_string());
     }
+    verify_baseline_freshness(&input)?;
     let _node_version = NodeDshRuntime::check_node()?;
     let root = runtime_root().ok_or_else(|| {
         "未找到 DSH 运行时载体：请设置 DSH_RUNTIME_ROOT / DSH_CHECKOUT，或在应用目录放置 dsh-runtime/ 载荷（用 scripts/dsh/build-runtime-payload.mjs 构建）".to_string()
@@ -220,12 +249,17 @@ fn prepare(
         cwd: work.clone(),
     };
 
+    let run_id = uuid::Uuid::new_v4().to_string();
     let child = NodeDshRuntime
         .launch(&config)
         .map_err(|error| format!("DSH 运行时启动失败: {}", error))?;
     let runtime = RuntimeHandle::new(child).map_err(|error| error.to_string())?;
 
+    let run_started = Instant::now();
     let result = run_preparation(&runtime, &config, &input, &model);
+    let failed_session = format!("prepare-{}-{}", input.novel_id, input.chapter_id);
+    let failed_snapshot = runtime.snapshot(&failed_session).unwrap_or_default();
+    let failed_duration_ms = run_started.elapsed().as_millis() as i64;
     let _ = runtime.shutdown_and_wait(SHUTDOWN_TIMEOUT);
     drop(runtime);
     if let Some(guard) = proxy_guard {
@@ -242,7 +276,63 @@ fn prepare(
             metadata: Some(serde_json::json!({ "logTail": tail })),
         });
     }
+
+    let ledger_record = match &result {
+        Ok(proposal) => PreparationRunRecord {
+            id: run_id,
+            novel_id: input.novel_id.clone(),
+            chapter_id: input.chapter_id.clone(),
+            planner: proposal.planner.clone(),
+            status: "completed".to_string(),
+            prompt_tokens: proposal.metrics.prompt_tokens.unwrap_or(0),
+            completion_tokens: proposal.metrics.completion_tokens.unwrap_or(0),
+            duration_ms: proposal.metrics.duration_ms,
+            planner_coerced: proposal
+                .metrics
+                .planner_coerced
+                .as_ref()
+                .and_then(|value| serde_json::to_string(value).ok()),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        },
+        Err(_) => PreparationRunRecord {
+            id: run_id,
+            novel_id: input.novel_id.clone(),
+            chapter_id: input.chapter_id.clone(),
+            planner: "dsh_spike_v0".to_string(),
+            status: "failed".to_string(),
+            prompt_tokens: failed_snapshot.prompt_tokens as i64,
+            completion_tokens: failed_snapshot.completion_tokens as i64,
+            duration_ms: failed_duration_ms,
+            planner_coerced: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        },
+    };
+    let ledger_result = crate::db::get_connection()
+        .lock()
+        .map_err(|error| format!("DSH 运行记录数据库锁失败: {}", error))
+        .and_then(|connection| record_run(&connection, &ledger_record));
+    if let Err(ledger_error) = ledger_result {
+        return Err(match result {
+            Ok(_) => format!("DSH 提案已生成，但运行记录未持久化：{}", ledger_error),
+            Err(original_error) => format!(
+                "DSH 准备失败，且失败记录未持久化：{}；原始错误：{}",
+                ledger_error, original_error
+            ),
+        });
+    }
     result
+}
+
+fn verify_baseline_freshness(input: &ChapterPreparationInput) -> Result<(), String> {
+    let connection = crate::db::get_connection()
+        .lock()
+        .map_err(|error| format!("DSH 基线复验数据库锁失败: {}", error))?;
+    let canonical = super::baseline_freshness::read_canonical(
+        &connection,
+        &input.novel_id,
+        &input.chapter_id,
+    )?;
+    super::baseline_freshness::verify_fresh(input, &canonical)
 }
 
 fn run_preparation(
@@ -269,6 +359,7 @@ fn run_preparation(
 
     let session_id = format!("prepare-{}-{}", input.novel_id, input.chapter_id);
     let started = Instant::now();
+    verify_baseline_freshness(input)?;
     runtime
         .request(
             "session/prompt",
@@ -328,6 +419,7 @@ fn run_preparation(
                 }
             }
         }
+        verify_baseline_freshness(input)?;
         runtime
             .request(
                 "session/prompt",
@@ -388,7 +480,9 @@ fn build_repair_prompt(errors: &[String]) -> String {
         lines.push(format!("- {}", error));
     }
     lines.push("请只输出修正后的完整 JSON 对象，并遵守以下硬性规则：".to_string());
-    lines.push("1. 字符串内部引用原文只能使用中文引号「」；数组元素之间必须用英文逗号分隔。".to_string());
+    lines.push(
+        "1. 字符串内部引用原文只能使用中文引号「」；数组元素之间必须用英文逗号分隔。".to_string(),
+    );
     lines.push("2. planner 字段只有两个合法值，必须逐字符一致：current_chapter_readiness_v1 或 dsh_spike_v0（拼写注意：d-s-h，不是 d-s-p；用下划线 _ 连接，不是连字符 -）。".to_string());
     lines.push("3. revision 逐字使用提示中给定的值，不得编造。".to_string());
     lines.push("4. 除 JSON 对象外不要输出任何解释文字。".to_string());
@@ -419,13 +513,16 @@ fn resolve_gateway_bin() -> Result<String, String> {
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
         .ok_or_else(|| "无法定位应用可执行目录".to_string())?;
-    let candidate = exe_dir.join("novel-domain-gateway.exe");
-    if candidate.is_file() {
+    let candidates = [
+        crate::db::get_data_dir().join("dsh-runtime/gateway/novel-domain-gateway.exe"),
+        exe_dir.join("dsh-runtime/gateway/novel-domain-gateway.exe"),
+        exe_dir.join("novel-domain-gateway.exe"),
+    ];
+    if let Some(candidate) = candidates.iter().find(|candidate| candidate.is_file()) {
         return Ok(candidate.to_string_lossy().to_string());
     }
     Err(format!(
-        "novel-domain-gateway 未找到（可设 DSH_GATEWAY_BIN 指定）；查找位置: {}",
-        candidate.display()
+        "novel-domain-gateway 未找到（可设 DSH_GATEWAY_BIN 指定）；已检查应用数据和安装目录"
     ))
 }
 
@@ -441,16 +538,25 @@ mod e2e_tests {
         let api_key = std::env::var("DSH_E2E_API_KEY").expect("set DSH_E2E_API_KEY");
         let gateway_bin = std::env::var("DSH_GATEWAY_BIN").expect("set DSH_GATEWAY_BIN");
         std::env::set_var("DSH_GATEWAY_BIN", gateway_bin);
+        crate::db::init_test_database();
+        let novel_id = std::env::var("DSH_E2E_NOVEL_ID")
+            .unwrap_or_else(|_| "fed8183e-f40f-4b68-8291-fe0f1a4c82b2".to_string());
+        let chapter_id = std::env::var("DSH_E2E_CHAPTER_ID")
+            .unwrap_or_else(|_| "bbf1d4e6-df6d-470f-b8ea-ba70b71ae67b".to_string());
+        let canonical = super::super::baseline_freshness::read_canonical(
+            &crate::db::get_connection().lock().unwrap(),
+            &novel_id,
+            &chapter_id,
+        )
+        .expect("read canonical baselines");
         let input = ChapterPreparationInput {
-            novel_id: std::env::var("DSH_E2E_NOVEL_ID")
-                .unwrap_or_else(|_| "fed8183e-f40f-4b68-8291-fe0f1a4c82b2".to_string()),
-            chapter_id: std::env::var("DSH_E2E_CHAPTER_ID")
-                .unwrap_or_else(|_| "bbf1d4e6-df6d-470f-b8ea-ba70b71ae67b".to_string()),
+            novel_id,
+            chapter_id,
             baseline_revisions: PROPOSAL_SOURCES
                 .iter()
                 .map(|source| ChapterBaselineRevision {
                     source: source.to_string(),
-                    revision: 1,
+                    revision: canonical.revision_of(source),
                 })
                 .collect(),
         };

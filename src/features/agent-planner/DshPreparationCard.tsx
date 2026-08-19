@@ -141,6 +141,8 @@ export function DshPreparationCard({
     revisions,
     revisionsLoading,
     revisionsError,
+    summary,
+    summaryError,
     run,
   } = preparation;
   const dshModel =
@@ -207,6 +209,22 @@ export function DshPreparationCard({
           data-testid="dsh-revisions-ready"
         >
           基线修订号已加载：{revisions?.map((item) => item.source + '=' + item.revision).join('，')}
+        </div>
+      )}
+      {summary.runs > 0 && (
+        <div
+          className="agent-plan-card__notice"
+          style={{ fontSize: 11 }}
+          data-testid="dsh-usage-summary"
+        >
+          本章 DSH 用量：{summary.runs} 次 · 输入 {summary.promptTokens} tokens · 输出{' '}
+          {summary.completionTokens} tokens · 累计 {(summary.durationMs / 1000).toFixed(1)}s
+          （观测汇总，不替代全局预算门禁）
+        </div>
+      )}
+      {summaryError && (
+        <div className="agent-plan-card__notice is-warning" data-testid="dsh-summary-error">
+          {summaryError}
         </div>
       )}
       {!apiKey && (

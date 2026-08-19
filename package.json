@@ -1,19 +1,23 @@
 {
   "name": "ai-novel-studio",
   "private": true,
-  "version": "3.1.0",
+  "version": "3.2.0",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"
   },
   "scripts": {
     "dev": "vite",
+    "predev": "node scripts/dsh/ensure-bundle-assets.mjs",
     "build": "tsc && vite build",
+    "prebuild": "node scripts/dsh/ensure-bundle-assets.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --bundles msi,nsis",
-    "tauri:build:release": "tauri build --ci --bundles msi,updater",
+    "dsh:assets:ensure": "node scripts/dsh/ensure-bundle-assets.mjs",
+    "dsh:assets": "node scripts/dsh/prepare-bundle-assets.mjs",
+    "tauri:build": "npm run dsh:assets && tauri build --bundles msi,nsis",
+    "tauri:build:release": "npm run dsh:assets && tauri build --ci --bundles msi,updater",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "lint:ci": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{js,cjs,mjs,ts,json,md}\" \".github/**/*.{yml,yaml,md}\" \"docs/**/*.md\" \"prompts/**/*.md\" \"scripts/**/*.{ts,js,mjs,json,md}\" \"tests/**/*.{ts,tsx,js,mjs,json,md}\"",

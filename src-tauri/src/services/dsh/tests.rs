@@ -19,7 +19,8 @@ use serde_json::json;
 
 const PROVIDER: &str = "deepseek-official";
 const MODEL: &str = "deepseek-chat";
-const PROMPT: &str = "请为长篇小说的第 12 章输出一份章节准备提案要点。只输出提案要点，不要执行任何工具或写文件。";
+const PROMPT: &str =
+    "请为长篇小说的第 12 章输出一份章节准备提案要点。只输出提案要点，不要执行任何工具或写文件。";
 
 /// Test-only composition: same five plugins as the production template minus
 /// the mcp-novel gateway row (the gateway binary does not exist in P1).
@@ -61,7 +62,8 @@ fn checkout() -> Option<PathBuf> {
         .ok()
         .map(PathBuf::from)
         .filter(|path| {
-            path.join("packages/examples/jsonrpc-demo/lib/bin.js").exists()
+            path.join("packages/examples/jsonrpc-demo/lib/bin.js")
+                .exists()
                 && path
                     .join("packages/test-support/llm-mock-server/src/bin.ts")
                     .exists()
@@ -101,7 +103,10 @@ impl MockLlm {
             if TcpStream::connect(("127.0.0.1", port)).is_ok() {
                 break;
             }
-            assert!(Instant::now() < deadline, "mock llm server never became ready");
+            assert!(
+                Instant::now() < deadline,
+                "mock llm server never became ready"
+            );
             std::thread::sleep(Duration::from_millis(100));
         }
         Self { child, port }
@@ -127,7 +132,10 @@ fn launch_config(checkout: &Path, dir: &Path, port: u16) -> DshLaunchConfig {
     let cordis_config = dir.join("cordis.yml");
     let rendered = TEST_TEMPLATE.replace(
         "{CHECKOUT}",
-        &checkout.to_string_lossy().replace(' ', "%20").replace('\\', "/"),
+        &checkout
+            .to_string_lossy()
+            .replace(' ', "%20")
+            .replace('\\', "/"),
     );
     fs::write(&cordis_config, rendered).expect("write test cordis.yml");
     DshLaunchConfig {
@@ -137,7 +145,8 @@ fn launch_config(checkout: &Path, dir: &Path, port: u16) -> DshLaunchConfig {
         home: dir.join("home"),
         api_key: "mock-key".to_string(),
         base_url: format!("http://127.0.0.1:{}/v1", port),
-        system_prompt: "你是小说章节准备规划员。用中文回答。只根据提供的事实输出提案要点。".to_string(),
+        system_prompt: "你是小说章节准备规划员。用中文回答。只根据提供的事实输出提案要点。"
+            .to_string(),
         cwd: dir.to_path_buf(),
     }
 }
@@ -174,7 +183,10 @@ fn prompt(handle: &RuntimeHandle, session_id: &str, text: &str) {
             Duration::from_secs(30),
         )
         .expect("session/prompt request");
-    assert!(receipt["messageId"].is_string(), "missing messageId receipt");
+    assert!(
+        receipt["messageId"].is_string(),
+        "missing messageId receipt"
+    );
 }
 
 #[test]
@@ -197,7 +209,9 @@ fn scenario_a_normal_lifecycle() {
                 chapter_id: None,
                 draft_id: None,
                 error_code: None,
-                metadata: Some(serde_json::json!({ "reason": "DSH_CHECKOUT unset or checkout not built" })),
+                metadata: Some(
+                    serde_json::json!({ "reason": "DSH_CHECKOUT unset or checkout not built" }),
+                ),
             });
             return;
         }
@@ -223,7 +237,12 @@ fn scenario_a_normal_lifecycle() {
     let code = runtime
         .shutdown_and_wait(Duration::from_secs(30))
         .expect("shutdown");
-    assert_eq!(code, 0, "shutdown exit code; stderr: {}", runtime.stderr_tail());
+    assert_eq!(
+        code,
+        0,
+        "shutdown exit code; stderr: {}",
+        runtime.stderr_tail()
+    );
 }
 
 #[test]
@@ -240,7 +259,9 @@ fn scenario_c_midstream_kill_restart_resume() {
                 chapter_id: None,
                 draft_id: None,
                 error_code: None,
-                metadata: Some(serde_json::json!({ "reason": "DSH_CHECKOUT unset or checkout not built" })),
+                metadata: Some(
+                    serde_json::json!({ "reason": "DSH_CHECKOUT unset or checkout not built" }),
+                ),
             });
             return;
         }
@@ -273,5 +294,10 @@ fn scenario_c_midstream_kill_restart_resume() {
     let code = second
         .shutdown_and_wait(Duration::from_secs(30))
         .expect("shutdown after restart");
-    assert_eq!(code, 0, "restart shutdown exit code; stderr: {}", second.stderr_tail());
+    assert_eq!(
+        code,
+        0,
+        "restart shutdown exit code; stderr: {}",
+        second.stderr_tail()
+    );
 }

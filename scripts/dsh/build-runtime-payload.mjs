@@ -5,17 +5,15 @@
 //   <payload>/packages/**/{lib,package.json,node_modules}   (all built packages)
 //   <payload>/node_modules/.pnpm                            (real store files)
 //   <payload>/node_modules/<top-level links>                (junction farm, remapped)
-//   <payload>/VERSION_MATRIX.json
+//   <payload>/JUNCTIONS.json + VERSION_MATRIX.json
 //
-// Junction handling: pnpm junctions point at checkout-internal targets
-// (workspace packages or the .pnpm store). Every junction is recreated with a
-// payload-local target (Windows junctions always store absolute targets, so the
-// payload is NOT relocatable — rebuild it at the desired location). fs.cp is
-// NOT used for node_modules: Node's cp follows Windows junctions in some paths
-// (stack overflow on pnpm cycles); this script walks entries itself.
+// Junction handling: pnpm junctions point at checkout-internal targets. The
+// staging payload uses payload-local junctions and records every link in
+// JUNCTIONS.json. The installer unpacker recreates them at the final writable
+// location, making the archived carrier relocatable.
 //
 // Usage:
-//   node scripts/dsh/build-runtime-payload.mjs <checkoutDir> <payloadDir> [commit] [--no-pnpm]
+//   node scripts/dsh/build-runtime-payload.mjs <checkoutDir> <payloadDir> [commit] [--no-pnpm] [--if-missing]
 // Verify afterwards with the e2e test (DSH_RUNTIME_ROOT=<payloadDir>, no DSH_CHECKOUT).
 
 import {
@@ -37,9 +35,10 @@ const checkout = process.argv[2]?.trim();
 const payload = process.argv[3]?.trim();
 const commitArg = process.argv[4]?.trim();
 const skipPnpmStore = process.argv.includes('--no-pnpm');
+const ifMissing = process.argv.includes('--if-missing');
 if (!checkout || !payload) {
   console.error(
-    'usage: node scripts/dsh/build-runtime-payload.mjs <checkoutDir> <payloadDir> [commit] [--no-pnpm]',
+    'usage: node scripts/dsh/build-runtime-payload.mjs <checkoutDir> <payloadDir> [commit] [--no-pnpm] [--if-missing]',
   );
   process.exit(2);
 }
@@ -50,6 +49,30 @@ if (!existsSync(path.join(checkoutRoot, 'pnpm-lock.yaml'))) {
   console.error('checkout dir does not look like the harness root: ' + checkoutRoot);
   process.exit(2);
 }
+if (
+  payloadRoot === path.parse(payloadRoot).root ||
+  payloadRoot.toLowerCase() === checkoutRoot.toLowerCase() ||
+  checkoutRoot.toLowerCase().startsWith((payloadRoot + path.sep).toLowerCase())
+) {
+  console.error('refusing unsafe payload target: ' + payloadRoot);
+  process.exit(2);
+}
+if (ifMissing && existsSync(path.join(payloadRoot, 'VERSION_MATRIX.json'))) {
+  try {
+    const matrix = JSON.parse(readFileSync(path.join(payloadRoot, 'VERSION_MATRIX.json'), 'utf8'));
+    if (
+      matrix.sourceCommit === (commitArg || 'unknown') &&
+      existsSync(path.join(payloadRoot, 'JUNCTIONS.json')) &&
+      existsSync(path.join(payloadRoot, 'packages/examples/jsonrpc-demo/lib/bin.js')) &&
+      existsSync(path.join(payloadRoot, 'packages/sdk/protocol/lib/index.js'))
+    ) {
+      console.log('[payload] complete pinned payload already exists; skipping rebuild');
+      process.exit(0);
+    }
+  } catch {
+    // An unreadable carrier is rebuilt from the pinned checkout.
+  }
+}
 rmSync(payloadRoot, { recursive: true, force: true });
 mkdirSync(payloadRoot, { recursive: true });
 
@@ -58,6 +81,21 @@ const checkoutPrefix = checkoutRoot + path.sep;
 let copiedFiles = 0;
 let copiedDirs = 0;
 let relinked = 0;
+const junctions = [];
+
+function portablePath(value) {
+  return value.split(path.sep).join('/');
+}
+
+function createPayloadJunction(linkPath, checkoutRelativeTarget) {
+  const target = path.join(payloadRoot, checkoutRelativeTarget);
+  symlinkSync(target, linkPath, 'junction');
+  junctions.push({
+    link: portablePath(path.relative(payloadRoot, linkPath)),
+    target: portablePath(checkoutRelativeTarget),
+  });
+  relinked += 1;
+}
 
 /** Maps an absolute checkout-internal target to its payload-internal relative suffix. */
 function remapInside(target) {
@@ -93,8 +131,7 @@ function copyTree(fromDir, toDir) {
           process.exit(2);
         }
         noteRoot(inside);
-        // Junction stores the absolute payload-local path (not relocatable).
-        symlinkSync(path.join(payloadRoot, inside), to, 'junction');
+        createPayloadJunction(to, inside);
       } else {
         // Relative targets resolve against the ORIGINAL link location (checkout),
         // then remap into the payload — same semantics as the absolute branch.
@@ -105,9 +142,8 @@ function copyTree(fromDir, toDir) {
           process.exit(2);
         }
         noteRoot(inside);
-        symlinkSync(path.join(payloadRoot, inside), to, 'junction');
+        createPayloadJunction(to, inside);
       }
-      relinked += 1;
     } else if (entry.isDirectory()) {
       copyTree(from, to);
       copiedDirs += 1;
@@ -187,8 +223,7 @@ for (const entry of readdirSync(checkoutNodeModules, { withFileTypes: true })) {
       process.exit(2);
     }
     noteRoot(inside);
-    symlinkSync(path.join(payloadRoot, inside), to, 'junction');
-    relinked += 1;
+    createPayloadJunction(to, inside);
     continue;
   }
   const inside = remapInside(target);
@@ -197,8 +232,7 @@ for (const entry of readdirSync(checkoutNodeModules, { withFileTypes: true })) {
     process.exit(2);
   }
   noteRoot(inside);
-  symlinkSync(path.join(payloadRoot, inside), to, 'junction');
-  relinked += 1;
+  createPayloadJunction(to, inside);
 }
 
 // 3b. Any additional roots discovered from junction targets (native/, apps/...).
@@ -248,11 +282,12 @@ for (const entry of readdirSync(checkoutNodeModules, { withFileTypes: true })) {
   log('junction existence gate passed');
 }
 
-// 5. Verification + version matrix.
+// 5. Verification + relocation manifest + version matrix.
 const binJs = path.join(payloadRoot, 'packages/examples/jsonrpc-demo/lib/bin.js');
 const serverEntry = path.join(payloadRoot, 'packages/sdk/server/lib/index.js');
-if (!existsSync(binJs) || !existsSync(serverEntry)) {
-  console.error('payload verification failed: bin.js or server entry missing');
+const protocolEntry = path.join(payloadRoot, 'packages/sdk/protocol/lib/index.js');
+if (!existsSync(binJs) || !existsSync(serverEntry) || !existsSync(protocolEntry)) {
+  console.error('payload verification failed: runtime, server or protocol entry missing');
   process.exit(2);
 }
 function sha256(file) {
@@ -266,6 +301,14 @@ const matrix = {
   packageLockSha256: sha256(path.join(checkoutRoot, 'pnpm-lock.yaml')),
   note: 'DSH_SESSION_FORMAT_VERSION=0, no compatibility promise; payload is disposable.',
 };
+writeFileSync(
+  path.join(payloadRoot, 'JUNCTIONS.json'),
+  JSON.stringify(
+    junctions.sort((left, right) => left.link.localeCompare(right.link)),
+    null,
+    2,
+  ) + '\n',
+);
 writeFileSync(
   path.join(payloadRoot, 'VERSION_MATRIX.json'),
   JSON.stringify(matrix, null, 2) + '\n',

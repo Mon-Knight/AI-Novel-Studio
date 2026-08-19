@@ -60,6 +60,8 @@ interface FakeHookState {
   revisions: ChapterBaselineRevision[] | null;
   revisionsLoading: boolean;
   revisionsError: string;
+  summary: { runs: number; promptTokens: number; completionTokens: number; durationMs: number };
+  summaryError: string;
   runCalls: { mode: DshPreparationMode; options?: { apiKey?: string; model?: string } }[];
 }
 
@@ -76,6 +78,8 @@ function baseHookState(overrides: Partial<FakeHookState> = {}): FakeHookState {
     ],
     revisionsLoading: false,
     revisionsError: '',
+    summary: { runs: 0, promptTokens: 0, completionTokens: 0, durationMs: 0 },
+    summaryError: '',
     runCalls: [],
     ...overrides,
   };
@@ -91,6 +95,8 @@ function renderWithHook(state: FakeHookState, apiKey: string | undefined = 'sk-t
     revisions: state.revisions,
     revisionsLoading: state.revisionsLoading,
     revisionsError: state.revisionsError,
+    summary: state.summary,
+    summaryError: state.summaryError,
     run: (mode: DshPreparationMode, options?: { apiKey?: string; model?: string }) => {
       state.runCalls.push({ mode, options });
       return Promise.resolve();
@@ -125,6 +131,24 @@ test('修订号就绪后展示六来源快照', () => {
   renderWithHook(baseHookState());
   const ready = screen.getByTestId('dsh-revisions-ready');
   assert.ok(ready.textContent?.includes('outline=7'));
+});
+
+test('展示 DSH 用量并明确它不是预算门禁', () => {
+  renderWithHook(
+    baseHookState({
+      summary: { runs: 3, promptTokens: 4500, completionTokens: 8800, durationMs: 12000 },
+    }),
+  );
+  const summary = screen.getByTestId('dsh-usage-summary');
+  assert.ok(summary.textContent?.includes('3 次'));
+  assert.ok(summary.textContent?.includes('4500'));
+  assert.ok(summary.textContent?.includes('8800'));
+  assert.ok(summary.textContent?.includes('不替代全局预算门禁'));
+});
+
+test('用量汇总读取失败会显示警告', () => {
+  renderWithHook(baseHookState({ summaryError: '汇总读取失败' }));
+  assert.equal(screen.getByTestId('dsh-summary-error').textContent, '汇总读取失败');
 });
 
 test('点击 DSH 按钮携带 apiKey 与 deepseek 模型', () => {

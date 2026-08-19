@@ -51,33 +51,74 @@ pub fn checkout_from_env() -> Option<String> {
 /// Resolves the runtime root (the directory whose layout mirrors the harness
 /// checkout: packages/.../lib plus bin.js). Resolution order:
 /// 1. `DSH_RUNTIME_ROOT` env (explicit carrier: checkout or payload);
-/// 2. exe-adjacent `dsh-runtime/` payload (also `resources/dsh-runtime` for
-///    bundled Windows installs); the payload is only accepted when COMPLETE
-///    (bin.js + server entry + VERSION_MATRIX.json + .pnpm store), so a partial
-///    build can never shadow a usable DSH_CHECKOUT;
+/// 2. verified payload in the writable application-data directory;
+/// 3. exe/resource-adjacent payload, or a bundled zip atomically unpacked into
+///    application data;
 /// 3. `DSH_CHECKOUT` env (built harness checkout, dev fallback).
 pub fn runtime_root() -> Option<String> {
     if let Some(root) = checkout_if_dir(std::env::var("DSH_RUNTIME_ROOT").ok()) {
         return Some(root);
     }
+    let writable = crate::db::get_data_dir().join("dsh-runtime");
+    if payload_complete(&writable) {
+        return Some(writable.to_string_lossy().to_string());
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for candidate in [dir.join("dsh-runtime"), dir.join("resources").join("dsh-runtime")] {
+            for candidate in [
+                dir.join("dsh-runtime"),
+                dir.join("resources").join("dsh-runtime"),
+            ] {
                 if payload_complete(&candidate) {
                     return Some(candidate.to_string_lossy().to_string());
                 }
+            }
+            if let Some(unpacked) = unpack_bundled_payload(dir) {
+                return Some(unpacked.to_string_lossy().to_string());
             }
         }
     }
     checkout_from_env()
 }
 
+fn unpack_bundled_payload(exe_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let roots = [
+        exe_dir.to_path_buf(),
+        exe_dir.join("resources"),
+        exe_dir.join("bin"),
+        exe_dir.join("resources").join("bin"),
+    ];
+    let (zip, unpacker) = roots.iter().find_map(|root| {
+        let zip = root.join("dsh-runtime.zip");
+        let unpacker = root.join("unpack-payload.mjs");
+        (zip.is_file() && unpacker.is_file()).then(|| (zip, unpacker))
+    })?;
+    let destination = crate::db::get_data_dir();
+    let status = std::process::Command::new("node")
+        .arg(unpacker)
+        .arg(zip)
+        .arg(&destination)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?;
+    let root = destination.join("dsh-runtime");
+    if status.success() && payload_complete(&root) {
+        Some(root)
+    } else {
+        None
+    }
+}
+
 /// A payload counts as usable only when every runtime-critical piece exists.
 fn payload_complete(root: &std::path::Path) -> bool {
-    root.join("packages/examples/jsonrpc-demo/lib/bin.js").is_file()
+    root.join("packages/examples/jsonrpc-demo/lib/bin.js")
+        .is_file()
         && root.join("packages/sdk/server/lib/index.js").is_file()
         && root.join("packages/sdk/protocol/lib/index.js").is_file()
         && root.join("VERSION_MATRIX.json").is_file()
+        && root.join("JUNCTIONS.json").is_file()
         && root.join("node_modules/.pnpm").is_dir()
 }
 
@@ -87,7 +128,11 @@ mod tests {
 
     #[test]
     fn renders_file_urls_with_percent_encoding() {
-        let yaml = cordis_yml("F:\\DeepSeek Harness", "F:\\app\\gateway.exe", "F:\\app\\novel.db");
+        let yaml = cordis_yml(
+            "F:\\DeepSeek Harness",
+            "F:\\app\\gateway.exe",
+            "F:\\app\\novel.db",
+        );
         assert!(yaml.contains("file:///F:/DeepSeek%20Harness/packages/sdk/server/lib/index.js"));
         assert!(yaml.contains("command: 'F:/app/gateway.exe'"));
         assert!(yaml.contains("args: ['--db', 'F:/app/novel.db']"));
@@ -109,8 +154,13 @@ mod tests {
         // integration scenarios that read DSH_CHECKOUT in parallel threads).
         assert!(checkout_if_dir(None).is_none());
         assert!(checkout_if_dir(Some("".to_string())).is_none());
-        assert!(checkout_if_dir(Some("F:\\definitely-not-a-real-dir-987654".to_string())).is_none());
+        assert!(
+            checkout_if_dir(Some("F:\\definitely-not-a-real-dir-987654".to_string())).is_none()
+        );
         let existing = std::env::temp_dir().to_string_lossy().to_string();
-        assert_eq!(checkout_if_dir(Some(existing.clone())).as_deref(), Some(existing.as_str()));
+        assert_eq!(
+            checkout_if_dir(Some(existing.clone())).as_deref(),
+            Some(existing.as_str())
+        );
     }
 }

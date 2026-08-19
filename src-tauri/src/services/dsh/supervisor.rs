@@ -97,7 +97,9 @@ impl JobObject {
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         };
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        };
         unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if job == 0 {
@@ -113,7 +115,9 @@ impl JobObject {
             );
             if set == 0 {
                 CloseHandle(job);
-                return Err(SupervisorError("SetInformationJobObject failed".to_string()));
+                return Err(SupervisorError(
+                    "SetInformationJobObject failed".to_string(),
+                ));
             }
             let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
             if process == 0 {
@@ -124,7 +128,9 @@ impl JobObject {
             CloseHandle(process);
             if assigned == 0 {
                 CloseHandle(job);
-                return Err(SupervisorError("AssignProcessToJobObject failed".to_string()));
+                return Err(SupervisorError(
+                    "AssignProcessToJobObject failed".to_string(),
+                ));
             }
             Ok(JobObject(job))
         }
@@ -190,9 +196,14 @@ fn apply_session_event(sessions: &mut HashMap<String, SessionSnapshot>, value: &
                 }
             }
             if let Some(usage) = data.and_then(|data| data.get("usage")) {
-                snapshot.prompt_tokens += usage.get("inputTokens").and_then(Value::as_u64).unwrap_or(0);
-                snapshot.completion_tokens +=
-                    usage.get("outputTokens").and_then(Value::as_u64).unwrap_or(0);
+                snapshot.prompt_tokens += usage
+                    .get("inputTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                snapshot.completion_tokens += usage
+                    .get("outputTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
             }
         }
         _ => {}
@@ -263,8 +274,12 @@ impl RuntimeHandle {
                                         (Some(method), None) => {
                                             if method == "session.status" {
                                                 if let (Some(session), Some(status)) = (
-                                                    value.pointer("/params/sessionId").and_then(Value::as_str),
-                                                    value.pointer("/params/status").and_then(Value::as_str),
+                                                    value
+                                                        .pointer("/params/sessionId")
+                                                        .and_then(Value::as_str),
+                                                    value
+                                                        .pointer("/params/status")
+                                                        .and_then(Value::as_str),
                                                 ) {
                                                     sessions
                                                         .lock()
@@ -274,15 +289,22 @@ impl RuntimeHandle {
                                                         .status = Some(status.to_string());
                                                 }
                                             } else if method == "session.event" {
-                                                apply_session_event(&mut sessions.lock().unwrap(), &value);
+                                                apply_session_event(
+                                                    &mut sessions.lock().unwrap(),
+                                                    &value,
+                                                );
                                             }
                                             let _ = tx.send(Frame::Notification);
                                         }
                                         (None, Some(response_id)) => {
                                             if let Some(error) = value.get("error") {
-                                                let _ = tx.send(Frame::Error(response_id, error.clone()));
+                                                let _ = tx
+                                                    .send(Frame::Error(response_id, error.clone()));
                                             } else if let Some(result) = value.get("result") {
-                                                let _ = tx.send(Frame::Response(response_id, result.clone()));
+                                                let _ = tx.send(Frame::Response(
+                                                    response_id,
+                                                    result.clone(),
+                                                ));
                                             }
                                         }
                                         (None, None) => {
@@ -367,12 +389,11 @@ impl RuntimeHandle {
                 return Err(SupervisorError(format!("timeout waiting for {}", method)));
             }
             match self.rx.recv_timeout(remaining) {
-                Ok(Frame::Response(response_id, result)) if response_id == id => {
-                    return Ok(result)
-                }
+                Ok(Frame::Response(response_id, result)) if response_id == id => return Ok(result),
                 Ok(Frame::Error(response_id, error)) if response_id == id => {
                     return Err(SupervisorError(
-                        serde_json::to_string(&error).unwrap_or_else(|_| "unknown error".to_string()),
+                        serde_json::to_string(&error)
+                            .unwrap_or_else(|_| "unknown error".to_string()),
                     ))
                 }
                 Ok(_) => continue,

@@ -51,6 +51,22 @@ jobs:
       - run: npm run test:bundle-size
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
+      - name: Checkout pinned DSH runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: .dsh-checkout
+          fetch-depth: 1
+      - name: Build pinned DSH host libraries
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm --dir .dsh-checkout install --frozen-lockfile
+          pnpm --dir .dsh-checkout run build:lib:host
+          "DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Prepare signed updater configuration
         shell: pwsh
         env:
