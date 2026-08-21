@@ -4,13 +4,16 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
 } from 'node:fs';
 import path from 'node:path';
 
@@ -51,44 +54,91 @@ function inside(root, relative) {
   return resolved;
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withUnpackLock(fn) {
+  const lockPath = path.join(destination, '.dsh-runtime.lock');
+  mkdirSync(destination, { recursive: true });
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (true) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      try {
+        return fn();
+      } finally {
+        closeSync(fd);
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      if (complete(finalRoot)) {
+        console.log('runtime carrier already verified: ' + finalRoot);
+        process.exit(0);
+      }
+      if (Date.now() > deadline) {
+        throw new Error('timed out waiting for DSH unpack lock');
+      }
+      sleep(500);
+    }
+  }
+}
+
 if (complete(finalRoot)) {
   console.log('runtime carrier already verified: ' + finalRoot);
   process.exit(0);
 }
 
-mkdirSync(destination, { recursive: true });
-const temporary = path.join(destination, `.dsh-runtime-unpack-${process.pid}-${Date.now()}`);
-rmSync(temporary, { recursive: true, force: true });
-mkdirSync(temporary, { recursive: true });
-try {
-  const extraction = spawnSync('tar', ['-xf', path.resolve(zipPath), '-C', temporary], {
-    stdio: 'inherit',
-  });
-  if (extraction.error) throw extraction.error;
-  if (extraction.status !== 0) {
-    throw new Error('tar extraction failed with exit ' + String(extraction.status));
+withUnpackLock(() => {
+  if (complete(finalRoot)) {
+    console.log('runtime carrier already verified: ' + finalRoot);
+    return;
   }
-  const stagedRoot = path.join(temporary, 'dsh-runtime');
-  const junctions = JSON.parse(readFileSync(path.join(stagedRoot, 'JUNCTIONS.json'), 'utf8'));
-  if (!Array.isArray(junctions)) throw new Error('JUNCTIONS.json must contain an array');
-  for (const entry of junctions) {
-    const link = inside(stagedRoot, entry?.link);
-    const target = inside(stagedRoot, entry?.target);
-    rmSync(link, { recursive: true, force: true });
-    mkdirSync(path.dirname(link), { recursive: true });
-    symlinkSync(target, link, 'junction');
-    statSync(link);
-  }
-  if (!complete(stagedRoot)) throw new Error('relocated runtime carrier verification failed');
 
-  rmSync(finalRoot, { recursive: true, force: true });
-  try {
-    renameSync(stagedRoot, finalRoot);
-  } catch (error) {
-    if (!complete(finalRoot)) throw error;
-  }
-  if (!complete(finalRoot)) throw new Error('installed runtime carrier verification failed');
-  console.log('runtime carrier installed: ' + finalRoot);
-} finally {
+  mkdirSync(destination, { recursive: true });
+  const temporary = path.join(destination, `.dsh-runtime-unpack-${process.pid}-${Date.now()}`);
   rmSync(temporary, { recursive: true, force: true });
-}
+  mkdirSync(temporary, { recursive: true });
+  try {
+    const extraction = spawnSync('tar', ['-xf', path.resolve(zipPath), '-C', temporary], {
+      stdio: 'inherit',
+    });
+    if (extraction.error) throw extraction.error;
+    if (extraction.status !== 0) {
+      throw new Error('tar extraction failed with exit ' + String(extraction.status));
+    }
+    const stagedRoot = path.join(temporary, 'dsh-runtime');
+    const junctions = JSON.parse(readFileSync(path.join(stagedRoot, 'JUNCTIONS.json'), 'utf8'));
+    if (!Array.isArray(junctions)) throw new Error('JUNCTIONS.json must contain an array');
+    for (const entry of junctions) {
+      const link = inside(stagedRoot, entry?.link);
+      const target = inside(stagedRoot, entry?.target);
+      rmSync(link, { recursive: true, force: true });
+      mkdirSync(path.dirname(link), { recursive: true });
+      symlinkSync(target, link, 'junction');
+      statSync(link);
+    }
+    if (!complete(stagedRoot)) throw new Error('relocated runtime carrier verification failed');
+    if (complete(finalRoot)) {
+      console.log('runtime carrier already verified: ' + finalRoot);
+      return;
+    }
+    if (existsSync(finalRoot) && !complete(finalRoot)) {
+      rmSync(finalRoot, { recursive: true, force: true });
+    }
+    try {
+      renameSync(stagedRoot, finalRoot);
+    } catch (error) {
+      if (!complete(finalRoot)) throw error;
+    }
+    if (!complete(finalRoot)) throw new Error('installed runtime carrier verification failed');
+    console.log('runtime carrier installed: ' + finalRoot);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});

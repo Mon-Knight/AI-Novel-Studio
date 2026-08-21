@@ -168,6 +168,8 @@ pub fn checkout_from_env() -> Option<String> {
     checkout_if_dir(std::env::var("DSH_CHECKOUT").ok())
 }
 
+static UNPACK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Resolves the runtime root (the directory whose layout mirrors the harness
 /// checkout: packages/.../lib plus bin.js). Resolution order:
 /// 1. `DSH_RUNTIME_ROOT` env (explicit carrier: checkout or payload);
@@ -179,9 +181,13 @@ pub fn runtime_root() -> Option<String> {
     if let Some(root) = checkout_if_dir(std::env::var("DSH_RUNTIME_ROOT").ok()) {
         return Some(root);
     }
-    let writable = crate::db::get_data_dir().join("dsh-runtime");
+    let data_dir = crate::db::get_data_dir();
+    let writable = data_dir.join("dsh-runtime");
     if payload_complete(&writable) {
         return Some(writable.to_string_lossy().to_string());
+    }
+    if let Some(recovered) = recover_complete_staging(&data_dir) {
+        return Some(recovered.to_string_lossy().to_string());
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -201,7 +207,43 @@ pub fn runtime_root() -> Option<String> {
     checkout_from_env()
 }
 
+fn recover_complete_staging(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let final_root = data_dir.join("dsh-runtime");
+    if payload_complete(&final_root) {
+        return Some(final_root);
+    }
+    let mut staged = Vec::new();
+    for entry in std::fs::read_dir(data_dir).ok()?.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        if !name.starts_with(".dsh-runtime-unpack-") {
+            continue;
+        }
+        let candidate = path.join("dsh-runtime");
+        if payload_complete(&candidate) {
+            staged.push((entry.metadata().and_then(|meta| meta.modified()).ok(), path, candidate));
+        }
+    }
+    staged.sort_by(|left, right| right.0.cmp(&left.0));
+    let (_, temporary, candidate) = staged.into_iter().next()?;
+    if final_root.exists() {
+        let _ = std::fs::remove_dir_all(&final_root);
+    }
+    std::fs::rename(&candidate, &final_root).ok()?;
+    let _ = std::fs::remove_dir_all(&temporary);
+    payload_complete(&final_root).then_some(final_root)
+}
+
 fn unpack_bundled_payload(exe_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let _guard = UNPACK_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let destination = crate::db::get_data_dir();
+    let root = destination.join("dsh-runtime");
+    if payload_complete(&root) {
+        return Some(root);
+    }
+    if let Some(recovered) = recover_complete_staging(&destination) {
+        return Some(recovered);
+    }
     let roots = [
         exe_dir.to_path_buf(),
         exe_dir.join("resources"),
@@ -213,7 +255,6 @@ fn unpack_bundled_payload(exe_dir: &std::path::Path) -> Option<std::path::PathBu
         let unpacker = root.join("unpack-payload.mjs");
         (zip.is_file() && unpacker.is_file()).then(|| (zip, unpacker))
     })?;
-    let destination = crate::db::get_data_dir();
     let status = std::process::Command::new("node")
         .arg(unpacker)
         .arg(zip)
@@ -223,11 +264,10 @@ fn unpack_bundled_payload(exe_dir: &std::path::Path) -> Option<std::path::PathBu
         .stderr(std::process::Stdio::null())
         .status()
         .ok()?;
-    let root = destination.join("dsh-runtime");
     if status.success() && payload_complete(&root) {
         Some(root)
     } else {
-        None
+        recover_complete_staging(&destination)
     }
 }
 
@@ -312,6 +352,39 @@ mod tests {
         let yaml = cordis_yml("F:\\作品 目录#1", "g", "d");
         assert!(yaml.contains("file:///F:/%E4%BD%9C%E5%93%81%20%E7%9B%AE%E5%BD%95%231"));
         assert!(!yaml.contains("作品"));
+    }
+
+    fn write_complete_payload(root: &std::path::Path) {
+        for relative in [
+            "packages/examples/jsonrpc-demo/lib/bin.js",
+            "packages/sdk/server/lib/index.js",
+            "packages/sdk/protocol/lib/index.js",
+            "node_modules/.pnpm/placeholder.txt",
+        ] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+            std::fs::write(&path, b"ok").expect("write payload file");
+        }
+        std::fs::write(root.join("VERSION_MATRIX.json"), "{}").expect("write matrix");
+        std::fs::write(root.join("JUNCTIONS.json"), "[]").expect("write junctions");
+    }
+
+    #[test]
+    fn recovers_complete_leftover_unpack_directory() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "ans-dsh-recover-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let leftover = data_dir.join(".dsh-runtime-unpack-1-1").join("dsh-runtime");
+        write_complete_payload(&leftover);
+        let recovered = recover_complete_staging(&data_dir).expect("recover leftover payload");
+        assert_eq!(recovered, data_dir.join("dsh-runtime"));
+        assert!(payload_complete(&recovered));
+        assert!(!data_dir.join(".dsh-runtime-unpack-1-1").exists());
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     #[test]
