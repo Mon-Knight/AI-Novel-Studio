@@ -4112,7 +4112,7 @@ mod tests {
         seed_story_asset_fixture(&source, "novel-source");
         let mut backup =
             export_project_backup_in_conn(&source, "novel-source").expect("export story assets");
-        assert_eq!(backup.schema_version, 10);
+        assert_eq!(backup.schema_version, 11);
 
         for (table, expected) in [
             ("factions", 2),
@@ -4377,7 +4377,7 @@ mod tests {
 
         let backup =
             export_project_backup_in_conn(&source, "novel-source").expect("export source plan");
-        assert_eq!(backup.schema_version, 10);
+        assert_eq!(backup.schema_version, 11);
         let plans = &backup.tables["autonomous_story_plans"];
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0]["plan_id"], "plan-source");

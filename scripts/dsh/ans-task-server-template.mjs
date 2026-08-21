@@ -549,6 +549,13 @@ class AnsTaskServer {
         checks: ['ctx.tokenMeter'],
       },
       {
+        id: 'compaction-basic',
+        plugin: 'compaction-basic',
+        kind: 'runtime',
+        status: status(this.hasService('compaction')),
+        checks: ['ctx.compaction'],
+      },
+      {
         id: 'mcp-novel',
         plugin: 'mcp-client',
         kind: 'tool',

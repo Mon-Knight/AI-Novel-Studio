@@ -37,7 +37,7 @@
 - `cargo test --locked start_path_two_conversations_cancel_one_without_stopping_the_other` 通过。
 - `cargo test --locked available_carrier_is_not_reported_loaded_before_runtime_health` 通过。
 - `npm test`：303 项通过。
-- 全量 `cargo test --locked`：293 项通过（v3.3.0 收口修复后）；v3.4.0 增量 `artifact_decision_is_idempotent` 通过。
+- 全量 `cargo test --locked`：294 项通过（含备份 schema 11 与 compaction-basic health 投影）；2 项 ignored。
 - 桌面 E2E 仍需在真实 Tauri 会话中回归；本版本不打包 MSI/NSIS。
 
 ### 产物确认与章节审阅
@@ -65,6 +65,7 @@
 - 章节事件采用改为写入 SQLite（`create_chapter_event` / `list_chapter_events`），桌面不再只落 LocalStorage。
 - 候选工具拒绝无结构文本：角色/事件/设定必须含 name 或 title；质量报告必须含 summary 或 issues。
 - 统一 Planner / AI Task / 桌面 E2E 的生产 Tool Registry 哈希为 `6eebed8c…`；DSH 测试 allowlist 与 Cordis composition 计数同步到 11 个工具和 compaction-basic。
+- `runtime/health` 投影补上 `compaction-basic`；项目备份 schema 11 的测试断言与 `artifact_decisions` / `review_authorizations` 对齐。
 - 工作台增加「压缩上下文」预览与确认应用入口。
 - 压缩候选在对话中发布为 `generic_json` ResultArtifact 卡片（桌面）或浏览器投影卡片，确认后走既有 `request_apply` / Safe Apply 路径。浏览器结构化应用不再一律 `BROWSER_APPLY_UNSUPPORTED`。
 - 浏览器 fallback 按任务目标选择领域候选工具（大纲/角色/事件/设定/润色/质量/总结），并输出可通过候选校验的结构化预览；无章节绑定时仍只做只读检索，不伪造 DSH 或 ResultArtifact。

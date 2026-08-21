@@ -148,6 +148,7 @@ function createHarness(plugin, { persisted = false } = {}) {
       'jobs',
       'invariants',
       'tokenMeter',
+      'compaction',
     ].map((service) => [service, {}]),
   );
   const llm = {
@@ -311,7 +312,8 @@ for (const persisted of [false, true]) {
       });
       assert.equal(health.ready, true);
       assert.equal(health.protocol, PROTOCOL);
-      assert.equal(health.composition.length, 6);
+      assert.equal(health.composition.length, 7);
+      assert.ok(health.composition.some((entry) => entry.id === 'compaction-basic'));
       assert.ok(health.composition.every((entry) => entry.status === 'loaded'));
       assert.equal(health.providers[0].models[0].id, 'deepseek-chat');
       assert.equal(health.toolsProjection, 'public-scoped-registry');
