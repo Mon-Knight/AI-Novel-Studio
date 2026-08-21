@@ -60,6 +60,13 @@
 - 任务模型快照冻结压缩 Provider/version；DSH Cordis 组合挂接 `compaction-basic`（`auto: true`）作为 Session 输入压缩 seam，不改写 Agent Loop。
 - 写作工作台默认只保留保存、草稿、章节准备、总结、排版和采用；生成/大纲/角色/事件/风格/润色等 AI 入口迁入创作工作台。桌面 E2E 仍可打开工程/设定/检查/生成以回归既有作业链路。
 
+### 修复
+
+- 章节事件采用改为写入 SQLite（`create_chapter_event` / `list_chapter_events`），桌面不再只落 LocalStorage。
+- 候选工具拒绝无结构文本：角色/事件/设定必须含 name 或 title；质量报告必须含 summary 或 issues。
+- 统一 Planner / AI Task / 桌面 E2E 的生产 Tool Registry 哈希为 `6eebed8c…`；DSH 测试 allowlist 与 Cordis composition 计数同步到 11 个工具和 compaction-basic。
+- 工作台增加「压缩上下文」预览与确认应用入口。
+
 ## v3.2.1 (2026-08-19) - 发布资产 URL 热修复
 
 ### 修复

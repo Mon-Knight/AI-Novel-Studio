@@ -305,6 +305,7 @@ fn generate_chapter_like(
             return Err(format!("chapter not found in novel: {}/{}", novel_id, chapter_id));
         }
     }
+    validate_candidate_payload(artifact_type, candidate_text)?;
     Ok(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
@@ -349,6 +350,7 @@ fn generate_chapter(connection: &Connection, arguments: &Value) -> Result<Value,
             novel_id, chapter_id
         ));
     }
+    validate_candidate_payload("chapter_text", candidate_text)?;
     Ok(json!({
         "ok": true,
         "toolVersion": TOOL_VERSION,
@@ -356,6 +358,103 @@ fn generate_chapter(connection: &Connection, arguments: &Value) -> Result<Value,
         "candidateOnly": true,
         "data": {"novelId": novel_id, "chapterId": chapter_id, "text": candidate_text}
     }))
+}
+
+fn parse_candidate_json(text: &str) -> Option<Value> {
+    let trimmed = text.trim();
+    serde_json::from_str(trimmed).ok().or_else(|| {
+        trimmed
+            .find(['{', '['])
+            .and_then(|start| serde_json::from_str(&trimmed[start..]).ok())
+    })
+}
+
+fn named_entries(value: &Value, keys: &[&str], name_key: &str) -> bool {
+    let lists = keys
+        .iter()
+        .filter_map(|key| value.get(key))
+        .chain(std::iter::once(value));
+    for list in lists {
+        if let Some(items) = list.as_array() {
+            if items.iter().any(|item| {
+                item.get(name_key)
+                    .and_then(Value::as_str)
+                    .map(|name| !name.trim().is_empty())
+                    .unwrap_or(false)
+            }) {
+                return true;
+            }
+        }
+    }
+    value
+        .get(name_key)
+        .and_then(Value::as_str)
+        .map(|name| !name.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn validate_candidate_payload(artifact_type: &str, candidate_text: &str) -> Result<(), String> {
+    match artifact_type {
+        "chapter_text" => {
+            if candidate_text.chars().count() < 8 {
+                return Err("章节候选过短".to_string());
+            }
+        }
+        "outline" => {
+            if parse_candidate_json(candidate_text)
+                .as_ref()
+                .and_then(Value::as_object)
+                .is_none()
+                && candidate_text.chars().count() < 20
+            {
+                return Err("大纲候选必须是 JSON 对象或足够长的正文".to_string());
+            }
+        }
+        "character_candidates" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "角色候选必须是 JSON".to_string())?;
+            if !named_entries(&parsed, &["characters", "candidates"], "name") {
+                return Err("角色候选必须包含至少一个带 name 的条目".to_string());
+            }
+        }
+        "event_candidates" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "事件候选必须是 JSON".to_string())?;
+            if !named_entries(&parsed, &["events", "suggestions", "candidates"], "title") {
+                return Err("事件候选必须包含至少一个带 title 的条目".to_string());
+            }
+        }
+        "setting_candidates" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "设定候选必须是 JSON".to_string())?;
+            if !named_entries(&parsed, &["settings", "candidates"], "name") {
+                return Err("设定候选必须包含至少一个带 name 的条目".to_string());
+            }
+        }
+        "quality_report" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "质量报告必须是 JSON".to_string())?;
+            if parsed.get("summary").and_then(Value::as_str).is_none()
+                && !parsed.get("issues").map(Value::is_array).unwrap_or(false)
+            {
+                return Err("质量报告必须包含 summary 或 issues".to_string());
+            }
+        }
+        "chapter_summary" => {
+            let parsed = parse_candidate_json(candidate_text);
+            let summary = parsed
+                .as_ref()
+                .and_then(|value| value.get("summary"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            if summary.is_empty() && candidate_text.chars().count() < 12 {
+                return Err("总结候选过短".to_string());
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn arg_id(arguments: &Value, key: &str) -> Result<String, String> {
@@ -1294,6 +1393,32 @@ mod tests {
         assert_eq!(result["data"]["chapterId"], "chapter-1");
         assert_eq!(result["data"]["text"], candidate);
         assert_eq!(total_changes(&connection), before_changes);
+    }
+
+    #[test]
+    fn generate_characters_rejects_unstructured_candidate() {
+        let connection = fixture_connection();
+        let error = call_tool(
+            &connection,
+            "generate_characters",
+            &json!({
+                "novelId": "novel-1",
+                "candidateText": "随便写两个角色"
+            }),
+        )
+        .expect_err("unstructured character candidates must be rejected");
+        assert!(error.contains("角色候选"));
+        let result = call_tool(
+            &connection,
+            "generate_characters",
+            &json!({
+                "novelId": "novel-1",
+                "candidateText": "{\"characters\":[{\"name\":\"林默\"}]}"
+            }),
+        )
+        .expect("structured character candidates should validate");
+        assert_eq!(result["artifactType"], "character_candidates");
+        assert_eq!(result["candidateOnly"], true);
     }
 
     #[test]

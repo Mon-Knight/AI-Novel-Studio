@@ -318,7 +318,10 @@ export class ToolRegistry {
         throw new DOMException('任务已取消', 'AbortError');
       }
       if (error instanceof ToolRegistryError) throw error;
-      throw new ToolRegistryError('TOOL_EXECUTION_FAILED', `工具 ${identity} 执行失败。`);
+      throw new ToolRegistryError(
+        'TOOL_EXECUTION_FAILED',
+        error instanceof Error ? error.message : `工具 ${identity} 执行失败。`,
+      );
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     }

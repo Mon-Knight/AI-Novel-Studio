@@ -10,6 +10,7 @@ import type {
   ToolJsonSchema,
 } from '../../types/toolRegistry';
 import { ToolRegistry, type ToolDefinition } from './toolRegistry';
+import { validateCandidateText } from './candidateValidation';
 import { memoryService } from '../memory/memoryService';
 import { isTauri } from '../database/db';
 
@@ -193,6 +194,7 @@ const definitions: ToolDefinition[] = [
       outputSchema: chapterCandidateResultSchema,
     },
     handler: async (args) => {
+      const text = validateCandidateText('chapter_text', String(args.candidateText));
       return {
         ok: true,
         toolVersion: 'v1',
@@ -201,7 +203,7 @@ const definitions: ToolDefinition[] = [
         data: {
           novelId: String(args.novelId),
           chapterId: String(args.chapterId),
-          text: String(args.candidateText),
+          text,
         },
       };
     },
@@ -241,17 +243,20 @@ const definitions: ToolDefinition[] = [
         },
       },
     },
-    handler: async (args: Record<string, unknown>) => ({
-      ok: true,
-      toolVersion: 'v1',
-      artifactType,
-      candidateOnly: true,
-      data: {
-        novelId: String(args.novelId),
-        chapterId: String(args.chapterId ?? ''),
-        text: String(args.candidateText),
-      },
-    }),
+    handler: async (args: Record<string, unknown>) => {
+      const text = validateCandidateText(artifactType, String(args.candidateText));
+      return {
+        ok: true,
+        toolVersion: 'v1',
+        artifactType,
+        candidateOnly: true,
+        data: {
+          novelId: String(args.novelId),
+          chapterId: String(args.chapterId ?? ''),
+          text,
+        },
+      };
+    },
   })),
   {
     descriptor: {

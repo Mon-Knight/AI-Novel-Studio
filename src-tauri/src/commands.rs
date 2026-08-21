@@ -4552,6 +4552,203 @@ pub fn remove_chapter_character(chapter_id: String, character_id: String) -> Res
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterEventDto {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub title: String,
+    pub description: String,
+    pub involved_character_ids: Option<String>,
+    pub impact: Option<String>,
+    pub risk: Option<String>,
+    pub status: String,
+    pub source: String,
+    pub ai_task_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateChapterEventInput {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub title: String,
+    pub description: String,
+    pub involved_character_ids: Option<Vec<String>>,
+    pub impact: Option<String>,
+    pub risk: Option<String>,
+    pub status: Option<String>,
+    pub source: Option<String>,
+    pub ai_task_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateChapterEventInput {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub involved_character_ids: Option<Vec<String>>,
+    pub impact: Option<String>,
+    pub risk: Option<String>,
+    pub status: Option<String>,
+}
+
+fn chapter_event_status(value: Option<&str>, fallback: &str) -> Result<String, String> {
+    let status = value.unwrap_or(fallback).trim();
+    match status {
+        "candidate" | "selected" | "required" | "forbidden" | "adopted" | "discarded" => {
+            Ok(status.to_string())
+        }
+        _ => Err("章节事件状态无效".to_string()),
+    }
+}
+
+fn encode_character_ids(ids: Option<&[String]>) -> Option<String> {
+    ids.filter(|values| !values.is_empty())
+        .and_then(|values| serde_json::to_string(values).ok())
+}
+
+fn map_chapter_event_row(row: &rusqlite::Row) -> rusqlite::Result<ChapterEventDto> {
+    Ok(ChapterEventDto {
+        id: row.get(0)?,
+        novel_id: row.get(1)?,
+        chapter_id: row.get(2)?,
+        title: row.get(3)?,
+        description: row.get(4)?,
+        involved_character_ids: row.get(5)?,
+        impact: row.get(6)?,
+        risk: row.get(7)?,
+        status: row.get(8)?,
+        source: row.get(9)?,
+        ai_task_id: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
+}
+
+const CHAPTER_EVENT_SELECT: &str = "SELECT id, novel_id, chapter_id, title, description, involved_character_ids, impact, risk, status, source, ai_task_id, created_at, updated_at FROM chapter_events";
+
+#[tauri::command]
+pub fn list_chapter_events(chapter_id: String) -> Result<Vec<ChapterEventDto>, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "{CHAPTER_EVENT_SELECT} WHERE chapter_id = ?1 ORDER BY created_at ASC"
+        ))
+        .map_err(|e| e.to_string())?;
+    let items = stmt
+        .query_map(params![&chapter_id], map_chapter_event_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+pub fn create_chapter_event(input: CreateChapterEventInput) -> Result<ChapterEventDto, String> {
+    let title = input.title.trim();
+    if title.is_empty() || title.chars().count() > 240 {
+        return Err("事件标题无效".to_string());
+    }
+    let status = chapter_event_status(input.status.as_deref(), "candidate")?;
+    let source = match input.source.as_deref().unwrap_or("manual") {
+        "manual" | "ai_suggested" => input.source.unwrap_or_else(|| "manual".to_string()),
+        _ => return Err("事件来源无效".to_string()),
+    };
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let involved = encode_character_ids(input.involved_character_ids.as_deref());
+    conn.execute(
+        "INSERT INTO chapter_events (id, novel_id, chapter_id, title, description, involved_character_ids, impact, risk, status, source, ai_task_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        params![
+            &id,
+            &input.novel_id,
+            &input.chapter_id,
+            title,
+            input.description,
+            involved,
+            input.impact,
+            input.risk,
+            status,
+            source,
+            input.ai_task_id,
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&format!("{CHAPTER_EVENT_SELECT} WHERE id = ?1"))
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![&id], map_chapter_event_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_chapter_event(
+    id: String,
+    input: UpdateChapterEventInput,
+) -> Result<ChapterEventDto, String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let status = match &input.status {
+        Some(value) => Some(chapter_event_status(Some(value), "candidate")?),
+        None => None,
+    };
+    let involved = encode_character_ids(input.involved_character_ids.as_deref());
+    conn.execute(
+        "UPDATE chapter_events SET
+            title = COALESCE(?1, title),
+            description = COALESCE(?2, description),
+            involved_character_ids = COALESCE(?3, involved_character_ids),
+            impact = COALESCE(?4, impact),
+            risk = COALESCE(?5, risk),
+            status = COALESCE(?6, status),
+            updated_at = ?7
+         WHERE id = ?8",
+        params![
+            input.title,
+            input.description,
+            involved,
+            input.impact,
+            input.risk,
+            status,
+            now,
+            &id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&format!("{CHAPTER_EVENT_SELECT} WHERE id = ?1"))
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![&id], map_chapter_event_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_chapter_event_status(id: String, status: String) -> Result<(), String> {
+    let status = chapter_event_status(Some(&status), "candidate")?;
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE chapter_events SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![status, now, &id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_chapter_event(id: String) -> Result<(), String> {
+    let conn = get_connection().lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM chapter_events WHERE id = ?1", params![&id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // Optional helper for QueryRow
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;

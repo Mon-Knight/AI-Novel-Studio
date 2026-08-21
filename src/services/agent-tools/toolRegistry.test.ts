@@ -208,6 +208,39 @@ test('production generate_chapter accepts only scoped model-authored candidate t
   );
 });
 
+test('production generate_characters rejects unstructured candidate text', async () => {
+  const { productionToolRegistry } = await import('./productionToolRegistry');
+  const context: ToolInvocationContext = {
+    invocationId: 'characters-1',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    grantedPermissions: ['novel.read', 'chapter.read'],
+    allowedTools: ['generate_characters@1'],
+  };
+  await assert.rejects(
+    () =>
+      productionToolRegistry.invoke(
+        'generate_characters',
+        '1',
+        { novelId: 'novel-1', chapterId: 'chapter-1', candidateText: '随便写两个角色' },
+        context,
+      ),
+    /角色候选/,
+  );
+  const result = await productionToolRegistry.invoke(
+    'generate_characters',
+    '1',
+    {
+      novelId: 'novel-1',
+      chapterId: 'chapter-1',
+      candidateText: JSON.stringify({ characters: [{ name: '林默' }] }),
+    },
+    context,
+  );
+  assert.equal(result.ok, true);
+  assert.equal((result as { artifactType?: string }).artifactType, 'character_candidates');
+});
+
 test('registry validates allowlist, permission, schema and scope before invoking handler', async () => {
   let calls = 0;
   const registry = new ToolRegistry([

@@ -35,7 +35,7 @@ const PROVIDER: &str = "deepseek-official";
 const DEFAULT_MODEL: &str = "deepseek-chat";
 const SESSION_TIMEOUT: Duration = Duration::from_secs(90);
 const ALLOWED_TOOLS: &str =
-    "novel.read_context,chapter.read_outline,search_memory,generate_chapter";
+    "novel.read_context,chapter.read_outline,search_memory,generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
 const EXPECTED_PUBLIC_TOOLS: [&str; 4] = [
     "mcp__novel__chapter_read_outline_68634582eb55",
     "mcp__novel__generate_chapter",
@@ -538,7 +538,7 @@ fn persistent_carrier_same_process_followup_model_switch_and_allowlist() {
         .get("composition")
         .and_then(Value::as_array)
         .expect("health composition");
-    assert_eq!(composition.len(), 6);
+    assert_eq!(composition.len(), 7);
     assert!(composition
         .iter()
         .all(|entry| entry.get("status").and_then(Value::as_str) == Some("loaded")));

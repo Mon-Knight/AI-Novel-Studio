@@ -20,6 +20,10 @@ import {
   type CurrentPluginProjection,
 } from '../../services/conversation/currentPluginService';
 import { ArtifactCard, PluginPanel, ToolEventRow } from './WorkbenchComponents';
+import {
+  novelContextCompressionProvider,
+  type NovelContextCompressionCandidate,
+} from '../../services/context/novelContextCompressionProvider';
 import '../../styles/workbench.css';
 
 function statusLabel(status: string): string {
@@ -62,6 +66,9 @@ function WorkbenchPage() {
   const [loading, setLoading] = useState(true);
   const [composerError, setComposerError] = useState('');
   const [decisionBusyCardId, setDecisionBusyCardId] = useState('');
+  const [compressionCandidate, setCompressionCandidate] =
+    useState<NovelContextCompressionCandidate | null>(null);
+  const [compressionBusy, setCompressionBusy] = useState(false);
   const [runningConversationIds, setRunningConversationIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -269,6 +276,34 @@ function WorkbenchPage() {
     if (selectedConversationId) taskSessionAdapter.cancel(selectedConversationId);
   }
 
+  async function proposeContextCompression() {
+    if (!selectedNovelId) return;
+    setCompressionBusy(true);
+    setComposerError('');
+    try {
+      const candidate = await novelContextCompressionProvider.propose(selectedNovelId);
+      setCompressionCandidate(candidate);
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : '压缩小说上下文失败');
+    } finally {
+      setCompressionBusy(false);
+    }
+  }
+
+  async function applyContextCompression() {
+    if (!compressionCandidate) return;
+    setCompressionBusy(true);
+    setComposerError('');
+    try {
+      await novelContextCompressionProvider.apply(compressionCandidate);
+      setCompressionCandidate(null);
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : '应用压缩上下文失败');
+    } finally {
+      setCompressionBusy(false);
+    }
+  }
+
   async function decideArtifact(
     artifact: ConversationArtifactCard,
     decision: ArtifactDecisionKind,
@@ -431,6 +466,14 @@ function WorkbenchPage() {
                 </span>
                 <button
                   className="btn btn-secondary btn-sm"
+                  data-testid="workbench-compress-context"
+                  disabled={compressionBusy}
+                  onClick={() => void proposeContextCompression()}
+                >
+                  压缩上下文
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
                   data-testid="workbench-current-plugins"
                   onClick={() => setShowPlugins(true)}
                 >
@@ -443,7 +486,7 @@ function WorkbenchPage() {
               data-testid="workbench-message-list"
               aria-live="polite"
             >
-              {bundle.turns.length === 0 && (
+              {bundle.turns.length === 0 && !compressionCandidate && (
                 <div className="workbench-intro">
                   <div className="workbench-intro-icon">✦</div>
                   <h3>从一个创作目标开始</h3>
@@ -451,6 +494,49 @@ function WorkbenchPage() {
                     例如“生成下一章”或“审计前十章人物一致性”。运行中的工具和候选产物会直接出现在这里。
                   </p>
                 </div>
+              )}
+              {compressionCandidate && (
+                <article
+                  className="workbench-artifact-card"
+                  data-testid="workbench-compression-card"
+                  data-valid={compressionCandidate.valid ? 'true' : 'false'}
+                >
+                  <div className="workbench-artifact-heading">
+                    <div>
+                      <div className="workbench-eyebrow">小说上下文压缩候选</div>
+                      <h3>
+                        {compressionCandidate.providerId}@{compressionCandidate.version}
+                      </h3>
+                    </div>
+                    <span className="workbench-artifact-status">
+                      {compressionCandidate.valid ? '校验通过' : '覆盖率不足'}
+                    </span>
+                  </div>
+                  <p>
+                    revision {compressionCandidate.sourceRevision} · token{' '}
+                    {compressionCandidate.coverage.tokens.used}/
+                    {compressionCandidate.coverage.tokens.budget}
+                  </p>
+                  <pre>{compressionCandidate.compressedText}</pre>
+                  <div className="workbench-artifact-actions">
+                    <button
+                      className="btn btn-primary btn-sm"
+                      data-testid="workbench-compression-apply"
+                      disabled={compressionBusy || !compressionCandidate.valid}
+                      onClick={() => void applyContextCompression()}
+                    >
+                      确认应用压缩
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      data-testid="workbench-compression-dismiss"
+                      disabled={compressionBusy}
+                      onClick={() => setCompressionCandidate(null)}
+                    >
+                      放弃
+                    </button>
+                  </div>
+                </article>
               )}
               {bundle.turns.map((turn) => {
                 const run = bundle.runs.find((item) => item.turnId === turn.turnId);

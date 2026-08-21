@@ -43,7 +43,7 @@ interface LeaseGrant {
   token: string;
 }
 
-const REGISTRY_HASH = '3322a2e3b9eff1053c21bf2eccb61bc0ad17596ab03f2668342ce1a94dc5f006';
+const REGISTRY_HASH = '6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579';
 
 describe('chapter readiness planner runtime', () => {
   it('runs the six local tools once and persists the completed plan without network access', async () => {

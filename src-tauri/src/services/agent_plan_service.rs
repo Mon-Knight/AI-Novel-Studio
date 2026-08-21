@@ -19,7 +19,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub const PRODUCTION_TOOL_REGISTRY_HASH: &str =
-    "846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871";
+    "6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579";
 const GENERAL_OUTPUT_SCHEMA_HASH: &str =
     "b0796da35365057202a2eb62644b0659796fc96fcb055af1bef4d25e5f48378d";
 const NOVEL_INPUT_SCHEMA_HASH: &str =
