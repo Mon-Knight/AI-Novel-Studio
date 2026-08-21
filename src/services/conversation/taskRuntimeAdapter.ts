@@ -2,6 +2,7 @@ import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import { taskConversationService } from './taskConversationService';
 import { captureTaskModelSnapshot } from './taskModelSnapshot';
 import { WORKBENCH_TOOLS } from './currentPluginService';
+import { selectCandidateTool } from './taskGoalRouting';
 import type { TaskModelSnapshot, TaskRun, ToolCallEvent } from '../../types/conversation';
 import type { ToolInvocationContext, ToolResult } from '../../types/toolRegistry';
 
@@ -59,36 +60,6 @@ function buildFallbackCandidate(goal: string, context: Record<string, unknown>):
     `已读取 ${Object.keys(context).length} 类只读上下文。`,
     '这是确定性 fallback 预览，不是正式 ResultArtifact，也不会写入章节正文。',
   ].join('\n\n');
-}
-
-function selectCandidateTool(
-  goal: string,
-  chapterId?: string,
-): { name: string; artifactType: string } | undefined {
-  if (!chapterId) return undefined;
-  const text = goal.toLowerCase();
-  const generating = /生成|候选|扩展|建议|generate|expand|suggest/.test(text);
-  if (/大纲|outline/.test(text)) return { name: 'generate_outline', artifactType: 'outline' };
-  if (/润色|polish/.test(text)) return { name: 'polish_chapter', artifactType: 'chapter_text' };
-  if (/质量|审计|检查|一致|quality/.test(text) && !generating) {
-    return { name: 'check_quality', artifactType: 'quality_report' };
-  }
-  if (/角色|人物|character/.test(text)) {
-    return { name: 'generate_characters', artifactType: 'character_candidates' };
-  }
-  if (/设定|世界|setting/.test(text)) {
-    return { name: 'expand_settings', artifactType: 'setting_candidates' };
-  }
-  if (/事件|剧情|event/.test(text)) {
-    return { name: 'suggest_events', artifactType: 'event_candidates' };
-  }
-  if (/质量|审计|检查|一致|quality/.test(text)) {
-    return { name: 'check_quality', artifactType: 'quality_report' };
-  }
-  if (/总结|摘要|summar/.test(text)) {
-    return { name: 'summarize_chapter', artifactType: 'chapter_summary' };
-  }
-  return { name: 'generate_chapter', artifactType: 'chapter_text' };
 }
 
 function buildStructuredFallback(

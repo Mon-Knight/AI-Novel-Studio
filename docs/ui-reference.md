@@ -7,7 +7,7 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：第 1～17 节记录 v3.2.1 及更早版本的页面基线。v3.3.0 及后续版本的目标 UI 以第 18 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.3.0 实施分支已落地首阶段工作台；确认、审阅与旧 UI 收敛仍是后续版本。
+> 文档演进说明：第 1～17 节记录 v3.2.1 及更早版本的页面基线。v3.3.0 及后续版本的目标 UI 以第 18 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板生产入口收敛。
 
 ---
 
@@ -1382,7 +1382,8 @@ AI 任务记录显示
 - 小说作品页保留并优化为项目管理入口，作品详情不再显示“待确认产物”。
 - 原写作工作台改为章节人工审阅/编辑器，默认只读，显式进入编辑、保存和采用。
 - 删除草稿版本查看入口。
-- 原右侧 AI 面板仅在相应能力已经迁入对话任务、验证等价且具备回退路径后分阶段移除；保留必要的正文阅读设置。
+- 生产写作工作台右侧栏只保留保存、草稿、章节准备、总结、排版和采用；生成/大纲/角色/事件/风格/检查/润色入口已迁入创作工作台任务对话。
+- 桌面 E2E 仍可通过 `VITE_AI_NOVEL_STUDIO_E2E` 打开既有作业链路面板，作为回退验证，不作为产品主入口。
 
 ## 18.7 当前插件只读视图
 

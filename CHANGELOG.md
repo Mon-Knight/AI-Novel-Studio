@@ -31,8 +31,8 @@
 
 ### 验证
 
-- `npm run test:workbench`：47 项通过（含 11 个工作台工具投影、按目标选择领域候选工具、角色/事件 Safe Apply、上下文压缩版本与回滚）。
-- `npm run lint:ci`、`npm run build` 通过。
+- `npm run test:workbench`：49 项通过（含 11 个工作台工具投影、按目标选择领域候选工具、跨任务冲突提示、角色/事件 Safe Apply、上下文压缩版本与回滚）。
+- `npm run lint:ci`、`npm run build`、`npm run test:docs-sync`、`npm run test:version-sync` 通过。
 - `cargo test --locked start_path_followup_reuses_session_and_resumes_after_child_exit` 通过。
 - `cargo test --locked start_path_two_conversations_cancel_one_without_stopping_the_other` 通过。
 - `cargo test --locked available_carrier_is_not_reported_loaded_before_runtime_health` 通过。
@@ -68,6 +68,8 @@
 - 工作台增加「压缩上下文」预览与确认应用入口。
 - 压缩候选在对话中发布为 `generic_json` ResultArtifact 卡片（桌面）或浏览器投影卡片，确认后走既有 `request_apply` / Safe Apply 路径。浏览器结构化应用不再一律 `BROWSER_APPLY_UNSUPPORTED`。
 - 浏览器 fallback 按任务目标选择领域候选工具（大纲/角色/事件/设定/润色/质量/总结），并输出可通过候选校验的结构化预览；无章节绑定时仍只做只读检索，不伪造 DSH 或 ResultArtifact。
+- 工作台输入区提供快捷模板，并在同一小说已有写入类任务运行时给出跨任务目标冲突提示（不阻断并发）。
+- 风格分析/伏笔审计走质量报告候选，风格润色走 `polish_chapter`；伏笔候选映射为事件候选。
 
 ## v3.2.1 (2026-08-19) - 发布资产 URL 热修复
 

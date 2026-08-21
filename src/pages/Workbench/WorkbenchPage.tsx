@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { Chapter } from '../../types/chapter';
 import type { Novel } from '../../types/novel';
 import type {
   ArtifactDecisionKind,
@@ -24,7 +25,17 @@ import {
   novelContextCompressionProvider,
   type NovelContextCompressionCandidate,
 } from '../../services/context/novelContextCompressionProvider';
+import { findTaskTargetConflict } from '../../services/conversation/taskGoalRouting';
 import '../../styles/workbench.css';
+
+const TASK_TEMPLATES = [
+  { id: 'generate-chapter', label: '生成下一章', goal: '生成下一章' },
+  { id: 'audit-chapter', label: '审计章节', goal: '审计人物一致性' },
+  { id: 'expand-outline', label: '完善大纲', goal: '扩展本章大纲' },
+  { id: 'check-characters', label: '检查人物', goal: '检查人物一致性' },
+  { id: 'expand-settings', label: '整理设定', goal: '生成世界设定候选' },
+  { id: 'polish-chapter', label: '润色候选', goal: '润色本章正文' },
+] as const;
 
 function statusLabel(status: string): string {
   return (
@@ -57,6 +68,7 @@ function WorkbenchPage() {
   const [selectedConversationId, setSelectedConversationId] = useState('');
   const [bundle, setBundle] = useState<TaskConversationBundle | null>(null);
   const [chapterId, setChapterId] = useState<string | undefined>();
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const [draft, setDraft] = useState('');
   const [selectedModel, setSelectedModel] = useState<TaskModelSnapshot>(() =>
     captureTaskModelSnapshot(),
@@ -76,6 +88,32 @@ function WorkbenchPage() {
   const selectedConversationRef = useRef('');
 
   const selectedNovel = novels.find((novel) => novel.id === selectedNovelId);
+  const selectedChapter = chapters.find((chapter) => chapter.id === chapterId);
+  const targetConflict = useMemo(
+    () =>
+      findTaskTargetConflict({
+        novelId: selectedNovelId,
+        chapterId,
+        conversationId: selectedConversationId,
+        goal: draft,
+        peers: conversations
+          .filter((conversation) => runningConversationIds.has(conversation.conversationId))
+          .map((conversation) => ({
+            conversationId: conversation.conversationId,
+            novelId: conversation.novelId,
+            title: conversation.title,
+            chapterId,
+          })),
+      }),
+    [
+      chapterId,
+      conversations,
+      draft,
+      runningConversationIds,
+      selectedConversationId,
+      selectedNovelId,
+    ],
+  );
 
   const selectNovel = useCallback((novelId: string) => {
     selectedNovelRef.current = novelId;
@@ -140,8 +178,9 @@ function WorkbenchPage() {
           return;
         }
         selectNovel(first.id);
-        const chapters = await chapterRepository.getByNovelId(first.id);
-        setChapterId(first.currentChapterId ?? chapters[0]?.id);
+        const novelChapters = await chapterRepository.getByNovelId(first.id);
+        setChapters(novelChapters);
+        setChapterId(first.currentChapterId ?? novelChapters[0]?.id);
         await loadConversations();
         setLoading(false);
       })
@@ -163,9 +202,10 @@ function WorkbenchPage() {
 
   useEffect(() => {
     if (!selectedNovelId) return;
-    void chapterRepository.getByNovelId(selectedNovelId).then((chapters) => {
+    void chapterRepository.getByNovelId(selectedNovelId).then((novelChapters) => {
       const current = novels.find((novel) => novel.id === selectedNovelId);
-      setChapterId(current?.currentChapterId ?? chapters[0]?.id);
+      setChapters(novelChapters);
+      setChapterId(current?.currentChapterId ?? novelChapters[0]?.id);
     });
   }, [novels, selectedNovelId]);
 
@@ -455,6 +495,11 @@ function WorkbenchPage() {
               <div>
                 <div className="workbench-eyebrow">{selectedNovel?.title || '小说项目'}</div>
                 <h2>{bundle.conversation.title}</h2>
+                <p className="workbench-chapter-target" data-testid="workbench-chapter-target">
+                  {selectedChapter
+                    ? `章节目标：${selectedChapter.title}`
+                    : '未绑定章节：只读检索，不生成候选'}
+                </p>
               </div>
               <div className="workbench-task-header-actions">
                 <span
@@ -667,6 +712,29 @@ function WorkbenchPage() {
                   {composerError}
                 </div>
               )}
+              {targetConflict && (
+                <div
+                  className="workbench-conflict-hint"
+                  data-testid="workbench-conflict-hint"
+                  role="status"
+                >
+                  {targetConflict.message}
+                </div>
+              )}
+              <div className="workbench-template-row" data-testid="workbench-task-templates">
+                {TASK_TEMPLATES.map((template) => (
+                  <button
+                    type="button"
+                    className="workbench-template-chip"
+                    key={template.id}
+                    data-testid={`workbench-template-${template.id}`}
+                    disabled={selectedConversationRunning}
+                    onClick={() => setDraft(template.goal)}
+                  >
+                    {template.label}
+                  </button>
+                ))}
+              </div>
               <div className="workbench-input-row">
                 <textarea
                   data-testid="workbench-composer-input"
