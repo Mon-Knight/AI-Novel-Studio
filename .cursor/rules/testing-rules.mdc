@@ -6,33 +6,49 @@ alwaysApply: true
 
 # Testing Rules
 
-## 强制验证命令（每次修改后必须运行）
+## 验证分层
+
+### 纯文档
 
 ```powershell
-# 1. Rust 编译检查
-cargo check
-
-# 2. 前端构建
-npm run build
-
-# 3. Tauri 完整构建
-npm run tauri build
-
-# 4. Git 状态
-git status
+npm run test:docs-sync
+npm run test:version-sync   # 涉及版本/路线时
+npx prettier --check <changed-docs>
+git diff --check
 ```
 
-以上命令 **全部通过** 才能提交代码。
+### 前端 / TypeScript
+
+```powershell
+<相关动态测试>
+npm run lint:ci
+npm run build
+```
+
+### Rust / SQLite
+
+```powershell
+cd src-tauri
+cargo check
+<相关 cargo test>
+cd ..
+```
+
+### 发布、Tauri 或 DSH 载体
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
+```
+
+完整桌面 E2E、Tauri 构建和 clean working tree 是发布门禁；纯文档或局部代码任务按影响范围验证，不伪造无关门禁结果。
 
 ## 验证检查清单
 
-- [ ] `cargo check` 通过，无编译错误
-- [ ] `npm run build` 通过，无 TS 类型错误
-- [ ] `npm run tauri build` 通过
-- [ ] `git status` 显示 working tree clean
-- [ ] 所有页面路由可访问
-- [ ] 写作工作台正常渲染
-- [ ] 右侧工具栏正常交互
+- [ ] 与改动直接相关的动态测试通过
+- [ ] 前端改动的 lint/build 通过
+- [ ] Rust 改动的 cargo check/相关测试通过
+- [ ] 发布任务的统一验证入口通过且工作树 clean
+- [ ] v3.3.0+ 创作工作台或原章节审阅编辑器按目标版本正常渲染
 - [ ] 无控制台报错
 
 ## 构建失败处理

@@ -45,6 +45,9 @@ export interface EditorAreaProps {
   retryingContent?: boolean;
   onOpenDraftHistory?: () => void;
   onBackToChapters?: () => void;
+  reviewLocked?: boolean;
+  onUnlockReview?: () => void;
+  onBeforeAdopt?: (draftId: string) => Promise<void>;
 }
 
 export interface EditorAreaHandle {

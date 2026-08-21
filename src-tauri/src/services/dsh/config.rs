@@ -10,6 +10,97 @@
 /// The production composition template; `{CHECKOUT}`, `{GATEWAY_BIN}` and
 /// `{GATEWAY_DB}` are replaced at render time.
 const TEMPLATE: &str = include_str!("../../../../scripts/dsh/cordis-template.yml");
+const TASK_SERVER_TEMPLATE: &str =
+    include_str!("../../../../scripts/dsh/ans-task-server-template.mjs");
+
+/// One entry in the immutable Cordis composition used by the conversational
+/// workbench.  `required_paths` are availability checks only: a present file
+/// never means the plugin was initialized or is healthy.
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeCompositionSpec {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub required_paths: &'static [&'static str],
+    pub capabilities: &'static [&'static str],
+}
+
+const TASK_SERVER_PATHS: &[&str] = &[
+    "packages/sdk/protocol/lib/index.js",
+    "packages/core/agent/lib/index.js",
+    "packages/llm/llm/lib/index.js",
+    "packages/core/session/lib/index.js",
+];
+const DEEPSEEK_PATHS: &[&str] = &["packages/llm/llm-deepseek/lib/index.js"];
+const AGENT_SPINE_PATHS: &[&str] = &["packages/examples/agent-spine-demo/lib/index.js"];
+const SESSION_PATHS: &[&str] = &["packages/session/session-persistence-jsonl/lib/index.js"];
+const TOKEN_METER_PATHS: &[&str] = &["packages/llm/token-meter/lib/index.js"];
+const COMPACTION_PATHS: &[&str] = &["packages/compaction/compaction-basic/lib/index.js"];
+const MCP_PATHS: &[&str] = &["packages/mcp/mcp-client/lib/index.js"];
+
+/// Static identity of the rendered composition. Runtime state is supplied by
+/// the adapter's `runtime/health` response and must not be inferred from this
+/// list.
+pub const WORKBENCH_COMPOSITION: &[RuntimeCompositionSpec] = &[
+    RuntimeCompositionSpec {
+        id: "sdk-jsonrpc-server",
+        name: "ANS Task Runtime Adapter",
+        kind: "runtime",
+        required_paths: TASK_SERVER_PATHS,
+        capabilities: &[
+            "initialize",
+            "persistent-session",
+            "resume",
+            "scoped-cancel",
+        ],
+    },
+    RuntimeCompositionSpec {
+        id: "llm-deepseek",
+        name: "DeepSeek Provider",
+        kind: "model",
+        required_paths: DEEPSEEK_PATHS,
+        capabilities: &["provider-directory", "model-directory", "streaming"],
+    },
+    RuntimeCompositionSpec {
+        id: "agent-spine",
+        name: "Harness Agent Spine",
+        kind: "runtime",
+        required_paths: AGENT_SPINE_PATHS,
+        capabilities: &["agent", "turn", "step", "tool-pipeline"],
+    },
+    RuntimeCompositionSpec {
+        id: "sessions",
+        name: "Session Persistence",
+        kind: "storage",
+        required_paths: SESSION_PATHS,
+        capabilities: &["append-only-events", "flush", "resume"],
+    },
+    RuntimeCompositionSpec {
+        id: "token-meter",
+        name: "Token Meter",
+        kind: "runtime",
+        required_paths: TOKEN_METER_PATHS,
+        capabilities: &["usage-metering"],
+    },
+    RuntimeCompositionSpec {
+        id: "compaction-basic",
+        name: "Session Compaction",
+        kind: "runtime",
+        required_paths: COMPACTION_PATHS,
+        capabilities: &["session-compaction", "auto-compact"],
+    },
+    RuntimeCompositionSpec {
+        id: "mcp-novel",
+        name: "Novel MCP Gateway",
+        kind: "tool",
+        required_paths: MCP_PATHS,
+        capabilities: &[
+            "scoped-tool-registry",
+            "read-only-context",
+            "candidate-generation",
+        ],
+    },
+];
 
 /// Percent-encodes a path for use inside a file:// URL: unreserved chars,
 /// ':' and '/' stay literal; everything else (spaces, non-ASCII, %, #, ?) is
@@ -36,6 +127,35 @@ pub fn cordis_yml(checkout: &str, gateway_bin: &str, gateway_db: &str) -> String
         .replace("{CHECKOUT}", &checkout)
         .replace("{GATEWAY_BIN}", &gateway_bin)
         .replace("{GATEWAY_DB}", &gateway_db)
+}
+
+/// Renders the task-workbench composition with the ANS-owned thin JSON-RPC
+/// plugin. The rest of the graph remains the pinned Harness Bundle/Profile
+/// composition; only the protocol surface is replaced so it can call public
+/// `agents.create/resume` and retain a live Agent handle.
+pub fn task_cordis_yml(
+    checkout: &str,
+    gateway_bin: &str,
+    gateway_db: &str,
+    task_server: &std::path::Path,
+) -> String {
+    let encoded_checkout = url_encode_path(&checkout.replace('\\', "/"));
+    let official_server = format!("file:///{encoded_checkout}/packages/sdk/server/lib/index.js");
+    let task_server = format!(
+        "file:///{}",
+        url_encode_path(&task_server.to_string_lossy().replace('\\', "/"))
+    );
+    cordis_yml(checkout, gateway_bin, gateway_db).replace(&official_server, &task_server)
+}
+
+/// Materializes the ANS protocol plugin beside a task worker. All imports are
+/// absolute URLs into the verified fixed carrier, so no ambient node_modules
+/// or machine-global package can change the runtime composition.
+pub fn task_server_script(checkout: &str, source_commit: &str, protocol: &str) -> String {
+    TASK_SERVER_TEMPLATE
+        .replace("{CHECKOUT}", &url_encode_path(&checkout.replace('\\', "/")))
+        .replace("{SOURCE_COMMIT}", source_commit)
+        .replace("{PROTOCOL}", protocol)
 }
 
 /// Pure filter: keeps a checkout path only when it names an existing directory.
@@ -136,9 +256,55 @@ mod tests {
         assert!(yaml.contains("file:///F:/DeepSeek%20Harness/packages/sdk/server/lib/index.js"));
         assert!(yaml.contains("command: 'F:/app/gateway.exe'"));
         assert!(yaml.contains("args: ['--db', 'F:/app/novel.db']"));
+        assert!(yaml.contains("toolBash: false"));
+        assert!(!yaml.contains("enableRunInBackground"));
         assert!(!yaml.contains("{CHECKOUT}"));
         assert!(!yaml.contains("{GATEWAY_BIN}"));
         assert!(!yaml.contains("{GATEWAY_DB}"));
+    }
+
+    #[test]
+    fn renders_persistent_task_server_from_fixed_carrier() {
+        let yaml = task_cordis_yml(
+            "F:\\DeepSeek Harness",
+            "F:\\app\\gateway.exe",
+            "F:\\app\\novel.db",
+            std::path::Path::new("F:\\应用 目录\\ans-task-server.mjs"),
+        );
+        assert!(
+            yaml.contains("file:///F:/%E5%BA%94%E7%94%A8%20%E7%9B%AE%E5%BD%95/ans-task-server.mjs")
+        );
+        assert!(!yaml.contains("packages/sdk/server/lib/index.js"));
+
+        let script = task_server_script(
+            "F:\\DeepSeek Harness",
+            "47f943859bef60e4160492346772ded9b24f765a",
+            "ans_task_session_v2",
+        );
+        assert!(script.contains("file:///F:/DeepSeek%20Harness/"));
+        assert!(script.contains("47f943859bef60e4160492346772ded9b24f765a"));
+        assert!(script.contains("ans_task_session_v2"));
+        assert!(!script.contains("{CHECKOUT}"));
+        assert!(!script.contains("{SOURCE_COMMIT}"));
+        assert!(!script.contains("{PROTOCOL}"));
+    }
+
+    #[test]
+    fn runtime_composition_manifest_matches_the_rendered_template() {
+        let ids = WORKBENCH_COMPOSITION
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(ids.len(), WORKBENCH_COMPOSITION.len());
+        for entry in WORKBENCH_COMPOSITION {
+            assert!(
+                TEMPLATE.contains(&format!("- id: {}", entry.id)),
+                "composition entry missing from template: {}",
+                entry.id
+            );
+            assert!(!entry.required_paths.is_empty());
+            assert!(!entry.capabilities.is_empty());
+        }
     }
 
     #[test]

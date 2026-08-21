@@ -48,12 +48,11 @@ AI Novel Studio 是：
 - AI 任务记录
 - 风格方案 / 输出控制方案
 
-### Agent 系统（预留）
-- Agent Tasks
-- Tool Calling
-- Planner
-- Long-term Memory
-- Multi-Agent Workflow
+### Agent 系统（已实现基础，v3.3.0+ 演进）
+- 已有 Planner、Tool Registry、Result Artifact、Safe Apply、Memory、Multi-Agent 与固定 DSH 载体
+- v3.3.0+：Novel → TaskConversation → Turn / Run / Tool Event
+- 固定 DSH Headless Worker 通过 ANS Adapter 接入，不成为 SQLite、预算或最终采用权威
+- Runtime Registry 只读投影功能、模型和其他当前插件，不扩展插件管理
 
 ## 目录结构约束
 
@@ -72,3 +71,4 @@ AI Novel Studio 是：
 - 禁止在组件中直接写 SQL
 - 禁止在组件中直接写大量 Prompt
 - 禁止模块间循环依赖
+- DSH/Cordis 内部 API 不得直接成为 React、SQLite 或长期领域契约

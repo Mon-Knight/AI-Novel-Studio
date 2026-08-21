@@ -8,8 +8,9 @@ pub mod autonomous_story_service;
 pub mod content_transaction_service;
 #[cfg(test)]
 mod content_transaction_service_tests;
-pub mod dsh;
+pub mod conversation_service;
 pub mod draft_service;
+pub mod dsh;
 pub mod memory_service;
 pub mod multi_agent_service;
 pub mod placement_service;

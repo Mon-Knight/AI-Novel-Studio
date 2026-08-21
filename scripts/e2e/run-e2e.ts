@@ -50,6 +50,7 @@ const allSpecs = [
   'chapter-context-persistence.spec.ts',
   'chapter-readiness-planner.spec.ts',
   'story-assets-transaction.spec.ts',
+  'conversational-workbench.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 

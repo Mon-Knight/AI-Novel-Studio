@@ -1,4 +1,5 @@
-export type ToolJsonSchemaType = 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
+export type ToolJsonSchemaType =
+  'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
 
 export interface ToolJsonSchema {
   type?: ToolJsonSchemaType;
@@ -17,11 +18,7 @@ export interface ToolJsonSchema {
 }
 
 export type ToolPermission =
-  | 'novel.read'
-  | 'chapter.read'
-  | 'style.read'
-  | 'verification.execute'
-  | 'business.write';
+  'novel.read' | 'chapter.read' | 'style.read' | 'verification.execute' | 'business.write';
 
 export type ToolSideEffect = 'none' | 'create' | 'update' | 'delete' | 'external';
 export type ToolConfirmationPolicy = 'never' | 'user_confirmation';
@@ -62,10 +59,26 @@ export interface ToolInvocationContext {
     planHash: string;
   };
   dryRun?: boolean;
+  modelSnapshot?: {
+    providerId: string;
+    modelId: string;
+    runtimeMode: 'mock' | 'api';
+    baseUrl?: string;
+    capabilities?: string[];
+    options?: Record<string, unknown>;
+    pricing?: {
+      inputPricePerMillionTokens?: number;
+      outputPricePerMillionTokens?: number;
+    };
+  };
+  signal?: AbortSignal;
 }
 
 export interface ToolResult<T = unknown> {
   ok: boolean;
+  toolVersion?: string;
+  artifactType?: string;
+  candidateOnly?: boolean;
   data?: T;
   error?: string;
   source?: string;

@@ -72,11 +72,11 @@ Agent 开始前必须先读：
 
 ### 步骤 5：定义测试要求
 
-- cargo check
-- npm run build
-- npm run tauri build
-- 脚本验证
-- git status
+- 文档任务：docs/version sync、Prettier、diff/range 检查
+- 前端任务：相关动态测试、`npm run lint:ci`、`npm run build`
+- Rust/SQLite 任务：`cargo check`、相关测试，版本验收时完整 `cargo test`
+- Tauri/DSH payload/发布任务：真实桌面 E2E、`npm run tauri:build` 或统一发布验证入口
+- 所有任务：`git status --short` 确认变更范围；clean working tree 只作为提交/发布终态要求
 
 ### 步骤 6：定义完成标准
 
@@ -94,45 +94,59 @@ Agent 完成后必须按此格式输出。
 
 ```markdown
 # AI Novel Studio vX.X.X
+
 # 任务标题
 
 ---
 
 ## 一、版本定位
+
 ...
 
 ## 二、本次版本号
+
 vX.X.X
 
 ## 三、本次核心目标
+
 ...
 
 ## 四、本次禁止事项（非常重要）
+
 本次：
+
 - 不...
 - 不...
 
 本次只允许：
+
 - ...
 
 ## 五、开始前必须阅读
+
 Agent 开始前必须阅读：
+
 - AGENTS.md
 - ...
 
 ## 六、必须新增/修改的文件
+
 ...
 
 ## 七、详细实现要求
+
 ...
 
 ## 八、测试要求
+
 ...
 
 ## 九、完成标准
+
 ...
 
 ## 十、完成汇报格式
+
 ...
 ```
 

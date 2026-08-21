@@ -4,7 +4,7 @@ import { assertCleanDiagnostics, bridgeDiagnostics, waitForTestId } from './help
 describe('desktop startup', () => {
   it('opens a healthy isolated Tauri workspace', async () => {
     await waitForTestId('app-shell');
-    await waitForTestId('project-list');
+    await waitForTestId('workbench-no-projects');
     const bridgeProbe = await browser.execute(() => {
       const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: unknown })
         .__AI_NOVEL_STUDIO_E2E__;

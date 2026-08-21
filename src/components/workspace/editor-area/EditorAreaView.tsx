@@ -17,6 +17,8 @@ interface EditorAreaViewProps {
   retryingContent?: boolean;
   onOpenDraftHistory?: EditorAreaProps['onOpenDraftHistory'];
   onBackToChapters?: EditorAreaProps['onBackToChapters'];
+  reviewLocked?: boolean;
+  onUnlockReview?: () => void;
 }
 
 const DRAFT_SOURCE_LABELS: Record<string, string> = {
@@ -38,6 +40,8 @@ export default function EditorAreaView({
   retryingContent,
   onOpenDraftHistory,
   onBackToChapters,
+  reviewLocked = false,
+  onUnlockReview,
 }: EditorAreaViewProps) {
   if (!chapter) {
     return (
@@ -318,6 +322,18 @@ export default function EditorAreaView({
         />
       ) : (
         <div className="editor-paper">
+          {reviewLocked && (
+            <div className="editor-review-banner" data-testid="chapter-review-lock">
+              <span>当前为对话确认后的审阅模式：打开不等于保存，保存不等于采用。</span>
+              <button
+                className="btn btn-secondary btn-sm"
+                data-testid="chapter-review-unlock"
+                onClick={() => onUnlockReview?.()}
+              >
+                进入编辑
+              </button>
+            </div>
+          )}
           <textarea
             ref={document.textareaRef}
             className="editor-textarea"
@@ -330,6 +346,8 @@ export default function EditorAreaView({
             data-word-count={countTextWords(document.content)}
             data-dirty={document.isDirty ? 'true' : 'false'}
             data-saving={document.saving ? 'true' : 'false'}
+            data-review-locked={reviewLocked ? 'true' : 'false'}
+            readOnly={reviewLocked}
             value={document.content}
             onChange={(event) => document.handleContentChange(event.target.value)}
             onSelect={document.handleSelectionChange}

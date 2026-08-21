@@ -282,6 +282,21 @@ export const novelRepository = {
       'ai_novel_studio_autonomous_story_plans',
     ];
     for (const key of keys) purge(key);
+    try {
+      const taskState = lsGet<{
+        bundles?: Array<{ conversation?: { novelId?: string } }>;
+      }>('ai_novel_studio_task_conversations');
+      if (taskState?.bundles) {
+        const bundles = taskState.bundles.filter(
+          (bundle) => bundle.conversation?.novelId !== novelId,
+        );
+        if (bundles.length !== taskState.bundles.length) {
+          lsSet('ai_novel_studio_task_conversations', { bundles });
+        }
+      }
+    } catch {
+      /* ignore malformed browser task state; the next read normalizes it */
+    }
 
     await this.remove(novelId);
 

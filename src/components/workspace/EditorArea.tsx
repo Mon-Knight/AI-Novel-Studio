@@ -39,6 +39,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     onApplyTextRejected: props.onApplyTextRejected,
     commandRequest: props.commandRequest,
     onChapterUpdated: props.onChapterUpdated,
+    onBeforeAdopt: props.onBeforeAdopt,
   });
   const outline = useChapterOutlineEditor({
     chapter: props.chapter,
@@ -74,6 +75,8 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
       retryingContent={props.retryingContent}
       onOpenDraftHistory={props.onOpenDraftHistory}
       onBackToChapters={props.onBackToChapters}
+      reviewLocked={props.reviewLocked}
+      onUnlockReview={props.onUnlockReview}
     />
   );
 });

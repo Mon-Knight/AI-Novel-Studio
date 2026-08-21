@@ -7,6 +7,8 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
+> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0 对话式工作台事实以及后续 v3.4.0/v3.5.0 决定与压缩边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。小说继续是领域数据最高级对象。
+
 ---
 
 # 1. 文档目的
@@ -2960,3 +2962,124 @@ ai_request_reservations    request/owner、token hash、TTL、预留、单次派
 - 相同结算 hash 可幂等重放；不同 usage、owner 或 token 失败关闭。派发时间只允许从空值写入一次，结算 hash、accounted Token / 成本 / 状态和结算时间在终态后由 trigger 冻结，直接 SQL 也不能改写。
 - 未配置成对价格时 accounted cost 保持 `NULL`，并增加未定价计数，不伪装为零成本。浏览器回退对 Provider 失败和 TTL 过期采用同样的保守计量，不再只释放 reservation。
 - 三张表属于应用级治理事实，不随单个作品备份、恢复或删除而迁移。浏览器开发模式继续使用原 LocalStorage 回退，不伪造桌面全局事务。
+
+---
+
+# 40. v3.3.0+ 对话式工作台逻辑事实（首阶段已实现）
+
+完整产品与架构设计见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。首阶段实际表为 `task_conversations`、`conversation_turns`、`task_runs`、`tool_call_events` 和 `conversation_artifact_cards`，由 migration 032 创建，migration 033 补充单任务活动运行唯一性、跨聚合作用域校验、状态迁移和 JSON/身份保护，migration 034 将新卡片收口为已校验 `ResultArtifact` 的引用投影并保留旧行读取兼容；实际字段和约束以 Rust migration 与 repository 为准。
+
+首阶段的数据表是 ANS 的执行事实与 UI 投影，不取代小说、章节、Memory、ResultArtifact 或 Safe Apply 的领域权威。`conversation_artifact_cards` 在确认流程完成前只保存候选卡片投影。
+
+## 40.1 层级边界
+
+```text
+Workbench（UI 聚合，不是领域父实体）
+└─ Novel（领域最高级对象）
+   └─ TaskConversation（用户可见任务）
+      ├─ ConversationTurn
+      ├─ TaskRun
+      │  └─ ToolCallEvent
+      ├─ ResultArtifact（复用既有产物事实）
+      └─ ArtifactDecision / ReviewAuthorization
+```
+
+工作台不复制小说正式事实，也不建立跨小说共享正文上下文。每个任务必须明确绑定一个小说；跨项目操作需要拆成独立任务或由未来版本单独定义。
+
+## 40.2 `TaskConversation` 逻辑聚合
+
+至少表达：
+
+- 稳定任务 ID 与所属小说 ID；
+- 用户可见标题、任务类型或模板来源；
+- `active / waiting_user / failed / completed / archived` 等用户可见状态；
+- 任务默认 Provider/模型引用；
+- 可选目标章节、章节范围或资产范围；
+- 创建、最近活动、完成和归档时间；
+- 乐观并发 revision。
+
+归档任务只影响任务列表可见性，不删除已经应用的正式事实、产物来源或审计记录。
+
+## 40.3 `ConversationTurn` 与消息事实
+
+每个回合属于一个任务，并按单调顺序排列。需要区分：
+
+- 用户输入；
+- AI 面向用户的回复；
+- 系统可见状态通知；
+- 工具调用、错误、产物和决定的引用。
+
+工具的大型输入/输出和产物正文不重复嵌入消息。消息保存安全摘要和事实引用；流式增量可以是临时投影，但完成、失败或取消终态必须持久化。
+
+## 40.4 `TaskRun` 与模型快照
+
+每个用户回合可以产生一个或多个运行；重试创建新运行，不覆盖旧运行。运行至少冻结：
+
+- 所属任务、回合和重试关系；
+- Provider、模型 ID、能力与参数快照；
+- Runtime 类型、固定 DSH source commit、Bundle/Profile 与 Adapter 协议版本（若该运行使用 DSH）；
+- `queued / running / succeeded / failed / cancelled` 状态；
+- owner、lease、epoch 或等价 fencing 事实；
+- 开始、结束、取消和恢复信息；
+- 全局 AI reservation/settlement 引用；
+- 最终错误分类和用户可见安全摘要。
+
+任务级模型配置只影响后续运行，不能改写历史运行的模型来源。
+
+## 40.5 `ToolCallEvent`
+
+每次工具调用只属于一个运行，至少表达：
+
+- 稳定调用 ID、工具 Registry 名称和版本；
+- 目标小说/章节/资产 scope；
+- 安全参数摘要、输入 snapshot 或 hash；
+- `queued / running / succeeded / failed / cancelled / skipped` 状态；
+- 开始、结束和耗时；
+- 结果引用或公开错误分类；
+- 副作用等级和应用事务引用（若存在）。
+
+终态不可被改写为另一结果。凭据、完整隐藏提示词和模型思维链不得进入消息或工具事件。
+
+## 40.6 产物决定与审阅授权
+
+继续复用 `ResultArtifact` 作为候选产物真相源，并为用户决定表达：
+
+- 不可变产物 ID、版本/hash、目标与基线 revision；
+- `request_revision / confirm / reject / request_apply` 等决定；
+- 决定者、决定时间与幂等键；
+- 应用事务 ID、结果 revision 或冲突信息。
+
+章节正文增加逻辑上的 `ReviewAuthorization`：
+
+- 只引用一个已确认的不可变章节候选；
+- 允许该候选进入人工审阅/编辑器；
+- 授权本身不改变正式正文；
+- 显式采用时消费或引用授权，并通过既有内容事务写入；
+- 重复消费必须幂等，候选或目标基线变化时失败关闭。
+
+## 40.7 并发与不变量
+
+1. 一个任务只属于一个小说，一个运行只属于一个任务回合。
+2. 多个任务可以读取同一小说并生成不同候选。
+3. 所有可应用产物都绑定目标和基线 revision。
+4. 正式写入仍通过 SQLite 权威事务、revision CAS、幂等和审计完成。
+5. 第一个竞争产物应用成功后，其他旧基线产物进入冲突或失效，不能最后写入覆盖。
+6. 取消一个任务只影响该任务的活动运行，不改变其他任务的 lease 或状态。
+7. 普通对话消息、工具成功和“确认”状态都不能单独证明正式写入成功。
+8. 完整备份必须在引入真实表的版本中同步升级，并验证任务、运行、工具、产物决定和正式事实的引用完整性。
+
+## 40.8 当前插件只读投影
+
+“当前插件”视图读取 Runtime Plugin/Capability Registry 的即时只读投影，不建立新的 SQLite 插件表。投影至少包含稳定插件 ID、名称、功能/模型/其他分类、版本、说明、加载状态和能力摘要；前端不维护第二份插件名单。
+
+该投影只用于查看，不表达安装、卸载、启停、配置、更新、权限、市场或项目绑定。某次任务实际使用的模型、Provider、工具和版本仍由 `TaskRun` 与 `ToolCallEvent` 的冻结事实记录，不能用“当前插件”状态改写历史运行。
+
+DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection 是运行时即时视图；DSH 事件只有在经过 ANS Adapter 转换并满足既有身份、顺序和终态不变量后，才形成 `TaskRun`、`ToolCallEvent` 或消息事实。
+
+## 40.9 后续版本边界
+
+- migration 036 已建立 append-only `artifact_decisions` 与 `review_authorizations`；章节候选确认进入审阅，结构化候选经 Safe Apply 写入领域服务。
+- 章节正文不得由对话卡片直接覆盖正式正文；必须审阅授权后显式采用。
+- 小说上下文压缩候选以 ContextRecord 版本链保存，不删除旧压缩版本。
+- 旧写作工作台仍保留为审阅/编辑器；旧右侧 AI 面板在旧面板 E2E 全部迁移前继续作为回退入口。
+- 不把 Runtime Registry 只读投影扩展为插件安装、卸载、启停、配置、更新或市场。

@@ -12,6 +12,7 @@ pub mod artifacts;
 pub mod autonomous_scheduler;
 pub mod autonomous_story;
 pub mod content_transactions;
+pub mod conversations;
 pub mod drafts;
 pub mod memory;
 pub mod multi_agent;

@@ -2,10 +2,13 @@
 //!
 //! An MCP stdio server (protocol 2024-11-05, JSON-RPC 2.0 line frames) that the
 //! DSH runtime spawns via `@deepseek-ai/dsh-mcp-client` (`serverName: novel`).
-//! It opens the novel SQLite READ-ONLY and serves four read-only tools. It never
-//! runs migrations, recovery, or writes; stdout carries only protocol frames and
-//! diagnostics go to stderr. Credential-like inputs and outputs are rejected
-//! (mirrors ai_fact_security; see secret_guard.rs).
+//! It opens the novel SQLite READ-ONLY and serves scoped read tools plus a
+//! candidate-only validation sink. The sink returns model-authored candidate
+//! text for the ANS ResultArtifact pipeline; it never writes chapters or any
+//! other business fact. The gateway never runs migrations, recovery, or writes;
+//! stdout carries only protocol frames and diagnostics go to stderr.
+//! Credential-like inputs and outputs are rejected (mirrors ai_fact_security;
+//! see secret_guard.rs).
 //!
 //! Deviation note: the task book planned a package [[bin]]; a workspace member
 //! crate is used instead so the app's bin crate stays untouched. The binary
@@ -66,7 +69,10 @@ fn main() {
         return;
     }
 
-    eprintln!("novel-domain-gateway {} serving {}", SERVER_VERSION, db_path);
+    eprintln!(
+        "novel-domain-gateway {} serving {}",
+        SERVER_VERSION, db_path
+    );
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut output = stdout.lock();
@@ -93,7 +99,9 @@ fn main() {
         };
         let frame = match handle_method(method, request.get("params"), &connection) {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-            Err(message) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": message}}),
+            Err(message) => {
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": message}})
+            }
         };
         if writeln!(output, "{}", frame).is_err() {
             break;
@@ -124,24 +132,105 @@ fn handle_method(
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "missing tool name".to_string())?;
-            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let (text, is_error) = match tools::call_tool(connection, name, &arguments) {
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let result = match tools::call_tool(connection, name, &arguments) {
                 Ok(payload) => {
                     if secret_guard::contains_secret_value(&payload) {
-                        return Err("tool output contains credential-like content; rejected".to_string());
+                        return Err(
+                            "tool output contains credential-like content; rejected".to_string()
+                        );
                     }
-                    (
-                        serde_json::to_string(&payload).map_err(|error| error.to_string())?,
-                        false,
-                    )
+                    let text =
+                        serde_json::to_string(&payload).map_err(|error| error.to_string())?;
+                    if text.len() > MAX_OUTPUT_BYTES {
+                        return Err("tool output exceeds 2 MiB cap".to_string());
+                    }
+                    json!({
+                        "content": [{"type": "text", "text": text}],
+                        "structuredContent": payload,
+                        "isError": false
+                    })
                 }
-                Err(message) => (json!({"error": message}).to_string(), true),
+                Err(message) => json!({
+                    "content": [{"type": "text", "text": json!({"error": message}).to_string()}],
+                    "isError": true
+                }),
             };
-            if text.len() > MAX_OUTPUT_BYTES {
-                return Err("tool output exceeds 2 MiB cap".to_string());
-            }
-            Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
+            Ok(result)
         }
         other => Err(format!("method not found: {}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("open fixture database");
+        connection
+            .execute_batch(
+                "CREATE TABLE chapters (
+                    id TEXT PRIMARY KEY,
+                    novel_id TEXT NOT NULL,
+                    deleted_at TEXT
+                );
+                INSERT INTO chapters (id, novel_id) VALUES ('chapter-1', 'novel-1');",
+            )
+            .expect("create fixture schema");
+        connection
+    }
+
+    #[test]
+    fn successful_tool_call_exposes_matching_structured_content() {
+        let connection = fixture_connection();
+        let params = json!({
+            "name": "generate_chapter",
+            "arguments": {
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "candidateText": "雨过天青。\n城门缓缓打开。"
+            }
+        });
+        let result = handle_method("tools/call", Some(&params), &connection)
+            .expect("tool call should succeed");
+
+        assert_eq!(result["isError"], false);
+        assert_eq!(
+            result["structuredContent"]["data"]["text"],
+            "雨过天青。\n城门缓缓打开。"
+        );
+        let text_payload: Value = serde_json::from_str(
+            result["content"][0]["text"]
+                .as_str()
+                .expect("text content must be a JSON string"),
+        )
+        .expect("text content must encode the structured payload");
+        assert_eq!(text_payload, result["structuredContent"]);
+    }
+
+    #[test]
+    fn failed_tool_call_stays_an_mcp_tool_error_without_structured_content() {
+        let connection = fixture_connection();
+        let params = json!({
+            "name": "generate_chapter",
+            "arguments": {
+                "novelId": "other-novel",
+                "chapterId": "chapter-1",
+                "candidateText": "候选正文"
+            }
+        });
+        let result = handle_method("tools/call", Some(&params), &connection)
+            .expect("domain rejection is returned as an MCP tool result");
+
+        assert_eq!(result["isError"], true);
+        assert!(result.get("structuredContent").is_none());
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .expect("error content must be text")
+            .contains("chapter not found in novel"));
     }
 }

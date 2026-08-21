@@ -239,7 +239,7 @@ vi.mock('../../pages/WritingWorkspace/WritingWorkspaceView', () => ({
         <button type="button" onClick={() => actions.setChapterGoalDirty(true)}>
           dirty-goal
         </button>
-        <button type="button" onClick={() => void actions.togglePanel('check')}>
+        <button type="button" onClick={() => void actions.togglePanel('chapter-summary')}>
           toggle
         </button>
         <button type="button" onClick={() => void actions.closePanel()}>
@@ -324,7 +324,9 @@ describe('WritingWorkspacePage orchestration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'same' }));
     fireEvent.click(screen.getByRole('button', { name: 'dirty-goal' }));
     fireEvent.click(screen.getByRole('button', { name: 'toggle' }));
-    await waitFor(() => expect(mocks.actions.openSidebarTool).toHaveBeenCalledWith('check'));
+    await waitFor(() =>
+      expect(mocks.actions.openSidebarTool).toHaveBeenCalledWith('chapter-summary'),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'close' }));
     fireEvent.click(screen.getByRole('button', { name: 'content-change' }));
     fireEvent.click(screen.getByRole('button', { name: 'outline' }));

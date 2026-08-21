@@ -2,36 +2,51 @@
 
 > 适用于：所有版本的验证与测试
 > 优先级：高（每个版本必须执行）
-> 当前基线：v2.1.8
+> 当前发布基线：从 `package.json` 派生（文档审计时为 v3.2.1）
 > 适用范围：整个项目
 
 ---
 
-## 1. 发布前强制验证矩阵
+## 1. 分层验证与发布矩阵
+
+### 1.0 按变更范围选择门禁
+
+- **纯文档**：`npm run test:docs-sync`；涉及版本/路线时再运行 `npm run test:version-sync`；对改动文档执行 Prettier check、`git diff --check` 和范围检查。
+- **前端/TypeScript**：相关动态测试 + `npm run lint:ci` + `npm run build`。
+- **Rust/SQLite**：相关 Rust 动态测试 + `cargo check`；版本验收运行完整 `cargo test`。
+- **Tauri/DSH payload/打包**：增加真实桌面 E2E 和 `npm run tauri:build`。
+- **发布**：运行本节完整矩阵和统一入口，要求 clean working tree。
+
+纯文档或局部代码任务不再为了形式执行无关的完整 Tauri 构建；任何定向验证也不能替代发布矩阵。
+
+### 1.1 发布前强制验证矩阵
 
 每个版本开发完成后，必须运行以下入口并通过。任一失败都阻断发布，不得把静态检查、编译通过或单次手动演示代替动态测试。
 
-### 1.1 版本同步
+### 1.2 版本与文档同步
 
 ```powershell
 npm run test:version-sync
+npm run test:docs-sync
 ```
 
 必须核对 npm lock、Cargo manifest / lock、Tauri 配置、前端版本常量，以及 README、CHANGELOG、路线图和测试文档中的当前版本。
 
-### 1.2 前端动态测试、质量与构建
+### 1.3 前端动态测试、质量与构建
 
 ```powershell
-npm run test
-npm run lint
+npm run test:coverage
+npm run test:component-size
+npm run lint:ci
 npm run build
+npm run test:bundle-size
 ```
 
-- `npm run test` 使用 Node / tsx 动态执行生产安全模块。
-- `npm run lint` 不允许 error；warning 必须在完成汇报中如实记录。
+- `npm run test:coverage` 覆盖 Node/tsx、Vitest、性能与核心覆盖率门禁。
+- `npm run lint:ci` 不允许 error 或 warning。
 - `npm run build` 必须同时通过 TypeScript 类型检查与 Vite 生产构建。
 
-### 1.3 补充运行时回归
+### 1.4 补充运行时回归
 
 ```powershell
 npm run test:ai-tasks-delete
@@ -40,7 +55,7 @@ npm run test:project-backup
 
 `test:ai-tasks-delete` 和 `test:project-backup` 必须执行真实 Rust 行为并传播失败退出码。不得用源码字符串匹配代替组件、服务或数据库运行时测试。
 
-### 1.4 Rust / SQLite
+### 1.5 Rust / SQLite
 
 ```powershell
 cd src-tauri
@@ -51,7 +66,7 @@ cd ..
 
 必须运行完整 Rust 测试，不得只执行单个过滤器后宣称发布通过。事务回滚、归属校验、稳定 ID、迁移幂等和故障注入必须由临时 SQLite 动态测试证明。
 
-### 1.5 Windows 真实 Tauri E2E
+### 1.6 Windows 真实 Tauri E2E
 
 ```powershell
 # 冒烟只用于快速定位
@@ -61,9 +76,9 @@ npm run test:e2e:smoke
 npm run test:e2e
 ```
 
-桌面 E2E 必须使用隔离 SQLite、强制 Mock Provider、外部网络阻断和进程清理。v2.1.8 的章节上下文场景还必须覆盖保存、真实应用重启、过期持久化、再次重启及生成排除。
+桌面 E2E 必须使用隔离 SQLite、强制 Mock Provider、外部网络阻断和进程清理。涉及任务工作台时还必须覆盖多任务隔离、单任务取消、重启恢复、工具错误和产物引用重建。
 
-### 1.6 Tauri 生产构建
+### 1.7 Tauri 生产构建
 
 ```powershell
 npm run tauri:build
@@ -71,7 +86,7 @@ npm run tauri:build
 
 完整构建必须生成可发布桌面产物；E2E 专用 executable 不能替代生产构建。
 
-### 1.7 Git 状态
+### 1.8 Git 状态
 
 ```powershell
 git status --short

@@ -15,7 +15,10 @@ import {
   type EditorContentSnapshot,
 } from '../../components/workspace/EditorArea';
 import { chapterRepository } from '../../services/database/chapterRepository';
-import type { PanelType as RightSidebarPanelType } from '../../types/rightSidebar';
+import {
+  isWorkspaceAiPanelRetired,
+  type PanelType as RightSidebarPanelType,
+} from '../../types/rightSidebar';
 import { useWorkspaceDraftApplication } from '../../features/workspace/useWorkspaceDraftApplication';
 import { useWorkspaceChapterLoader } from '../../features/workspace/useWorkspaceChapterLoader';
 import { useWorkspaceCreationActions } from '../../features/workspace/useWorkspaceCreationActions';
@@ -27,6 +30,7 @@ import { getCurrentWritingContext, type WritingContext } from '../../utils/writi
 import { useRightSidebarStore } from '../../store/rightSidebarStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import WritingWorkspaceView from './WritingWorkspaceView';
+import { artifactDecisionService } from '../../services/conversation/artifactDecisionService';
 import { reportAppError } from '../../utils/reportAndPresentError';
 import '../../styles/workspace.css';
 import '../../styles/right-dock.css';
@@ -37,6 +41,11 @@ function WritingWorkspacePage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const authorizationId = searchParams.get('authorizationId')?.trim() || undefined;
+  const [reviewLocked, setReviewLocked] = useState(Boolean(authorizationId));
+  useEffect(() => {
+    setReviewLocked(Boolean(authorizationId));
+  }, [authorizationId]);
   const sidebarState = useRightSidebarStore(
     useShallow((state) => ({
       activeTool: state.activeTool,
@@ -342,11 +351,15 @@ function WritingWorkspacePage() {
 
   const handleTogglePanel = useCallback(
     async (panel: PanelType) => {
+      if (isWorkspaceAiPanelRetired(panel)) {
+        navigate('/');
+        return;
+      }
       if (activePanel === 'outline' && !(await confirmDiscardChapterGoal())) return;
       if (activePanel === 'outline') setChapterGoalDirty(false);
       openSidebarTool(panel);
     },
-    [activePanel, confirmDiscardChapterGoal, openSidebarTool],
+    [activePanel, confirmDiscardChapterGoal, navigate, openSidebarTool],
   );
 
   const handleClosePanel = useCallback(async () => {
@@ -418,6 +431,14 @@ function WritingWorkspacePage() {
     [novelId, setChapters],
   );
 
+  const consumeReviewAuthorization = useCallback(
+    async (draftId: string) => {
+      if (!authorizationId) return;
+      await artifactDecisionService.consume(authorizationId, draftId);
+    },
+    [authorizationId],
+  );
+
   return (
     <WritingWorkspaceView
       novelId={novelId}
@@ -461,6 +482,9 @@ function WritingWorkspacePage() {
       locateTarget={locateTarget}
       writingContext={writingContext}
       leaveGuardDialog={leaveGuardDialog}
+      reviewLocked={reviewLocked}
+      onUnlockReview={() => setReviewLocked(false)}
+      onBeforeAdopt={consumeReviewAuthorization}
     />
   );
 }

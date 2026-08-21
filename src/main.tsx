@@ -11,6 +11,7 @@ import { describeUnknownError } from './utils/errorMessage';
 import { initializeTheme } from './store/themeStore';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
 import { autonomousSchedulerWorker } from './services/autonomous-creation/autonomousSchedulerWorker';
+import { taskConversationService } from './services/conversation/taskConversationService';
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
@@ -91,6 +92,14 @@ async function applySystemAccentColor() {
 }
 
 async function bootstrapApplication() {
+  try {
+    await taskConversationService.recoverInterruptedRuns();
+  } catch (error) {
+    appLogger.error('[STARTUP_CONVERSATION_RECOVERY_FAILED]', {
+      message: describeUnknownError(error, '任务对话恢复检查失败'),
+    });
+  }
+
   let startupContextMigration;
   try {
     startupContextMigration = await legacyChapterContextMigrationService.migrate();

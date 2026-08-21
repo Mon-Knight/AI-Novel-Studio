@@ -1,6 +1,7 @@
 import {
   useCallback,
   useMemo,
+  useState,
   type MouseEvent,
   type MutableRefObject,
   type ReactNode,
@@ -11,6 +12,7 @@ import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummar
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import RightPanel from '../../components/right-dock/RightPanel';
 import RightToolbar from '../../components/right-dock/RightToolbar';
+import { ChapterReadinessPlanCard } from '../../features/agent-planner/ChapterReadinessPlanCard';
 import EditorArea, {
   type EditorAreaHandle,
   type EditorContentSnapshot,
@@ -107,6 +109,9 @@ interface WritingWorkspaceViewProps {
   } | null;
   writingContext: WritingContext;
   leaveGuardDialog: ReactNode;
+  reviewLocked?: boolean;
+  onUnlockReview?: () => void;
+  onBeforeAdopt?: (draftId: string) => Promise<void>;
 }
 
 export default function WritingWorkspaceView({
@@ -127,6 +132,9 @@ export default function WritingWorkspaceView({
   locateTarget,
   writingContext,
   leaveGuardDialog,
+  reviewLocked = false,
+  onUnlockReview,
+  onBeforeAdopt,
 }: WritingWorkspaceViewProps) {
   const {
     novel,
@@ -142,6 +150,7 @@ export default function WritingWorkspaceView({
     aiModal,
   } = session;
   const activePanel = sidebarState.activeTool;
+  const [readinessOpen, setReadinessOpen] = useState(false);
   const activeChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === activeChapterId),
     [activeChapterId, chapters],
@@ -268,7 +277,18 @@ export default function WritingWorkspaceView({
             </div>
           )}
           <div className="workspace-topbar-spacer" aria-hidden="true" />
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            data-testid="workspace-open-workbench"
+            onClick={() => navigate('/')}
+          >
+            创作工作台
+          </button>
         </div>
+        <p className="workspace-workbench-notice" data-testid="workspace-ai-migrated-notice">
+          生成、大纲、角色、事件、设定、检查和润色请在创作工作台以任务对话完成；这里保留审阅、编辑、保存和采用。
+        </p>
 
         {loadState === 'ready' && chapters.length === 0 && !pageLoading ? (
           <div data-testid="workspace-empty-state" className="workspace-empty-state">
@@ -324,6 +344,9 @@ export default function WritingWorkspaceView({
               retryingContent={retryingContent}
               onOpenDraftHistory={() => actions.openSidebarTool('draft-history')}
               onBackToChapters={() => navigate(`/novels/${novelId}`)}
+              reviewLocked={reviewLocked}
+              onUnlockReview={onUnlockReview}
+              onBeforeAdopt={onBeforeAdopt}
             />
             <StatusBar
               chapter={activeChapter}
@@ -341,8 +364,16 @@ export default function WritingWorkspaceView({
         activePanel={activePanel}
         onTogglePanel={actions.togglePanel}
         onRunCommand={runEditorCommand}
+        onToggleReadiness={() => setReadinessOpen((open) => !open)}
+        readinessOpen={readinessOpen}
         documentAvailable={contentAvailable}
       />
+
+      {readinessOpen && novelId && activeChapter && (
+        <div className="workspace-readiness-dock" data-testid="chapter-readiness-dock">
+          <ChapterReadinessPlanCard novelId={novelId} chapterId={activeChapter.id} />
+        </div>
+      )}
 
       {!isChapterDocumentBlocked && activePanel === 'draft-history' && (
         <DraftHistoryPanel

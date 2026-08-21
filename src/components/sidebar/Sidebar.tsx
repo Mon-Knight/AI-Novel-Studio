@@ -8,7 +8,8 @@ interface NavItem {
 }
 
 const mainNavItems: NavItem[] = [
-  { path: '/', label: '小说作品', icon: '📖' },
+  { path: '/', label: '创作工作台', icon: '✦' },
+  { path: '/novels', label: '小说作品', icon: '📖' },
   { path: '/assets', label: '创作资产', icon: '📦' },
   { path: '/styles', label: '风格方案', icon: '🎨' },
   { path: '/templates', label: '模板中心', icon: '📋' },
@@ -49,7 +50,9 @@ function Sidebar() {
           </NavLink>
         ))}
 
-        <div className="sidebar-nav-section" style={{ marginTop: 8 }}>工具</div>
+        <div className="sidebar-nav-section" style={{ marginTop: 8 }}>
+          工具
+        </div>
         {toolNavItems.map((item) => (
           <NavLink
             key={item.path}

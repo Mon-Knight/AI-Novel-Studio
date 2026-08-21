@@ -21,7 +21,7 @@
 
 - [ ] 只修改了目标范围内的文件
 - [ ] 未修改无关模块
-- [ ] 未删除旧功能
+- [ ] 未删除任务未要求，或尚未完成等价迁移与回退验证的旧功能
 - [ ] 未修改数据库 schema（除非任务明确要求）
 - [ ] 未在组件中直接写 SQL
 - [ ] 未在组件中直接写大量 Prompt
@@ -32,12 +32,13 @@
 
 ## 开发后验证
 
-- [ ] 已运行 `npm run build`
-- [ ] 已运行 `cargo check`（如修改了 Rust 代码）
-- [ ] 已运行 `npm run tauri build`
-- [ ] 已运行 `powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1`
-- [ ] 已运行 `powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/check_docs_sync.ps1`
-- [ ] 所有验证步骤通过
+- [ ] 已运行与修改模块直接相关的动态测试
+- [ ] 前端改动已运行 `npm run lint:ci` 与 `npm run build`
+- [ ] Rust/SQLite 改动已运行 `cargo check` 与相关测试
+- [ ] 文档改动已运行 `npm run test:docs-sync`、必要的 version sync、Prettier 与 diff 检查
+- [ ] Tauri/DSH payload/打包改动已运行对应桌面与生产构建门禁
+- [ ] 发布任务已运行 `scripts/agent-workflow/verify_project.ps1`
+- [ ] 所有适用验证步骤通过
 
 ---
 
@@ -53,5 +54,5 @@
 ## 收尾
 
 - [ ] `git status` 确认变更范围正确
-- [ ] 已提交代码
-- [ ] 已打 tag（如是版本级任务）
+- [ ] 已按用户或版本任务要求提交代码
+- [ ] 已在发布门禁和审查完成后按发布任务创建 tag

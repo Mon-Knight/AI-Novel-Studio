@@ -10,9 +10,16 @@ import type {
   ToolJsonSchema,
 } from '../../types/toolRegistry';
 import { ToolRegistry, type ToolDefinition } from './toolRegistry';
+import { memoryService } from '../memory/memoryService';
+import { isTauri } from '../database/db';
 
 const idSchema: ToolJsonSchema = { type: 'string', minLength: 1, maxLength: 160 };
 const draftSchema: ToolJsonSchema = { type: 'string', minLength: 1, maxLength: 400_000 };
+const candidateTextSchema: ToolJsonSchema = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 400_000,
+};
 const resultSchema: ToolJsonSchema = {
   type: 'object',
   required: ['ok'],
@@ -69,6 +76,28 @@ const readinessResultSchema: ToolJsonSchema = {
   },
 };
 
+const chapterCandidateResultSchema: ToolJsonSchema = {
+  type: 'object',
+  required: ['ok', 'toolVersion', 'artifactType', 'candidateOnly', 'data'],
+  additionalProperties: false,
+  properties: {
+    ok: { enum: [true] },
+    toolVersion: { enum: ['v1'] },
+    artifactType: { enum: ['chapter_text'] },
+    candidateOnly: { enum: [true] },
+    data: {
+      type: 'object',
+      required: ['novelId', 'chapterId', 'text'],
+      additionalProperties: false,
+      properties: {
+        novelId: idSchema,
+        chapterId: idSchema,
+        text: candidateTextSchema,
+      },
+    },
+  },
+};
+
 function objectSchema(
   properties: Record<string, ToolJsonSchema>,
   required: string[],
@@ -108,6 +137,122 @@ function descriptor(
 }
 
 const definitions: ToolDefinition[] = [
+  {
+    descriptor: descriptor({
+      name: 'search_memory',
+      description: '在当前小说的长期记忆中检索与任务相关的已采用事实。',
+      inputSchema: objectSchema(
+        { novelId: idSchema, query: { type: 'string', minLength: 1, maxLength: 1000 } },
+        ['novelId', 'query'],
+      ),
+      permissions: ['novel.read'],
+      scope: 'novel',
+      timeoutMs: 20_000,
+    }),
+    handler: async (args) => {
+      try {
+        const result = await memoryService.retrieve({
+          requestId: `conversation-memory-${Date.now()}`,
+          novelId: String(args.novelId),
+          query: String(args.query),
+          topK: 8,
+          candidateLimit: 50,
+          tokenBudget: 4000,
+          filters: {},
+        });
+        return { ok: true, data: result, source: 'memory' };
+      } catch (error) {
+        if (!isTauri()) {
+          return { ok: true, data: { items: [], total: 0 }, source: 'localstorage' };
+        }
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : 'Memory 检索失败',
+          source: 'memory',
+        };
+      }
+    },
+  },
+  {
+    descriptor: {
+      ...descriptor({
+        name: 'generate_chapter',
+        description: '接收并验证模型已生成的章节候选，只返回 candidate-only 结构，不写入正式正文。',
+        inputSchema: objectSchema(
+          {
+            novelId: idSchema,
+            chapterId: idSchema,
+            candidateText: candidateTextSchema,
+          },
+          ['novelId', 'chapterId', 'candidateText'],
+        ),
+        permissions: ['novel.read', 'chapter.read'],
+        scope: 'chapter',
+        timeoutMs: 30_000,
+      }),
+      outputSchema: chapterCandidateResultSchema,
+    },
+    handler: async (args) => {
+      return {
+        ok: true,
+        toolVersion: 'v1',
+        artifactType: 'chapter_text',
+        candidateOnly: true,
+        data: {
+          novelId: String(args.novelId),
+          chapterId: String(args.chapterId),
+          text: String(args.candidateText),
+        },
+      };
+    },
+  },
+  ...(
+    [
+      ['generate_outline', 'outline', '接收并验证大纲候选 JSON，不写入正式大纲。'],
+      ['generate_characters', 'character_candidates', '接收并验证角色候选，不写入角色库。'],
+      ['suggest_events', 'event_candidates', '接收并验证事件候选，不写入章节事件。'],
+      ['expand_settings', 'setting_candidates', '接收并验证设定候选，不写入正式设定。'],
+      ['polish_chapter', 'chapter_text', '接收并验证润色后的章节候选，不覆盖正式正文。'],
+      ['check_quality', 'quality_report', '接收并验证质量检查报告，报告不能直接应用。'],
+      ['summarize_chapter', 'chapter_summary', '接收并验证章节总结候选，不写入正式上下文。'],
+    ] as const
+  ).map(([name, artifactType, description]) => ({
+    descriptor: {
+      ...descriptor({
+        name,
+        description,
+        inputSchema: objectSchema(
+          {
+            novelId: idSchema,
+            chapterId: idSchema,
+            candidateText: candidateTextSchema,
+          },
+          ['novelId', 'candidateText'],
+        ),
+        permissions: ['novel.read', 'chapter.read'],
+        scope: 'chapter' as const,
+        timeoutMs: 30_000,
+      }),
+      outputSchema: {
+        ...chapterCandidateResultSchema,
+        properties: {
+          ...chapterCandidateResultSchema.properties,
+          artifactType: { enum: [artifactType] },
+        },
+      },
+    },
+    handler: async (args: Record<string, unknown>) => ({
+      ok: true,
+      toolVersion: 'v1',
+      artifactType,
+      candidateOnly: true,
+      data: {
+        novelId: String(args.novelId),
+        chapterId: String(args.chapterId ?? ''),
+        text: String(args.candidateText),
+      },
+    }),
+  })),
   {
     descriptor: {
       ...descriptor({

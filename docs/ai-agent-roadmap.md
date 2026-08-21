@@ -20,6 +20,8 @@ Phase 1：Agent 基础设施（Rules / Skills / Instructions）
 Phase 2：Agent 化（Planner / Tool Calling / Memory）
   ↓
 Phase 3：Autonomous（Multi-Agent / 自主创作）
+  ↓
+Phase 4：Conversational Workbench（对话任务 / 并发 / 产物确认）
 ```
 
 ---
@@ -137,7 +139,62 @@ Agent 能自主推进创作流程：
 
 ---
 
-## 5. 关键技术能力演进
+## 5. Phase 4：Conversational Workbench（v3.3.0+，规划）
+
+### 5.1 工作台成为控制面
+
+Phase 4 不重新发明 Planner、Tool Registry、Memory 或 Safe Apply，而是把既有能力组织成用户可以持续使用的任务工作台：
+
+```text
+小说项目
+→ 创建任务对话
+→ 选择任务模型
+→ Runtime 调用受约束领域工具
+→ 对话内显示调用、错误与恢复
+→ 形成不可变产物
+→ 用户确认、审阅与安全应用
+```
+
+任务对话是用户可见的执行单元，每个任务拥有独立上下文、模型快照、运行和产物。系统需要允许“生成下一章”与“审计既有章节”等任务并发运行，并继续服从应用级并发、频率、Token 和成本治理。
+
+### 5.2 领域工具而非通用 Agent
+
+首批对话工具聚焦小说创作：
+
+- `novel.read_context`
+- `chapter.read_outline`
+- `search_memory`
+- `generate_chapter`
+
+后续按版本扩展大纲、人物、设定、风格、上下文、总结、检查与润色工具。工作台不扩展为通用代码、Shell、Git 或插件 Agent。
+
+工具、模型、上下文与压缩能力使用稳定能力接口和可替换 Provider。任务运行冻结实际 Provider、模型、能力版本与配置摘要；更换小说上下文压缩实现不应要求修改 Agent Loop、工作台或 Safe Apply。
+
+### 5.3 对话事件与错误
+
+AI 面向用户的回复、工具调用、错误和产物共同构成任务对话。工具调用必须显示排队、运行、成功、失败、取消或跳过状态；错误显示在失败环节，不依赖独立执行时间线，也不暴露隐藏思维链。
+
+### 5.4 产物与人工决定
+
+- 普通回复不能直接修改小说正式事实。
+- 产物形成后在对话中推送专用卡片。
+- 结构化产物经确认后使用 Safe Apply。
+- 章节候选先由用户确认进入人工审阅，再显式编辑、保存和采用。
+- 基线漂移、重复应用和并发写入继续由 revision、CAS 和幂等事务处理。
+
+### 5.5 DSH 与内部 Runtime 边界
+
+DSH 可以作为任务 Planner/Executor 的一种实现或 Worker，但不能成为小说事实、预算、产物验证或最终采用的权威。若 DSH 的取消仍采用进程重启语义，并发任务必须隔离 Worker，避免取消一个任务影响其他任务。
+
+借鉴范围包括 Profile/Bundle 能力组合、作用域 Session/Agent、Turn/Step 工具循环、受控并发和追加事件投影；不复制代码、Shell、Git 等通用开发能力。工作台另提供 Runtime Registry 的只读“当前插件”视图，分类查看功能、模型和其他已加载插件，不扩展安装、卸载、启停、配置、更新或市场能力。
+
+实现方式固定为“ANS 产品层 + 稳定 DSH Adapter + 固定版本 Headless Worker”。当前载体 commit 与较新参考源码必须先做差异审计；工作台实现不得顺带升级 DSH，也不得把 Harness UI、内部 Session 类型或 Cordis 对象变成 ANS 产品契约。
+
+详细设计与分阶段验收见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。对话工作台、确认/Safe Apply、领域候选工具和写作工作台审阅收敛已包含在 v3.5.0。
+
+---
+
+## 6. 关键技术能力演进
 
 | 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                  |
 | ------------ | ---------------- | ---------------- | ---------------------------------------- |
@@ -150,9 +207,9 @@ Agent 能自主推进创作流程：
 
 ---
 
-## 6. 技术选型方向
+## 7. 技术选型方向
 
-### 6.1 Agent 框架
+### 7.1 Agent 框架
 
 评估方向：
 
@@ -161,7 +218,7 @@ Agent 能自主推进创作流程：
 - AutoGen
 - 自研轻量 Agent 框架
 
-### 6.2 Memory 系统
+### 7.2 Memory 系统
 
 评估方向：
 
@@ -169,7 +226,7 @@ Agent 能自主推进创作流程：
 - 知识图谱（Neo4j）
 - 结构化 SQL + 非结构化向量混合
 
-### 6.3 Tool Calling
+### 7.3 Tool Calling
 
 评估方向：
 
@@ -179,7 +236,7 @@ Agent 能自主推进创作流程：
 
 ---
 
-## 7. 风险与挑战
+## 8. 风险与挑战
 
 | 风险       | 说明                       | 缓解措施            |
 | ---------- | -------------------------- | ------------------- |

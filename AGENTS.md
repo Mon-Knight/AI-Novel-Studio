@@ -57,7 +57,7 @@
 AI Agent **绝对不得**：
 
 - ❌ 大规模随意重构整个项目
-- ❌ 删除旧路由或已有功能
+- ❌ 删除用户未明确要求且尚未完成等价迁移、回退验证的旧路由或已有功能
 - ❌ 顺手修改无关模块
 - ❌ 自动扩展需求范围
 - ❌ 自行新增未来版本功能
@@ -118,16 +118,21 @@ AI Agent **绝对不得**：
 
 ## 6. UI 硬约束
 
-### 6.1 必须
+### 6.1 共同约束
 
 - 桌面写作软件风格（参考 Scrivener / 作家助手）
 - 浅色主题、克制阴影、轻量边框
 - 支持 2K 分辨率
-- 写作工作台：左树 + 中编辑 + 右工具栏
-- 右侧弹出面板（320px-380px）
-- 正文编辑区阅读舒适
+- 正文阅读和人工审阅区域保持舒适
 
-### 6.2 禁止
+### 6.2 版本化布局
+
+- **v3.5.0 主界面**：创作工作台以小说项目/任务树 + 任务对话区为中心；模型选择靠近输入区；工具调用、错误和产物卡片在对话内显示。
+- **写作工作台**：章节人工审阅/编辑器，保留卷章树、正文阅读、显式编辑、保存、采用和章节准备/总结；生成类 AI 面板不再作为主流程。
+- **当前插件**：只读显示 Runtime Registry 中的功能、模型和其他插件，不扩展为插件管理、市场或独立工具执行面板。
+- v3.3.0+ UI 任务必须先读 `docs/architecture/conversational-creative-workbench.md`；旧三栏要求不能覆盖该文档的目标设计。
+
+### 6.3 禁止
 
 - 网页后台管理布局
 - 移动端优先设计
@@ -147,7 +152,7 @@ AI Agent **绝对不得**：
 
 ### 7.2 当前版本
 
-参见 `package.json` 或 `src-tauri/Cargo.toml` 中的 `version` 字段。
+当前版本为 v3.5.0；机器可读版本以 `package.json`、`src-tauri/Cargo.toml` 和版本同步检查为准。
 
 ### 7.3 发布流程
 
@@ -169,37 +174,59 @@ git push origin vX.X.X
 
 ---
 
-## 8. 测试要求（每次修改后）
+## 8. 测试要求
+
+验证按变更范围分层，不再要求每个纯文档或局部前端任务都执行完整 Tauri 发布构建。
+
+### 8.1 文档任务
 
 ```powershell
-cargo check              # Rust 编译检查
-npm run build            # 前端构建
-npm run tauri build      # Tauri 完整构建
-git status               # 确认 working tree clean
+npm run test:docs-sync
+npm run test:version-sync   # 涉及版本、路线或发布文档时
+npx prettier --check <changed-docs>
+git diff --check
+git status --short
 ```
+
+### 8.2 代码任务
+
+- 运行直接覆盖修改模块的动态测试；
+- 前端/TypeScript 变更运行 `npm run lint:ci` 与 `npm run build`；
+- Rust/SQLite 变更在 `src-tauri` 运行 `cargo check`、相关测试，并在版本验收时运行完整 `cargo test`；
+- 只有桌面载体、Tauri 配置、DSH payload、打包或发布任务才把完整 `npm run tauri:build` 作为该任务强制门禁。
+
+### 8.3 发布任务
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
+```
+
+发布矩阵包含版本/文档同步、覆盖率、lint、前端构建、Rust、真实 Windows Tauri E2E、生产构建与 clean working tree。定向测试不能代替发布矩阵。
 
 ---
 
 ## 9. 文档体系
 
-| 文件                              | 用途                         |
-| --------------------------------- | ---------------------------- |
-| `AGENTS.md`                       | Agent 总入口规则             |
-| `.github/copilot-instructions.md` | Copilot 项目开发指令         |
-| `.github/instructions/`           | 分领域开发指令               |
-| `.github/prompts/`                | 版本开发 Prompt 模板         |
-| `.github/skills/`                 | Agent Skills（多步骤工作流） |
-| `.cursor/rules/`                  | Cursor IDE 规则              |
-| `docs/product-design.md`          | 产品设计文档                 |
-| `docs/ui-reference.md`            | UI 参考标准                  |
-| `docs/data-model.md`              | 数据模型边界                 |
-| `docs/development-rules.md`       | 开发规则                     |
-| `docs/version-roadmap.md`         | 版本路线图                   |
-| `docs/project-architecture.md`    | 项目架构                     |
-| `docs/module-boundaries.md`       | 模块边界                     |
-| `docs/agent-workflow.md`          | Agent 工作流                 |
-| `docs/ai-agent-roadmap.md`        | AI Agent 路线图              |
-| `CHANGELOG.md`                    | 变更日志                     |
+| 文件                                                     | 用途                         |
+| -------------------------------------------------------- | ---------------------------- |
+| `AGENTS.md`                                              | Agent 总入口规则             |
+| `.github/copilot-instructions.md`                        | Copilot 项目开发指令         |
+| `.github/instructions/`                                  | 分领域开发指令               |
+| `.github/prompts/`                                       | 版本开发 Prompt 模板         |
+| `.github/skills/`                                        | Agent Skills（多步骤工作流） |
+| `.cursor/rules/`                                         | Cursor IDE 规则              |
+| `docs/product-design.md`                                 | 产品设计文档                 |
+| `docs/ui-reference.md`                                   | UI 参考标准                  |
+| `docs/data-model.md`                                     | 数据模型边界                 |
+| `docs/development-rules.md`                              | 开发规则                     |
+| `docs/version-roadmap.md`                                | 版本路线图                   |
+| `docs/project-architecture.md`                           | 项目架构                     |
+| `docs/module-boundaries.md`                              | 模块边界                     |
+| `docs/agent-workflow.md`                                 | Agent 工作流                 |
+| `docs/ai-agent-roadmap.md`                               | AI Agent 路线图              |
+| `docs/architecture/conversational-creative-workbench.md` | v3.3.0+ 对话工作台权威规划   |
+| `docs/audit/agent-requirements-review-2026-08-20.md`     | Agent 要求时效审计           |
+| `CHANGELOG.md`                                           | 变更日志                     |
 
 ---
 
@@ -240,29 +267,25 @@ git status               # 确认 working tree clean
 
 ### 11.1 当前开发协作模式（与产品内 Agent Runtime 版本无关）
 
-AI Novel Studio 仓库开发当前仍采用 **用户主导、Agent 执行** 的协作模式：
+仓库开发采用 **用户主导、Agent 执行** 的协作模式，但不再假定用户必须在 ChatGPT 与 VS Code 之间手工复制任务书：
 
 ```text
-第 1 步：用户向 ChatGPT / Planner 询问下一步
-        ↓
-第 2 步：ChatGPT 分析项目状态，生成完整任务书
-        ↓
-第 3 步：用户复制任务书给 VS Code Agent
-        ↓
-第 4 步：Agent 根据任务书执行开发
-        ↓
-第 5 步：Agent 输出完成汇报
-        ↓
-第 6 步：用户把完成汇报发回 ChatGPT
-        ↓
-第 7 步：ChatGPT 分析结果，生成下一步任务书
+用户提出目标
+→ Agent 读取仓库状态与权威文档
+→ 分析影响并在需要时输出计划供确认
+→ Agent 在明确范围内执行
+→ 运行与变更范围相匹配的验证
+→ 输出完成证据
+→ 仅在用户或版本任务明确要求时 commit / push / tag
 ```
+
+复杂版本任务仍可以使用自包含任务书；直接在同一 Agent 会话执行的明确任务不需要为了形式重复生成任务书。
 
 ### 11.2 Agent 的角色定位
 
 Agent **不是** 自主决策者。Agent 是 **任务执行者**。
 
-- ✅ Agent 必须按任务书执行
+- ✅ Agent 必须按用户最新明确需求或已确认任务书执行
 - ✅ Agent 可以读取项目中的 Skills 来指导执行方式
 - ❌ Agent 不能因为项目里有 Skills 就自行扩展任务
 - ❌ Agent 不能自行决定下一步版本内容
@@ -270,7 +293,7 @@ Agent **不是** 自主决策者。Agent 是 **任务执行者**。
 
 ### 11.3 任务书要求
 
-任务书（由 ChatGPT 生成）必须：
+需要任务书时，任务书必须：
 
 - 自包含（不依赖对话历史）
 - 包含版本号、目标、禁止事项
