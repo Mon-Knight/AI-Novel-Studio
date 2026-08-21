@@ -277,28 +277,28 @@ function WorkbenchPage() {
   }
 
   async function proposeContextCompression() {
-    if (!selectedNovelId) return;
+    if (!selectedNovelId || !selectedConversationId) return;
     setCompressionBusy(true);
     setComposerError('');
     try {
       const candidate = await novelContextCompressionProvider.propose(selectedNovelId);
-      setCompressionCandidate(candidate);
+      if (!candidate.valid) {
+        setCompressionCandidate(candidate);
+        return;
+      }
+      await taskConversationService.publishStructuredCandidate({
+        conversationId: selectedConversationId,
+        novelId: selectedNovelId,
+        artifactType: 'generic_json',
+        derivationType: 'context_compression',
+        title: '小说上下文压缩',
+        summary: `覆盖率通过 · ${candidate.coverage.tokens.used}/${candidate.coverage.tokens.budget} tokens`,
+        structuredPayloadJson: candidate,
+      });
+      setCompressionCandidate(null);
+      await refreshBundle(selectedConversationId);
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : '压缩小说上下文失败');
-    } finally {
-      setCompressionBusy(false);
-    }
-  }
-
-  async function applyContextCompression() {
-    if (!compressionCandidate) return;
-    setCompressionBusy(true);
-    setComposerError('');
-    try {
-      await novelContextCompressionProvider.apply(compressionCandidate);
-      setCompressionCandidate(null);
-    } catch (error) {
-      setComposerError(error instanceof Error ? error.message : '应用压缩上下文失败');
     } finally {
       setCompressionBusy(false);
     }
@@ -519,14 +519,6 @@ function WorkbenchPage() {
                   </p>
                   <pre>{compressionCandidate.compressedText}</pre>
                   <div className="workbench-artifact-actions">
-                    <button
-                      className="btn btn-primary btn-sm"
-                      data-testid="workbench-compression-apply"
-                      disabled={compressionBusy || !compressionCandidate.valid}
-                      onClick={() => void applyContextCompression()}
-                    >
-                      确认应用压缩
-                    </button>
                     <button
                       className="btn btn-secondary btn-sm"
                       data-testid="workbench-compression-dismiss"

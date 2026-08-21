@@ -328,6 +328,7 @@ fn main() {
             commands::conversations::append_tool_call_event,
             commands::conversations::update_tool_call_event,
             commands::conversations::create_conversation_artifact_card,
+            commands::conversations::publish_structured_candidate,
             commands::conversations::record_artifact_decision,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,

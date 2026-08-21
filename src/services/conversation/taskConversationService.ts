@@ -452,6 +452,53 @@ export const taskConversationService = {
     return raw as ToolCallEvent;
   },
 
+  async publishStructuredCandidate(input: {
+    conversationId: string;
+    novelId: string;
+    artifactType: ConversationArtifactCard['artifactType'];
+    derivationType?: string;
+    title: string;
+    summary: string;
+    structuredPayloadJson: unknown;
+  }): Promise<ConversationArtifactCard> {
+    const createdAt = nowISO();
+    const raw = await dbCall<unknown>(
+      'publish_structured_candidate',
+      {
+        input: {
+          conversationId: input.conversationId,
+          novelId: input.novelId,
+          artifactType: input.artifactType,
+          derivationType: input.derivationType,
+          title: input.title,
+          summary: input.summary,
+          structuredPayloadJson: input.structuredPayloadJson,
+          createdAt,
+        },
+      },
+      () => {
+        const bundle = localBundle(input.conversationId);
+        if (!bundle) throw new Error('任务对话不存在');
+        const card: ConversationArtifactCard = {
+          cardId: generateId(),
+          conversationId: input.conversationId,
+          artifactId: `browser-${generateId()}`,
+          artifactType: input.artifactType,
+          title: input.title,
+          summary: input.summary,
+          content: JSON.stringify(input.structuredPayloadJson),
+          status: 'candidate',
+          createdAt,
+        };
+        bundle.artifacts.push(card);
+        bundle.conversation.updatedAt = createdAt;
+        upsertLocal(bundle);
+        return card;
+      },
+    );
+    return raw as ConversationArtifactCard;
+  },
+
   async createArtifactCard(
     input: Omit<ConversationArtifactCard, 'cardId'>,
   ): Promise<ConversationArtifactCard> {

@@ -118,6 +118,16 @@ pub fn create_conversation_artifact_card(
     service::create_artifact_card(&mut connection, input)
 }
 
+#[tauri::command]
+pub fn publish_structured_candidate(
+    input: service::PublishStructuredCandidateInput,
+) -> Result<service::ConversationArtifactCardRecord, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    service::publish_structured_candidate(&mut connection, input)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueReviewAuthorizationInput {

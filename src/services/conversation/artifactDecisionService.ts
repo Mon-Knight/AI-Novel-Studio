@@ -5,7 +5,9 @@ import type {
   ArtifactDecisionKind,
   ReviewAuthorization,
 } from '../../types/conversation';
+import type { ResultArtifactBundle, ResultArtifactType } from '../../types/result-artifact';
 import { applyArtifactBundle } from './artifactApply';
+import { taskConversationService } from './taskConversationService';
 
 export interface RecordDecisionInput {
   conversationId: string;
@@ -109,14 +111,16 @@ export const artifactDecisionService = {
     decision: ArtifactDecision;
     authorization?: ReviewAuthorization;
   }> {
-    if (!isTauri()) {
+    const bundle = isTauri()
+      ? await aiTaskRuntimeService.getArtifact(input.artifactId)
+      : await syntheticBrowserBundle(input);
+    if (!bundle) {
       return this.record({
         ...input,
         decision: 'request_apply',
         conflictCode: 'BROWSER_APPLY_UNSUPPORTED',
       });
     }
-    const bundle = await aiTaskRuntimeService.getArtifact(input.artifactId);
     const outcome = await applyArtifactBundle(input, bundle);
     return this.record({
       ...input,
@@ -127,3 +131,38 @@ export const artifactDecisionService = {
     });
   },
 };
+
+async function syntheticBrowserBundle(
+  input: RecordDecisionInput,
+): Promise<ResultArtifactBundle | undefined> {
+  const conversation = await taskConversationService.get(input.conversationId);
+  const card = conversation?.artifacts.find((item) => item.cardId === input.cardId);
+  if (!card?.content) return undefined;
+  let structured: unknown;
+  try {
+    structured = JSON.parse(card.content) as unknown;
+  } catch {
+    structured = undefined;
+  }
+  const artifactType: ResultArtifactType =
+    card.artifactType === 'generic' ? 'generic_json' : card.artifactType;
+  return {
+    artifact: {
+      artifactId: card.artifactId || input.artifactId,
+      taskId: 'browser-fallback',
+      attemptId: 'browser-fallback',
+      sourceInputSnapshotId: 'browser-fallback',
+      artifactType,
+      schemaVersion: 1,
+      rawContentRefId: 'browser-fallback',
+      sourceNovelId: input.novelId,
+      contentHash: 'browser-fallback-hash',
+      contentLength: card.content.length,
+      processingStatus: 'valid',
+      createdAt: card.createdAt,
+    },
+    rawContent: card.content,
+    structuredPayloadJson: structured,
+    issues: [],
+  };
+}

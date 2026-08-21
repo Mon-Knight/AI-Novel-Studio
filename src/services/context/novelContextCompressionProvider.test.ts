@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mockNovels } from '../../features/novels/mockNovels';
+import { artifactDecisionService } from '../conversation/artifactDecisionService';
+import { taskConversationService } from '../conversation/taskConversationService';
 import { contextRecordService } from './contextRecordService';
 import {
   CONTEXT_COMPRESSION_PROVIDER_ID,
@@ -95,4 +97,65 @@ test('extractive context compression keeps coverage, versions old records and ca
     afterRollback.filter((record) => record.title.startsWith('小说上下文压缩')).length,
     2,
   );
+});
+
+test('workbench compression candidate publishes a card and applies through the decision protocol', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  localStorage.setItem('ai_novel_studio_novels', JSON.stringify(mockNovels));
+  localStorage.setItem(
+    'ai_novel_studio_chapters',
+    JSON.stringify([
+      {
+        id: 'ch-003',
+        novelId: 'novel-001',
+        title: '第三章',
+        outline: '主角发现关键线索。',
+        orderIndex: 2,
+        createdAt: '2026-08-20T00:00:00Z',
+        updatedAt: '2026-08-20T00:00:00Z',
+      },
+    ]),
+  );
+  await contextRecordService.create({
+    novelId: 'novel-001',
+    contextType: 'foreshadow',
+    title: '归途信标',
+    content: '殖民地仍有未发出的求救信标。',
+    importance: 5,
+  });
+  await contextRecordService.create({
+    novelId: 'novel-001',
+    contextType: 'rule',
+    title: '跃迁配额',
+    content: '跃迁必须消耗核定配额。',
+    importance: 4,
+  });
+  const conversation = await taskConversationService.create('novel-001', '压缩任务');
+  const candidate = await novelContextCompressionProvider.propose('novel-001', 4000);
+  assert.equal(candidate.valid, true);
+  const card = await taskConversationService.publishStructuredCandidate({
+    conversationId: conversation.conversationId,
+    novelId: 'novel-001',
+    artifactType: 'generic_json',
+    derivationType: 'context_compression',
+    title: '小说上下文压缩',
+    summary: '覆盖率通过',
+    structuredPayloadJson: candidate,
+  });
+  assert.ok(card.artifactId);
+  assert.match(card.content, /ans.novel-context.extractive-v1/);
+  const applied = await artifactDecisionService.applyStructured({
+    conversationId: conversation.conversationId,
+    cardId: card.cardId,
+    artifactId: card.artifactId ?? '',
+    decision: 'request_apply',
+    targetType: 'asset',
+    targetId: 'novel-001',
+    novelId: 'novel-001',
+  });
+  assert.ok(applied.decision.applyTransactionId);
+  assert.equal(applied.decision.conflictCode, undefined);
+  const records = await contextRecordService.getByNovelId('novel-001');
+  assert.ok(records.some((record) => record.title.startsWith('小说上下文压缩') && record.isActive));
 });

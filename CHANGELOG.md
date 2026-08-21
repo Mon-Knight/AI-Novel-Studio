@@ -66,6 +66,7 @@
 - 候选工具拒绝无结构文本：角色/事件/设定必须含 name 或 title；质量报告必须含 summary 或 issues。
 - 统一 Planner / AI Task / 桌面 E2E 的生产 Tool Registry 哈希为 `6eebed8c…`；DSH 测试 allowlist 与 Cordis composition 计数同步到 11 个工具和 compaction-basic。
 - 工作台增加「压缩上下文」预览与确认应用入口。
+- 压缩候选在对话中发布为 `generic_json` ResultArtifact 卡片（桌面）或浏览器投影卡片，确认后走既有 `request_apply` / Safe Apply 路径。浏览器结构化应用不再一律 `BROWSER_APPLY_UNSUPPORTED`。
 
 ## v3.2.1 (2026-08-19) - 发布资产 URL 热修复
 
