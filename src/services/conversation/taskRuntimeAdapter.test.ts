@@ -6,7 +6,7 @@ import { mockNovels } from '../../features/novels/mockNovels';
 import { ArtifactCard, ToolEventRow } from '../../pages/Workbench/WorkbenchComponents';
 import { taskConversationService } from './taskConversationService';
 import { taskRuntimeAdapter } from './taskRuntimeAdapter';
-import { taskSessionAdapter } from '../dsh/taskSessionAdapter';
+import { taskSessionAdapter, WORKBENCH_CONVERSATIONAL_REPLY } from '../dsh/taskSessionAdapter';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -171,6 +171,51 @@ test('browser fallback selects domain candidate tools from the user goal', async
       );
     }
   }
+});
+
+test('greetings complete without generate_chapter or a DSH worker', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  localStorage.setItem('ai_novel_studio_novels', JSON.stringify(mockNovels));
+  localStorage.setItem(
+    'ai_novel_studio_chapters',
+    JSON.stringify([
+      {
+        id: 'ch-003',
+        novelId: 'novel-001',
+        title: '第三章',
+        outline: '主角发现关键线索。',
+        orderIndex: 2,
+        createdAt: '2026-08-20T00:00:00Z',
+        updatedAt: '2026-08-20T00:00:00Z',
+      },
+    ]),
+  );
+  const conversation = await taskConversationService.create('novel-001', '问候任务');
+  const turn = await taskConversationService.appendTurn(
+    conversation.conversationId,
+    'user',
+    '你好',
+  );
+  const run = await taskSessionAdapter.startTurn({
+    conversationId: conversation.conversationId,
+    novelId: 'novel-001',
+    chapterId: 'ch-003',
+    turnId: turn.turnId,
+    goal: '你好',
+    modelSnapshot: mockModel(),
+  });
+  assert.equal(run.status, 'completed');
+  const bundle = await taskConversationService.get(conversation.conversationId);
+  assert.equal(bundle?.toolEvents.length, 0);
+  assert.equal(
+    bundle?.toolEvents.some((event) => event.toolName === 'generate_chapter'),
+    false,
+  );
+  assert.equal(
+    bundle?.turns.find((item) => item.role === 'assistant')?.content,
+    WORKBENCH_CONVERSATIONAL_REPLY,
+  );
 });
 
 test('cancelling an active worker is scoped to its conversation', async () => {

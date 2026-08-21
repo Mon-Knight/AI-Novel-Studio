@@ -50,7 +50,7 @@ pub fn tool_list() -> Vec<Value> {
         }),
         json!({
             "name": "generate_chapter",
-            "description": "接收并验证模型已生成的章节候选。只返回 candidate-only 结构，不写入正式正文。",
+            "description": "接收并验证模型已经写好的章节候选。必须传入 candidateText。问候、能力询问或闲聊时不要调用。只返回 candidate-only 结构，不写入正式正文。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
