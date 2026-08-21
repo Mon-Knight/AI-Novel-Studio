@@ -39,7 +39,22 @@ const ALLOWED_TOOLS: &str =
     "novel.read_context,chapter.read_outline,search_memory,generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
 const CANDIDATE_TOOLS: &str =
     "generate_chapter,generate_outline,generate_characters,suggest_events,expand_settings,polish_chapter,check_quality,summarize_chapter";
+const WORKBENCH_SYSTEM_PROMPT: &str = "你是 AI Novel Studio 创作工作台的任务助手。用中文回复，不展示隐藏推理。只使用任务 allowlist 中的工具。问候、能力询问和闲聊时直接说明工作台能做什么（读取上下文、检索记忆、生成章节/大纲/角色/事件/设定候选、润色、质量检查、章节总结），不要调用 generate_chapter、generate_outline、generate_characters、suggest_events、expand_settings、polish_chapter、check_quality、summarize_chapter。只有用户明确要求生成、润色、检查、总结或扩展时，才调用对应候选工具。候选工具只验证你已经写好的 candidateText，不会自己写正文；调用前必须先在参数中放入完整候选，禁止空调用。所有候选只用于人工审阅，不得修改正式小说事实。";
 pub const PLUGIN_PROBE_CONVERSATION_ID: &str = "__ans_plugin_probe__";
+
+fn workbench_turn_prompt(input: &StartTaskTurnInput) -> String {
+    let chapter = input
+        .chapter_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("未绑定");
+    format!(
+        "小说 ID：{novel}\n章节 ID：{chapter}\n用户消息：{goal}\n\n执行规则：\n1. 若用户只是问候、询问能力或闲聊：用中文直接回答工作台能力，不要调用 generate_chapter、generate_outline、generate_characters、suggest_events、expand_settings、polish_chapter、check_quality、summarize_chapter。只读工具也可以不调用。\n2. 若用户明确要求生成、润色、检查、总结或扩展：先按需读取上下文，再自己写好候选，然后用对应工具提交 candidateText。\n3. generate_chapter 必须带 novelId、chapterId 和已经写好的 candidateText；缺少 candidateText 会立即失败，禁止空调用。",
+        novel = input.novel_id,
+        chapter = chapter,
+        goal = input.goal
+    )
+}
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -387,6 +402,23 @@ fn tool_result_text(event: &Value) -> String {
         .collect::<String>()
 }
 
+fn tool_error_message(event: &Value, error_code: &str) -> String {
+    let content = tool_result_text(event);
+    if let Ok(value) = serde_json::from_str::<Value>(&content) {
+        if let Some(message) = value.get("error").and_then(Value::as_str) {
+            let trimmed = message.trim();
+            if !trimmed.is_empty() {
+                return trimmed.chars().take(500).collect();
+            }
+        }
+    }
+    let trimmed = content.trim();
+    if !trimmed.is_empty() {
+        return trimmed.chars().take(500).collect();
+    }
+    error_code.to_string()
+}
+
 fn append_generic_projection(
     connection: &mut rusqlite::Connection,
     run_id: &str,
@@ -594,6 +626,11 @@ fn project_session_event(
                 .pointer("/data/error/code")
                 .and_then(Value::as_str)
                 .unwrap_or(if is_error { "DSH_TOOL_FAILED" } else { "" });
+            let error_message = if is_error {
+                Some(tool_error_message(event, error_code))
+            } else {
+                None
+            };
             let mut result = json!({
                 "callId":call_id,
                 "dshSequence":sequence,
@@ -640,7 +677,7 @@ fn project_session_event(
                     event_id: record.event_id,
                     status: if is_error { "failed" } else { "succeeded" }.to_string(),
                     duration_ms,
-                    error: is_error.then(|| error_code.to_string()),
+                    error: error_message,
                     result: Some(result),
                     finished_at: Some(event_time(event)),
                 },
@@ -1225,7 +1262,7 @@ fn spawn_worker_process(
         home: work.join("home"),
         api_key: "local-proxy".to_string(),
         base_url,
-        system_prompt: "你是 AI Novel Studio 的小说任务执行 Agent。只使用任务 allowlist 中的工具。根据用户目标自主决定读取上下文、读取章节大纲、检索记忆和生成章节候选；所有候选只用于人工审阅，不得修改正式小说事实。回复中文，不展示隐藏推理。".to_string(),
+        system_prompt: WORKBENCH_SYSTEM_PROMPT.to_string(),
         cwd: work,
         allowed_tools: Some(ALLOWED_TOOLS.to_string()),
     };
@@ -1396,7 +1433,7 @@ fn execute(
             "session/prompt",
             Some(json!({
                 "sessionId":session_id,
-                "contentBlocks":[{"type":"text","text":format!("小说 ID：{}\n章节 ID：{}\n用户目标：{}\n请按需使用工具并形成候选。",input.novel_id,input.chapter_id.as_deref().unwrap_or(""),input.goal)}],
+                "contentBlocks":[{"type":"text","text":workbench_turn_prompt(&input)}],
                 "route":{
                     "provider":adapter_provider,
                     "model":model,
@@ -1797,6 +1834,58 @@ pub fn list_statuses() -> Vec<TaskRuntimeStatus> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod workbench_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn greeting_turn_prompt_forbids_empty_generate_chapter() {
+        let input = StartTaskTurnInput {
+            conversation_id: "c1".to_string(),
+            novel_id: "n1".to_string(),
+            turn_id: "t1".to_string(),
+            goal: "你好".to_string(),
+            chapter_id: Some("ch-1".to_string()),
+            model_snapshot: json!({}),
+            request_policy: TaskRequestPolicyInput {
+                max_requests_per_minute: 1,
+                max_concurrent_requests: 1,
+                daily_token_budget: None,
+                daily_cost_budget_usd: None,
+                warning_percent: 80,
+                timeout_seconds: 30,
+            },
+            api_key: String::new(),
+        };
+        let prompt = workbench_turn_prompt(&input);
+        assert!(prompt.contains("用户消息：你好"));
+        assert!(prompt.contains("不要调用 generate_chapter"));
+        assert!(prompt.contains("禁止空调用"));
+        assert!(!prompt.contains("请按需使用工具并形成候选"));
+        assert!(WORKBENCH_SYSTEM_PROMPT.contains("问候、能力询问和闲聊"));
+    }
+
+    #[test]
+    fn tool_error_prefers_gateway_message_over_generic_code() {
+        let event = json!({
+            "data": {
+                "message": {
+                    "content": [{
+                        "content": [{
+                            "type": "text",
+                            "text": "{\"error\":\"candidateText must be a non-empty string\"}"
+                        }]
+                    }]
+                }
+            }
+        });
+        assert_eq!(
+            tool_error_message(&event, "DSH_TOOL_FAILED"),
+            "candidateText must be a non-empty string"
+        );
+    }
 }
 
 #[cfg(test)]

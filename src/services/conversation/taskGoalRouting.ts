@@ -21,6 +21,19 @@ export interface TaskTargetConflict {
 
 const WRITE_INTENTS = new Set<TaskIntent>(['chapter_write', 'structured_write']);
 
+const CONVERSATIONAL_GOAL =
+  /^(你好|您好|哈喽|嗨+|hi+|hello|hey|早上好|下午好|晚上好|谢谢|感谢|thanks|thank you|你能做什么|你能干什么|你会什么|你是谁|在吗|喂|帮助|怎么用|如何使用|介绍一下自己?)[\s!！。.?？~～]*$/i;
+
+const DOMAIN_GOAL =
+  /生成|大纲|角色|人物|设定|事件|润色|质量|审计|检查|总结|候选|章节|下一章|outline|generate|polish|audit|character|setting|event|summar/;
+
+export function isConversationalGoal(goal: string): boolean {
+  const text = goal.trim();
+  if (!text || Array.from(text).length > 40) return false;
+  if (DOMAIN_GOAL.test(text)) return false;
+  return CONVERSATIONAL_GOAL.test(text);
+}
+
 function matchCandidateTool(goal: string): CandidateToolChoice {
   const text = goal.toLowerCase();
   const generating = /生成|候选|扩展|建议|generate|expand|suggest/.test(text);
@@ -58,11 +71,12 @@ export function selectCandidateTool(
   goal: string,
   chapterId?: string,
 ): CandidateToolChoice | undefined {
-  if (!chapterId) return undefined;
+  if (!chapterId || isConversationalGoal(goal)) return undefined;
   return matchCandidateTool(goal);
 }
 
 export function classifyTaskIntent(goal: string): TaskIntent {
+  if (isConversationalGoal(goal)) return 'read';
   const tool = matchCandidateTool(goal);
   if (tool.name === 'check_quality') return 'audit';
   if (tool.name === 'generate_chapter' || tool.name === 'polish_chapter') return 'chapter_write';

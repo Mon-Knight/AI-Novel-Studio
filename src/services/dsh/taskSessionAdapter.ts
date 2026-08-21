@@ -8,6 +8,10 @@ import type { TaskRun } from '../../types/conversation';
 import { dshTaskRuntimeService } from './taskRuntimeService';
 import { captureTaskModelSnapshot } from '../conversation/taskModelSnapshot';
 import { taskConversationService } from '../conversation/taskConversationService';
+import { isConversationalGoal } from '../conversation/taskGoalRouting';
+
+export const WORKBENCH_CONVERSATIONAL_REPLY =
+  '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。问候和能力询问不会调用生成工具。';
 
 /**
  * Stable ANS boundary for the pinned DSH headless carrier. Cordis/DSH objects
@@ -27,6 +31,33 @@ export interface TaskSession {
 }
 
 const sessions = new Map<string, TaskSession>();
+
+async function completeConversationalTurn(
+  input: TaskRuntimeInput,
+  session: TaskSession,
+  onEvent?: (event: TaskRuntimeEvent) => void,
+): Promise<TaskRun> {
+  const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
+  const run = await taskConversationService.createRun(
+    input.conversationId,
+    input.turnId,
+    modelSnapshot,
+    session.workerId,
+  );
+  const startedAt = new Date().toISOString();
+  let currentRun = await taskConversationService.updateRun(run.runId, 'running', { startedAt });
+  onEvent?.({ run: currentRun });
+  await taskConversationService.appendTurn(
+    input.conversationId,
+    'assistant',
+    WORKBENCH_CONVERSATIONAL_REPLY,
+  );
+  currentRun = await taskConversationService.updateRun(run.runId, 'completed', {
+    finishedAt: new Date().toISOString(),
+  });
+  onEvent?.({ run: currentRun });
+  return currentRun;
+}
 
 function sessionFor(input: TaskRuntimeInput): TaskSession {
   const existing = sessions.get(input.conversationId);
@@ -65,6 +96,9 @@ export const taskSessionAdapter = {
     onEvent?: (event: TaskRuntimeEvent) => void,
   ): Promise<TaskRun> {
     const session = sessionFor(input);
+    if (isConversationalGoal(input.goal)) {
+      return completeConversationalTurn(input, session, onEvent);
+    }
     if (isTauri()) {
       return dshTaskRuntimeService
         .start(

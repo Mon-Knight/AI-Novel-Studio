@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyTaskIntent, findTaskTargetConflict, selectCandidateTool } from './taskGoalRouting';
+import {
+  classifyTaskIntent,
+  findTaskTargetConflict,
+  isConversationalGoal,
+  selectCandidateTool,
+} from './taskGoalRouting';
 
 test('candidate tool routing covers domain, style and foreshadowing goals', () => {
   assert.equal(selectCandidateTool('生成下一章', 'ch-1')?.name, 'generate_chapter');
@@ -16,6 +21,13 @@ test('candidate tool routing covers domain, style and foreshadowing goals', () =
   assert.equal(selectCandidateTool('生成伏笔候选', 'ch-1')?.name, 'suggest_events');
   assert.equal(selectCandidateTool('总结本章', 'ch-1')?.name, 'summarize_chapter');
   assert.equal(selectCandidateTool('为本作品生成角色候选'), undefined);
+  assert.equal(selectCandidateTool('你好', 'ch-1'), undefined);
+  assert.equal(selectCandidateTool('你能做什么', 'ch-1'), undefined);
+  assert.equal(selectCandidateTool('hello', 'ch-1'), undefined);
+  assert.equal(isConversationalGoal('你好'), true);
+  assert.equal(isConversationalGoal('你能做什么？'), true);
+  assert.equal(isConversationalGoal('生成下一章'), false);
+  assert.equal(classifyTaskIntent('你好'), 'read');
 });
 
 test('write tasks on the same novel warn without blocking concurrency', () => {
