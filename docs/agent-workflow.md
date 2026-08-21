@@ -16,7 +16,7 @@ AI Agent 在 AI Novel Studio 项目中扮演 **开发者助手** 角色：
 - ✅ 更新文档，保持同步
 - ❌ 不能自行决定产品方向
 - ❌ 不能自动扩展需求范围
-- ❌ 不能删除已有功能
+- ❌ 不能删除用户未要求，或尚未完成等价迁移与回退验证的已有功能
 
 ---
 
@@ -87,10 +87,14 @@ graph TD
 
 **操作**：
 
-1. `cargo check` — Rust 编译检查
-2. `npm run build` — 前端构建
-3. `npm run tauri build` — 完整构建
-4. `git status` — 确认变更范围
+验证按范围分层：
+
+1. 纯文档：docs/version sync、Prettier、diff 与范围检查；
+2. 前端：相关动态测试、`npm run lint:ci`、`npm run build`；
+3. Rust/SQLite：`cargo check` 与相关动态测试；
+4. Tauri/DSH payload：真实桌面与生产构建门禁；
+5. 发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵；
+6. 所有任务：`git status --short` 确认变更范围。
 
 ### 阶段 5：收尾
 
@@ -101,7 +105,7 @@ graph TD
 1. 更新 `CHANGELOG.md`
 2. 如果涉及新功能，更新 `README.md`
 3. 生成完成汇报
-4. Git commit + push
+4. 仅在用户或版本任务明确要求时 Git commit / push；tag 只属于发布流程
 
 ---
 
@@ -122,7 +126,7 @@ graph TD
 ### 4.3 verify-build
 
 ```text
-环境检查 → 依赖检查 → cargo check → npm build → tauri build → git status
+识别变更范围 → 定向测试 → 适用 lint/build/Rust/桌面门禁 → git status；发布时运行完整统一验证
 ```
 
 ### 4.4 review-ui
@@ -144,7 +148,7 @@ graph TD
 ### 5.1 项目开发协作：用户主导的 Agent 任务执行模式
 
 ```
-用户 → Agent → 完成任务 → 汇报
+用户目标 → Agent 读取状态/文档 → 计划（需要时确认）→ 执行 → 分层验证 → 汇报
 ```
 
 ### 5.2 产品运行时：Multi-Agent 自主创作模式（v3.0.0）
@@ -167,6 +171,20 @@ graph TD
 
 上述产品运行时模式已覆盖全书规划和受审核逐章推进。任何候选都不会自动采用，章节分析和世界扩展也不会绕过用户确认。
 
+### 5.3 产品运行时：对话式并发创作工作台（v3.3.0+ 已落地）
+
+```text
+创作工作台 → 小说项目 → 独立任务对话
+                         ↓
+               DSH Headless Session/Agent
+                         ↓
+        小说工具 / 错误 / Result Artifact 投影到对话
+                         ↓
+               用户确认 / 审阅 / Safe Apply
+```
+
+该目标已在 v3.5.0 落地。具体边界以 `docs/architecture/conversational-creative-workbench.md` 为准。
+
 ---
 
 ## 6. Agent 使用文档的优先级
@@ -176,10 +194,11 @@ graph TD
 1. **用户最新需求**（最高优先级）
 2. `AGENTS.md`（行为约束）
 3. `docs/product-design.md`（产品定位）
-4. `docs/ui-reference.md`（UI 标准）
-5. `docs/data-model.md`（数据边界）
-6. `.github/instructions/`（分领域指令）
-7. `.cursor/rules/`（IDE 规则）
+4. `docs/architecture/conversational-creative-workbench.md`（v3.3.0+ 已确认规划）
+5. `docs/ui-reference.md`（UI 标准）
+6. `docs/data-model.md`（数据边界）
+7. `.github/instructions/`（分领域指令）
+8. `.cursor/rules/`（IDE 规则）
 
 ---
 

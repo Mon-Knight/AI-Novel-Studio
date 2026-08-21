@@ -1,7 +1,7 @@
 # Verification Checklist
 
 > 用途：Agent 执行任务后的综合验证清单
-> 使用时机：每次 Agent 任务完成后
+> 使用时机：版本验收、发布任务或用户明确要求综合验证时；普通任务按变更范围执行适用子项
 
 ---
 
@@ -35,9 +35,11 @@
 
 ## 构建检查
 
-- [ ] `cargo check` 通过？
-- [ ] `npm run build` 通过？
-- [ ] `npm run tauri build` 通过？
+- [ ] 与改动相关的动态测试通过？
+- [ ] 前端改动的 `npm run lint:ci` / `npm run build` 通过？
+- [ ] Rust/SQLite 改动的 `cargo check` / 相关测试通过？
+- [ ] Tauri/DSH payload/发布任务的桌面 E2E 与 `npm run tauri build` 通过？
+- [ ] 发布任务的 `verify_project.ps1` 通过？
 - [ ] 是否有 TypeScript 类型错误？
 - [ ] 是否有 ESLint 报错？
 

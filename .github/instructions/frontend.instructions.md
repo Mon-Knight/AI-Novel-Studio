@@ -3,6 +3,7 @@
 > 适用于：所有前端 React/TypeScript 代码的开发和修改
 > 优先级：高
 > 适用范围：`src/` 下所有 `.tsx` / `.ts` / `.css` 文件
+> 版本边界：v3.2.1 页面用于描述当前已发布行为；v3.3.0+ 目标以 `docs/architecture/conversational-creative-workbench.md` 为准
 
 ---
 
@@ -35,28 +36,34 @@ AppShell
 
 ## 2. 布局规范
 
-### 2.1 写作工作台布局
+### 2.1 v3.3.0+ 创作工作台布局
 
 ```text
-TopToolbar（顶部工具栏）
-├─ LeftTree（左侧卷章树，~240px）
-├─ CenterEditor（中间正文编辑区，flex: 1）
-├─ RightToolbar（右侧竖向工具栏，~48px）
-└─ RightPanel（弹出面板，320-380px，条件显示）
-BottomStatusBar（底部状态栏）
+WorkbenchShell
+├─ ProjectTaskTree（小说项目 / 任务树）
+└─ TaskConversation
+   ├─ TaskHeader（小说、任务、模型、状态）
+   ├─ ConversationNodes（消息、工具、错误、产物卡片）
+   └─ Composer（任务级模型选择、输入、发送/停止）
 ```
 
-### 2.2 首页布局
+不另设执行时间线、任务计划、工具或产物详情面板。当前插件只读视图只展示 Runtime Registry，不承担任务执行或插件管理。
+
+### 2.2 原写作工作台 / 章节审阅编辑器
+
+v3.2.1 当前仍保留左卷章树 + 中编辑区 + 右工具栏/弹出 AI 面板。v3.3.0+ 迁移中，只有在对应能力已经进入任务对话、完成等价验证并具备回退路径后，才移除旧 AI 面板；目标编辑器保留卷章树、正文阅读、显式编辑、保存和采用。
+
+### 2.3 作品管理页
 
 ```text
 Sidebar（左侧导航，~220px）
 MainContent
-├─ WelcomeBanner（欢迎横幅）
-├─ QuickActions（快捷入口卡片）
 └─ NovelCardList（作品卡片列表）
 ```
 
-### 2.3 表单页面
+作品管理继续保留，但 v3.3.0+ 不再是默认启动中心。
+
+### 2.4 表单页面
 
 - 表单最大宽度：`720px`
 - 禁止无限拉宽
@@ -77,7 +84,7 @@ MainContent
 ### 3.2 字体
 
 ```css
-font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
 ```
 
 - 正文编辑区：优先使用等宽或衬线字体
@@ -103,6 +110,8 @@ src/components/
 ├─ topbar/        # 顶部状态栏组件
 ├─ novel-card/    # 作品卡片
 ├─ workspace/     # 写作工作台组件
+├─ task-workbench/ # v3.3.0+ 项目/任务树与对话组件
+├─ plugin-view/   # 当前插件只读投影
 ├─ right-dock/    # 右侧工具栏与面板
 ├─ common/        # 通用按钮、输入框、模态框等
 ├─ novel-detail/  # 作品详情组件
@@ -144,14 +153,16 @@ src/components/
 
 ## 6. 2K 屏幕适配
 
-- 写作工作台在 2K（2560×1440）下必须完整显示
-- 左侧树 + 中间编辑区 + 右侧工具栏同时可见
+- v3.3.0+ 创作工作台在 2K（2560×1440）下完整显示项目/任务树、任务对话与输入区
+- 原章节审阅/编辑器在适用版本中保证卷章树与正文区域可见
 - 最小支持宽度：1280px
 - 推荐窗口大小：1440×900 到 2560×1440
 
 ---
 
-## 7. 右侧工具栏与弹出面板
+## 7. 原右侧工具栏与弹出面板
+
+本节只约束 v3.2.1 当前页面和迁移期回退路径，不是 v3.3.0+ 创作工作台的目标主布局。
 
 ### 7.1 工具栏
 
@@ -173,6 +184,8 @@ src/components/
 
 ## 8. 路由规范
 
+以下为 v3.2.1 当前路由，不得在规划文档阶段擅自删除：
+
 ```text
 /                       → Home（作品管理首页）
 /novels/:novelId        → NovelDetail（作品详情）
@@ -183,6 +196,17 @@ src/components/
 ```
 
 使用 HashRouter（`createHashRouter`），保持桌面端路径稳定。
+
+v3.3.0+ 默认工作台路由与旧路由迁移由对应版本任务明确；在等价迁移前保留现有入口和回退路径，不根据本指令猜测具体 URL。
+
+---
+
+## 9. 当前插件只读视图
+
+- 数据来自 Runtime Plugin/Capability Registry 的稳定投影，不在前端硬编码插件清单；
+- 只按功能、模型和其他插件显示名称、版本、说明、状态与能力；
+- 不提供安装、卸载、启停、配置、更新、权限、市场或项目绑定；
+- 不把该视图变成工具管理或执行时间线页面。
 
 ---
 

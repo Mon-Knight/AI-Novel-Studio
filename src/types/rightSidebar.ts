@@ -15,3 +15,32 @@ export type PanelType =
   | null;
 
 export type RightDockPanelType = Exclude<PanelType, 'draft-history' | null>;
+
+/** Review-only panels still offered in the writing workspace toolbar. */
+export const WORKSPACE_REVIEW_PANELS = ['draft-history', 'chapter-summary'] as const;
+
+/** Desktop E2E still exercises these job/quality/setting surfaces after the AI dock was removed. */
+export const WORKSPACE_E2E_PANELS = ['ai-generate', 'engineering', 'check', 'setting'] as const;
+
+export const RETIRED_WORKSPACE_AI_PANELS: ReadonlySet<Exclude<PanelType, null>> = new Set([
+  'ai-generate',
+  'outline',
+  'characters',
+  'events',
+  'style',
+  'polish',
+  'multi-agent',
+  'context-view',
+  'engineering',
+  'check',
+  'setting',
+]);
+
+export function isWorkspaceAiPanelRetired(
+  panel: PanelType,
+  e2eEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1',
+): boolean {
+  if (!panel || (WORKSPACE_REVIEW_PANELS as readonly string[]).includes(panel)) return false;
+  if (e2eEnabled && (WORKSPACE_E2E_PANELS as readonly string[]).includes(panel)) return false;
+  return RETIRED_WORKSPACE_AI_PANELS.has(panel);
+}

@@ -1,7 +1,7 @@
 # AI Novel Studio — 项目开发辅助 Skills
 
 > 文件：`docs/development-skills.md`  
-> 文档基线：v1.0.45
+> 文档基线：v3.5.0（2026-08-21）
 > 用途：说明 10 个项目开发辅助 Skills 的作用和使用方式
 
 ---
@@ -27,22 +27,20 @@
 | 目标用户 | AI Agent（开发者助手） | 小说作者（终端用户）                                             |
 | 用途     | 指导开发过程           | 自动化创作流程                                                   |
 | 运行位置 | `.github/skills/`      | `src/services/autonomous-creation/`、`src/services/multi-agent/` |
-| 当前状态 | v1.0.45 已就绪         | v3.0.0 已实现受审核全书规划、六专家评审与逐章推进                |
+| 当前状态 | 10 个 Skills 已就绪    | v3.5.0 已有对话工作台、审阅收敛与固定 DSH 载体 |
 
 ---
 
 ## 3. 用户真实协作流程
 
 ```text
-用户 → ChatGPT（分析 + 规划）
-  ↓ 生成任务书
-用户 → 复制任务书给 VS Code Agent
-  ↓ Agent 读取 .github/skills/ 指导执行
-Agent → 执行修改 + 验证 + 汇报
+用户提出目标
   ↓
-用户 → 汇报发回 ChatGPT
+Agent 读取仓库状态、AGENTS.md 与相关 Skills
   ↓
-ChatGPT → 分析结果 → 生成下一步任务书
+复杂版本任务生成/使用自包含任务书；明确任务可在同一会话直接执行
+  ↓
+Agent 执行修改 + 分层验证 + 汇报
 ```
 
 ---
@@ -67,7 +65,7 @@ ChatGPT → 分析结果 → 生成下一步任务书
 
 ### 4.5 verify-build — 构建验证
 
-统一执行 cargo check / npm build / tauri build / pytest / git status。
+按变更范围执行文档、前端、Rust/SQLite 或 Tauri/DSH 门禁；发布时运行完整统一验证和 clean-tree 检查。
 
 ### 4.6 review-ui — UI 审查
 

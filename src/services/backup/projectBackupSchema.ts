@@ -1,4 +1,4 @@
-export const PROJECT_BACKUP_SCHEMA_VERSION = 9;
+export const PROJECT_BACKUP_SCHEMA_VERSION = 11;
 export const MIN_SUPPORTED_PROJECT_BACKUP_SCHEMA_VERSION = 2;
 
 export type BackupValue =
@@ -102,6 +102,23 @@ const CONTENT_TRANSACTION_TABLES = [
   'chapter_event_locations',
 ] as const;
 
+const CONVERSATION_WORKBENCH_TABLES = [
+  'task_conversations',
+  'conversation_turns',
+  'task_runs',
+  'tool_call_events',
+  'conversation_artifact_cards',
+  'ai_tasks',
+  'ai_task_attempts',
+  'ai_input_snapshots',
+  'ai_context_snapshots',
+  'ai_constraint_snapshots',
+  'result_artifacts',
+  'artifact_validation_issues',
+] as const;
+
+const ARTIFACT_DECISION_TABLES = ['artifact_decisions', 'review_authorizations'] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -170,6 +187,8 @@ export function isCompleteProjectBackup(data: unknown): data is CompleteProjectB
     ...(data.schemaVersion >= 7 ? MEMORY_TABLES : []),
     ...(data.schemaVersion >= 8 ? AUTONOMOUS_SCHEDULER_TABLES : []),
     ...(data.schemaVersion >= 9 ? CONTENT_TRANSACTION_TABLES : []),
+    ...(data.schemaVersion >= 10 ? CONVERSATION_WORKBENCH_TABLES : []),
+    ...(data.schemaVersion >= 11 ? ARTIFACT_DECISION_TABLES : []),
   ];
   const allowedTables = new Set<string>(requiredTables);
   return (

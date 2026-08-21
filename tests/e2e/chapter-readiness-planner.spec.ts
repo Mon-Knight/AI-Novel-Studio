@@ -43,7 +43,7 @@ interface LeaseGrant {
   token: string;
 }
 
-const REGISTRY_HASH = '846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871';
+const REGISTRY_HASH = '6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579';
 
 describe('chapter readiness planner runtime', () => {
   it('runs the six local tools once and persists the completed plan without network access', async () => {
@@ -52,7 +52,7 @@ describe('chapter readiness planner runtime', () => {
     const volumeId = await createVolumeThroughUi('E2E Planner Volume');
     const chapterId = await createChapterThroughUi('E2E Planner Chapter', volumeId);
 
-    await clickTestId('ai-generate');
+    await clickTestId('chapter-readiness-toggle');
     await waitForTestIdAttribute('chapter-readiness-plan', 'data-plan-status', 'none');
     await clickTestId('chapter-readiness-create');
     const card = await waitForTestIdAttribute(
@@ -85,17 +85,23 @@ describe('chapter readiness planner runtime', () => {
       'verification.check_readiness@1',
     ]);
     expect(bundle.attempts).toHaveLength(6);
-    expect(bundle.attempts.every((attempt) => (
-      attempt.status === 'succeeded' && attempt.attemptNumber === 1
-    ))).toBe(true);
+    expect(
+      bundle.attempts.every(
+        (attempt) => attempt.status === 'succeeded' && attempt.attemptNumber === 1,
+      ),
+    ).toBe(true);
     expect(bundle.plan.resultJson?.data?.ready).toBe(false);
-    expect(bundle.plan.resultJson?.data?.missing?.some((item) => (
-      item.code === 'chapter_outline' && item.blocking
-    ))).toBe(true);
+    expect(
+      bundle.plan.resultJson?.data?.missing?.some(
+        (item) => item.code === 'chapter_outline' && item.blocking,
+      ),
+    ).toBe(true);
     expect(bundle.checkpoints.map((checkpoint) => checkpoint.sequence)).toEqual(
       bundle.checkpoints.map((_, index) => index + 1),
     );
-    expect(bundle.checkpoints.some((checkpoint) => checkpoint.eventType === 'step_failed')).toBe(false);
+    expect(bundle.checkpoints.some((checkpoint) => checkpoint.eventType === 'step_failed')).toBe(
+      false,
+    );
 
     const diagnostics = await bridgeDiagnostics();
     expect(diagnostics.counts?.agentPlans).toBe(1);
@@ -160,37 +166,37 @@ describe('chapter readiness planner runtime', () => {
     expect(recovered.steps[0].status).toBe('waiting_retry');
     expect(recovered.attempts).toHaveLength(1);
     expect(recovered.attempts[0].status).toBe('abandoned');
-    expect(recovered.checkpoints.filter((checkpoint) => (
-      checkpoint.eventType === 'interrupted_recovered'
-    ))).toHaveLength(1);
+    expect(
+      recovered.checkpoints.filter(
+        (checkpoint) => checkpoint.eventType === 'interrupted_recovered',
+      ),
+    ).toHaveLength(1);
 
     await openWorkspace(projectId);
     const chapter = await findTestIdByAttribute('chapter-item', 'data-chapter-id', chapterId);
     await chapter.click();
     await waitForTestIdAttribute('chapter-editor', 'data-chapter-id', chapterId);
-    await clickTestId('ai-generate');
+    await clickTestId('chapter-readiness-toggle');
     await waitForTestIdAttribute('chapter-readiness-plan', 'data-plan-status', 'waiting_retry');
     await clickTestId('chapter-readiness-retry');
-    await waitForTestIdAttribute(
-      'chapter-readiness-plan',
-      'data-plan-status',
-      'completed',
-      60000,
-    );
+    await waitForTestIdAttribute('chapter-readiness-plan', 'data-plan-status', 'completed', 60000);
 
     const completed = await bridgeCall<PlanBundle>('get_agent_plan', {
       input: { planId: created.plan.planId },
     });
     expect(completed.plan.status).toBe('completed');
     expect(completed.attempts).toHaveLength(7);
-    expect(completed.attempts.filter((attempt) => attempt.stepId === firstStep.stepId)
-      .map((attempt) => [attempt.attemptNumber, attempt.status])).toEqual([
+    expect(
+      completed.attempts
+        .filter((attempt) => attempt.stepId === firstStep.stepId)
+        .map((attempt) => [attempt.attemptNumber, attempt.status]),
+    ).toEqual([
       [1, 'abandoned'],
       [2, 'succeeded'],
     ]);
-    expect(completed.checkpoints.filter((checkpoint) => (
-      checkpoint.eventType === 'retry_authorized'
-    ))).toHaveLength(1);
+    expect(
+      completed.checkpoints.filter((checkpoint) => checkpoint.eventType === 'retry_authorized'),
+    ).toHaveLength(1);
     await assertCleanDiagnostics();
 
     await browser.reloadSession();

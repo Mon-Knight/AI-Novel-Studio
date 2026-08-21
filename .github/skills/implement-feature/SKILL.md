@@ -58,10 +58,12 @@
 
 每完成一批修改后：
 
-1. 运行 `cargo check`（如果修改了 Rust 代码）
-2. 运行 `npm run build`（如果修改了前端代码）
-3. 检查控制台是否有错误
-4. `git status` 确认修改范围
+1. 运行与修改模块直接相关的动态测试
+2. 修改前端时运行 `npm run lint:ci` 与 `npm run build`
+3. 修改 Rust/SQLite 时运行 `cargo check` 与相关测试
+4. 修改 Tauri/DSH payload 或执行发布时运行对应桌面 E2E、生产构建或统一发布验证入口
+5. 纯文档任务运行 docs/version sync、Prettier 和 diff 检查
+6. `git status --short` 确认修改范围
 
 ### 步骤 6：文档同步
 
@@ -79,25 +81,33 @@
 # ✅ 完成汇报
 
 ## 一、当前版本
+
 - 版本号：
 - 分支：
 
 ## 二、本次目标
+
 - ...
 
 ## 三、已完成内容
+
 - ...
 
 ## 四、新增 / 修改文件
+
 - ...
 
 ## 五、运行与验证
-- cargo check：
-- npm run build：
-- npm run tauri build：
+
+- 相关动态测试：
+- lint/build（如适用）：
+- Rust/SQLite（如适用）：
+- Tauri/DSH/发布门禁（如适用）：
+- 文档与范围检查：
 - git status：
 
 ## 六、后续建议
+
 - ...
 ```
 
@@ -120,7 +130,7 @@
 ## 验证方式
 
 - 修改后的文件是否在任务书范围内？
-- `cargo check` / `npm run build` 是否通过？
+- 与修改范围相匹配的测试、lint、构建或文档门禁是否通过？
 - 已有功能是否正常？
 
 ## 失败处理

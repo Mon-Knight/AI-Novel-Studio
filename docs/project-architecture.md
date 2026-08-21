@@ -344,4 +344,58 @@ Vite 生产输出固定拆分 `vendor-react / vendor-router / vendor-zustand / v
 
 ---
 
+## 19. v3.3.0+ 对话式并发创作工作台目标架构（首阶段已实现）
+
+v3.3.0 及后续版本计划增加面向小说任务的对话控制面，不替换现有领域事实层：
+
+```text
+Workbench Shell
+  ├─ 小说项目 / 任务树
+  └─ 对话、工具事件、错误、产物卡片
+        ↓
+Task Conversation Service
+  ├─ 消息 / 回合
+  ├─ 任务级模型快照
+  └─ 持久状态投影
+        ↓
+Task Runtime / Worker Pool
+  ├─ Planner
+  ├─ Plugin / Capability Registry
+  │  ├─ 功能插件 / Tool Registry
+  │  ├─ 模型插件 / Provider Pipeline
+  │  └─ 上下文与其他 Runtime Provider
+  └─ 取消 / 恢复 / 全局请求治理
+        ↓ ANS DSH Adapter
+DSH Headless Worker（固定源码基线）
+  ├─ Session / Agent Loop
+  ├─ Tool Pipeline / Scheduler
+  ├─ Model Provider / Compaction
+  └─ Plugin Graph
+        ↓
+Artifact + Decision Bridge
+  ├─ ResultArtifact
+  ├─ 验证 / 基线 / 用户决定
+  └─ Review Authorization / Safe Apply
+        ↓
+Novel Domain Services + SQLite
+```
+
+架构边界：
+
+- 工作台是 UI 聚合层，小说仍是领域数据最高级对象；
+- 任务对话之间隔离消息、模型、运行、取消与产物，允许受治理并发；
+- 工具调用和错误作为持久执行事实投影到对话，不建立第二套真相源；
+- 普通回复不写正式事实，只有不可变产物经过用户决定和领域事务后才可应用；
+- 章节候选还需要单次审阅授权，在人工审阅/编辑器中显式采用；
+- DSH 可承担 Planner/Executor/Worker 职责，但 SQLite、预算门禁、验证与最终采用权继续留在 ANS；
+- Runtime 借鉴 DSH 的 Profile/Bundle 组合、作用域 Session/Agent、`turn → step → tool result → next step` 循环和追加事件投影，但不复制通用代码、Shell、Git 等能力；
+- 固定版本 DSH 作为 Headless Worker，ANS DSH Adapter 隔离其内部 API；不完整 Fork Harness，不嵌入 Harness Web UI，不把 DSH Session Log 当作小说事实源；
+- 能力采用“稳定定义 → 可替换 Provider → Runtime 消费”边界，小说上下文压缩等实现可以替换而不改写工作台和 Safe Apply；
+- “当前插件”页面只是 Plugin/Capability Registry 的只读投影，按功能、模型和其他插件显示名称、版本、状态与能力，不提供插件管理；
+- 原写作工作台在功能等价迁移后收敛为人工审阅/编辑器，底层服务不随 UI 一起删除。
+
+当前实施分支已将 `/` 指向创作工作台，并将旧作品管理保留为 `/novels` 回退入口；旧章节写作工作台和功能入口继续保留。完整设计与后续收敛边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
+
+---
+
 > **本文件是 AI Novel Studio 项目架构的概要描述。详细模块边界见 `docs/module-boundaries.md`。**

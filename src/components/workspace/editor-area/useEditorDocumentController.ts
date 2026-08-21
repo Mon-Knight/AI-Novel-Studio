@@ -27,6 +27,7 @@ interface UseEditorDocumentControllerOptions {
   onApplyTextRejected?: EditorAreaProps['onApplyTextRejected'];
   commandRequest?: EditorCommandRequest | null;
   onChapterUpdated?: EditorAreaProps['onChapterUpdated'];
+  onBeforeAdopt?: EditorAreaProps['onBeforeAdopt'];
 }
 
 export function useEditorDocumentController({
@@ -43,6 +44,7 @@ export function useEditorDocumentController({
   onApplyTextRejected,
   commandRequest,
   onChapterUpdated,
+  onBeforeAdopt,
 }: UseEditorDocumentControllerOptions) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -397,6 +399,7 @@ export function useEditorDocumentController({
     const draftForAdoption = draftToAdopt;
     setAdopting(true);
     try {
+      if (onBeforeAdopt) await onBeforeAdopt(draftForAdoption.id);
       const adopted = await runWithLoading(
         {
           title: '正在确认采用',
@@ -450,6 +453,7 @@ export function useEditorDocumentController({
     novelId,
     onChapterUpdated,
     onDraftSaved,
+    onBeforeAdopt,
     saving,
   ]);
 

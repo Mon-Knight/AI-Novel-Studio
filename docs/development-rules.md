@@ -6,6 +6,7 @@
 > 技术路线：Tauri + React + TypeScript + SQLite  
 > 开发方式：VS Code + Copilot / Agent 辅助开发  
 > 文档目的：约束后续开发流程、目录结构、版本管理、GitHub 备份、UI 方向、AI 功能开发边界，避免项目在长期迭代中变成混乱的网页后台或不可维护的代码堆。
+> 时效说明：第 1～20 节大量保留早期 v0.x～v3.2.1 的形成过程和当前页面约束；v3.3.0+ 的主交互、Harness 复用与验证覆盖规则以第 24 节和 `docs/architecture/conversational-creative-workbench.md` 为准。
 
 ---
 
@@ -15,8 +16,8 @@ AI Novel Studio 已建立完整的 Agent 工程化开发基础设施。所有开
 
 - **`AGENTS.md`** — AI Agent 总入口规则（必读）
 - **`.github/instructions/`** — 6 个分领域开发指令
-- **`.github/skills/`** — 5 个多步骤 Agent 工作流
-- **`.cursor/rules/`** — 5 个 IDE 规则
+- **`.github/skills/`** — 10 个多步骤 Agent 工作流
+- **`.cursor/rules/`** — 8 个 IDE 规则
 - **`docs/agent-workflow.md`** — Agent 标准工作流
 
 AI Agent 在操作本仓库时，必须：
@@ -85,7 +86,7 @@ AI 生成一章正文
 - 不把 UI 做成网页式数据管理面板
 - 不把“上下文包”做成开局强制填写项
 
-本项目主入口必须是：
+以下是 v3.2.1 及更早版本形成的入口；v3.3.0+ 默认入口按第 24 节迁移：
 
 ```text
 小说作品 → 作品详情 → 章节写作工作台 → AI 生成正文
@@ -1051,24 +1052,15 @@ v1.0.0：可正式写长篇的基础版
 
 ## 13. 测试与验证规则
 
-### 13.1 每次修改后至少验证
+### 13.1 按变更范围验证
 
-根据当前阶段执行：
+- 纯文档：`npm run test:docs-sync`，必要时 `npm run test:version-sync`，并执行 Prettier、diff 和范围检查；
+- 前端/TypeScript：相关动态测试、`npm run lint:ci`、`npm run build`；
+- Rust/SQLite：`cargo check`、相关动态测试，版本验收时完整 `cargo test`；
+- Tauri/DSH payload/打包：真实桌面 E2E 与生产构建；
+- 发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵和 clean working tree。
 
-```powershell
-npm install
-npm run dev
-npm run build
-npm run tauri dev
-```
-
-若项目已加入测试，则执行：
-
-```powershell
-npm test
-```
-
-或项目实际定义的测试命令。
+不得用 `npm run dev` 或一次手动演示代替动态测试；也不要求纯文档或局部代码任务运行无关的完整 Tauri 发布构建。
 
 ---
 
@@ -1076,13 +1068,13 @@ npm test
 
 UI 修改后必须检查：
 
-- 首页是否正常显示
+- 目标版本的默认入口是否正常显示
 - 左侧导航是否可点击
 - 顶部栏是否正常
 - 作品卡片是否正常
-- 工作台三栏布局是否正常
-- 右侧栏是否可展开 / 收回
-- 中间正文区是否未被右侧栏挤压变形
+- v3.3.0+ 项目/任务树、对话、输入和内联工具/产物是否正常
+- 原章节审阅/编辑器的卷章树、正文阅读、显式编辑/保存/采用是否正常
+- v3.2.1 旧右侧栏若仍属于回退路径，其展开/收回是否正常
 - 窗口缩放时布局是否可用
 
 ---
@@ -1096,7 +1088,7 @@ AI 相关功能修改后必须检查：
 - AI 调用失败时是否显示错误
 - 生成结果是否先保存为草稿
 - 用户确认后是否才采用
-- 重生成是否保留原草稿版本
+- 重试是否产生新运行/候选且不覆盖原执行与产物事实
 
 ---
 
@@ -1440,8 +1432,8 @@ JSON 风格配置 ≠ JSON 作品备份
 每次开始开发前检查：
 
 ```text
-1. 是否在 F:\ai-novel-studio
-2. git status 是否干净
+1. 是否在任务指定的正确工作树
+2. 是否记录 git status、分支与 HEAD；只有提交/发布起点才要求 clean
 3. 是否确认当前版本目标
 4. 是否阅读 docs 相关文档
 5. 是否确认不修改无关模块
@@ -1456,17 +1448,16 @@ JSON 风格配置 ≠ JSON 作品备份
 每次开发结束后检查：
 
 ```text
-1. npm run dev 是否可运行
-2. npm run build 是否通过
-3. npm run tauri dev 是否可启动
-4. UI 是否符合参考方向
+1. 是否执行与变更范围匹配的动态测试
+2. 适用的 lint/build/Rust/Tauri/DSH 门禁是否通过
+3. UI 是否符合目标版本参考方向
 5. 是否没有把大段提示词写入组件
 6. 是否没有提交 node_modules
 7. 是否没有提交 .env.local
 8. git status 是否确认
-9. 是否 commit
-10. 是否 tag
-11. 是否 push GitHub
+9. 是否按用户/版本任务要求 commit
+10. 是否仅在发布门禁完成后按发布任务 tag
+11. 是否按用户/版本任务要求 push GitHub
 12. 是否写完成汇报
 ```
 
@@ -1483,3 +1474,33 @@ AI Novel Studio 的开发必须坚持三个核心：
 ```
 
 后续所有 Copilot / Agent 任务都必须以本文件为开发约束。
+
+---
+
+## 24. v3.3.0+ 规则覆盖层（2026-08-20）
+
+本节用于消除早期规则与已确认工作台方向之间的冲突。该方向已在 v3.5.0 落地；本节继续约束后续任务不得回退到 v3.2.1 三栏目标。
+
+### 24.1 产品与 UI
+
+- 默认中心从作品首页/旧三栏 AI 工作台迁移为“创作工作台 → 小说项目 → 任务对话”；
+- 工具调用、错误和产物卡片在对话中显示，不新增执行时间线、任务计划、工具或产物详情面板；
+- 原写作工作台在能力等价迁移后收敛为章节人工审阅/编辑器；
+- 待确认入口、待确认产物和草稿版本查看只在对应版本任务完成迁移与回退验证后删除；
+- 当前插件只读展示功能、模型和其他已加载插件，不增加插件管理或市场。
+
+### 24.2 Harness 源码复用
+
+- 当前发布载体继续固定 DSH commit `47f943859bef60e4160492346772ded9b24f765a`；
+- 推荐使用固定版本 Harness Headless Worker + ANS DSH Adapter，不完整 Fork、不嵌入 Harness Web UI；
+- 一个任务对话映射为持续 Session/Agent，DSH 负责 Turn/Step、工具调度和 Session 事件；
+- ANS 继续拥有小说领域工具、预算、Result Artifact、用户决定、revision/CAS、Safe Apply 与 SQLite 权威；
+- 较新 Harness 源码只能在独立版本完成 API 差异、载体构建和回归验证后升级。
+
+### 24.3 Agent 执行
+
+- 用户最新明确需求或已确认任务书是当前目标，不强制在不同聊天/IDE 间复制任务书；
+- 旧 UI 规则按版本解释，不能把 v3.2.1 三栏布局强加给 v3.3.0+ 主工作台；
+- 验证按文档、前端、Rust/SQLite、Tauri/DSH 和发布范围分层；
+- commit、push、tag 只在用户或版本/发布任务明确要求时执行；
+- Agent 规则时效审计见 `docs/audit/agent-requirements-review-2026-08-20.md`。

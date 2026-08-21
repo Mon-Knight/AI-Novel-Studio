@@ -1,5 +1,5 @@
 ---
-description: AI Novel Studio UI 规则 - 桌面写作软件风格、布局约束、视觉标准
+description: AI Novel Studio UI 规则 - 对话式创作工作台、章节审阅编辑器与桌面视觉标准
 globs: src/**/*.tsx,src/**/*.css
 alwaysApply: true
 ---
@@ -12,25 +12,28 @@ AI Novel Studio 的 UI 是 **Windows 桌面写作软件**，不是网页后台�
 
 ## 布局强制要求
 
-### 首页
+### v3.3.0+ 默认创作工作台
 ```
-Sidebar (左侧导航 ~220px) | MainContent (作品卡片列表)
+ProjectTaskTree | TaskConversation（消息 / 工具 / 错误 / 产物卡片）
+                | Composer（任务级模型 / 输入 / 发送或停止）
 ```
 
-### 写作工作台
+不增加独立执行时间线、任务计划、工具或产物详情面板。
+
+### 原写作工作台 / 章节审阅编辑器
 ```
 TopToolbar
 ├── LeftTree (~240px)
 ├── CenterEditor (flex: 1)
-├── RightToolbar (~48px)
-└── RightPanel (320-380px, 条件显示)
 BottomStatusBar
 ```
 
-### 右侧工具栏
-- 固定竖向图标栏
-- 点击图标展开面板
-- 点击正文区 / 按 Esc / 切换章节 → 自动收回
+v3.2.1 当前右侧 AI 工具栏仅是迁移期现状；对应能力迁入任务对话并完成等价与回退验证后分阶段移除。目标编辑器保留显式编辑、保存和采用。
+
+### 当前插件
+- 只读显示 Runtime Registry 的功能、模型和其他插件
+- 不提供安装、卸载、启停、配置、更新、权限、市场或项目绑定
+- 不显示任务执行详情
 
 ## 视觉标准
 
@@ -44,7 +47,8 @@ BottomStatusBar
 ## 2K 适配
 - 推荐窗口：1440×900 到 2560×1440
 - 最小宽度：1280px
-- 写作工作台三栏在 2K 下必须完整可见
+- 创作工作台的项目/任务树、对话和输入区在 2K 下必须完整可见
+- 章节审阅编辑器的卷章树和正文区在 2K 下必须完整可见
 
 ## 禁止模式
 

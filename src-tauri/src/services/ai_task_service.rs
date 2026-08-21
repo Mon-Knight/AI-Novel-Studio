@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const PRODUCTION_TOOL_REGISTRY_HASH: &str =
-    "846a38c25bba33c843b56fa6583b334bae3364073fb7f0b6290be0c405aae871";
+    "6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579";
 
 fn connection_test_policy() -> Result<(i64, f64), AppError> {
     let policy: Value = serde_json::from_str(include_str!(

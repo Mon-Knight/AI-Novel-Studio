@@ -1,4 +1,4 @@
-//! Four read-only novel domain tools for the v3.1.0 gateway.
+//! Novel-domain read tools plus a candidate-only validation sink.
 //!
 //! SQL and column semantics mirror the app's Rust schema (`src-tauri/src/db.rs`,
 //! `src/outline_commands.rs`, `src/migrations.rs`) and the read semantics of
@@ -14,6 +14,7 @@ pub const TOOL_VERSION: &str = "v1";
 
 const ID_MAX: usize = 160;
 const QUERY_MAX: usize = 2000;
+const CANDIDATE_TEXT_MAX: usize = 400_000;
 const TOP_K_MIN: i64 = 1;
 const TOP_K_MAX: i64 = 20;
 const FIELD_CLIP: usize = 12_000;
@@ -21,7 +22,74 @@ const CHUNK_CLIP: usize = 2_000;
 
 /// The `tools/list` payload.
 pub fn tool_list() -> Vec<Value> {
-    vec![
+    let tools = vec![
+        json!({
+            "name": "novel.read_context",
+            "description": "读取小说上下文与章节结构。只读。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX}
+                },
+                "required": ["novelId"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "chapter.read_outline",
+            "description": "读取目标章节大纲与工程上下文。只读。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX}
+                },
+                "required": ["novelId", "chapterId"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "generate_chapter",
+            "description": "接收并验证模型已生成的章节候选。只返回 candidate-only 结构，不写入正式正文。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "candidateText": {"type": "string", "minLength": 1, "maxLength": CANDIDATE_TEXT_MAX}
+                },
+                "required": ["novelId", "chapterId", "candidateText"],
+                "additionalProperties": false
+            },
+            "outputSchema": {
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean", "enum": [true]},
+                    "toolVersion": {"type": "string", "enum": [TOOL_VERSION]},
+                    "artifactType": {"type": "string", "enum": ["chapter_text"]},
+                    "candidateOnly": {"type": "boolean", "enum": [true]},
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                            "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                            "text": {"type": "string", "minLength": 1, "maxLength": CANDIDATE_TEXT_MAX}
+                        },
+                        "required": ["novelId", "chapterId", "text"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["ok", "toolVersion", "artifactType", "candidateOnly", "data"],
+                "additionalProperties": false
+            }
+        }),
+        candidate_tool_schema("generate_outline", "outline", "接收并验证大纲候选。不写入正式大纲。"),
+        candidate_tool_schema("generate_characters", "character_candidates", "接收并验证角色候选。不写入角色库。"),
+        candidate_tool_schema("suggest_events", "event_candidates", "接收并验证事件候选。不写入章节事件。"),
+        candidate_tool_schema("expand_settings", "setting_candidates", "接收并验证设定候选。不写入正式设定。"),
+        candidate_tool_schema("polish_chapter", "chapter_text", "接收并验证润色候选。不覆盖正式正文。"),
+        candidate_tool_schema("check_quality", "quality_report", "接收并验证质量报告。报告不能直接应用。"),
+        candidate_tool_schema("summarize_chapter", "chapter_summary", "接收并验证章节总结候选。不写入正式上下文。"),
         json!({
             "name": "get_metadata",
             "description": "读取小说元信息、分卷与章节结构、目标章节位置，以及风格/输出方案列表。只读。",
@@ -81,7 +149,24 @@ pub fn tool_list() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
-    ]
+    ];
+    if let Ok(raw) = std::env::var("ANS_ALLOWED_TOOLS") {
+        let allowed: std::collections::HashSet<&str> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .collect();
+        tools
+            .into_iter()
+            .filter(|tool| {
+                tool.get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| allowed.contains(name))
+            })
+            .collect()
+    } else {
+        tools
+    }
 }
 
 /// Dispatches one `tools/call`.
@@ -89,13 +174,287 @@ pub fn call_tool(connection: &Connection, name: &str, arguments: &Value) -> Resu
     if crate::secret_guard::contains_secret_value(arguments) {
         return Err("suspicious credential-like input rejected".to_string());
     }
+    if let Ok(raw) = std::env::var("ANS_ALLOWED_TOOLS") {
+        let allowed: std::collections::HashSet<&str> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .collect();
+        if !allowed.contains(name) {
+            return Err(format!("tool not allowed for this task: {}", name));
+        }
+    }
     match name {
-        "get_metadata" => get_metadata(connection, arguments),
-        "get_chapter_context" => get_chapter_context(connection, arguments),
+        "novel.read_context" => get_metadata(connection, arguments, false),
+        "get_metadata" => get_metadata(connection, arguments, true),
+        "chapter.read_outline" | "get_chapter_context" => {
+            get_chapter_context(connection, arguments)
+        }
         "search_memory" => search_memory(connection, arguments),
         "get_character_states" => get_character_states(connection, arguments),
+        "generate_chapter" => generate_chapter(connection, arguments),
+        "generate_outline" => candidate_tool(connection, arguments, "outline", false),
+        "generate_characters" => candidate_tool(connection, arguments, "character_candidates", false),
+        "suggest_events" => candidate_tool(connection, arguments, "event_candidates", true),
+        "expand_settings" => candidate_tool(connection, arguments, "setting_candidates", false),
+        "polish_chapter" => candidate_tool(connection, arguments, "chapter_text", true),
+        "check_quality" => candidate_tool(connection, arguments, "quality_report", true),
+        "summarize_chapter" => candidate_tool(connection, arguments, "chapter_summary", true),
         other => Err(format!("unknown tool: {}", other)),
     }
+}
+
+fn candidate_tool_schema(name: &str, artifact_type: &str, description: &str) -> Value {
+    json!({
+        "name": name,
+        "description": description,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                "candidateText": {"type": "string", "minLength": 1, "maxLength": CANDIDATE_TEXT_MAX}
+            },
+            "required": ["novelId", "candidateText"],
+            "additionalProperties": false
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean", "enum": [true]},
+                "toolVersion": {"type": "string", "enum": [TOOL_VERSION]},
+                "artifactType": {"type": "string", "enum": [artifact_type]},
+                "candidateOnly": {"type": "boolean", "enum": [true]},
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                        "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                        "text": {"type": "string", "minLength": 1, "maxLength": CANDIDATE_TEXT_MAX}
+                    },
+                    "required": ["novelId", "text"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["ok", "toolVersion", "artifactType", "candidateOnly", "data"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn candidate_tool(
+    connection: &Connection,
+    arguments: &Value,
+    artifact_type: &str,
+    require_chapter: bool,
+) -> Result<Value, String> {
+    let novel_id = arg_id(arguments, "novelId")?;
+    let chapter_id = arguments
+        .get("chapterId")
+        .or_else(|| arguments.get("chapter_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if require_chapter && chapter_id.is_none() {
+        return Err("chapterId is required".to_string());
+    }
+    generate_chapter_like(connection, &novel_id, chapter_id, arguments, artifact_type)
+}
+
+fn generate_chapter_like(
+    connection: &Connection,
+    novel_id: &str,
+    chapter_id: Option<&str>,
+    arguments: &Value,
+    artifact_type: &str,
+) -> Result<Value, String> {
+    let candidate_text = arguments
+        .get("candidateText")
+        .or_else(|| arguments.get("candidate_text"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "candidateText must be a non-empty string".to_string())?;
+    if candidate_text.chars().count() > CANDIDATE_TEXT_MAX {
+        return Err(format!(
+            "candidateText exceeds {} characters",
+            CANDIDATE_TEXT_MAX
+        ));
+    }
+    let novel_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM novels WHERE id = ?1 AND deleted_at IS NULL)",
+            params![novel_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !novel_exists {
+        return Err(format!("novel not found: {}", novel_id));
+    }
+    if let Some(chapter_id) = chapter_id {
+        let chapter_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM chapters
+                    WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL
+                 )",
+                params![chapter_id, novel_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if !chapter_exists {
+            return Err(format!("chapter not found in novel: {}/{}", novel_id, chapter_id));
+        }
+    }
+    validate_candidate_payload(artifact_type, candidate_text)?;
+    Ok(json!({
+        "ok": true,
+        "toolVersion": TOOL_VERSION,
+        "artifactType": artifact_type,
+        "candidateOnly": true,
+        "data": {
+            "novelId": novel_id,
+            "chapterId": chapter_id.unwrap_or(""),
+            "text": candidate_text
+        }
+    }))
+}
+
+fn generate_chapter(connection: &Connection, arguments: &Value) -> Result<Value, String> {
+    let novel_id = arg_id(arguments, "novelId")?;
+    let chapter_id = arg_id(arguments, "chapterId")?;
+    let candidate_text = arguments
+        .get("candidateText")
+        .or_else(|| arguments.get("candidate_text"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "candidateText must be a non-empty string".to_string())?;
+    if candidate_text.chars().count() > CANDIDATE_TEXT_MAX {
+        return Err(format!(
+            "candidateText exceeds {} characters",
+            CANDIDATE_TEXT_MAX
+        ));
+    }
+    let chapter_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM chapters
+                WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL
+             )",
+            params![chapter_id, novel_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !chapter_exists {
+        return Err(format!(
+            "chapter not found in novel: {}/{}",
+            novel_id, chapter_id
+        ));
+    }
+    validate_candidate_payload("chapter_text", candidate_text)?;
+    Ok(json!({
+        "ok": true,
+        "toolVersion": TOOL_VERSION,
+        "artifactType": "chapter_text",
+        "candidateOnly": true,
+        "data": {"novelId": novel_id, "chapterId": chapter_id, "text": candidate_text}
+    }))
+}
+
+fn parse_candidate_json(text: &str) -> Option<Value> {
+    let trimmed = text.trim();
+    serde_json::from_str(trimmed).ok().or_else(|| {
+        trimmed
+            .find(['{', '['])
+            .and_then(|start| serde_json::from_str(&trimmed[start..]).ok())
+    })
+}
+
+fn named_entries(value: &Value, keys: &[&str], name_key: &str) -> bool {
+    let lists = keys
+        .iter()
+        .filter_map(|key| value.get(key))
+        .chain(std::iter::once(value));
+    for list in lists {
+        if let Some(items) = list.as_array() {
+            if items.iter().any(|item| {
+                item.get(name_key)
+                    .and_then(Value::as_str)
+                    .map(|name| !name.trim().is_empty())
+                    .unwrap_or(false)
+            }) {
+                return true;
+            }
+        }
+    }
+    value
+        .get(name_key)
+        .and_then(Value::as_str)
+        .map(|name| !name.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn validate_candidate_payload(artifact_type: &str, candidate_text: &str) -> Result<(), String> {
+    match artifact_type {
+        "chapter_text" => {
+            if candidate_text.chars().count() < 8 {
+                return Err("章节候选过短".to_string());
+            }
+        }
+        "outline" => {
+            if parse_candidate_json(candidate_text)
+                .as_ref()
+                .and_then(Value::as_object)
+                .is_none()
+                && candidate_text.chars().count() < 20
+            {
+                return Err("大纲候选必须是 JSON 对象或足够长的正文".to_string());
+            }
+        }
+        "character_candidates" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "角色候选必须是 JSON".to_string())?;
+            if !named_entries(&parsed, &["characters", "candidates"], "name") {
+                return Err("角色候选必须包含至少一个带 name 的条目".to_string());
+            }
+        }
+        "event_candidates" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "事件候选必须是 JSON".to_string())?;
+            if !named_entries(&parsed, &["events", "suggestions", "candidates"], "title") {
+                return Err("事件候选必须包含至少一个带 title 的条目".to_string());
+            }
+        }
+        "setting_candidates" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "设定候选必须是 JSON".to_string())?;
+            if !named_entries(&parsed, &["settings", "candidates"], "name") {
+                return Err("设定候选必须包含至少一个带 name 的条目".to_string());
+            }
+        }
+        "quality_report" => {
+            let parsed = parse_candidate_json(candidate_text)
+                .ok_or_else(|| "质量报告必须是 JSON".to_string())?;
+            if parsed.get("summary").and_then(Value::as_str).is_none()
+                && !parsed.get("issues").map(Value::is_array).unwrap_or(false)
+            {
+                return Err("质量报告必须包含 summary 或 issues".to_string());
+            }
+        }
+        "chapter_summary" => {
+            let parsed = parse_candidate_json(candidate_text);
+            let summary = parsed
+                .as_ref()
+                .and_then(|value| value.get("summary"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            if summary.is_empty() && candidate_text.chars().count() < 12 {
+                return Err("总结候选过短".to_string());
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn arg_id(arguments: &Value, key: &str) -> Result<String, String> {
@@ -131,18 +490,34 @@ fn clip(value: String) -> String {
     }
 }
 
-fn max_updated_at(connection: &Connection, table: &str, column: &str, param: &str) -> Option<String> {
+fn max_updated_at(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    param: &str,
+) -> Option<String> {
     // table/column come from hardcoded call sites, never user input.
-    let sql = format!("SELECT MAX(updated_at) FROM {} WHERE {} = ?1", table, column);
+    let sql = format!(
+        "SELECT MAX(updated_at) FROM {} WHERE {} = ?1",
+        table, column
+    );
     connection
         .query_row(&sql, params![param], |row| row.get::<_, Option<String>>(0))
         .ok()
         .flatten()
 }
 
-fn max_created_at(connection: &Connection, table: &str, column: &str, param: &str) -> Option<String> {
+fn max_created_at(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    param: &str,
+) -> Option<String> {
     // For tables without an updated_at column (e.g. character_states).
-    let sql = format!("SELECT MAX(created_at) FROM {} WHERE {} = ?1", table, column);
+    let sql = format!(
+        "SELECT MAX(created_at) FROM {} WHERE {} = ?1",
+        table, column
+    );
     connection
         .query_row(&sql, params![param], |row| row.get::<_, Option<String>>(0))
         .ok()
@@ -163,9 +538,17 @@ fn chapter_order(connection: &Connection, chapter_id: &str) -> Result<i64, Strin
 // get_metadata
 // ---------------------------------------------------------------------------
 
-fn get_metadata(connection: &Connection, arguments: &Value) -> Result<Value, String> {
+fn get_metadata(
+    connection: &Connection,
+    arguments: &Value,
+    require_chapter: bool,
+) -> Result<Value, String> {
     let novel_id = arg_id(arguments, "novelId")?;
-    let chapter_id = arg_id(arguments, "chapterId")?;
+    let chapter_id = if require_chapter {
+        Some(arg_id(arguments, "chapterId")?)
+    } else {
+        None
+    };
 
     let novel = connection
         .query_row(
@@ -240,7 +623,7 @@ fn get_metadata(connection: &Connection, arguments: &Value) -> Result<Value, Str
         for row in rows.take(1000) {
             let chapter = row.map_err(|error| error.to_string())?;
             index += 1;
-            if chapter["id"] == chapter_id {
+            if chapter.get("id").and_then(Value::as_str) == chapter_id.as_deref() {
                 target_position = json!({
                     "orderIndex": index,
                     "volumeId": chapter["volumeId"],
@@ -251,8 +634,10 @@ fn get_metadata(connection: &Connection, arguments: &Value) -> Result<Value, Str
             chapters.push(chapter);
         }
     }
-    if target_position.is_null() {
-        return Err(format!("chapter not found in novel: {}", chapter_id));
+    if let Some(chapter_id) = chapter_id.as_deref() {
+        if target_position.is_null() {
+            return Err(format!("chapter not found in novel: {}", chapter_id));
+        }
     }
 
     let mut style_profiles = Vec::new();
@@ -307,10 +692,10 @@ fn get_metadata(connection: &Connection, arguments: &Value) -> Result<Value, Str
             "novel": novel,
             "volumes": volumes,
             "chapters": chapters,
-            "targetChapter": {
+            "targetChapter": chapter_id.map(|chapter_id| json!({
                 "chapterId": chapter_id,
                 "position": target_position
-            },
+            })),
             "styleProfiles": style_profiles,
             "outputProfiles": output_profiles
         }
@@ -481,7 +866,10 @@ fn search_memory(connection: &Connection, arguments: &Value) -> Result<Value, St
                 .iter()
                 .filter_map(Value::as_str)
                 .filter(|value| {
-                    matches!(*value, "adopted_draft" | "chapter_summary" | "context_record")
+                    matches!(
+                        *value,
+                        "adopted_draft" | "chapter_summary" | "context_record"
+                    )
                 })
                 .map(str::to_string)
                 .collect()
@@ -509,7 +897,8 @@ fn search_memory(connection: &Connection, arguments: &Value) -> Result<Value, St
             "d.status = 'active'".to_string(),
             "memory_chunks_fts MATCH ?2".to_string(),
         ];
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(novel_id.clone()), Box::new(query.to_string())];
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(novel_id.clone()), Box::new(query.to_string())];
         if let Some(chapter) = chapter_filter {
             conditions.push(format!("m.chapter_id = ?{}", params_vec.len() + 1));
             params_vec.push(Box::new(chapter.to_string()));
@@ -540,31 +929,41 @@ fn search_memory(connection: &Connection, arguments: &Value) -> Result<Value, St
             params_vec.len() + 1
         );
         params_vec.push(Box::new(top_k));
-        let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(&sql)
+            .map_err(|error| error.to_string())?;
         let mapped = statement
-            .query_map(rusqlite::params_from_iter(params_vec.iter().map(|value| value.as_ref())), |row| {
-                Ok(json!({
-                    "chunkId": row.get::<_, String>(0)?,
-                    "chapterId": row.get::<_, String>(1)?,
-                    "ordinal": row.get::<_, i64>(2)?,
-                    "text": clip_chunk(row.get::<_, String>(3)?),
-                    "importance": row.get::<_, f64>(4)?,
-                    "entityKeys": row.get::<_, String>(5)?,
-                    "metadata": row.get::<_, String>(6)?,
-                    "sourceType": row.get::<_, String>(7)?,
-                    "sourceId": row.get::<_, String>(8)?,
-                    "sourceVersion": row.get::<_, i64>(9)?
-                }))
-            })
+            .query_map(
+                rusqlite::params_from_iter(params_vec.iter().map(|value| value.as_ref())),
+                |row| {
+                    Ok(json!({
+                        "chunkId": row.get::<_, String>(0)?,
+                        "chapterId": row.get::<_, String>(1)?,
+                        "ordinal": row.get::<_, i64>(2)?,
+                        "text": clip_chunk(row.get::<_, String>(3)?),
+                        "importance": row.get::<_, f64>(4)?,
+                        "entityKeys": row.get::<_, String>(5)?,
+                        "metadata": row.get::<_, String>(6)?,
+                        "sourceType": row.get::<_, String>(7)?,
+                        "sourceId": row.get::<_, String>(8)?,
+                        "sourceVersion": row.get::<_, i64>(9)?
+                    }))
+                },
+            )
             .map_err(|error| error.to_string())?;
         for row in mapped {
             rows.push(row.map_err(|error| error.to_string())?);
         }
     } else {
         // LIKE fallback
-        let mut conditions = vec!["m.novel_id = ?1".to_string(), "d.status = 'active'".to_string(), "m.text LIKE ?2".to_string()];
+        let mut conditions = vec![
+            "m.novel_id = ?1".to_string(),
+            "d.status = 'active'".to_string(),
+            "m.text LIKE ?2".to_string(),
+        ];
         let pattern = format!("%{}%", query);
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(novel_id.clone()), Box::new(pattern)];
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(novel_id.clone()), Box::new(pattern)];
         if let Some(chapter) = chapter_filter {
             conditions.push(format!("m.chapter_id = ?{}", params_vec.len() + 1));
             params_vec.push(Box::new(chapter.to_string()));
@@ -594,22 +993,27 @@ fn search_memory(connection: &Connection, arguments: &Value) -> Result<Value, St
             params_vec.len() + 1
         );
         params_vec.push(Box::new(top_k));
-        let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(&sql)
+            .map_err(|error| error.to_string())?;
         let mapped = statement
-            .query_map(rusqlite::params_from_iter(params_vec.iter().map(|value| value.as_ref())), |row| {
-                Ok(json!({
-                    "chunkId": row.get::<_, String>(0)?,
-                    "chapterId": row.get::<_, String>(1)?,
-                    "ordinal": row.get::<_, i64>(2)?,
-                    "text": clip_chunk(row.get::<_, String>(3)?),
-                    "importance": row.get::<_, f64>(4)?,
-                    "entityKeys": row.get::<_, String>(5)?,
-                    "metadata": row.get::<_, String>(6)?,
-                    "sourceType": row.get::<_, String>(7)?,
-                    "sourceId": row.get::<_, String>(8)?,
-                    "sourceVersion": row.get::<_, i64>(9)?
-                }))
-            })
+            .query_map(
+                rusqlite::params_from_iter(params_vec.iter().map(|value| value.as_ref())),
+                |row| {
+                    Ok(json!({
+                        "chunkId": row.get::<_, String>(0)?,
+                        "chapterId": row.get::<_, String>(1)?,
+                        "ordinal": row.get::<_, i64>(2)?,
+                        "text": clip_chunk(row.get::<_, String>(3)?),
+                        "importance": row.get::<_, f64>(4)?,
+                        "entityKeys": row.get::<_, String>(5)?,
+                        "metadata": row.get::<_, String>(6)?,
+                        "sourceType": row.get::<_, String>(7)?,
+                        "sourceId": row.get::<_, String>(8)?,
+                        "sourceVersion": row.get::<_, i64>(9)?
+                    }))
+                },
+            )
             .map_err(|error| error.to_string())?;
         for row in mapped {
             rows.push(row.map_err(|error| error.to_string())?);
@@ -816,10 +1220,16 @@ pub fn run_smoke(connection: &Connection) {
     match (novel_id.as_deref(), chapter_id.as_deref()) {
         (Some(novel), Some(chapter)) => {
             let arguments = json!({"novelId": novel, "chapterId": chapter});
-            for name in ["get_metadata", "get_chapter_context", "get_character_states"] {
+            for name in [
+                "get_metadata",
+                "get_chapter_context",
+                "get_character_states",
+            ] {
                 match call_tool(connection, name, &arguments) {
                     Ok(payload) => {
-                        let size = serde_json::to_string(&payload).map(|value| value.len()).unwrap_or(0);
+                        let size = serde_json::to_string(&payload)
+                            .map(|value| value.len())
+                            .unwrap_or(0);
                         println!("smoke {}: ok, {} bytes", name, size);
                     }
                     Err(error) => println!("smoke {}: ERROR {}", name, error),
@@ -827,10 +1237,246 @@ pub fn run_smoke(connection: &Connection) {
             }
             let search = json!({"novelId": novel, "query": "主角", "topK": 5});
             match call_tool(connection, "search_memory", &search) {
-                Ok(payload) => println!("smoke search_memory: ok, matched={}", payload["data"]["matchedChunks"]),
+                Ok(payload) => println!(
+                    "smoke search_memory: ok, matched={}",
+                    payload["data"]["matchedChunks"]
+                ),
                 Err(error) => println!("smoke search_memory: ERROR {}", error),
             }
         }
         _ => println!("smoke: database has no novels/chapters; only tool listing verified"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("open fixture database");
+        connection
+            .execute_batch(
+                "CREATE TABLE novels (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    subtitle TEXT,
+                    genre TEXT,
+                    description TEXT,
+                    status TEXT NOT NULL,
+                    total_word_count INTEGER NOT NULL,
+                    target_word_count INTEGER,
+                    deleted_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE TABLE volumes (
+                    id TEXT PRIMARY KEY,
+                    novel_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    summary TEXT,
+                    goal TEXT,
+                    main_conflict TEXT,
+                    order_index INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    deleted_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE TABLE chapters (
+                    id TEXT PRIMARY KEY,
+                    novel_id TEXT NOT NULL,
+                    volume_id TEXT,
+                    title TEXT NOT NULL,
+                    goal TEXT,
+                    order_index INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    adopted_draft_id TEXT,
+                    word_count INTEGER NOT NULL,
+                    deleted_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE TABLE style_profiles (
+                    id TEXT PRIMARY KEY,
+                    novel_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    is_active INTEGER NOT NULL,
+                    updated_at TEXT
+                );
+                CREATE TABLE output_profiles (
+                    id TEXT PRIMARY KEY,
+                    novel_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    is_default INTEGER NOT NULL,
+                    updated_at TEXT
+                );
+                INSERT INTO novels (
+                    id, title, status, total_word_count, updated_at
+                ) VALUES ('novel-1', '测试小说', 'draft', 0, '2026-08-21T00:00:00Z');
+                INSERT INTO chapters (
+                    id, novel_id, title, order_index, status, word_count, updated_at
+                ) VALUES (
+                    'chapter-1', 'novel-1', '第一章', 1, 'draft', 0, '2026-08-21T00:00:00Z'
+                );",
+            )
+            .expect("create fixture schema");
+        connection
+    }
+
+    fn listed_tool<'a>(tools: &'a [Value], name: &str) -> &'a Value {
+        tools
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+            .unwrap_or_else(|| panic!("missing tool schema: {}", name))
+    }
+
+    fn total_changes(connection: &Connection) -> i64 {
+        connection
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .expect("read SQLite total_changes")
+    }
+
+    #[test]
+    fn schemas_freeze_read_context_and_candidate_contracts() {
+        let tools = tool_list();
+        let read_context = listed_tool(&tools, "novel.read_context");
+        assert_eq!(read_context["inputSchema"]["required"], json!(["novelId"]));
+        assert!(read_context["inputSchema"]["properties"]
+            .get("chapterId")
+            .is_none());
+
+        let generate = listed_tool(&tools, "generate_chapter");
+        assert_eq!(
+            generate["inputSchema"]["required"],
+            json!(["novelId", "chapterId", "candidateText"])
+        );
+        assert!(generate["inputSchema"]["properties"]
+            .get("candidateText")
+            .is_some());
+        assert!(generate["inputSchema"]["properties"].get("goal").is_none());
+        assert!(generate["inputSchema"]["properties"]
+            .get("prompt")
+            .is_none());
+        assert_eq!(generate["outputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            generate["outputSchema"]["required"],
+            json!(["ok", "toolVersion", "artifactType", "candidateOnly", "data"])
+        );
+        assert_eq!(
+            generate["outputSchema"]["properties"]["artifactType"]["enum"],
+            json!(["chapter_text"])
+        );
+        assert_eq!(
+            generate["outputSchema"]["properties"]["candidateOnly"]["enum"],
+            json!([true])
+        );
+    }
+
+    #[test]
+    fn generate_chapter_preserves_candidate_without_writing() {
+        let connection = fixture_connection();
+        let before_changes = total_changes(&connection);
+        let candidate = "  雨声落在窗沿。\r\n\r\n沈砚没有回头。  ";
+        let result = call_tool(
+            &connection,
+            "generate_chapter",
+            &json!({
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "candidateText": candidate
+            }),
+        )
+        .expect("candidate should validate");
+
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["toolVersion"], TOOL_VERSION);
+        assert_eq!(result["artifactType"], "chapter_text");
+        assert_eq!(result["candidateOnly"], true);
+        assert_eq!(result["data"]["novelId"], "novel-1");
+        assert_eq!(result["data"]["chapterId"], "chapter-1");
+        assert_eq!(result["data"]["text"], candidate);
+        assert_eq!(total_changes(&connection), before_changes);
+    }
+
+    #[test]
+    fn generate_characters_rejects_unstructured_candidate() {
+        let connection = fixture_connection();
+        let error = call_tool(
+            &connection,
+            "generate_characters",
+            &json!({
+                "novelId": "novel-1",
+                "candidateText": "随便写两个角色"
+            }),
+        )
+        .expect_err("unstructured character candidates must be rejected");
+        assert!(error.contains("角色候选"));
+        let result = call_tool(
+            &connection,
+            "generate_characters",
+            &json!({
+                "novelId": "novel-1",
+                "candidateText": "{\"characters\":[{\"name\":\"林默\"}]}"
+            }),
+        )
+        .expect("structured character candidates should validate");
+        assert_eq!(result["artifactType"], "character_candidates");
+        assert_eq!(result["candidateOnly"], true);
+    }
+
+    #[test]
+    fn generate_chapter_rejects_invalid_candidate_and_scope() {
+        let connection = fixture_connection();
+        for arguments in [
+            json!({"novelId": "novel-1", "chapterId": "chapter-1"}),
+            json!({
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "candidateText": "  \n\t "
+            }),
+        ] {
+            let error = call_tool(&connection, "generate_chapter", &arguments)
+                .expect_err("empty candidates must be rejected");
+            assert!(error.contains("candidateText"));
+        }
+
+        let oversized = "章".repeat(CANDIDATE_TEXT_MAX + 1);
+        let error = call_tool(
+            &connection,
+            "generate_chapter",
+            &json!({
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "candidateText": oversized
+            }),
+        )
+        .expect_err("oversized candidate must be rejected");
+        assert!(error.contains("exceeds"));
+
+        let error = call_tool(
+            &connection,
+            "generate_chapter",
+            &json!({
+                "novelId": "novel-2",
+                "chapterId": "chapter-1",
+                "candidateText": "候选正文"
+            }),
+        )
+        .expect_err("chapter must belong to the scoped novel");
+        assert!(error.contains("chapter not found in novel"));
+    }
+
+    #[test]
+    fn read_context_accepts_novel_scope_while_legacy_metadata_requires_chapter() {
+        let connection = fixture_connection();
+        let result = call_tool(
+            &connection,
+            "novel.read_context",
+            &json!({"novelId": "novel-1"}),
+        )
+        .expect("novel-scoped context should not require a chapter");
+        assert_eq!(result["data"]["novel"]["id"], "novel-1");
+        assert!(result["data"]["targetChapter"].is_null());
+
+        let legacy_error = call_tool(&connection, "get_metadata", &json!({"novelId": "novel-1"}))
+            .expect_err("legacy metadata contract still requires chapterId");
+        assert!(legacy_error.contains("chapterId"));
     }
 }

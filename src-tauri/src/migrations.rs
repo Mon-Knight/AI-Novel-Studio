@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-const MIGRATION_VERSION: &str = "3.2.0";
+const MIGRATION_VERSION: &str = "3.3.0";
 
 struct Migration {
     id: &'static str,
@@ -22,7 +22,7 @@ pub struct AppliedMigration {
     pub applied_at: String,
 }
 
-fn migrations() -> [Migration; 31] {
+fn migrations() -> [Migration; 36] {
     [
         Migration {
             id: "001_schema_migrations",
@@ -178,6 +178,31 @@ fn migrations() -> [Migration; 31] {
             id: "031_dsh_preparation_runs",
             definition: "dsh_preparation_runs_v1(id,novel_id,chapter_id,planner,status,prompt_tokens,completion_tokens,duration_ms,planner_coerced,created_at,indexes)",
             apply: apply_dsh_preparation_runs,
+        },
+        Migration {
+            id: "032_conversation_workbench",
+            definition: "conversation_workbench_v1(task_conversations,conversation_turns,task_runs,tool_call_events,conversation_artifact_cards,append_only_events,scoped_identity,status_edges,indexes)",
+            apply: apply_conversation_workbench,
+        },
+        Migration {
+            id: "033_conversation_workbench_guards",
+            definition: "conversation_workbench_guards_v1(one_active_run,task_run_scope,immutable_identity,status_edges,tool_event_scope,artifact_scope,json_validation)",
+            apply: apply_conversation_workbench_guards,
+        },
+        Migration {
+            id: "034_conversation_artifact_projection",
+            definition: "conversation_artifact_projection_v1(result_artifact_reference_only,legacy_rows_preserved,artifact_scope,projection_content_forbidden)",
+            apply: apply_conversation_artifact_projection,
+        },
+        Migration {
+            id: "035_conversation_tool_call_identity",
+            definition: "conversation_tool_call_identity_v1(stable_call_id,unique_per_run,legacy_null_compatible,immutable_identity)",
+            apply: apply_conversation_tool_call_identity,
+        },
+        Migration {
+            id: "036_artifact_decisions_and_review_auth",
+            definition: "conversation_artifact_decisions_v1(artifact_decisions,review_authorizations,append_only_decisions,authorization_status_edges,indexes)",
+            apply: apply_artifact_decisions_and_review_auth,
         },
     ]
 }
@@ -3064,6 +3089,375 @@ fn apply_dsh_preparation_runs(transaction: &Transaction<'_>) -> Result<(), AppEr
         .map_err(AppError::database)
 }
 
+fn apply_conversation_workbench(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS task_conversations (
+                conversation_id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'idle',
+                default_model_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_conversations_novel_updated
+                ON task_conversations(novel_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS conversation_turns (
+                turn_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                run_id TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES task_conversations(conversation_id) ON DELETE CASCADE,
+                UNIQUE (conversation_id, sequence)
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_turns_conversation
+                ON conversation_turns(conversation_id, sequence);
+
+            CREATE TABLE IF NOT EXISTS task_runs (
+                run_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                model_snapshot_json TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                FOREIGN KEY (conversation_id) REFERENCES task_conversations(conversation_id) ON DELETE CASCADE,
+                FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_task_runs_conversation_updated
+                ON task_runs(conversation_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS tool_call_events (
+                event_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                tool_name TEXT NOT NULL,
+                arguments_summary_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                duration_ms INTEGER,
+                error TEXT,
+                result_json TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT,
+                FOREIGN KEY (run_id) REFERENCES task_runs(run_id) ON DELETE CASCADE,
+                UNIQUE (run_id, sequence)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tool_call_events_run_sequence
+                ON tool_call_events(run_id, sequence);
+
+            CREATE TABLE IF NOT EXISTS conversation_artifact_cards (
+                card_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                turn_id TEXT,
+                run_id TEXT,
+                artifact_id TEXT,
+                artifact_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                content TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'candidate',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES task_conversations(conversation_id) ON DELETE CASCADE,
+                FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE RESTRICT,
+                FOREIGN KEY (run_id) REFERENCES task_runs(run_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_artifact_cards_conversation
+                ON conversation_artifact_cards(conversation_id, created_at);
+
+            CREATE TRIGGER IF NOT EXISTS trg_conversation_turns_append_only_update
+                BEFORE UPDATE ON conversation_turns
+                BEGIN SELECT RAISE(ABORT, 'conversation turns are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_conversation_turns_append_only_delete
+                BEFORE DELETE ON conversation_turns
+                BEGIN SELECT RAISE(ABORT, 'conversation turns are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_tool_call_events_append_only_update
+                BEFORE UPDATE ON tool_call_events
+                WHEN OLD.status IN ('succeeded', 'failed', 'cancelled')
+                BEGIN SELECT RAISE(ABORT, 'terminal tool call events are immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_conversation_artifact_cards_immutable_update
+                BEFORE UPDATE ON conversation_artifact_cards
+                BEGIN SELECT RAISE(ABORT, 'artifact cards are immutable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_conversation_workbench_guards(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_runs_one_active_conversation
+                ON task_runs(conversation_id)
+                WHERE status IN ('queued', 'running', 'cancel_requested');
+
+            CREATE TRIGGER IF NOT EXISTS trg_task_conversations_validate_insert
+                BEFORE INSERT ON task_conversations
+                WHEN NEW.status NOT IN ('idle', 'running', 'waiting_user', 'failed', 'completed', 'archived')
+                  OR length(trim(NEW.title)) = 0
+                  OR (NEW.default_model_json IS NOT NULL AND
+                      (json_valid(NEW.default_model_json) = 0 OR json_type(NEW.default_model_json) <> 'object'))
+                BEGIN SELECT RAISE(ABORT, 'invalid task conversation'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_task_conversations_validate_update
+                BEFORE UPDATE OF status, title, default_model_json ON task_conversations
+                WHEN NEW.status NOT IN ('idle', 'running', 'waiting_user', 'failed', 'completed', 'archived')
+                  OR length(trim(NEW.title)) = 0
+                  OR (NEW.default_model_json IS NOT NULL AND
+                      (json_valid(NEW.default_model_json) = 0 OR json_type(NEW.default_model_json) <> 'object'))
+                BEGIN SELECT RAISE(ABORT, 'invalid task conversation update'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_conversation_turns_validate_insert
+                BEFORE INSERT ON conversation_turns
+                WHEN NEW.sequence < 0
+                  OR NEW.role NOT IN ('user', 'assistant', 'system')
+                  OR length(trim(NEW.content)) = 0
+                BEGIN SELECT RAISE(ABORT, 'invalid conversation turn'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_task_runs_validate_insert
+                BEFORE INSERT ON task_runs
+                WHEN NEW.status <> 'queued'
+                  OR json_valid(NEW.model_snapshot_json) = 0
+                  OR json_type(NEW.model_snapshot_json) <> 'object'
+                  OR NOT EXISTS (
+                      SELECT 1 FROM conversation_turns
+                      WHERE turn_id = NEW.turn_id
+                        AND conversation_id = NEW.conversation_id
+                        AND role = 'user'
+                  )
+                BEGIN SELECT RAISE(ABORT, 'invalid task run scope or snapshot'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_task_runs_immutable_identity
+                BEFORE UPDATE ON task_runs
+                WHEN OLD.run_id <> NEW.run_id
+                  OR OLD.conversation_id <> NEW.conversation_id
+                  OR OLD.turn_id <> NEW.turn_id
+                  OR OLD.model_snapshot_json <> NEW.model_snapshot_json
+                  OR OLD.worker_id <> NEW.worker_id
+                  OR OLD.created_at <> NEW.created_at
+                BEGIN SELECT RAISE(ABORT, 'task run identity is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_task_runs_status_edges
+                BEFORE UPDATE OF status ON task_runs
+                WHEN OLD.status <> NEW.status AND NOT (
+                    (OLD.status = 'queued' AND NEW.status IN ('running','failed','cancel_requested','cancelled')) OR
+                    (OLD.status = 'running' AND NEW.status IN ('completed','failed','cancel_requested','cancelled')) OR
+                    (OLD.status = 'cancel_requested' AND NEW.status IN ('completed','failed','cancelled'))
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal task run transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_task_runs_terminal_immutable
+                BEFORE UPDATE ON task_runs
+                WHEN OLD.status IN ('completed', 'failed', 'cancelled')
+                BEGIN SELECT RAISE(ABORT, 'terminal task run is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_tool_call_events_validate_insert
+                BEFORE INSERT ON tool_call_events
+                WHEN NEW.status NOT IN ('pending', 'queued', 'running')
+                  OR NEW.sequence < 0
+                  OR json_valid(NEW.arguments_summary_json) = 0
+                  OR json_type(NEW.arguments_summary_json) <> 'object'
+                  OR NOT EXISTS (
+                      SELECT 1 FROM task_runs
+                      WHERE run_id = NEW.run_id
+                        AND status IN ('queued', 'running', 'cancel_requested')
+                  )
+                BEGIN SELECT RAISE(ABORT, 'invalid tool call event'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_tool_call_events_immutable_identity
+                BEFORE UPDATE ON tool_call_events
+                WHEN OLD.event_id <> NEW.event_id
+                  OR OLD.run_id <> NEW.run_id
+                  OR OLD.sequence <> NEW.sequence
+                  OR OLD.tool_name <> NEW.tool_name
+                  OR OLD.arguments_summary_json <> NEW.arguments_summary_json
+                  OR OLD.created_at <> NEW.created_at
+                BEGIN SELECT RAISE(ABORT, 'tool call event identity is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_tool_call_events_status_edges_v2
+                BEFORE UPDATE OF status ON tool_call_events
+                WHEN OLD.status <> NEW.status AND NOT (
+                    (OLD.status IN ('pending','queued') AND NEW.status IN ('queued','running','succeeded','failed','cancelled','skipped')) OR
+                    (OLD.status = 'running' AND NEW.status IN ('succeeded','failed','cancelled','skipped'))
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal tool call event transition'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_tool_call_events_terminal_immutable_v2
+                BEFORE UPDATE ON tool_call_events
+                WHEN OLD.status IN ('succeeded', 'failed', 'cancelled', 'skipped')
+                BEGIN SELECT RAISE(ABORT, 'terminal tool call event is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_conversation_artifact_cards_validate_insert
+                BEFORE INSERT ON conversation_artifact_cards
+                WHEN NEW.status NOT IN ('candidate', 'confirmed', 'rejected')
+                  OR length(trim(NEW.title)) = 0
+                  OR length(trim(NEW.content)) = 0
+                  OR (NEW.turn_id IS NOT NULL AND NOT EXISTS (
+                      SELECT 1 FROM conversation_turns
+                      WHERE turn_id = NEW.turn_id AND conversation_id = NEW.conversation_id
+                  ))
+                  OR (NEW.run_id IS NOT NULL AND NOT EXISTS (
+                      SELECT 1 FROM task_runs
+                      WHERE run_id = NEW.run_id AND conversation_id = NEW.conversation_id
+                  ))
+                  OR (NEW.turn_id IS NOT NULL AND NEW.run_id IS NOT NULL AND NOT EXISTS (
+                      SELECT 1 FROM task_runs
+                      WHERE run_id = NEW.run_id AND turn_id = NEW.turn_id
+                  ))
+                BEGIN SELECT RAISE(ABORT, 'invalid conversation artifact scope'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_conversation_artifact_cards_json_status
+                BEFORE UPDATE ON conversation_artifact_cards
+                WHEN NEW.status NOT IN ('candidate', 'confirmed', 'rejected')
+                BEGIN SELECT RAISE(ABORT, 'invalid conversation artifact status'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_conversation_artifact_projection(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "DROP TRIGGER IF EXISTS trg_conversation_artifact_cards_validate_insert;
+             CREATE INDEX IF NOT EXISTS idx_conversation_artifact_cards_artifact
+                 ON conversation_artifact_cards(artifact_id);
+             CREATE TRIGGER IF NOT EXISTS trg_conversation_artifact_cards_projection_insert
+                 BEFORE INSERT ON conversation_artifact_cards
+                 WHEN NEW.status NOT IN ('candidate', 'confirmed', 'rejected')
+                   OR length(trim(NEW.title)) = 0
+                   OR (NEW.turn_id IS NOT NULL AND NOT EXISTS (
+                       SELECT 1 FROM conversation_turns
+                       WHERE turn_id = NEW.turn_id AND conversation_id = NEW.conversation_id
+                   ))
+                   OR (NEW.run_id IS NOT NULL AND NOT EXISTS (
+                       SELECT 1 FROM task_runs
+                       WHERE run_id = NEW.run_id AND conversation_id = NEW.conversation_id
+                   ))
+                   OR (NEW.turn_id IS NOT NULL AND NEW.run_id IS NOT NULL AND NOT EXISTS (
+                       SELECT 1 FROM task_runs
+                       WHERE run_id = NEW.run_id AND turn_id = NEW.turn_id
+                   ))
+                   OR (NEW.artifact_id IS NOT NULL AND length(trim(NEW.content)) <> 0)
+                   OR (NEW.artifact_id IS NOT NULL AND NOT EXISTS (
+                       SELECT 1
+                       FROM result_artifacts a
+                       JOIN ai_tasks t ON t.task_id = a.task_id
+                       JOIN task_conversations c ON c.conversation_id = NEW.conversation_id
+                       WHERE a.artifact_id = NEW.artifact_id
+                         AND t.novel_id = c.novel_id
+                         AND a.processing_status IN ('valid', 'valid_with_warnings')
+                   ))
+                 BEGIN SELECT RAISE(ABORT, 'conversation artifact card must reference valid result artifact'); END;
+             CREATE TRIGGER IF NOT EXISTS trg_conversation_artifact_cards_projection_update
+                 BEFORE UPDATE OF artifact_id, content, conversation_id, turn_id, run_id ON conversation_artifact_cards
+                 WHEN NEW.artifact_id IS NOT NULL AND length(trim(NEW.content)) <> 0
+                 BEGIN SELECT RAISE(ABORT, 'artifact projection identity/content is immutable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_artifact_decisions_and_review_auth(
+    transaction: &Transaction<'_>,
+) -> Result<(), AppError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS artifact_decisions (
+                decision_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                artifact_hash TEXT NOT NULL,
+                card_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                base_revision TEXT,
+                apply_transaction_id TEXT,
+                conflict_code TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (card_id) REFERENCES conversation_artifact_cards(card_id) ON DELETE RESTRICT,
+                FOREIGN KEY (conversation_id) REFERENCES task_conversations(conversation_id) ON DELETE CASCADE,
+                UNIQUE (artifact_id, decision, idempotency_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifact_decisions_card_created
+                ON artifact_decisions(card_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_artifact_decisions_conversation
+                ON artifact_decisions(conversation_id, created_at);
+            CREATE TRIGGER IF NOT EXISTS trg_artifact_decisions_no_update
+                BEFORE UPDATE ON artifact_decisions
+                BEGIN SELECT RAISE(ABORT, 'artifact decisions are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_artifact_decisions_validate_insert
+                BEFORE INSERT ON artifact_decisions
+                WHEN NEW.decision NOT IN ('confirm', 'reject', 'request_revision', 'request_apply')
+                  OR length(trim(NEW.artifact_id)) = 0
+                  OR length(trim(NEW.artifact_hash)) = 0
+                  OR length(trim(NEW.idempotency_key)) = 0
+                  OR length(trim(NEW.actor)) = 0
+                  OR length(trim(NEW.target_type)) = 0
+                  OR length(trim(NEW.target_id)) = 0
+                BEGIN SELECT RAISE(ABORT, 'invalid artifact decision'); END;
+
+            CREATE TABLE IF NOT EXISTS review_authorizations (
+                authorization_id TEXT PRIMARY KEY,
+                artifact_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                decision_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                issued_at TEXT NOT NULL,
+                consumed_at TEXT,
+                consumed_by_draft_id TEXT,
+                FOREIGN KEY (decision_id) REFERENCES artifact_decisions(decision_id) ON DELETE RESTRICT,
+                FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS idx_review_authorizations_chapter_status
+                ON review_authorizations(chapter_id, status);
+            CREATE TRIGGER IF NOT EXISTS trg_review_authorizations_identity
+                BEFORE UPDATE ON review_authorizations
+                WHEN OLD.authorization_id <> NEW.authorization_id
+                  OR OLD.artifact_id <> NEW.artifact_id
+                  OR OLD.chapter_id <> NEW.chapter_id
+                  OR OLD.novel_id <> NEW.novel_id
+                  OR OLD.decision_id <> NEW.decision_id
+                  OR OLD.issued_at <> NEW.issued_at
+                BEGIN SELECT RAISE(ABORT, 'review authorization identity is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS trg_review_authorizations_status_edges
+                BEFORE UPDATE OF status ON review_authorizations
+                WHEN NOT (
+                    (OLD.status = 'issued' AND NEW.status IN ('consumed', 'expired'))
+                    OR OLD.status = NEW.status
+                )
+                BEGIN SELECT RAISE(ABORT, 'illegal review authorization transition'); END;",
+        )
+        .map_err(AppError::database)
+}
+
+fn apply_conversation_tool_call_identity(transaction: &Transaction<'_>) -> Result<(), AppError> {
+    if !table_has_column(transaction, "tool_call_events", "call_id")? {
+        transaction
+            .execute("ALTER TABLE tool_call_events ADD COLUMN call_id TEXT", [])
+            .map_err(AppError::database)?;
+    }
+    transaction
+        .execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_tool_call_events_run_call
+                 ON tool_call_events(run_id, call_id)
+                 WHERE call_id IS NOT NULL;
+             DROP TRIGGER IF EXISTS trg_tool_call_events_immutable_identity;
+             CREATE TRIGGER trg_tool_call_events_immutable_identity
+                 BEFORE UPDATE ON tool_call_events
+                 WHEN OLD.event_id <> NEW.event_id
+                   OR OLD.run_id <> NEW.run_id
+                   OR OLD.sequence <> NEW.sequence
+                   OR OLD.tool_name <> NEW.tool_name
+                   OR OLD.arguments_summary_json <> NEW.arguments_summary_json
+                   OR OLD.created_at <> NEW.created_at
+                   OR OLD.call_id IS NOT NEW.call_id
+                 BEGIN SELECT RAISE(ABORT, 'tool call event identity is immutable'); END;",
+        )
+        .map_err(AppError::database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3072,7 +3466,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 31] = [
+    const EXPECTED_MIGRATION_CHECKSUMS: [(&str, &str); 36] = [
         (
             "001_schema_migrations",
             "65e4591cc3a707e67920683594bc839909a942cab697c15831fa1e1d1a9207b1",
@@ -3197,6 +3591,26 @@ mod tests {
             "031_dsh_preparation_runs",
             "4ebb60ca4e56603635cbc20f8065a7c0643c9e267d73cf27872fce2ed8b202ff",
         ),
+        (
+            "032_conversation_workbench",
+            "76bb095009183591d951de7ea0e55e1904f12cafe52aaa45623bf8ddea3fdadc",
+        ),
+        (
+            "033_conversation_workbench_guards",
+            "74563051c064a4ab5ef571234527b1aef66fea3ef43a77193af598c3c84554fc",
+        ),
+        (
+            "034_conversation_artifact_projection",
+            "03521e2becc8ec47c7be95bd63d901478a2677a1448803cb7f4c1e03b10910b1",
+        ),
+        (
+            "035_conversation_tool_call_identity",
+            "77079cac687b36bd22c6a000fe55e68ee150017be512337c6df7efe259be41ad",
+        ),
+        (
+            "036_artifact_decisions_and_review_auth",
+            "10dbc72d0f9a861972fb21c963ec468935cc3c2106f1c74677edbd499a99783c",
+        ),
     ];
 
     fn run_migrations_through(connection: &mut Connection, count: usize) -> Result<(), AppError> {
@@ -3283,7 +3697,7 @@ mod tests {
             .iter()
             .rev()
             .take(2)
-            .all(|migration| migration.version == "3.2.0"));
+            .all(|migration| migration.version == "3.3.0"));
         run_migrations(&mut connection)?;
         assert_eq!(list_applied(&connection)?, first);
         let content: String = connection.query_row(
@@ -3840,6 +4254,115 @@ mod tests {
             assert!(table_columns(&legacy_output_profile, "output_profiles")?
                 .contains(&column.to_string()));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn db33_conversation_guards_enforce_scope_status_and_immutability(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = Connection::open_in_memory()?;
+        connection.execute_batch("PRAGMA foreign_keys=ON;")?;
+        crate::db::create_tables(&mut connection)?;
+        connection.execute_batch(
+            "INSERT INTO novels (id, title, outline, created_at, updated_at)
+             VALUES ('novel-guard-a', 'A', '', '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'),
+                    ('novel-guard-b', 'B', '', '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z');
+             INSERT INTO task_conversations
+                (conversation_id, novel_id, title, status, created_at, updated_at)
+             VALUES ('conversation-guard-a', 'novel-guard-a', '任务 A', 'idle', '2026-08-20T00:00:01Z', '2026-08-20T00:00:01Z'),
+                    ('conversation-guard-b', 'novel-guard-b', '任务 B', 'idle', '2026-08-20T00:00:01Z', '2026-08-20T00:00:01Z');
+             INSERT INTO conversation_turns
+                (turn_id, conversation_id, sequence, role, content, created_at)
+             VALUES ('turn-guard-a', 'conversation-guard-a', 0, 'user', '生成', '2026-08-20T00:00:02Z'),
+                    ('turn-guard-b', 'conversation-guard-b', 0, 'user', '审计', '2026-08-20T00:00:02Z');",
+        )?;
+
+        assert!(connection
+            .execute(
+                "INSERT INTO task_runs
+                    (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at)
+                 VALUES ('run-guard-cross', 'conversation-guard-a', 'turn-guard-b', 'queued', '{}', 'worker', '2026-08-20T00:00:03Z', '2026-08-20T00:00:03Z')",
+                [],
+            )
+            .is_err());
+        connection.execute(
+            "INSERT INTO task_runs
+                (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at)
+             VALUES ('run-guard-a', 'conversation-guard-a', 'turn-guard-a', 'queued', '{\"modelId\":\"Mock\"}', 'worker', '2026-08-20T00:00:03Z', '2026-08-20T00:00:03Z')",
+            [],
+        )?;
+        assert!(connection
+            .execute(
+                "INSERT INTO task_runs
+                    (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at)
+                 VALUES ('run-guard-invalid', 'conversation-guard-a', 'turn-guard-a', 'invalid', '{}', 'worker', '2026-08-20T00:00:04Z', '2026-08-20T00:00:04Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO task_runs
+                    (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at)
+                 VALUES ('run-guard-second', 'conversation-guard-a', 'turn-guard-a', 'queued', '{}', 'worker', '2026-08-20T00:00:04Z', '2026-08-20T00:00:04Z')",
+                [],
+            )
+            .is_err());
+
+        connection.execute(
+            "UPDATE task_runs SET status='running', started_at='2026-08-20T00:00:05Z', updated_at='2026-08-20T00:00:05Z' WHERE run_id='run-guard-a'",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO tool_call_events
+                (event_id, run_id, sequence, tool_name, arguments_summary_json, status, created_at)
+             VALUES ('event-guard-a', 'run-guard-a', 0, 'novel.read_context', '{}', 'queued', '2026-08-20T00:00:07Z')",
+            [],
+        )?;
+        connection.execute(
+            "UPDATE tool_call_events SET status='running' WHERE event_id='event-guard-a'",
+            [],
+        )?;
+        connection.execute(
+            "UPDATE tool_call_events SET status='succeeded', finished_at='2026-08-20T00:00:07Z' WHERE event_id='event-guard-a'",
+            [],
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE tool_call_events SET status='succeeded' WHERE event_id='event-guard-a'",
+                [],
+            )
+            .is_err());
+        connection.execute(
+            "UPDATE task_runs SET status='completed', finished_at='2026-08-20T00:00:06Z', updated_at='2026-08-20T00:00:06Z' WHERE run_id='run-guard-a'",
+            [],
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE task_runs SET status='running' WHERE run_id='run-guard-a'",
+                [],
+            )
+            .is_err());
+
+        assert!(connection
+            .execute(
+                "INSERT INTO conversation_artifact_cards
+                    (card_id, conversation_id, turn_id, run_id, artifact_type, title, summary, content, status, created_at)
+                 VALUES ('card-guard-cross', 'conversation-guard-a', 'turn-guard-b', 'run-guard-a', 'chapter_text', '候选', '摘要', '正文', 'candidate', '2026-08-20T00:00:08Z')",
+                [],
+            )
+            .is_err());
+        connection.execute(
+            "INSERT INTO conversation_artifact_cards
+                (card_id, conversation_id, turn_id, run_id, artifact_type, title, summary, content, status, created_at)
+             VALUES ('card-guard-a', 'conversation-guard-a', 'turn-guard-a', 'run-guard-a', 'chapter_text', '候选', '摘要', '正文', 'candidate', '2026-08-20T00:00:08Z')",
+            [],
+        )?;
+        assert!(connection
+            .execute(
+                "UPDATE conversation_artifact_cards SET title='改写' WHERE card_id='card-guard-a'",
+                [],
+            )
+            .is_err());
         Ok(())
     }
 

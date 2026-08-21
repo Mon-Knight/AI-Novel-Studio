@@ -1,0 +1,95 @@
+v3.3.0 workbench transaction verification
+==========================================
+
+Changed branch/field
+--------------------
+Branch: codex/v3.3.0-conversational-workbench
+Field: App default route
+Baseline value: /novels
+Modified value: /
+Restored behavior: ROLLBACK_TEST_COPY restored to DIFF_FILE byte-for-byte; MODIFIED_FILE remains changed.
+
+Required artifacts
+------------------
+MODIFIED_FILE: F:\ai-novel-studio-hotfix-v321\reports\v3.3.0-workbench-transaction\MODIFIED_FILE
+DIFF_FILE: F:\ai-novel-studio-hotfix-v321\reports\v3.3.0-workbench-transaction\DIFF_FILE
+VERIFICATION.txt: F:\ai-novel-studio-hotfix-v321\reports\v3.3.0-workbench-transaction\VERIFICATION.txt
+ROLLBACK.sh: F:\ai-novel-studio-hotfix-v321\reports\v3.3.0-workbench-transaction\ROLLBACK.sh
+
+BASELINE
+--------
+Command: npm run test:docs-sync
+Literal result: Document sync regression tests passed.
+Exit status: 0
+
+Command: npm run test:version-sync
+Literal result: Version sync checks passed.
+Exit status: 0
+
+Command: npm run lint:ci
+Literal result: ESLint completed with no warnings or errors.
+Exit status: 0
+
+Command: npm run build
+Literal result: vite build completed; 415 modules transformed; built in 3.46s.
+Exit status: 0
+
+Command: cargo check (workdir src-tauri)
+Literal result: Finished dev profile; no compile errors.
+Exit status: 0
+
+MODIFIED
+--------
+Command: npm run test:workbench
+Literal result: 4 tests passed, 0 failed.
+Exit status: 0
+
+Command: cargo test --bin ai-novel-studio (workdir src-tauri)
+Literal result: 279 passed; 0 failed; 2 ignored.
+Exit status: 0
+
+Command: npm run build
+Literal result: vite build completed; 416 modules transformed; built in 3.51s.
+Exit status: 0
+
+Command: npm run lint:ci
+Literal result: ESLint completed with no warnings or errors.
+Exit status: 0
+
+CONTINUATION (2026-08-21)
+-------------------------
+Command: npm test
+Literal result: 302 passed; 0 failed.
+Exit status: 0
+
+Command: migration 033 / project cleanup focused Rust tests
+Literal result: conversation scope/status/immutability guard passed; task conversation project cleanup and trigger restoration passed.
+Exit status: 0
+
+Implementation note: interrupted task-run recovery now executes during application bootstrap; migration 033 adds one-active-run, scoped identity, status-edge, JSON and terminal immutability guards without rewriting migration 032.
+
+Command: git diff --check
+Literal result: no whitespace errors; exit produced only existing CRLF conversion warnings for five rule files.
+Exit status: 0
+
+DESKTOP BUILD
+-------------
+Command: $env:DSH_CHECKOUT='F:\\dsh-v320-clean'; npm run tauri build -- --bundles msi,nsis
+Literal result: Finished 2 bundles at: F:\\ai-novel-studio-hotfix-v321\\src-tauri\\target\\release\\bundle\\msi\\AI Novel Studio_3.2.1_x64_en-US.msi; F:\\ai-novel-studio-hotfix-v321\\src-tauri\\target\\release\\bundle\\nsis\\AI Novel Studio_3.2.1_x64-setup.exe
+Exit status: 0
+
+ROLLBACK
+--------
+Command: Copy-Item reports\v3.3.0-workbench-transaction\MODIFIED_FILE reports\v3.3.0-workbench-transaction\ROLLBACK_TEST_COPY -Force; bash reports/v3.3.0-workbench-transaction/ROLLBACK.sh reports/v3.3.0-workbench-transaction/ROLLBACK_TEST_COPY reports/v3.3.0-workbench-transaction/DIFF_FILE
+Literal result: restored=reports/v3.3.0-workbench-transaction/ROLLBACK_TEST_COPY
+Exit status: 0
+
+Command: Get-FileHash ROLLBACK_TEST_COPY and DIFF_FILE -Algorithm SHA256
+Literal result: ROLLBACK_TEST_COPY=D2D6E26094E838550007A81C47BD611D073DA22AA41831E5FF852A7F753C0FC6; DIFF_FILE=D2D6E26094E838550007A81C47BD611D073DA22AA41831E5FF852A7F753C0FC6
+Exit status: 0
+
+Hash evidence
+-------------
+Original baseline fixture hash: FF41CE301A91AB7CDF8ED1BDF17474DE5D68B45AA718B4FCB3859A9590D4902B
+MODIFIED_FILE final hash (changed and left changed): CBACCF70F980EF51EF0FE51E8A46DA01E5A923316F0DA2705E6FA2F95C194B6C
+DIFF_FILE hash: D2D6E26094E838550007A81C47BD611D073DA22AA41831E5FF852A7F753C0FC6

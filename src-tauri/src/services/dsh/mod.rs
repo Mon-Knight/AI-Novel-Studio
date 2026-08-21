@@ -7,10 +7,12 @@
 pub mod baseline_freshness;
 pub mod commands;
 pub mod config;
+pub mod governed_proxy;
 pub mod launcher;
 pub mod ledger;
 pub mod models;
 pub mod proposal_validator;
 pub mod supervisor;
+pub mod task_runtime;
 #[cfg(test)]
 mod tests;

@@ -25,11 +25,7 @@ export class ToolRegistryError extends Error {
   readonly retryable = false;
   readonly details?: Record<string, unknown>;
 
-  constructor(
-    code: ToolRegistryErrorCode,
-    message: string,
-    details?: Record<string, unknown>,
-  ) {
+  constructor(code: ToolRegistryErrorCode, message: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ToolRegistryError';
     this.code = code;
@@ -52,9 +48,10 @@ function validateSchema(value: unknown, schema: ToolJsonSchema, path = '$'): str
   }
   if (schema.type) {
     const actual = valueType(value);
-    const matches = schema.type === 'number'
-      ? actual === 'number' || actual === 'integer'
-      : actual === schema.type;
+    const matches =
+      schema.type === 'number'
+        ? actual === 'number' || actual === 'integer'
+        : actual === schema.type;
     if (!matches) {
       errors.push(`${path} 应为 ${schema.type}，实际为 ${actual}`);
       return errors;
@@ -120,9 +117,11 @@ function validateDescriptor(descriptor: ToolDescriptorV1): ToolDescriptorV1 {
   if (!descriptor.description.trim() || descriptor.description.length > 500) {
     throw new Error(`Invalid tool description: ${descriptor.name}`);
   }
-  if (!Number.isInteger(descriptor.timeoutMs)
-    || descriptor.timeoutMs < 100
-    || descriptor.timeoutMs > 300_000) {
+  if (
+    !Number.isInteger(descriptor.timeoutMs) ||
+    descriptor.timeoutMs < 100 ||
+    descriptor.timeoutMs > 300_000
+  ) {
     throw new Error(`Invalid tool timeout: ${descriptor.name}`);
   }
   if (!['system', 'novel', 'chapter', 'draft'].includes(descriptor.scope)) {
@@ -131,8 +130,7 @@ function validateDescriptor(descriptor: ToolDescriptorV1): ToolDescriptorV1 {
   if (descriptor.sideEffect === 'none' && descriptor.confirmationPolicy !== 'never') {
     throw new Error(`Read-only tool cannot require confirmation: ${descriptor.name}`);
   }
-  if (descriptor.sideEffect !== 'none'
-    && descriptor.confirmationPolicy !== 'user_confirmation') {
+  if (descriptor.sideEffect !== 'none' && descriptor.confirmationPolicy !== 'user_confirmation') {
     throw new Error(`Side-effect tool must require user confirmation: ${descriptor.name}`);
   }
   return {
@@ -172,10 +170,9 @@ export class ToolRegistry {
       this.manifestPromise = (async () => {
         const tools = [...this.definitions.values()]
           .map((definition) => publicDescriptor(definition.descriptor))
-          .sort((left, right) => compareCanonicalText(
-            descriptorIdentity(left),
-            descriptorIdentity(right),
-          ));
+          .sort((left, right) =>
+            compareCanonicalText(descriptorIdentity(left), descriptorIdentity(right)),
+          );
         const registryHash = await canonicalHash({
           contractVersion: 'tool_registry_manifest_v1',
           registryVersion: 'tool_registry_v1',
@@ -214,31 +211,32 @@ export class ToolRegistry {
       throw new ToolRegistryError('TOOL_NOT_ALLOWED', `工具 ${identity} 不在本次执行白名单。`);
     }
     const granted = new Set(context.grantedPermissions);
-    const missingPermissions = exact.descriptor.permissions.filter((permission) => !granted.has(permission));
+    const missingPermissions = exact.descriptor.permissions.filter(
+      (permission) => !granted.has(permission),
+    );
     if (missingPermissions.length > 0) {
-      throw new ToolRegistryError(
-        'TOOL_PERMISSION_DENIED',
-        `工具 ${identity} 缺少权限。`,
-        { missingPermissions },
-      );
+      throw new ToolRegistryError('TOOL_PERMISSION_DENIED', `工具 ${identity} 缺少权限。`, {
+        missingPermissions,
+      });
     }
     const argumentErrors = validateSchema(argumentsJson, exact.descriptor.inputSchema);
-    if (argumentErrors.length > 0
-      || argumentsJson === null
-      || typeof argumentsJson !== 'object'
-      || Array.isArray(argumentsJson)) {
-      throw new ToolRegistryError(
-        'TOOL_ARGUMENT_INVALID',
-        `工具 ${identity} 参数不符合 schema。`,
-        { errors: argumentErrors.slice(0, 20) },
-      );
+    if (
+      argumentErrors.length > 0 ||
+      argumentsJson === null ||
+      typeof argumentsJson !== 'object' ||
+      Array.isArray(argumentsJson)
+    ) {
+      throw new ToolRegistryError('TOOL_ARGUMENT_INVALID', `工具 ${identity} 参数不符合 schema。`, {
+        errors: argumentErrors.slice(0, 20),
+      });
     }
     const argumentsRecord = argumentsJson as Record<string, unknown>;
     const requiredScope = exact.descriptor.scope;
-    if ((requiredScope === 'novel' && !context.novelId)
-      || (requiredScope === 'chapter' && (!context.novelId || !context.chapterId))
-      || (requiredScope === 'draft'
-        && (!context.novelId || !context.chapterId || !context.draftId))) {
+    if (
+      (requiredScope === 'novel' && !context.novelId) ||
+      (requiredScope === 'chapter' && (!context.novelId || !context.chapterId)) ||
+      (requiredScope === 'draft' && (!context.novelId || !context.chapterId || !context.draftId))
+    ) {
       throw new ToolRegistryError(
         'TOOL_SCOPE_MISMATCH',
         `工具 ${identity} 缺少权威 ${requiredScope} scope。`,
@@ -256,11 +254,12 @@ export class ToolRegistry {
     }
     if (exact.descriptor.sideEffect !== 'none') {
       const confirmation = context.confirmation;
-      const evidenceShapeValid = confirmation?.confirmedBy === 'user'
-        && Boolean(confirmation.userConfirmedAt)
-        && Boolean(confirmation.planId)
-        && Boolean(confirmation.operationId)
-        && /^[0-9a-f]{64}$/.test(confirmation.planHash);
+      const evidenceShapeValid =
+        confirmation?.confirmedBy === 'user' &&
+        Boolean(confirmation.userConfirmedAt) &&
+        Boolean(confirmation.planId) &&
+        Boolean(confirmation.operationId) &&
+        /^[0-9a-f]{64}$/.test(confirmation.planHash);
       let verified = false;
       if (evidenceShapeValid) {
         let verificationTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -291,15 +290,13 @@ export class ToolRegistry {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const timeout = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new ToolRegistryError(
-          'TOOL_EXECUTION_FAILED',
-          `工具 ${identity} 执行超时。`,
-        )), exact.descriptor.timeoutMs);
+        timeoutId = setTimeout(
+          () =>
+            reject(new ToolRegistryError('TOOL_EXECUTION_FAILED', `工具 ${identity} 执行超时。`)),
+          exact.descriptor.timeoutMs,
+        );
       });
-      const result = await Promise.race([
-        exact.handler(argumentsRecord, context),
-        timeout,
-      ]);
+      const result = await Promise.race([exact.handler(argumentsRecord, context), timeout]);
       let jsonResult: ToolResult;
       try {
         jsonResult = JSON.parse(JSON.stringify(result)) as ToolResult;
@@ -311,18 +308,19 @@ export class ToolRegistry {
       }
       const outputErrors = validateSchema(jsonResult, exact.descriptor.outputSchema);
       if (outputErrors.length > 0) {
-        throw new ToolRegistryError(
-          'TOOL_OUTPUT_INVALID',
-          `工具 ${identity} 输出不符合 schema。`,
-          { errors: outputErrors.slice(0, 20) },
-        );
+        throw new ToolRegistryError('TOOL_OUTPUT_INVALID', `工具 ${identity} 输出不符合 schema。`, {
+          errors: outputErrors.slice(0, 20),
+        });
       }
       return jsonResult;
     } catch (error) {
+      if (context.signal?.aborted) {
+        throw new DOMException('任务已取消', 'AbortError');
+      }
       if (error instanceof ToolRegistryError) throw error;
       throw new ToolRegistryError(
         'TOOL_EXECUTION_FAILED',
-        `工具 ${identity} 执行失败。`,
+        error instanceof Error ? error.message : `工具 ${identity} 执行失败。`,
       );
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);

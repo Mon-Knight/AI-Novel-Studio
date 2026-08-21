@@ -2,7 +2,8 @@ import { useLocation } from 'react-router-dom';
 import { APP_VERSION, APP_PLATFORM_LABEL } from '../../constants/version';
 
 const pageTitles: Record<string, string> = {
-  '/': 'AI Novel Studio',
+  '/': '创作工作台',
+  '/novels': '小说作品',
   '/styles': '风格方案',
   '/settings': '设置中心',
   '/coming-soon': '即将开放',

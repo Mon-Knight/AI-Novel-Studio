@@ -1,5 +1,77 @@
 # AI Novel Studio - CHANGELOG
 
+> 当前版本：v3.5.0。v3.3.0/v3.4.0 工作台、确认/Safe Apply 与 v3.5.0 领域工具、上下文压缩和写作工作台审阅收敛在同一实施分支一并收口。
+
+## v3.5.0 (2026-08-21) - 对话式创作工作台与审阅收敛
+
+本版本包含原规划的 v3.3.0 工作台最小闭环、v3.4.0 产物确认/审阅授权，以及 v3.5.0 领域任务与旧 AI 面板收敛。
+
+### 工作台最小闭环
+
+### 新增
+
+- 默认 `/` 进入创作工作台；`/novels` 保留原作品管理首页，旧章节写作工作台路由继续可用。
+- 新增任务对话、回合、运行、工具调用事件和候选产物卡片的 SQLite migration 032、Rust repository/service/commands，以及浏览器 LocalStorage 开发回退；migration 033 补充活动运行唯一性、跨任务作用域、状态边和终态不可变保护。
+- 工作台支持同一小说下创建并切换多个任务；每个任务冻结独立 Provider/模型快照，运行拥有独立 Worker、状态和取消边界。
+- 首批对话内联工具为 `novel.read_context`、`chapter.read_outline`、`search_memory`、`generate_chapter`；生成结果只形成候选产物卡片，不直接写入正式正文。
+- 新增 Runtime Registry 只读“当前插件”视图，分类显示功能、模型与 DSH Adapter projection，不提供插件管理动作。
+- 新增固定 DSH 发布 commit `47f943859bef60e4160492346772ded9b24f765a` 的真实 Headless Task Worker：每个活动任务独立 child/Job Object，工作目录固定在 `dsh-task-workers`，idle 后保留进程；后续回合走同一 Session 的 `session/prompt`（`lifecycle=continued`），进程退出后从 JSONL 调用公开 `ctx.agents.resume`（`lifecycle=resumed`）。`dsh_start_task_turn` 动态测试覆盖 follow-up/resume 与两 Worker 取消隔离。
+- `describe_runtime` 不再把载体文件存在写成 `loaded`；当前插件健康来自 idle Worker 或显式 probe，打开“当前插件”时才启动探测。
+- 工作台左侧同时列出全部小说下的任务；工具行显示语义中文名与技术名；运行状态轮询 Rust Worker 映射。
+- 新增 `taskSessionAdapter` 的桌面 DSH IPC bridge 与浏览器 fallback 边界，将 Session/Agent/Worker 映射为 ANS 稳定标识；参考快照差异记录见 `docs/audit/dsh-baseline-diff-2026-08-20.md`。
+- migration 034 将新的对话产物卡片限制为已校验 `ResultArtifact` 的 `artifactId` 投影；旧 032/033 卡片保留可读兼容，桌面 UI 从 Artifact Service 读取正文，不再保存第二份候选正文。
+- DSH novel gateway 增加 `novel.read_context`、`chapter.read_outline`、`search_memory`、`generate_chapter` 任务 allowlist 与候选生成工具；旧章节准备别名保持回退兼容。
+- 任务执行状态改为按 conversation 独立跟踪：用户切换任务不会锁住或覆盖当前对话，已运行任务可继续在后台推进并单独取消；动态章节 Prompt 在真正执行生成步骤时读取前序工具证据。
+- 应用 bootstrap 时把重启前遗留的 queued/running/cancel_requested 运行恢复为可审计失败事实，并把未完成工具事件收敛为 cancelled，避免从深链路启动或刷新后永久显示“运行中”。
+
+### 修复
+
+- 修复 `generationJobService.test.ts` 的 Vite SSR 测试服务器持续执行依赖自动发现、导致断言全部通过后进程仍不退出并持续占用内存的问题；测试现在关闭文件监听与依赖发现。
+- 项目清理事务同步清除所属任务对话、回合、运行、工具事件和产物卡片，并在维护删除后恢复回合 append-only trigger；浏览器开发回退删除小说时也同步清理对应任务 bundle。
+
+### 验证
+
+- `npm run test:workbench`：49 项通过（含 11 个工作台工具投影、按目标选择领域候选工具、跨任务冲突提示、角色/事件 Safe Apply、上下文压缩版本与回滚）。
+- `npm run lint:ci`、`npm run build`、`npm run test:docs-sync`、`npm run test:version-sync` 通过。
+- `cargo test --locked start_path_followup_reuses_session_and_resumes_after_child_exit` 通过。
+- `cargo test --locked start_path_two_conversations_cancel_one_without_stopping_the_other` 通过。
+- `cargo test --locked available_carrier_is_not_reported_loaded_before_runtime_health` 通过。
+- `npm test`：303 项通过。
+- 全量 `cargo test --locked`：294 项通过（含备份 schema 11 与 compaction-basic health 投影）；2 项 ignored。
+- 桌面 E2E 仍需在真实 Tauri 会话中回归；本版本不打包 MSI/NSIS。
+
+### 产物确认与章节审阅
+
+### 新增
+
+- migration 036：append-only `artifact_decisions` 与 `review_authorizations`；备份 schema 11。
+- 对话产物卡片提供确认进入审阅 / 要求修改 / 拒绝；章节确认会签发审阅授权并打开写作工作台审阅模式。
+- 写作工作台在 `authorizationId` 下默认只读，显式“进入编辑”后才可改；采用前消费审阅授权。重复决定与重复消费幂等。
+- `setting_candidates` 的「确认并申请应用」走既有 Placement Safe Apply；质量报告不能直接应用。
+- `outline`、`character_candidates`、`event_candidates`、`chapter_summary` 的申请应用走对应领域服务；章节正文仍必须确认进入审阅，不能直接 Safe Apply。
+
+### 领域任务与旧工作台收敛
+
+### 新增
+
+- 对话 allowlist 增加 candidate-only 工具：`generate_outline`、`generate_characters`、`suggest_events`、`expand_settings`、`polish_chapter`、`check_quality`、`summarize_chapter`。
+- Gateway / Tool Registry / DSH Worker 同步暴露这些工具；结果仍只形成 ResultArtifact 卡片，正式写入继续走确认协议。
+- 新增 `ans.novel-context.extractive-v1` 小说上下文压缩 Provider：读取当前作品 revision、生成带覆盖率证据的压缩候选，校验通过后才可应用；旧压缩版本保留并可回滚。
+- 任务模型快照冻结压缩 Provider/version；DSH Cordis 组合挂接 `compaction-basic`（`auto: true`）作为 Session 输入压缩 seam，不改写 Agent Loop。
+- 写作工作台默认只保留保存、草稿、章节准备、总结、排版和采用；生成/大纲/角色/事件/风格/润色等 AI 入口迁入创作工作台。桌面 E2E 仍可打开工程/设定/检查/生成以回归既有作业链路。
+
+### 修复
+
+- 章节事件采用改为写入 SQLite（`create_chapter_event` / `list_chapter_events`），桌面不再只落 LocalStorage。
+- 候选工具拒绝无结构文本：角色/事件/设定必须含 name 或 title；质量报告必须含 summary 或 issues。
+- 统一 Planner / AI Task / 桌面 E2E 的生产 Tool Registry 哈希为 `6eebed8c…`；DSH 测试 allowlist 与 Cordis composition 计数同步到 11 个工具和 compaction-basic。
+- `runtime/health` 投影补上 `compaction-basic`；项目备份 schema 11 的测试断言与 `artifact_decisions` / `review_authorizations` 对齐。
+- 工作台增加「压缩上下文」预览与确认应用入口。
+- 压缩候选在对话中发布为 `generic_json` ResultArtifact 卡片（桌面）或浏览器投影卡片，确认后走既有 `request_apply` / Safe Apply 路径。浏览器结构化应用不再一律 `BROWSER_APPLY_UNSUPPORTED`。
+- 浏览器 fallback 按任务目标选择领域候选工具（大纲/角色/事件/设定/润色/质量/总结），并输出可通过候选校验的结构化预览；无章节绑定时仍只做只读检索，不伪造 DSH 或 ResultArtifact。
+- 工作台输入区提供快捷模板，并在同一小说已有写入类任务运行时给出跨任务目标冲突提示（不阻断并发）。
+- 风格分析/伏笔审计走质量报告候选，风格润色走 `polish_chapter`；伏笔候选映射为事件候选。
+- 修复前端完整备份校验仍停在 schema 9、会拒绝桌面导出的 schema 11 备份的问题；同步 README、路线图和导入导出文档的工作台完成态与备份 schema 11。
 
 ## v3.2.1 (2026-08-19) - 发布资产 URL 热修复
 

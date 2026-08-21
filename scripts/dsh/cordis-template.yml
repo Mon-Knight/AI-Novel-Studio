@@ -20,8 +20,7 @@
     workspaceContext: false
     skills:
       enabled: false
-    toolBash:
-      enableRunInBackground: false
+    toolBash: false
     toolJobs: false
 
 - id: sessions
@@ -32,6 +31,11 @@
 
 - id: token-meter
   name: 'file:///{CHECKOUT}/packages/llm/token-meter/lib/index.js'
+
+- id: compaction-basic
+  name: 'file:///{CHECKOUT}/packages/compaction/compaction-basic/lib/index.js'
+  config:
+    auto: true
 
 - id: mcp-novel
   name: 'file:///{CHECKOUT}/packages/mcp/mcp-client/lib/index.js'

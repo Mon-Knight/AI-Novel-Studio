@@ -7,6 +7,8 @@
 主要开发工具：VS Code + GitHub Copilot / Agent  
 文档用途：约束 Copilot / Agent 在本项目中的开发方向、代码结构、UI 风格、数据边界和版本管理流程。
 
+> 时效说明：本文第 8～21 节大量记录早期 v0.x～v3.2.1 页面形成过程。v3.3.0+ 已确认目标以第 32 节和 `docs/architecture/conversational-creative-workbench.md` 为准；旧首页、三栏工作台和右侧 AI 面板要求不得覆盖新目标。
+
 ---
 
 # 1. 项目定位
@@ -41,6 +43,7 @@ AI 辅助生成角色、事件、正文、润色建议、质量检查、章节�
 docs/product-design.md
 docs/ui-reference.md
 docs/data-model.md
+docs/architecture/conversational-creative-workbench.md
 ```
 
 后续若存在以下文档，也应参考：
@@ -67,8 +70,8 @@ docs/development-rules.md
 
 ```text
 第一优先级：像一个真正的 Windows 小说创作软件
-第二优先级：以章节为单位完成 AI 正文生成
-第三优先级：通过提示词让 AI 承担不同创作分工
+第二优先级：以工作台组织小说项目和可并发任务对话
+第三优先级：通过受约束工具与产物逐步完成小说创作
 第四优先级：用户选择和确认，AI 不直接决定最终正文
 第五优先级：保存上下文，保证长篇小说连续性
 第六优先级：长期可维护，避免代码和功能混乱
@@ -103,7 +106,7 @@ docs/development-rules.md
 AI Novel Studio 的核心是：
 
 ```text
-右侧面板选择设定、角色、事件、风格、输出控制
+（v3.2.1 及更早）右侧面板选择设定、角色、事件、风格、输出控制
 ↓
 AI 生成章节正文到中间编辑区
 ↓
@@ -1055,19 +1058,13 @@ ComingSoon 页面
 
 # 28. 测试与验证规则
 
-每次完成任务后，至少验证：
+每次完成任务后按变更范围验证：
 
-```powershell
-npm install
-npm run dev
-npm run tauri dev
-```
-
-如果配置了 lint，还应执行：
-
-```powershell
-npm run lint
-```
+- 纯文档：docs/version sync、Prettier、diff 和范围检查；
+- 前端：相关动态测试、`npm run lint:ci`、`npm run build`；
+- Rust/SQLite：`cargo check` 与相关测试；
+- Tauri/DSH payload：真实桌面与生产构建门禁；
+- 发布：`scripts/agent-workflow/verify_project.ps1` 完整矩阵。
 
 每次完成版本后，应说明：
 
@@ -1091,7 +1088,7 @@ npm run lint
 1. 先阅读 docs 文档。
 2. 再查看当前项目结构。
 3. 不要盲目重写整个项目。
-4. 不要删除已有可用功能。
+4. 不要删除用户未要求，或尚未完成等价迁移与回退验证的已有功能。
 5. 不要未经说明改技术路线。
 6. 不要擅自引入大型依赖。
 7. 不要把 UI 改成后台管理风。
@@ -1129,16 +1126,17 @@ npm run lint
 
 ## 五、运行与验证
 
-- npm install：
-- npm run dev：
-- npm run tauri dev：
-- npm run lint：
+- 相关动态测试：
+- lint/build（如适用）：
+- Rust/SQLite（如适用）：
+- Tauri/DSH/发布门禁（如适用）：
+- 文档与范围检查：
 
 ## 六、GitHub 备份
 
-- commit：
-- push：
-- tag：
+- commit（如任务要求）：
+- push（如任务要求）：
+- tag（仅发布任务）：
 
 ## 七、后续建议
 
@@ -1159,3 +1157,46 @@ AI Novel Studio 也不是网页后台。
 ```
 
 所有代码、页面、数据结构、提示词系统和版本规划，都必须服务于这个核心目标。
+
+---
+
+# 32. v3.3.0+ 对话式创作工作台覆盖规则
+
+## 32.1 主界面
+
+```text
+创作工作台
+└─ 小说项目
+   └─ 任务对话
+      ├─ 用户与 AI 消息
+      ├─ 内联工具调用和错误
+      ├─ 任务级模型选择
+      └─ Result Artifact 卡片与用户决定
+```
+
+- 工作台是目标默认首界面；小说作品页继续保留为项目管理入口。
+- 不建立独立执行时间线、任务计划、工具或产物详情面板。
+- 原写作工作台在等价迁移后收敛为章节人工审阅/编辑器，保留阅读、显式编辑、保存和采用。
+- 待确认导航、作品详情待确认产物、草稿版本查看和旧 AI 面板只能在对应版本任务完成迁移与回退验证后删除。
+
+## 32.2 Harness 复用
+
+- 当前发布载体固定 DSH commit `47f943859bef60e4160492346772ded9b24f765a`。
+- 通过 ANS DSH Adapter 使用固定版本 Harness Headless Worker；不完整 Fork，不嵌入 Harness Web UI。
+- DSH 负责 Session/Agent、Turn/Step、工具调度、模型调用和 Session 事件。
+- ANS 负责小说项目/任务事实、领域工具、预算、Artifact、用户决定、revision/CAS、Safe Apply 和 SQLite。
+- 较新 Harness master 只能作为参考，升级必须由独立版本任务验证。
+
+## 32.3 当前插件
+
+- 只读显示 Runtime Registry 中的功能插件、模型插件和其他插件；
+- 显示名称、版本、说明、状态与能力；
+- 不提供安装、卸载、启停、配置、更新、权限、市场或项目绑定；
+- 实际工具调用继续只在所属任务对话中显示。
+
+## 32.4 Agent 规则
+
+- 当前实现与未来规划必须明确区分，不能把 v3.3.0 规划写成 v3.2.1 已有功能；
+- 验证按变更范围分层，发布时才强制完整统一矩阵和 clean working tree；
+- commit、push、tag 仅在用户或版本/发布任务明确要求时执行；
+- 规则冲突时优先读 `AGENTS.md`、本节及对话工作台权威设计文档。

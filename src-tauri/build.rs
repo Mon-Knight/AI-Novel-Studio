@@ -11,15 +11,21 @@ fn main() {
 
     fs::create_dir_all(&bin).expect("create ignored DSH resource directory");
     if !unpacker.is_file() {
-        fs::copy(manifest.join("../scripts/dsh/unpack-payload.mjs"), &unpacker)
-            .expect("stage DSH unpacker for debug resource validation");
+        fs::copy(
+            manifest.join("../scripts/dsh/unpack-payload.mjs"),
+            &unpacker,
+        )
+        .expect("stage DSH unpacker for debug resource validation");
     }
     if !zip.is_file() && !release {
         fs::write(&zip, []).expect("create ignored debug DSH zip placeholder");
     }
     if release
         && (fs::metadata(&zip).map(|value| value.len()).unwrap_or(0) == 0
-            || fs::metadata(&unpacker).map(|value| value.len()).unwrap_or(0) == 0)
+            || fs::metadata(&unpacker)
+                .map(|value| value.len())
+                .unwrap_or(0)
+                == 0)
     {
         panic!("release DSH resources are missing; run npm run dsh:assets first");
     }

@@ -242,6 +242,10 @@ export async function fillTextareaTestId(testId: string, value: string): Promise
 }
 
 export async function createProjectThroughUi(title = unique('E2E Project')): Promise<string> {
+  if ((await browser.execute(() => window.location.hash)) !== '#/novels') {
+    await navigateHash('#/novels');
+  }
+  await waitForTestId('project-list');
   await clickTestId('project-create');
   await fillTestId('project-name-input', title);
   await clickTestId('project-save');
@@ -266,7 +270,7 @@ export async function navigateHash(route: string): Promise<void> {
 }
 
 export async function goHome(): Promise<void> {
-  await navigateHash('#/');
+  await navigateHash('#/novels');
   await waitForTestId('app-shell');
   await waitForTestId('project-list');
 }

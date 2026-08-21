@@ -1,7 +1,7 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.2.1
+> 版本：v3.5.0
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---
@@ -174,6 +174,67 @@ v1.0.46 将 Agent Tool Layer 从占位接口升级为只读真实数据接口。
 
 - `src/agent-tools/` → 软件内部 Agent Tool Layer，读真实数据
 - `.github/skills/` → 项目开发辅助 Skills，纯流程指导
+
+---
+
+## 12. v3.3.0+ 对话任务 Runtime（首阶段已实现）
+
+首阶段已在既有 Runtime 之上增加任务对话控制面，而不是把开发辅助 Workflow Scripts 当成产品功能。
+
+### 12.1 任务隔离
+
+每个任务对话拥有独立的消息、回合、模型快照、活动运行、取消状态和产物。用户切换任务不会取消后台运行；一个任务失败或取消不会改写另一个任务的状态。
+
+### 12.2 对话事件投影
+
+任务运行把以下持久事实投影到对话：
+
+- AI 面向用户的消息；
+- `novel.read_context`、`chapter.read_outline`、`search_memory`、`generate_chapter` 等工具调用；
+- 工具或 Provider 在发生位置的错误；
+- 完成并校验后的产物卡片；
+- 用户确认、拒绝、修订、审阅授权和应用结果。
+
+对话不展示隐藏思维链，也不依赖独立执行时间线、任务计划、工具或产物详情面板。
+
+### 12.3 并发与治理
+
+- 首个版本至少支持两个独立任务并发；
+- 只读和候选生成可以并发，正式写入继续使用单目标事务、revision CAS 与幂等语义；
+- 全局 AI 请求治理继续限制 Provider 并发、频率、Token 与成本；
+- DSH 若保持取消即重启进程的语义，每个活动任务需要独立 Worker/进程边界；
+- 重启后的运行按持久事实恢复、暂停或标记中断，不从临时 UI 状态猜测成功。
+
+### 12.4 权威边界
+
+Task Runtime 负责执行生命周期，不成为小说事实源。Result Artifact、验证、用户决定、章节审阅授权和 Safe Apply 继续构成正式写入链路；DSH 或模型不能绕过这些边界。
+
+### 12.5 Harness 式回合循环与能力接口
+
+目标 Runtime 借鉴 Harness 的组合与执行顺序：启动时由 Profile/Bundle 装载能力图；每个任务创建独立 Session/Agent scope；每个回合执行 `turn/start → pre-step → model/tool step → turn/end`。`pre-step` 冻结本步骤模型并组装提示词、上下文和工具；工具结果进入下一步骤，直到模型不再请求工具。
+
+模型、工具、上下文与压缩能力通过稳定定义和可替换 Provider 提供。任务运行冻结实际 Provider、模型、能力版本与配置摘要。Session 的追加事件用于重放与 UI 投影，小说正式事实仍由领域服务和 SQLite 管理。
+
+任务对话压缩与小说上下文压缩是两个不同能力：前者只调整 Session 输入表面；后者必须形成可验证 Result Artifact，并在用户确认后通过 Safe Apply 应用。
+
+### 12.6 当前插件投影
+
+Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少包含稳定插件 ID、名称、分类、版本、说明、加载状态和能力摘要。分类仅用于查看功能插件、模型插件和其他插件；该投影不承担安装、卸载、启停、配置、更新、权限、市场或项目绑定，也不保存为第二套插件事实。
+
+### 12.7 DSH Headless Adapter
+
+当前发布载体继续固定 DSH commit `47f943859bef60e4160492346772ded9b24f765a`。首阶段桌面实现已在 ANS Task Runtime 与固定 DSH Worker 之间建立稳定 Adapter；它不完整 Fork Harness 或嵌入其 Web UI：
+
+- `TaskConversation / TaskRun` 映射为持续 Session/Agent 和 Turn；
+- DSH 事件转换为 ANS 持久消息、运行和工具事实；每个活动任务持有独立 child/Job Object，取消不会跨任务传播；
+- ANS 领域服务通过受约束 Novel Tool Adapter 暴露给 DSH；
+- 成功生成结果经过既有 AI Task/Attempt/ResultArtifact 管线验证后，卡片只保存 `artifactId` 投影，不把普通 assistant 文本当成第二份产物正文；
+- Worker 取消、崩溃和重启不能影响其他活动任务；
+- Plugin Graph 只通过稳定只读 Projection 暴露给 UI。
+
+较新 Harness 源码只作为架构参考。升级固定 commit 必须先完成 API 差异审计、载体构建、任务隔离和回归验证，不能在工作台版本中顺带升级。
+
+完整设计与版本路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。任务对话、确认、Safe Apply、审阅授权、领域候选工具、上下文压缩和写作工作台审阅收敛已包含在 v3.5.0。
 
 ---
 

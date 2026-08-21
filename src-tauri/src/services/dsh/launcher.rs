@@ -30,6 +30,9 @@ pub struct DshLaunchConfig {
     /// Working directory recorded in every SDK session header; keep it stable
     /// across restarts so sessions resume from their JSONL root.
     pub cwd: PathBuf,
+    /// Optional ANS task allowlist inherited by the novel gateway. Empty means
+    /// the legacy DSH preparation composition (all carrier tools).
+    pub allowed_tools: Option<String>,
 }
 
 /// Spawns the DSH runtime process for one launch config.
@@ -103,6 +106,9 @@ impl DshRuntimeLauncher for NodeDshRuntime {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(allowed_tools) = &config.allowed_tools {
+            command.env("ANS_ALLOWED_TOOLS", allowed_tools);
+        }
         command.spawn()
     }
 }

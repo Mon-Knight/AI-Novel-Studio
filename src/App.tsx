@@ -14,6 +14,7 @@ import StartupContextMigrationDialog, {
 
 const NovelDetailPage = lazy(() => import('./pages/NovelDetail/NovelDetailPage'));
 const HomePage = lazy(() => import('./pages/Home/HomePage'));
+const WorkbenchPage = lazy(() => import('./pages/Workbench/WorkbenchPage'));
 const WritingWorkspacePage = lazy(() => import('./pages/WritingWorkspace/WritingWorkspacePage'));
 const StyleProfilesPage = lazy(() => import('./pages/StyleProfiles/StyleProfilesPage'));
 const ReferenceLibraryPage = lazy(() => import('./pages/ReferenceLibrary/ReferenceLibraryPage'));
@@ -52,7 +53,8 @@ function App({ startupRecovery, startupContextMigration }: AppProps) {
           }
         >
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<WorkbenchPage />} />
+            <Route path="/novels" element={<HomePage />} />
             <Route path="/novels/:novelId" element={<NovelDetailPage />} />
             <Route path="/novels/:novelId/workspace" element={<WritingWorkspacePage />} />
             <Route path="/novels/:novelId/references" element={<ReferenceLibraryPage />} />
