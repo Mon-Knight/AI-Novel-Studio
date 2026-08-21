@@ -109,6 +109,68 @@ test('two task workers keep independent runs and event projections', async () =>
     firstBundle?.turns.find((turn) => turn.role === 'assistant')?.content ?? '',
     /不会冒充 DSH 或 ResultArtifact/,
   );
+  assert.ok(firstBundle?.toolEvents.some((event) => event.toolName === 'generate_chapter'));
+});
+
+test('browser fallback selects domain candidate tools from the user goal', async () => {
+  const cases: Array<{ goal: string; tool: string; chapterId?: string }> = [
+    { goal: '生成下一章', tool: 'generate_chapter', chapterId: 'ch-003' },
+    { goal: '为本作品生成角色候选', tool: 'generate_characters', chapterId: 'ch-003' },
+    { goal: '扩展本章大纲', tool: 'generate_outline', chapterId: 'ch-003' },
+    { goal: '生成世界设定候选', tool: 'expand_settings', chapterId: 'ch-003' },
+    { goal: '建议本章事件', tool: 'suggest_events', chapterId: 'ch-003' },
+    { goal: '润色本章正文', tool: 'polish_chapter', chapterId: 'ch-003' },
+    { goal: '审计人物一致性', tool: 'check_quality', chapterId: 'ch-003' },
+    { goal: '检查章节质量', tool: 'check_quality', chapterId: 'ch-003' },
+    { goal: '总结本章', tool: 'summarize_chapter', chapterId: 'ch-003' },
+    { goal: '为本作品生成角色候选', tool: 'search_memory' },
+  ];
+  for (const fixture of cases) {
+    (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+      new MemoryStorage() as unknown as Storage;
+    localStorage.setItem('ai_novel_studio_novels', JSON.stringify(mockNovels));
+    localStorage.setItem(
+      'ai_novel_studio_chapters',
+      JSON.stringify([
+        {
+          id: 'ch-003',
+          novelId: 'novel-001',
+          title: '第三章',
+          outline: '主角发现关键线索。',
+          orderIndex: 2,
+          createdAt: '2026-08-20T00:00:00Z',
+          updatedAt: '2026-08-20T00:00:00Z',
+        },
+      ]),
+    );
+    const conversation = await taskConversationService.create('novel-001', fixture.goal);
+    const turn = await taskConversationService.appendTurn(
+      conversation.conversationId,
+      'user',
+      fixture.goal,
+    );
+    const run = await taskRuntimeAdapter.start({
+      conversationId: conversation.conversationId,
+      novelId: 'novel-001',
+      chapterId: fixture.chapterId,
+      turnId: turn.turnId,
+      goal: fixture.goal,
+    });
+    assert.equal(run.status, 'completed', fixture.goal);
+    const bundle = await taskConversationService.get(conversation.conversationId);
+    assert.ok(
+      bundle?.toolEvents.some((event) => event.toolName === fixture.tool),
+      `${fixture.goal} should invoke ${fixture.tool}`,
+    );
+    assert.ok(bundle?.toolEvents.every((event) => event.status === 'succeeded'));
+    assert.equal(bundle?.artifacts.length, 0);
+    if (!fixture.chapterId) {
+      assert.equal(
+        bundle?.toolEvents.some((event) => event.toolName === 'generate_characters'),
+        false,
+      );
+    }
+  }
 });
 
 test('cancelling an active worker is scoped to its conversation', async () => {

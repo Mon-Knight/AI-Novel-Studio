@@ -1,6 +1,7 @@
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import { taskConversationService } from './taskConversationService';
 import { captureTaskModelSnapshot } from './taskModelSnapshot';
+import { WORKBENCH_TOOLS } from './currentPluginService';
 import type { TaskModelSnapshot, TaskRun, ToolCallEvent } from '../../types/conversation';
 import type { ToolInvocationContext, ToolResult } from '../../types/toolRegistry';
 
@@ -60,6 +61,70 @@ function buildFallbackCandidate(goal: string, context: Record<string, unknown>):
   ].join('\n\n');
 }
 
+function selectCandidateTool(
+  goal: string,
+  chapterId?: string,
+): { name: string; artifactType: string } | undefined {
+  if (!chapterId) return undefined;
+  const text = goal.toLowerCase();
+  const generating = /生成|候选|扩展|建议|generate|expand|suggest/.test(text);
+  if (/大纲|outline/.test(text)) return { name: 'generate_outline', artifactType: 'outline' };
+  if (/润色|polish/.test(text)) return { name: 'polish_chapter', artifactType: 'chapter_text' };
+  if (/质量|审计|检查|一致|quality/.test(text) && !generating) {
+    return { name: 'check_quality', artifactType: 'quality_report' };
+  }
+  if (/角色|人物|character/.test(text)) {
+    return { name: 'generate_characters', artifactType: 'character_candidates' };
+  }
+  if (/设定|世界|setting/.test(text)) {
+    return { name: 'expand_settings', artifactType: 'setting_candidates' };
+  }
+  if (/事件|剧情|event/.test(text)) {
+    return { name: 'suggest_events', artifactType: 'event_candidates' };
+  }
+  if (/质量|审计|检查|一致|quality/.test(text)) {
+    return { name: 'check_quality', artifactType: 'quality_report' };
+  }
+  if (/总结|摘要|summar/.test(text)) {
+    return { name: 'summarize_chapter', artifactType: 'chapter_summary' };
+  }
+  return { name: 'generate_chapter', artifactType: 'chapter_text' };
+}
+
+function buildStructuredFallback(
+  toolName: string,
+  artifactType: string,
+  goal: string,
+  context: Record<string, unknown>,
+): string {
+  const preview = buildFallbackCandidate(goal, context);
+  if (toolName === 'generate_characters' || artifactType === 'character_candidates') {
+    return JSON.stringify({
+      characters: [{ name: '预览角色', identity: preview }],
+    });
+  }
+  if (toolName === 'suggest_events' || artifactType === 'event_candidates') {
+    return JSON.stringify({
+      events: [{ title: '预览事件', description: preview }],
+    });
+  }
+  if (toolName === 'expand_settings' || artifactType === 'setting_candidates') {
+    return JSON.stringify({
+      settings: [{ name: '预览设定', description: preview }],
+    });
+  }
+  if (toolName === 'generate_outline' || artifactType === 'outline') {
+    return JSON.stringify({ title: '预览大纲', content: preview });
+  }
+  if (toolName === 'check_quality' || artifactType === 'quality_report') {
+    return JSON.stringify({ summary: preview, issues: [] });
+  }
+  if (toolName === 'summarize_chapter' || artifactType === 'chapter_summary') {
+    return JSON.stringify({ summary: preview });
+  }
+  return preview;
+}
+
 async function execute(
   input: TaskRuntimeInput,
   controller: AbortController,
@@ -81,12 +146,7 @@ async function execute(
     novelId: input.novelId,
     chapterId: input.chapterId,
     grantedPermissions: ['novel.read', 'chapter.read'],
-    allowedTools: [
-      'novel.read_context@1',
-      'chapter.read_outline@1',
-      'search_memory@1',
-      'generate_chapter@1',
-    ],
+    allowedTools: WORKBENCH_TOOLS.map((name) => `${name}@1`),
     dryRun: true,
     modelSnapshot,
     signal: controller.signal,
@@ -106,13 +166,19 @@ async function execute(
     name: 'search_memory',
     args: () => ({ novelId: input.novelId, query: input.goal }),
   });
-  if (input.chapterId) {
+  const candidateTool = selectCandidateTool(input.goal, input.chapterId);
+  if (candidateTool) {
     steps.push({
-      name: 'generate_chapter',
+      name: candidateTool.name,
       args: () => ({
         novelId: input.novelId,
         chapterId: input.chapterId,
-        candidateText: buildFallbackCandidate(input.goal, evidence),
+        candidateText: buildStructuredFallback(
+          candidateTool.name,
+          candidateTool.artifactType,
+          input.goal,
+          evidence,
+        ),
       }),
     });
   }
@@ -169,13 +235,17 @@ async function execute(
       }
     }
 
-    const generated = evidence.generate_chapter as { text?: string } | undefined;
+    const generated = candidateTool
+      ? (evidence[candidateTool.name] as { text?: string } | undefined)
+      : undefined;
     await taskConversationService.appendTurn(
       input.conversationId,
       'assistant',
       generated?.text
         ? `浏览器开发 fallback 已完成确定性预览；它不会冒充 DSH 或 ResultArtifact。\n\n${generated.text}`
-        : '已完成可用上下文读取和记忆检索；当前任务没有绑定章节，因此暂未生成章节候选。',
+        : candidateTool
+          ? `浏览器开发 fallback 已调用 ${candidateTool.name}；预览不是正式 ResultArtifact。`
+          : '已完成可用上下文读取和记忆检索；当前任务没有绑定可生成候选的目标。',
     );
     currentRun = await taskConversationService.updateRun(run.runId, 'completed', {
       finishedAt: new Date().toISOString(),
