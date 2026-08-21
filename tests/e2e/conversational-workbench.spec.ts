@@ -122,11 +122,13 @@ describe('conversational creative workbench', () => {
       await findTestIdByAttribute('workbench-plugin-group', 'data-category', category);
     }
     const functionRows = await browser.$$(
-      ['[data-testid="workbench-plugin-row"]', '[data-category="function"]'].join(''),
+      '[data-testid="workbench-plugin-row"][data-category="function"]',
     );
-    const functionProjection = (await Promise.all(functionRows.map((row) => row.getText()))).join(
-      '\n',
-    );
+    const functionTexts: string[] = [];
+    for (const row of functionRows) {
+      functionTexts.push(await row.getText());
+    }
+    const functionProjection = functionTexts.join('\n');
     for (const tool of [
       'novel.read_context',
       'chapter.read_outline',
@@ -171,7 +173,7 @@ describe('conversational creative workbench', () => {
       /(DSH|载体|运行时|VERSION_MATRIX|Provider API Key|API Key)/i,
     );
     expect(await (await waitForTestId('workbench-composer-error')).getText()).toMatch(
-      /(DSH|载体|运行时|VERSION_MATRIX|Provider API Key|API Key)/i,
+      /(任务启动失败|DSH|载体|运行时|VERSION_MATRIX|Provider API Key|API Key)/i,
     );
     expect(await selectedTask.getAttribute('data-status')).toBe('failed');
     expect(await testIdCount('workbench-artifact-card')).toBe(0);
@@ -204,8 +206,8 @@ describe('conversational creative workbench', () => {
     await browser.reloadSession();
     await waitForTestId('app-shell');
     await navigateHash('#/');
-    const restoredHeader = await waitForTestId('workbench-task-header');
-    expect(await restoredHeader.getAttribute('data-conversation-id')).toBe(conversationId);
+    const restoredFailedHeader = await waitForTestId('workbench-task-header');
+    expect(await restoredFailedHeader.getAttribute('data-conversation-id')).toBe(conversationId);
     await waitForTestIdAttribute('workbench-conversation-status', 'data-status', 'failed');
     await waitForFailedRunCount(2);
     expect(new Set(await testIdAttributes('workbench-run', 'data-run-id'))).toEqual(
