@@ -48,6 +48,20 @@ const tables = [
   'chapter_locations',
   'chapter_event_factions',
   'chapter_event_locations',
+  'task_conversations',
+  'conversation_turns',
+  'task_runs',
+  'tool_call_events',
+  'conversation_artifact_cards',
+  'ai_tasks',
+  'ai_task_attempts',
+  'ai_input_snapshots',
+  'ai_context_snapshots',
+  'ai_constraint_snapshots',
+  'result_artifacts',
+  'artifact_validation_issues',
+  'artifact_decisions',
+  'review_authorizations',
   'chapter_summaries',
   'context_records',
   'quality_check_reports',
@@ -90,9 +104,23 @@ const introducedSchema = new Map([
   ['chapter_locations', 9],
   ['chapter_event_factions', 9],
   ['chapter_event_locations', 9],
+  ['task_conversations', 10],
+  ['conversation_turns', 10],
+  ['task_runs', 10],
+  ['tool_call_events', 10],
+  ['conversation_artifact_cards', 10],
+  ['ai_tasks', 10],
+  ['ai_task_attempts', 10],
+  ['ai_input_snapshots', 10],
+  ['ai_context_snapshots', 10],
+  ['ai_constraint_snapshots', 10],
+  ['result_artifacts', 10],
+  ['artifact_validation_issues', 10],
+  ['artifact_decisions', 11],
+  ['review_authorizations', 11],
 ]);
 
-function completeBackup(schemaVersion = 9) {
+function completeBackup(schemaVersion = 11) {
   const schemaTables = tables.filter((name) => schemaVersion >= (introducedSchema.get(name) ?? 2));
   return {
     type: 'ai_novel_studio_project',
@@ -210,13 +238,35 @@ test('schemaVersion 8 requires scheduler tables and still omits story assets', (
 
 test('schemaVersion 9 requires all official faction and location asset tables', () => {
   const assetBackup = completeBackup(9);
-  assert.equal(backupSchema.PROJECT_BACKUP_SCHEMA_VERSION, 9);
   assert.equal(backupSchema.isCompleteProjectBackup(assetBackup), true);
   assert.ok(Array.isArray(assetBackup.tables.factions));
   assert.ok(Array.isArray(assetBackup.tables.chapter_event_locations));
+  assert.equal(assetBackup.tables.task_conversations, undefined);
 
   delete assetBackup.tables.locations;
   assert.equal(backupSchema.isCompleteProjectBackup(assetBackup), false);
+});
+
+test('schemaVersion 10 requires conversation workbench tables without decisions', () => {
+  const workbenchBackup = completeBackup(10);
+  assert.equal(backupSchema.isCompleteProjectBackup(workbenchBackup), true);
+  assert.ok(Array.isArray(workbenchBackup.tables.task_conversations));
+  assert.ok(Array.isArray(workbenchBackup.tables.result_artifacts));
+  assert.equal(workbenchBackup.tables.artifact_decisions, undefined);
+
+  delete workbenchBackup.tables.task_runs;
+  assert.equal(backupSchema.isCompleteProjectBackup(workbenchBackup), false);
+});
+
+test('schemaVersion 11 requires artifact decisions and review authorizations', () => {
+  const currentBackup = completeBackup(11);
+  assert.equal(backupSchema.PROJECT_BACKUP_SCHEMA_VERSION, 11);
+  assert.equal(backupSchema.isCompleteProjectBackup(currentBackup), true);
+  assert.ok(Array.isArray(currentBackup.tables.artifact_decisions));
+  assert.ok(Array.isArray(currentBackup.tables.review_authorizations));
+
+  delete currentBackup.tables.review_authorizations;
+  assert.equal(backupSchema.isCompleteProjectBackup(currentBackup), false);
 });
 
 test('非整数 schemaVersion 不得进入 Rust 完整恢复链路', () => {
@@ -226,7 +276,7 @@ test('非整数 schemaVersion 不得进入 Rust 完整恢复链路', () => {
 });
 
 test('损坏或未来版本的完整备份不会降级为旧版项目 JSON', () => {
-  const malformed = { ...completeBackup(), schemaVersion: 10 };
+  const malformed = { ...completeBackup(), schemaVersion: 12 };
   const result = jsonImport.detectJsonImportType(malformed);
 
   assert.equal(result.type, 'ai_novel_studio_project');

@@ -2928,13 +2928,15 @@ chapter_event_locations   章节事件—地点关系
 
 资产 identity、novel scope 和创建时间不可变；更新必须提交 expected revision。所有关系端点必须属于同一作品。地点父子图拒绝自身父级和环，批量创建时按拓扑顺序写入，因此冻结集合中的子地点可以先于父地点出现。
 
-# 38. 完整项目备份 schema 8 / 9
+# 38. 完整项目备份 schema 8～11
 
 - schema 8 在 schema 7 的 Memory 基线上加入四张 scheduler 表。恢复时废弃中断 owner/epoch，重算 policy/request/decision/payload hash，并保证没有 active lease 残留。
 - schema 9 加入九张势力、地点及关系表；地点按父子拓扑恢复，随后恢复关系和章节关联。
+- schema 10 加入任务对话、回合、运行、工具事件、产物卡片、AI Task 快照和 ResultArtifact 工作台事实。
+- schema 11 加入 append-only `artifact_decisions` 与 `review_authorizations`。
 - content transaction 的运行历史不进入项目备份；已提交形成的正式资产进入 schema 9，避免把可重放的运行中事务带到新作品。
 - 项目清理覆盖 scheduler 和正式资产。清理期间只临时移除 checkpoint 的 no-delete trigger，事务完成后原样重建；失败回滚不能留下缺失 trigger。
-- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表。未来或非整数 schema 版本拒绝进入完整恢复链路。
+- schema 2～7 继续按其历史表集合导入；schema 8 允许缺少故事资产；schema 9 必须包含全部正式资产表；schema 10 必须包含工作台对话事实；schema 11 必须包含产物决定与审阅授权。未来或非整数 schema 版本拒绝进入完整恢复链路。
 
 # 39. migration 029：桌面端全局 AI 请求治理
 

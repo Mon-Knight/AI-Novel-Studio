@@ -139,7 +139,7 @@ Agent 能自主推进创作流程：
 
 ---
 
-## 5. Phase 4：Conversational Workbench（v3.3.0+，规划）
+## 5. Phase 4：Conversational Workbench（v3.3.0+，已落地）
 
 ### 5.1 工作台成为控制面
 

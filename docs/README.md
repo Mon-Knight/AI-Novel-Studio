@@ -18,7 +18,7 @@
 
 | 文档                                                             | 说明                                        | 状态                 |
 | ---------------------------------------------------------------- | ------------------------------------------- | -------------------- |
-| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ v3.0.0 已同步     |
+| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ v3.5.0 已同步     |
 | [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                                | ✅ 已有              |
 | [development-rules.md](development-rules.md)                     | 开发规则总览                                | ✅ 已有              |
 | [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口、证据校正与建议演进顺序 | ✅ 2026-07-28 已审计 |
@@ -41,7 +41,7 @@
 | [context-constraint-tool-registry.md](architecture/context-constraint-tool-registry.md)                 | v2.4.0 正式编译协议、预算与工具注册边界                    | ✅ 已实现            |
 | [chapter-readiness-planner-runtime.md](architecture/chapter-readiness-planner-runtime.md)               | v2.5.0 持久 Planner、lease/checkpoint、显式重试与恢复      | ✅ 已实现            |
 | [multi-agent-collaboration.md](architecture/multi-agent-collaboration.md)                               | v3.0.0 全书自主规划、六专家评审、逐章推进与持久事实        | ✅ 已实现            |
-| [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | v3.3.0+ 对话任务工作台、Harness Runtime 映射与只读插件视图 | 📝 规划基线          |
+| [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | v3.3.0+ 对话任务工作台、Harness Runtime 映射与只读插件视图 | ✅ v3.5.0 已实现     |
 | [v3.3.0-conversational-workbench-taskbook.md](architecture/v3.3.0-conversational-workbench-taskbook.md) | Codex 接管现有实现并完成真实 Harness Headless 工作台闭环   | 📝 执行任务书        |
 | [desktop-e2e.md](technical/desktop-e2e.md)                                                              | Windows 真实 Tauri E2E、隔离与排障                         | ✅ v2.1.7+ 持续适用  |
 | [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md)                 | Provider 发布门禁、真实 API 尝试与安装包证据               | ✅ 已记录            |
