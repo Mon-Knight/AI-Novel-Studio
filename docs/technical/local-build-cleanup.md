@@ -29,13 +29,13 @@ Rust 编译器保留增量编译缓存以加速后续构建，但长期积累会
 
 ## 2. 空间占用分析
 
-| 目录 | 典型大小 | 说明 |
-|------|----------|------|
-| `node_modules/` | 300-600 MB | npm 依赖，可通过 `npm install` 重建 |
-| `src-tauri/target/` | 3-10 GB+ | Rust 编译输出，可通过 `cargo build` 重建 |
-| 其中 `target/debug/` | 2-6 GB | Debug 构建，一般不需要 |
-| 其中 `target/release/deps/` | 1-3 GB | 依赖库编译缓存 |
-| `dist/` | 1-5 MB | 前端构建输出，很小 |
+| 目录                        | 典型大小   | 说明                                     |
+| --------------------------- | ---------- | ---------------------------------------- |
+| `node_modules/`             | 300-600 MB | npm 依赖，可通过 `npm install` 重建      |
+| `src-tauri/target/`         | 3-10 GB+   | Rust 编译输出，可通过 `cargo build` 重建 |
+| 其中 `target/debug/`        | 2-6 GB     | Debug 构建，一般不需要                   |
+| 其中 `target/release/deps/` | 1-3 GB     | 依赖库编译缓存                           |
+| `dist/`                     | 1-5 MB     | 前端构建输出，很小                       |
 
 ---
 
@@ -88,28 +88,28 @@ npm run tauri build
 
 ## 4. 哪些可以安全删除
 
-| 项目 | 可以删？ | 重建方式 |
-|------|----------|----------|
-| `node_modules/` | ✅ | `npm install` |
-| `src-tauri/target/debug/` | ✅ | `cargo build` |
-| `src-tauri/target/release/` (除 bundle 中的安装包) | ✅ | `cargo build --release` |
-| Rust incremental 缓存 | ✅ | 自动重建 |
-| `dist/` | ✅ | `npm run build` |
-| Vite 缓存 | ✅ | 自动重建 |
+| 项目                                               | 可以删？ | 重建方式                |
+| -------------------------------------------------- | -------- | ----------------------- |
+| `node_modules/`                                    | ✅       | `npm install`           |
+| `src-tauri/target/debug/`                          | ✅       | `cargo build`           |
+| `src-tauri/target/release/` (除 bundle 中的安装包) | ✅       | `cargo build --release` |
+| Rust incremental 缓存                              | ✅       | 自动重建                |
+| `dist/`                                            | ✅       | `npm run build`         |
+| Vite 缓存                                          | ✅       | 自动重建                |
 
 ---
 
 ## 5. 哪些绝对不要删除
 
-| 项目 | 原因 |
-|------|------|
-| `.git/` | 版本历史，删除后无法恢复 |
-| `src/`、`src-tauri/src/` | 源代码 |
-| `docs/`、`README.md`、`CHANGELOG.md` | 项目文档 |
-| `package.json`、`Cargo.toml` | 项目配置 |
-| `*.db`、`*.sqlite` | 用户数据 |
-| 用户导出的 `.json`、`.txt`、`.md` | 用户备份 |
-| 当前稳定版本安装包 (.exe/.msi) | 发布产物 |
+| 项目                                 | 原因                     |
+| ------------------------------------ | ------------------------ |
+| `.git/`                              | 版本历史，删除后无法恢复 |
+| `src/`、`src-tauri/src/`             | 源代码                   |
+| `docs/`、`README.md`、`CHANGELOG.md` | 项目文档                 |
+| `package.json`、`Cargo.toml`         | 项目配置                 |
+| `*.db`、`*.sqlite`                   | 用户数据                 |
+| 用户导出的 `.json`、`.txt`、`.md`    | 用户备份                 |
+| 当前稳定版本安装包 (.exe/.msi)       | 发布产物                 |
 
 ---
 
@@ -138,11 +138,11 @@ npm run tauri build
 
 ## 7. 相关脚本
 
-| 脚本 | 功能 | 默认模式 |
-|------|------|----------|
-| `report_large_files.ps1` | 扫描报告空间占用 | 只读 |
-| `archive_old_builds.ps1` | 归档旧安装包 | 默认 dry-run |
-| `clean_old_builds.ps1` | 清理构建缓存 | 默认 dry-run |
+| 脚本                     | 功能             | 默认模式     |
+| ------------------------ | ---------------- | ------------ |
+| `report_large_files.ps1` | 扫描报告空间占用 | 只读         |
+| `archive_old_builds.ps1` | 归档旧安装包     | 默认 dry-run |
+| `clean_old_builds.ps1`   | 清理构建缓存     | 默认 dry-run |
 
 ---
 

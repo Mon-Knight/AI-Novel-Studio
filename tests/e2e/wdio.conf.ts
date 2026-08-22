@@ -3,13 +3,22 @@ import fs from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import { browser } from '@wdio/globals';
 import type { Frameworks } from '@wdio/types';
-import { sanitizeArtifactDirectory, sanitizeSecrets } from '../../scripts/e2e/artifact-sanitizer.ts';
+import {
+  sanitizeArtifactDirectory,
+  sanitizeSecrets,
+} from '../../scripts/e2e/artifact-sanitizer.ts';
 import { bridgeDiagnostics } from './helpers';
 
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
 const appPath = path.resolve(
-  process.env.AI_NOVEL_STUDIO_E2E_APP
-    ?? path.join(workspaceRoot, 'src-tauri', 'target', 'release', process.platform === 'win32' ? 'ai-novel-studio.exe' : 'ai-novel-studio'),
+  process.env.AI_NOVEL_STUDIO_E2E_APP ??
+    path.join(
+      workspaceRoot,
+      'src-tauri',
+      'target',
+      'release',
+      process.platform === 'win32' ? 'ai-novel-studio.exe' : 'ai-novel-studio',
+    ),
 );
 const artifactRoot = path.resolve(
   process.env.AI_NOVEL_STUDIO_E2E_ARTIFACTS ?? path.join(workspaceRoot, 'test-results', 'e2e'),
@@ -48,16 +57,18 @@ export const config = {
   specs: [path.resolve(import.meta.dirname, '*.spec.ts')],
   exclude: [path.resolve(import.meta.dirname, 'helpers.ts')],
   maxInstances: 1,
-  capabilities: [{
-    browserName: 'wry',
-    'tauri:options': {
-      application: appPath,
-      // Keep EdgeDriver's DevToolsActivePort lookup in the same isolated
-      // WebView2 directory that the Rust runtime configures at startup.
-      webviewOptions: e2eDataDir ? { userDataFolder: path.join(e2eDataDir, 'webview2') } : {},
+  capabilities: [
+    {
+      browserName: 'wry',
+      'tauri:options': {
+        application: appPath,
+        // Keep EdgeDriver's DevToolsActivePort lookup in the same isolated
+        // WebView2 directory that the Rust runtime configures at startup.
+        webviewOptions: e2eDataDir ? { userDataFolder: path.join(e2eDataDir, 'webview2') } : {},
+      },
+      'wdio:enforceWebDriverClassic': true,
     },
-    'wdio:enforceWebDriverClassic': true,
-  }],
+  ],
   hostname: process.env.AI_NOVEL_STUDIO_E2E_DRIVER_HOST ?? '127.0.0.1',
   port: driverPort,
   path: '/',
@@ -123,26 +134,39 @@ export const config = {
   async before() {
     await waitForTestIdFromBrowser('app-shell');
     const diagnostics = await bridgeDiagnostics();
-    if (!e2eDataDir) throw new Error('The active spec does not have an isolated E2E data directory');
+    if (!e2eDataDir)
+      throw new Error('The active spec does not have an isolated E2E data directory');
 
     const expectedDataDir = normalizeDiagnosticPath(path.resolve(e2eDataDir));
-    const expectedDatabasePath = normalizeDiagnosticPath(path.join(e2eDataDir, 'ai-novel-studio.db'));
+    const expectedDatabasePath = normalizeDiagnosticPath(
+      path.join(e2eDataDir, 'ai-novel-studio.db'),
+    );
     const actualDataDir = diagnostics.dataDir ? normalizeDiagnosticPath(diagnostics.dataDir) : '';
-    const actualDatabasePath = diagnostics.databasePath ? normalizeDiagnosticPath(diagnostics.databasePath) : '';
+    const actualDatabasePath = diagnostics.databasePath
+      ? normalizeDiagnosticPath(diagnostics.databasePath)
+      : '';
     if (actualDataDir !== expectedDataDir) {
-      throw new Error(`E2E data directory mismatch: expected ${expectedDataDir}, received ${actualDataDir || '<empty>'}`);
+      throw new Error(
+        `E2E data directory mismatch: expected ${expectedDataDir}, received ${actualDataDir || '<empty>'}`,
+      );
     }
     if (actualDatabasePath !== expectedDatabasePath) {
-      throw new Error(`E2E database path mismatch: expected ${expectedDatabasePath}, received ${actualDatabasePath || '<empty>'}`);
+      throw new Error(
+        `E2E database path mismatch: expected ${expectedDatabasePath}, received ${actualDatabasePath || '<empty>'}`,
+      );
     }
     if (diagnostics.enabled !== true) throw new Error('E2E diagnostics reported enabled=false');
     if (diagnostics.schemaReady !== true) throw new Error('E2E database schema is not ready');
     if (diagnostics.integrityCheck !== 'ok') {
-      throw new Error(`E2E database integrity check failed: ${diagnostics.integrityCheck ?? '<empty>'}`);
+      throw new Error(
+        `E2E database integrity check failed: ${diagnostics.integrityCheck ?? '<empty>'}`,
+      );
     }
     if (diagnostics.networkBlocked !== true) throw new Error('E2E network blocking is not enabled');
-    if (diagnostics.webviewNetwork?.installed !== true) throw new Error('E2E WebView network guard is not installed');
-    if (diagnostics.webviewNetwork.total !== 0) throw new Error('E2E WebView made a network request during startup');
+    if (diagnostics.webviewNetwork?.installed !== true)
+      throw new Error('E2E WebView network guard is not installed');
+    if (diagnostics.webviewNetwork.total !== 0)
+      throw new Error('E2E WebView made a network request during startup');
   },
 
   async beforeSession() {
@@ -176,13 +200,24 @@ export const config = {
       const safeName = sanitizeName(`${test.parent}-${test.title}`);
       const screenshotPath = path.join(artifactRoot, `${safeName}.png`);
       const sourcePath = path.join(artifactRoot, `${safeName}.html`);
-      try { await browser.saveScreenshot(screenshotPath); } catch { /* best effort */ }
-      try { fs.writeFileSync(sourcePath, sanitizeSecrets(await browser.getPageSource()), 'utf8'); } catch { /* best effort */ }
+      try {
+        await browser.saveScreenshot(screenshotPath);
+      } catch {
+        /* best effort */
+      }
+      try {
+        fs.writeFileSync(sourcePath, sanitizeSecrets(await browser.getPageSource()), 'utf8');
+      } catch {
+        /* best effort */
+      }
       if (diagnostics !== undefined) {
-        fs.writeFileSync(path.join(artifactRoot, `${safeName}.json`), JSON.stringify(sanitizeSecrets(diagnostics), null, 2), 'utf8');
+        fs.writeFileSync(
+          path.join(artifactRoot, `${safeName}.json`),
+          JSON.stringify(sanitizeSecrets(diagnostics), null, 2),
+          'utf8',
+        );
       }
     }
-
   },
 
   async onComplete() {
@@ -195,7 +230,10 @@ export const config = {
   },
 };
 
-async function waitForDriver(port: number, getStartFailure: () => Error | undefined): Promise<void> {
+async function waitForDriver(
+  port: number,
+  getStartFailure: () => Error | undefined,
+): Promise<void> {
   const deadline = Date.now() + 30000;
   let lastError: unknown;
   while (Date.now() < deadline) {
@@ -211,7 +249,9 @@ async function waitForDriver(port: number, getStartFailure: () => Error | undefi
   }
   const startFailure = getStartFailure();
   if (startFailure) throw startFailure;
-  throw new Error(`tauri-driver did not become ready on port ${port}: ${String(lastError ?? 'timeout')}`);
+  throw new Error(
+    `tauri-driver did not become ready on port ${port}: ${String(lastError ?? 'timeout')}`,
+  );
 }
 
 async function waitForTestIdFromBrowser(testId: string): Promise<void> {
@@ -220,54 +260,81 @@ async function waitForTestIdFromBrowser(testId: string): Promise<void> {
 }
 
 function sanitizeName(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'e2e-failure';
+  return (
+    input
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 120) || 'e2e-failure'
+  );
 }
 
 async function getBrowserDiagnostics(timeoutMs: number): Promise<unknown> {
   return browser.executeAsync((limit, done: (value: unknown) => void) => {
-    const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: { getDiagnostics?: () => unknown; getConsoleLogs?: () => unknown; getUnhandledErrors?: () => unknown; getNetworkAttempts?: () => unknown } }).__AI_NOVEL_STUDIO_E2E__;
+    const bridge = (
+      window as unknown as {
+        __AI_NOVEL_STUDIO_E2E__?: {
+          getDiagnostics?: () => unknown;
+          getConsoleLogs?: () => unknown;
+          getUnhandledErrors?: () => unknown;
+          getNetworkAttempts?: () => unknown;
+        };
+      }
+    ).__AI_NOVEL_STUDIO_E2E__;
     if (!bridge) return done({ error: 'E2E bridge is unavailable' });
 
-    const collect = (label: string, operation: () => unknown): Promise<unknown> => new Promise((resolve) => {
-      let settled = false;
-      const finish = (value: unknown) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        resolve(value);
-      };
-      const timer = window.setTimeout(() => finish({ error: `${label} timed out after ${limit}ms` }), limit);
-      Promise.resolve()
-        .then(operation)
-        .then(finish)
-        .catch((error) => finish({ error: String(error) }));
-    });
+    const collect = (label: string, operation: () => unknown): Promise<unknown> =>
+      new Promise((resolve) => {
+        let settled = false;
+        const finish = (value: unknown) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          resolve(value);
+        };
+        const timer = window.setTimeout(
+          () => finish({ error: `${label} timed out after ${limit}ms` }),
+          limit,
+        );
+        Promise.resolve()
+          .then(operation)
+          .then(finish)
+          .catch((error) => finish({ error: String(error) }));
+      });
 
     Promise.all([
       collect('backend diagnostics', () => bridge.getDiagnostics?.()),
       collect('console logs', () => bridge.getConsoleLogs?.()),
       collect('unhandled errors', () => bridge.getUnhandledErrors?.()),
       collect('network attempts', () => bridge.getNetworkAttempts?.()),
-    ]).then(([diagnostics, logs, errors, networkAttempts]) => done({
-      route: window.location.href,
-      domSummary: {
-        title: document.title,
-        elementCount: document.getElementsByTagName('*').length,
-        bodyTextLength: document.body?.innerText.length ?? 0,
-        testIds: [...new Set([...document.querySelectorAll<HTMLElement>('[data-testid]')]
-          .map((element) => element.dataset.testid)
-          .filter((testId): testId is string => Boolean(testId)))],
-      },
-      diagnostics,
-      logs,
-      errors,
-      networkAttempts,
-    })).catch((error) => done({ error: String(error) }));
+    ])
+      .then(([diagnostics, logs, errors, networkAttempts]) =>
+        done({
+          route: window.location.href,
+          domSummary: {
+            title: document.title,
+            elementCount: document.getElementsByTagName('*').length,
+            bodyTextLength: document.body?.innerText.length ?? 0,
+            testIds: [
+              ...new Set(
+                [...document.querySelectorAll<HTMLElement>('[data-testid]')]
+                  .map((element) => element.dataset.testid)
+                  .filter((testId): testId is string => Boolean(testId)),
+              ),
+            ],
+          },
+          diagnostics,
+          logs,
+          errors,
+          networkAttempts,
+        }),
+      )
+      .catch((error) => done({ error: String(error) }));
   }, timeoutMs);
 }
 
 function browserHealthError(value: unknown): Error | undefined {
-  if (!value || typeof value !== 'object') return new Error('Front-end diagnostics were unavailable');
+  if (!value || typeof value !== 'object')
+    return new Error('Front-end diagnostics were unavailable');
   const snapshot = value as {
     error?: unknown;
     errors?: unknown;
@@ -275,16 +342,24 @@ function browserHealthError(value: unknown): Error | undefined {
     networkAttempts?: { installed?: unknown; total?: unknown };
   };
   if (snapshot.error) return new Error(`Front-end diagnostics failed: ${String(snapshot.error)}`);
-  if (!Array.isArray(snapshot.errors)) return new Error('Front-end unhandled-error diagnostics were unavailable');
-  if (snapshot.errors.length > 0) return new Error(`Front-end reported ${snapshot.errors.length} unhandled error(s)`);
-  if (!Array.isArray(snapshot.logs)) return new Error('Front-end console diagnostics were unavailable');
-  const consoleErrors = snapshot.logs.filter((entry) => (
-    entry && typeof entry === 'object' && (entry as { level?: unknown }).level === 'error'
-  ));
-  if (consoleErrors.length > 0) return new Error(`Front-end console reported ${consoleErrors.length} error(s)`);
-  if (snapshot.networkAttempts?.installed !== true) return new Error('E2E WebView network guard is not installed');
+  if (!Array.isArray(snapshot.errors))
+    return new Error('Front-end unhandled-error diagnostics were unavailable');
+  if (snapshot.errors.length > 0)
+    return new Error(`Front-end reported ${snapshot.errors.length} unhandled error(s)`);
+  if (!Array.isArray(snapshot.logs))
+    return new Error('Front-end console diagnostics were unavailable');
+  const consoleErrors = snapshot.logs.filter(
+    (entry) =>
+      entry && typeof entry === 'object' && (entry as { level?: unknown }).level === 'error',
+  );
+  if (consoleErrors.length > 0)
+    return new Error(`Front-end console reported ${consoleErrors.length} error(s)`);
+  if (snapshot.networkAttempts?.installed !== true)
+    return new Error('E2E WebView network guard is not installed');
   if (snapshot.networkAttempts.total !== 0) {
-    return new Error(`E2E WebView blocked ${String(snapshot.networkAttempts.total)} external network request(s)`);
+    return new Error(
+      `E2E WebView blocked ${String(snapshot.networkAttempts.total)} external network request(s)`,
+    );
   }
   return undefined;
 }
@@ -292,14 +367,24 @@ function browserHealthError(value: unknown): Error | undefined {
 async function stopDriver(): Promise<void> {
   const currentDriver = driver;
   driver = undefined;
-  if (!currentDriver || currentDriver.exitCode !== null || currentDriver.signalCode !== null) return;
+  if (!currentDriver || currentDriver.exitCode !== null || currentDriver.signalCode !== null)
+    return;
 
   if (process.platform === 'win32' && currentDriver.pid) {
     await new Promise<void>((resolve) => {
-      execFile('taskkill.exe', ['/PID', String(currentDriver.pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+      execFile(
+        'taskkill.exe',
+        ['/PID', String(currentDriver.pid), '/T', '/F'],
+        { windowsHide: true },
+        () => resolve(),
+      );
     });
   } else {
-    try { currentDriver.kill('SIGTERM'); } catch { /* already exited */ }
+    try {
+      currentDriver.kill('SIGTERM');
+    } catch {
+      /* already exited */
+    }
   }
   await waitForChildExit(currentDriver, 5000);
 }

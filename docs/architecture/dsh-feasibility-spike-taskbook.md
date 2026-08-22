@@ -1,4 +1,5 @@
 # AI Novel Studio spike/dsh-feasibility
+
 # 任务书：DSH Feasibility Spike（进程外大脑验证）
 
 > 本任务书自包含。执行 Agent 不依赖任何此前对话。
@@ -71,42 +72,42 @@ DSH 侧（`F:\DeepSeek Harness` checkout，只读使用）：
 
 ### 6.1 新增（Rust，`src-tauri/`）
 
-| 文件 | 职责 |
-|---|---|
-| `src-tauri/src/services/dsh/mod.rs` | 模块入口 |
-| `src-tauri/src/services/dsh/runtime_launcher.rs` | `DshRuntimeLauncher` trait + 唯一实现 `NodeDshRuntime`（spawn 系统 Node + 构建产物；版本检测 `^22.19 \|\| >=24`，不满足即报错退出） |
-| `src-tauri/src/services/dsh/supervisor.rs` | 进程生命周期：spawn/kill-tree（Windows Job Object）、stdio JSON-RPC 帧编解码、`initialize` 握手、`session/prompt`、`shutdown`、崩溃检测与重启、取消=重启语义 |
-| `src-tauri/src/services/dsh/commands.rs` | 唯一对外命令 `dsh_spike_prepare`（输入 `ChapterPreparationInput`，输出校验后的 `ChapterPreparationProposal` 或结构化错误） |
-| `src-tauri/src/bin/novel-domain-gateway.rs` | 独立 bin：MCP stdio（JSON-RPC 2.0：`initialize` / `tools/list` / `tools/call`），4 个只读工具，参数与 revision 校验，`SQLITE_OPEN_READONLY` 打开 DB；测试构建支持 fixture provider |
+| 文件                                             | 职责                                                                                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/services/dsh/mod.rs`              | 模块入口                                                                                                                                                                           |
+| `src-tauri/src/services/dsh/runtime_launcher.rs` | `DshRuntimeLauncher` trait + 唯一实现 `NodeDshRuntime`（spawn 系统 Node + 构建产物；版本检测 `^22.19 \|\| >=24`，不满足即报错退出）                                                |
+| `src-tauri/src/services/dsh/supervisor.rs`       | 进程生命周期：spawn/kill-tree（Windows Job Object）、stdio JSON-RPC 帧编解码、`initialize` 握手、`session/prompt`、`shutdown`、崩溃检测与重启、取消=重启语义                       |
+| `src-tauri/src/services/dsh/commands.rs`         | 唯一对外命令 `dsh_spike_prepare`（输入 `ChapterPreparationInput`，输出校验后的 `ChapterPreparationProposal` 或结构化错误）                                                         |
+| `src-tauri/src/bin/novel-domain-gateway.rs`      | 独立 bin：MCP stdio（JSON-RPC 2.0：`initialize` / `tools/list` / `tools/call`），4 个只读工具，参数与 revision 校验，`SQLITE_OPEN_READONLY` 打开 DB；测试构建支持 fixture provider |
 
 ### 6.2 新增（TypeScript，`src/`）
 
-| 文件 | 职责 |
-|---|---|
-| `src/types/chapterPreparation.ts` | `ChapterPreparationInput` / `ChapterPreparationProposal` / 全部子类型 / `ChapterPreparationPlannerPort`（类型层，零逻辑） |
-| `src/services/dsh-spike/currentPlannerAdapter.ts` | 编排现有 `create_agent_plan` / `claim_agent_plan_step` / `complete_agent_plan_step` 等命令，将 readiness 结果与工具输出确定性映射为 Proposal；无模型调用 |
-| `src/services/dsh-spike/dshPlannerAdapter.ts` | `invoke('dsh_spike_prepare', …)` 薄 facade；浏览器模式返回"仅 Tauri 可用"错误，不伪造结果 |
-| `src/services/dsh-spike/proposalValidator.ts` | 设计文档 6.3 的 TS 镜像校验（Rust 为权威） |
-| `src/services/dsh-spike/proposalValidator.test.ts` | 校验器单测（含越权写动作拒绝、revision 漂移拒绝） |
-| `src/services/dsh-spike/currentPlannerAdapter.test.ts` | 映射确定性单测 |
+| 文件                                                   | 职责                                                                                                                                                     |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/types/chapterPreparation.ts`                      | `ChapterPreparationInput` / `ChapterPreparationProposal` / 全部子类型 / `ChapterPreparationPlannerPort`（类型层，零逻辑）                                |
+| `src/services/dsh-spike/currentPlannerAdapter.ts`      | 编排现有 `create_agent_plan` / `claim_agent_plan_step` / `complete_agent_plan_step` 等命令，将 readiness 结果与工具输出确定性映射为 Proposal；无模型调用 |
+| `src/services/dsh-spike/dshPlannerAdapter.ts`          | `invoke('dsh_spike_prepare', …)` 薄 facade；浏览器模式返回"仅 Tauri 可用"错误，不伪造结果                                                                |
+| `src/services/dsh-spike/proposalValidator.ts`          | 设计文档 6.3 的 TS 镜像校验（Rust 为权威）                                                                                                               |
+| `src/services/dsh-spike/proposalValidator.test.ts`     | 校验器单测（含越权写动作拒绝、revision 漂移拒绝）                                                                                                        |
+| `src/services/dsh-spike/currentPlannerAdapter.test.ts` | 映射确定性单测                                                                                                                                           |
 
 ### 6.3 新增（脚本 / 资产）
 
-| 文件 | 职责 |
-|---|---|
-| `scripts/dsh-spike/cordis.yml` | 设计文档第 7 节组合，引用真实插件 id；stdout 纯净；API Key 只经环境变量 |
-| `scripts/dsh-spike/persona.md` | 章节准备规划 persona：只产 Proposal、禁写工具、事实以工具返回为准 |
-| `scripts/dsh-spike/README.md` | 启动/运行/清理手册 + 版本固定矩阵填写处 |
-| `tests/dsh-spike/cases/*.json` | 20 个固定案例（novelId/chapterId/baselineRevisions/rubric）+ `cases-manifest.json`（整体 SHA-256） |
-| `tests/dsh-spike/run-ab.ts`（或 `tests/browser/` 下 wdio spec） | A/B runner：逐案例跑两个 adapter → Validator → 脱敏盲评文档 → 度量记录 |
-| `reports/dsh-spike/` | 输出目录（gitignore 或仅报告模板入库，原始报告不入库） |
+| 文件                                                            | 职责                                                                                               |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `scripts/dsh-spike/cordis.yml`                                  | 设计文档第 7 节组合，引用真实插件 id；stdout 纯净；API Key 只经环境变量                            |
+| `scripts/dsh-spike/persona.md`                                  | 章节准备规划 persona：只产 Proposal、禁写工具、事实以工具返回为准                                  |
+| `scripts/dsh-spike/README.md`                                   | 启动/运行/清理手册 + 版本固定矩阵填写处                                                            |
+| `tests/dsh-spike/cases/*.json`                                  | 20 个固定案例（novelId/chapterId/baselineRevisions/rubric）+ `cases-manifest.json`（整体 SHA-256） |
+| `tests/dsh-spike/run-ab.ts`（或 `tests/browser/` 下 wdio spec） | A/B runner：逐案例跑两个 adapter → Validator → 脱敏盲评文档 → 度量记录                             |
+| `reports/dsh-spike/`                                            | 输出目录（gitignore 或仅报告模板入库，原始报告不入库）                                             |
 
 ### 6.4 修改（仅 2 个文件，最小改动）
 
-| 文件 | 改动 |
-|---|---|
-| `src-tauri/Cargo.toml` | 新增 `[[bin]] name = "novel-domain-gateway"`；注册 dsh 模块所需的最小项（若有新依赖必须先报告，不得擅自引入） |
-| `src-tauri/src/main.rs` | 挂载 dsh 模块与 `dsh_spike_prepare` 命令 |
+| 文件                    | 改动                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/Cargo.toml`  | 新增 `[[bin]] name = "novel-domain-gateway"`；注册 dsh 模块所需的最小项（若有新依赖必须先报告，不得擅自引入） |
+| `src-tauri/src/main.rs` | 挂载 dsh 模块与 `dsh_spike_prepare` 命令                                                                      |
 
 ## 7. 详细实现要求
 
@@ -173,27 +174,34 @@ npm run spike:ab -- --cases tests/dsh-spike/cases
 # DSH Feasibility Spike 完成汇报
 
 ## 1. 结论
+
 Spike 成功 / 失败 / 部分通过（一句话定性）
 
 ## 2. 六项门槛逐项结果
-| # | 门槛 | 结果 | 证据 |
-|---|------|------|------|
+
+| #   | 门槛 | 结果 | 证据 |
+| --- | ---- | ---- | ---- |
 
 ## 3. 关键度量摘要
+
 - 每案例平均延迟 / token / 工具次数（DSH 侧）
 - 进程重启与退出码记录摘要
 
 ## 4. 版本固定矩阵
+
 （六字段 + NODE_VERSION 实际值）
 
 ## 5. 实现清单
+
 - 新增文件列表（含测试）
 - 修改文件列表（仅 Cargo.toml / main.rs，注明 diff 摘要）
 
 ## 6. 验证执行记录
+
 - cargo check / cargo test / npm run build / npm test / git status 结果
 
 ## 7. 未决问题与后续建议
+
 - 模型网关方向、Windows 交付载体、v3.1.0 立项建议
 ```
 

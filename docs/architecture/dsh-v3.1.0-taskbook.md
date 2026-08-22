@@ -1,4 +1,5 @@
 # AI Novel Studio v3.1.0
+
 # 任务书：DSH 进程外大脑接入（ChapterPreparationPlannerPort 落地版）
 
 > 本任务书自包含，执行 Agent 不依赖任何此前对话。
@@ -65,46 +66,46 @@ DSH 侧（`F:\DeepSeek Harness` checkout，只读使用）：
 
 ### 6.1 新增（Rust，`src-tauri/`）
 
-| 文件 | 职责 |
-|---|---|
-| `src/services/dsh/mod.rs` | 模块入口（services/mod.rs 注册） |
-| `src/services/dsh/models.rs` | serde 类型：`ChapterPreparationInput` / `ChapterPreparationProposal` / 全部子类型（与 TS 类型逐字段镜像） |
-| `src/services/dsh/runtime_launcher.rs` | `DshRuntimeLauncher` trait + 唯一实现 `NodeDshRuntime`：系统 Node 版本检测（`^22.19 \|\| >=24`，不满足返回结构化错误）；runtime 产物经 `DSH_RUNTIME_BIN` 或 `DSH_CHECKOUT` 定位 |
-| `src/services/dsh/config.rs` | cordis 模板渲染：file:// URL、空格 %20 编码、路径占位替换；产出写入 runtime 工作目录 |
-| `src/services/dsh/supervisor.rs` | 进程生命周期：spawn、**Windows Job Object kill-tree**（JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE）、stdio JSON-RPC 行帧编解码、`initialize`/`session/prompt`/`shutdown`、`session.event`/`session.status` 通知处理、崩溃检测与重启、**取消=kill 进程树+重启**、MCP settle（默认 3s，可配置；注释标注 v3.1.0 后等待 SDK 确定性就绪信号） |
-| `src/services/dsh/proposal_validator.rs` | Rust 权威校验：schemaVersion=1；planner 枚举合法或**唯一近邻归一**（≤2，记录 `metrics.plannerCoerced`）；targetChapter 与输入一致；baselineRevisions 原样回显；retrievedEvidence 的 revision 与 baseline 严格一致；recommendedActions 仅 `read_tool`/`ask_user`（越权→整体丢弃并计数）；全字段长度上限；拒绝超大文档 |
-| `src/services/dsh/commands.rs` | 唯一对外命令 `dsh_prepare_chapter`：输入 `ChapterPreparationInput` → 驱动 Supervisor → 解析模型输出（text→reasoning 回退）→ 注入 adapter metrics → **修复回合（≤3，回喂校验错误，提示词逐字符拼写枚举）** → Validator → 输出校验后 Proposal 或结构化错误（含归一标记） |
-| `src/bin/novel-domain-gateway.rs` | 独立 bin：MCP stdio（JSON-RPC 2.0：`initialize` / `tools/list` / `tools/call`），`SQLITE_OPEN_READONLY` 打开 DB，`--db <path>` 与 `--smoke`（冒烟含负向拒绝） |
-| `src/services/dsh/gateway/tools.rs` | 4 只读工具实现：SQL 语义镜像 spike 版并复用 `ai_fact_security`；参数校验（id/topK 范围）、camelCase/snake_case 双名兼容、输出携带来源 revision、≤2 MiB、长文本裁剪 |
+| 文件                                     | 职责                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/services/dsh/mod.rs`                | 模块入口（services/mod.rs 注册）                                                                                                                                                                                                                                                                                                 |
+| `src/services/dsh/models.rs`             | serde 类型：`ChapterPreparationInput` / `ChapterPreparationProposal` / 全部子类型（与 TS 类型逐字段镜像）                                                                                                                                                                                                                        |
+| `src/services/dsh/runtime_launcher.rs`   | `DshRuntimeLauncher` trait + 唯一实现 `NodeDshRuntime`：系统 Node 版本检测（`^22.19 \|\| >=24`，不满足返回结构化错误）；runtime 产物经 `DSH_RUNTIME_BIN` 或 `DSH_CHECKOUT` 定位                                                                                                                                                  |
+| `src/services/dsh/config.rs`             | cordis 模板渲染：file:// URL、空格 %20 编码、路径占位替换；产出写入 runtime 工作目录                                                                                                                                                                                                                                             |
+| `src/services/dsh/supervisor.rs`         | 进程生命周期：spawn、**Windows Job Object kill-tree**（JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE）、stdio JSON-RPC 行帧编解码、`initialize`/`session/prompt`/`shutdown`、`session.event`/`session.status` 通知处理、崩溃检测与重启、**取消=kill 进程树+重启**、MCP settle（默认 3s，可配置；注释标注 v3.1.0 后等待 SDK 确定性就绪信号） |
+| `src/services/dsh/proposal_validator.rs` | Rust 权威校验：schemaVersion=1；planner 枚举合法或**唯一近邻归一**（≤2，记录 `metrics.plannerCoerced`）；targetChapter 与输入一致；baselineRevisions 原样回显；retrievedEvidence 的 revision 与 baseline 严格一致；recommendedActions 仅 `read_tool`/`ask_user`（越权→整体丢弃并计数）；全字段长度上限；拒绝超大文档             |
+| `src/services/dsh/commands.rs`           | 唯一对外命令 `dsh_prepare_chapter`：输入 `ChapterPreparationInput` → 驱动 Supervisor → 解析模型输出（text→reasoning 回退）→ 注入 adapter metrics → **修复回合（≤3，回喂校验错误，提示词逐字符拼写枚举）** → Validator → 输出校验后 Proposal 或结构化错误（含归一标记）                                                           |
+| `src/bin/novel-domain-gateway.rs`        | 独立 bin：MCP stdio（JSON-RPC 2.0：`initialize` / `tools/list` / `tools/call`），`SQLITE_OPEN_READONLY` 打开 DB，`--db <path>` 与 `--smoke`（冒烟含负向拒绝）                                                                                                                                                                    |
+| `src/services/dsh/gateway/tools.rs`      | 4 只读工具实现：SQL 语义镜像 spike 版并复用 `ai_fact_security`；参数校验（id/topK 范围）、camelCase/snake_case 双名兼容、输出携带来源 revision、≤2 MiB、长文本裁剪                                                                                                                                                               |
 
 ### 6.2 修改（Rust，仅 2 个入口文件）
 
-| 文件 | 改动 |
-|---|---|
-| `src-tauri/Cargo.toml` | 新增 `[[bin]] name = "novel-domain-gateway"`；注册 dsh 模块所需项（预期无新增外部依赖；rusqlite/serde 已存在） |
-| `src-tauri/src/main.rs` | 挂载 `services::dsh` 与 `dsh_prepare_chapter` 命令（最小改动） |
+| 文件                    | 改动                                                                                                           |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/Cargo.toml`  | 新增 `[[bin]] name = "novel-domain-gateway"`；注册 dsh 模块所需项（预期无新增外部依赖；rusqlite/serde 已存在） |
+| `src-tauri/src/main.rs` | 挂载 `services::dsh` 与 `dsh_prepare_chapter` 命令（最小改动）                                                 |
 
 ### 6.3 新增（TypeScript，`src/`）
 
-| 文件 | 职责 |
-|---|---|
-| `src/types/chapterPreparation.ts` | 类型层：`ChapterPreparationInput` / `ChapterPreparationProposal` / 全部子类型 / `ChapterPreparationPlannerPort`（零逻辑） |
-| `src/services/dsh/currentPlannerAdapter.ts` | 编排现有 `create_agent_plan` / `claim_agent_plan_step` / `complete_agent_plan_step` 等命令与工具输出，**确定性映射**为 Proposal（`planner: current_chapter_readiness_v1`，无模型调用，成本 0） |
-| `src/services/dsh/dshPlannerAdapter.ts` | `invoke('dsh_prepare_chapter', …)` 薄 facade；浏览器开发模式返回"仅 Tauri 可用"结构化错误，不伪造结果 |
-| `src/services/dsh/proposalValidator.ts` | Rust 规则的 TS 镜像（含枚举归一、越权拒绝、revision 漂移拒绝） |
-| `src/services/dsh/proposalValidator.test.ts` | 校验器单测：合法提案、越权写动作拒绝、revision 漂移拒绝、枚举归一记录（dsp→dsh）、二义/过远不归一 |
-| `src/services/dsh/currentPlannerAdapter.test.ts` | 映射确定性单测 |
-| `src/components/workspace/agent-planner/DshPreparationCard.tsx`（+ View/presentation 拆分，遵循现有 agent-planner 组件模式） | 提案展示：planner 标识、校验状态、度量（延迟/token/工具次数）、归一标记（⚠）、建议动作列表 |
-| `src/components/workspace/agent-planner/useDshPreparation.ts` | 状态钩子：调用两个 adapter、校验、loading/error/cancel 状态 |
+| 文件                                                                                                                         | 职责                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/types/chapterPreparation.ts`                                                                                            | 类型层：`ChapterPreparationInput` / `ChapterPreparationProposal` / 全部子类型 / `ChapterPreparationPlannerPort`（零逻辑）                                                                      |
+| `src/services/dsh/currentPlannerAdapter.ts`                                                                                  | 编排现有 `create_agent_plan` / `claim_agent_plan_step` / `complete_agent_plan_step` 等命令与工具输出，**确定性映射**为 Proposal（`planner: current_chapter_readiness_v1`，无模型调用，成本 0） |
+| `src/services/dsh/dshPlannerAdapter.ts`                                                                                      | `invoke('dsh_prepare_chapter', …)` 薄 facade；浏览器开发模式返回"仅 Tauri 可用"结构化错误，不伪造结果                                                                                          |
+| `src/services/dsh/proposalValidator.ts`                                                                                      | Rust 规则的 TS 镜像（含枚举归一、越权拒绝、revision 漂移拒绝）                                                                                                                                 |
+| `src/services/dsh/proposalValidator.test.ts`                                                                                 | 校验器单测：合法提案、越权写动作拒绝、revision 漂移拒绝、枚举归一记录（dsp→dsh）、二义/过远不归一                                                                                              |
+| `src/services/dsh/currentPlannerAdapter.test.ts`                                                                             | 映射确定性单测                                                                                                                                                                                 |
+| `src/components/workspace/agent-planner/DshPreparationCard.tsx`（+ View/presentation 拆分，遵循现有 agent-planner 组件模式） | 提案展示：planner 标识、校验状态、度量（延迟/token/工具次数）、归一标记（⚠）、建议动作列表                                                                                                     |
+| `src/components/workspace/agent-planner/useDshPreparation.ts`                                                                | 状态钩子：调用两个 adapter、校验、loading/error/cancel 状态                                                                                                                                    |
 
 ### 6.4 新增（提示词 / 脚本 / 资产）
 
-| 文件 | 职责 |
-|---|---|
-| `prompts/dsh_chapter_preparation.md` | 章节准备规划 persona：只产 Proposal JSON、禁写工具、事实以工具返回为准、JSON 硬规则（中文引号、逗号、planner 枚举逐字符拼写）、revision 不得编造 |
-| `scripts/dsh/cordis-template.yml` | 生产组合模板（spike 实测 6 插件：sdk-jsonrpc-server / llm-deepseek(thinking: enabled, reasoningEffort: max) / agent-spine(persona 指向上述模板) / sessions / token-meter / mcp-novel(stdio spawn 网关)）；stdout 纯净；无 API Key；占位符渲染时替换 |
-| `scripts/dsh/model-proxy.mjs` | 本地 OpenAI 兼容代理（选项 A，spike 附录 F 已实测）：`POST /chat/completions` 流式透传上游 + usage 记账日志（预算网关挂钩点）；上游 Key 只经环境变量；由 Supervisor 管理生命周期，`DEEPSEEK_BASE_URL` 指向它 |
-| `docs/architecture/dsh-v3.1.0-taskbook.md` | 本任务书 |
+| 文件                                       | 职责                                                                                                                                                                                                                                                |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompts/dsh_chapter_preparation.md`       | 章节准备规划 persona：只产 Proposal JSON、禁写工具、事实以工具返回为准、JSON 硬规则（中文引号、逗号、planner 枚举逐字符拼写）、revision 不得编造                                                                                                    |
+| `scripts/dsh/cordis-template.yml`          | 生产组合模板（spike 实测 6 插件：sdk-jsonrpc-server / llm-deepseek(thinking: enabled, reasoningEffort: max) / agent-spine(persona 指向上述模板) / sessions / token-meter / mcp-novel(stdio spawn 网关)）；stdout 纯净；无 API Key；占位符渲染时替换 |
+| `scripts/dsh/model-proxy.mjs`              | 本地 OpenAI 兼容代理（选项 A，spike 附录 F 已实测）：`POST /chat/completions` 流式透传上游 + usage 记账日志（预算网关挂钩点）；上游 Key 只经环境变量；由 Supervisor 管理生命周期，`DEEPSEEK_BASE_URL` 指向它                                        |
+| `docs/architecture/dsh-v3.1.0-taskbook.md` | 本任务书                                                                                                                                                                                                                                            |
 
 ### 6.5 已在分支的参考文档（非新增改动）
 
@@ -192,23 +193,29 @@ cargo run --bin novel-domain-gateway -- --db <只读DB路径> --smoke
 # v3.1.0 DSH 进程外大脑接入 完成汇报
 
 ## 1. 结论
+
 （一句话定性）
 
 ## 2. 七项目标逐项结果
+
 | # | 目标 | 结果 | 证据 |
 
 ## 3. 关键度量摘要
+
 （端到端单案例：延迟 / token / 工具次数 / 修复回合 / 归一标记 / 进程重启）
 
 ## 4. 实现清单
+
 - 新增文件列表（含测试）
 - 修改文件列表（仅 Cargo.toml / main.rs，注明 diff 摘要）
 
 ## 5. 验证执行记录
+
 - cargo check / cargo test / npm run build / npm test / git status 结果
 - 网关冒烟与端到端结果
 
 ## 6. 未决问题与后续建议
+
 - 预算账本接入（v3.2 候选）、MCP 就绪信号、Windows 打包交付、剩余 8 案例补跑
 ```
 

@@ -4,15 +4,15 @@
 
 ## 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 桌面壳 | Tauri (Rust) |
-| 前端 | React 18 + TypeScript 5 |
-| 构建 | Vite 5 |
-| 路由 | React Router 6 (HashRouter) |
+| 层级     | 技术                                       |
+| -------- | ------------------------------------------ |
+| 桌面壳   | Tauri (Rust)                               |
+| 前端     | React 18 + TypeScript 5                    |
+| 构建     | Vite 5                                     |
+| 路由     | React Router 6 (HashRouter)                |
 | 数据存储 | SQLite (Tauri) / LocalStorage (浏览器开发) |
-| AI 调用 | 统一服务层封装 |
-| 提示词 | Markdown 模板独立管理 |
+| AI 调用  | 统一服务层封装                             |
+| 提示词   | Markdown 模板独立管理                      |
 
 ## 架构概览
 

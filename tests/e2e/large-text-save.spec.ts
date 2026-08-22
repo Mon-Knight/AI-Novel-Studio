@@ -66,13 +66,18 @@ function sha256(value: string): string {
 }
 
 async function waitForSavedDraft(chapterId: string) {
-  await browser.waitUntil(async () => {
-    const editor = await browser.$('[data-testid="chapter-editor"]');
-    return await editor.getAttribute('data-chapter-id') === chapterId
-      && await editor.getAttribute('data-dirty') === 'false'
-      && await editor.getAttribute('data-saving') === 'false'
-      && Boolean(await editor.getAttribute('data-draft-id'));
-  }, { timeout: 60000, timeoutMsg: 'large-text draft did not finish saving' });
+  await browser.waitUntil(
+    async () => {
+      const editor = await browser.$('[data-testid="chapter-editor"]');
+      return (
+        (await editor.getAttribute('data-chapter-id')) === chapterId &&
+        (await editor.getAttribute('data-dirty')) === 'false' &&
+        (await editor.getAttribute('data-saving')) === 'false' &&
+        Boolean(await editor.getAttribute('data-draft-id'))
+      );
+    },
+    { timeout: 60000, timeoutMsg: 'large-text draft did not finish saving' },
+  );
   return waitForTestIdAttribute('chapter-editor', 'data-chapter-id', chapterId);
 }
 
@@ -107,18 +112,24 @@ describe('large-text chapter safety', () => {
     await clickTestId('chapter-save');
     const savedEditor = await waitForSavedDraft(chapterId);
     expect(await savedEditor.getValue()).toBe(canonicalContent);
-    expect(Number(await savedEditor.getAttribute('data-word-count'))).toBe(countWords(canonicalContent));
+    expect(Number(await savedEditor.getAttribute('data-word-count'))).toBe(
+      countWords(canonicalContent),
+    );
 
     const draftId = await savedEditor.getAttribute('data-draft-id');
     if (!draftId) throw new Error('Saved large-text draft did not expose data-draft-id');
-    const savedDrafts = await bridgeCall<LargeTextDraft[]>('get_drafts_by_chapter_id', { chapterId });
+    const savedDrafts = await bridgeCall<LargeTextDraft[]>('get_drafts_by_chapter_id', {
+      chapterId,
+    });
     const savedDraft = savedDrafts.find((draft) => draft.id === draftId);
     expect(savedDraft?.largeTextRefId).toBeTruthy();
     expect(savedDraft?.wordCount).toBe(countWords(canonicalContent));
     expect(savedDraft?.content).not.toBe(canonicalContent);
     expect(savedDrafts.filter((draft) => draft.id === draftId)).toHaveLength(1);
 
-    const persistedState = await bridgeCall<LargeTextDraftState>('get_e2e_large_text_draft_state', { draftId });
+    const persistedState = await bridgeCall<LargeTextDraftState>('get_e2e_large_text_draft_state', {
+      draftId,
+    });
     expect(persistedState.draftId).toBe(draftId);
     expect(persistedState.chapterId).toBe(chapterId);
     expect(persistedState.largeTextRefId).toBe(savedDraft?.largeTextRefId);
@@ -142,12 +153,17 @@ describe('large-text chapter safety', () => {
     await clickTestId('chapter-adopt');
     await waitForTestId('apply-confirm');
     await clickTestId('dialog-confirm');
-    await browser.waitUntil(async () => {
-      const editor = await browser.$('[data-testid="chapter-editor"]');
-      return await editor.getAttribute('data-draft-id') === draftId
-        && await editor.getAttribute('data-adopted') === 'true'
-        && await editor.getAttribute('data-dirty') === 'false';
-    }, { timeout: 60000, timeoutMsg: 'large-text draft was not adopted' });
+    await browser.waitUntil(
+      async () => {
+        const editor = await browser.$('[data-testid="chapter-editor"]');
+        return (
+          (await editor.getAttribute('data-draft-id')) === draftId &&
+          (await editor.getAttribute('data-adopted')) === 'true' &&
+          (await editor.getAttribute('data-dirty')) === 'false'
+        );
+      },
+      { timeout: 60000, timeoutMsg: 'large-text draft was not adopted' },
+    );
 
     const adoptedEditor = await waitForTestIdAttribute('chapter-editor', 'data-draft-id', draftId);
     expect(await adoptedEditor.getValue()).toBe(canonicalContent);
@@ -156,9 +172,15 @@ describe('large-text chapter safety', () => {
       { novelId: projectId },
     );
     expect(chapters.find((chapter) => chapter.id === chapterId)?.adoptedDraftId).toBe(draftId);
-    const adoptedDrafts = await bridgeCall<LargeTextDraft[]>('get_drafts_by_chapter_id', { chapterId });
-    expect(adoptedDrafts.filter((draft) => draft.id === draftId && draft.isAdopted)).toHaveLength(1);
-    const adoptedState = await bridgeCall<LargeTextDraftState>('get_e2e_large_text_draft_state', { draftId });
+    const adoptedDrafts = await bridgeCall<LargeTextDraft[]>('get_drafts_by_chapter_id', {
+      chapterId,
+    });
+    expect(adoptedDrafts.filter((draft) => draft.id === draftId && draft.isAdopted)).toHaveLength(
+      1,
+    );
+    const adoptedState = await bridgeCall<LargeTextDraftState>('get_e2e_large_text_draft_state', {
+      draftId,
+    });
     expect(adoptedState.adopted).toBe(true);
     expect(adoptedState.contentSha256).toBe(sha256(canonicalContent));
   });
@@ -167,7 +189,10 @@ describe('large-text chapter safety', () => {
     const projectId = await createProjectThroughUi(E2E_FIXTURES.largeText.corruptionProjectTitle);
     await openWorkspace(projectId);
     const volumeId = await createVolumeThroughUi(E2E_FIXTURES.largeText.volumeTitle);
-    const damagedChapterId = await createChapterThroughUi(E2E_FIXTURES.largeText.chapterTitle, volumeId);
+    const damagedChapterId = await createChapterThroughUi(
+      E2E_FIXTURES.largeText.chapterTitle,
+      volumeId,
+    );
     const canonicalContent = await fillTextareaTestId('chapter-editor', createLargeTextContent());
     await clickTestId('chapter-save');
     const damagedEditor = await waitForSavedDraft(damagedChapterId);
@@ -185,7 +210,10 @@ describe('large-text chapter safety', () => {
       throw new Error('Large-text diagnostic state did not expose its document reference');
     }
 
-    const safeChapterId = await createChapterThroughUi(E2E_FIXTURES.largeText.safeChapterTitle, volumeId);
+    const safeChapterId = await createChapterThroughUi(
+      E2E_FIXTURES.largeText.safeChapterTitle,
+      volumeId,
+    );
     await fillTextareaTestId('chapter-editor', E2E_FIXTURES.largeText.safeContent);
     await clickTestId('chapter-save');
     await waitForSavedDraft(safeChapterId);
@@ -201,11 +229,23 @@ describe('large-text chapter safety', () => {
       affectedRows: 1,
     });
 
-    const damagedChapter = await findTestIdByAttribute('chapter-item', 'data-chapter-id', damagedChapterId);
+    const damagedChapter = await findTestIdByAttribute(
+      'chapter-item',
+      'data-chapter-id',
+      damagedChapterId,
+    );
     await damagedChapter.click();
     await waitForTestId('content-unavailable-state');
-    expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', damagedChapterId)).getAttribute('data-active')).toBe('true');
-    expect(await (await findTestIdByAttribute('chapter-item', 'data-chapter-id', safeChapterId)).getAttribute('data-active')).not.toBe('true');
+    expect(
+      await (
+        await findTestIdByAttribute('chapter-item', 'data-chapter-id', damagedChapterId)
+      ).getAttribute('data-active'),
+    ).toBe('true');
+    expect(
+      await (
+        await findTestIdByAttribute('chapter-item', 'data-chapter-id', safeChapterId)
+      ).getAttribute('data-active'),
+    ).not.toBe('true');
     expect(await browser.$('[data-testid="chapter-editor"]').isExisting()).toBe(false);
 
     await clickTestId('content-unavailable-history');

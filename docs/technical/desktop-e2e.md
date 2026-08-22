@@ -13,24 +13,24 @@
 
 以下版本来自 `package.json`、`package-lock.json`、`Cargo.toml`、`Cargo.lock` 和接入时的 Windows 验证机。带“安装”的版本是锁文件或本机实际解析结果，不只是 semver 声明。
 
-| 项目 | 声明 / 最低版本 | 接入时安装版本 |
-|------|-----------------|----------------|
-| 应用 | `2.1.2` | `2.1.2` |
-| Tauri Rust crate | `1.7` | `1.8.3` |
-| `tauri-build` | `1.5` | `1.5.6` |
-| `@tauri-apps/api` | `^1.6.0` | `1.6.0` |
-| `@tauri-apps/cli` | `^1.5.14` | `1.6.3` |
-| React / React DOM | `^18.3.1` | `18.3.1` |
-| React Router | `^6.23.1` | `6.30.3` |
-| TypeScript | `^5.4.5` | `5.9.3` |
-| Vite | `^5.3.1` | `5.4.21` |
-| Node.js | `>=22.6.0` | `24.15.0` |
-| npm | 未锁定 | `11.12.1` |
-| Rust / Cargo | manifest `rust-version = 1.60` | `1.95.0` |
-| WebdriverIO | 固定 `9.29.1` | `9.29.1` |
-| WDIO Mocha adapter | 固定 `9.29.1` | `9.29.1` |
-| `tauri-driver` | 独立工具 | `0.1.5` |
-| WebView2 / EdgeDriver | 主版本必须一致 | 验证机均为 `150.0.4078.83` |
+| 项目                  | 声明 / 最低版本                | 接入时安装版本             |
+| --------------------- | ------------------------------ | -------------------------- |
+| 应用                  | `2.1.2`                        | `2.1.2`                    |
+| Tauri Rust crate      | `1.7`                          | `1.8.3`                    |
+| `tauri-build`         | `1.5`                          | `1.5.6`                    |
+| `@tauri-apps/api`     | `^1.6.0`                       | `1.6.0`                    |
+| `@tauri-apps/cli`     | `^1.5.14`                      | `1.6.3`                    |
+| React / React DOM     | `^18.3.1`                      | `18.3.1`                   |
+| React Router          | `^6.23.1`                      | `6.30.3`                   |
+| TypeScript            | `^5.4.5`                       | `5.9.3`                    |
+| Vite                  | `^5.3.1`                       | `5.4.21`                   |
+| Node.js               | `>=22.6.0`                     | `24.15.0`                  |
+| npm                   | 未锁定                         | `11.12.1`                  |
+| Rust / Cargo          | manifest `rust-version = 1.60` | `1.95.0`                   |
+| WebdriverIO           | 固定 `9.29.1`                  | `9.29.1`                   |
+| WDIO Mocha adapter    | 固定 `9.29.1`                  | `9.29.1`                   |
+| `tauri-driver`        | 独立工具                       | `0.1.5`                    |
+| WebView2 / EdgeDriver | 主版本必须一致                 | 验证机均为 `150.0.4078.83` |
 
 `package-lock.json` 中的 `@vitest/*` 是 WebdriverIO 断言依赖的传递依赖。项目没有 `vitest` 命令、Vitest 配置或 Vitest 测试套件，不能把这些传递包视为已有 Vitest 覆盖。
 
@@ -67,16 +67,16 @@
 
 接入前 `src/` 中没有任何 `data-testid`。以下关键路径只能依赖中文文本、CSS 类、DOM 层级或原生对话框，均不满足桌面自动化要求：
 
-| 页面 / 流程 | 接入前缺口 |
-|-------------|------------|
-| 应用启动 | 应用壳、初始化错误、首页列表无稳定锚点 |
-| 作品首页 | 列表、新建、名称输入、保存、作品卡片和打开操作无稳定锚点 |
-| 作品详情 | 设置区、编辑、名称输入、保存和结果提示无稳定锚点 |
-| 写作工作台 | 卷 / 章创建、章节列表、章节项、编辑器和保存无稳定锚点 |
-| AI 候选 | 生成入口、生成提交、约束、候选审查、采用和确认无稳定锚点 |
-| 离开保护 | 原生确认框无法通过 WebDriver DOM 访问 |
-| 恢复 | 首批 E2E 接入时产品尚无恢复节点；v2.1.5 已增加真实 `recovery-dialog` 与重启流程 |
-| 请求取消 | v2.1.5 只能写入任务取消终态，无法中止在途 HTTP / Mock 请求；v2.1.6 增加真实取消链路与桌面回归 |
+| 页面 / 流程 | 接入前缺口                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| 应用启动    | 应用壳、初始化错误、首页列表无稳定锚点                                                        |
+| 作品首页    | 列表、新建、名称输入、保存、作品卡片和打开操作无稳定锚点                                      |
+| 作品详情    | 设置区、编辑、名称输入、保存和结果提示无稳定锚点                                              |
+| 写作工作台  | 卷 / 章创建、章节列表、章节项、编辑器和保存无稳定锚点                                         |
+| AI 候选     | 生成入口、生成提交、约束、候选审查、采用和确认无稳定锚点                                      |
+| 离开保护    | 原生确认框无法通过 WebDriver DOM 访问                                                         |
+| 恢复        | 首批 E2E 接入时产品尚无恢复节点；v2.1.5 已增加真实 `recovery-dialog` 与重启流程               |
+| 请求取消    | v2.1.5 只能写入任务取消终态，无法中止在途 HTTP / Mock 请求；v2.1.6 增加真实取消链路与桌面回归 |
 
 ---
 
@@ -230,25 +230,25 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 正常使用只需运行 npm 命令。以下变量用于 CI、驱动位置或故障定位：
 
-| 变量 | 作用 |
-|------|------|
-| `AI_NOVEL_STUDIO_E2E=1` | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝 |
-| `VITE_AI_NOVEL_STUDIO_E2E=1` | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置 |
-| `AI_NOVEL_STUDIO_E2E_DATA_DIR` | 单个 spec 已存在的绝对临时目录；由运行器生成 |
-| `AI_NOVEL_STUDIO_E2E_RUN_ID` | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成 |
-| `AI_NOVEL_STUDIO_E2E_APP` | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建 |
-| `AI_NOVEL_STUDIO_E2E_CARGO_TARGET_DIR` | 覆盖 E2E Cargo target，默认 `.e2e-tools/target`；不得与 `src-tauri/target` 重叠 |
-| `AI_NOVEL_STUDIO_E2E_DRIVER` | `tauri-driver` 可执行文件名或路径 |
-| `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER` | `msedgedriver.exe` 路径 |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_HOST` | driver 地址，默认 `127.0.0.1` |
-| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT` | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000` |
-| `AI_NOVEL_STUDIO_E2E_ARTIFACTS` | 运行诊断产物根目录，默认 `test-results/e2e` |
-| `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1` | 即使成功也保留临时 SQLite / WebView2 数据 |
-| `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1` | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE |
-| `AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT` | 单个 WDIO 进程总超时，默认 10 分钟 |
-| `AI_NOVEL_STUDIO_E2E_TIMEOUT` | Mocha 测试超时，默认 120 秒 |
-| `AI_NOVEL_STUDIO_E2E_WAIT` | WebDriver 显式等待默认值，默认 15 秒 |
-| `AI_NOVEL_STUDIO_E2E_LOG_LEVEL` | WebdriverIO 日志级别，默认 `warn` |
+| 变量                                   | 作用                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------- |
+| `AI_NOVEL_STUDIO_E2E=1`                | 打开 Rust E2E 隔离和网络阻断；其他值会被运行器拒绝                                     |
+| `VITE_AI_NOVEL_STUDIO_E2E=1`           | 构建时启用前端受限桥和 DOM 对话框，由运行器自动设置                                    |
+| `AI_NOVEL_STUDIO_E2E_DATA_DIR`         | 单个 spec 已存在的绝对临时目录；由运行器生成                                           |
+| `AI_NOVEL_STUDIO_E2E_RUN_ID`           | 单个 spec 的随机握手 ID；必须与临时目录 marker 一致，由运行器生成                      |
+| `AI_NOVEL_STUDIO_E2E_APP`              | 覆盖被测 EXE 路径；该 EXE 必须是 E2E 构建                                              |
+| `AI_NOVEL_STUDIO_E2E_CARGO_TARGET_DIR` | 覆盖 E2E Cargo target，默认 `.e2e-tools/target`；不得与 `src-tauri/target` 重叠        |
+| `AI_NOVEL_STUDIO_E2E_DRIVER`           | `tauri-driver` 可执行文件名或路径                                                      |
+| `AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER`    | `msedgedriver.exe` 路径                                                                |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_HOST`      | driver 地址，默认 `127.0.0.1`                                                          |
+| `AI_NOVEL_STUDIO_E2E_DRIVER_PORT`      | 可选的固定起始端口；未设置时运行器自动选择整组空闲端口，原生 driver 使用各端口 `+1000` |
+| `AI_NOVEL_STUDIO_E2E_ARTIFACTS`        | 运行诊断产物根目录，默认 `test-results/e2e`                                            |
+| `AI_NOVEL_STUDIO_E2E_KEEP_DATA=1`      | 即使成功也保留临时 SQLite / WebView2 数据                                              |
+| `AI_NOVEL_STUDIO_E2E_SKIP_BUILD=1`     | 跳过 Tauri E2E 构建，仅用于已知新鲜 EXE                                                |
+| `AI_NOVEL_STUDIO_E2E_SPEC_TIMEOUT`     | 单个 WDIO 进程总超时，默认 10 分钟                                                     |
+| `AI_NOVEL_STUDIO_E2E_TIMEOUT`          | Mocha 测试超时，默认 120 秒                                                            |
+| `AI_NOVEL_STUDIO_E2E_WAIT`             | WebDriver 显式等待默认值，默认 15 秒                                                   |
+| `AI_NOVEL_STUDIO_E2E_LOG_LEVEL`        | WebdriverIO 日志级别，默认 `warn`                                                      |
 
 不要手工设置 `AI_NOVEL_STUDIO_E2E_DATA_DIR` 或 `AI_NOVEL_STUDIO_E2E_RUN_ID`。Rust 要求数据目录已存在、规范化后是操作系统临时目录的专用子目录、不是文件系统根或正式 `%LOCALAPPDATA%\AI Novel Studio`，并要求 marker 内容与 run-id 完全一致；任一条件不满足都会在数据库初始化前拒绝启动。
 
@@ -303,18 +303,18 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 业务测试不得使用中文按钮文本、CSS 类、DOM 父子层级、窗口坐标或分辨率。核心契约如下：
 
-| 区域 | `data-testid` |
-|------|---------------|
-| 应用 / 首页 | `app-shell`、`project-list`、`project-create`、`project-card`、`project-open` |
-| 作品编辑 | `project-settings`、`project-edit`、`project-name-input`、`project-save` |
-| 卷章 | `volume-create`、`volume-create-dialog`、`volume-title-input`、`volume-save`、`volume-item`、`chapter-create-first`、`chapter-create`、`chapter-create-dialog`、`chapter-title-input`、`chapter-create-submit`、`chapter-list`、`chapter-item` |
-| 编辑器 | `chapter-editor`、`chapter-save`、`chapter-adopt`、`chapter-load-retry` |
-| AI 候选 | `ai-generate`、`ai-generate-submit`、`candidate-review`、`candidate-content`、`candidate-constraints`、`candidate-replace`、`candidate-apply` |
-| 章节工程任务 | `chapter-engineering`、`engineering-panel`、`engineering-tab-jobs`、`generation-job-start`、`generation-job-cancel`、`generation-job-status`、`generation-job-step`、`generation-job-recovery` |
-| 质量检查与历史 | `quality-check`、`quality-history`、`quality-history-select`、`quality-history-readonly`、`quality-report`、`quality-issue` |
-| 章节上下文 | `chapter-summary`、`chapter-summary-panel`、`chapter-summary-generate`、`chapter-summary-save`、`chapter-summary-record`、`generation-context-count` |
-| 确认与保护 | `generation-preflight`、`apply-confirm`、`leave-guard`、`dialog-confirm`、`dialog-cancel` |
-| 结果与恢复 | `error-notice`、`success-notice`、`recovery-dialog`、`recovery-dismiss` |
+| 区域           | `data-testid`                                                                                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 应用 / 首页    | `app-shell`、`project-list`、`project-create`、`project-card`、`project-open`                                                                                                                                                                  |
+| 作品编辑       | `project-settings`、`project-edit`、`project-name-input`、`project-save`                                                                                                                                                                       |
+| 卷章           | `volume-create`、`volume-create-dialog`、`volume-title-input`、`volume-save`、`volume-item`、`chapter-create-first`、`chapter-create`、`chapter-create-dialog`、`chapter-title-input`、`chapter-create-submit`、`chapter-list`、`chapter-item` |
+| 编辑器         | `chapter-editor`、`chapter-save`、`chapter-adopt`、`chapter-load-retry`                                                                                                                                                                        |
+| AI 候选        | `ai-generate`、`ai-generate-submit`、`candidate-review`、`candidate-content`、`candidate-constraints`、`candidate-replace`、`candidate-apply`                                                                                                  |
+| 章节工程任务   | `chapter-engineering`、`engineering-panel`、`engineering-tab-jobs`、`generation-job-start`、`generation-job-cancel`、`generation-job-status`、`generation-job-step`、`generation-job-recovery`                                                 |
+| 质量检查与历史 | `quality-check`、`quality-history`、`quality-history-select`、`quality-history-readonly`、`quality-report`、`quality-issue`                                                                                                                    |
+| 章节上下文     | `chapter-summary`、`chapter-summary-panel`、`chapter-summary-generate`、`chapter-summary-save`、`chapter-summary-record`、`generation-context-count`                                                                                           |
+| 确认与保护     | `generation-preflight`、`apply-confirm`、`leave-guard`、`dialog-confirm`、`dialog-cancel`                                                                                                                                                      |
+| 结果与恢复     | `error-notice`、`success-notice`、`recovery-dialog`、`recovery-dismiss`                                                                                                                                                                        |
 
 重复节点使用同一个语义 test ID，并用业务属性区分，例如 `data-project-id`、`data-chapter-id`、`data-chapter-title`。只给业务边界和必要子操作增加选择器，不给普通布局元素批量加 ID。
 
@@ -324,19 +324,19 @@ Remove-Item Env:AI_NOVEL_STUDIO_E2E_SKIP_BUILD
 
 ## 8. 自动化覆盖
 
-| Spec | 真实流程与主要断言 |
-|------|--------------------|
-| `app-start.spec.ts` | Tauri 窗口和 `app-shell` 可见；首页可访问；前端无未处理异常；E2E 桥存在；SQLite 完整性、外键、Schema 和空库计数正常 |
-| `project-create-open.spec.ts` | 从 UI 新建作品、输入名称、保存、回到列表并打开；断言名称、作品 ID、详情路由和 SQLite 记录 |
-| `project-edit-save.spec.ts` | 打开设置并修改名称；限定时间内完成保存；按钮恢复；成功提示出现；导航后重新读取仍正确；独立只读 SQLite 连接看见已提交标题 / 新更新时间，且数据库仅有一条对应作品 |
-| `chapter-save.spec.ts` | 显式创建卷和章节；在编辑器输入、保存、切换页面并重新打开；断言正文完整、卷章归属和 SQLite 草稿记录 |
-| `large-text-save.spec.ts` | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换 |
-| `candidate-review-apply.spec.ts` | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用 |
-| `leave-guard.spec.ts` | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖 |
-| `generation-job-cancel.spec.ts` | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态 |
-| `restart-task-recovery.spec.ts` | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI |
-| `quality-history-replay.spec.ts` | 从空库经 UI 创建作品、卷章和正文；连续执行两次固定 Mock 质检，重启真实应用后回放两份报告；断言 report / draft / content hash / AI Task 绑定、item ID 隔离、历史只读与当前计数一致 |
-| `chapter-context-persistence.spec.ts` | 从 UI 采用正文并原子保存章节上下文；重启后逐值核对总结及上下文稳定 ID；采用新正文触发总结和关联记录原子过期，再次重启后断言生成上下文计数为零 |
+| Spec                                  | 真实流程与主要断言                                                                                                                                                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `app-start.spec.ts`                   | Tauri 窗口和 `app-shell` 可见；首页可访问；前端无未处理异常；E2E 桥存在；SQLite 完整性、外键、Schema 和空库计数正常                                                                                                                        |
+| `project-create-open.spec.ts`         | 从 UI 新建作品、输入名称、保存、回到列表并打开；断言名称、作品 ID、详情路由和 SQLite 记录                                                                                                                                                  |
+| `project-edit-save.spec.ts`           | 打开设置并修改名称；限定时间内完成保存；按钮恢复；成功提示出现；导航后重新读取仍正确；独立只读 SQLite 连接看见已提交标题 / 新更新时间，且数据库仅有一条对应作品                                                                            |
+| `chapter-save.spec.ts`                | 显式创建卷和章节；在编辑器输入、保存、切换页面并重新打开；断言正文完整、卷章归属和 SQLite 草稿记录                                                                                                                                         |
+| `large-text-save.spec.ts`             | 通过 DOM 输入 184KB 中文 / emoji / CRLF 正文，保存、离开、重开并采用；逐值核对全文、字数、document / chunks 元数据和 SHA-256；损坏隔离库一个 chunk 后断言安全章节与编辑器不被 500 字预览替换                                               |
+| `candidate-review-apply.spec.ts`      | 使用固定 Mock AI 生成候选；查看约束评分 / 缺失计数和 result / draft / novel / chapter / source / revision / base hash / AI task 元数据；确认正式采用；断言任务成功、编辑器及页面字数同步、只有一个正式草稿且重复操作不重复采用             |
+| `leave-guard.spec.ts`                 | 修改正文后切换章节；取消离开保留 dirty 内容；分别验证“保存并离开”和“放弃修改”，断言保存正文可重开、放弃内容不入库且没有错误删除或错位覆盖                                                                                                  |
+| `generation-job-cancel.spec.ts`       | 分别暂停正文生成和质量检查 Mock 请求后通过 DOM 点击取消；断言 5 秒内 waiter 清理、SQLite 唯一取消 checkpoint、正文取消不新增草稿、质量取消保留已提交草稿且 AI task 为 `cancelled`、无 pending 报告，release 后无迟到 step / completed 状态 |
+| `restart-task-recovery.spec.ts`       | 通过 E2E-only Mock AI gate 把章节工程任务暂停在生成步骤；重启真实 Tauri 应用并复用同一隔离 SQLite；断言 `APP_RESTART_INTERRUPTED`、进度和已完成 step 保留、恢复 checkpoint 唯一、二次启动幂等且没有自动重发 AI                             |
+| `quality-history-replay.spec.ts`      | 从空库经 UI 创建作品、卷章和正文；连续执行两次固定 Mock 质检，重启真实应用后回放两份报告；断言 report / draft / content hash / AI Task 绑定、item ID 隔离、历史只读与当前计数一致                                                          |
+| `chapter-context-persistence.spec.ts` | 从 UI 采用正文并原子保存章节上下文；重启后逐值核对总结及上下文稳定 ID；采用新正文触发总结和关联记录原子过期，再次重启后断言生成上下文计数为零                                                                                              |
 
 这些测试保留真实 React、HashRouter、Tauri IPC、Rust command、SQLite 事务和 WebView2 生命周期。IPC 桥用于受限验收、隔离库故障注入和 E2E-only Mock pause / release，不替换正常业务写入流程；pause gate 不调用网络，也不直接修改数据库。
 

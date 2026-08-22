@@ -27,7 +27,7 @@
 | 目标用户 | AI Agent（开发者助手） | 小说作者（终端用户）                                             |
 | 用途     | 指导开发过程           | 自动化创作流程                                                   |
 | 运行位置 | `.github/skills/`      | `src/services/autonomous-creation/`、`src/services/multi-agent/` |
-| 当前状态 | 10 个 Skills 已就绪    | v3.5.0 已有对话工作台、审阅收敛与固定 DSH 载体 |
+| 当前状态 | 10 个 Skills 已就绪    | v3.5.0 已有对话工作台、审阅收敛与固定 DSH 载体                   |
 
 ---
 

@@ -41,7 +41,11 @@ describe('candidate review and adoption', () => {
     const projectId = await createProjectThroughUi(E2E_FIXTURES.candidateApply.projectTitle);
     await openWorkspace(projectId);
     const chapterId = await createFirstChapterThroughUi();
-    const sourceEditor = await waitForTestIdAttribute('chapter-editor', 'data-chapter-id', chapterId);
+    const sourceEditor = await waitForTestIdAttribute(
+      'chapter-editor',
+      'data-chapter-id',
+      chapterId,
+    );
     const sourceDraftId = await sourceEditor.getAttribute('data-draft-id');
     const sourceRevision = await sourceEditor.getAttribute('data-draft-version');
     const sourceContentHash = await sourceEditor.getAttribute('data-content-hash');
@@ -68,7 +72,11 @@ describe('candidate review and adoption', () => {
     expect(await review.getAttribute('data-source-revision')).toBe(sourceRevision);
     expect(await review.getAttribute('data-base-content-hash')).toBe(sourceContentHash);
     expect(await constraints.getAttribute('data-draft-id')).toBe(resultId);
-    for (const attribute of ['data-outline-score', 'data-missing-outline-count', 'data-missing-required-count']) {
+    for (const attribute of [
+      'data-outline-score',
+      'data-missing-outline-count',
+      'data-missing-required-count',
+    ]) {
       const rawValue = await constraints.getAttribute(attribute);
       expect(rawValue).toBeTruthy();
       const numericValue = Number(rawValue);
@@ -76,8 +84,12 @@ describe('candidate review and adoption', () => {
       expect(numericValue).toBeGreaterThanOrEqual(0);
     }
 
-    expect(await candidateContent.getText()).toContain(E2E_FIXTURES.candidateApply.mockExpectedFragment);
-    const draftsBeforeAdoption = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', { chapterId });
+    expect(await candidateContent.getText()).toContain(
+      E2E_FIXTURES.candidateApply.mockExpectedFragment,
+    );
+    const draftsBeforeAdoption = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', {
+      chapterId,
+    });
     const candidate = draftsBeforeAdoption.find((draft) => draft.id === resultId);
     expect(candidate?.novelId).toBe(projectId);
     expect(candidate?.chapterId).toBe(chapterId);
@@ -91,12 +103,17 @@ describe('candidate review and adoption', () => {
     expect(await editor.getAttribute('data-draft-id')).toBe(resultId);
     expect(await editor.getAttribute('data-adopted')).toBe('false');
     expect(Number(await editor.getAttribute('data-word-count'))).toBe(candidate.wordCount);
-    expect(normalizeTextareaLineEndings(await editor.getValue()))
-      .toBe(normalizeTextareaLineEndings(candidate.content));
+    expect(normalizeTextareaLineEndings(await editor.getValue())).toBe(
+      normalizeTextareaLineEndings(candidate.content),
+    );
     expect(await editor.getAttribute('data-dirty')).toBe('false');
 
-    const tasks = await bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId });
-    const generationTasks = tasks.filter((task) => task.chapterId === chapterId && task.taskType === 'chapter_generate');
+    const tasks = await bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', {
+      chapterId,
+    });
+    const generationTasks = tasks.filter(
+      (task) => task.chapterId === chapterId && task.taskType === 'chapter_generate',
+    );
     expect(generationTasks).toHaveLength(1);
     const generationTask = generationTasks[0];
     expect(generationTask.id).toBe(aiTaskId);
@@ -122,27 +139,43 @@ describe('candidate review and adoption', () => {
     expect(await applyButton.isEnabled()).toBe(false);
     await clickTestId('dialog-confirm');
 
-    await browser.waitUntil(async () => {
-      const drafts = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', { chapterId });
-      return drafts.filter((draft) => draft.isAdopted).length === 1
-        && drafts.find((draft) => draft.isAdopted)?.id === resultId;
-    }, { timeout: 30000, timeoutMsg: 'candidate was not adopted' });
+    await browser.waitUntil(
+      async () => {
+        const drafts = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', {
+          chapterId,
+        });
+        return (
+          drafts.filter((draft) => draft.isAdopted).length === 1 &&
+          drafts.find((draft) => draft.isAdopted)?.id === resultId
+        );
+      },
+      { timeout: 30000, timeoutMsg: 'candidate was not adopted' },
+    );
     await applyButton.waitForEnabled({ timeout: 30000 });
     await waitForTestId('success-notice');
-    await browser.waitUntil(async () => {
-      const currentEditor = await browser.$('[data-testid="chapter-editor"]');
-      return await currentEditor.getAttribute('data-draft-id') === resultId
-        && await currentEditor.getAttribute('data-adopted') === 'true'
-        && Number(await currentEditor.getAttribute('data-word-count')) === candidate.wordCount;
-    }, { timeout: 30000, timeoutMsg: 'adopted draft state did not synchronize to the editor' });
+    await browser.waitUntil(
+      async () => {
+        const currentEditor = await browser.$('[data-testid="chapter-editor"]');
+        return (
+          (await currentEditor.getAttribute('data-draft-id')) === resultId &&
+          (await currentEditor.getAttribute('data-adopted')) === 'true' &&
+          Number(await currentEditor.getAttribute('data-word-count')) === candidate.wordCount
+        );
+      },
+      { timeout: 30000, timeoutMsg: 'adopted draft state did not synchronize to the editor' },
+    );
     const wordCount = await waitForTestId('chapter-word-count');
     expect(Number(await wordCount.getAttribute('data-word-count'))).toBe(candidate.wordCount);
 
-    const chapters = await bridgeCall<Array<{ id: string; novelId: string; adoptedDraftId?: string }>>('get_chapters_by_novel_id', { novelId: projectId });
+    const chapters = await bridgeCall<
+      Array<{ id: string; novelId: string; adoptedDraftId?: string }>
+    >('get_chapters_by_novel_id', { novelId: projectId });
     const chapter = chapters.find((item) => item.id === chapterId);
     expect(chapter?.novelId).toBe(projectId);
     expect(chapter?.adoptedDraftId).toBe(resultId);
-    const draftsAfterAdoption = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', { chapterId });
+    const draftsAfterAdoption = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', {
+      chapterId,
+    });
     expect(draftsAfterAdoption).toHaveLength(draftsBeforeAdoption.length);
     expect(draftsAfterAdoption.filter((draft) => draft.isAdopted)).toHaveLength(1);
 
@@ -151,10 +184,16 @@ describe('candidate review and adoption', () => {
     expect(await applyButton.isEnabled()).toBe(false);
     await clickTestId('dialog-confirm');
     await applyButton.waitForEnabled({ timeout: 30000 });
-    const draftsAfterRepeat = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', { chapterId });
+    const draftsAfterRepeat = await bridgeCall<CandidateDraft[]>('get_drafts_by_chapter_id', {
+      chapterId,
+    });
     expect(draftsAfterRepeat).toHaveLength(draftsBeforeAdoption.length);
-    expect(draftsAfterRepeat.filter((draft) => draft.isAdopted && draft.id === resultId)).toHaveLength(1);
-    const tasksAfterRepeat = await bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId });
+    expect(
+      draftsAfterRepeat.filter((draft) => draft.isAdopted && draft.id === resultId),
+    ).toHaveLength(1);
+    const tasksAfterRepeat = await bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', {
+      chapterId,
+    });
     const generationTasksAfterRepeat = tasksAfterRepeat.filter(
       (task) => task.chapterId === chapterId && task.taskType === 'chapter_generate',
     );
@@ -162,8 +201,9 @@ describe('candidate review and adoption', () => {
     expect(generationTasksAfterRepeat[0].id).toBe(aiTaskId);
     expect(generationTasksAfterRepeat[0].status).toBe('succeeded');
     const adoptedEditor = await waitForTestId('chapter-editor');
-    expect(normalizeTextareaLineEndings(await adoptedEditor.getValue()))
-      .toBe(normalizeTextareaLineEndings(candidate.content));
+    expect(normalizeTextareaLineEndings(await adoptedEditor.getValue())).toBe(
+      normalizeTextareaLineEndings(candidate.content),
+    );
     expect(await adoptedEditor.getAttribute('data-adopted')).toBe('true');
     expect(Number(await adoptedEditor.getAttribute('data-word-count'))).toBe(candidate.wordCount);
   });

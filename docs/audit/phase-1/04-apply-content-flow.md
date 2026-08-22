@@ -13,29 +13,29 @@
 
 ### 2.1 编辑器内存变更入口
 
-| 入口 | 触发方 | 实际操作 | 目标确定方式 | 证据 | 置信度 |
-|---|---|---|---|---|---|
-| 用户键入 | `EditorArea` textarea | `setContent(value)`，dirty | 当前挂载的 `chapter` props | `EditorArea.tsx:240-245` | 代码确认 |
-| 加载/切换草稿 | `currentDraft` effect | 用 `currentDraft.content` 替换全文，dirty=false | 不校验 draft.chapterId | `EditorArea.tsx:101-117` | 代码确认 |
-| 通用 AI 追加/替换 | AI/润色/质量面板 → page → Editor | append 或 replace_all，dirty=true | **点击时当前编辑器** | `WritingWorkspacePage.tsx:298-319`; `EditorArea.tsx:263-279` | 代码确认 |
-| 生成完成自动载入 | `onGenerated` | page 替换 `currentDraft/editorSnapshot`，Editor effect 替换全文 | **回调完成时当前页面** | `WritingWorkspacePage.tsx:283-296,631` | 代码确认 |
-| 草稿历史“恢复” | `DraftHistoryPanel` | `onLoadDraft` → `handleDraftApplied` | 面板的 `chapterId`，page 不复核 | `DraftHistoryPanel.tsx:132-133`; page `612-620` | 代码确认 |
-| 一键排版 | Editor command | 空行压缩 + trim，dirty | 当前编辑器 | `EditorArea.tsx:321-325` | 代码确认 |
-| 质量修复更优结果 | `CheckPanel` | `onGenerated(newDraft)`；无回调时通用 replace | 请求闭包的 chapter 保存，UI 目标未复核 | `CheckPanel.tsx:376-415` | 代码确认 |
-| 章节工程完成 | `ChapterEngineeringPanel` | `onGenerated(result.draft)` | job 固定 chapter，UI 未复核 | `ChapterEngineeringPanel.tsx:553-568` | 代码确认 |
+| 入口              | 触发方                           | 实际操作                                                        | 目标确定方式                           | 证据                                                         | 置信度   |
+| ----------------- | -------------------------------- | --------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------ | -------- |
+| 用户键入          | `EditorArea` textarea            | `setContent(value)`，dirty                                      | 当前挂载的 `chapter` props             | `EditorArea.tsx:240-245`                                     | 代码确认 |
+| 加载/切换草稿     | `currentDraft` effect            | 用 `currentDraft.content` 替换全文，dirty=false                 | 不校验 draft.chapterId                 | `EditorArea.tsx:101-117`                                     | 代码确认 |
+| 通用 AI 追加/替换 | AI/润色/质量面板 → page → Editor | append 或 replace_all，dirty=true                               | **点击时当前编辑器**                   | `WritingWorkspacePage.tsx:298-319`; `EditorArea.tsx:263-279` | 代码确认 |
+| 生成完成自动载入  | `onGenerated`                    | page 替换 `currentDraft/editorSnapshot`，Editor effect 替换全文 | **回调完成时当前页面**                 | `WritingWorkspacePage.tsx:283-296,631`                       | 代码确认 |
+| 草稿历史“恢复”    | `DraftHistoryPanel`              | `onLoadDraft` → `handleDraftApplied`                            | 面板的 `chapterId`，page 不复核        | `DraftHistoryPanel.tsx:132-133`; page `612-620`              | 代码确认 |
+| 一键排版          | Editor command                   | 空行压缩 + trim，dirty                                          | 当前编辑器                             | `EditorArea.tsx:321-325`                                     | 代码确认 |
+| 质量修复更优结果  | `CheckPanel`                     | `onGenerated(newDraft)`；无回调时通用 replace                   | 请求闭包的 chapter 保存，UI 目标未复核 | `CheckPanel.tsx:376-415`                                     | 代码确认 |
+| 章节工程完成      | `ChapterEngineeringPanel`        | `onGenerated(result.draft)`                                     | job 固定 chapter，UI 未复核            | `ChapterEngineeringPanel.tsx:553-568`                        | 代码确认 |
 
 ### 2.2 持久化正文/版本入口
 
-| 入口 | 前端服务 | Tauri command / SQL | 结果 |
-|---|---|---|---|
-| 保存新草稿 | `draftVersionService.create` | `create_chapter_draft` / INSERT | 新的非采用版本 |
-| 更新当前非采用草稿 | `draftVersionService.update` | `update_chapter_draft` / UPDATE by id+chapter | 覆盖该候选版本内容 |
-| 采用草稿 | `draftVersionService.adopt` | `adopt_chapter_draft` / 两次 UPDATE | 改 `is_adopted` |
-| AI 生成/重生成 | AiGeneratePanel / job | create draft | 新候选版本 |
-| 润色 | PolishPanel | create source snapshot（必要时）+ result draft | 新候选版本 |
-| 质量修复 | CheckPanel | create fixed draft | 新候选版本 |
-| TXT 导入 | `ImportTxtDialog` | create draft | 导入候选版本 |
-| 大文本 | `saveLargeTextWithChunks` + draft command | `large_text_documents/chunks` 事务，随后 draft INSERT/UPDATE | 分片全文 + draft 引用 |
+| 入口               | 前端服务                                  | Tauri command / SQL                                          | 结果                  |
+| ------------------ | ----------------------------------------- | ------------------------------------------------------------ | --------------------- |
+| 保存新草稿         | `draftVersionService.create`              | `create_chapter_draft` / INSERT                              | 新的非采用版本        |
+| 更新当前非采用草稿 | `draftVersionService.update`              | `update_chapter_draft` / UPDATE by id+chapter                | 覆盖该候选版本内容    |
+| 采用草稿           | `draftVersionService.adopt`               | `adopt_chapter_draft` / 两次 UPDATE                          | 改 `is_adopted`       |
+| AI 生成/重生成     | AiGeneratePanel / job                     | create draft                                                 | 新候选版本            |
+| 润色               | PolishPanel                               | create source snapshot（必要时）+ result draft               | 新候选版本            |
+| 质量修复           | CheckPanel                                | create fixed draft                                           | 新候选版本            |
+| TXT 导入           | `ImportTxtDialog`                         | create draft                                                 | 导入候选版本          |
+| 大文本             | `saveLargeTextWithChunks` + draft command | `large_text_documents/chunks` 事务，随后 draft INSERT/UPDATE | 分片全文 + draft 引用 |
 
 证据：`src/services/database/draftVersionService.ts:160-333`、`src-tauri/src/commands.rs:1093-1200`、`src/components/import/ImportTxtDialog.tsx:73`。
 
@@ -127,12 +127,12 @@ setEditorSnapshot({ chapterId: draft.chapterId, ... })
 
 ## 6. 重复应用保护
 
-| 机制 | 能防什么 | 不能防什么 |
-|---|---|---|
-| `lastApplyRequestId` | 同一个 request 对象因重渲染被 effect 重复消费 | 用户重复点击，因为每次点击生成新 id |
+| 机制                       | 能防什么                                                           | 不能防什么                                          |
+| -------------------------- | ------------------------------------------------------------------ | --------------------------------------------------- |
+| `lastApplyRequestId`       | 同一个 request 对象因重渲染被 effect 重复消费                      | 用户重复点击，因为每次点击生成新 id                 |
 | AiGenerate append disabled | 当 latestGeneratedDraft.id == currentDraftId 时禁用该面板的 append | replace_all；Polish apply；跨章节迟到；重启后的重复 |
-| `isAdopted` UI | 隐藏已采用草稿的采用按钮 | 并发采用、错误章节参数、超时重试 |
-| Setting suggestion status | 非 pending 禁止重复采纳 | 正式写入成功但 local 状态保存失败后的重复 |
+| `isAdopted` UI             | 隐藏已采用草稿的采用按钮                                           | 并发采用、错误章节参数、超时重试                    |
+| Setting suggestion status  | 非 pending 禁止重复采纳                                            | 正式写入成功但 local 状态保存失败后的重复           |
 
 通用应用没有持久 idempotency key，也没有“result X 已应用到 document Y revision Z”的记录。风险：append 重复内容 P1，replace 重复覆盖/错误覆盖 P0。
 
@@ -211,32 +211,32 @@ Rust `update_chapter_draft` 用 `WHERE id=? AND chapter_id=?`，但不检查 aff
 
 ## 10. 撤销、失败和恢复
 
-| 能力 | 当前状态 | 结论 |
-|---|---|---|
-| 编辑器原生撤销 | textarea 浏览器行为可能可用 | 未形成应用事务或持久审计记录 |
-| 应用前 diff 预览 | 无 | 缺失 |
-| 应用操作记录 | 无表/无实体 | 缺失 |
-| 应用失败回滚 | apply 只改内存；保存/采用各自处理 | 跨步骤无整体回滚 |
-| 软件崩溃恢复未保存 apply | 无 autosave/session journal | 缺失 |
-| 候选草稿恢复 | 草稿历史可读取 | 有，但无法标记“已应用到何处” |
-| 采用整体回滚 | 无事务/无 adoption history | 缺失 |
-| 大文本完整性阻断 | hash mismatch 不阻断 | 失败 |
+| 能力                     | 当前状态                          | 结论                         |
+| ------------------------ | --------------------------------- | ---------------------------- |
+| 编辑器原生撤销           | textarea 浏览器行为可能可用       | 未形成应用事务或持久审计记录 |
+| 应用前 diff 预览         | 无                                | 缺失                         |
+| 应用操作记录             | 无表/无实体                       | 缺失                         |
+| 应用失败回滚             | apply 只改内存；保存/采用各自处理 | 跨步骤无整体回滚             |
+| 软件崩溃恢复未保存 apply | 无 autosave/session journal       | 缺失                         |
+| 候选草稿恢复             | 草稿历史可读取                    | 有，但无法标记“已应用到何处” |
+| 采用整体回滚             | 无事务/无 adoption history        | 缺失                         |
+| 大文本完整性阻断         | hash mismatch 不阻断              | 失败                         |
 
 ## 11. 安全条件逐项判定
 
-| 安全条件 | 通用 apply | 保存草稿 | 正式采用 |
-|---|---|---|---|
-| 固定目标文档 ID | 否 | chapter.id（可能与 draft 错配） | 参数有 chapter/draft |
-| 基础正文版本 | 否 | 否 | 否 |
-| 当前版本比较 | 否 | 否 | 否 |
-| 内容 Hash | 只重算当前 hash，不比较 base | 否 | 否 |
-| 重复应用保护 | 仅单次 effect id | 无幂等键 | 无幂等键 |
-| 数据库事务 | 不适用（内存） | 单条 SQL 原子；大文本跨命令非原子 | **无，两个 UPDATE** |
-| 原子写入 | 否（apply+save 分离） | 小文本单行；大文本否 | 否 |
-| 撤销记录 | 否 | 草稿版本可人工恢复 | 无 adoption history |
-| 失败回滚 | 否 | 单 SQL；工作流无 | 否 |
-| 异常退出恢复 | 否 | 已提交草稿可恢复 | 当前标记可读，失败中间态不可恢复 |
-| 未保存冲突检测 | replace 仅提示当前 dirty | 不比较 base | 采用前仅检查本地 dirty |
+| 安全条件        | 通用 apply                   | 保存草稿                          | 正式采用                         |
+| --------------- | ---------------------------- | --------------------------------- | -------------------------------- |
+| 固定目标文档 ID | 否                           | chapter.id（可能与 draft 错配）   | 参数有 chapter/draft             |
+| 基础正文版本    | 否                           | 否                                | 否                               |
+| 当前版本比较    | 否                           | 否                                | 否                               |
+| 内容 Hash       | 只重算当前 hash，不比较 base | 否                                | 否                               |
+| 重复应用保护    | 仅单次 effect id             | 无幂等键                          | 无幂等键                         |
+| 数据库事务      | 不适用（内存）               | 单条 SQL 原子；大文本跨命令非原子 | **无，两个 UPDATE**              |
+| 原子写入        | 否（apply+save 分离）        | 小文本单行；大文本否              | 否                               |
+| 撤销记录        | 否                           | 草稿版本可人工恢复                | 无 adoption history              |
+| 失败回滚        | 否                           | 单 SQL；工作流无                  | 否                               |
+| 异常退出恢复    | 否                           | 已提交草稿可恢复                  | 当前标记可读，失败中间态不可恢复 |
+| 未保存冲突检测  | replace 仅提示当前 dirty     | 不比较 base                       | 采用前仅检查本地 dirty           |
 
 ## 12. 真实正文应用时序（含风险点）
 
@@ -258,4 +258,3 @@ AI result(A, base unknown)
 ```
 
 当前最关键的不变量——“任何正文写入必须同时证明目标章节、基础版本和当前版本仍一致”——尚不存在。
-

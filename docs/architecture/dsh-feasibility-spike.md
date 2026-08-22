@@ -19,10 +19,10 @@ AI Novel Studio 已自建完整的小说领域能力（生成、质量、Memory�
 
 ## 2. 权限边界（本 Spike 及后续版本的最高约束）
 
-| 侧 | 拥有 | 不拥有 |
-|---|---|---|
-| **DSH（大脑）** | 规划、推理、工具选择权、会话轨迹 | 事实解释、策略否决、预算、执行、事务、最终采用 |
-| **AI Novel Studio（身体）** | 事实解释、策略否决、预算、执行、事务、最终采用权 | — |
+| 侧                          | 拥有                                             | 不拥有                                         |
+| --------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+| **DSH（大脑）**             | 规划、推理、工具选择权、会话轨迹                 | 事实解释、策略否决、预算、执行、事务、最终采用 |
+| **AI Novel Studio（身体）** | 事实解释、策略否决、预算、执行、事务、最终采用权 | —                                              |
 
 推论：
 
@@ -62,14 +62,14 @@ flowchart TB
 
 DSH 的 `dsh-sdk-jsonrpc-server` 插件在 stdout 上提供 newline-delimited JSON-RPC 2.0。权威协议见 harness 仓库 `packages/sdk/protocol/README.md` 与 `packages/sdk/server/README.md`。已核实的 Wire 事实：
 
-| 方向 | Method | 说明 |
-|---|---|---|
-| client→server | `initialize` | 可选 `maxTokens`（每次模型输出的 token 上限）；无效值拒绝初始化 |
-| client→server | `session/prompt` | 排队一条用户消息，立即返回 `{ messageId }`；**不返回本次提示的最终结果** |
-| client→server | `shutdown` | 优雅退出，退出码 0 |
-| server→client | `session.event` | 每个持久化会话事件（含全部 session log envelope） |
-| server→client | `session.status` | 整 Agent `running`/`idle` 转换 |
-| server→client | `subagent.started` / `subagent.finished` | 子代理生命周期（仅 in-process） |
+| 方向          | Method                                   | 说明                                                                     |
+| ------------- | ---------------------------------------- | ------------------------------------------------------------------------ |
+| client→server | `initialize`                             | 可选 `maxTokens`（每次模型输出的 token 上限）；无效值拒绝初始化          |
+| client→server | `session/prompt`                         | 排队一条用户消息，立即返回 `{ messageId }`；**不返回本次提示的最终结果** |
+| client→server | `shutdown`                               | 优雅退出，退出码 0                                                       |
+| server→client | `session.event`                          | 每个持久化会话事件（含全部 session log envelope）                        |
+| server→client | `session.status`                         | 整 Agent `running`/`idle` 转换                                           |
+| server→client | `subagent.started` / `subagent.finished` | 子代理生命周期（仅 in-process）                                          |
 
 **必须遵守的协议限制（已官方确认）：**
 
@@ -129,19 +129,25 @@ Spike 直接使用 harness 自带 `@deepseek-ai/dsh-llm-deepseek` 适配器，`D
 ```ts
 // src/types/chapterPreparation.ts
 export interface ChapterPreparationInput {
-  novelId: string
-  chapterId: string
+  novelId: string;
+  chapterId: string;
   /** 调用方已知的各类来源当前修订号；Proposal 必须原样回显且与其一致 */
-  baselineRevisions: ChapterBaselineRevision[]
+  baselineRevisions: ChapterBaselineRevision[];
 }
 
 export interface ChapterBaselineRevision {
-  source: 'outline' | 'chapter_context' | 'style_profile' | 'output_control' | 'character_states' | 'memory_index'
-  revision: number
+  source:
+    | 'outline'
+    | 'chapter_context'
+    | 'style_profile'
+    | 'output_control'
+    | 'character_states'
+    | 'memory_index';
+  revision: number;
 }
 
 export interface ChapterPreparationPlannerPort {
-  prepare(input: ChapterPreparationInput): Promise<ChapterPreparationProposal>
+  prepare(input: ChapterPreparationInput): Promise<ChapterPreparationProposal>;
 }
 ```
 
@@ -155,43 +161,54 @@ export interface ChapterPreparationPlannerPort {
 ```ts
 // src/types/chapterPreparation.ts
 export interface ChapterPreparationProposal {
-  schemaVersion: 1
-  planner: 'current_chapter_readiness_v1' | 'dsh_spike_v0'
-  targetChapter: { novelId: string; chapterId: string }
-  baselineRevisions: ChapterBaselineRevision[]
-  retrievedEvidence: RetrievedEvidenceItem[]
-  chapterGoals: string[]
-  scenePlan: ScenePlanItem[]
-  characterConstraints: CharacterConstraintItem[]
-  continuityRisks: ContinuityRiskItem[]
-  unresolvedQuestions: string[]
-  recommendedActions: RecommendedActionItem[]
-  producedAt: string
-  metrics: ProposalMetrics
+  schemaVersion: 1;
+  planner: 'current_chapter_readiness_v1' | 'dsh_spike_v0';
+  targetChapter: { novelId: string; chapterId: string };
+  baselineRevisions: ChapterBaselineRevision[];
+  retrievedEvidence: RetrievedEvidenceItem[];
+  chapterGoals: string[];
+  scenePlan: ScenePlanItem[];
+  characterConstraints: CharacterConstraintItem[];
+  continuityRisks: ContinuityRiskItem[];
+  unresolvedQuestions: string[];
+  recommendedActions: RecommendedActionItem[];
+  producedAt: string;
+  metrics: ProposalMetrics;
 }
 
 export interface RetrievedEvidenceItem {
-  source: ChapterBaselineRevision['source']
-  revision: number            // 必须与 baselineRevisions 中对应 source 一致
-  summary: string
-  detailRef?: string
+  source: ChapterBaselineRevision['source'];
+  revision: number; // 必须与 baselineRevisions 中对应 source 一致
+  summary: string;
+  detailRef?: string;
 }
 
-export interface ScenePlanItem { title: string; purpose: string; conflicts?: string[] }
-export interface CharacterConstraintItem { characterId: string; constraint: string }
-export interface ContinuityRiskItem { kind: string; description: string; severity: 'low' | 'medium' | 'high' }
+export interface ScenePlanItem {
+  title: string;
+  purpose: string;
+  conflicts?: string[];
+}
+export interface CharacterConstraintItem {
+  characterId: string;
+  constraint: string;
+}
+export interface ContinuityRiskItem {
+  kind: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high';
+}
 export interface RecommendedActionItem {
-  type: 'read_tool' | 'ask_user'   // Spike 只允许这两类；禁止任何写动作
-  target?: string
-  description: string
+  type: 'read_tool' | 'ask_user'; // Spike 只允许这两类；禁止任何写动作
+  target?: string;
+  description: string;
 }
 export interface ProposalMetrics {
-  planner: ChapterPreparationProposal['planner']
-  durationMs: number
-  promptTokens?: number
-  completionTokens?: number
-  toolCallCount?: number
-  processRestarts?: number
+  planner: ChapterPreparationProposal['planner'];
+  durationMs: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  toolCallCount?: number;
+  processRestarts?: number;
 }
 ```
 
@@ -207,13 +224,13 @@ export interface ProposalMetrics {
 新增 `scripts/dsh-spike/cordis.yml`，只挂最小集合（参照 harness `examples/jsonrpc-agent/cordis.yml`，并移除 bash/fs/subprocess 等全部写能力）：
 
 ```yaml
-- id: sdk-jsonrpc-server        # '@deepseek-ai/dsh-sdk-jsonrpc-server'
-- id: llm-deepseek              # '@deepseek-ai/dsh-llm-deepseek'（thinking 默认）
-- id: agent-spine               # '@deepseek-ai/dsh-agent-spine-demo'，persona 指向 scripts/dsh-spike/persona.md
-- id: sessions                  # '@deepseek-ai/dsh-session-persistence-jsonl'，root = DSH_SESSION_ROOT
-- id: session-checkpoints       # '@deepseek-ai/dsh-session-checkpoint-policy'
-- id: token-meter               # '@deepseek-ai/dsh-token-meter'
-- id: mcp-novel                 # '@deepseek-ai/dsh-mcp-client'，serverName: novel，stdio spawn novel-domain-gateway
+- id: sdk-jsonrpc-server # '@deepseek-ai/dsh-sdk-jsonrpc-server'
+- id: llm-deepseek # '@deepseek-ai/dsh-llm-deepseek'（thinking 默认）
+- id: agent-spine # '@deepseek-ai/dsh-agent-spine-demo'，persona 指向 scripts/dsh-spike/persona.md
+- id: sessions # '@deepseek-ai/dsh-session-persistence-jsonl'，root = DSH_SESSION_ROOT
+- id: session-checkpoints # '@deepseek-ai/dsh-session-checkpoint-policy'
+- id: token-meter # '@deepseek-ai/dsh-token-meter'
+- id: mcp-novel # '@deepseek-ai/dsh-mcp-client'，serverName: novel，stdio spawn novel-domain-gateway
 ```
 
 明确**不挂**：web-app、bash、fs、terminal、workflow、用户审批 UI 插件、stdout logger。persona（`scripts/dsh-spike/persona.md`）固定为"章节准备规划"角色，并写入：只产出 Proposal JSON、禁止写工具、事实以工具返回为准、不得臆造角色/事件。
@@ -233,14 +250,14 @@ export interface ProposalMetrics {
 
 ### 8.3 验收门槛（全部通过才算 Spike 成功）
 
-| # | 门槛 | 说明 |
-|---|---|---|
-| 1 | Proposal schema 有效率 100% | 全部 20 案例通过 6.3 校验 |
-| 2 | 越权或写工具调用 = 0 | 工具通道 + recommendedActions 双口径 |
-| 3 | 严重连续性错误 ≤ 旧 Planner | 同一 rubric 对比 |
-| 4 | DSH 盲评胜率 ≥ 60% | 平局计 0.5 |
-| 5 | 成本上限 | 见 8.4 |
-| 6 | 完整度量记录 | 每案例延迟、token、工具次数、失败恢复、进程退出结果 |
+| #   | 门槛                        | 说明                                                |
+| --- | --------------------------- | --------------------------------------------------- |
+| 1   | Proposal schema 有效率 100% | 全部 20 案例通过 6.3 校验                           |
+| 2   | 越权或写工具调用 = 0        | 工具通道 + recommendedActions 双口径                |
+| 3   | 严重连续性错误 ≤ 旧 Planner | 同一 rubric 对比                                    |
+| 4   | DSH 盲评胜率 ≥ 60%          | 平局计 0.5                                          |
+| 5   | 成本上限                    | 见 8.4                                              |
+| 6   | 完整度量记录                | 每案例延迟、token、工具次数、失败恢复、进程退出结果 |
 
 ### 8.4 成本门槛（对原方案的修正）
 
@@ -274,11 +291,11 @@ NODE_VERSION                # 本机 v24.15.0 起验证
 
 ## 11. 执行阶段与出口
 
-| 阶段 | 内容 | 出口条件 |
-|---|---|---|
-| P1 载体验证 | Rust Supervisor 单测：spawn Node+DSH → initialize → session/prompt → 收 session.event 至 idle → 杀进程重启 → 再初始化成功 | cargo test 全绿；重启延迟与退出码记录在案 |
-| P2 领域通道 | novel-domain-gateway bin：4 工具 + 参数/revision 校验 + 只读 SQLite；DSH 能实际调用 mcp__novel__* | 对只读副本 DB 的 4 工具冒烟通过；越权输入被拒 |
-| P3 Shadow A/B | 两个 adapter + 20 案例 + Validator + 盲评报告 | 8.3 六项门槛全部通过 |
+| 阶段          | 内容                                                                                                                      | 出口条件                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| P1 载体验证   | Rust Supervisor 单测：spawn Node+DSH → initialize → session/prompt → 收 session.event 至 idle → 杀进程重启 → 再初始化成功 | cargo test 全绿；重启延迟与退出码记录在案     |
+| P2 领域通道   | novel-domain-gateway bin：4 工具 + 参数/revision 校验 + 只读 SQLite；DSH 能实际调用 mcp__novel__*                         | 对只读副本 DB 的 4 工具冒烟通过；越权输入被拒 |
+| P3 Shadow A/B | 两个 adapter + 20 案例 + Validator + 盲评报告                                                                             | 8.3 六项门槛全部通过                          |
 
 任何阶段失败：记录失败事实与根因，Spike 终止，产品零影响。
 

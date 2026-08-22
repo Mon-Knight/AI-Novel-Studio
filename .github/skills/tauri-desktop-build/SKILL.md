@@ -66,6 +66,7 @@ npm run tauri dev
 ```
 
 检查：
+
 - [ ] 窗口是否正常打开
 - [ ] 窗口尺寸是否符合要求（默认 1440x900）
 - [ ] 最大化是否正常
@@ -76,6 +77,7 @@ npm run tauri dev
 ### 步骤 3：构建前检查
 
 对照 `tauri-build.checklist.md`：
+
 - [ ] `npm run build` 通过
 - [ ] `cargo check` 通过
 - [ ] 图标资源存在（`src-tauri/icons/`）
@@ -88,6 +90,7 @@ npm run tauri build
 ```
 
 检查：
+
 - [ ] 编译是否成功
 - [ ] 安装包路径
 - [ ] EXE 是否可启动
@@ -110,23 +113,28 @@ npm run tauri build
 ## Tauri 构建报告
 
 ### 环境
+
 - Rust：vX.X
 - Node：vX.X
 
 ### 开发模式
+
 - 窗口打开：✅ / ❌
 - 页面加载：✅ / ❌
 
 ### 构建结果
+
 - `cargo check`：✅ / ❌
 - `npm run tauri build`：✅ / ❌
 
 ### 产物
+
 - EXE 路径：
 - 安装包路径：
 - 大小：
 
 ### 失败详情（如有）
+
 ...
 ```
 

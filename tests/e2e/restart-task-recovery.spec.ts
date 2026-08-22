@@ -46,14 +46,14 @@ async function getSteps(jobId: string): Promise<GenerationStepView[]> {
 function parseStepOutput(step: GenerationStepView): Record<string, unknown> | undefined {
   if (!step.outputJson) return undefined;
   const parsed = JSON.parse(step.outputJson) as unknown;
-  return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
+  return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
 }
 
 function recoverySteps(steps: GenerationStepView[]): GenerationStepView[] {
-  return steps.filter((step) => (
-    step.status === 'failed'
-    && parseStepOutput(step)?.recoveryReason === RESTART_ERROR_CODE
-  ));
+  return steps.filter(
+    (step) =>
+      step.status === 'failed' && parseStepOutput(step)?.recoveryReason === RESTART_ERROR_CODE,
+  );
 }
 
 describe('generation task restart recovery', () => {
@@ -74,18 +74,26 @@ describe('generation task restart recovery', () => {
     });
     await clickTestId('generation-job-start');
 
-    await browser.waitUntil(async () => {
-      const [gate, jobs] = await Promise.all([callMockGate('getMockAiGateState'), getJobs(chapterId)]);
-      const latest = jobs[0];
-      return gate.paused
-        && gate.waitingRequests === 1
-        && gate.requestCount === 1
-        && latest?.status === 'running'
-        && latest.currentStep === 'draft_generation';
-    }, {
-      timeout: 30000,
-      timeoutMsg: 'generation job did not reach the paused draft_generation checkpoint',
-    });
+    await browser.waitUntil(
+      async () => {
+        const [gate, jobs] = await Promise.all([
+          callMockGate('getMockAiGateState'),
+          getJobs(chapterId),
+        ]);
+        const latest = jobs[0];
+        return (
+          gate.paused &&
+          gate.waitingRequests === 1 &&
+          gate.requestCount === 1 &&
+          latest?.status === 'running' &&
+          latest.currentStep === 'draft_generation'
+        );
+      },
+      {
+        timeout: 30000,
+        timeoutMsg: 'generation job did not reach the paused draft_generation checkpoint',
+      },
+    );
 
     const jobsBeforeRestart = await getJobs(chapterId);
     expect(jobsBeforeRestart).toHaveLength(1);
@@ -134,8 +142,12 @@ describe('generation task restart recovery', () => {
 
     const stepsAfterRecovery = await getSteps(recoveredJob.id);
     expect(stepsAfterRecovery).toHaveLength(stepsBeforeRestart.length + 1);
-    expect(stepsAfterRecovery.filter((step) => completedStepIds.includes(step.id)).map((step) => step.id).sort())
-      .toEqual(completedStepIds);
+    expect(
+      stepsAfterRecovery
+        .filter((step) => completedStepIds.includes(step.id))
+        .map((step) => step.id)
+        .sort(),
+    ).toEqual(completedStepIds);
     const recoveredSteps = recoverySteps(stepsAfterRecovery);
     expect(recoveredSteps).toHaveLength(1);
     const recoveryStep = recoveredSteps[0];

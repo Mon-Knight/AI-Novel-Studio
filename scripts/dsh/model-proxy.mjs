@@ -65,7 +65,12 @@ function parseUsage(raw) {
     const usage = candidates[index]?.usage;
     const tokenInput = Number(usage?.prompt_tokens ?? usage?.input_tokens);
     const tokenOutput = Number(usage?.completion_tokens ?? usage?.output_tokens);
-    if (Number.isSafeInteger(tokenInput) && tokenInput >= 0 && Number.isSafeInteger(tokenOutput) && tokenOutput >= 0) {
+    if (
+      Number.isSafeInteger(tokenInput) &&
+      tokenInput >= 0 &&
+      Number.isSafeInteger(tokenOutput) &&
+      tokenOutput >= 0
+    ) {
       return { tokenInput, tokenOutput };
     }
   }
@@ -105,7 +110,9 @@ const server = http.createServer(async (req, res) => {
     policyTicket = reservation?.ticket;
   } catch (error) {
     res.writeHead(Number(error.status) || 429, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: error.message, code: 'AI_REQUEST_POLICY_REJECTED' } }));
+    res.end(
+      JSON.stringify({ error: { message: error.message, code: 'AI_REQUEST_POLICY_REJECTED' } }),
+    );
     return;
   }
   console.log(
@@ -171,7 +178,9 @@ const server = http.createServer(async (req, res) => {
     );
   } catch (error) {
     if (policyTicket) {
-      await policyCall('/settle', { ticket: policyTicket, outcome: 'failed' }).catch(() => undefined);
+      await policyCall('/settle', { ticket: policyTicket, outcome: 'failed' }).catch(
+        () => undefined,
+      );
     }
     console.error('[model-proxy] upstream ' + (abortKind ?? 'failed'));
     if (!res.headersSent && !res.destroyed) {

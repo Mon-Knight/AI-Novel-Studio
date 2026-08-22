@@ -53,11 +53,13 @@ describe('T01 - React rapid chapter switching', () => {
     expect(screen.getByTestId('active-chapter').textContent).toBe('chapter-c');
 
     await act(async () => loads['chapter-c'].resolve('chapter-c-content'));
-    expect((screen.getByRole('textbox', { name: '正文' }) as HTMLTextAreaElement).value)
-      .toBe('chapter-c-content');
+    expect((screen.getByRole('textbox', { name: '正文' }) as HTMLTextAreaElement).value).toBe(
+      'chapter-c-content',
+    );
 
     await act(async () => loads['chapter-b'].resolve('late-chapter-b-content'));
-    expect((screen.getByRole('textbox', { name: '正文' }) as HTMLTextAreaElement).value)
-      .toBe('chapter-c-content');
+    expect((screen.getByRole('textbox', { name: '正文' }) as HTMLTextAreaElement).value).toBe(
+      'chapter-c-content',
+    );
   });
 });

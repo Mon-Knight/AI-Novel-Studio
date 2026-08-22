@@ -132,12 +132,13 @@ describe('tracked Provider pipeline', () => {
     await clickTestId('setting-tool');
     await clickTestId('setting-suggest');
     await waitForTestId('setting-suggestion');
-    await browser.waitUntil(async () => (
-      await browser.$$('[data-testid="setting-suggestion"]')
-    ).length === 3, {
-      timeout: 30000,
-      timeoutMsg: 'Mock setting candidates were not rendered',
-    });
+    await browser.waitUntil(
+      async () => (await browser.$$('[data-testid="setting-suggestion"]')).length === 3,
+      {
+        timeout: 30000,
+        timeoutMsg: 'Mock setting candidates were not rendered',
+      },
+    );
 
     const tasks = await bridgeCall<ExecutionTaskView[]>('list_ai_tasks', {
       input: { novelId: projectId, limit: 20 },
@@ -174,15 +175,20 @@ describe('tracked Provider pipeline', () => {
     expect(detail.contextSnapshot.sourceManifestJson.contractVersion).toBe('context_manifest_v1');
     expect(detail.contextSnapshot.sourceManifestJson.compilerVersion).toBe('context_compiler_v1');
     expect(detail.contextSnapshot.sourceManifestJson.compiledContextHash).toHaveLength(64);
-    expect(detail.contextSnapshot.sourceManifestJson.sources?.some((source) => (
-      source.sourceType === 'novel'
-      && source.sourceId === projectId
-      && source.contentHash?.length === 64
-      && ['included', 'truncated'].includes(source.status ?? '')
-    ))).toBe(true);
-    expect(detail.contextSnapshot.sourceManifestJson.sources?.some((source) => (
-      source.sourceType === 'chapter' && source.sourceId === chapterId
-    ))).toBe(true);
+    expect(
+      detail.contextSnapshot.sourceManifestJson.sources?.some(
+        (source) =>
+          source.sourceType === 'novel' &&
+          source.sourceId === projectId &&
+          source.contentHash?.length === 64 &&
+          ['included', 'truncated'].includes(source.status ?? ''),
+      ),
+    ).toBe(true);
+    expect(
+      detail.contextSnapshot.sourceManifestJson.sources?.some(
+        (source) => source.sourceType === 'chapter' && source.sourceId === chapterId,
+      ),
+    ).toBe(true);
     expect(detail.contextSnapshot.budgetJson.contractVersion).toBe('context_budget_v1');
     expect(detail.contextSnapshot.budgetJson.compiledContextTokens).toBeLessThanOrEqual(
       detail.contextSnapshot.budgetJson.availableContextTokens as number,
@@ -195,7 +201,9 @@ describe('tracked Provider pipeline', () => {
     expect(detail.constraintSnapshot.promptTemplateBody).not.toContain('E2E Provider Pipeline');
     expect(detail.constraintSnapshot.payloadJson.contractVersion).toBe('constraint_payload_v1');
     expect(detail.constraintSnapshot.payloadJson.compilerVersion).toBe('constraint_compiler_v1');
-    expect(detail.constraintSnapshot.payloadJson.toolPolicy?.registryVersion).toBe('tool_registry_v1');
+    expect(detail.constraintSnapshot.payloadJson.toolPolicy?.registryVersion).toBe(
+      'tool_registry_v1',
+    );
     expect(detail.constraintSnapshot.payloadJson.toolPolicy?.registryHash).toHaveLength(64);
     expect(detail.constraintSnapshot.payloadJson.toolPolicy?.allowedTools).toEqual([]);
     expect(detail.constraintSnapshot.providerOptionsJson.providerId).toBe('mock');
@@ -225,15 +233,25 @@ describe('tracked Provider pipeline', () => {
     }
     expect(proposalIds.every(Boolean)).toBe(true);
     expect(new Set(proposalIds).size).toBe(3);
-    const placements = await Promise.all(proposalIds.map((proposalId) => (
-      bridgeCall<PlacementBundleView>('get_placement_proposal', {
-        input: { proposalId },
-      })
-    )));
-    expect(placements.every((placement) => placement.plan.status === 'awaiting_confirmation')).toBe(true);
-    expect(placements.every((placement) => placement.proposal.expectedTargetVersion === 0)).toBe(true);
-    expect(placements.every((placement) => placement.proposal.expectedTargetHash.length === 64)).toBe(true);
-    expect(placements.every((placement) => placement.proposal.proposalHash.length === 64)).toBe(true);
+    const placements = await Promise.all(
+      proposalIds.map((proposalId) =>
+        bridgeCall<PlacementBundleView>('get_placement_proposal', {
+          input: { proposalId },
+        }),
+      ),
+    );
+    expect(placements.every((placement) => placement.plan.status === 'awaiting_confirmation')).toBe(
+      true,
+    );
+    expect(placements.every((placement) => placement.proposal.expectedTargetVersion === 0)).toBe(
+      true,
+    );
+    expect(
+      placements.every((placement) => placement.proposal.expectedTargetHash.length === 64),
+    ).toBe(true);
+    expect(placements.every((placement) => placement.proposal.proposalHash.length === 64)).toBe(
+      true,
+    );
     expect(await browser.$$('[data-testid="setting-suggestion-adopt"]')).toHaveLength(3);
 
     const preparedDiagnostics = await bridgeDiagnostics();
@@ -247,21 +265,25 @@ describe('tracked Provider pipeline', () => {
     const adoptButtons = await browser.$$('[data-testid="setting-suggestion-adopt"]');
     await adoptButtons[0].waitForClickable({ timeout: 30000 });
     await adoptButtons[0].click();
-    await browser.waitUntil(async () => {
-      const settings = await bridgeCall<WorldSettingView[]>('get_world_settings', {
-        novelId: projectId,
-      });
-      return settings.length === settingsBefore.length + 1;
-    }, {
-      timeout: 30000,
-      timeoutMsg: 'Confirmed placement did not create one world setting',
-    });
-    await browser.waitUntil(async () => (
-      await browser.$$('[data-testid="setting-suggestion"]')
-    ).length === 2, {
-      timeout: 30000,
-      timeoutMsg: 'Applied setting candidate remained in the review list',
-    });
+    await browser.waitUntil(
+      async () => {
+        const settings = await bridgeCall<WorldSettingView[]>('get_world_settings', {
+          novelId: projectId,
+        });
+        return settings.length === settingsBefore.length + 1;
+      },
+      {
+        timeout: 30000,
+        timeoutMsg: 'Confirmed placement did not create one world setting',
+      },
+    );
+    await browser.waitUntil(
+      async () => (await browser.$$('[data-testid="setting-suggestion"]')).length === 2,
+      {
+        timeout: 30000,
+        timeoutMsg: 'Applied setting candidate remained in the review list',
+      },
+    );
 
     const appliedPlacement = await bridgeCall<PlacementBundleView>('get_placement_proposal', {
       input: { proposalId: firstPlacement.proposal.proposalId },

@@ -7,10 +7,10 @@
 
 ## 1. 当前版本安装包
 
-| 包类型 | 路径 | 用途 |
-|--------|------|------|
-| NSIS | `src-tauri/target/release/bundle/nsis/AI Novel Studio_1.7.10_x64-setup.exe` | Windows 安装向导，推荐普通用户使用 |
-| MSI | `src-tauri/target/release/bundle/msi/AI Novel Studio_1.7.10_x64_en-US.msi` | Windows 企业部署 / 静默安装 |
+| 包类型 | 路径                                                                        | 用途                               |
+| ------ | --------------------------------------------------------------------------- | ---------------------------------- |
+| NSIS   | `src-tauri/target/release/bundle/nsis/AI Novel Studio_1.7.10_x64-setup.exe` | Windows 安装向导，推荐普通用户使用 |
+| MSI    | `src-tauri/target/release/bundle/msi/AI Novel Studio_1.7.10_x64_en-US.msi`  | Windows 企业部署 / 静默安装        |
 
 安装包由 `npm run tauri build` 生成，位于 `src-tauri/target/release/bundle/` 下。
 
@@ -42,11 +42,11 @@
 
 以下目录可以安全删除，因为它们可以通过构建命令重建：
 
-| 目录 | 大小估算 | 重建命令 |
-|------|----------|----------|
-| `node_modules/` | ~300-600 MB | `npm install` |
-| `src-tauri/target/` | ~3-10 GB | `cargo build` |
-| `dist/` | ~1-5 MB | `npm run build` |
+| 目录                | 大小估算    | 重建命令        |
+| ------------------- | ----------- | --------------- |
+| `node_modules/`     | ~300-600 MB | `npm install`   |
+| `src-tauri/target/` | ~3-10 GB    | `cargo build`   |
+| `dist/`             | ~1-5 MB     | `npm run build` |
 
 **注意**：删除 `src-tauri/target/` 会同时删除已构建的安装包。删除前请先归档当前版本安装包。
 
@@ -78,11 +78,11 @@
 
 ## 6. 相关脚本
 
-| 脚本 | 用途 | 是否修改文件 |
-|------|------|-------------|
-| `scripts/maintenance/report_large_files.ps1` | 扫描报告大文件 | ❌ 只读 |
-| `scripts/maintenance/archive_old_builds.ps1` | 归档旧安装包 | 默认 DRY-RUN |
-| `scripts/maintenance/clean_old_builds.ps1` | 清理构建缓存 | 默认 DRY-RUN |
+| 脚本                                         | 用途           | 是否修改文件 |
+| -------------------------------------------- | -------------- | ------------ |
+| `scripts/maintenance/report_large_files.ps1` | 扫描报告大文件 | ❌ 只读      |
+| `scripts/maintenance/archive_old_builds.ps1` | 归档旧安装包   | 默认 DRY-RUN |
+| `scripts/maintenance/clean_old_builds.ps1`   | 清理构建缓存   | 默认 DRY-RUN |
 
 ---
 

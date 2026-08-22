@@ -32,17 +32,17 @@
 
 `QualityCheckReport`：`src/types/qualityCheck.ts:52-61`；items：`63-84`。
 
-| 要求字段 | 当前字段 | 状态 | 说明 |
-|---|---|---|---|
-| `quality_task_id` | `aiTaskId?` 类型/列存在 | 未接通 | `runCheck` 创建 task，但 report create/save 不接收 task id |
-| `project_id` | `novelId` | 有 | 固定 |
-| `document_id` | `chapterId` + `draftId` | 有 | 精确到草稿 |
-| `document_revision` | `draftVersion` | 有 | save result 时写入 |
-| `content_hash` | `contentHash` | 有 | 检测前计算，修复前比较 |
-| `content_length` | `contentLength` | 有 | 辅助证据 |
-| `selected_range` | 无 | 缺失 | 当前只检测全文 |
-| `context_snapshot_id` | 无 | 缺失 | context read log 与报告无直接 FK |
-| `checked_at` | `checkedAt` | 有 | 检测快照时间 |
+| 要求字段              | 当前字段                | 状态   | 说明                                                       |
+| --------------------- | ----------------------- | ------ | ---------------------------------------------------------- |
+| `quality_task_id`     | `aiTaskId?` 类型/列存在 | 未接通 | `runCheck` 创建 task，但 report create/save 不接收 task id |
+| `project_id`          | `novelId`               | 有     | 固定                                                       |
+| `document_id`         | `chapterId` + `draftId` | 有     | 精确到草稿                                                 |
+| `document_revision`   | `draftVersion`          | 有     | save result 时写入                                         |
+| `content_hash`        | `contentHash`           | 有     | 检测前计算，修复前比较                                     |
+| `content_length`      | `contentLength`         | 有     | 辅助证据                                                   |
+| `selected_range`      | 无                      | 缺失   | 当前只检测全文                                             |
+| `context_snapshot_id` | 无                      | 缺失   | context read log 与报告无直接 FK                           |
+| `checked_at`          | `checkedAt`             | 有     | 检测快照时间                                               |
 
 结论：报告对**正文文本**绑定强，对**任务/上下文/选区**绑定不完整。置信度：代码确认。
 
@@ -131,7 +131,9 @@
 `generationJobService` 从质量 items 构造：
 
 ```ts
-{ issueId, severity, riskLevel, quote, replacementText, rationale }
+{
+  (issueId, severity, riskLevel, quote, replacementText, rationale);
+}
 ```
 
 只对 severity low 且 quote ≤120 的候选判为 low；应用时检查当前候选正文包含 quote，然后执行一次 `String.replace`，保存为新的非正式草稿：`generationJobService.ts:312-355,783-825`。
@@ -175,33 +177,32 @@
 
 ## 8. Placement 能力逐项检查
 
-| 能力 | 通用正文 | 章节 patch | 设定库采纳 |
-|---|---|---|---|
-| placement plan | 无 | transient patch list | 单 candidate payload，不是 plan |
-| 目标类型 | 无 | 隐含 chapter draft | character/world/rule |
-| 目标 ID | 无 | job chapterId / savedDraft | 写入后生成 |
-| 操作类型 | append/replace_all | replace quote | create |
-| 基础版本 | 无 | 无 | 无 |
-| 置信度 | 无 | 无 | 无 |
-| 冲突检测 | 无 | quote exists | 无 |
-| 锁定内容保护 | 无 | 无 | 无 |
-| 拆分多目标 | 无 | 同草稿多个 patch | 不支持单记录拆分 |
-| 同事务多目标 | 无 | 不适用/单草稿 | 无 |
-| 部分失败整体回滚 | 无 | 内存 patch 后单次 draft create；无应用记录 | 无 |
-| 恢复前状态 | 未保存时依赖 textarea undo | 原草稿版本仍在 | 无正式 undo |
-| diff 预览 | 无 | 无 UI diff | 仅编辑 JSON/字段 |
+| 能力             | 通用正文                   | 章节 patch                                 | 设定库采纳                      |
+| ---------------- | -------------------------- | ------------------------------------------ | ------------------------------- |
+| placement plan   | 无                         | transient patch list                       | 单 candidate payload，不是 plan |
+| 目标类型         | 无                         | 隐含 chapter draft                         | character/world/rule            |
+| 目标 ID          | 无                         | job chapterId / savedDraft                 | 写入后生成                      |
+| 操作类型         | append/replace_all         | replace quote                              | create                          |
+| 基础版本         | 无                         | 无                                         | 无                              |
+| 置信度           | 无                         | 无                                         | 无                              |
+| 冲突检测         | 无                         | quote exists                               | 无                              |
+| 锁定内容保护     | 无                         | 无                                         | 无                              |
+| 拆分多目标       | 无                         | 同草稿多个 patch                           | 不支持单记录拆分                |
+| 同事务多目标     | 无                         | 不适用/单草稿                              | 无                              |
+| 部分失败整体回滚 | 无                         | 内存 patch 后单次 draft create；无应用记录 | 无                              |
+| 恢复前状态       | 未保存时依赖 textarea undo | 原草稿版本仍在                             | 无正式 undo                     |
+| diff 预览        | 无                         | 无 UI diff                                 | 仅编辑 JSON/字段                |
 
 ## 9. 质量/放置主要风险
 
-| 风险 | 等级 | 结论 |
-|---|---|---|
-| 旧报告 item 被改挂到新 report，历史快照不稳定 | P1 | 代码确认 |
-| save result 非事务，completed report 可只有部分 items | P1 | 代码确认 |
-| 新 pending report 遮住旧 completed report | P1 | 代码确认 |
-| 质量检查迟到回调更新新章节 UI | P0 | 代码确认，详见状态审计 |
-| 旧报告定位仍可作用于新正文 | P1 | 代码确认 |
-| fix status `adopted` 与正式 adopted 正文含义冲突 | P1 | 代码确认 |
-| auto patch 无版本/锁保护，首处字符串替换 | P1 | 代码确认；只写候选，降低为非 P0 |
-| 设定采纳跨 localStorage/SQLite 非原子，可重复创建 | P1 | 高度可能 |
-| 不存在通用安全自动放置 | P1（能力缺口） | 代码确认 |
-
+| 风险                                                  | 等级           | 结论                            |
+| ----------------------------------------------------- | -------------- | ------------------------------- |
+| 旧报告 item 被改挂到新 report，历史快照不稳定         | P1             | 代码确认                        |
+| save result 非事务，completed report 可只有部分 items | P1             | 代码确认                        |
+| 新 pending report 遮住旧 completed report             | P1             | 代码确认                        |
+| 质量检查迟到回调更新新章节 UI                         | P0             | 代码确认，详见状态审计          |
+| 旧报告定位仍可作用于新正文                            | P1             | 代码确认                        |
+| fix status `adopted` 与正式 adopted 正文含义冲突      | P1             | 代码确认                        |
+| auto patch 无版本/锁保护，首处字符串替换              | P1             | 代码确认；只写候选，降低为非 P0 |
+| 设定采纳跨 localStorage/SQLite 非原子，可重复创建     | P1             | 高度可能                        |
+| 不存在通用安全自动放置                                | P1（能力缺口） | 代码确认                        |

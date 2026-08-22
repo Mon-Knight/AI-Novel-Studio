@@ -11,37 +11,37 @@
 
 ### 1.1 前端依赖
 
-| 包 | 当前版本 | Tauri 2 对应版本 |
-|----|---------|-----------------|
-| `@tauri-apps/api` | 1.6.0 | `@tauri-apps/api` 2.x |
+| 包                | 当前版本    | Tauri 2 对应版本      |
+| ----------------- | ----------- | --------------------- |
+| `@tauri-apps/api` | 1.6.0       | `@tauri-apps/api` 2.x |
 | `@tauri-apps/cli` | 1.6.3 (dev) | `@tauri-apps/cli` 2.x |
-| react | 18.3.1 | 不变 |
-| react-router-dom | 6.23.1 | 不变 |
-| vite | 5.4.21 | 不变 |
+| react             | 18.3.1      | 不变                  |
+| react-router-dom  | 6.23.1      | 不变                  |
+| vite              | 5.4.21      | 不变                  |
 
 ### 1.2 Rust 依赖
 
-| crate | 当前版本 | Tauri 2 对应版本 |
-|-------|---------|-----------------|
-| tauri | 1.8.3 (resolved) | tauri 2.x |
-| tauri-build | 1.5 | tauri-build 2.x |
-| rusqlite | 0.31 (bundled) | 不变 |
-| serde / serde_json | 1.0 | 不变 |
-| reqwest | 0.11 (blocking, rustls) | 不变 |
-| uuid / chrono / sha2 | 各版本 | 不变 |
+| crate                | 当前版本                | Tauri 2 对应版本 |
+| -------------------- | ----------------------- | ---------------- |
+| tauri                | 1.8.3 (resolved)        | tauri 2.x        |
+| tauri-build          | 1.5                     | tauri-build 2.x  |
+| rusqlite             | 0.31 (bundled)          | 不变             |
+| serde / serde_json   | 1.0                     | 不变             |
+| reqwest              | 0.11 (blocking, rustls) | 不变             |
+| uuid / chrono / sha2 | 各版本                  | 不变             |
 
 ### 1.3 Rust 模块结构（8 个源文件）
 
-| 文件 | 功能 | Tauri 2 兼容风险 |
-|------|------|-----------------|
-| `main.rs` | Tauri Builder + 窗口管理 + 单实例 | 🔴 高 — `tauri::Builder` API 变化 |
-| `commands.rs` | 所有 CRUD commands | 🟡 中 — `#[tauri::command]` 签名不变，但 invoke handler 注册方式变化 |
-| `ai.rs` | AI 调用（reqwest + blocking） | 🟢 低 — 纯逻辑，无 Tauri API 依赖 |
-| `db.rs` | SQLite 初始化 | 🟢 低 — 纯 `rusqlite`，无 Tauri API |
-| `large_text_save.rs` | 大文本分片存储 | 🟢 低 — 纯逻辑 + 文件系统 |
-| `outline_commands.rs` | 大纲 CRUD | 🟡 中 — command 注册方式变化 |
-| `window_state.rs` | 窗口状态持久化 + 单实例锁 | 🔴 高 — 依赖 `tauri::Window` API |
-| `system_accent.rs` | Windows 注册表 Accent 读取 | 🟢 低 — 纯 `std::process::Command`，无 Tauri API |
+| 文件                  | 功能                              | Tauri 2 兼容风险                                                     |
+| --------------------- | --------------------------------- | -------------------------------------------------------------------- |
+| `main.rs`             | Tauri Builder + 窗口管理 + 单实例 | 🔴 高 — `tauri::Builder` API 变化                                    |
+| `commands.rs`         | 所有 CRUD commands                | 🟡 中 — `#[tauri::command]` 签名不变，但 invoke handler 注册方式变化 |
+| `ai.rs`               | AI 调用（reqwest + blocking）     | 🟢 低 — 纯逻辑，无 Tauri API 依赖                                    |
+| `db.rs`               | SQLite 初始化                     | 🟢 低 — 纯 `rusqlite`，无 Tauri API                                  |
+| `large_text_save.rs`  | 大文本分片存储                    | 🟢 低 — 纯逻辑 + 文件系统                                            |
+| `outline_commands.rs` | 大纲 CRUD                         | 🟡 中 — command 注册方式变化                                         |
+| `window_state.rs`     | 窗口状态持久化 + 单实例锁         | 🔴 高 — 依赖 `tauri::Window` API                                     |
+| `system_accent.rs`    | Windows 注册表 Accent 读取        | 🟢 低 — 纯 `std::process::Command`，无 Tauri API                     |
 
 ---
 
@@ -58,6 +58,7 @@
 ```
 
 Tauri 2 的 feature 体系重做：
+
 - `shell-open` → 通过 `tauri-plugin-shell` 提供
 - 插件系统全面独立
 
@@ -98,6 +99,7 @@ Tauri 2 的 feature 体系重做：
 ```
 
 核心变更：
+
 - `App` → `AppHandle` 类型变化
 - `Manager` trait 方法调整
 - `Window::scale_factor()` / `outer_position()` → 可能变化
@@ -107,28 +109,30 @@ Tauri 2 的 feature 体系重做：
 
 此文件是本项目最依赖 Tauri API 的模块。API 调查：
 
-| 当前 API | Tauri 2 状态 | 风险 |
-|----------|-------------|------|
-| `window.scale_factor()` | 保留 | 🟢 |
-| `window.outer_position()` | 保留 | 🟢 |
-| `window.outer_size()` | 保留 | 🟢 |
-| `window.is_maximized()` | 保留 | 🟢 |
-| `window.is_minimized()` | 保留 | 🟢 |
-| `window.set_position(Physical(...))` | 保留 | 🟢 |
-| `window.set_size(Logical(...))` | 保留 | 🟢 |
-| `window.maximize()` | 保留 | 🟢 |
-| `window.unminimize()` | 保留 | 🟢 |
-| `window.set_focus()` | 保留 | 🟢 |
-| `tauri::Size::Logical` | 路径可能变化 | 🟡 |
-| `tauri::Position::Physical` | 路径可能变化 | 🟡 |
-| `tauri::LogicalSize` / `tauri::PhysicalPosition` | 路径可能变化 | 🟡 |
+| 当前 API                                         | Tauri 2 状态 | 风险 |
+| ------------------------------------------------ | ------------ | ---- |
+| `window.scale_factor()`                          | 保留         | 🟢   |
+| `window.outer_position()`                        | 保留         | 🟢   |
+| `window.outer_size()`                            | 保留         | 🟢   |
+| `window.is_maximized()`                          | 保留         | 🟢   |
+| `window.is_minimized()`                          | 保留         | 🟢   |
+| `window.set_position(Physical(...))`             | 保留         | 🟢   |
+| `window.set_size(Logical(...))`                  | 保留         | 🟢   |
+| `window.maximize()`                              | 保留         | 🟢   |
+| `window.unminimize()`                            | 保留         | 🟢   |
+| `window.set_focus()`                             | 保留         | 🟢   |
+| `tauri::Size::Logical`                           | 路径可能变化 | 🟡   |
+| `tauri::Position::Physical`                      | 路径可能变化 | 🟡   |
+| `tauri::LogicalSize` / `tauri::PhysicalPosition` | 路径可能变化 | 🟡   |
 
 ### 2.5 前端 @tauri-apps/api 变更
 
 当前前端仅用到：
+
 - `import { invoke } from '@tauri-apps/api'` — 用于 Accent Color 读取
 
 Tauri 2 中：
+
 - `invoke` 路径保持不变
 - 但需要在 `Cargo.toml` 中显式启用核心插件
 
@@ -146,18 +150,18 @@ fn main() {
 
 ## 3. 现有功能 Tauri 2 兼容风险评估
 
-| # | 功能 | 风险 | 详情 |
-|---|------|------|------|
-| 1 | SQLite 数据库初始化 | 🟢 零 | `rusqlite`，与 Tauri 无关 |
-| 2 | AI API 调用 | 🟢 零 | `reqwest`，纯网络 |
-| 3 | 系统 Accent Color | 🟢 零 | `std::process::Command`，无 Tauri API |
-| 4 | 右键菜单禁用 | 🟢 零 | 纯 DOM 事件 |
-| 5 | 暗色模式变量 | 🟢 零 | 纯 CSS |
-| 6 | LoadingModal | 🟢 零 | 纯 React 组件 |
-| 7 | 窗口状态持久化 | 🟡 中 | 依赖多个 `Window` API，但 Tauri 2 基本保留 |
-| 8 | 单实例锁+聚焦 | 🟡 中 | `window.unminimize()` / `set_focus()` 保留；`app.handle()` 路径变化 |
-| 9 | 文件导入导出 | 🟢 零 | 纯前端 + Rust 文件系统 |
-| 10 | `tauri dev` / `tauri build` | 🟡 中 | CLI 命令保持不变，但配置格式需迁移 |
+| #   | 功能                        | 风险  | 详情                                                                |
+| --- | --------------------------- | ----- | ------------------------------------------------------------------- |
+| 1   | SQLite 数据库初始化         | 🟢 零 | `rusqlite`，与 Tauri 无关                                           |
+| 2   | AI API 调用                 | 🟢 零 | `reqwest`，纯网络                                                   |
+| 3   | 系统 Accent Color           | 🟢 零 | `std::process::Command`，无 Tauri API                               |
+| 4   | 右键菜单禁用                | 🟢 零 | 纯 DOM 事件                                                         |
+| 5   | 暗色模式变量                | 🟢 零 | 纯 CSS                                                              |
+| 6   | LoadingModal                | 🟢 零 | 纯 React 组件                                                       |
+| 7   | 窗口状态持久化              | 🟡 中 | 依赖多个 `Window` API，但 Tauri 2 基本保留                          |
+| 8   | 单实例锁+聚焦               | 🟡 中 | `window.unminimize()` / `set_focus()` 保留；`app.handle()` 路径变化 |
+| 9   | 文件导入导出                | 🟢 零 | 纯前端 + Rust 文件系统                                              |
+| 10  | `tauri dev` / `tauri build` | 🟡 中 | CLI 命令保持不变，但配置格式需迁移                                  |
 
 **总体风险：🟡 中 — 可迁移，但需 1-2 天适配。**
 
@@ -187,6 +191,7 @@ DwmSetWindowAttribute(hwnd, DWMWA_MICA, &enable, sizeof(BOOL));
 ```
 
 实现要点：
+
 1. 获取 WebView2 的父窗口 HWND
 2. 调用 `DwmSetWindowAttribute`
 3. 检测 Windows 版本决定用 Mica (Win11) 还是 Acrylic (Win10) 还是回退纯色
@@ -195,12 +200,12 @@ DwmSetWindowAttribute(hwnd, DWMWA_MICA, &enable, sizeof(BOOL));
 
 ### 4.3 Windows 10/11 兼容
 
-| Windows 版本 | 支持 | 方案 |
-|-------------|------|------|
-| Windows 11 22H2+ | ✅ Mica | `DWMSBT_MAINWINDOW` |
-| Windows 10 1803+ | ✅ Acrylic | `DWMWA_MICA` 或 `DwmEnableBlurBehindWindow` |
-| Windows 10 1709- | ❌ 不支持 | 回退静态背景 |
-| 远程桌面 / 虚拟机 | ⚠️ 部分 | 自动检测回退 |
+| Windows 版本      | 支持       | 方案                                        |
+| ----------------- | ---------- | ------------------------------------------- |
+| Windows 11 22H2+  | ✅ Mica    | `DWMSBT_MAINWINDOW`                         |
+| Windows 10 1803+  | ✅ Acrylic | `DWMWA_MICA` 或 `DwmEnableBlurBehindWindow` |
+| Windows 10 1709-  | ❌ 不支持  | 回退静态背景                                |
+| 远程桌面 / 虚拟机 | ⚠️ 部分    | 自动检测回退                                |
 
 ### 4.4 WebView 透明陷阱
 
@@ -215,39 +220,41 @@ DwmSetWindowAttribute(hwnd, DWMWA_MICA, &enable, sizeof(BOOL));
 
 ### 路线 A：继续 Tauri 1.7 + Win32 API
 
-| 维度 | 评价 |
-|------|------|
-| 开发成本 | 🟡 中 — 需接入 `windows` crate，HWND 获取路径需探索 |
-| 风险 | 🟡 中 — Win32 API 稳定但 `windows` crate 版本兼容复杂 |
-| 对现有功能影响 | 🟢 低 — 不修改架构，只在 main.rs 增加初始化逻辑 |
-| Mica 效果 | ⚠️ 依赖 Win32 API 正确调用 |
-| 推荐度 | 🟡 可行但不最优 |
+| 维度           | 评价                                                  |
+| -------------- | ----------------------------------------------------- |
+| 开发成本       | 🟡 中 — 需接入 `windows` crate，HWND 获取路径需探索   |
+| 风险           | 🟡 中 — Win32 API 稳定但 `windows` crate 版本兼容复杂 |
+| 对现有功能影响 | 🟢 低 — 不修改架构，只在 main.rs 增加初始化逻辑       |
+| Mica 效果      | ⚠️ 依赖 Win32 API 正确调用                            |
+| 推荐度         | 🟡 可行但不最优                                       |
 
 **Cargo.toml 新增依赖：**
+
 ```toml
 windows = { version = "0.58", features = ["Win32_UI_Controls", "Win32_Graphics_Dwm", "Win32_Foundation"] }
 ```
+
 约 2-3MB 新增编译产物。
 
 ### 路线 B：升级 Tauri 2.x + 未来 Mica
 
-| 维度 | 评价 |
-|------|------|
-| 开发成本 | 🔴 高 — 1-2 天迁移 + 回归测试 |
-| 风险 | 🟡 中 — API 破坏性变化可控但需全量回归 |
+| 维度           | 评价                                           |
+| -------------- | ---------------------------------------------- |
+| 开发成本       | 🔴 高 — 1-2 天迁移 + 回归测试                  |
+| 风险           | 🟡 中 — API 破坏性变化可控但需全量回归         |
 | 对现有功能影响 | 🔴 中 — 8 个命令注册、窗口状态、单实例均需适配 |
-| Mica 效果 | 🟡 需配合 Win32 API，Tauri 2 无内建 Mica |
-| 推荐度 | 🟢 长期最优 |
+| Mica 效果      | 🟡 需配合 Win32 API，Tauri 2 无内建 Mica       |
+| 推荐度         | 🟢 长期最优                                    |
 
 ### 路线 C：暂缓 Mica，优化 CSS 原生感
 
-| 维度 | 评价 |
-|------|------|
-| 开发成本 | 🟢 低 — 纯 CSS 调整 |
-| 风险 | 🟢 零 |
-| 对现有功能影响 | 🟢 无 |
-| Mica 效果 | ❌ 无 |
-| 推荐度 | 🟢 当前推荐 |
+| 维度           | 评价                |
+| -------------- | ------------------- |
+| 开发成本       | 🟢 低 — 纯 CSS 调整 |
+| 风险           | 🟢 零               |
+| 对现有功能影响 | 🟢 无               |
+| Mica 效果      | ❌ 无               |
+| 推荐度         | 🟢 当前推荐         |
 
 ---
 
@@ -299,6 +306,7 @@ Native Feel P2.2：原生 Dialog 与通知最小落地
 ```
 
 内容：
+
 1. 用 `tauri::api::dialog::ask()` 替换 1-2 个危险操作确认框
 2. 封装 `nativeDialog.ts` 工具
 3. 评估 `tauri-plugin-notification`（Tauri 1.x 兼容）

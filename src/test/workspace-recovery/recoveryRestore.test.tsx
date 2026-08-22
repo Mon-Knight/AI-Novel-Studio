@@ -56,21 +56,24 @@ describe('T09 - restore a matching recovery snapshot', () => {
         onEditorContentChange={onEditorContentChange}
       />,
     );
-    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value)
-      .toBe('当前正文'));
+    await waitFor(() =>
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('当前正文'),
+    );
 
     act(() => {
       expect(editorRef.current?.restoreRecovery('异常退出前正文', 1, 3)).toBe(true);
     });
 
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('异常退出前正文');
-    expect(onEditorContentChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      chapterId: 'chapter-a',
-      draftId: 'draft-a',
-      content: '异常退出前正文',
-      isDirty: true,
-      contentAvailable: true,
-    }));
+    expect(onEditorContentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        chapterId: 'chapter-a',
+        draftId: 'draft-a',
+        content: '异常退出前正文',
+        isDirty: true,
+        contentAvailable: true,
+      }),
+    );
     expect(createSpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
   });

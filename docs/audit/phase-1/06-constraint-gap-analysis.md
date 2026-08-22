@@ -15,28 +15,28 @@
 
 主要章节生成从 `buildFreshChapterGenerationContext` 开始，重新读取章节，再由 `buildChapterContext` 聚合数据：`src/services/prompt/contextBuilder.ts:85-132,395-440`。
 
-| 上下文 | 数据源 | 自动用于旧章节生成 | 用于章节工程 job | 可靠性/缺口 | 置信度 |
-|---|---|---|---|---|---|
-| 当前项目 | route `novelId` / `novels` | 是 | 是 | 异步回调缺 project generation guard | 代码确认 |
-| 当前章节 | `activeChapterId` + fresh repository read | 是 | 是 | UI active 与 task target 可分叉 | 代码确认 |
-| 当前章节目标 | `chapters.goal` | 是 | 是 | 未保存 goal draft 可被 cached outline 路径影响；无任务版本号 | 代码确认 |
-| 总纲 | active master outline → novel.outline → description fallback | 是 | 是 | 有来源标记；没有 base revision | 代码确认 |
-| 分卷大纲 | active volume outline → volume fields | 是 | 是 | 有来源标记 | 代码确认 |
-| 章节大纲 | cached draft / chapter field / active outline 选择 | 是 | 是 | 多事实源通过时间比较解决，仍无版本实体绑定 | 代码确认 |
-| 前文/上下文 | chapter summaries + volume context records | 是 | 是 | 依赖摘要是否及时过期；读取失败被吞掉 | 代码确认 |
-| 世界设定 | active world settings | 是 | 是 | 只取 active/最近若干；无冲突规则 engine | 代码确认 |
-| 世界规则 | active rule systems | 是 | 是 | prompt 约束为主 | 代码确认 |
-| 主角 | protagonist/novel protagonists | 是 | 是 | 含能力限制/禁止行为 | 代码确认 |
-| 本章出场角色 | `chapter_characters` + characters | 是 | 是 | 老数据无 mustAppear 时全设为必须出场 | 代码确认 |
-| 人物当前状态 | `characters.currentState` | 部分 | 部分 | `character_states` 历史/knowledgeState 未被 contextBuilder 加载 | 代码确认 |
-| 本章事件 | `chapter_events` | 是 | 是 | forbidden/discarded 被过滤，required 有标签 | 代码确认 |
-| 风格 | 显式选择的 style profile | 是 | 是 | 未选择则可能 fallback；需要用户选择 |
-| 输出/字数 | chapter target > output profile > 4000 | 是 | 是 | 自动优先级明确 | 代码确认 |
-| 当前编辑器全文 | 仅 rewrite 时传 `draftContent` | 条件使用 | job 始终可加入 current_editor section | new 模式可能忽略未保存正文 | 代码确认 |
-| 当前选区 | Editor snapshot 有 offsets | **否** | 否 | writingContext 未接快照，selectedText 恒空 | 代码确认 |
-| 当前场景 | 无活动 scene 与光标映射 | 否 | scene plan 全量进入 prompt | 不知道用户正在写哪个 scene | 代码确认 |
-| 伏笔 | chapter summary/context record 可存 | 间接 | 间接 | 没有统一 active/resolved/target chapter 约束验证 | 代码确认 |
-| 锁定内容 | 无通用锁表/范围 | 否 | `forbiddenChanges` 作为 prompt | 没有 range/hash/program gate | 代码确认 |
+| 上下文         | 数据源                                                       | 自动用于旧章节生成 | 用于章节工程 job                      | 可靠性/缺口                                                     | 置信度   |
+| -------------- | ------------------------------------------------------------ | ------------------ | ------------------------------------- | --------------------------------------------------------------- | -------- |
+| 当前项目       | route `novelId` / `novels`                                   | 是                 | 是                                    | 异步回调缺 project generation guard                             | 代码确认 |
+| 当前章节       | `activeChapterId` + fresh repository read                    | 是                 | 是                                    | UI active 与 task target 可分叉                                 | 代码确认 |
+| 当前章节目标   | `chapters.goal`                                              | 是                 | 是                                    | 未保存 goal draft 可被 cached outline 路径影响；无任务版本号    | 代码确认 |
+| 总纲           | active master outline → novel.outline → description fallback | 是                 | 是                                    | 有来源标记；没有 base revision                                  | 代码确认 |
+| 分卷大纲       | active volume outline → volume fields                        | 是                 | 是                                    | 有来源标记                                                      | 代码确认 |
+| 章节大纲       | cached draft / chapter field / active outline 选择           | 是                 | 是                                    | 多事实源通过时间比较解决，仍无版本实体绑定                      | 代码确认 |
+| 前文/上下文    | chapter summaries + volume context records                   | 是                 | 是                                    | 依赖摘要是否及时过期；读取失败被吞掉                            | 代码确认 |
+| 世界设定       | active world settings                                        | 是                 | 是                                    | 只取 active/最近若干；无冲突规则 engine                         | 代码确认 |
+| 世界规则       | active rule systems                                          | 是                 | 是                                    | prompt 约束为主                                                 | 代码确认 |
+| 主角           | protagonist/novel protagonists                               | 是                 | 是                                    | 含能力限制/禁止行为                                             | 代码确认 |
+| 本章出场角色   | `chapter_characters` + characters                            | 是                 | 是                                    | 老数据无 mustAppear 时全设为必须出场                            | 代码确认 |
+| 人物当前状态   | `characters.currentState`                                    | 部分               | 部分                                  | `character_states` 历史/knowledgeState 未被 contextBuilder 加载 | 代码确认 |
+| 本章事件       | `chapter_events`                                             | 是                 | 是                                    | forbidden/discarded 被过滤，required 有标签                     | 代码确认 |
+| 风格           | 显式选择的 style profile                                     | 是                 | 是                                    | 未选择则可能 fallback；需要用户选择                             |
+| 输出/字数      | chapter target > output profile > 4000                       | 是                 | 是                                    | 自动优先级明确                                                  | 代码确认 |
+| 当前编辑器全文 | 仅 rewrite 时传 `draftContent`                               | 条件使用           | job 始终可加入 current_editor section | new 模式可能忽略未保存正文                                      | 代码确认 |
+| 当前选区       | Editor snapshot 有 offsets                                   | **否**             | 否                                    | writingContext 未接快照，selectedText 恒空                      | 代码确认 |
+| 当前场景       | 无活动 scene 与光标映射                                      | 否                 | scene plan 全量进入 prompt            | 不知道用户正在写哪个 scene                                      | 代码确认 |
+| 伏笔           | chapter summary/context record 可存                          | 间接               | 间接                                  | 没有统一 active/resolved/target chapter 约束验证                | 代码确认 |
+| 锁定内容       | 无通用锁表/范围                                              | 否                 | `forbiddenChanges` 作为 prompt        | 没有 range/hash/program gate                                    | 代码确认 |
 
 ## 3. 章节工程约束现状
 
@@ -70,80 +70,80 @@
 
 ### 4.1 续写当前场景
 
-| 仍需用户表达/重复的信息 | 分类 | 原因 |
-|---|---|---|
-| “从当前光标/当前场景继续” | A/B | 有全文和 cursor offset，但没有 cursor→scene 映射；writingContext cursor 未接通 |
-| 当前未保存正文 | A/C | editor 有，但旧 new-generate 不自动传；rewrite/job 才传 |
-| 当前场景目标/冲突/地点 | A/C | engineering scene plan 可存，但系统不知道 active scene；老项目可能为空 |
-| 本次意图（推进、对话、转场等） | D | 创作选择必须即时决定 |
-| 不可改内容 | B/C | engineering forbiddenChanges 可人工填，但无正文范围锁 |
+| 仍需用户表达/重复的信息        | 分类 | 原因                                                                           |
+| ------------------------------ | ---- | ------------------------------------------------------------------------------ |
+| “从当前光标/当前场景继续”      | A/B  | 有全文和 cursor offset，但没有 cursor→scene 映射；writingContext cursor 未接通 |
+| 当前未保存正文                 | A/C  | editor 有，但旧 new-generate 不自动传；rewrite/job 才传                        |
+| 当前场景目标/冲突/地点         | A/C  | engineering scene plan 可存，但系统不知道 active scene；老项目可能为空         |
+| 本次意图（推进、对话、转场等） | D    | 创作选择必须即时决定                                                           |
+| 不可改内容                     | B/C  | engineering forbiddenChanges 可人工填，但无正文范围锁                          |
 
 ### 4.2 重写选区
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 选区文本/范围 | A | Editor 已上报 offsets，但统一 context 未读取，也无 replace_selection apply |
-| 选区基础版本/hash | B | 任务对象没有 selection/base revision snapshot |
-| 重写风格/目标 | D（风格方案可 A） | 用户需决定本次变化；已有 style 可自动带入 |
-| 选区外禁止修改 | B | 无锁定范围和 diff gate |
+| 信息              | 分类              | 原因                                                                       |
+| ----------------- | ----------------- | -------------------------------------------------------------------------- |
+| 选区文本/范围     | A                 | Editor 已上报 offsets，但统一 context 未读取，也无 replace_selection apply |
+| 选区基础版本/hash | B                 | 任务对象没有 selection/base revision snapshot                              |
+| 重写风格/目标     | D（风格方案可 A） | 用户需决定本次变化；已有 style 可自动带入                                  |
+| 选区外禁止修改    | B                 | 无锁定范围和 diff gate                                                     |
 
 ### 4.3 生成下一章
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 项目、当前卷、已有总纲/前文 | 已自动 | context builder 自动加载 |
-| 下一章记录/章节目标 | C/D | 必须先创建/选择章节；若规划缺失需用户补充 |
-| 后续章节大纲 | C | 当前章节、总纲、卷纲会用；“下一章之后的章节计划”未显式聚合 |
-| 出场角色/事件 | C | 有 chapter 关系时自动用；为空时不能可靠推断 |
-| 场景计划/信息释放 | C/D | engineering 可存，但多为用户手工填写，不会从项目自动推导并验证 |
-| 字数/文风 | 已自动或 D | 有优先级 fallback；用户可覆盖 |
+| 信息                        | 分类       | 原因                                                           |
+| --------------------------- | ---------- | -------------------------------------------------------------- |
+| 项目、当前卷、已有总纲/前文 | 已自动     | context builder 自动加载                                       |
+| 下一章记录/章节目标         | C/D        | 必须先创建/选择章节；若规划缺失需用户补充                      |
+| 后续章节大纲                | C          | 当前章节、总纲、卷纲会用；“下一章之后的章节计划”未显式聚合     |
+| 出场角色/事件               | C          | 有 chapter 关系时自动用；为空时不能可靠推断                    |
+| 场景计划/信息释放           | C/D        | engineering 可存，但多为用户手工填写，不会从项目自动推导并验证 |
+| 字数/文风                   | 已自动或 D | 有优先级 fallback；用户可覆盖                                  |
 
 ### 4.4 创建人物
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 当前项目/章节/已有角色 | 已自动 | Character service 可读项目与章节上下文 |
-| 人物身份、目标、阵营、性格 | D | AI 可给候选，但必须用户决定是否成为正式事实 |
-| 与已有事实的冲突 | B/C | 有数据但无 uniqueness/relationship/knowledge validator |
-| 首次出场与知识边界 | B/C | 字段/character state 部分存在，生成候选未形成强约束 |
+| 信息                       | 分类   | 原因                                                   |
+| -------------------------- | ------ | ------------------------------------------------------ |
+| 当前项目/章节/已有角色     | 已自动 | Character service 可读项目与章节上下文                 |
+| 人物身份、目标、阵营、性格 | D      | AI 可给候选，但必须用户决定是否成为正式事实            |
+| 与已有事实的冲突           | B/C    | 有数据但无 uniqueness/relationship/knowledge validator |
+| 首次出场与知识边界         | B/C    | 字段/character state 部分存在，生成候选未形成强约束    |
 
 ### 4.5 修改人物
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 目标人物 ID | D/A | UI 可选择；没有通用 AI 修改人物入口/operation plan |
-| 修改字段与保留字段 | D/B | 必须由用户决定；无 field lock/base version |
-| 当前人物状态/知识 | A/C | `character_states` 可存，但主生成 builder 不加载其最新记录 |
-| 修改影响哪些章节/事实 | B | 无依赖分析与变更计划 |
+| 信息                  | 分类 | 原因                                                       |
+| --------------------- | ---- | ---------------------------------------------------------- |
+| 目标人物 ID           | D/A  | UI 可选择；没有通用 AI 修改人物入口/operation plan         |
+| 修改字段与保留字段    | D/B  | 必须由用户决定；无 field lock/base version                 |
+| 当前人物状态/知识     | A/C  | `character_states` 可存，但主生成 builder 不加载其最新记录 |
+| 修改影响哪些章节/事实 | B    | 无依赖分析与变更计划                                       |
 
 ### 4.6 生成大纲
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 项目、世界、规则、主角、已有卷章 | 已自动 | `outlineGenerateService` 聚合 |
-| 大纲层级/目标卷 | D | UI 操作决定 |
-| 本次方向/特殊要求 | D | 创作选择 |
-| 锁定旧大纲片段 | B | 无范围锁或 base revision diff |
-| 与当前正式正文的反向一致性 | C | 有 summary/context，但无硬验证 |
+| 信息                             | 分类   | 原因                           |
+| -------------------------------- | ------ | ------------------------------ |
+| 项目、世界、规则、主角、已有卷章 | 已自动 | `outlineGenerateService` 聚合  |
+| 大纲层级/目标卷                  | D      | UI 操作决定                    |
+| 本次方向/特殊要求                | D      | 创作选择                       |
+| 锁定旧大纲片段                   | B      | 无范围锁或 base revision diff  |
+| 与当前正式正文的反向一致性       | C      | 有 summary/context，但无硬验证 |
 
 ### 4.7 质量检测
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 当前项目/章节/全文/hash/version | 已自动 | 当前最完整的快照绑定 |
-| 检测范围（选区） | B | 只支持全文，selected range 未保存 |
-| 检查规则 | C/D | engineering qualityRules 可填，但 `qualityCheckAiService` 未接 active rule object |
-| 人物知识/锁定内容 | A/B | 部分数据存在但不进入可验证规则 |
+| 信息                            | 分类   | 原因                                                                              |
+| ------------------------------- | ------ | --------------------------------------------------------------------------------- |
+| 当前项目/章节/全文/hash/version | 已自动 | 当前最完整的快照绑定                                                              |
+| 检测范围（选区）                | B      | 只支持全文，selected range 未保存                                                 |
+| 检查规则                        | C/D    | engineering qualityRules 可填，但 `qualityCheckAiService` 未接 active rule object |
+| 人物知识/锁定内容               | A/B    | 部分数据存在但不进入可验证规则                                                    |
 
 ### 4.8 自动放置
 
-| 信息 | 分类 | 原因 |
-|---|---|---|
-| 目标类型/目标对象 | D/B | 设定候选有有限 type；通用结果没有 placement plan |
-| append/replace/merge/patch | D | 当前正文只让用户点 append/replace_all |
-| 基础版本/冲突策略 | B | 没有模型 |
-| 锁定范围 | B | 没有模型 |
-| 多目标拆分与失败策略 | B/D | 没有 transaction plan；策略需产品决定 |
+| 信息                       | 分类 | 原因                                             |
+| -------------------------- | ---- | ------------------------------------------------ |
+| 目标类型/目标对象          | D/B  | 设定候选有有限 type；通用结果没有 placement plan |
+| append/replace/merge/patch | D    | 当前正文只让用户点 append/replace_all            |
+| 基础版本/冲突策略          | B    | 没有模型                                         |
+| 锁定范围                   | B    | 没有模型                                         |
+| 多目标拆分与失败策略       | B/D  | 没有 transaction plan；策略需产品决定            |
 
 ## 5. AI 约束分层审计
 
@@ -205,13 +205,13 @@
 
 ### 5.5 生成后审查
 
-| 流程 | 审查 | 是否阻止应用/采用 |
-|---|---|---|
-| 旧章节生成 | 大纲关键点与必须角色字符串检查 | 只提示；仍可确认采用 |
-| 章节工程生成 | 自动质量检测 + low-risk patch | 生成候选；不自动正式采用 |
-| 质量修复 | scope gate + 完整复检 + before/after compare | scope 失败不建候选；未变好不载入编辑器 |
-| 大纲/设定 JSON | parse/normalize | parse 失败通常拒绝候选 |
-| 通用 apply | 无语义审查、无 base compare | 用户确认即可替换当前全文 |
+| 流程           | 审查                                         | 是否阻止应用/采用                      |
+| -------------- | -------------------------------------------- | -------------------------------------- |
+| 旧章节生成     | 大纲关键点与必须角色字符串检查               | 只提示；仍可确认采用                   |
+| 章节工程生成   | 自动质量检测 + low-risk patch                | 生成候选；不自动正式采用               |
+| 质量修复       | scope gate + 完整复检 + before/after compare | scope 失败不建候选；未变好不载入编辑器 |
+| 大纲/设定 JSON | parse/normalize                              | parse 失败通常拒绝候选                 |
+| 通用 apply     | 无语义审查、无 base compare                  | 用户确认即可替换当前全文               |
 
 ## 6. 任务书关键问题回答
 
@@ -253,14 +253,13 @@
 
 ## 7. 能力差距优先级
 
-| 差距 | 风险 | 等级 |
-|---|---|---|
-| apply/adopt 无固定目标、base revision/hash 与原子事务 | 可写错章节/覆盖正文 | P0 |
-| async 任务与当前 UI 状态未隔离 | 迟到结果错位 | P0 |
-| 大文本完整性/引用链不阻断失败 | 截断/已知 hash 错误仍持久化 | P0 |
-| 约束结构只进 prompt、缺输出 validator | 违反设定仍可应用 | P1 |
-| selection/active scene 未接通 | 用户重复描述范围/场景 | P1 |
-| character_states/knowledge 未进入主 context | 人物状态/知识不可靠 | P1 |
-| 两套任务/上下文追溯断裂 | 无法解释和恢复 | P1 |
-| 日志缺统一 trace | 问题难复现 | P2 |
-
+| 差距                                                  | 风险                        | 等级 |
+| ----------------------------------------------------- | --------------------------- | ---- |
+| apply/adopt 无固定目标、base revision/hash 与原子事务 | 可写错章节/覆盖正文         | P0   |
+| async 任务与当前 UI 状态未隔离                        | 迟到结果错位                | P0   |
+| 大文本完整性/引用链不阻断失败                         | 截断/已知 hash 错误仍持久化 | P0   |
+| 约束结构只进 prompt、缺输出 validator                 | 违反设定仍可应用            | P1   |
+| selection/active scene 未接通                         | 用户重复描述范围/场景       | P1   |
+| character_states/knowledge 未进入主 context           | 人物状态/知识不可靠         | P1   |
+| 两套任务/上下文追溯断裂                               | 无法解释和恢复              | P1   |
+| 日志缺统一 trace                                      | 问题难复现                  | P2   |

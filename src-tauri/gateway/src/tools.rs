@@ -83,13 +83,41 @@ pub fn tool_list() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
-        candidate_tool_schema("generate_outline", "outline", "接收并验证大纲候选。不写入正式大纲。"),
-        candidate_tool_schema("generate_characters", "character_candidates", "接收并验证角色候选。不写入角色库。"),
-        candidate_tool_schema("suggest_events", "event_candidates", "接收并验证事件候选。不写入章节事件。"),
-        candidate_tool_schema("expand_settings", "setting_candidates", "接收并验证设定候选。不写入正式设定。"),
-        candidate_tool_schema("polish_chapter", "chapter_text", "接收并验证润色候选。不覆盖正式正文。"),
-        candidate_tool_schema("check_quality", "quality_report", "接收并验证质量报告。报告不能直接应用。"),
-        candidate_tool_schema("summarize_chapter", "chapter_summary", "接收并验证章节总结候选。不写入正式上下文。"),
+        candidate_tool_schema(
+            "generate_outline",
+            "outline",
+            "接收并验证大纲候选。不写入正式大纲。",
+        ),
+        candidate_tool_schema(
+            "generate_characters",
+            "character_candidates",
+            "接收并验证角色候选。不写入角色库。",
+        ),
+        candidate_tool_schema(
+            "suggest_events",
+            "event_candidates",
+            "接收并验证事件候选。不写入章节事件。",
+        ),
+        candidate_tool_schema(
+            "expand_settings",
+            "setting_candidates",
+            "接收并验证设定候选。不写入正式设定。",
+        ),
+        candidate_tool_schema(
+            "polish_chapter",
+            "chapter_text",
+            "接收并验证润色候选。不覆盖正式正文。",
+        ),
+        candidate_tool_schema(
+            "check_quality",
+            "quality_report",
+            "接收并验证质量报告。报告不能直接应用。",
+        ),
+        candidate_tool_schema(
+            "summarize_chapter",
+            "chapter_summary",
+            "接收并验证章节总结候选。不写入正式上下文。",
+        ),
         json!({
             "name": "get_metadata",
             "description": "读取小说元信息、分卷与章节结构、目标章节位置，以及风格/输出方案列表。只读。",
@@ -194,7 +222,9 @@ pub fn call_tool(connection: &Connection, name: &str, arguments: &Value) -> Resu
         "get_character_states" => get_character_states(connection, arguments),
         "generate_chapter" => generate_chapter(connection, arguments),
         "generate_outline" => candidate_tool(connection, arguments, "outline", false),
-        "generate_characters" => candidate_tool(connection, arguments, "character_candidates", false),
+        "generate_characters" => {
+            candidate_tool(connection, arguments, "character_candidates", false)
+        }
         "suggest_events" => candidate_tool(connection, arguments, "event_candidates", true),
         "expand_settings" => candidate_tool(connection, arguments, "setting_candidates", false),
         "polish_chapter" => candidate_tool(connection, arguments, "chapter_text", true),
@@ -302,7 +332,10 @@ fn generate_chapter_like(
             )
             .map_err(|error| error.to_string())?;
         if !chapter_exists {
-            return Err(format!("chapter not found in novel: {}/{}", novel_id, chapter_id));
+            return Err(format!(
+                "chapter not found in novel: {}/{}",
+                novel_id, chapter_id
+            ));
         }
     }
     validate_candidate_payload(artifact_type, candidate_text)?;

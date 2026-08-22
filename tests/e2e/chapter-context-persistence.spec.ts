@@ -43,30 +43,39 @@ interface ChapterView {
   status: string;
 }
 
-async function adoptEditorContent(chapterId: string, content: string, previousDraftId?: string): Promise<string> {
+async function adoptEditorContent(
+  chapterId: string,
+  content: string,
+  previousDraftId?: string,
+): Promise<string> {
   const editor = await waitForTestIdAttribute('chapter-editor', 'data-chapter-id', chapterId);
   await editor.click();
   await editor.clearValue();
   await editor.setValue(content);
-  await browser.waitUntil(async () => await editor.getAttribute('data-dirty') === 'true', {
+  await browser.waitUntil(async () => (await editor.getAttribute('data-dirty')) === 'true', {
     timeout: 30000,
     timeoutMsg: 'chapter editor did not become dirty before adoption',
   });
   await clickTestId('chapter-adopt');
   await waitForTestId('apply-confirm');
   await clickTestId('dialog-confirm');
-  await browser.waitUntil(async () => {
-    const current = await browser.$('[data-testid="chapter-editor"]');
-    const draftId = await current.getAttribute('data-draft-id');
-    return Boolean(draftId)
-      && draftId !== previousDraftId
-      && await current.getAttribute('data-adopted') === 'true'
-      && await current.getAttribute('data-dirty') === 'false';
-  }, {
-    timeout: 60000,
-    interval: 100,
-    timeoutMsg: 'chapter draft was not adopted',
-  });
+  await browser.waitUntil(
+    async () => {
+      const current = await browser.$('[data-testid="chapter-editor"]');
+      const draftId = await current.getAttribute('data-draft-id');
+      return (
+        Boolean(draftId) &&
+        draftId !== previousDraftId &&
+        (await current.getAttribute('data-adopted')) === 'true' &&
+        (await current.getAttribute('data-dirty')) === 'false'
+      );
+    },
+    {
+      timeout: 60000,
+      interval: 100,
+      timeoutMsg: 'chapter draft was not adopted',
+    },
+  );
   const draftId = await editor.getAttribute('data-draft-id');
   if (!draftId) throw new Error('adopted editor did not expose a draft ID');
   return draftId;
@@ -98,7 +107,12 @@ describe('chapter context persistence', () => {
     const summaryId = await savedRecord.getAttribute('data-summary-id');
     expect(summaryId).toBeTruthy();
 
-    const [summaryBeforeRestart, summariesBeforeRestart, recordsBeforeRestart, chaptersBeforeRestart] = await Promise.all([
+    const [
+      summaryBeforeRestart,
+      summariesBeforeRestart,
+      recordsBeforeRestart,
+      chaptersBeforeRestart,
+    ] = await Promise.all([
       bridgeCall<ChapterSummaryView | null>('get_chapter_summary', { chapterId }),
       bridgeCall<ChapterSummaryView[]>('get_chapter_summaries_by_novel', { novelId: projectId }),
       bridgeCall<ContextRecordView[]>('get_context_records', { novelId: projectId }),
@@ -109,17 +123,26 @@ describe('chapter context persistence', () => {
     expect(summaryBeforeRestart?.adoptedDraftId).toBe(adoptedDraftId);
     expect(summaryBeforeRestart?.isExpired).toBe(false);
     expect(summariesBeforeRestart.filter((item) => item.chapterId === chapterId)).toHaveLength(1);
-    const chapterRecordsBeforeRestart = recordsBeforeRestart.filter((record) => record.chapterId === chapterId);
+    const chapterRecordsBeforeRestart = recordsBeforeRestart.filter(
+      (record) => record.chapterId === chapterId,
+    );
     expect(chapterRecordsBeforeRestart.length).toBeGreaterThan(0);
-    expect(chapterRecordsBeforeRestart.every((record) => record.isActive && !record.isExpired)).toBe(true);
-    expect(chaptersBeforeRestart.find((chapter) => chapter.id === chapterId)?.status).toBe('summarized');
+    expect(
+      chapterRecordsBeforeRestart.every((record) => record.isActive && !record.isExpired),
+    ).toBe(true);
+    expect(chaptersBeforeRestart.find((chapter) => chapter.id === chapterId)?.status).toBe(
+      'summarized',
+    );
 
     await clickTestId('ai-generate');
     const initialContextCount = await waitForTestId('generation-context-count');
-    await browser.waitUntil(async () => Number(await initialContextCount.getAttribute('data-context-count')) > 0, {
-      timeout: 30000,
-      timeoutMsg: 'saved context was not available to generation',
-    });
+    await browser.waitUntil(
+      async () => Number(await initialContextCount.getAttribute('data-context-count')) > 0,
+      {
+        timeout: 30000,
+        timeoutMsg: 'saved context was not available to generation',
+      },
+    );
 
     await assertCleanDiagnostics();
     await browser.reloadSession();
@@ -128,7 +151,11 @@ describe('chapter context persistence', () => {
     await openWorkspace(projectId);
     await selectChapter(chapterId);
     await clickTestId('chapter-summary');
-    const reopenedSummary = await waitForTestIdAttribute('chapter-summary-record', 'data-summary-id', summaryId!);
+    const reopenedSummary = await waitForTestIdAttribute(
+      'chapter-summary-record',
+      'data-summary-id',
+      summaryId!,
+    );
     expect(await reopenedSummary.getAttribute('data-summary-expired')).toBe('false');
 
     const [summaryAfterRestart, recordsAfterRestart] = await Promise.all([
@@ -141,7 +168,11 @@ describe('chapter context persistence', () => {
 
     await clickTestId('chapter-summary');
     await waitForTestIdMissing('chapter-summary-panel');
-    const revisedDraftId = await adoptEditorContent(chapterId, fixture.revisedContent, adoptedDraftId);
+    const revisedDraftId = await adoptEditorContent(
+      chapterId,
+      fixture.revisedContent,
+      adoptedDraftId,
+    );
     expect(revisedDraftId).not.toBe(adoptedDraftId);
 
     // Adoption must expire persisted context in the same SQLite transaction. Do not
@@ -154,8 +185,9 @@ describe('chapter context persistence', () => {
     expect(expiredSummary?.id).toBe(summaryId);
     expect(expiredSummary?.isExpired).toBe(true);
     const expiredChapterRecords = expiredRecords.filter((record) => record.chapterId === chapterId);
-    expect(expiredChapterRecords.map((record) => record.id).sort())
-      .toEqual(chapterRecordsBeforeRestart.map((record) => record.id).sort());
+    expect(expiredChapterRecords.map((record) => record.id).sort()).toEqual(
+      chapterRecordsBeforeRestart.map((record) => record.id).sort(),
+    );
     expect(expiredChapterRecords.every((record) => record.isExpired)).toBe(true);
 
     await clickTestId('ai-generate');
@@ -171,8 +203,12 @@ describe('chapter context persistence', () => {
     await selectChapter(chapterId);
     await clickTestId('ai-generate');
     await waitForTestIdAttribute('generation-context-count', 'data-context-count', '0');
-    const recordsAfterExpiryRestart = await bridgeCall<ContextRecordView[]>('get_context_records', { novelId: projectId });
-    const finalChapterRecords = recordsAfterExpiryRestart.filter((record) => record.chapterId === chapterId);
+    const recordsAfterExpiryRestart = await bridgeCall<ContextRecordView[]>('get_context_records', {
+      novelId: projectId,
+    });
+    const finalChapterRecords = recordsAfterExpiryRestart.filter(
+      (record) => record.chapterId === chapterId,
+    );
     expect(finalChapterRecords).toEqual(expiredChapterRecords);
     expect(finalChapterRecords.every((record) => record.isExpired)).toBe(true);
     await assertCleanDiagnostics();

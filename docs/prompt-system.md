@@ -125,24 +125,24 @@ AI 分析抽象风格特征
 
 建议第一阶段支持以下任务类型：
 
-| 任务类型 | 内部标识 | 主要用途 | 是否进入 MVP |
-|---|---|---|---|
-| 世界设定整理 | `world_setting_normalize` | 将用户大致世界背景整理成结构化资料 | 是 |
-| 规则体系整理 | `rule_system_normalize` | 整理魔法、科技、修炼、能力、战斗规则 | 是 |
-| 主角设定整理 | `protagonist_normalize` | 整理主角身份、能力、目标、限制 | 是 |
-| 风格分析 | `style_analyze` | 从 TXT 中提取风格画像 | v0.6.0 |
-| JSON 风格读取 | `style_json_import` | 从 JSON 配置读取风格方案 | v0.6.0 |
-| 分卷大纲扩展 | `volume_outline_expand` | 根据粗略分卷设想扩展分卷大纲 | v0.3.0+ |
-| 章节大纲生成 | `chapter_outline_generate` | 根据分卷大纲生成章节列表 | v0.3.0+ |
-| 候选角色生成 | `character_candidates_generate` | 根据世界背景、规则体系、章节需求生成候选角色 | v0.7.0 |
-| 候选事件推理 | `event_candidates_generate` | 根据大纲、前文、角色状态推理可选事件 | v0.7.0 |
-| 章节正文生成 | `chapter_draft_generate` | 生成一章小说正文 | 是 |
-| 章节正文重生成 | `chapter_draft_regenerate` | 在保留设定的情况下重新生成正文 | 是 |
-| 根据当前稿修改 | `chapter_draft_rewrite` | 按用户要求修改当前稿 | v0.5.0+ |
-| 正文润色 | `chapter_polish` | 优化文字表达，不改变剧情事实 | v0.9.0 |
-| 质量检查 | `quality_check` | 检查逻辑、设定、角色行为、前后文割裂 | v0.9.0 |
-| 章节总结 | `chapter_summarize` | 确认采用后总结章节内容 | v0.8.0 |
-| 上下文更新 | `context_update` | 更新角色状态、事件记录、伏笔、下一章衔接点 | v0.8.0 |
+| 任务类型       | 内部标识                        | 主要用途                                     | 是否进入 MVP |
+| -------------- | ------------------------------- | -------------------------------------------- | ------------ |
+| 世界设定整理   | `world_setting_normalize`       | 将用户大致世界背景整理成结构化资料           | 是           |
+| 规则体系整理   | `rule_system_normalize`         | 整理魔法、科技、修炼、能力、战斗规则         | 是           |
+| 主角设定整理   | `protagonist_normalize`         | 整理主角身份、能力、目标、限制               | 是           |
+| 风格分析       | `style_analyze`                 | 从 TXT 中提取风格画像                        | v0.6.0       |
+| JSON 风格读取  | `style_json_import`             | 从 JSON 配置读取风格方案                     | v0.6.0       |
+| 分卷大纲扩展   | `volume_outline_expand`         | 根据粗略分卷设想扩展分卷大纲                 | v0.3.0+      |
+| 章节大纲生成   | `chapter_outline_generate`      | 根据分卷大纲生成章节列表                     | v0.3.0+      |
+| 候选角色生成   | `character_candidates_generate` | 根据世界背景、规则体系、章节需求生成候选角色 | v0.7.0       |
+| 候选事件推理   | `event_candidates_generate`     | 根据大纲、前文、角色状态推理可选事件         | v0.7.0       |
+| 章节正文生成   | `chapter_draft_generate`        | 生成一章小说正文                             | 是           |
+| 章节正文重生成 | `chapter_draft_regenerate`      | 在保留设定的情况下重新生成正文               | 是           |
+| 根据当前稿修改 | `chapter_draft_rewrite`         | 按用户要求修改当前稿                         | v0.5.0+      |
+| 正文润色       | `chapter_polish`                | 优化文字表达，不改变剧情事实                 | v0.9.0       |
+| 质量检查       | `quality_check`                 | 检查逻辑、设定、角色行为、前后文割裂         | v0.9.0       |
+| 章节总结       | `chapter_summarize`             | 确认采用后总结章节内容                       | v0.8.0       |
+| 上下文更新     | `context_update`                | 更新角色状态、事件记录、伏笔、下一章衔接点   | v0.8.0       |
 
 ---
 
@@ -217,9 +217,11 @@ prompts/
 # 章节正文生成
 
 ## 角色定位
+
 你是长篇小说章节写作助手，负责根据用户确认的世界背景、角色、剧情事件、章节大纲和风格方案生成一章小说正文。
 
 ## 输入资料
+
 - 作品基础信息：{{novel}}
 - 世界背景：{{world_setting}}
 - 规则体系：{{rule_system}}
@@ -234,12 +236,15 @@ prompts/
 - 用户补充要求：{{user_instruction}}
 
 ## 任务要求
+
 请生成当前章节正文。
 
 ## 输出格式
+
 直接输出小说正文，不要输出分析过程、提纲、解释或项目符号。
 
 ## 禁止事项
+
 - 不得违背世界规则。
 - 不得让角色做出与性格和目标明显冲突的行为。
 - 不得复制参考文本原句。
@@ -411,16 +416,16 @@ type OutputProfilePromptContext = {
 
 写作工作台右侧面板不直接保存复杂数据，只触发 AI 任务和选择已有资产。
 
-| 右侧面板 | 主要功能 | 对应 AI 任务 |
-|---|---|---|
-| AI 生成 | 生成、重生成、根据当前稿修改、确认采用 | `chapter_draft_generate` / `chapter_draft_regenerate` / `chapter_draft_rewrite` |
-| 大纲 | 查看当前分卷和章节大纲 | `chapter_outline_generate` |
-| 角色 | 推荐候选角色，选择本章出场角色 | `character_candidates_generate` |
-| 事件 | 推荐候选事件，选择本章必须发生事件 | `event_candidates_generate` |
-| 设定 | 查看当前调用的世界背景和规则体系 | `world_setting_normalize` / `rule_system_normalize` |
-| 风格 | 选择已有风格方案和输出控制方案 | `style_analyze` / `style_json_import` |
-| 检查 | 检查正文问题 | `quality_check` |
-| 润色 | 润色当前正文 | `chapter_polish` |
+| 右侧面板 | 主要功能                               | 对应 AI 任务                                                                    |
+| -------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| AI 生成  | 生成、重生成、根据当前稿修改、确认采用 | `chapter_draft_generate` / `chapter_draft_regenerate` / `chapter_draft_rewrite` |
+| 大纲     | 查看当前分卷和章节大纲                 | `chapter_outline_generate`                                                      |
+| 角色     | 推荐候选角色，选择本章出场角色         | `character_candidates_generate`                                                 |
+| 事件     | 推荐候选事件，选择本章必须发生事件     | `event_candidates_generate`                                                     |
+| 设定     | 查看当前调用的世界背景和规则体系       | `world_setting_normalize` / `rule_system_normalize`                             |
+| 风格     | 选择已有风格方案和输出控制方案         | `style_analyze` / `style_json_import`                                           |
+| 检查     | 检查正文问题                           | `quality_check`                                                                 |
+| 润色     | 润色当前正文                           | `chapter_polish`                                                                |
 
 ---
 
@@ -850,16 +855,16 @@ src/services/ai/
 export const promptRegistry = {
   chapter_draft_generate: {
     template: 'prompts/workspace/chapter_draft_generate.md',
-    outputType: 'text'
+    outputType: 'text',
   },
   event_candidates_generate: {
     template: 'prompts/workspace/event_candidates_generate.md',
-    outputType: 'json'
+    outputType: 'json',
   },
   quality_check: {
     template: 'prompts/workspace/quality_check.md',
-    outputType: 'json'
-  }
+    outputType: 'json',
+  },
 };
 ```
 

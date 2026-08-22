@@ -84,20 +84,28 @@ async function getSnapshot(reportId: string): Promise<QualitySnapshotView> {
   return bridgeCall<QualitySnapshotView>('get_quality_check_report_snapshot', { reportId });
 }
 
-async function runGenerationJob(chapterId: string, expectedCount: number): Promise<GenerationJobView> {
+async function runGenerationJob(
+  chapterId: string,
+  expectedCount: number,
+): Promise<GenerationJobView> {
   const start = await waitForTestId('generation-job-start');
   await start.waitForEnabled({ timeout: 30000 });
   await start.click();
-  await browser.waitUntil(async () => {
-    const jobs = await getJobs(chapterId);
-    return jobs.length === expectedCount
-      && jobs[0]?.status === 'completed'
-      && jobs[0]?.progressPercent === 100;
-  }, {
-    timeout: 120000,
-    interval: 200,
-    timeoutMsg: `generation job ${expectedCount} did not complete`,
-  });
+  await browser.waitUntil(
+    async () => {
+      const jobs = await getJobs(chapterId);
+      return (
+        jobs.length === expectedCount &&
+        jobs[0]?.status === 'completed' &&
+        jobs[0]?.progressPercent === 100
+      );
+    },
+    {
+      timeout: 120000,
+      interval: 200,
+      timeoutMsg: `generation job ${expectedCount} did not complete`,
+    },
+  );
   return (await getJobs(chapterId))[0];
 }
 
@@ -182,25 +190,35 @@ describe('quality history immutable replay', () => {
     );
     await resolveIssue.click();
     await waitForTestIdAttribute('quality-issue', 'data-status', 'resolved');
-    await browser.waitUntil(async () => {
-      const latest = await bridgeCall<QualitySnapshotView>('get_quality_check_issues', { chapterId });
-      return latest.statistics.resolved === 1
-        && latest.items.find((item) => item.id === issueToResolve.id)?.status === 'resolved';
-    }, {
-      timeout: 30000,
-      interval: 100,
-      timeoutMsg: 'quality issue workflow state was not committed',
-    });
+    await browser.waitUntil(
+      async () => {
+        const latest = await bridgeCall<QualitySnapshotView>('get_quality_check_issues', {
+          chapterId,
+        });
+        return (
+          latest.statistics.resolved === 1 &&
+          latest.items.find((item) => item.id === issueToResolve.id)?.status === 'resolved'
+        );
+      },
+      {
+        timeout: 30000,
+        interval: 100,
+        timeoutMsg: 'quality issue workflow state was not committed',
+      },
+    );
 
-    const [currentAfterResolve, firstSnapshotAfterResolve, secondSnapshotAfterResolve] = await Promise.all([
-      bridgeCall<QualitySnapshotView>('get_quality_check_issues', { chapterId }),
-      getSnapshot(firstReport.id),
-      getSnapshot(secondReport.id),
-    ]);
+    const [currentAfterResolve, firstSnapshotAfterResolve, secondSnapshotAfterResolve] =
+      await Promise.all([
+        bridgeCall<QualitySnapshotView>('get_quality_check_issues', { chapterId }),
+        getSnapshot(firstReport.id),
+        getSnapshot(secondReport.id),
+      ]);
     expect(currentAfterResolve.report?.id).toBe(secondReport.id);
     expect(currentAfterResolve.statistics.resolved).toBe(1);
     expect(currentAfterResolve.statistics.pending).toBe(currentAfterResolve.statistics.total - 1);
-    expect(currentAfterResolve.items.find((item) => item.id === issueToResolve.id)?.status).toBe('resolved');
+    expect(currentAfterResolve.items.find((item) => item.id === issueToResolve.id)?.status).toBe(
+      'resolved',
+    );
     expect(firstSnapshotAfterResolve).toEqual(firstSnapshotBefore);
     expect(secondSnapshotAfterResolve).toEqual(secondSnapshot);
 

@@ -105,12 +105,12 @@ schema_migrations (
 
 ## 3. 新增迁移
 
-| 顺序 | Migration ID | 内容 |
-|---|---|---|
-| 1 | `001_schema_migrations` | 建立正式迁移账本并记录自身 |
-| 2 | `002_workspace_recovery_snapshots` | 建立恢复快照表、精确复合主键、更新时间索引和可选大文本引用 |
-| 3 | `003_draft_save_operations` | 建立草稿保存 operation 幂等记录表及目标索引 |
-| 4 | `004_large_text_integrity` | 补齐长文本 document/chunk 完整性字段、状态、索引与 `chapter_drafts.content_hash`，并修复已被旧草稿引用的 document 目标身份 |
+| 顺序 | Migration ID                       | 内容                                                                                                                       |
+| ---- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `001_schema_migrations`            | 建立正式迁移账本并记录自身                                                                                                 |
+| 2    | `002_workspace_recovery_snapshots` | 建立恢复快照表、精确复合主键、更新时间索引和可选大文本引用                                                                 |
+| 3    | `003_draft_save_operations`        | 建立草稿保存 operation 幂等记录表及目标索引                                                                                |
+| 4    | `004_large_text_integrity`         | 补齐长文本 document/chunk 完整性字段、状态、索引与 `chapter_drafts.content_hash`，并修复已被旧草稿引用的 document 目标身份 |
 
 空数据库和缺少 v2.2.0 新结构的旧数据库走同一迁移序列；DB01、DB02、DB03 和 DB15 分别验证初始化、重复启动、checksum 冲突和旧库升级。
 
@@ -249,28 +249,28 @@ PowerShell 测试入口先验证目标测试实际被发现，拒绝零测试假
 
 ## 13. 验证命令与结果
 
-| 命令 | 结果 |
-|---|---|
-| `npm run lint` | 通过；0 error，保留 1 条既有 React Hooks warning |
-| `npm run build` | 通过；TypeScript 与 Vite production build 成功 |
-| `npm test` | 通过；Node 16/16，tsx 动态回归 43/43 |
-| `npm run test:workspace-safety` | 通过，5/5 |
-| `npm run test:components` | 通过，5/5 |
-| `npm run test:workspace-reliability` | 通过，前端 13/13，Rust 103/103 |
-| `npm run test:workspace-recovery` | 通过，前端 10/10，Rust 103/103 |
-| `npm run test:large-text-integrity` | 通过，前端 5/5，Rust 103/103 |
-| `npm run test:migrations` | 通过，前端 1/1，Rust 103/103 |
-| `npm run test:ai-tasks-delete` | 通过；静态检查与运行时 1/1 |
-| `npm run test:setting-suggestions` | 通过 |
-| `npm run test:quality-workspace` | 通过 |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | 通过，103/103 |
-| `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` | 通过，103/103 |
-| `cargo check --manifest-path src-tauri/Cargo.toml` | 通过，保留 9 条既有 Rust warning |
-| `npm run test:e2e` | 通过；Windows Tauri 完整套件 11 个独立 spec 全部通过 |
-| `npm run test:version-sync` | 通过 |
-| `scripts/agent-workflow/check_docs_sync.ps1` | 通过 |
-| `git diff --check` | 通过 |
-| `npm run tauri:build` | 通过；前端、Rust release、MSI 与 NSIS 打包均成功 |
+| 命令                                                             | 结果                                                 |
+| ---------------------------------------------------------------- | ---------------------------------------------------- |
+| `npm run lint`                                                   | 通过；0 error，保留 1 条既有 React Hooks warning     |
+| `npm run build`                                                  | 通过；TypeScript 与 Vite production build 成功       |
+| `npm test`                                                       | 通过；Node 16/16，tsx 动态回归 43/43                 |
+| `npm run test:workspace-safety`                                  | 通过，5/5                                            |
+| `npm run test:components`                                        | 通过，5/5                                            |
+| `npm run test:workspace-reliability`                             | 通过，前端 13/13，Rust 103/103                       |
+| `npm run test:workspace-recovery`                                | 通过，前端 10/10，Rust 103/103                       |
+| `npm run test:large-text-integrity`                              | 通过，前端 5/5，Rust 103/103                         |
+| `npm run test:migrations`                                        | 通过，前端 1/1，Rust 103/103                         |
+| `npm run test:ai-tasks-delete`                                   | 通过；静态检查与运行时 1/1                           |
+| `npm run test:setting-suggestions`                               | 通过                                                 |
+| `npm run test:quality-workspace`                                 | 通过                                                 |
+| `cargo test --manifest-path src-tauri/Cargo.toml`                | 通过，103/103                                        |
+| `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` | 通过，103/103                                        |
+| `cargo check --manifest-path src-tauri/Cargo.toml`               | 通过，保留 9 条既有 Rust warning                     |
+| `npm run test:e2e`                                               | 通过；Windows Tauri 完整套件 11 个独立 spec 全部通过 |
+| `npm run test:version-sync`                                      | 通过                                                 |
+| `scripts/agent-workflow/check_docs_sync.ps1`                     | 通过                                                 |
+| `git diff --check`                                               | 通过                                                 |
+| `npm run tauri:build`                                            | 通过；前端、Rust release、MSI 与 NSIS 打包均成功     |
 
 安装包产物路径：
 

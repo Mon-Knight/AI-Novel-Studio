@@ -24,43 +24,53 @@
 # ✅ vX.X.X 发布报告
 
 ## 一、版本信息
+
 - 版本号：vX.X.X
 - 发布日期：YYYY-MM-DD
 - 上一版本：vX.X.X
 
 ## 二、变更摘要
+
 一句话描述本版本的核心变更。
 
 ## 三、新增内容
+
 - 功能/文件 1：描述
 - 功能/文件 2：描述
 
 ## 四、修改内容
+
 - 文件 1：修改了什么
 - 文件 2：修改了什么
 
 ## 五、修复内容
+
 - Bug 1：描述 + 修复方式
 
 ## 六、新增文件清单
+
 - `path/to/file1`
 - `path/to/file2`
 
 ## 七、修改文件清单
+
 - `path/to/file3`
 - `path/to/file4`
 
 ## 八、测试结果
+
 - cargo check：✅ / ❌
 - npm run build：✅ / ❌
 - npm run tauri build：✅ / ❌
 - git status：clean / dirty
 
 ## 九、Git 信息
+
 - commit hash：
 - tag：vX.X.X
 
 ## 十、后续建议
+
 - 下一步建议做什么？
 - 有什么已知问题？
 ```

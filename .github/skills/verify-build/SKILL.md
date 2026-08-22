@@ -48,6 +48,7 @@ cargo check
 ```
 
 记录：
+
 - 编译是否成功
 - 警告数量
 - 错误详情（如有）
@@ -61,6 +62,7 @@ npm run build
 ```
 
 记录：
+
 - TypeScript 编译是否通过
 - Vite 打包是否成功
 - 输出文件大小
@@ -75,6 +77,7 @@ npm run tauri build
 ```
 
 记录：
+
 - 完整构建是否成功
 - 产物路径
 - 安装包大小
@@ -87,6 +90,7 @@ git status
 ```
 
 记录：
+
 - Working tree 是否 clean
 - 未跟踪的文件
 - 未提交的修改
@@ -99,26 +103,30 @@ git status
 ## 🔍 vX.X.X 构建验证报告
 
 ### 环境
-| 组件 | 版本 | 状态 |
-|------|------|------|
-| Node.js | vXX | ✅ |
-| npm | vXX | ✅ |
-| Rust | vXX | ✅ |
-| Cargo | vXX | ✅ |
+
+| 组件    | 版本 | 状态 |
+| ------- | ---- | ---- |
+| Node.js | vXX  | ✅   |
+| npm     | vXX  | ✅   |
+| Rust    | vXX  | ✅   |
+| Cargo   | vXX  | ✅   |
 
 ### 构建结果
-| 步骤 | 状态 | 备注 |
-|------|------|------|
-| cargo check | ✅ / ❌ | |
-| npm run build | ✅ / ❌ | |
-| npm run tauri build | ✅ / ❌ | |
-| git status | clean / dirty | |
+
+| 步骤                | 状态          | 备注 |
+| ------------------- | ------------- | ---- |
+| cargo check         | ✅ / ❌       |      |
+| npm run build       | ✅ / ❌       |      |
+| npm run tauri build | ✅ / ❌       |      |
+| git status          | clean / dirty |      |
 
 ### 总体判定
+
 ✅ 全部通过 —— 可以发布
 ❌ 存在问题 —— 需要修复后重新验证
 
 ### 失败详情（如有）
+
 ...
 ```
 

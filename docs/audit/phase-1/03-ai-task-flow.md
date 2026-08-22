@@ -34,24 +34,24 @@
 
 所有入口最终都走上面的同一客户端；错误通常由服务标记 task failed 后抛回组件，组件写 local error/UI modal。表中“取消”指真正终止请求，而不是只隐藏弹窗。
 
-| 功能入口 | 入口组件 | 调用服务/函数 | 主要上下文 | 参数/输出 | 结果保存 | 取消 | 证据与置信度 |
-|---|---|---|---|---|---|---|---|
-| 章节新生成/重写 | `AiGeneratePanel` | `buildFreshChapterGenerationContext` → `buildGenerateRequest` → `client.generate` | 项目、章节、大纲、角色、事件、世界规则、前文、风格；rewrite 加当前正文 | 约 8k/12k tokens | `ai_task_records` 摘要 + 新 `chapter_drafts` | 无，`cancelable:false` | `AiGeneratePanel.tsx:248-436`; 代码确认 |
-| 按大纲重新修正 | `AiGeneratePanel` | `reviseChapterByOutline` | 最新草稿、章节大纲、缺失点、必须角色 | 8k/12k | task 摘要 + 新草稿 | 无 | `AiGeneratePanel.tsx:453-568`; 代码确认 |
-| 章节工程生成 | `ChapterEngineeringPanel` | `generationJobService.runChapterDraftJob` | 持久化 context snapshot + active engineering state + 当前编辑正文 | 设置中的模型参数 | job/steps、完整 step output、草稿、质量报告、patch 草稿 | 协作式状态取消，不能中止在途 HTTP | `ChapterEngineeringPanel.tsx:553-589`; `generationJobService.ts:617-864`; 代码确认 |
-| 润色 | `PolishPanel` | `polishAiService.runPolish` | 章节、当前正文快照、大纲、模式/自定义要求 | 8k | `polish_records`、task 摘要、新草稿 | 无 | `PolishPanel.tsx:49-117`; `polishAiService.ts:10-56`; 代码确认 |
-| 质量检测 | `CheckPanel`、generation job | `qualityCheckAiService.runCheck` | 草稿正文、章节目标/大纲、上下文、hash/字数 | 6k | task 摘要 + `quality_check_reports/items` | 无 | `CheckPanel.tsx:125-219`; `qualityCheckAiService.ts:13-87`; 代码确认 |
-| AI 质量修复/复检 | `CheckPanel` | `qualityFixService.runFix` → 再 `runCheck` | source draft/version/hash、pending/ignored issues、章节上下文 | JSON、10k | task 摘要、`quality_fix_runs`、候选草稿、新报告 | 无 | `CheckPanel.tsx:240-430`; `qualityFixService.ts:343-461`; 代码确认 |
-| 总纲/分卷/章节大纲生成 | `OutlinePanel`、`OutlineManager` | `outlineGenerateService.generate*` | 作品、世界/规则、主角、现有卷章和已采用大纲 | 4k/7k/8k | task + UI 候选；用户再保存/采用大纲 | 无 | `OutlinePanel.tsx:82-137`; `outlineGenerateService.ts:131-293`; 代码确认 |
-| 大纲编辑器生成 | `OutlineEditor` | `client.generate(request)` | 当前 outline 类型及上级大纲 | request builder | 只写编辑器 local content，保存由用户触发 | 无 | `OutlineEditor.tsx:154-184`; 代码确认 |
-| 角色候选 | `CharactersPanel` | `characterGenerateService.generateCandidates` | 项目/章节、已有角色/上下文 | 4k | task + 面板候选；采用后写角色 | 无 | `CharactersPanel.tsx:81`; `characterGenerateService.ts:11-83`; 代码确认 |
-| 事件建议 | `EventsPanel` | `eventSuggestService.suggestEvents` | 项目/章节、角色/事件/上下文 | 4k | task + 面板候选；采用后写事件 | 无 | `EventsPanel.tsx:49`; `eventSuggestService.ts:24-111`; 代码确认 |
-| 章节设定补充 | `SettingPanel` | `settingExpandService.suggestSettings` | 项目/章节、世界设定/规则 | 5k | task + 面板建议 | 无 | `SettingPanel.tsx:38`; `settingExpandService.ts:20-78`; 代码确认 |
-| 风格分析 | `StylePanel`、`StyleProfilesPage` | `analyzeStyle` | 样本文本/项目 | 4k JSON | task + 风格方案（用户保存） | 无 | `StylePanel.tsx`; `styleAnalyzeService.ts:13-68`; 代码确认 |
-| 章节总结 | `ChapterSummaryPanel`、workspace | `chapterSummarizeService.summarize` | 已采用草稿、章节/作品 | 5k JSON | task + `chapter_summaries`（确认后） | 无 | `ChapterSummaryPanel.tsx:91`; `chapterSummarizeService.ts:53-94`; 代码确认 |
-| 分卷上下文总结 | `ContextViewPanel` | `volumeSummaryAiService.summarize` | 章节上下文集合 | 4k JSON | task + `context_records` | 无 | `volumeSummaryService.ts:97-185`; 代码确认 |
-| 设定库 AI 推演 | `SettingSuggestionsPage` | `settingSuggestionService.generate` | 项目、已有设定/规则/角色、用户选择 | 5k JSON | task + localStorage 候选记录 | 无 | `SettingSuggestionsPage.tsx:129-165`; `settingSuggestionService.ts:113-297`; 代码确认 |
-| AI 设置连接测试 | 设置页 | `aiSettingsService.testConnection` | 配置本身 | temperature .1、100 tokens | task + 设置 test 状态 | 无 | `aiSettingsService.ts:76-121`; 代码确认 |
+| 功能入口               | 入口组件                          | 调用服务/函数                                                                     | 主要上下文                                                             | 参数/输出                  | 结果保存                                                | 取消                              | 证据与置信度                                                                          |
+| ---------------------- | --------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------- |
+| 章节新生成/重写        | `AiGeneratePanel`                 | `buildFreshChapterGenerationContext` → `buildGenerateRequest` → `client.generate` | 项目、章节、大纲、角色、事件、世界规则、前文、风格；rewrite 加当前正文 | 约 8k/12k tokens           | `ai_task_records` 摘要 + 新 `chapter_drafts`            | 无，`cancelable:false`            | `AiGeneratePanel.tsx:248-436`; 代码确认                                               |
+| 按大纲重新修正         | `AiGeneratePanel`                 | `reviseChapterByOutline`                                                          | 最新草稿、章节大纲、缺失点、必须角色                                   | 8k/12k                     | task 摘要 + 新草稿                                      | 无                                | `AiGeneratePanel.tsx:453-568`; 代码确认                                               |
+| 章节工程生成           | `ChapterEngineeringPanel`         | `generationJobService.runChapterDraftJob`                                         | 持久化 context snapshot + active engineering state + 当前编辑正文      | 设置中的模型参数           | job/steps、完整 step output、草稿、质量报告、patch 草稿 | 协作式状态取消，不能中止在途 HTTP | `ChapterEngineeringPanel.tsx:553-589`; `generationJobService.ts:617-864`; 代码确认    |
+| 润色                   | `PolishPanel`                     | `polishAiService.runPolish`                                                       | 章节、当前正文快照、大纲、模式/自定义要求                              | 8k                         | `polish_records`、task 摘要、新草稿                     | 无                                | `PolishPanel.tsx:49-117`; `polishAiService.ts:10-56`; 代码确认                        |
+| 质量检测               | `CheckPanel`、generation job      | `qualityCheckAiService.runCheck`                                                  | 草稿正文、章节目标/大纲、上下文、hash/字数                             | 6k                         | task 摘要 + `quality_check_reports/items`               | 无                                | `CheckPanel.tsx:125-219`; `qualityCheckAiService.ts:13-87`; 代码确认                  |
+| AI 质量修复/复检       | `CheckPanel`                      | `qualityFixService.runFix` → 再 `runCheck`                                        | source draft/version/hash、pending/ignored issues、章节上下文          | JSON、10k                  | task 摘要、`quality_fix_runs`、候选草稿、新报告         | 无                                | `CheckPanel.tsx:240-430`; `qualityFixService.ts:343-461`; 代码确认                    |
+| 总纲/分卷/章节大纲生成 | `OutlinePanel`、`OutlineManager`  | `outlineGenerateService.generate*`                                                | 作品、世界/规则、主角、现有卷章和已采用大纲                            | 4k/7k/8k                   | task + UI 候选；用户再保存/采用大纲                     | 无                                | `OutlinePanel.tsx:82-137`; `outlineGenerateService.ts:131-293`; 代码确认              |
+| 大纲编辑器生成         | `OutlineEditor`                   | `client.generate(request)`                                                        | 当前 outline 类型及上级大纲                                            | request builder            | 只写编辑器 local content，保存由用户触发                | 无                                | `OutlineEditor.tsx:154-184`; 代码确认                                                 |
+| 角色候选               | `CharactersPanel`                 | `characterGenerateService.generateCandidates`                                     | 项目/章节、已有角色/上下文                                             | 4k                         | task + 面板候选；采用后写角色                           | 无                                | `CharactersPanel.tsx:81`; `characterGenerateService.ts:11-83`; 代码确认               |
+| 事件建议               | `EventsPanel`                     | `eventSuggestService.suggestEvents`                                               | 项目/章节、角色/事件/上下文                                            | 4k                         | task + 面板候选；采用后写事件                           | 无                                | `EventsPanel.tsx:49`; `eventSuggestService.ts:24-111`; 代码确认                       |
+| 章节设定补充           | `SettingPanel`                    | `settingExpandService.suggestSettings`                                            | 项目/章节、世界设定/规则                                               | 5k                         | task + 面板建议                                         | 无                                | `SettingPanel.tsx:38`; `settingExpandService.ts:20-78`; 代码确认                      |
+| 风格分析               | `StylePanel`、`StyleProfilesPage` | `analyzeStyle`                                                                    | 样本文本/项目                                                          | 4k JSON                    | task + 风格方案（用户保存）                             | 无                                | `StylePanel.tsx`; `styleAnalyzeService.ts:13-68`; 代码确认                            |
+| 章节总结               | `ChapterSummaryPanel`、workspace  | `chapterSummarizeService.summarize`                                               | 已采用草稿、章节/作品                                                  | 5k JSON                    | task + `chapter_summaries`（确认后）                    | 无                                | `ChapterSummaryPanel.tsx:91`; `chapterSummarizeService.ts:53-94`; 代码确认            |
+| 分卷上下文总结         | `ContextViewPanel`                | `volumeSummaryAiService.summarize`                                                | 章节上下文集合                                                         | 4k JSON                    | task + `context_records`                                | 无                                | `volumeSummaryService.ts:97-185`; 代码确认                                            |
+| 设定库 AI 推演         | `SettingSuggestionsPage`          | `settingSuggestionService.generate`                                               | 项目、已有设定/规则/角色、用户选择                                     | 5k JSON                    | task + localStorage 候选记录                            | 无                                | `SettingSuggestionsPage.tsx:129-165`; `settingSuggestionService.ts:113-297`; 代码确认 |
+| AI 设置连接测试        | 设置页                            | `aiSettingsService.testConnection`                                                | 配置本身                                                               | temperature .1、100 tokens | task + 设置 test 状态                                   | 无                                | `aiSettingsService.ts:76-121`; 代码确认                                               |
 
 没有发现独立的“续写选区”任务类型或可执行的“通用内容分析后多目标放置”入口。续写/重写主要由章节生成模式和用户 instruction 表达；选区链路未接通，见 `02-state-ownership.md`。
 
@@ -59,20 +59,20 @@
 
 `AiTaskRecord` 实际字段：`src/types/ai.ts:87-109`；表结构：`src-tauri/src/db.rs:308-332`。
 
-| 任务书要求字段 | `ai_task_records` | 结论 |
-|---|---|---|
-| `task_id` | `id` | 有 |
-| `project_id` | `novel_id` | 有，可空 |
-| `task_type` | `task_type` | 有 |
-| `target_document_id` | 无；仅 `chapter_id` | 缺失 |
-| `target_revision` | 无 | 缺失 |
-| `selection_snapshot` | 无 | 缺失 |
-| `context_snapshot_id` | 无 | 缺失 |
-| `status` | 有 | 有，但取消链未接通 |
-| `progress` | 无 | 缺失；进度仅 UI local/modal |
-| `streamed_content` | 无 | 缺失；系统也不流式 |
-| `error` | `error_message` | 有 |
-| `created_at` | 有 | 有 |
+| 任务书要求字段        | `ai_task_records`   | 结论                        |
+| --------------------- | ------------------- | --------------------------- |
+| `task_id`             | `id`                | 有                          |
+| `project_id`          | `novel_id`          | 有，可空                    |
+| `task_type`           | `task_type`         | 有                          |
+| `target_document_id`  | 无；仅 `chapter_id` | 缺失                        |
+| `target_revision`     | 无                  | 缺失                        |
+| `selection_snapshot`  | 无                  | 缺失                        |
+| `context_snapshot_id` | 无                  | 缺失                        |
+| `status`              | 有                  | 有，但取消链未接通          |
+| `progress`            | 无                  | 缺失；进度仅 UI local/modal |
+| `streamed_content`    | 无                  | 缺失；系统也不流式          |
+| `error`               | `error_message`     | 有                          |
+| `created_at`          | 有                  | 有                          |
 
 `aiTaskService.markSucceeded` 会把 `resultText/promptSnapshot/resultJson` 各截断到 500 字（`src/services/ai/aiTaskService.ts:134-137,198-251`）。因此 old task record 不能作为可恢复的完整生成结果或完整 prompt 证据；正文生成的完整结果依赖 `chapter_drafts`，其他面板结果可能只在组件内存。置信度：代码确认。
 
@@ -82,16 +82,16 @@
 
 `GenerationJob` 字段见 `src/types/generationJob.ts:30-53`；步骤可保存 `inputSnapshot/outputJson/outputText`（`55-65`）。表见 `src-tauri/src/db.rs:259-306`。
 
-| 能力 | 现状 | 结论 |
-|---|---|---|
-| 固定项目/卷/章节 | job 持久化 `novelId/volumeId/chapterId` | 有 |
-| 上下文快照 | `chapter_generation_snapshots` 保存完整 context/prompt/hash/source | 有 |
-| 完整输出恢复 | `generation_step_results.output_text` 保存生成全文 | 有 |
-| 进度/步骤 | job currentStep/progress + step results | 有 |
-| 目标草稿/基础版本 | job 没有 target draft/revision/base hash | 缺失 |
-| 选区快照 | 无 | 缺失 |
-| 网络取消 | `ensureNotCancelled` 只在 step 开始前检查 DB 状态 | 缺失 |
-| 原子性 | 每个 job/step/snapshot/draft/report 独立写入 | 缺失 |
+| 能力              | 现状                                                               | 结论 |
+| ----------------- | ------------------------------------------------------------------ | ---- |
+| 固定项目/卷/章节  | job 持久化 `novelId/volumeId/chapterId`                            | 有   |
+| 上下文快照        | `chapter_generation_snapshots` 保存完整 context/prompt/hash/source | 有   |
+| 完整输出恢复      | `generation_step_results.output_text` 保存生成全文                 | 有   |
+| 进度/步骤         | job currentStep/progress + step results                            | 有   |
+| 目标草稿/基础版本 | job 没有 target draft/revision/base hash                           | 缺失 |
+| 选区快照          | 无                                                                 | 缺失 |
+| 网络取消          | `ensureNotCancelled` 只在 step 开始前检查 DB 状态                  | 缺失 |
+| 原子性            | 每个 job/step/snapshot/draft/report 独立写入                       | 缺失 |
 
 `runStep` 在 action 前检查取消，然后等待整个 action，再保存 step；AI 请求期间点击取消不会中断 HTTP，也不会在 action 返回后立即再次检查（`generationJobService.ts:639-666,693-717`）。因此迟到响应仍可被保存为 step output；到下一 step 才可能发现 cancelled。置信度：代码确认。
 
@@ -156,16 +156,16 @@ create generation_job（固定 A）
 
 ## 8. 结果保存位置
 
-| 结果类型 | 完整内容位置 | UI 位置 | 重启恢复 |
-|---|---|---|---|
-| 旧章节生成/重写 | `chapter_drafts.content` 或大文本引用 | `latestGeneratedDraft` + 当前编辑器 | 草稿历史可恢复；“未应用结果”语义不完整 |
-| 章节工程生成 | step `output_text` + `chapter_drafts` | engineering panel job/steps + editor | job/step/草稿可查 |
-| 润色 | `chapter_drafts` + `polish_records.result_draft_id` | `lastPolishResult` | 草稿存在；面板按钮状态不恢复 |
-| 质量报告 | `quality_check_reports/items` | 页面 `qcReport/qcItems` + CheckPanel | 可按章节加载最新报告 |
-| 质量修复 | `quality_fix_runs` + candidate draft + after report | local comparison | DB 有 run/草稿，但比较 UI 恢复链不完整 |
-| 大纲/角色/事件/设定候选 | task 摘要或面板 local state，部分另有领域记录 | 面板 | 多数面板结果不能完整恢复 |
-| 设定库推演 | localStorage 完整 candidate/raw output | 页面 | 同浏览器 profile 可恢复；非 SQLite |
-| 流式 delta | 不存在 | 不存在 | 不适用 |
+| 结果类型                | 完整内容位置                                        | UI 位置                              | 重启恢复                               |
+| ----------------------- | --------------------------------------------------- | ------------------------------------ | -------------------------------------- |
+| 旧章节生成/重写         | `chapter_drafts.content` 或大文本引用               | `latestGeneratedDraft` + 当前编辑器  | 草稿历史可恢复；“未应用结果”语义不完整 |
+| 章节工程生成            | step `output_text` + `chapter_drafts`               | engineering panel job/steps + editor | job/step/草稿可查                      |
+| 润色                    | `chapter_drafts` + `polish_records.result_draft_id` | `lastPolishResult`                   | 草稿存在；面板按钮状态不恢复           |
+| 质量报告                | `quality_check_reports/items`                       | 页面 `qcReport/qcItems` + CheckPanel | 可按章节加载最新报告                   |
+| 质量修复                | `quality_fix_runs` + candidate draft + after report | local comparison                     | DB 有 run/草稿，但比较 UI 恢复链不完整 |
+| 大纲/角色/事件/设定候选 | task 摘要或面板 local state，部分另有领域记录       | 面板                                 | 多数面板结果不能完整恢复               |
+| 设定库推演              | localStorage 完整 candidate/raw output              | 页面                                 | 同浏览器 profile 可恢复；非 SQLite     |
+| 流式 delta              | 不存在                                              | 不存在                               | 不适用                                 |
 
 ## 9. 任务追溯链能力
 
@@ -192,13 +192,12 @@ generation_job
 
 ## 10. 异步错位风险清单
 
-| 风险 | 等级 | 证据 | 置信度 |
-|---|---|---|---|
-| 生成/润色/质量迟到回调把 A 草稿装入 B 编辑器 | P0 | 面板 `onGenerated` + page `handleDraftApplied` 无 guard | 代码确认 |
-| 通用 apply 在完成时读取当前编辑器，不读取任务目标 | P0 | `WritingWorkspacePage.tsx:298-319` | 代码确认 |
-| 取消 generation job 后在途响应仍落 step output | P1 | `generationJobService.ts:639-666` | 代码确认 |
-| 多个任务覆盖单一 global AI modal | P1 | `WritingWorkspacePage.tsx:116-127` | 代码确认 |
-| 面板卸载丢进度/结果但后台仍写库 | P1 | RightPanel 动态组件 + local state | 代码确认 |
-| 两套任务表追溯断裂 | P1 | job id 不满足 draft 的 ai_task FK 检查 | 代码确认 |
-| 无统一 trace/log correlation | P2 | console/string logs | 代码确认 |
-
+| 风险                                              | 等级 | 证据                                                    | 置信度   |
+| ------------------------------------------------- | ---- | ------------------------------------------------------- | -------- |
+| 生成/润色/质量迟到回调把 A 草稿装入 B 编辑器      | P0   | 面板 `onGenerated` + page `handleDraftApplied` 无 guard | 代码确认 |
+| 通用 apply 在完成时读取当前编辑器，不读取任务目标 | P0   | `WritingWorkspacePage.tsx:298-319`                      | 代码确认 |
+| 取消 generation job 后在途响应仍落 step output    | P1   | `generationJobService.ts:639-666`                       | 代码确认 |
+| 多个任务覆盖单一 global AI modal                  | P1   | `WritingWorkspacePage.tsx:116-127`                      | 代码确认 |
+| 面板卸载丢进度/结果但后台仍写库                   | P1   | RightPanel 动态组件 + local state                       | 代码确认 |
+| 两套任务表追溯断裂                                | P1   | job id 不满足 draft 的 ai_task FK 检查                  | 代码确认 |
+| 无统一 trace/log correlation                      | P2   | console/string logs                                     | 代码确认 |

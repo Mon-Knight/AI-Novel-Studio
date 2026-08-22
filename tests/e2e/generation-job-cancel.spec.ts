@@ -94,22 +94,27 @@ describe('generation job request cancellation', () => {
       });
       await clickTestId('generation-job-start');
 
-      await browser.waitUntil(async () => {
-        const [gate, jobs] = await Promise.all([
-          callMockGate('getMockAiGateState'),
-          getJobs(chapterId),
-        ]);
-        const latest = jobs[0];
-        return gate.paused
-          && gate.waitingRequests === 1
-          && gate.requestCount === 1
-          && latest?.status === 'running'
-          && latest.currentStep === 'draft_generation'
-          && latest.progressPercent === 72;
-      }, {
-        timeout: 30000,
-        timeoutMsg: 'generation job did not reach the paused draft_generation request',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [gate, jobs] = await Promise.all([
+            callMockGate('getMockAiGateState'),
+            getJobs(chapterId),
+          ]);
+          const latest = jobs[0];
+          return (
+            gate.paused &&
+            gate.waitingRequests === 1 &&
+            gate.requestCount === 1 &&
+            latest?.status === 'running' &&
+            latest.currentStep === 'draft_generation' &&
+            latest.progressPercent === 72
+          );
+        },
+        {
+          timeout: 30000,
+          timeoutMsg: 'generation job did not reach the paused draft_generation request',
+        },
+      );
 
       const jobsBeforeCancel = await getJobs(chapterId);
       expect(jobsBeforeCancel).toHaveLength(1);
@@ -132,23 +137,28 @@ describe('generation job request cancellation', () => {
       expect(await (await waitForTestId('generation-job-cancel')).isEnabled()).toBe(true);
 
       await clickTestId('generation-job-cancel');
-      await browser.waitUntil(async () => {
-        const [gate, jobs] = await Promise.all([
-          callMockGate('getMockAiGateState'),
-          getJobs(chapterId),
-        ]);
-        const latest = jobs[0];
-        return gate.paused
-          && gate.waitingRequests === 0
-          && gate.requestCount === 1
-          && latest?.id === runningJob.id
-          && latest.status === 'cancelled'
-          && Boolean(latest.finishedAt);
-      }, {
-        timeout: 5000,
-        interval: 50,
-        timeoutMsg: 'generation request did not abort and persist cancellation within 5 seconds',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [gate, jobs] = await Promise.all([
+            callMockGate('getMockAiGateState'),
+            getJobs(chapterId),
+          ]);
+          const latest = jobs[0];
+          return (
+            gate.paused &&
+            gate.waitingRequests === 0 &&
+            gate.requestCount === 1 &&
+            latest?.id === runningJob.id &&
+            latest.status === 'cancelled' &&
+            Boolean(latest.finishedAt)
+          );
+        },
+        {
+          timeout: 5000,
+          interval: 50,
+          timeoutMsg: 'generation request did not abort and persist cancellation within 5 seconds',
+        },
+      );
 
       const jobsAfterCancel = await getJobs(chapterId);
       expect(jobsAfterCancel).toHaveLength(1);
@@ -180,12 +190,16 @@ describe('generation job request cancellation', () => {
 
       const stepsAfterCancel = await getSteps(cancelledJob.id);
       expect(stepsAfterCancel).toHaveLength(3);
-      expect(stepsAfterCancel.filter((step) => (
-        step.stepName === 'preflight' && step.status === 'succeeded'
-      ))).toHaveLength(1);
-      expect(stepsAfterCancel.filter((step) => (
-        step.stepName === 'compile_context' && step.status === 'succeeded'
-      ))).toHaveLength(1);
+      expect(
+        stepsAfterCancel.filter(
+          (step) => step.stepName === 'preflight' && step.status === 'succeeded',
+        ),
+      ).toHaveLength(1);
+      expect(
+        stepsAfterCancel.filter(
+          (step) => step.stepName === 'compile_context' && step.status === 'succeeded',
+        ),
+      ).toHaveLength(1);
       const cancelledSteps = stepsAfterCancel.filter((step) => step.status === 'cancelled');
       expect(cancelledSteps).toHaveLength(1);
       expect(cancelledSteps[0]).toMatchObject({
@@ -193,11 +207,19 @@ describe('generation job request cancellation', () => {
         stepName: 'draft_generation',
       });
       expect(stepsAfterCancel.filter((step) => step.status === 'failed')).toEqual([]);
-      expect(stepsAfterCancel.filter((step) => (
-        step.status === 'succeeded'
-        && ['draft_generation', 'save_version', 'quality_check', 'patch_generation', 'patch_apply']
-          .includes(step.stepName)
-      ))).toEqual([]);
+      expect(
+        stepsAfterCancel.filter(
+          (step) =>
+            step.status === 'succeeded' &&
+            [
+              'draft_generation',
+              'save_version',
+              'quality_check',
+              'patch_generation',
+              'patch_apply',
+            ].includes(step.stepName),
+        ),
+      ).toEqual([]);
 
       const draftsAfterCancel = await getDrafts(chapterId);
       expect(draftsAfterCancel).toEqual(initialDrafts);
@@ -217,23 +239,27 @@ describe('generation job request cancellation', () => {
       });
 
       const stableUntil = Date.now() + 500;
-      await browser.waitUntil(async () => {
-        const [jobs, steps, drafts, gate] = await Promise.all([
-          getJobs(chapterId),
-          getSteps(cancelledJob.id),
-          getDrafts(chapterId),
-          callMockGate('getMockAiGateState'),
-        ]);
-        expect(jobs).toEqual(jobsAfterCancel);
-        expect(steps).toEqual(stepsAfterCancel);
-        expect(drafts).toEqual(draftsAfterCancel);
-        expect(gate).toEqual(releaseState);
-        return Date.now() >= stableUntil;
-      }, {
-        timeout: 2000,
-        interval: 50,
-        timeoutMsg: 'cancelled generation state did not remain stable after releasing the Mock AI gate',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [jobs, steps, drafts, gate] = await Promise.all([
+            getJobs(chapterId),
+            getSteps(cancelledJob.id),
+            getDrafts(chapterId),
+            callMockGate('getMockAiGateState'),
+          ]);
+          expect(jobs).toEqual(jobsAfterCancel);
+          expect(steps).toEqual(stepsAfterCancel);
+          expect(drafts).toEqual(draftsAfterCancel);
+          expect(gate).toEqual(releaseState);
+          return Date.now() >= stableUntil;
+        },
+        {
+          timeout: 2000,
+          interval: 50,
+          timeoutMsg:
+            'cancelled generation state did not remain stable after releasing the Mock AI gate',
+        },
+      );
 
       await assertCleanDiagnostics();
     } finally {
@@ -271,21 +297,26 @@ describe('generation job request cancellation', () => {
       });
       await clickTestId('generation-job-start');
 
-      await browser.waitUntil(async () => {
-        const [gate, jobs] = await Promise.all([
-          callMockGate('getMockAiGateState'),
-          getJobs(chapterId),
-        ]);
-        const latest = jobs[0];
-        return gate.paused
-          && gate.waitingRequests === 1
-          && gate.requestCount === baselineGate.requestCount + 1
-          && latest?.status === 'running'
-          && latest.currentStep === 'draft_generation';
-      }, {
-        timeout: 30000,
-        timeoutMsg: 'generation job did not reach the first paused request',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [gate, jobs] = await Promise.all([
+            callMockGate('getMockAiGateState'),
+            getJobs(chapterId),
+          ]);
+          const latest = jobs[0];
+          return (
+            gate.paused &&
+            gate.waitingRequests === 1 &&
+            gate.requestCount === baselineGate.requestCount + 1 &&
+            latest?.status === 'running' &&
+            latest.currentStep === 'draft_generation'
+          );
+        },
+        {
+          timeout: 30000,
+          timeoutMsg: 'generation job did not reach the first paused request',
+        },
+      );
 
       expect(await callMockGate('advanceMockAi')).toEqual({
         paused: true,
@@ -293,64 +324,75 @@ describe('generation job request cancellation', () => {
         requestCount: baselineGate.requestCount + 1,
       });
 
-      await browser.waitUntil(async () => {
-        const [gate, jobs, drafts, tasks] = await Promise.all([
-          callMockGate('getMockAiGateState'),
-          getJobs(chapterId),
-          getDrafts(chapterId),
-          bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId }),
-        ]);
-        const latest = jobs[0];
-        const qualityTasks = tasks.filter((task) => task.taskType === 'quality_check');
-        return gate.paused
-          && gate.waitingRequests === 1
-          && gate.requestCount === baselineGate.requestCount + 2
-          && latest?.status === 'running'
-          && latest.currentStep === 'quality_check'
-          && latest.progressPercent === 99
-          && drafts.length === initialDrafts.length + 1
-          && qualityTasks.length === 1
-          && qualityTasks[0].status === 'running';
-      }, {
-        timeout: 30000,
-        timeoutMsg: 'generation job did not reach the paused quality_check request',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [gate, jobs, drafts, tasks] = await Promise.all([
+            callMockGate('getMockAiGateState'),
+            getJobs(chapterId),
+            getDrafts(chapterId),
+            bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId }),
+          ]);
+          const latest = jobs[0];
+          const qualityTasks = tasks.filter((task) => task.taskType === 'quality_check');
+          return (
+            gate.paused &&
+            gate.waitingRequests === 1 &&
+            gate.requestCount === baselineGate.requestCount + 2 &&
+            latest?.status === 'running' &&
+            latest.currentStep === 'quality_check' &&
+            latest.progressPercent === 99 &&
+            drafts.length === initialDrafts.length + 1 &&
+            qualityTasks.length === 1 &&
+            qualityTasks[0].status === 'running'
+          );
+        },
+        {
+          timeout: 30000,
+          timeoutMsg: 'generation job did not reach the paused quality_check request',
+        },
+      );
 
       const runningJob = (await getJobs(chapterId))[0];
       const draftsAtQuality = await getDrafts(chapterId);
       const initialDraftIds = new Set(initialDrafts.map((draft) => draft.id));
-      const generatedDrafts = draftsAtQuality.filter((draft) => (
-        !initialDraftIds.has(draft.id) && draft.source === 'ai_generated'
-      ));
+      const generatedDrafts = draftsAtQuality.filter(
+        (draft) => !initialDraftIds.has(draft.id) && draft.source === 'ai_generated',
+      );
       expect(generatedDrafts).toHaveLength(1);
       expect(generatedDrafts[0]).toMatchObject({
         chapterId,
         source: 'ai_generated',
       });
-      expect(await bridgeCall<QualityIssuesView>('get_quality_check_issues', { chapterId }))
-        .toMatchObject({ report: null, items: [] });
+      expect(
+        await bridgeCall<QualityIssuesView>('get_quality_check_issues', { chapterId }),
+      ).toMatchObject({ report: null, items: [] });
 
       await clickTestId('generation-job-cancel');
-      await browser.waitUntil(async () => {
-        const [gate, jobs, tasks] = await Promise.all([
-          callMockGate('getMockAiGateState'),
-          getJobs(chapterId),
-          bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId }),
-        ]);
-        const qualityTask = tasks.find((task) => task.taskType === 'quality_check');
-        return gate.paused
-          && gate.waitingRequests === 0
-          && gate.requestCount === baselineGate.requestCount + 2
-          && jobs[0]?.id === runningJob.id
-          && jobs[0].status === 'cancelled'
-          && Boolean(jobs[0].finishedAt)
-          && qualityTask?.status === 'cancelled'
-          && Boolean(qualityTask.finishedAt);
-      }, {
-        timeout: 5000,
-        interval: 50,
-        timeoutMsg: 'quality request did not abort and persist cancellation within 5 seconds',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [gate, jobs, tasks] = await Promise.all([
+            callMockGate('getMockAiGateState'),
+            getJobs(chapterId),
+            bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId }),
+          ]);
+          const qualityTask = tasks.find((task) => task.taskType === 'quality_check');
+          return (
+            gate.paused &&
+            gate.waitingRequests === 0 &&
+            gate.requestCount === baselineGate.requestCount + 2 &&
+            jobs[0]?.id === runningJob.id &&
+            jobs[0].status === 'cancelled' &&
+            Boolean(jobs[0].finishedAt) &&
+            qualityTask?.status === 'cancelled' &&
+            Boolean(qualityTask.finishedAt)
+          );
+        },
+        {
+          timeout: 5000,
+          interval: 50,
+          timeoutMsg: 'quality request did not abort and persist cancellation within 5 seconds',
+        },
+      );
 
       const cancelledJob = (await getJobs(chapterId))[0];
       expect(cancelledJob).toMatchObject({
@@ -368,16 +410,17 @@ describe('generation job request cancellation', () => {
           stepName: 'quality_check',
         }),
       ]);
-      expect(stepsAfterCancel.filter((step) => (
-        step.stepName === 'quality_check' && step.status === 'succeeded'
-      ))).toEqual([]);
+      expect(
+        stepsAfterCancel.filter(
+          (step) => step.stepName === 'quality_check' && step.status === 'succeeded',
+        ),
+      ).toEqual([]);
       expect(stepsAfterCancel.filter((step) => step.status === 'failed')).toEqual([]);
       expect(await getDrafts(chapterId)).toEqual(draftsAtQuality);
 
-      const qualityTasks = (await bridgeCall<AiTaskView[]>(
-        'get_ai_task_records_by_chapter_id',
-        { chapterId },
-      )).filter((task) => task.taskType === 'quality_check');
+      const qualityTasks = (
+        await bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId })
+      ).filter((task) => task.taskType === 'quality_check');
       expect(qualityTasks).toHaveLength(1);
       expect(qualityTasks[0]).toMatchObject({
         novelId: projectId,
@@ -385,8 +428,9 @@ describe('generation job request cancellation', () => {
         status: 'cancelled',
       });
       expect(qualityTasks[0].finishedAt).toBeTruthy();
-      expect(await bridgeCall<QualityIssuesView>('get_quality_check_issues', { chapterId }))
-        .toMatchObject({ report: null, items: [] });
+      expect(
+        await bridgeCall<QualityIssuesView>('get_quality_check_issues', { chapterId }),
+      ).toMatchObject({ report: null, items: [] });
 
       const releaseState = await callMockGate('releaseMockAi');
       gateReleased = true;
@@ -397,26 +441,29 @@ describe('generation job request cancellation', () => {
       });
 
       const stableUntil = Date.now() + 500;
-      await browser.waitUntil(async () => {
-        const [jobs, steps, drafts, tasks, quality] = await Promise.all([
-          getJobs(chapterId),
-          getSteps(cancelledJob.id),
-          getDrafts(chapterId),
-          bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId }),
-          bridgeCall<QualityIssuesView>('get_quality_check_issues', { chapterId }),
-        ]);
-        expect(jobs).toEqual([cancelledJob]);
-        expect(steps).toEqual(stepsAfterCancel);
-        expect(drafts).toEqual(draftsAtQuality);
-        expect(tasks.filter((task) => task.taskType === 'quality_check')).toEqual(qualityTasks);
-        expect(quality)
-          .toMatchObject({ report: null, items: [] });
-        return Date.now() >= stableUntil;
-      }, {
-        timeout: 2000,
-        interval: 50,
-        timeoutMsg: 'cancelled quality state did not remain stable after releasing the Mock AI gate',
-      });
+      await browser.waitUntil(
+        async () => {
+          const [jobs, steps, drafts, tasks, quality] = await Promise.all([
+            getJobs(chapterId),
+            getSteps(cancelledJob.id),
+            getDrafts(chapterId),
+            bridgeCall<AiTaskView[]>('get_ai_task_records_by_chapter_id', { chapterId }),
+            bridgeCall<QualityIssuesView>('get_quality_check_issues', { chapterId }),
+          ]);
+          expect(jobs).toEqual([cancelledJob]);
+          expect(steps).toEqual(stepsAfterCancel);
+          expect(drafts).toEqual(draftsAtQuality);
+          expect(tasks.filter((task) => task.taskType === 'quality_check')).toEqual(qualityTasks);
+          expect(quality).toMatchObject({ report: null, items: [] });
+          return Date.now() >= stableUntil;
+        },
+        {
+          timeout: 2000,
+          interval: 50,
+          timeoutMsg:
+            'cancelled quality state did not remain stable after releasing the Mock AI gate',
+        },
+      );
 
       await assertCleanDiagnostics();
     } finally {

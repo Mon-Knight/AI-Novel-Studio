@@ -30,7 +30,9 @@ describe('T08 - unavailable large-text content', () => {
     expect(screen.queryByDisplayValue('这只是截断预览，不是完整正文')).toBeNull();
     expect(screen.queryByText('这只是截断预览，不是完整正文')).toBeNull();
     expect(screen.getByText(/编辑、保存、采用和 AI 正文操作已暂停/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: '重新读取正文' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: '重新读取正文' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it('offers an explicit retry without treating the preview as content', async () => {
@@ -105,13 +107,17 @@ describe('T08 - unavailable large-text content', () => {
     expect(screen.getByTestId('content-unavailable-state')).toBeTruthy();
     expect(screen.queryByPlaceholderText(/在这里输入或粘贴正文内容/)).toBeNull();
     expect(screen.queryByText('不能进入编辑器的截断预览')).toBeNull();
-    await waitFor(() => expect(onEditorContentChange).toHaveBeenCalledWith(expect.objectContaining({
-      chapterId: 'chapter-a',
-      draftId: 'draft-a',
-      content: '',
-      isDirty: false,
-      contentAvailable: false,
-    })));
+    await waitFor(() =>
+      expect(onEditorContentChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chapterId: 'chapter-a',
+          draftId: 'draft-a',
+          content: '',
+          isDirty: false,
+          contentAvailable: false,
+        }),
+      ),
+    );
 
     let saved: ChapterDraft | null | undefined;
     await act(async () => {

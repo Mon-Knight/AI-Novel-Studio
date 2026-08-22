@@ -12,10 +12,13 @@ import {
 
 test('structured sanitization preserves multiline JSON while removing secrets and Windows paths', () => {
   const source = {
-    logs: [{
-      level: 'info',
-      message: 'first line\nfile C:\\Users\\writer\\draft.txt\nAuthorization: Bearer private-token',
-    }],
+    logs: [
+      {
+        level: 'info',
+        message:
+          'first line\nfile C:\\Users\\writer\\draft.txt\nAuthorization: Bearer private-token',
+      },
+    ],
     apiKey: 'sk-1234567890abcdef',
     nested: {
       prompt: 'sensitive full prompt',
@@ -30,16 +33,23 @@ test('structured sanitization preserves multiline JSON while removing secrets an
   assert.equal(reparsed.apiKey, '[REDACTED]');
   assert.equal(reparsed.nested.prompt, '[REDACTED]');
   assert.equal(reparsed.nested.databasePath, '[REDACTED_PATH]');
-  assert.equal(reparsed.logs[0].message, 'first line\nfile [REDACTED_PATH]\nAuthorization: [REDACTED]');
+  assert.equal(
+    reparsed.logs[0].message,
+    'first line\nfile [REDACTED_PATH]\nAuthorization: [REDACTED]',
+  );
   assert.doesNotMatch(serialized, /writer|private-token|sensitive full prompt|sk-123/i);
 });
 
 test('JSON text sanitization remains valid across repeated passes', () => {
-  const source = JSON.stringify({
-    message: 'candidate review\nC:\\Users\\writer\\result.json"next\nnext line',
-    detail: 'token=private-token"next',
-    authorization: 'Bearer top-secret-token',
-  }, null, 2);
+  const source = JSON.stringify(
+    {
+      message: 'candidate review\nC:\\Users\\writer\\result.json"next\nnext line',
+      detail: 'token=private-token"next',
+      authorization: 'Bearer top-secret-token',
+    },
+    null,
+    2,
+  );
 
   const once = sanitizeJsonText(source);
   const twice = sanitizeJsonText(once);
@@ -56,12 +66,16 @@ test('artifact directory emits parseable safe JSON and sanitizes text logs', asy
     const diagnosticsPath = path.join(root, 'frontend-diagnostics.json');
     const invalidPath = path.join(root, 'invalid.json');
     const logPath = path.join(root, 'rust-backend.log');
-    fs.writeFileSync(diagnosticsPath, JSON.stringify({
-      logs: [{ message: 'line one\nC:\\Users\\writer\\chapter.txt\nline three' }],
-      errors: [],
-      networkAttempts: { installed: true, total: 0 },
-      token: 'private-token',
-    }), 'utf8');
+    fs.writeFileSync(
+      diagnosticsPath,
+      JSON.stringify({
+        logs: [{ message: 'line one\nC:\\Users\\writer\\chapter.txt\nline three' }],
+        errors: [],
+        networkAttempts: { installed: true, total: 0 },
+        token: 'private-token',
+      }),
+      'utf8',
+    );
     fs.writeFileSync(invalidPath, '{"message":"truncated', 'utf8');
     fs.writeFileSync(logPath, 'API_KEY=sk-1234567890abcdef\nC:\\Users\\writer\\app.log', 'utf8');
 

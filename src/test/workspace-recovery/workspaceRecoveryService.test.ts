@@ -55,18 +55,15 @@ describe('browser recovery repository fallback', () => {
       'trace-delete',
     );
 
-    await expect(workspaceRecoveryService.get(
-      { novelId: 'novel-a', chapterId: 'chapter-a1' },
-      'read-a1',
-    )).resolves.toBeNull();
-    await expect(workspaceRecoveryService.get(
-      { novelId: 'novel-a', chapterId: 'chapter-a2' },
-      'read-a2',
-    )).resolves.toEqual(expect.objectContaining({ recoveryContent: 'chapter-a2' }));
-    await expect(workspaceRecoveryService.get(
-      { novelId: 'novel-b', chapterId: 'chapter-b1' },
-      'read-b1',
-    )).resolves.toEqual(expect.objectContaining({ recoveryContent: 'chapter-b1' }));
+    await expect(
+      workspaceRecoveryService.get({ novelId: 'novel-a', chapterId: 'chapter-a1' }, 'read-a1'),
+    ).resolves.toBeNull();
+    await expect(
+      workspaceRecoveryService.get({ novelId: 'novel-a', chapterId: 'chapter-a2' }, 'read-a2'),
+    ).resolves.toEqual(expect.objectContaining({ recoveryContent: 'chapter-a2' }));
+    await expect(
+      workspaceRecoveryService.get({ novelId: 'novel-b', chapterId: 'chapter-b1' }, 'read-b1'),
+    ).resolves.toEqual(expect.objectContaining({ recoveryContent: 'chapter-b1' }));
   });
 
   it('fails closed when browser storage rejects a recovery write', async () => {
@@ -74,13 +71,15 @@ describe('browser recovery repository fallback', () => {
       throw new DOMException('quota exceeded', 'QuotaExceededError');
     });
 
-    await expect(workspaceRecoveryService.upsert({
-      traceId: 'trace-write-failure',
-      novelId: 'novel-a',
-      chapterId: 'chapter-a1',
-      recoveryContent: 'must persist',
-      recoveryContentHash: 'hash-write-failure',
-    })).rejects.toMatchObject({ code: 'RECOVERY_CONTENT_INVALID', retryable: true });
+    await expect(
+      workspaceRecoveryService.upsert({
+        traceId: 'trace-write-failure',
+        novelId: 'novel-a',
+        chapterId: 'chapter-a1',
+        recoveryContent: 'must persist',
+        recoveryContentHash: 'hash-write-failure',
+      }),
+    ).rejects.toMatchObject({ code: 'RECOVERY_CONTENT_INVALID', retryable: true });
   });
 
   it('fails closed when browser storage rejects recovery deletion', async () => {
@@ -95,9 +94,11 @@ describe('browser recovery repository fallback', () => {
       throw new DOMException('storage unavailable', 'InvalidStateError');
     });
 
-    await expect(workspaceRecoveryService.delete(target, 'trace-delete-failure'))
-      .rejects.toMatchObject({ code: 'RECOVERY_CONTENT_INVALID', retryable: true });
-    await expect(workspaceRecoveryService.get(target, 'trace-read-after-delete-failure'))
-      .resolves.toEqual(expect.objectContaining({ recoveryContentHash: 'hash-delete-failure' }));
+    await expect(
+      workspaceRecoveryService.delete(target, 'trace-delete-failure'),
+    ).rejects.toMatchObject({ code: 'RECOVERY_CONTENT_INVALID', retryable: true });
+    await expect(
+      workspaceRecoveryService.get(target, 'trace-read-after-delete-failure'),
+    ).resolves.toEqual(expect.objectContaining({ recoveryContentHash: 'hash-delete-failure' }));
   });
 });

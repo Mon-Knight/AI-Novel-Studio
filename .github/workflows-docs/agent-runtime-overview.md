@@ -56,15 +56,15 @@ Agent Workflow Runtime 是 AI Novel Studio 在 v1.0.44 引入的最小可执行�
 
 本版本建立了最小闭环，各组件状态：
 
-| 组件 | 状态 | 说明 |
-|------|------|------|
-| Checklists | ✅ 可用 | 4 个执行清单 |
-| Workflow Scripts | ✅ 可用 | 4 个 PowerShell 脚本 |
-| Agent Types | ✅ 可用 | 最小类型定义 |
-| Planner Lite | ✅ 占位 | 返回固定 workflow |
-| Workflow Runner | ✅ 可用 | 摘要统计能力 |
-| Tool Layer | ⚠️ 占位 | 返回 `not implemented` |
-| Prompt Pipeline | ⚠️ 结构 | 目录就绪，函数占位 |
+| 组件             | 状态    | 说明                   |
+| ---------------- | ------- | ---------------------- |
+| Checklists       | ✅ 可用 | 4 个执行清单           |
+| Workflow Scripts | ✅ 可用 | 4 个 PowerShell 脚本   |
+| Agent Types      | ✅ 可用 | 最小类型定义           |
+| Planner Lite     | ✅ 占位 | 返回固定 workflow      |
+| Workflow Runner  | ✅ 可用 | 摘要统计能力           |
+| Tool Layer       | ⚠️ 占位 | 返回 `not implemented` |
+| Prompt Pipeline  | ⚠️ 结构 | 目录就绪，函数占位     |
 
 ---
 

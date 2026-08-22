@@ -20,7 +20,9 @@ describe('project creation and opening', () => {
     expect(await browser.getUrl()).toContain(`#/novels/${projectId}`);
 
     const projects = await bridgeCall<Array<{ id: string; title: string }>>('get_all_novels');
-    expect(projects.filter((project) => project.id === projectId && project.title === title)).toHaveLength(1);
+    expect(
+      projects.filter((project) => project.id === projectId && project.title === title),
+    ).toHaveLength(1);
     expect((await bridgeDiagnostics()).counts?.novels).toBe(1);
 
     await goHome();
@@ -37,12 +39,17 @@ describe('project creation and opening', () => {
     const keyboardEntry = await findTestIdByAttribute('project-open', 'data-project-id', projectId);
     await keyboardEntry.scrollIntoView();
     await browser.execute((id) => {
-      const target = [...document.querySelectorAll<HTMLElement>('[data-testid="project-open"]')]
-        .find((element) => element.dataset.projectId === id);
+      const target = [
+        ...document.querySelectorAll<HTMLElement>('[data-testid="project-open"]'),
+      ].find((element) => element.dataset.projectId === id);
       if (!target) throw new Error(`project-open ${id} was not found`);
       target.focus();
     }, projectId);
-    expect(await browser.execute(() => (document.activeElement as HTMLElement | null)?.dataset.projectId)).toBe(projectId);
+    expect(
+      await browser.execute(
+        () => (document.activeElement as HTMLElement | null)?.dataset.projectId,
+      ),
+    ).toBe(projectId);
     await browser.keys('Enter');
     await waitForTestId('project-settings');
     expect(await browser.execute(() => window.location.hash)).toBe(`#/novels/${projectId}`);

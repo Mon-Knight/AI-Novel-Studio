@@ -7,12 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
-    exclude: [
-      'node_modules/**',
-      'dist/**',
-      'src-tauri/**',
-      'src/**/*.test.mjs',
-    ],
+    exclude: ['node_modules/**', 'dist/**', 'src-tauri/**', 'src/**/*.test.mjs'],
     clearMocks: true,
     restoreMocks: true,
     unstubGlobals: true,

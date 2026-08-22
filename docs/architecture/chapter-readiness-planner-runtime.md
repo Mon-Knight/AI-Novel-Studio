@@ -17,14 +17,14 @@ novel.read_context@1
 verification.check_readiness@1
 ```
 
-| 顺序 | Step key | Tool | 依赖 |
-|------|----------|------|------|
-| 1 | `read_novel_context` | `novel.read_context@1` | 无 |
-| 2 | `read_chapter_outline` | `chapter.read_outline@1` | 1 |
-| 3 | `read_chapter_context` | `chapter.read_context@1` | 1 |
-| 4 | `read_style_profile` | `style.read_profile@1` | 1 |
-| 5 | `read_output_control` | `style.read_output_control@1` | 1 |
-| 6 | `check_readiness` | `verification.check_readiness@1` | 2、3、4、5 |
+| 顺序 | Step key               | Tool                             | 依赖       |
+| ---- | ---------------------- | -------------------------------- | ---------- |
+| 1    | `read_novel_context`   | `novel.read_context@1`           | 无         |
+| 2    | `read_chapter_outline` | `chapter.read_outline@1`         | 1          |
+| 3    | `read_chapter_context` | `chapter.read_context@1`         | 1          |
+| 4    | `read_style_profile`   | `style.read_profile@1`           | 1          |
+| 5    | `read_output_control`  | `style.read_output_control@1`    | 1          |
+| 6    | `check_readiness`      | `verification.check_readiness@1` | 2、3、4、5 |
 
 旧 `src/agent/planner-lite.ts` 继续作为 v1.0.46 历史参考，不是 v2.5.0 的执行事实源。
 

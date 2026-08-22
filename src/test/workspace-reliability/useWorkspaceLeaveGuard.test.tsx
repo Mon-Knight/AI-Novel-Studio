@@ -1,10 +1,5 @@
 import { useState } from 'react';
-import {
-  Link,
-  RouterProvider,
-  createHashRouter,
-  createMemoryRouter,
-} from 'react-router-dom';
+import { Link, RouterProvider, createHashRouter, createMemoryRouter } from 'react-router-dom';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -91,9 +86,7 @@ function GuardHarness({
 }
 
 function renderWithMemoryRouter(element: React.ReactNode) {
-  const router = createMemoryRouter([
-    { path: '/', element },
-  ], { initialEntries: ['/'] });
+  const router = createMemoryRouter([{ path: '/', element }], { initialEntries: ['/'] });
   return { router, ...render(<RouterProvider router={router} />) };
 }
 
@@ -166,13 +159,21 @@ describe('workspace leave guard', () => {
         save,
         discard: async () => undefined,
       });
-      return <><Link to="/other">离开工作区</Link>{guard.dialog}</>;
+      return (
+        <>
+          <Link to="/other">离开工作区</Link>
+          {guard.dialog}
+        </>
+      );
     }
 
-    const router = createHashRouter([
-      { path: '/', element: <RouteGuard /> },
-      { path: '/other', element: <div>其他页面</div> },
-    ], { window });
+    const router = createHashRouter(
+      [
+        { path: '/', element: <RouteGuard /> },
+        { path: '/other', element: <div>其他页面</div> },
+      ],
+      { window },
+    );
     const user = userEvent.setup();
     render(<RouterProvider router={router} />);
 
@@ -278,9 +279,7 @@ describe('workspace leave guard', () => {
     const save = vi.fn(async () => true);
     const discard = vi.fn(async () => undefined);
     const user = userEvent.setup();
-    renderWithMemoryRouter(
-      <GuardHarness save={save} discard={discard} contentAvailable={false} />,
-    );
+    renderWithMemoryRouter(<GuardHarness save={save} discard={discard} contentAvailable={false} />);
 
     await user.click(screen.getByRole('button', { name: '切换 B' }));
     expect(await screen.findByText('正文暂时无法完整读取')).toBeTruthy();
@@ -297,12 +296,7 @@ describe('workspace leave guard', () => {
     const save = vi.fn(async () => true);
     const user = userEvent.setup();
     renderWithMemoryRouter(
-      <GuardHarness
-        save={save}
-        shouldGuard={false}
-        shouldPreflight
-        preflight={preflight}
-      />,
+      <GuardHarness save={save} shouldGuard={false} shouldPreflight preflight={preflight} />,
     );
 
     await user.click(screen.getByRole('button', { name: '切换 B' }));
@@ -317,12 +311,7 @@ describe('workspace leave guard', () => {
     const preflight = vi.fn(async () => true);
     const save = vi.fn(async () => true);
     renderWithMemoryRouter(
-      <GuardHarness
-        save={save}
-        shouldGuard={false}
-        shouldPreflight
-        preflight={preflight}
-      />,
+      <GuardHarness save={save} shouldGuard={false} shouldPreflight preflight={preflight} />,
     );
     await waitFor(() => expect(tauriHarness.closeHandler).not.toBeNull());
     const event = { preventDefault: vi.fn() };

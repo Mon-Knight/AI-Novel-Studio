@@ -1,0 +1,16 @@
+--- MODIFIED_FILE.baseline.json
++++ MODIFIED_FILE.json
+@@
+-  "state": "baseline",
+-  "retainedProject": "F:\\ai-novel-studio",
+-  "standaloneRepository": false,
+-  "cleanupScope": "not applied",
++  "state": "modified",
++  "changedField": "retainedProject",
++  "retainedProject": "F:\\ai-novel-studio-hotfix-v321",
++  "previouslyLinkedTo": "F:\\ai-novel-studio\\.git",
++  "standaloneRepository": true,
++  "cleanupScope": "F:\\ root-level AI Novel Studio project directories except retainedProject",
++  "candidateCount": 10,
++  "reclaimedBytes": 64123429764,
++  "deletedProjects": ["F:\\ai-novel-studio", "F:\\ai-novel-studio-docs-transaction", "F:\\ai-novel-studio-docs-update-20260820", "F:\\ai-novel-studio-local-state", "F:\\ai-novel-studio-spike", "F:\\AI-Novel-Studio-v3.2.1-official", "F:\\ai-novel-studio-v310", "F:\\ai-novel-studio-v320", "F:\\ai-novel-studio-v320-rollback-check-20260819-1", "F:\\ai-novel-studio-v320-transaction"],

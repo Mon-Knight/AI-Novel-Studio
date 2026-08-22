@@ -48,7 +48,9 @@ describe('project editing', () => {
     await browser.refresh();
     await waitForTestId('app-shell');
     await waitForTestIdAttribute('project-settings', 'data-project-name', newTitle);
-    const saved = await bridgeCall<{ id: string; title: string } | null>('get_novel_by_id', { id: projectId });
+    const saved = await bridgeCall<{ id: string; title: string } | null>('get_novel_by_id', {
+      id: projectId,
+    });
     expect(saved?.title).toBe(newTitle);
 
     const projects = await bridgeCall<Array<{ id: string; title: string }>>('get_all_novels');

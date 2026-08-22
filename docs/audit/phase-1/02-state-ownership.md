@@ -11,26 +11,26 @@
 
 ## 2. 状态所有权表
 
-| 状态 | 权威所有者 | 生命周期 | 持久化 | 写入者 | 读取者 | 当前问题 | 置信度 |
-|---|---|---|---|---|---|---|---|
-| 当前项目 ID | 路由参数 `novelId` | 页面/路由 | URL | Router | `WritingWorkspacePage`、服务调用 | 异步回调没有统一 project generation token | 代码确认 |
-| 当前项目对象 | `WritingWorkspacePage.novel` | 页面 | 源数据在 `novels` | 页面加载 | 工作台 | 与路由 ID 并存，属缓存镜像 | 代码确认 |
-| 当前章节 ID | `activeChapterId` | 页面 | 否 | 章节点击、初始化、新建 | `activeChapter` 派生、右栏、编辑器 | 先切 ID、后异步加载草稿；无请求序号 | 代码确认 |
-| 目标章节 ID（旧 AI 面板） | 请求启动闭包中的 `chapter.id` | 单次 async | 部分写入 `ai_task_records.chapter_id` | 面板 | 草稿创建 | DB 保存目标固定，但迟到回调会更新新章节 UI | 代码确认 |
-| 目标章节 ID（generation job） | `GenerationJob.chapterId` | 持久任务 | `generation_jobs.chapter_id` | `generationJobService.create` | job runner | 绑定章节但缺基础正文版本/hash | 代码确认 |
-| 当前草稿对象 | `WritingWorkspacePage.currentDraft` | 页面 | 对应 `chapter_drafts` | 加载、保存、AI `onGenerated`、历史恢复 | Editor、右栏 | 更新时不校验活动章节 | 代码确认 |
-| 编辑器正文 | `EditorArea.content` | 组件挂载 | 否 | 用户输入、草稿 effect、apply request | 保存、选区快照 | 章节切换可被旧草稿覆盖；未保存正文无离开保护 | 代码确认 |
-| 编辑器派生快照 | `editorSnapshot` | 页面 | 否 | `onEditorContentChange` | AI 上下文、dirty/hash | 不是提交快照；与 `currentDraft` 可能跨章节混合 | 代码确认 |
-| 未保存正文 | `EditorArea.content + isDirty` | 内存 | 否 | 用户 | 保存/替换确认 | 切换章节不确认，页面卸载无恢复 | 代码确认 |
-| 持久草稿版本 | `chapter_drafts` | 长期 | SQLite | `draftVersionService` | 工作台/历史/质量 | version 号用 `MAX+1`，无唯一约束/事务防并发 | 代码确认 |
-| 正式正文 | `chapter_drafts.is_adopted` | 长期 | SQLite | `adopt_chapter_draft` | `getAdoptedByChapterId` | 采用的两次 UPDATE 无事务；可能出现 0 个正式版本 | 代码确认 |
-| `chapters.adopted_draft_id` | `chapters` 列 | 长期 | SQLite | 当前未发现写入 | DTO/部分上下文类型 | 已建立但未接入正式采用链 | 代码确认 |
-| 长正文全文 | `large_text_documents/chunks` | 长期 | SQLite | `large_text_save.rs` | `draftVersionService.readFullContent` | 与 draft 引用分两次操作；读取失败静默退回 500 字预览 | 代码确认 |
-| AI 候选正文 | 非采用 `chapter_drafts` | 长期 | SQLite | 生成/润色/修复服务 | 编辑器、历史 | 创建后经 `onGenerated` 自动成为当前编辑草稿，但不是正式正文 | 代码确认 |
-| 章节目录对象 | `chapters[]` | 页面镜像 | 源数据在 SQLite | repository reload | 目录/上下文 | `adoptedDraftId` 字段不可靠 | 代码确认 |
-| 右栏显示状态 | `sidebarState.activeTool/collapsed` | 页面 | 否 | toolbar/close | RightPanel | 页面重启丢失 | 代码确认 |
-| 各右栏业务结果 | 多数面板 local state | 面板组件 | 多数否 | 各面板 | 各面板 | 收起保留，换面板卸载；业务状态与 UI 生命周期混合 | 代码确认 |
-| 质量报告 | SQLite + 页面 `qcReport/qcItems` | 长期/页面缓存 | 是 | quality service | CheckPanel | 报告绑定较完整；加载/回调仍缺章节请求令牌 | 代码确认 |
+| 状态                          | 权威所有者                          | 生命周期      | 持久化                                | 写入者                                 | 读取者                                | 当前问题                                                    | 置信度   |
+| ----------------------------- | ----------------------------------- | ------------- | ------------------------------------- | -------------------------------------- | ------------------------------------- | ----------------------------------------------------------- | -------- |
+| 当前项目 ID                   | 路由参数 `novelId`                  | 页面/路由     | URL                                   | Router                                 | `WritingWorkspacePage`、服务调用      | 异步回调没有统一 project generation token                   | 代码确认 |
+| 当前项目对象                  | `WritingWorkspacePage.novel`        | 页面          | 源数据在 `novels`                     | 页面加载                               | 工作台                                | 与路由 ID 并存，属缓存镜像                                  | 代码确认 |
+| 当前章节 ID                   | `activeChapterId`                   | 页面          | 否                                    | 章节点击、初始化、新建                 | `activeChapter` 派生、右栏、编辑器    | 先切 ID、后异步加载草稿；无请求序号                         | 代码确认 |
+| 目标章节 ID（旧 AI 面板）     | 请求启动闭包中的 `chapter.id`       | 单次 async    | 部分写入 `ai_task_records.chapter_id` | 面板                                   | 草稿创建                              | DB 保存目标固定，但迟到回调会更新新章节 UI                  | 代码确认 |
+| 目标章节 ID（generation job） | `GenerationJob.chapterId`           | 持久任务      | `generation_jobs.chapter_id`          | `generationJobService.create`          | job runner                            | 绑定章节但缺基础正文版本/hash                               | 代码确认 |
+| 当前草稿对象                  | `WritingWorkspacePage.currentDraft` | 页面          | 对应 `chapter_drafts`                 | 加载、保存、AI `onGenerated`、历史恢复 | Editor、右栏                          | 更新时不校验活动章节                                        | 代码确认 |
+| 编辑器正文                    | `EditorArea.content`                | 组件挂载      | 否                                    | 用户输入、草稿 effect、apply request   | 保存、选区快照                        | 章节切换可被旧草稿覆盖；未保存正文无离开保护                | 代码确认 |
+| 编辑器派生快照                | `editorSnapshot`                    | 页面          | 否                                    | `onEditorContentChange`                | AI 上下文、dirty/hash                 | 不是提交快照；与 `currentDraft` 可能跨章节混合              | 代码确认 |
+| 未保存正文                    | `EditorArea.content + isDirty`      | 内存          | 否                                    | 用户                                   | 保存/替换确认                         | 切换章节不确认，页面卸载无恢复                              | 代码确认 |
+| 持久草稿版本                  | `chapter_drafts`                    | 长期          | SQLite                                | `draftVersionService`                  | 工作台/历史/质量                      | version 号用 `MAX+1`，无唯一约束/事务防并发                 | 代码确认 |
+| 正式正文                      | `chapter_drafts.is_adopted`         | 长期          | SQLite                                | `adopt_chapter_draft`                  | `getAdoptedByChapterId`               | 采用的两次 UPDATE 无事务；可能出现 0 个正式版本             | 代码确认 |
+| `chapters.adopted_draft_id`   | `chapters` 列                       | 长期          | SQLite                                | 当前未发现写入                         | DTO/部分上下文类型                    | 已建立但未接入正式采用链                                    | 代码确认 |
+| 长正文全文                    | `large_text_documents/chunks`       | 长期          | SQLite                                | `large_text_save.rs`                   | `draftVersionService.readFullContent` | 与 draft 引用分两次操作；读取失败静默退回 500 字预览        | 代码确认 |
+| AI 候选正文                   | 非采用 `chapter_drafts`             | 长期          | SQLite                                | 生成/润色/修复服务                     | 编辑器、历史                          | 创建后经 `onGenerated` 自动成为当前编辑草稿，但不是正式正文 | 代码确认 |
+| 章节目录对象                  | `chapters[]`                        | 页面镜像      | 源数据在 SQLite                       | repository reload                      | 目录/上下文                           | `adoptedDraftId` 字段不可靠                                 | 代码确认 |
+| 右栏显示状态                  | `sidebarState.activeTool/collapsed` | 页面          | 否                                    | toolbar/close                          | RightPanel                            | 页面重启丢失                                                | 代码确认 |
+| 各右栏业务结果                | 多数面板 local state                | 面板组件      | 多数否                                | 各面板                                 | 各面板                                | 收起保留，换面板卸载；业务状态与 UI 生命周期混合            | 代码确认 |
+| 质量报告                      | SQLite + 页面 `qcReport/qcItems`    | 长期/页面缓存 | 是                                    | quality service                        | CheckPanel                            | 报告绑定较完整；加载/回调仍缺章节请求令牌                   | 代码确认 |
 
 ## 3. 正文事实来源
 

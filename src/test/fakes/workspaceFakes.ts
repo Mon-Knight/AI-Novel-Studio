@@ -43,15 +43,9 @@ export function createFakeSaveService<TResult>() {
 }
 
 export function createFakeRecoveryService<TSnapshot>() {
-  const reads = new FakeAsyncQueue<
-    [novelId: string, chapterId: string],
-    TSnapshot | null
-  >();
+  const reads = new FakeAsyncQueue<[novelId: string, chapterId: string], TSnapshot | null>();
   const writes = new FakeAsyncQueue<[input: unknown], TSnapshot>();
-  const deletes = new FakeAsyncQueue<
-    [novelId: string, chapterId: string],
-    void
-  >();
+  const deletes = new FakeAsyncQueue<[novelId: string, chapterId: string], void>();
 
   return {
     reads,

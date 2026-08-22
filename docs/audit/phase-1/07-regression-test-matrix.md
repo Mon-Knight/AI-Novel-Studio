@@ -221,20 +221,19 @@ React component/integration（可控 deferred Promise + fake repositories）
 
 除 R01-R20 外，Phase 2 前的最小安全门还应包含：
 
-| 编号 | 场景 | 预期 |
-|---|---|---|
-| DB01 | adopt 传入不存在 draft | 原 adopted 不变，事务返回 target_not_found |
-| DB02 | adopt 传入别章 draft | 两章均不变，返回 target_mismatch |
-| DB03 | update 0 affected rows | 返回明确 conflict/not_found，前端保持 dirty |
-| DB04 | 大文本全文 hash mismatch | finalize 回滚，不创建 document |
-| DB05 | 大文本 commit 后缓存清理失败 | 返回 committed-with-cleanup-warning，不允许盲重试 |
-| DB06 | 大文本 document 成功、draft link 失败 | 同事务回滚或可恢复 journal，不留孤儿 |
-| DB07 | quality 第 N item 失败 | report/items 整体回滚 |
-| DB08 | dbCall 超过 3 秒后 Rust 成功 | 前端能查询 operation id，不重复写 |
+| 编号 | 场景                                  | 预期                                              |
+| ---- | ------------------------------------- | ------------------------------------------------- |
+| DB01 | adopt 传入不存在 draft                | 原 adopted 不变，事务返回 target_not_found        |
+| DB02 | adopt 传入别章 draft                  | 两章均不变，返回 target_mismatch                  |
+| DB03 | update 0 affected rows                | 返回明确 conflict/not_found，前端保持 dirty       |
+| DB04 | 大文本全文 hash mismatch              | finalize 回滚，不创建 document                    |
+| DB05 | 大文本 commit 后缓存清理失败          | 返回 committed-with-cleanup-warning，不允许盲重试 |
+| DB06 | 大文本 document 成功、draft link 失败 | 同事务回滚或可恢复 journal，不留孤儿              |
+| DB07 | quality 第 N item 失败                | report/items 整体回滚                             |
+| DB08 | dbCall 超过 3 秒后 Rust 成功          | 前端能查询 operation id，不重复写                 |
 
 当前均无自动化覆盖。
 
 ## 4. 通过标准
 
 R03、R04、R05、R06、R07、R08、R11、R14、R15、R19 和 DB01-DB08 在安全写入继续扩展前必须具备可重复自动化证据。静态文本断言、编译通过、手工正常路径演示均不能替代这些竞争/故障注入测试。
-

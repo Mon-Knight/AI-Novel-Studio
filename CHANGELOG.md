@@ -76,6 +76,20 @@
 - 修复工作台把「你好」「你能做什么」等问候/能力询问默认跑成 `generate_chapter` 并因缺少 `candidateText` 瞬时失败的问题；这类消息现在直接回复能力说明，不再空调用生成工具。
 - 修复桌面端打开工作台时并发解包 DSH 载体互相覆盖、最终 `dsh-runtime` 装不上导致无法使用的问题；解包改为单飞并回收已解压完整的残留目录。
 
+### 架构重构与工程治理
+
+- **后端领域分层（Phase 2）**：解耦万行单体 `commands.rs`，全面建立 `domain/`（纯业务规则与验证）、`repositories/`（持久化抽象与 SQLite 实现）、`services/`（应用服务与事务协调）与 `commands/`（薄命令入口）分层体系，318 项 Rust 测试全量保持通过。
+- **前端业务解耦（Phase 3）**：
+  - 将 2,200+ 行的 `chapterProseOrchestrator.ts` 拆分为 `scenePlanParser`、`beatContextAssembler`、`beatTextValidator`、`beatRepairService` 与 `proseGenerationPipeline` 等单一职责模块；
+  - 将 1,700+ 行的 `generationJobService` 拆分为状态机流转控制、多端存储、断点续生、质检门禁与章节生成主管线；
+  - 将 770+ 行的 `WorkbenchPage.tsx` 消除 15 个散落状态，抽离出 5 大专职 Custom Hook，页面聚焦纯布局与视图装配；
+  - 关键链路测试加固：新增 14 个场景解析、状态机与质检门禁测试，前端自动化测试总数增至 322 项全绿通过；
+  - 完善基于 `variables.css` 的全局 Design Token 体系与标准组件工具类。
+- **运行时加固与桌面交互（Phase 4）**：
+  - 消除 Rust 生产代码路径中的潜在 panic 隐患，加固 DSH 进程生命周期容错；
+  - 在 AI 侧边 Dock 面板、正文编辑区与作品详情页全景接入 `PanelErrorBoundary` 局部隔离与重试机制，杜绝渲染白屏；
+  - 引入跨平台桌面快捷键 Hook `useKeyboardShortcuts`，支持防误触机制与快捷键映射。
+
 ## v3.2.1 (2026-08-19) - 发布资产 URL 热修复
 
 ### 修复

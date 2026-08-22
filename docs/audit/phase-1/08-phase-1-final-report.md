@@ -16,18 +16,18 @@
 
 ### 1.2 本阶段执行结果
 
-| 项目 | 结果 |
-|---|---|
-| Git 工作区 | 本地 ZIP 无 `.git`，无法判断 clean/commit；远端历史以 GitHub 只读数据补充 |
-| 依赖一致性 | `npm ls --depth=0` 通过；package/lock 根版本 2.1.0 |
-| 前端 lint | 通过；1 条 hooks dependency warning |
-| 前端构建 | 同快照完整生产构建曾成功；隔离复跑因 Vite 临时配置文件 `EPERM` 失败，TypeScript 已完成 |
-| Rust format check | 失败，多个文件有格式 diff；未执行格式化 |
-| `cargo check` | 通过，10 warnings |
-| `cargo test` | 2 通过、1 失败 |
-| 前端/脚本测试 | 3 个静态检查通过 |
-| runtime AI task delete | Rust 测试失败，但 PowerShell 脚本错误返回退出 0（假绿） |
-| 真实 AI / 真实用户库 | 未使用 |
+| 项目                   | 结果                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| Git 工作区             | 本地 ZIP 无 `.git`，无法判断 clean/commit；远端历史以 GitHub 只读数据补充              |
+| 依赖一致性             | `npm ls --depth=0` 通过；package/lock 根版本 2.1.0                                     |
+| 前端 lint              | 通过；1 条 hooks dependency warning                                                    |
+| 前端构建               | 同快照完整生产构建曾成功；隔离复跑因 Vite 临时配置文件 `EPERM` 失败，TypeScript 已完成 |
+| Rust format check      | 失败，多个文件有格式 diff；未执行格式化                                                |
+| `cargo check`          | 通过，10 warnings                                                                      |
+| `cargo test`           | 2 通过、1 失败                                                                         |
+| 前端/脚本测试          | 3 个静态检查通过                                                                       |
+| runtime AI task delete | Rust 测试失败，但 PowerShell 脚本错误返回退出 0（假绿）                                |
+| 真实 AI / 真实用户库   | 未使用                                                                                 |
 
 详细命令、时间、warning/error：`01-project-baseline.md`。
 
@@ -90,23 +90,23 @@ flowchart LR
 
 ## 3. 状态所有权表
 
-| 状态 | 当前所有者 | 是否持久 | 事实/缓存 | 主要风险 |
-|---|---|---:|---|---|
-| 当前项目 | route `novelId` + page `novel` | URL/DB | route 为选择，DB 为事实 | 旧 async 无 page generation guard |
-| 当前章节 | page `activeChapterId` | 否 | UI 选择 | 先切 ID 后异步 load，无乱序保护 |
-| 当前正文草稿 | page `currentDraft` | 对应 DB | 页面缓存 | 可与 active chapter 错配 |
-| 未保存正文 | `EditorArea.content/isDirty` | 否 | 当前编辑会话事实 | 切章/退出无统一保护 |
-| 正式正文 | `chapter_drafts.is_adopted` | 是 | 持久事实 | adopt 非事务；可能 0 adopted |
-| `chapters.adopted_draft_id` | chapters 列 | 是 | 未接通/不可信 | 当前无写入者 |
-| AI 旧任务 | `ai_task_records` | 是 | 任务摘要 | 无 revision/context/selection/progress/cancel |
-| 章节工程任务 | `generation_jobs/steps` | 是 | 较完整任务 | 无 base version；网络不可取消 |
-| 流式内容 | 不存在 | 否 | 不适用 | 未来接入前无 sequence/store |
-| AI 生成结果 | `chapter_drafts` / step output / panel local | 部分 | 候选 | UI result 生命周期不统一 |
-| 质量报告 | `quality_check_reports/items` + page cache | 是 | draft/hash 快照 | 保存非事务，历史 item 可迁移 report |
-| 自动放置计划 | 无统一实体 | 否 | transient patch/candidate | 无版本/锁/事务/撤销 |
-| 面板显示状态 | page `sidebarState` + RightPanel last type | 否 | UI 状态 | 收起保留，换面板卸载 |
-| 面板业务状态 | 多数 panel local | 多数否 | 业务与 UI 混合 | 切面板/重启丢失 |
-| 长文本全文 | large text tables + draft ref | 是 | 正文事实的一部分 | hash 错仍 commit、引用跨命令 |
+| 状态                        | 当前所有者                                   | 是否持久 | 事实/缓存                 | 主要风险                                      |
+| --------------------------- | -------------------------------------------- | -------: | ------------------------- | --------------------------------------------- |
+| 当前项目                    | route `novelId` + page `novel`               |   URL/DB | route 为选择，DB 为事实   | 旧 async 无 page generation guard             |
+| 当前章节                    | page `activeChapterId`                       |       否 | UI 选择                   | 先切 ID 后异步 load，无乱序保护               |
+| 当前正文草稿                | page `currentDraft`                          |  对应 DB | 页面缓存                  | 可与 active chapter 错配                      |
+| 未保存正文                  | `EditorArea.content/isDirty`                 |       否 | 当前编辑会话事实          | 切章/退出无统一保护                           |
+| 正式正文                    | `chapter_drafts.is_adopted`                  |       是 | 持久事实                  | adopt 非事务；可能 0 adopted                  |
+| `chapters.adopted_draft_id` | chapters 列                                  |       是 | 未接通/不可信             | 当前无写入者                                  |
+| AI 旧任务                   | `ai_task_records`                            |       是 | 任务摘要                  | 无 revision/context/selection/progress/cancel |
+| 章节工程任务                | `generation_jobs/steps`                      |       是 | 较完整任务                | 无 base version；网络不可取消                 |
+| 流式内容                    | 不存在                                       |       否 | 不适用                    | 未来接入前无 sequence/store                   |
+| AI 生成结果                 | `chapter_drafts` / step output / panel local |     部分 | 候选                      | UI result 生命周期不统一                      |
+| 质量报告                    | `quality_check_reports/items` + page cache   |       是 | draft/hash 快照           | 保存非事务，历史 item 可迁移 report           |
+| 自动放置计划                | 无统一实体                                   |       否 | transient patch/candidate | 无版本/锁/事务/撤销                           |
+| 面板显示状态                | page `sidebarState` + RightPanel last type   |       否 | UI 状态                   | 收起保留，换面板卸载                          |
+| 面板业务状态                | 多数 panel local                             |   多数否 | 业务与 UI 混合            | 切面板/重启丢失                               |
+| 长文本全文                  | large text tables + draft ref                |       是 | 正文事实的一部分          | hash 错仍 commit、引用跨命令                  |
 
 完整证据：`02-state-ownership.md`。
 
@@ -199,17 +199,17 @@ result(A, base unknown)
 
 ### 5.2 九项历史问题
 
-| 原问题 | 远端历史/修改文件 | 核心修改方式 | 当前使用/覆盖 | 未覆盖/旧实现 | 判定 | 根因判断 |
-|---|---|---|---|---|---|---|
-| 1. 面板状态保留 | [c30a7e](https://github.com/Mon-Knight/AI-Novel-Studio/commit/c30a7eca82435dd32ca3cef142c9fd6766901c98)、[a9bcf7](https://github.com/Mon-Knight/AI-Novel-Studio/commit/a9bcf7a80f6ac945439b389be5d98adae1b00c85)；`RightPanel.tsx`, `rightSidebarStore.ts` | 收起用 CSS hide；新增 toolStates | 同一面板收起/展开在用 | 换面板卸载；toolStates 无面板写入；重启丢 | **表面修复** | 用 keep-mounted 缓解生命周期，业务所有权未迁出 UI |
-| 2. 切章关闭/保留面板 | c30a7e；`WritingWorkspacePage.tsx` | 切章不再 close panel，props 感知新章节 | UI 连续性在用 | in-flight callback/load 无章节 token，结果错位 | **表面修复** | 改显示行为，未解决异步目标隔离 |
-| 3. AI 结果应用正文 | c30a7e；`PolishPanel`, `AiGeneratePanel`, page, Editor | 新增 append/replace 通用回调 | 按钮和 Editor effect 在用 | 无 target/revision/hash/idempotency/undo | **表面修复** | 增加入口，未建立安全应用协议 |
-| 4. 重生成包含当前正文 | c30a7e；prompt/context/panel | rewrite 传 `currentEditorContent` 为 draftContent | rewrite 模式在用 | 无 base snapshot；选区未接；new mode不一定含未保存正文 | **部分修复** | 数据已进入 prompt，任务版本绑定未完成 |
-| 5. 质量结果保存 | [b10010](https://github.com/Mon-Knight/AI-Novel-Studio/commit/b1001099ffa58516329522cacd68f5dfc98a9222)、[0422fa](https://github.com/Mon-Knight/AI-Novel-Studio/commit/0422fa18cf8adb99967289372c47734756f420f8)、[86ea15](https://github.com/Mon-Knight/AI-Novel-Studio/commit/86ea152d8c1fa6c66b7d6cab87b47852681a391d) | DB report/items、页面 lifted state、质量闭环 | chapter/draft/hash/version 绑定在用 | save 非事务；task/context/selection 未绑定；load race | **部分修复** | 快照模型基本建立，事务与任务隔离未完成 |
-| 6. 长文本目标引用 | [7844b0](https://github.com/Mon-Knight/AI-Novel-Studio/commit/7844b0b38455)；Rust large text + draft service | 分片事务、draft `large_text_ref_id` | >阈值正文在用 | hash 错继续；draft 引用跨 command；read 失败退预览；unused target_type | **部分修复** | 分片存储解决，端到端原子/完整性未解决 |
-| 7. 自动放置 | [59756d](https://github.com/Mon-Knight/AI-Novel-Studio/commit/59756dd66684d37d8f9533b62a154bc251137105)、[bee9ef](https://github.com/Mon-Knight/AI-Novel-Studio/commit/bee9efdf768edb3d024c92f8d6480b65ebbf1d07) | low-risk quote patch；大纲结果应用当前章；设定 type switch | 局部路径在用 | 无统一 plan/version/lock/transaction/undo | **部分修复** | 局部操作落地，不是通用安全放置架构 |
-| 8. 启动白屏 | [d9345e](https://github.com/Mon-Knight/AI-Novel-Studio/commit/d9345e79bff3637018fd3d5615267ee086dddae7) 及当前 `main.tsx/index.html` | 静态 splash；先 mount React，再异步 accent；启动计时 | 当前代码在用 | 未跑 packaged cold-start/E2E；脚本异常前 splash 可能常驻 | **部分修复** | 正常启动反馈已改善，缺发布态验证 |
-| 9. DB 保存和恢复 | [4091da](https://github.com/Mon-Knight/AI-Novel-Studio/commit/4091da0646b04e78c94f8774ca5550670c616fb0)、[6642f5](https://github.com/Mon-Knight/AI-Novel-Studio/commit/6642f5dda73b48b807fe699e24c66fa7a00728cd)、d9345e | workspace repository 单源、Tauri 不静默 fallback、草稿版本 | 正常 CRUD 在用 | 3 秒迟到提交；adopt/quality/large text 边界；无 migration ledger | **部分修复** | 正常路径统一，故障/并发/恢复语义未完成 |
+| 原问题                | 远端历史/修改文件                                                                                                                                                                                                                                                                                                         | 核心修改方式                                               | 当前使用/覆盖                       | 未覆盖/旧实现                                                          | 判定         | 根因判断                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------- | ------------ | ------------------------------------------------- |
+| 1. 面板状态保留       | [c30a7e](https://github.com/Mon-Knight/AI-Novel-Studio/commit/c30a7eca82435dd32ca3cef142c9fd6766901c98)、[a9bcf7](https://github.com/Mon-Knight/AI-Novel-Studio/commit/a9bcf7a80f6ac945439b389be5d98adae1b00c85)；`RightPanel.tsx`, `rightSidebarStore.ts`                                                                | 收起用 CSS hide；新增 toolStates                           | 同一面板收起/展开在用               | 换面板卸载；toolStates 无面板写入；重启丢                              | **表面修复** | 用 keep-mounted 缓解生命周期，业务所有权未迁出 UI |
+| 2. 切章关闭/保留面板  | c30a7e；`WritingWorkspacePage.tsx`                                                                                                                                                                                                                                                                                        | 切章不再 close panel，props 感知新章节                     | UI 连续性在用                       | in-flight callback/load 无章节 token，结果错位                         | **表面修复** | 改显示行为，未解决异步目标隔离                    |
+| 3. AI 结果应用正文    | c30a7e；`PolishPanel`, `AiGeneratePanel`, page, Editor                                                                                                                                                                                                                                                                    | 新增 append/replace 通用回调                               | 按钮和 Editor effect 在用           | 无 target/revision/hash/idempotency/undo                               | **表面修复** | 增加入口，未建立安全应用协议                      |
+| 4. 重生成包含当前正文 | c30a7e；prompt/context/panel                                                                                                                                                                                                                                                                                              | rewrite 传 `currentEditorContent` 为 draftContent          | rewrite 模式在用                    | 无 base snapshot；选区未接；new mode不一定含未保存正文                 | **部分修复** | 数据已进入 prompt，任务版本绑定未完成             |
+| 5. 质量结果保存       | [b10010](https://github.com/Mon-Knight/AI-Novel-Studio/commit/b1001099ffa58516329522cacd68f5dfc98a9222)、[0422fa](https://github.com/Mon-Knight/AI-Novel-Studio/commit/0422fa18cf8adb99967289372c47734756f420f8)、[86ea15](https://github.com/Mon-Knight/AI-Novel-Studio/commit/86ea152d8c1fa6c66b7d6cab87b47852681a391d) | DB report/items、页面 lifted state、质量闭环               | chapter/draft/hash/version 绑定在用 | save 非事务；task/context/selection 未绑定；load race                  | **部分修复** | 快照模型基本建立，事务与任务隔离未完成            |
+| 6. 长文本目标引用     | [7844b0](https://github.com/Mon-Knight/AI-Novel-Studio/commit/7844b0b38455)；Rust large text + draft service                                                                                                                                                                                                              | 分片事务、draft `large_text_ref_id`                        | >阈值正文在用                       | hash 错继续；draft 引用跨 command；read 失败退预览；unused target_type | **部分修复** | 分片存储解决，端到端原子/完整性未解决             |
+| 7. 自动放置           | [59756d](https://github.com/Mon-Knight/AI-Novel-Studio/commit/59756dd66684d37d8f9533b62a154bc251137105)、[bee9ef](https://github.com/Mon-Knight/AI-Novel-Studio/commit/bee9efdf768edb3d024c92f8d6480b65ebbf1d07)                                                                                                          | low-risk quote patch；大纲结果应用当前章；设定 type switch | 局部路径在用                        | 无统一 plan/version/lock/transaction/undo                              | **部分修复** | 局部操作落地，不是通用安全放置架构                |
+| 8. 启动白屏           | [d9345e](https://github.com/Mon-Knight/AI-Novel-Studio/commit/d9345e79bff3637018fd3d5615267ee086dddae7) 及当前 `main.tsx/index.html`                                                                                                                                                                                      | 静态 splash；先 mount React，再异步 accent；启动计时       | 当前代码在用                        | 未跑 packaged cold-start/E2E；脚本异常前 splash 可能常驻               | **部分修复** | 正常启动反馈已改善，缺发布态验证                  |
+| 9. DB 保存和恢复      | [4091da](https://github.com/Mon-Knight/AI-Novel-Studio/commit/4091da0646b04e78c94f8774ca5550670c616fb0)、[6642f5](https://github.com/Mon-Knight/AI-Novel-Studio/commit/6642f5dda73b48b807fe699e24c66fa7a00728cd)、d9345e                                                                                                  | workspace repository 单源、Tauri 不静默 fallback、草稿版本 | 正常 CRUD 在用                      | 3 秒迟到提交；adopt/quality/large text 边界；无 migration ledger       | **部分修复** | 正常路径统一，故障/并发/恢复语义未完成            |
 
 ### 5.3 新旧实现并存
 
@@ -223,45 +223,45 @@ result(A, base unknown)
 
 ### 6.1 P0（从高到低）
 
-| ID | 风险 | 证据 | 置信度 |
-|---|---|---|---|
-| P0-01 | 切换章节不确认/保存未保存正文，新草稿 effect 直接覆盖 | page `handleSelectChapter`; Editor effect | 代码确认 |
-| P0-02 | load/AI/润色/质量迟到回调把 A 草稿装入 B 当前编辑器 | `loadChapterDraft`, `handleDraftApplied`, panels | 代码确认 |
-| P0-03 | 通用 apply 无 target/revision/hash，依赖当前正好打开目标章节 | page `applyAiTextToEditor`; Editor apply effect | 代码确认 |
-| P0-04 | `adopt_chapter_draft` 两次 UPDATE 无事务、不查 affected rows、返回查询不约束 chapter | `commands.rs:1169-1189` | 代码确认 |
-| P0-05 | 错配 draft/chapter 的 save 可 0 行更新却显示 clean/返回旧草稿 | `EditorArea.tsx:281-319`; `commands.rs:1145-1165` | 代码确认 |
-| P0-06 | 大文本全文 SHA mismatch 只警告继续 commit | `large_text_save.rs:277-286` | 代码确认 |
-| P0-07 | 大文本读取失败静默使用 500 字预览，用户后续保存可形成截断正文 | `draftVersionService.ts:95-152,222-230,286-294` | 高度可能 |
-| P0-08 | `dbCall` 3 秒超时不取消 Rust；非幂等写可能“前端失败、DB 成功、用户重试” | `db.ts:77-124` | 高度可能 |
-| P0-09 | 大文本 document/chunks 与 draft 引用跨 command，无整体事务 | draft service + large text Rust | 代码确认（孤儿）；正文影响高度可能 |
+| ID    | 风险                                                                                 | 证据                                              | 置信度                             |
+| ----- | ------------------------------------------------------------------------------------ | ------------------------------------------------- | ---------------------------------- |
+| P0-01 | 切换章节不确认/保存未保存正文，新草稿 effect 直接覆盖                                | page `handleSelectChapter`; Editor effect         | 代码确认                           |
+| P0-02 | load/AI/润色/质量迟到回调把 A 草稿装入 B 当前编辑器                                  | `loadChapterDraft`, `handleDraftApplied`, panels  | 代码确认                           |
+| P0-03 | 通用 apply 无 target/revision/hash，依赖当前正好打开目标章节                         | page `applyAiTextToEditor`; Editor apply effect   | 代码确认                           |
+| P0-04 | `adopt_chapter_draft` 两次 UPDATE 无事务、不查 affected rows、返回查询不约束 chapter | `commands.rs:1169-1189`                           | 代码确认                           |
+| P0-05 | 错配 draft/chapter 的 save 可 0 行更新却显示 clean/返回旧草稿                        | `EditorArea.tsx:281-319`; `commands.rs:1145-1165` | 代码确认                           |
+| P0-06 | 大文本全文 SHA mismatch 只警告继续 commit                                            | `large_text_save.rs:277-286`                      | 代码确认                           |
+| P0-07 | 大文本读取失败静默使用 500 字预览，用户后续保存可形成截断正文                        | `draftVersionService.ts:95-152,222-230,286-294`   | 高度可能                           |
+| P0-08 | `dbCall` 3 秒超时不取消 Rust；非幂等写可能“前端失败、DB 成功、用户重试”              | `db.ts:77-124`                                    | 高度可能                           |
+| P0-09 | 大文本 document/chunks 与 draft 引用跨 command，无整体事务                           | draft service + large text Rust                   | 代码确认（孤儿）；正文影响高度可能 |
 
 ### 6.2 P1
 
-| ID | 风险 | 证据/影响 |
-|---|---|---|
-| P1-01 | 切换不同面板/重启丢 local AI 结果与进度 | RightPanel 动态 component + panel local state |
-| P1-02 | old task 缺 target revision/context/selection/progress/cancel | `AiTaskRecord`/table |
-| P1-03 | generation job 取消不能终止在途 HTTP，迟到全文仍可进 step output | `runStep` 取消检查时机 |
-| P1-04 | 两套 task 追溯断裂；job 草稿 aiTaskId 被清空 | Rust 只查 `ai_task_records` |
-| P1-05 | quality report completed/items 保存非事务 | commands save result |
-| P1-06 | 历史 quality item 被改挂新 report，旧报告不能稳定重放 | issue merge SQL |
-| P1-07 | pending 新报告可遮住旧 completed 报告 | latest report query 不过滤 status |
-| P1-08 | quality fix `adopted` 不等于正式 adopted draft | CheckPanel 只 `onGenerated` |
-| P1-09 | selection 状态已采集但 writingContext 未接通 | Editor snapshot vs writingContext |
-| P1-10 | 工程约束主要仅 prompt，无 scene/knowledge/lock validator | compiler/job |
-| P1-11 | 自动放置整体仅 L2，无多目标事务/撤销 | patch + setting adoption |
-| P1-12 | runtime 测试脚本吞 cargo 失败，CI 可假绿 | PowerShell 缺 exit code propagation |
+| ID    | 风险                                                             | 证据/影响                                     |
+| ----- | ---------------------------------------------------------------- | --------------------------------------------- |
+| P1-01 | 切换不同面板/重启丢 local AI 结果与进度                          | RightPanel 动态 component + panel local state |
+| P1-02 | old task 缺 target revision/context/selection/progress/cancel    | `AiTaskRecord`/table                          |
+| P1-03 | generation job 取消不能终止在途 HTTP，迟到全文仍可进 step output | `runStep` 取消检查时机                        |
+| P1-04 | 两套 task 追溯断裂；job 草稿 aiTaskId 被清空                     | Rust 只查 `ai_task_records`                   |
+| P1-05 | quality report completed/items 保存非事务                        | commands save result                          |
+| P1-06 | 历史 quality item 被改挂新 report，旧报告不能稳定重放            | issue merge SQL                               |
+| P1-07 | pending 新报告可遮住旧 completed 报告                            | latest report query 不过滤 status             |
+| P1-08 | quality fix `adopted` 不等于正式 adopted draft                   | CheckPanel 只 `onGenerated`                   |
+| P1-09 | selection 状态已采集但 writingContext 未接通                     | Editor snapshot vs writingContext             |
+| P1-10 | 工程约束主要仅 prompt，无 scene/knowledge/lock validator         | compiler/job                                  |
+| P1-11 | 自动放置整体仅 L2，无多目标事务/撤销                             | patch + setting adoption                      |
+| P1-12 | runtime 测试脚本吞 cargo 失败，CI 可假绿                         | PowerShell 缺 exit code propagation           |
 
 ### 6.3 P2
 
-| ID | 风险 | 证据/影响 |
-|---|---|---|
-| P2-01 | 10 个 Rust warning，含未用结构/字段/函数 | `cargo check` |
-| P2-02 | hooks dependency warning | `ChapterEngineeringPanel.tsx:310` |
-| P2-03 | Vite 主 chunk >500k、动态/静态混合导入 | 前端构建输出 |
-| P2-04 | console/string 日志，无统一 task/chapter/revision trace | 前后端日志实现 |
-| P2-05 | `commands.rs` 同时承担 command/业务/SQL/映射/错误 | 模块职责集中 |
-| P2-06 | `cargo fmt --check` 不通过 | format baseline |
+| ID    | 风险                                                    | 证据/影响                         |
+| ----- | ------------------------------------------------------- | --------------------------------- |
+| P2-01 | 10 个 Rust warning，含未用结构/字段/函数                | `cargo check`                     |
+| P2-02 | hooks dependency warning                                | `ChapterEngineeringPanel.tsx:310` |
+| P2-03 | Vite 主 chunk >500k、动态/静态混合导入                  | 前端构建输出                      |
+| P2-04 | console/string 日志，无统一 task/chapter/revision trace | 前后端日志实现                    |
+| P2-05 | `commands.rs` 同时承担 command/业务/SQL/映射/错误       | 模块职责集中                      |
+| P2-06 | `cargo fmt --check` 不通过                              | format baseline                   |
 
 ## 7. 减少用户输入的现状差距
 
@@ -304,14 +304,14 @@ result(A, base unknown)
 
 ## 8. AI 约束能力差距
 
-| 层级 | 当前能力 | 主要差距 |
-|---|---|---|
-| Prompt 建议 | 覆盖人物、世界、剧情、场景、风格、禁止事项 | 模型可违背，普通 apply 不阻断 |
-| 结构化上下文 | ChapterGenerationContext、EngineeringState、ContextSnapshot、quality/fix snapshot | old tasks 无 snapshot id；character state/selection/lock 不完整 |
-| 输出结构 | 多个 JSON prompt + 容错 parser | 无 provider JSON Schema/constrained decoding；自由正文不可结构验证 |
-| 程序硬约束 | 配置范围、FK、quality stale hash、fix scope、low-risk quote/type gate | 无通用 document version/lock/knowledge/scene/placement validator |
-| 生成后审查 | outline/required character check、job quality、fix recheck | 覆盖不统一；警告结果仍可 apply/adopt |
-| 安全应用 | 候选草稿先于正式采用 | apply targetless；adopt 非事务；无 idempotency/diff/undo |
+| 层级         | 当前能力                                                                          | 主要差距                                                           |
+| ------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Prompt 建议  | 覆盖人物、世界、剧情、场景、风格、禁止事项                                        | 模型可违背，普通 apply 不阻断                                      |
+| 结构化上下文 | ChapterGenerationContext、EngineeringState、ContextSnapshot、quality/fix snapshot | old tasks 无 snapshot id；character state/selection/lock 不完整    |
+| 输出结构     | 多个 JSON prompt + 容错 parser                                                    | 无 provider JSON Schema/constrained decoding；自由正文不可结构验证 |
+| 程序硬约束   | 配置范围、FK、quality stale hash、fix scope、low-risk quote/type gate             | 无通用 document version/lock/knowledge/scene/placement validator   |
+| 生成后审查   | outline/required character check、job quality、fix recheck                        | 覆盖不统一；警告结果仍可 apply/adopt                               |
+| 安全应用     | 候选草稿先于正式采用                                                              | apply targetless；adopt 非事务；无 idempotency/diff/undo           |
 
 特别判断：AI 通常不会自动把生成正文设为正式 `is_adopted=1`，这是有效的人工门槛；但质量更优结果会自动载入编辑器，通用 apply 可覆盖当前全文，且最终采用实现不安全，因此不能把“候选草稿”本身视为完整安全保证。
 
@@ -368,4 +368,3 @@ result(A, base unknown)
 **明确不在第二阶段处理的内容：** streaming、全面任务队列重构、状态管理库更换、通用多目标自动放置、人物知识图谱、全部 prompt/质量规则重写、目录重组、warning 清理、UI 美化。
 
 本报告只推荐上述一个主题。Phase 1 到此停止，等待后续任务。
-

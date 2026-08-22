@@ -1,0 +1,62 @@
+AI Novel Studio project cleanup verification
+Date: 2026-08-20 (Asia/Shanghai)
+
+Changed branch/field
+--------------------
+retainedProject = F:\ai-novel-studio-hotfix-v321
+repository storage: linked worktree -> standalone repository
+cleanup field: F:\ root-level AI Novel Studio directories except retainedProject -> only retainedProject remains
+
+Artifacts
+---------
+MODIFIED_FILE: F:\ai-novel-studio-hotfix-v321\reports\cleanup-other-projects-20260820\MODIFIED_FILE.json
+DIFF_FILE: F:\ai-novel-studio-hotfix-v321\reports\cleanup-other-projects-20260820\DIFF_FILE.patch
+VERIFICATION: F:\ai-novel-studio-hotfix-v321\reports\cleanup-other-projects-20260820\VERIFICATION.txt
+ROLLBACK: F:\ai-novel-studio-hotfix-v321\reports\cleanup-other-projects-20260820\ROLLBACK.sh
+
+BASELINE
+--------
+Command: git status --porcelain=v2 --branch
+Result: branch codex/conversational-workbench-docs at babf9c7497ad187bc8ac8c1714c13a3d1414fb1f; 27 tracked files modified; 2 untracked files
+Exit status: 0
+Command: npm run build
+Literal result: Vite production build completed; 409 modules transformed
+Exit status: 0
+Command: cargo check --manifest-path src-tauri\Cargo.toml
+Literal result: Finished dev profile [unoptimized + debuginfo]
+Exit status: 0
+
+MODIFIED
+--------
+Command: git -C F:\ai-novel-studio-hotfix-v321 rev-parse --git-dir
+Result: F:\ai-novel-studio-hotfix-v321\.git (standalone)
+Exit status: 0
+Command: Get-ChildItem F:\ -Directory | filter AI Novel Studio names
+Input: F:\ root directory, excluding F:\ai-novel-studio-hotfix-v321
+Literal result: no other AI Novel Studio directory returned; retained path Test-Path=True
+Exit status: 0
+Literal result: 64,123,429,764 bytes were removed from the ten deleted directories; recovery-small-projects.zip SHA-256 F042548DE1F758007B5C772AC51B4BD853BBDE09A4B69E09D8DA537EA6F6B5CB; recovery-local-state-unique.zip SHA-256 B59A3A467B08B180E4AE3B7DAAE9E20C5E5B34A069EFE404323ABB5CADA38D20
+
+Command: git -C F:\ai-novel-studio-hotfix-v321 rev-parse --git-common-dir
+Literal result: .git
+Exit status: 0
+Command: npm run build
+Literal result: TS2322 in src/services/conversation/taskRuntimeAdapter.test.ts at lines 16 and 53 (MemoryStorage missing Storage.length and Storage.key)
+Exit status: 1 (the untracked workbench test appeared during the cleanup and was preserved)
+Command: npm run tauri build
+Literal result: beforeBuildCommand npm run build failed with exit code 2, with the same TS2322 diagnostics
+Exit status: 1
+Command: cargo check --manifest-path src-tauri\Cargo.toml
+Literal result: Finished dev profile [unoptimized + debuginfo]
+Exit status: 0
+
+ROLLBACK
+--------
+Command: bash /mnt/f/ai-novel-studio-hotfix-v321/reports/cleanup-other-projects-20260820/ROLLBACK.sh /mnt/f/ai-novel-studio-cleanup-rollback-test
+Input: separate rollback destination /mnt/f/ai-novel-studio-cleanup-rollback-test
+Literal result: f1388fb7dd9649dbedea19aef8fb90da7d17d1c6; 110; 82915d8c9c963396e3b39f42ddb46148681fb5cf; bfaa09b1c43c55f0a8d2bd08d5ddc7a7885e8162; 19; 214e4f810c005d5c7e0ba033eb8ff935489fcd4c; 3bbd810ce8930a34f212feed021afd1b2e992b64. The recovery zips were expanded and the destination was removed after verification.
+Exit status: 0 (verified on a separate copy)
+
+Restored behavior/status
+------------------------
+The retained project remains on codex/conversational-workbench-docs at babf9c7497ad187bc8ac8c1714c13a3d1414fb1f with standalone `.git` and one worktree. Its pre-cleanup working-tree fingerprint was E2EDF197DE17A25C34B2E96DAF283FE9F2649986E3AF88D5CF5BF180FB90004F. Concurrent workbench changes that appeared during cleanup remain untouched. The recovery clone restores the deleted Git project heads and the two archived dirty worktrees; rebuildable caches and the official binary package are intentionally not restored.

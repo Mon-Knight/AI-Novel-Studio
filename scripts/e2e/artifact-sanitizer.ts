@@ -6,11 +6,17 @@ const SANITIZATION_ERROR = 'Invalid JSON artifact was omitted during sanitizatio
 
 export function redactLogText(value: string): string {
   return value
-    .replace(/("(?:api[_-]?key|authorization|token|password|secret|cookie|prompt)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
+    .replace(
+      /("(?:api[_-]?key|authorization|token|password|secret|cookie|prompt)"\s*:\s*)"[^"]*"/gi,
+      '$1"[REDACTED]"',
+    )
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
     .replace(/(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,"']+/gi, '$1[REDACTED]')
     .replace(/\bbearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/((?:api[_-]?key|token|password|secret|cookie|prompt)\s*[:=]\s*)[^\s,"']+/gi, '$1[REDACTED]')
+    .replace(
+      /((?:api[_-]?key|token|password|secret|cookie|prompt)\s*[:=]\s*)[^\s,"']+/gi,
+      '$1[REDACTED]',
+    )
     .replace(/[A-Za-z]:\\[^\r\n"']+/g, '[REDACTED_PATH]');
 }
 
@@ -21,7 +27,10 @@ export function sanitizeSecrets<T>(value: T): T {
       return typeof item === 'string' ? redactLogText(item) : item;
     }
     return Object.fromEntries(
-      Object.entries(item).map(([key, child]) => [key, SENSITIVE_KEY.test(key) ? '[REDACTED]' : visit(child)]),
+      Object.entries(item).map(([key, child]) => [
+        key,
+        SENSITIVE_KEY.test(key) ? '[REDACTED]' : visit(child),
+      ]),
     );
   };
   return visit(value) as T;
@@ -42,7 +51,9 @@ async function sanitizeDirectory(root: string, current: string, issues: string[]
   try {
     entries = await fs.promises.readdir(current, { withFileTypes: true });
   } catch (error) {
-    issues.push(`${relativeArtifactPath(root, current)}: could not be listed (${safeErrorName(error)})`);
+    issues.push(
+      `${relativeArtifactPath(root, current)}: could not be listed (${safeErrorName(error)})`,
+    );
     return;
   }
 
@@ -58,7 +69,9 @@ async function sanitizeDirectory(root: string, current: string, issues: string[]
     try {
       contents = await fs.promises.readFile(target, 'utf8');
     } catch (error) {
-      issues.push(`${relativeArtifactPath(root, target)}: could not be read (${safeErrorName(error)})`);
+      issues.push(
+        `${relativeArtifactPath(root, target)}: could not be read (${safeErrorName(error)})`,
+      );
       continue;
     }
 
@@ -77,7 +90,9 @@ async function sanitizeDirectory(root: string, current: string, issues: string[]
     try {
       await fs.promises.writeFile(target, sanitized, 'utf8');
     } catch (error) {
-      issues.push(`${relativeArtifactPath(root, target)}: could not be rewritten (${safeErrorName(error)})`);
+      issues.push(
+        `${relativeArtifactPath(root, target)}: could not be rewritten (${safeErrorName(error)})`,
+      );
     }
   }
 }

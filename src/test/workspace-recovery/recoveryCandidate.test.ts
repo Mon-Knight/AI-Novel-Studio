@@ -60,7 +60,7 @@ describe('recovery candidate persistence', () => {
       return saved;
     });
     const dependencies = {
-      listDrafts: vi.fn(async () => persisted ? [persisted] : []),
+      listDrafts: vi.fn(async () => (persisted ? [persisted] : [])),
       createDraft,
     };
 
@@ -72,24 +72,28 @@ describe('recovery candidate persistence', () => {
     expect(first.reused).toBe(false);
     expect(second).toEqual({ draft: first.draft, reused: true });
     expect(createDraft).toHaveBeenCalledTimes(1);
-    expect(createDraft).toHaveBeenCalledWith(expect.objectContaining({
-      note: RECOVERY_CANDIDATE_NOTE,
-      title: RECOVERY_CANDIDATE_TITLE,
-      operationId: expect.stringMatching(/^recovery-candidate-[0-9a-f]{64}$/),
-    }));
+    expect(createDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: RECOVERY_CANDIDATE_NOTE,
+        title: RECOVERY_CANDIDATE_TITLE,
+        operationId: expect.stringMatching(/^recovery-candidate-[0-9a-f]{64}$/),
+      }),
+    );
   });
 
   it('rejects a candidate whose returned content identity differs', async () => {
     const recovery = await snapshot();
-    await expect(persistRecoveryCandidate(recovery, {
-      listDrafts: async () => [],
-      createDraft: async (input) => {
-        const saved = candidate(input);
-        if (saved.contentState?.status === 'ready') {
-          saved.contentState.contentHash = await computeContentSha256('其他正文');
-        }
-        return saved;
-      },
-    })).rejects.toEqual(expect.objectContaining({ code: 'RECOVERY_CONTENT_INVALID' }));
+    await expect(
+      persistRecoveryCandidate(recovery, {
+        listDrafts: async () => [],
+        createDraft: async (input) => {
+          const saved = candidate(input);
+          if (saved.contentState?.status === 'ready') {
+            saved.contentState.contentHash = await computeContentSha256('其他正文');
+          }
+          return saved;
+        },
+      }),
+    ).rejects.toEqual(expect.objectContaining({ code: 'RECOVERY_CONTENT_INVALID' }));
   });
 });
