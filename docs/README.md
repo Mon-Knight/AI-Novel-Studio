@@ -42,6 +42,7 @@
 | [chapter-readiness-planner-runtime.md](architecture/chapter-readiness-planner-runtime.md)               | v2.5.0 持久 Planner、lease/checkpoint、显式重试与恢复      | ✅ 已实现            |
 | [multi-agent-collaboration.md](architecture/multi-agent-collaboration.md)                               | v3.0.0 全书自主规划、六专家评审、逐章推进与持久事实        | ✅ 已实现            |
 | [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | v3.3.0+ 对话任务工作台、Harness Runtime 映射与只读插件视图 | ✅ v3.5.0 已实现     |
+| [dual-model-creative-runtime.md](architecture/dual-model-creative-runtime.md)                           | Phase 5.1 云端优先、可选本地作家、路由与模型上线门         | 🚧 5.1-B/C 已实现    |
 | [v3.3.0-conversational-workbench-taskbook.md](architecture/v3.3.0-conversational-workbench-taskbook.md) | Codex 接管现有实现并完成真实 Harness Headless 工作台闭环   | 📝 执行任务书        |
 | [desktop-e2e.md](technical/desktop-e2e.md)                                                              | Windows 真实 Tauri E2E、隔离与排障                         | ✅ v2.1.7+ 持续适用  |
 | [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md)                 | Provider 发布门禁、真实 API 尝试与安装包证据               | ✅ 已记录            |

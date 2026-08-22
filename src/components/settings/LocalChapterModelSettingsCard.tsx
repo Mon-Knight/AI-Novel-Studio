@@ -33,7 +33,7 @@ function LocalChapterModelSettingsCard({
     <section className="detail-card settings-card" aria-labelledby="local-chapter-model-title">
       <div className="settings-card-heading">
         <span aria-hidden="true">🧩</span>
-        <span id="local-chapter-model-title">本地章节场景模型</span>
+        <span id="local-chapter-model-title">专用本地正文模型（可选）</span>
       </div>
       <div
         style={{
@@ -47,10 +47,13 @@ function LocalChapterModelSettingsCard({
           color: 'var(--color-text-secondary)',
         }}
       >
-        <strong>{local.enabled ? '✅ 已启用独立本地路由' : '⏸ 未启用'}</strong>
+        <strong>
+          {local.enabled ? '✅ 已启用可选本地作家路由' : '☁️ 云端正文模式（推荐当前使用）'}
+        </strong>
         <br />
-        仅用于章节首次生成和 Autonomous 候选正文；改写、润色、质检、修稿及其他 AI
-        任务继续使用上方全局 Provider。本地服务不可用时不会自动切换到外部模型。
+        未启用或尚未通过 Benchmark 时，世界观、规划和正文均由上方全局 Cloud Provider 完成；已有
+        Scene/Beat 计划仍按 Beat 生成。启用后，本地模型只负责正文，训练、测试、故障或 Context
+        超限时自动由同一云端流程接管，不改变 Scene、Prompt 约束或审核流程。
       </div>
 
       <label
@@ -62,7 +65,19 @@ function LocalChapterModelSettingsCard({
           onChange={(event) => update({ enabled: event.target.checked })}
           style={{ width: 18, height: 18 }}
         />
-        启用本地章节 Scene 生成
+        启用已通过 Benchmark 的本地 Scene/Beat 正文模型
+      </label>
+
+      <label
+        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 14 }}
+      >
+        <input
+          type="checkbox"
+          checked={local.allowCloudWriterFallback !== false}
+          onChange={(event) => update({ allowCloudWriterFallback: event.target.checked })}
+          style={{ width: 18, height: 18 }}
+        />
+        本地训练、测试或不可用时由云端代写同一 Beat（不改 Scene/目标）
       </label>
 
       <div className="settings-form-grid">
@@ -189,7 +204,7 @@ function LocalChapterModelSettingsCard({
           context · 1024 max output。
         </span>
         <button type="button" className="btn btn-primary btn-sm" onClick={onSave}>
-          保存本地模型设置
+          保存可选本地模型设置
         </button>
         <button
           type="button"

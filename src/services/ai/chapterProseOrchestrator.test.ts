@@ -26,6 +26,7 @@ import {
   mergeSceneContinuation,
   narrativeCharacterCount,
   isRetryableExternalBeatRepairError,
+  selectChapterProseExecutionMode,
   trimExternalBeatRepairAtNaturalBoundary,
   validateBeatNovelty,
   validateLocalGenerationPlan,
@@ -34,6 +35,13 @@ import {
   validateSceneText,
   withExternalBeatRepairRequestSettings,
 } from './chapterProseOrchestrator';
+
+test('confirmed Scene plan uses Beat orchestration independently of local model state', () => {
+  const scenePlan = [{ sceneNo: 1, beats: [{ order: 1, text: '推进', required: true }] }];
+  assert.equal(selectChapterProseExecutionMode({ scenePlan }), 'beat_orchestration');
+  assert.equal(selectChapterProseExecutionMode({}), 'external_chapter');
+  assert.equal(selectChapterProseExecutionMode({ mode: 'rewrite', scenePlan }), 'external_chapter');
+});
 
 test('local generation attempts are capped at initial generation plus one rewrite', () => {
   assert.equal(MAX_LOCAL_BEAT_ATTEMPTS, 2);

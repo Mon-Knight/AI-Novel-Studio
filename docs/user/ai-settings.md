@@ -28,10 +28,38 @@ Mock 模式允许你在没有 API Key 的情况下体验完整工作流。
 - DeepSeek：`deepseek-chat`、`deepseek-coder`
 - 其他 OpenAI 兼容模型
 
-## 本地章节场景模型
+## 当前临时云端正文模式
 
-设置中心还提供独立的“本地章节场景模型”配置，不受全局 Mock/API 开关切换影响。推荐将本地
-llama-server 配置为：
+本地微调模型未训练完成时，推荐只配置“全局 Cloud Provider”，并保持“专用本地正文模型”关闭：
+
+1. 关闭 Mock 模式；
+2. 选择 `deepseek` 或 `openai_compatible`；
+3. 填写云端 API Base URL、API Key 与模型名称；
+4. 保存后执行连接测试。
+
+此时全局 Cloud Provider 同时承担世界观、规划、Scene、质检等导演任务和临时正文任务。已有确认的
+Scene/Beat 计划时，Runtime 仍按 `scene-beat-prose-v1` 逐 Beat 生成；没有 Scene 计划时使用原有
+云端整章候选流程。两条路径都只生成候选 Artifact，继续经过质量门、人工审核和 Safe Apply。
+
+## 专用远程正文模型（Remote Writer）
+
+支持将微调作家模型部署在远程独立 GPU 服务器、私有云或云端 VPC：
+
+1. 进入「设置中心」中的「专用远程正文模型（Remote Writer / 可选）」卡片；
+2. 勾选「启用专用远程 Scene/Beat 正文模型」；
+3. 填写配置：
+   - **Base URL**：公网访问必须使用 `https://`，局域网/VPC（如 10.x / 192.168.x / 100.64.x）支持 `http://` 或 `https://`；
+   - **API Key / Token**：必填，禁止匿名访问；
+   - **模型名称**：远程部署的模型名称（如 `qwen35-32b-novel-v1`）；
+   - **参数预算**：支持自定义上下文 Token 预算与单次最大输出 Token。
+4. 点击「测试远程模型连接」确认服务可用。
+
+启用后，Beat 正文生成将优先调度至远程 Writer；当本地 Writer 启用且为 `AVAILABLE` 时，本地优先；当本地处于 TRAINING/FAILED 时，将自动平滑降级至远程 Writer 或全局云端 Provider。
+
+## 可选本地章节场景模型
+
+设置中心还提供独立的“专用本地正文模型”配置。它不是生成正文的前置条件，仅供已完成训练、通过
+Benchmark 且健康的本机模型接管 Scene/Beat 正文。推荐 llama-server 配置为：
 
 - Base URL：`http://127.0.0.1:8080/v1`
 - 模型：`qwen35-9b-novel-v3`
@@ -39,16 +67,19 @@ llama-server 配置为：
 - 协议预算：4096 context / 1024 max output
 - 采样参数：Temperature、Top P、Top K、Repeat penalty、可选 Seed
 
-启用后，本地路由只用于章节首次生成和 Autonomous 候选正文；章节改写、润色、质检、修稿及其他
-AI 任务继续使用全局 Provider。本地服务不可用时不会自动回退到外部模型。
+本地 endpoint 只负责章节首次生成和 Autonomous 候选正文；章节改写、润色、质检、修稿及其他 AI
+任务继续使用全局 Provider。默认开启“由云端代写同一 Beat”：本地处于 TRAINING / TESTING /
+FAILED、健康失败或 Context 超限时，Router 会自动选择云端且不修改 Scene、Beat 或 Prompt 约束；
+若用户关闭该选项，本地不可用时则失败关闭。
 
 保存设置后可点击「检查本地模型」。桌面端会依次检查 `/health`、`/v1/models` 和单 Beat
-smoke 请求，并校验返回模型 ID；检查失败只显示诊断结果，不会改变模型路由或自动改用外部模型。
+smoke 请求并校验模型 ID；结果会更新当前进程的健康状态，并从下一个 Beat 起影响路由。生产流量还
+要求生命周期 sidecar 提供通过 Benchmark 的 `AVAILABLE` 证据；文件缺失时按 `TESTING` 处理。
 
 章节工程面板的「AI 生成候选」使用全局 Provider 规划 Scene/Beat，只生成待确认 JSON 候选；
 用户选择「保存候选草稿」或「保存并应用候选」后，才会进入章节工程状态。首次正文生成和
-Autonomous 候选会读取已应用的 Scene/Beat，按 Beat 串行调用本地模型并在合并前检查空正文、
-`<think>`、required Beat 覆盖和 `finish_reason=length`。
+Autonomous 候选会读取已应用的 Scene/Beat，由 Model Router 选择云端或本地 endpoint，并在合并前
+检查空正文、`<think>`、required Beat 覆盖和 `finish_reason=length`。
 
 ## API Key 安全
 

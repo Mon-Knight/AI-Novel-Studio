@@ -250,7 +250,7 @@ export function useChapterGenerationAction({
             request.messages.map((message) => `${message.role}\n${message.content}`).join('\n\n'),
           );
           const engineeringScenePlan =
-            settings.localChapterModel?.enabled && genMode !== 'rewrite'
+            genMode !== 'rewrite'
               ? (await chapterEngineeringService.getBundle(chapter.id)).activeState?.scenePlan
               : undefined;
           const response = await executeChapterGeneration({

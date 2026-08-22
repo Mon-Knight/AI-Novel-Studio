@@ -1092,12 +1092,101 @@ test('local chapter adapter keeps real API and unpriced provenance separate from
       },
     },
     'chapter_scene_generate',
+    {
+      selected: {
+        endpointId: 'local.local_llama_cpp.qwen35-9b-novel-v3',
+        providerId: 'local_llama_cpp',
+        modelId: 'qwen35-9b-novel-v3',
+        kind: 'local',
+      },
+    },
   );
 
   assert.equal(adapter.runtimeMode, 'api');
   assert.equal(adapter.pricingSnapshot?.source, 'unconfigured');
   assert.equal(adapter.providerId, 'local_llama_cpp');
   assert.equal(adapter.modelId, 'qwen35-9b-novel-v3');
+});
+
+test('writer route can select the cloud beat endpoint without using the local model', () => {
+  const adapter = createProviderAdapter(
+    {
+      ...settings,
+      runtimeMode: 'api',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'secret',
+      modelName: 'deepseek-v4-flash',
+      mockMode: false,
+      localChapterModel: {
+        enabled: true,
+        providerId: 'local_llama_cpp',
+        baseUrl: 'http://127.0.0.1:8080/v1',
+        apiKey: 'local-no-key-required',
+        modelName: 'qwen35-9b-novel-v3',
+        timeoutSeconds: 120,
+        contextTokens: 4096,
+        maxTokens: 1024,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 20,
+        repeatPenalty: 1.08,
+      },
+    },
+    'chapter_scene_generate',
+    {
+      selected: {
+        endpointId: 'cloud.deepseek.deepseek-v4-flash',
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4-flash',
+        kind: 'cloud',
+      },
+    },
+  );
+
+  assert.equal(adapter.providerId, 'deepseek');
+  assert.equal(adapter.modelId, 'deepseek-v4-flash');
+  assert.equal(adapter.runtimeMode, 'api');
+});
+
+test('cloud-only settings execute the Beat contract without any local model configuration', () => {
+  const cloudSettings: AiSettings = {
+    ...settings,
+    runtimeMode: 'api',
+    provider: 'openai_compatible',
+    baseUrl: 'https://cloud-writer.example/v1',
+    apiKey: 'cloud-secret',
+    modelName: 'temporary-cloud-writer',
+    mockMode: false,
+  };
+  const adapter = createProviderAdapter(cloudSettings, 'chapter_scene_generate', {
+    selected: {
+      endpointId: 'cloud.openai_compatible.temporary-cloud-writer',
+      providerId: 'openai_compatible',
+      modelId: 'temporary-cloud-writer',
+      kind: 'cloud',
+    },
+  });
+
+  assert.equal(adapter.providerId, 'openai_compatible');
+  assert.equal(adapter.modelId, 'temporary-cloud-writer');
+  assert.equal(adapter.runtimeMode, 'api');
+  assert.throws(
+    () => createProviderAdapter(cloudSettings, 'chapter_scene_generate'),
+    /必须携带冻结的 Model Router 决策/,
+  );
+  assert.throws(
+    () =>
+      createProviderAdapter(cloudSettings, 'chapter_scene_generate', {
+        selected: {
+          endpointId: 'local.local_llama_cpp.untrained-model',
+          providerId: 'local_llama_cpp',
+          modelId: 'untrained-model',
+          kind: 'local',
+        },
+      }),
+    /未启用的专用本地正文模型/,
+  );
 });
 
 test('local chapter adapter rejects a non-loopback endpoint before provider dispatch', () => {
@@ -1125,6 +1214,14 @@ test('local chapter adapter rejects a non-loopback endpoint before provider disp
           },
         },
         'chapter_scene_generate',
+        {
+          selected: {
+            endpointId: 'local.local_llama_cpp.qwen35-9b-novel-v3',
+            providerId: 'local_llama_cpp',
+            modelId: 'qwen35-9b-novel-v3',
+            kind: 'local',
+          },
+        },
       ),
     /只允许 localhost、127\.0\.0\.0\/8 或 \[::1\]/,
   );

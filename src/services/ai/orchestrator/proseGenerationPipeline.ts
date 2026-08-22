@@ -1,5 +1,6 @@
 import type { AiExecutionResult, AiSceneExecutionResult } from '../aiExecutionPipeline';
 import { executeAiTask } from '../aiExecutionPipeline';
+import { estimateTokens } from '../compilation/canonical';
 import { executeChapterSceneGeneration } from '../chapterSceneGenerationExecutionService';
 import type {
   ChapterGenerationExecutionInput,
@@ -67,14 +68,26 @@ export async function executeExternalChapterGeneration(
   });
 }
 
+export type ChapterProseExecutionMode = 'external_chapter' | 'beat_orchestration';
+
+export function selectChapterProseExecutionMode(
+  taskInput: Record<string, unknown>,
+): ChapterProseExecutionMode {
+  if (taskInput.mode === 'rewrite') return 'external_chapter';
+  if (Array.isArray(taskInput.scenePlan) && taskInput.scenePlan.length > 0) {
+    return 'beat_orchestration';
+  }
+  // A Scene plan is required only for Beat orchestration. Without one, the
+  // governed cloud Provider can still generate a whole-chapter candidate.
+  return 'external_chapter';
+}
+
 export async function executeChapterProseOrchestrator(
   input: ChapterGenerationExecutionInput,
 ): Promise<AiExecutionResult> {
-  if (!input.settings.localChapterModel?.enabled || input.taskInput.mode === 'rewrite') {
+  const executionMode = selectChapterProseExecutionMode(input.taskInput);
+  if (executionMode === 'external_chapter') {
     return executeExternalChapterGeneration(input);
-  }
-  if (!Array.isArray(input.taskInput.scenePlan) || input.taskInput.scenePlan.length === 0) {
-    throw new Error('本地章节正文生成必须先由外部 AI 生成并由用户确认 Scene/Beat 计划。');
   }
   const scenes = scenePlanFromInput(input);
   validateLocalGenerationPlan(scenes);
@@ -147,8 +160,6 @@ export async function executeChapterProseOrchestrator(
             reusedFromJobId: resumeBeat.sourceJobId,
           };
           results.push(beatResult);
-          externalRepairUsed ||=
-            resumeBeat.providerId !== input.settings.localChapterModel?.providerId;
           await input.onSceneCompleted?.(beatResult);
           previous = { scene, beatOrder: beat.order, text: beatResult.text };
           continue;
@@ -197,12 +208,24 @@ export async function executeChapterProseOrchestrator(
                 pendingSceneBeats,
               );
         const unitIdentity = `:scene:${scene.sceneNo}:beat:${beat.order}:attempt:${localAttempt}`;
+        const sceneContext =
+          typeof attemptTaskInput.sceneContext === 'string' ? attemptTaskInput.sceneContext : '';
+        if (input.settings.localChapterModel?.enabled) {
+          const { syncLocalModelLifecycleSidecar } =
+            await import('../runtime/modelLifecycleSidecar');
+          await syncLocalModelLifecycleSidecar(input.settings.localChapterModel);
+        }
+        const { routeCreativeTask } = await import('../runtime/modelRouter');
+        const routeDecision = routeCreativeTask(input.settings, 'chapter_scene_generate', {
+          compiledContextTokens: estimateTokens(sceneContext),
+        });
         response = await executeChapterSceneGeneration({
           ...input,
           operationId: input.operationId + unitIdentity,
           traceId: (input.traceId ?? input.operationId) + unitIdentity,
           sourceId: input.sourceId + unitIdentity,
           taskInput: attemptTaskInput,
+          routeDecision,
         });
         beatText = response.text.trim();
         try {
@@ -260,7 +283,7 @@ export async function executeChapterProseOrchestrator(
           externalRepairUsed = true;
         } catch (error: unknown) {
           throw new Error(
-            `Scene ${scene.sceneNo} / Beat ${beat.order} 本地模型两次生成及外部 AI 定点修稿均未通过；` +
+            `Scene ${scene.sceneNo} / Beat ${beat.order} 正文模型两次生成及云端定点修稿均未通过；` +
               validationErrorMessage(error),
           );
         }

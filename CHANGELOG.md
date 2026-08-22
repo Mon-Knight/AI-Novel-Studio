@@ -2,6 +2,34 @@
 
 > 当前版本：v3.5.0。v3.3.0/v3.4.0 工作台、确认/Safe Apply 与 v3.5.0 领域工具、上下文压缩和写作工作台审阅收敛在同一实施分支一并收口。
 
+## Unreleased - Phase 5.1-B/C Dual Model Creative Runtime（Cloud-first 稳定化）
+
+### 新增
+
+- 新增模型无关的 Creative Runtime：`RouteDecision` 纯函数按 Role 选择云端导演或本地作家，不把 `chapter_generate` 绑到具体厂商。
+- 本地作家生命周期（AVAILABLE / TRAINING / TESTING / FAILED / DISABLED）为进程内状态；设置页健康检查写入 health，不新增 IPC 或 SQLite 表。
+- `chapter_scene_generate` 在本地训练、失败、不健康或上下文超限时，可自动用云端代写**同一 Beat 契约**，不改 Scene/目标，也不滑回整章 `chapter_generate`。
+- 设置增加「允许云端作家 Fallback」（默认开启）；关闭后本地不可用即失败关闭。
+- 路由结果写入已有 `taskInput.routeDecision`，进入 compilationHash，不改 `providerOptionsJson` 白名单。
+- 新增凭据无关的本地模型生命周期 sidecar；应用在每个 Beat 前同步 TRAINING / TESTING / FAILED / DISABLED / AVAILABLE，跨重启仍能自动使用云端代写或恢复本地。
+- 新增 Qwen/Llama OpenAI-compatible endpoint 能力目录；本地 endpoint 只声明 Scene/Beat 正文能力，不获得导演能力。
+- 新增本地模型 Benchmark Runner 与 10 个固定 Scene-to-Prose 案例；CLI 先写 TESTING，通过率达标并形成 SHA-256 报告身份后才写 AVAILABLE。
+- 新增训练生命周期 CLI；它可以标记 TRAINING/TESTING/FAILED/DISABLED，但明确不能绕过 Benchmark 直接标记 AVAILABLE。
+- 新增无本地模型的正式云端正文模式：未配置或关闭专用本地模型时，全局 DeepSeek / OpenAI-Compatible Provider 成为 Scene/Beat 的主路由，而不是伪装成 Fallback。
+- 新增专用远程正文模型（Remote Writer）网络策略与路由支持：支持公网 HTTPS 与局域网/VPC（RFC 1918 / CGNAT / Link-Local / 回环）HTTP/HTTPS 访问；强制要求 API Key/Token 鉴权以杜绝匿名调用；当本地作家不可用时优先降级至 Remote Writer 或 Cloud Provider。
+
+### 变更
+
+- `createProviderAdapter` 改为消费 Router 选中的 endpoint，不再仅凭 `taskType` 推断本地或云端；本地 endpoint 仍严格限制为 `chapter_scene_generate`。
+- 本地串行队列只约束本地 endpoint；云端作家 Fallback 不再占用 llama-server 队列。
+- 已确认 Scene/Beat 计划即使本地模型被禁用，也继续逐 Beat 走云端作家契约；不会回退为整章 `chapter_generate`；没有 Scene 计划时仍可走原有云端整章候选流程。
+- `chapter_scene_generate` 编译不再硬性要求启用本地模型；只有冻结 RouteDecision 确认选中本地 endpoint 时才采用本地 4096/1024 与采样参数，云端路由使用云端 Context 预算。
+- 本地生命周期由乐观默认 `AVAILABLE` 改为无 sidecar 即 `TESTING`；尚未训练或未通过 Benchmark 的模型不会获得生产流量。
+- 章节生成 preflight 在允许 Fallback 时不再因本地训练、离线或模型不匹配阻断创作，而是记录原因并转交云端；禁用 Fallback 时继续失败关闭。
+- Provider Adapter 要求 Scene/Beat 调用携带冻结 RouteDecision，并复验 endpoint 与当前设置身份；Beat 协议改为模型无关的 `scene-beat-prose-v1`。
+- Scene/Beat 质量修复与人工确认门不再以“本地模型已启用”为条件，云端逐 Beat 正文沿用相同门禁且不自动应用低风险 patch。
+- 同步 AI 设置用户文档：明确当前云端临时作家、本地可选及未来独立 Remote Writer Endpoint 边界，移除旧版“不自动回退”说明。
+
 ## v3.5.0 (2026-08-21) - 对话式创作工作台与审阅收敛
 
 本版本包含原规划的 v3.3.0 工作台最小闭环、v3.4.0 产物确认/审阅授权，以及 v3.5.0 领域任务与旧 AI 面板收敛。

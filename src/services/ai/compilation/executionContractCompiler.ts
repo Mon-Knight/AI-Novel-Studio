@@ -8,6 +8,7 @@ import type {
 import type { AiTaskType } from '../../../types/ai-task';
 import type { ResultArtifactType } from '../../../types/result-artifact';
 import type { ToolRegistryManifestV1 } from '../../../types/toolRegistry';
+import { ROUTE_DECISION_TASK_INPUT_KEY } from '../../../types/modelRuntime';
 import {
   canonicalHash,
   estimateTokens,
@@ -120,16 +121,23 @@ function validateScope(
   }
 }
 
-function localChapterSettings(definition: AiTaskCompilationDefinition, settings: AiSettings) {
+function selectedLocalChapterSettings(
+  definition: AiTaskCompilationDefinition,
+  settings: AiSettings,
+  providerId: string,
+  modelId: string,
+  taskInput: Record<string, unknown>,
+) {
   if (definition.taskType !== 'chapter_scene_generate') return undefined;
   const local = settings.localChapterModel;
-  if (!local?.enabled) {
-    throw new AiCompilationError(
-      'AI_COMPILATION_INPUT_INVALID',
-      '本地章节场景模型未启用，不能编译 chapter_scene_generate；系统不会自动回退到外部模型。',
-    );
-  }
-  return local;
+  if (!local?.enabled) return undefined;
+  const route = taskInput[ROUTE_DECISION_TASK_INPUT_KEY];
+  const selected =
+    isPlainRecord(route) && isPlainRecord(route.selected) ? route.selected : undefined;
+  if (selected?.kind !== 'local') return undefined;
+  const localProviderId = local.providerId.trim() || 'local_llama_cpp';
+  const localModelId = local.modelName.trim();
+  return providerId === localProviderId && modelId === localModelId ? local : undefined;
 }
 
 interface CompiledSamplingOptions {
@@ -150,12 +158,12 @@ function sampling(
   definition: AiTaskCompilationDefinition,
   settings: AiSettings,
   modelId: string,
+  local: NonNullable<AiSettings['localChapterModel']> | undefined,
 ): CompiledSamplingOptions {
   const thinkingMode =
     definition.thinkingMode && supportsDeepSeekV4ThinkingToggle(modelId)
       ? definition.thinkingMode
       : undefined;
-  const local = localChapterSettings(definition, settings);
   if (local) {
     return {
       temperature: local.temperature,
@@ -225,9 +233,15 @@ export async function compileAiExecutionContract(
           ],
         };
   const fixedMessageTokens = estimateTokens(JSON.stringify(fixedMessages)) + MESSAGE_SAFETY_TOKENS;
-  const local = localChapterSettings(definition, input.settings);
-  const modelContextTokens = local ? 4096 : definition.modelContextTokens;
-  const samplingOptions = sampling(definition, input.settings, input.modelId);
+  const local = selectedLocalChapterSettings(
+    definition,
+    input.settings,
+    input.providerId,
+    input.modelId,
+    taskInput,
+  );
+  const modelContextTokens = local ? local.contextTokens : definition.modelContextTokens;
+  const samplingOptions = sampling(definition, input.settings, input.modelId, local);
   const contextSnapshot = await compileAiContext({
     sources: compilation.sources,
     missingSourceTypes: compilation.missingSourceTypes,

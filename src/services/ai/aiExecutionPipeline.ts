@@ -11,6 +11,8 @@ import type {
   CreateAiTaskInput,
 } from '../../types/ai-task';
 import type { CreateResultArtifactInput, ResultArtifactBundle } from '../../types/result-artifact';
+import type { RouteDecision } from '../../types/modelRuntime';
+import { ROUTE_DECISION_TASK_INPUT_KEY } from '../../types/modelRuntime';
 import { normalizeAppError, type AppError } from '../../types/appError';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
 import { isTauri } from '../database/db';
@@ -43,6 +45,8 @@ export interface ExecuteAiTaskInput {
   cancel?: () => void;
   stream?: boolean;
   onStreamEvent?: (event: AiStreamEvent) => void;
+  /** Frozen Model Router decision. Does not change compiled creative context. */
+  routeDecision?: RouteDecision;
 }
 
 export interface AiExecutionResult {
@@ -96,7 +100,11 @@ export interface AiExecutionDependencies {
   runtime: RuntimePort;
   /** Compatibility projection for the current AI task center and draft foreign key. */
   projection?: AiTaskProjectionPort;
-  createAdapter: (settings: AiSettings, taskType?: AiTaskType) => ProviderAdapter;
+  createAdapter: (
+    settings: AiSettings,
+    taskType?: AiTaskType,
+    route?: Pick<RouteDecision, 'selected'>,
+  ) => ProviderAdapter;
   compileContract: (input: {
     taskType: AiTaskType;
     scope: {
@@ -593,9 +601,18 @@ async function executeAiTaskInternal(
   dependencies: AiExecutionDependencies = defaultDependencies,
 ): Promise<AiExecutionResult> {
   throwIfAiRequestCancelled(input.signal);
-  const adapter = dependencies.createAdapter(input.settings, input.taskType);
+  const adapter = dependencies.createAdapter(input.settings, input.taskType, input.routeDecision);
   const operationId = input.operationId ?? dependencies.createId();
   const traceId = input.traceId ?? operationId;
+  const compilation = input.routeDecision
+    ? {
+        ...input.compilation,
+        taskInput: {
+          ...(input.compilation.taskInput ?? {}),
+          [ROUTE_DECISION_TASK_INPUT_KEY]: input.routeDecision,
+        },
+      }
+    : input.compilation;
   let contract: CompiledAiExecutionContractV1;
   try {
     contract = await dependencies.compileContract({
@@ -606,7 +623,7 @@ async function executeAiTaskInternal(
         chapterId: input.chapterId,
         draftId: input.draftId,
       },
-      compilation: input.compilation,
+      compilation,
       settings: input.settings,
       providerId: adapter.providerId,
       modelId: adapter.modelId,

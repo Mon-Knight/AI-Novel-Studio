@@ -108,6 +108,72 @@ export function isLoopbackAiBaseUrl(baseUrl: string): boolean {
   }
 }
 
+export function isPrivateOrLoopbackHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase().trim();
+  if (
+    host === 'localhost' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.lan')
+  ) {
+    return true;
+  }
+  if (
+    host === '::1' ||
+    host.startsWith('fc') ||
+    host.startsWith('fd') ||
+    host.startsWith('fe80:')
+  ) {
+    return true;
+  }
+  const octets = host.split('.').map(Number);
+  if (
+    octets.length === 4 &&
+    octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+  ) {
+    const [a, b] = octets;
+    if (a === 127) return true; // 127.0.0.0/8
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 (CGNAT / VPC)
+    if (a === 169 && b === 254) return true; // 169.254.0.0/16 (Link-Local)
+  }
+  return false;
+}
+
+export function validateRemoteWriterConfig(config: {
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+}): void {
+  if (!config.baseUrl?.trim()) {
+    throw new Error('Remote Writer API Base URL 未配置。');
+  }
+  if (!config.apiKey?.trim()) {
+    throw new Error('Remote Writer 必须配置鉴权 Token / API Key，不允许匿名调用。');
+  }
+  if (!config.modelName?.trim()) {
+    throw new Error('Remote Writer 模型名称未配置。');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(config.baseUrl.trim());
+  } catch {
+    throw new Error('Remote Writer API Base URL 格式无效。');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Remote Writer URL 协议必须为 http 或 https。');
+  }
+
+  const isPrivate = isPrivateOrLoopbackHost(url.hostname);
+  if (!isPrivate && url.protocol !== 'https:') {
+    throw new Error('公网 Remote Writer Endpoint 必须使用 HTTPS 协议以保证通信安全。');
+  }
+}
+
 export function requireLoopbackAiBaseUrl(baseUrl: string): void {
   if (!isLoopbackAiBaseUrl(baseUrl)) {
     throw new Error('本地章节模型 Base URL 只允许 localhost、127.0.0.0/8 或 [::1] 回环地址。');

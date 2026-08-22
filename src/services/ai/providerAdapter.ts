@@ -7,8 +7,9 @@ import type {
   AiUsageCost,
 } from '../../types/ai';
 import type { AiTaskType } from '../../types/ai-task';
+import type { RouteDecision } from '../../types/modelRuntime';
 import { MockAiClient } from './mockAiClient';
-import { RealAiClient, validateRealAiConfig } from './realAiClient';
+import { RealAiClient, validateRealAiConfig, validateRemoteWriterConfig } from './realAiClient';
 import { calculateAiUsageCost, createAiPricingSnapshot } from './aiCost';
 import { isAiRequestCancelled } from './aiCancellation';
 import { aiPerformanceMonitor } from '../observability/aiPerformanceMonitor';
@@ -51,13 +52,32 @@ function resolveModelId(settings: AiSettings): string {
 export function createProviderAdapter(
   settings: AiSettings,
   taskType?: AiTaskType,
+  route?: Pick<RouteDecision, 'selected'>,
 ): ProviderAdapter {
-  const isLocalChapterScene = taskType === 'chapter_scene_generate';
   const local = settings.localChapterModel;
+  const remote = settings.remoteWriter;
+  if (taskType === 'chapter_scene_generate' && !route) {
+    throw new Error('chapter_scene_generate 必须携带冻结的 Model Router 决策。');
+  }
+
+  const isLocalChapterScene = route?.selected.kind === 'local';
+  const isRemoteChapterScene = route?.selected.kind === 'remote';
+
+  if (isLocalChapterScene && taskType !== 'chapter_scene_generate') {
+    throw new Error('专用本地正文模型只能执行 chapter_scene_generate。');
+  }
   if (isLocalChapterScene && !local?.enabled) {
-    throw new Error(
-      '本地章节场景模型未启用，请先在设置中心开启本地章节模型；系统不会自动回退到外部模型。',
-    );
+    throw new Error('Model Router 选择了未启用的专用本地正文模型，已拒绝派发。');
+  }
+
+  if (isRemoteChapterScene && taskType !== 'chapter_scene_generate') {
+    throw new Error('专用远程正文模型只能执行 chapter_scene_generate。');
+  }
+  if (isRemoteChapterScene && (!remote || !remote.enabled)) {
+    throw new Error('Model Router 选择了未启用的专用远程正文模型，已拒绝派发。');
+  }
+  if (isRemoteChapterScene && remote) {
+    validateRemoteWriterConfig(remote);
   }
 
   const effective: {
@@ -93,24 +113,67 @@ export function createProviderAdapter(
           allowTruncatedOutput: true,
           requireLoopback: true,
         }
-      : {
-          runtimeMode: settings.runtimeMode,
-          provider: settings.provider,
-          baseUrl: settings.baseUrl,
-          apiKey: settings.apiKey,
-          modelName: settings.modelName,
-          temperature: settings.temperature,
-          maxTokens: settings.maxTokens,
-          timeoutSeconds: settings.timeoutSeconds,
-          requireLoopback: false,
-        };
+      : isRemoteChapterScene && remote
+        ? {
+            runtimeMode: 'api' as const,
+            provider: 'openai_compatible' as const,
+            baseUrl: remote.baseUrl,
+            apiKey: remote.apiKey,
+            modelName: remote.modelName,
+            temperature: remote.temperature,
+            maxTokens: remote.maxTokens ?? 4000,
+            timeoutSeconds: remote.timeoutSeconds,
+            topP: remote.topP,
+            topK: remote.topK,
+            repeatPenalty: remote.repeatPenalty,
+            seed: remote.seed,
+            allowTruncatedOutput: true,
+            requireLoopback: false,
+          }
+        : {
+            runtimeMode: settings.runtimeMode,
+            provider: settings.provider,
+            baseUrl: settings.baseUrl,
+            apiKey: settings.apiKey,
+            modelName: settings.modelName,
+            temperature: settings.temperature,
+            maxTokens: settings.maxTokens,
+            timeoutSeconds: settings.timeoutSeconds,
+            allowTruncatedOutput: taskType === 'chapter_scene_generate',
+            requireLoopback: false,
+          };
   const providerId =
     isLocalChapterScene && local
-      ? local.providerId || 'local_llama_cpp'
-      : settings.runtimeMode === 'mock'
-        ? 'mock'
-        : settings.provider;
-  const modelId = isLocalChapterScene && local ? local.modelName.trim() : resolveModelId(settings);
+      ? local.providerId.trim() || 'local_llama_cpp'
+      : isRemoteChapterScene && remote
+        ? remote.providerId.trim() || 'remote_openai_compatible'
+        : settings.runtimeMode === 'mock'
+          ? 'mock'
+          : settings.provider;
+  const modelId =
+    isLocalChapterScene && local
+      ? local.modelName.trim()
+      : isRemoteChapterScene && remote
+        ? remote.modelName.trim()
+        : resolveModelId(settings);
+  if (route) {
+    const expectedKind = isLocalChapterScene
+      ? 'local'
+      : isRemoteChapterScene
+        ? 'remote'
+        : settings.runtimeMode === 'mock'
+          ? 'mock'
+          : 'cloud';
+    const expectedEndpointId = `${expectedKind === 'local' ? 'local' : expectedKind === 'remote' ? 'remote' : 'cloud'}.${providerId}.${modelId}`;
+    if (
+      route.selected.endpointId !== expectedEndpointId ||
+      route.selected.providerId !== providerId ||
+      route.selected.modelId !== modelId ||
+      route.selected.kind !== expectedKind
+    ) {
+      throw new Error('Model Router 选择与当前 Provider 配置不一致，已拒绝派发。');
+    }
+  }
   const pricingSettings = isLocalChapterScene
     ? {
         ...settings,
@@ -120,7 +183,13 @@ export function createProviderAdapter(
         outputPricePerMillionTokens: undefined,
         dailyCostBudgetUsd: undefined,
       }
-    : settings;
+    : isRemoteChapterScene
+      ? {
+          ...settings,
+          runtimeMode: 'api' as const,
+          provider: 'openai_compatible' as const,
+        }
+      : settings;
   const client =
     effective.runtimeMode === 'mock'
       ? new MockAiClient()

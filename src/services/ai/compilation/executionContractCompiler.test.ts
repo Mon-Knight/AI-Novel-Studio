@@ -283,11 +283,61 @@ test('local chapter scene compiles one user message with the verified sampling p
         sceneGoal: '让主角确认列车与失踪案有关。',
         sceneBeats: ['听见列车进站', '发现车票上的异常日期'],
         sceneConstraints: ['第一人称', '不揭示幕后真相'],
+        routeDecision: {
+          schemaVersion: 1,
+          role: 'writer.beat_prose',
+          taskType: 'chapter_scene_generate',
+          primary: {
+            endpointId: 'local.local_llama_cpp.qwen35-9b-novel-v3',
+            providerId: 'local_llama_cpp',
+            modelId: 'qwen35-9b-novel-v3',
+            kind: 'local',
+          },
+          selected: {
+            endpointId: 'local.local_llama_cpp.qwen35-9b-novel-v3',
+            providerId: 'local_llama_cpp',
+            modelId: 'qwen35-9b-novel-v3',
+            kind: 'local',
+          },
+          reason: 'local_available',
+          fallbackUsed: false,
+          decidedAt: '2026-08-22T00:00:00.000Z',
+        },
       },
     },
     settings: localSettings,
     providerId: 'local_llama_cpp',
     modelId: 'qwen35-9b-novel-v3',
+    toolRegistry: registry,
+  });
+  const cloudCompiled = await compileAiExecutionContract({
+    definition: localDefinition,
+    scope: { scopeType: 'chapter', novelId: 'novel-1', chapterId: 'chapter-1' },
+    compilation: {
+      sources: [
+        {
+          sourceType: 'request_context',
+          sourceId: 'chapter-1:scene-cloud',
+          sourceVersion: 'hash-cloud',
+          origin: 'request',
+          label: 'Scene context',
+          content: '夜雨中的旧车站，沈岚等待一列不该出现的列车。',
+          order: 0,
+          priority: 100,
+          required: true,
+        },
+      ],
+      taskInput: {
+        chapterTitle: '第一章',
+        contextHash: 'b'.repeat(64),
+        sceneGoal: '让主角确认列车与失踪案有关。',
+        sceneBeats: ['听见列车进站'],
+        sceneConstraints: ['不揭示幕后真相'],
+      },
+    },
+    settings,
+    providerId: 'deepseek',
+    modelId: 'test-model',
     toolRegistry: registry,
   });
 
@@ -309,6 +359,11 @@ test('local chapter scene compiles one user message with the verified sampling p
   assert.equal(compiled.constraintSnapshot.providerOptionsJson.providerId, 'local_llama_cpp');
   assert.equal(compiled.constraintSnapshot.providerOptionsJson.maxTokens, 1024);
   assert.equal(compiled.constraintSnapshot.providerOptionsJson.topK, 20);
+  assert.equal(cloudCompiled.request.messages.length, 1);
+  assert.equal(cloudCompiled.contextSnapshot.budgetJson.modelContextTokens, 64_000);
+  assert.equal(cloudCompiled.request.maxTokens, 12_000);
+  assert.equal(cloudCompiled.request.topP, undefined);
+  assert.equal(cloudCompiled.constraintSnapshot.providerOptionsJson.providerId, 'deepseek');
 });
 
 test('DeepSeek V4 Beat repair compiles non-thinking mode into request and audit snapshot', async () => {

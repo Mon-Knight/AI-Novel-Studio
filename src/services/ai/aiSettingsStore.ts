@@ -1,4 +1,4 @@
-import type { AiSettings, LocalChapterModelSettings } from '../../types/ai';
+import type { AiSettings, LocalChapterModelSettings, RemoteWriterSettings } from '../../types/ai';
 import { lsGet, lsSet } from '../database/db';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
@@ -7,11 +7,13 @@ const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
 interface SessionCredentials {
   providerApiKey: string;
   localChapterModelApiKey: string;
+  remoteWriterApiKey: string;
 }
 
 let sessionCredentials: SessionCredentials = {
   providerApiKey: '',
   localChapterModelApiKey: 'local-no-key-required',
+  remoteWriterApiKey: '',
 };
 
 export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings {
@@ -24,6 +26,24 @@ export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings
     timeoutSeconds: 120,
     contextTokens: 4096,
     maxTokens: 1024,
+    temperature: 0.7,
+    topP: 0.8,
+    topK: 20,
+    repeatPenalty: 1.08,
+    allowCloudWriterFallback: true,
+  };
+}
+
+export function getDefaultRemoteWriterSettings(): RemoteWriterSettings {
+  return {
+    enabled: false,
+    providerId: 'remote_openai_compatible',
+    baseUrl: '',
+    apiKey: '',
+    modelName: '',
+    timeoutSeconds: 120,
+    contextTokens: 32000,
+    maxTokens: 4000,
     temperature: 0.7,
     topP: 0.8,
     topK: 20,
@@ -97,6 +117,34 @@ function normalizeLocalChapterModelSettings(
     minTokens: normalizeOptionalInteger(stored.minTokens, 0, 1024),
     noRepeatNgramSize: normalizeOptionalInteger(stored.noRepeatNgramSize, 0, 32),
     seed: normalizeOptionalInteger(stored.seed, -2_147_483_648, 2_147_483_647),
+    allowCloudWriterFallback: stored.allowCloudWriterFallback !== false,
+  };
+}
+
+function normalizeRemoteWriterSettings(
+  stored: RemoteWriterSettings | undefined,
+): RemoteWriterSettings | undefined {
+  if (!stored) return undefined;
+  const defaults = getDefaultRemoteWriterSettings();
+  return {
+    enabled: stored.enabled === true,
+    providerId: String(stored.providerId ?? defaults.providerId).trim() || defaults.providerId,
+    baseUrl: String(stored.baseUrl ?? defaults.baseUrl).trim(),
+    apiKey: String(stored.apiKey ?? defaults.apiKey),
+    modelName: String(stored.modelName ?? defaults.modelName).trim(),
+    timeoutSeconds: Math.round(
+      normalizeNumber(stored.timeoutSeconds, defaults.timeoutSeconds, 1, 1800),
+    ),
+    contextTokens:
+      normalizeOptionalInteger(stored.contextTokens, 1024, 200000) ?? defaults.contextTokens,
+    maxTokens: normalizeOptionalInteger(stored.maxTokens, 1, 32000) ?? defaults.maxTokens,
+    temperature: normalizeNumber(stored.temperature, defaults.temperature ?? 0.7, 0, 2),
+    topP: normalizeNumber(stored.topP, defaults.topP ?? 0.8, 0, 1),
+    topK: Math.round(normalizeNumber(stored.topK, defaults.topK ?? 20, 0, 4096)),
+    repeatPenalty: normalizeNumber(stored.repeatPenalty, defaults.repeatPenalty ?? 1.08, 0.01, 3),
+    minTokens: normalizeOptionalInteger(stored.minTokens, 0, 8000),
+    noRepeatNgramSize: normalizeOptionalInteger(stored.noRepeatNgramSize, 0, 32),
+    seed: normalizeOptionalInteger(stored.seed, -2_147_483_648, 2_147_483_647),
   };
 }
 
@@ -145,11 +193,16 @@ export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
   if (localChapterModel) merged.localChapterModel = localChapterModel;
   else delete merged.localChapterModel;
 
+  const remoteWriter = normalizeRemoteWriterSettings(stored.remoteWriter);
+  if (remoteWriter) merged.remoteWriter = remoteWriter;
+  else delete merged.remoteWriter;
+
   return merged;
 }
 
 function withoutCredentials(settings: AiSettings): Record<string, unknown> {
   const local = settings.localChapterModel;
+  const remote = settings.remoteWriter;
   return {
     runtimeMode: settings.runtimeMode,
     provider: settings.provider,
@@ -186,6 +239,27 @@ function withoutCredentials(settings: AiSettings): Record<string, unknown> {
             minTokens: local.minTokens,
             noRepeatNgramSize: local.noRepeatNgramSize,
             seed: local.seed,
+            allowCloudWriterFallback: local.allowCloudWriterFallback !== false,
+          },
+        }
+      : {}),
+    ...(remote
+      ? {
+          remoteWriter: {
+            enabled: remote.enabled,
+            providerId: remote.providerId,
+            baseUrl: remote.baseUrl,
+            modelName: remote.modelName,
+            timeoutSeconds: remote.timeoutSeconds,
+            contextTokens: remote.contextTokens,
+            maxTokens: remote.maxTokens,
+            temperature: remote.temperature,
+            topP: remote.topP,
+            topK: remote.topK,
+            repeatPenalty: remote.repeatPenalty,
+            minTokens: remote.minTokens,
+            noRepeatNgramSize: remote.noRepeatNgramSize,
+            seed: remote.seed,
           },
         }
       : {}),
@@ -204,6 +278,14 @@ function withSessionCredentials(settings: AiSettings): AiSettings {
           },
         }
       : {}),
+    ...(settings.remoteWriter
+      ? {
+          remoteWriter: {
+            ...settings.remoteWriter,
+            apiKey: sessionCredentials.remoteWriterApiKey,
+          },
+        }
+      : {}),
   };
 }
 
@@ -217,15 +299,22 @@ export function getAiSettings(): AiSettings {
     stored.localChapterModel ?? {},
     'apiKey',
   );
+  const hasLegacyRemoteKey = Object.prototype.hasOwnProperty.call(
+    stored.remoteWriter ?? {},
+    'apiKey',
+  );
   if (hasLegacyProviderKey && typeof stored.apiKey === 'string') {
     sessionCredentials.providerApiKey = stored.apiKey;
   }
   if (hasLegacyLocalKey && typeof stored.localChapterModel?.apiKey === 'string') {
     sessionCredentials.localChapterModelApiKey = stored.localChapterModel.apiKey;
   }
+  if (hasLegacyRemoteKey && typeof stored.remoteWriter?.apiKey === 'string') {
+    sessionCredentials.remoteWriterApiKey = stored.remoteWriter.apiKey;
+  }
 
   const normalized = normalizeAiSettings(stored);
-  if (hasLegacyProviderKey || hasLegacyLocalKey) {
+  if (hasLegacyProviderKey || hasLegacyLocalKey || hasLegacyRemoteKey) {
     lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
   }
   return withSessionCredentials(normalized);
@@ -237,6 +326,7 @@ export function saveAiSettings(settings: AiSettings): void {
     providerApiKey: normalized.apiKey,
     localChapterModelApiKey:
       normalized.localChapterModel?.apiKey ?? sessionCredentials.localChapterModelApiKey,
+    remoteWriterApiKey: normalized.remoteWriter?.apiKey ?? sessionCredentials.remoteWriterApiKey,
   };
   lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
 }

@@ -12,6 +12,7 @@ import AppearanceSettingsCard from '../../components/settings/AppearanceSettings
 import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSettingsCard';
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
 import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
+import RemoteWriterSettingsCard from '../../components/settings/RemoteWriterSettingsCard';
 import {
   checkLocalChapterModel,
   type LocalChapterModelHealthResult,
@@ -71,9 +72,23 @@ function SettingsPage() {
     setLocalHealthChecking(true);
     setLocalHealthResult(null);
     try {
-      setLocalHealthResult(await checkLocalChapterModel(local, controller.signal));
+      const result = await checkLocalChapterModel(local, controller.signal);
+      setLocalHealthResult(result);
+      const [{ localModelRef }, { modelLifecycleManager }] = await Promise.all([
+        import('../../services/ai/runtime/modelCatalog'),
+        import('../../services/ai/runtime/modelLifecycle'),
+      ]);
+      modelLifecycleManager.observeHealth(
+        localModelRef(local).endpointId,
+        result.healthOk && result.modelOk && result.smokeOk ? 'ok' : 'down',
+      );
     } catch (error) {
       if (!controller.signal.aborted) {
+        const [{ localModelRef }, { modelLifecycleManager }] = await Promise.all([
+          import('../../services/ai/runtime/modelCatalog'),
+          import('../../services/ai/runtime/modelLifecycle'),
+        ]);
+        modelLifecycleManager.observeHealth(localModelRef(local).endpointId, 'down');
         setLocalHealthResult({
           healthOk: false,
           modelOk: false,
@@ -189,6 +204,11 @@ function SettingsPage() {
         healthResult={localHealthResult}
         healthChecking={localHealthChecking}
         onCheckHealth={handleCheckLocalHealth}
+      />
+      <RemoteWriterSettingsCard
+        settings={settings}
+        onChange={update}
+        onSave={handleSave}
       />
       <AiGovernanceSettingsCard
         settings={settings}

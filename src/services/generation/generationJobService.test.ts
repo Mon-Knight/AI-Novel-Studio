@@ -463,7 +463,7 @@ test('saved draft quality repair remains eligible after Beat-level external resc
   const pendingIssue = { status: 'pending', severity: 'critical' } as never;
   assert.equal(
     shouldAttemptExternalQualityRepair({
-      localChapterModelEnabled: true,
+      beatOrchestrationEnabled: true,
       runtimeMode: 'api',
       manualReviewRequired: true,
       qualityItems: [pendingIssue],
@@ -473,7 +473,7 @@ test('saved draft quality repair remains eligible after Beat-level external resc
   );
   assert.equal(
     shouldAttemptExternalQualityRepair({
-      localChapterModelEnabled: true,
+      beatOrchestrationEnabled: true,
       runtimeMode: 'api',
       manualReviewRequired: false,
       qualityItems: [pendingIssue],

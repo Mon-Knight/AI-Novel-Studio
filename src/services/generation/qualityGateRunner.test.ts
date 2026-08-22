@@ -117,7 +117,7 @@ test('shouldAttemptExternalQualityRepair enables repair only when conditions mee
 
   assert.equal(
     shouldAttemptExternalQualityRepair({
-      localChapterModelEnabled: true,
+      beatOrchestrationEnabled: true,
       runtimeMode: 'api',
       manualReviewRequired: true,
       qualityItems: items,
@@ -128,7 +128,7 @@ test('shouldAttemptExternalQualityRepair enables repair only when conditions mee
 
   assert.equal(
     shouldAttemptExternalQualityRepair({
-      localChapterModelEnabled: false,
+      beatOrchestrationEnabled: false,
       runtimeMode: 'api',
       manualReviewRequired: true,
       qualityItems: items,
@@ -139,7 +139,7 @@ test('shouldAttemptExternalQualityRepair enables repair only when conditions mee
 
   assert.equal(
     shouldAttemptExternalQualityRepair({
-      localChapterModelEnabled: true,
+      beatOrchestrationEnabled: true,
       runtimeMode: 'mock',
       manualReviewRequired: true,
       qualityItems: items,

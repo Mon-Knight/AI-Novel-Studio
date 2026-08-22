@@ -152,4 +152,25 @@ test('local chapter model settings normalize to the verified scene protocol', ()
   assert.equal(normalized.localChapterModel?.topK, 4096);
   assert.equal(normalized.localChapterModel?.repeatPenalty, 3);
   assert.equal(normalized.localChapterModel?.seed, 42);
+  assert.equal(normalized.localChapterModel?.allowCloudWriterFallback, true);
+});
+
+test('local writer fallback can be disabled and defaults to enabled', () => {
+  const enabled = normalizeAiSettings({
+    runtimeMode: 'mock',
+    provider: 'mock',
+    mockMode: true,
+    localChapterModel: getDefaultLocalChapterModelSettings(),
+  });
+  const disabled = normalizeAiSettings({
+    runtimeMode: 'mock',
+    provider: 'mock',
+    mockMode: true,
+    localChapterModel: {
+      ...getDefaultLocalChapterModelSettings(),
+      allowCloudWriterFallback: false,
+    },
+  });
+  assert.equal(enabled.localChapterModel?.allowCloudWriterFallback, true);
+  assert.equal(disabled.localChapterModel?.allowCloudWriterFallback, false);
 });

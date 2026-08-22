@@ -69,6 +69,7 @@ npm run test:bundle-size
 - `test:component-size` 扫描全部生产 `.tsx`，要求每个文件不超过 500 行；它不允许通过增加排除规则或提高阈值来绕过组件拆分。
 - `test:rust-logging` 扫描全部生产与测试 Rust 源码，只允许 `errors.rs` 中唯一结构化 stderr sink；任何新增 `println! / eprintln! / print! / eprint! / dbg!` 或 sink 缺失/重复都失败关闭，并由临时负向夹具验证门禁本身。
 - `test:bundle-size` 读取 Vite manifest，校验唯一入口、全部 emitted JS、稳定 vendor chunk 与安全路径，再按真实文件字节和 gzip-9 执行双预算。当前入口门槛为 400 KiB / 135 KiB gzip-9，任一 chunk 为 450 KiB / 160 KiB gzip-9；缺失或歧义产物同样返回非零。
+- Phase 5.1 模型路由门禁由 `scripts/models/local-model-benchmark*.test.mjs`、`src/services/ai/runtime/modelLifecycleSidecar.test.ts`、`routeDecision.test.ts`、`executionContractCompiler.test.ts` 与 `aiExecutionPipeline.test.ts` 覆盖：无 sidecar 的本地模型保持 `TESTING`，回环模型通过 Benchmark 才写 `AVAILABLE`，TRAINING/TESTING 走云端 Beat Fallback；关闭或未配置本地模型时云端是正文主路由；编译器与 Adapter 均按冻结 RouteDecision 选择参数和 endpoint，sidecar 拒绝凭据字段。
 - 当前全量非回退阈值为 lines/statements 34%、functions 44%、branches 64%；核心逻辑集合另设 lines/statements 85%、functions/branches 80%。最近一次干净完整结果为全量 lines/statements 35.14%、functions 47.34%、branches 66.41%，核心集合 lines/statements 87.90%、functions 85.89%、branches 82.01%，关键组件集合 lines/statements 91.67%、functions 90.00%、branches 78.74%。这些阈值是当前可验证基线，不是最终质量目标；后续补测必须单调提高。
 - `lint:ci` 将显式 `any` 作为 error，并以 `--max-warnings 0` 运行；生产源码 warning 回归会直接返回非零退出码。
 - `workspaceSessionStore.test.ts` 验证切换 novel 时清空 active chapter、当前草稿与 dirty，并覆盖可追踪的函数式集合更新；同一 reset 契约还统一持有质量和 AI 弹窗状态，该 Zustand store 已进入核心覆盖率集合。

@@ -336,7 +336,7 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
     responseSchema: 'scene_text_v1',
     constraints: {
       outputMode: 'beat_prose',
-      protocolVersion: 'qwen35-novel-beat-v3',
+      protocolVersion: 'scene-beat-prose-v1',
       candidateOnly: true,
       mayWriteBusinessData: false,
       requireExplicitApplyConfirmation: true,
@@ -346,7 +346,9 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
     allowedSourceTypes: ['request_context'],
     requiredSourceTypes: ['request_context'],
     allowedTools: [],
-    modelContextTokens: 4096,
+    // Cloud writers may use the full governed window; the compiler narrows
+    // this to the verified endpoint budget when the selected writer is local.
+    modelContextTokens: 64_000,
     maxOutputTokens: 1024,
     defaultTemperature: 0.7,
     messageMode: 'single_user',

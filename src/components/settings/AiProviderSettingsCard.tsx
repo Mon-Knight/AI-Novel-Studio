@@ -28,9 +28,20 @@ function AiProviderSettingsCard({
     <>
       {/* AI 接口设置 */}
       <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <span style={{ fontSize: 18 }}>🤖</span>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>AI 接口设置</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>全局 Cloud Provider</span>
+        </div>
+        <div
+          style={{
+            marginBottom: 12,
+            fontSize: 12,
+            lineHeight: 1.7,
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          负责世界观、规划、Scene、质检等导演任务；未启用可用的专用本地正文模型时，也负责临时
+          Scene/Beat 与整章候选正文生成。支持 DeepSeek 及 OpenAI-Compatible 云端 API。
         </div>
 
         {/* 当前 AI 模式 */}

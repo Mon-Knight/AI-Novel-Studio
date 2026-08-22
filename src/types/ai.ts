@@ -32,6 +32,8 @@ export interface AiSettings {
   budgetWarningPercent?: number;
   /** Optional task-specific local model used only for chapter prose generation. */
   localChapterModel?: LocalChapterModelSettings;
+  /** Optional dedicated remote OpenAI-compatible model used for chapter scene prose generation. */
+  remoteWriter?: RemoteWriterSettings;
   mockMode: boolean; // 兼容旧字段，从 runtimeMode 派生
   lastTestAt?: string;
   lastTestOk?: boolean;
@@ -51,6 +53,26 @@ export interface LocalChapterModelSettings {
   topP: number;
   topK: number;
   repeatPenalty: number;
+  minTokens?: number;
+  noRepeatNgramSize?: number;
+  seed?: number;
+  /** When false, a down/training local writer fails closed instead of using the cloud beat contract. */
+  allowCloudWriterFallback?: boolean;
+}
+
+export interface RemoteWriterSettings {
+  enabled: boolean;
+  providerId: string;
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+  timeoutSeconds: number;
+  contextTokens?: number;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
   minTokens?: number;
   noRepeatNgramSize?: number;
   seed?: number;

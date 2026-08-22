@@ -56,7 +56,7 @@ export function passesChapterQualityGate(score: number, items: QualityCheckItem[
 }
 
 export function shouldAttemptExternalQualityRepair(input: {
-  localChapterModelEnabled: boolean;
+  beatOrchestrationEnabled: boolean;
   runtimeMode: 'mock' | 'api';
   manualReviewRequired: boolean;
   qualityItems: QualityCheckItem[];
@@ -67,7 +67,7 @@ export function shouldAttemptExternalQualityRepair(input: {
   externalBeatRepairUsed: boolean;
 }): boolean {
   return (
-    input.localChapterModelEnabled &&
+    input.beatOrchestrationEnabled &&
     input.runtimeMode === 'api' &&
     input.manualReviewRequired &&
     input.qualityItems.some((item) => item.status === 'pending')

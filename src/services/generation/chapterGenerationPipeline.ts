@@ -367,12 +367,17 @@ export async function runChapterDraftJob(
   onProgress?: GenerationJobProgressCallback,
 ): Promise<ChapterDraftJobResult> {
   const settings = aiSettingsService.getSettings();
-  const chapterProvider = settings.localChapterModel?.enabled
-    ? settings.localChapterModel.providerId
-    : settings.provider;
-  const chapterModel = settings.localChapterModel?.enabled
-    ? settings.localChapterModel.modelName
-    : settings.modelName;
+  const [{ buildRouteRequest, routeCreativeTask }, { syncLocalModelLifecycleSidecar }] =
+    await Promise.all([
+      import('../ai/runtime/modelRouter'),
+      import('../ai/runtime/modelLifecycleSidecar'),
+    ]);
+  if (settings.localChapterModel?.enabled) {
+    await syncLocalModelLifecycleSidecar(settings.localChapterModel);
+  }
+  let chapterWriterRoute = routeCreativeTask(settings, 'chapter_scene_generate');
+  const chapterProvider = chapterWriterRoute.selected.providerId;
+  const chapterModel = chapterWriterRoute.selected.modelId;
   let job = await createGenerationJob({
     novelId: input.novelId,
     volumeId: input.volumeId,
@@ -432,21 +437,52 @@ export async function runChapterDraftJob(
   try {
     await updateJob({ status: 'running', startedAt: nowISO(), progressPercent: 1 });
     await runStep('preflight', 8, async () => {
-      const localAvailability = settings.localChapterModel?.enabled
-        ? await checkLocalChapterModelAvailability(
-            settings.localChapterModel,
+      let localAvailability:
+        Awaited<ReturnType<typeof checkLocalChapterModelAvailability>> | undefined;
+      let localAvailabilityError: string | undefined;
+      const local = settings.localChapterModel;
+      const localLifecycle = buildRouteRequest(settings, 'chapter_scene_generate').localLifecycle;
+      if (local?.enabled && localLifecycle === 'AVAILABLE') {
+        const [{ modelLifecycleManager }, { localModelRef }] = await Promise.all([
+          import('../ai/runtime/modelLifecycle'),
+          import('../ai/runtime/modelCatalog'),
+        ]);
+        const endpointId = localModelRef(local).endpointId;
+        try {
+          localAvailability = await checkLocalChapterModelAvailability(
+            local,
             control.controller.signal,
-          )
-        : undefined;
-      if (localAvailability && (!localAvailability.healthOk || !localAvailability.modelOk)) {
-        throw new Error(localAvailability.message);
+          );
+          const healthy = localAvailability.healthOk && localAvailability.modelOk;
+          modelLifecycleManager.observeHealth(endpointId, healthy ? 'ok' : 'down');
+          if (!healthy) localAvailabilityError = localAvailability.message;
+        } catch (error) {
+          if (control.controller.signal.aborted || isAiRequestCancelled(error)) throw error;
+          modelLifecycleManager.observeHealth(endpointId, 'down');
+          localAvailabilityError =
+            error instanceof Error ? error.message : '专用本地正文模型检查失败。';
+        }
+        // Re-route after every non-generative health observation. A recovered
+        // endpoint can re-enter service for this chapter; an outage falls back
+        // or throws when the user explicitly disabled cloud writer fallback.
+        chapterWriterRoute = routeCreativeTask(settings, 'chapter_scene_generate');
+      }
+      const selected = chapterWriterRoute.selected;
+      if (job.provider !== selected.providerId || job.modelName !== selected.modelId) {
+        job = await updateGenerationJob({
+          id: job.id,
+          provider: selected.providerId,
+          modelName: selected.modelId,
+        });
       }
       return {
         outputJson: {
           runtimeMode: settings.runtimeMode,
-          provider: chapterProvider,
-          modelName: chapterModel,
+          provider: selected.providerId,
+          modelName: selected.modelId,
           chapterId: input.chapterId,
+          routeReason: chapterWriterRoute.reason,
+          fallbackUsed: chapterWriterRoute.fallbackUsed,
           localAvailability: localAvailability
             ? {
                 healthOk: localAvailability.healthOk,
@@ -454,10 +490,16 @@ export async function runChapterDraftJob(
                 smokeCalled: false,
               }
             : undefined,
+          localAvailabilityError,
         },
-        outputText: localAvailability
-          ? '正文生成预检通过：本地服务健康、模型匹配，未执行 smoke 生成。'
-          : '正文生成预检通过。',
+        outputText:
+          selected.kind === 'local' && localAvailability
+            ? '正文生成预检通过：本地服务健康、模型匹配，未执行 smoke 生成。'
+            : settings.runtimeMode === 'mock'
+              ? '正文生成预检通过：使用 Mock Provider。'
+              : local?.enabled
+                ? `正文生成预检通过：专用本地模型不接收流量（${chapterWriterRoute.reason}），由云端 Provider 临时代写。`
+                : '正文生成预检通过：未启用专用本地模型，由云端 Provider 生成正文。',
       };
     });
     let snapshot: ChapterGenerationSnapshot | null = null;
@@ -476,15 +518,18 @@ export async function runChapterDraftJob(
     });
     let resumeBeats: ChapterProseResumeBeat[] = [];
     const compiledSnapshot = snapshot as ChapterGenerationSnapshot | null;
-    if (settings.localChapterModel?.enabled && compiledSnapshot) {
+    const beatOrchestrationEnabled = Boolean(
+      compiledSnapshot?.compiledContext.activeEngineeringState?.scenePlan.length,
+    );
+    if (beatOrchestrationEnabled && compiledSnapshot) {
       const resumableJobs = (await getGenerationJobsByChapterId(input.chapterId))
         .filter(
           (candidate) =>
             candidate.id !== job.id &&
             candidate.status === 'failed' &&
             candidate.jobType === 'chapter_generation' &&
-            candidate.provider === chapterProvider &&
-            candidate.modelName === chapterModel,
+            candidate.provider === chapterWriterRoute.selected.providerId &&
+            candidate.modelName === chapterWriterRoute.selected.modelId,
         )
         .slice(0, 20);
       const candidates = await Promise.all(
@@ -502,8 +547,8 @@ export async function runChapterDraftJob(
       resumeBeats = selectResumableBeatPrefix({
         candidates,
         contextHash: compiledSnapshot.contextHash,
-        provider: chapterProvider,
-        modelName: chapterModel,
+        provider: chapterWriterRoute.selected.providerId,
+        modelName: chapterWriterRoute.selected.modelId,
         repairBeats,
       });
     }
@@ -739,7 +784,7 @@ export async function runChapterDraftJob(
 
       if (
         shouldAttemptExternalQualityRepair({
-          localChapterModelEnabled: settings.localChapterModel?.enabled === true,
+          beatOrchestrationEnabled,
           runtimeMode: settings.runtimeMode,
           manualReviewRequired,
           qualityItems,
@@ -825,15 +870,16 @@ export async function runChapterDraftJob(
     });
     await runStep('patch_apply', 99, async () => {
       if (!savedDraft) throw new Error('missing_saved_draft');
-      if (settings.localChapterModel?.enabled) {
+      if (beatOrchestrationEnabled) {
         return {
           status: 'skipped',
           outputJson: {
             appliedCount: 0,
             skippedCount: patchCandidates.length,
-            reason: 'local_prose_quality_gate_owns_external_repair_round',
+            reason: 'beat_orchestration_quality_gate_owns_external_repair_round',
           },
-          outputText: '本地正文流程不自动应用低风险 patch；请依据最终评分和问题列表人工确认。',
+          outputText:
+            'Scene/Beat 正文流程不自动应用低风险 patch；请依据最终评分和问题列表人工确认。',
         };
       }
       const result = applyLowRiskPatches(savedDraft.content, patchCandidates);
