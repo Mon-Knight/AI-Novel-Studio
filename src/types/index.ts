@@ -39,3 +39,4 @@ export * from './result-artifact';
 export * from './modelRuntime';
 export * from './novelMemory';
 export * from './chapterVersion';
+export * from './promptRegistry';

@@ -22,6 +22,7 @@
 - 新增记忆状态演进与版本快照引擎（Novel Memory State Update Engine Phase 3）：实现创作生成后的结构化状态增量（`MemoryStateDelta`）批量应用；支持角色动态心境/目标/伤势/阵营演化及世界时间线/大事件/势力态势更新；沉淀不可变版本快照（`MemoryVersionSnapshot`）并支持状态安全回滚。
 - 新增小说作家评测体系（Novel Writer Benchmark Evaluation System Phase 4）：建立包含人物一致性（`CharacterConsistency`）、世界观（`WorldConsistency`）、情节连贯性（`PlotContinuity`）、伏笔留存（`ForeshadowingRetention`）及文风一致性（`StyleConsistency`）的 5 大维度评测算法；支持无 Memory 的 Baseline 与启用 Novel Memory Layer 的 Enhanced 模式 A/B 对照实验；自动生成包含 Token 消耗、耗时与提升 Delta 的结构化评测报告。
 - 新增章节版本演进与全链路创作溯源系统（Chapter Version & Provenance System）：提供 Git 式章节多版本管理（`ChapterRevision`）；自动沉淀生成模型（Model）、提供商（Provider）、路由原因（RouteDecision）、提示词快照与记忆版本；内置行级与字符级轻量 Diff 比对引擎；支持版本采用（Adopt）与不可变安全历史回滚。
+- 新增提示词模板注册与多模型动态适配引擎（Prompt Template Registry & Model-Adaptive Engine）：声明式统一管理分镜创作、Beat推进、专家评审、记忆演化抽取与质量诊断等 5 大官方基准模板；支持严格变量完整性校验与默认值回退；按目标模型家族（`Qwen` / `DeepSeek` / `Claude` / `OpenAI-Compatible`）动态注入专属系统指令前缀与输出格式约束；生成确定性哈希凭证以供审计与版本溯源。
 
 ### 变更
 
