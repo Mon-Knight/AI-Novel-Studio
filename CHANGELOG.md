@@ -20,6 +20,7 @@
 - 新增长篇小说记忆层（Novel Memory Layer Phase 1）领域模型与服务契约：建立长期记忆（世界规则/人物底层/核心伏笔）、中期记忆（本卷主线/角色动态状态/阵营态势）、短期工作记忆（分镜 POV/活跃角色/即时冲突）三层记忆架构；定义 `CharacterDynamicState`、`WorldStateSnapshot`、`SceneMemoryContext` 与 `INovelMemoryManager` 接口，为百万字创作及 Qwen3.8-27B 场景写作提供结构化上下文供给基础。
 - 新增场景记忆召回与装配引擎（Novel Memory Retrieval Engine Phase 2）：实现基于实体相关性与重要度权重（1~5）的三层记忆过滤召回；支持按模型 Context 预算进行 `核心设定 > 场景冲突/POV > 近期事件/动态 > 辅助线索` 优先级裁剪；提供 `formatSceneMemoryForCompilation` 将结构化记忆包络注入 `executionContractCompiler`，无缝增强 Scene 作家生成质量并保持旧流程向后兼容。
 - 新增记忆状态演进与版本快照引擎（Novel Memory State Update Engine Phase 3）：实现创作生成后的结构化状态增量（`MemoryStateDelta`）批量应用；支持角色动态心境/目标/伤势/阵营演化及世界时间线/大事件/势力态势更新；沉淀不可变版本快照（`MemoryVersionSnapshot`）并支持状态安全回滚。
+- 新增小说作家评测体系（Novel Writer Benchmark Evaluation System Phase 4）：建立包含人物一致性（`CharacterConsistency`）、世界观（`WorldConsistency`）、情节连贯性（`PlotContinuity`）、伏笔留存（`ForeshadowingRetention`）及文风一致性（`StyleConsistency`）的 5 大维度评测算法；支持无 Memory 的 Baseline 与启用 Novel Memory Layer 的 Enhanced 模式 A/B 对照实验；自动生成包含 Token 消耗、耗时与提升 Delta 的结构化评测报告。
 
 ### 变更
 
