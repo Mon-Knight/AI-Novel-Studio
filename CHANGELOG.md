@@ -23,6 +23,7 @@
 - 新增小说作家评测体系（Novel Writer Benchmark Evaluation System Phase 4）：建立包含人物一致性（`CharacterConsistency`）、世界观（`WorldConsistency`）、情节连贯性（`PlotContinuity`）、伏笔留存（`ForeshadowingRetention`）及文风一致性（`StyleConsistency`）的 5 大维度评测算法；支持无 Memory 的 Baseline 与启用 Novel Memory Layer 的 Enhanced 模式 A/B 对照实验；自动生成包含 Token 消耗、耗时与提升 Delta 的结构化评测报告。
 - 新增章节版本演进与全链路创作溯源系统（Chapter Version & Provenance System）：提供 Git 式章节多版本管理（`ChapterRevision`）；自动沉淀生成模型（Model）、提供商（Provider）、路由原因（RouteDecision）、提示词快照与记忆版本；内置行级与字符级轻量 Diff 比对引擎；支持版本采用（Adopt）与不可变安全历史回滚。
 - 新增提示词模板注册与多模型动态适配引擎（Prompt Template Registry & Model-Adaptive Engine）：声明式统一管理分镜创作、Beat推进、专家评审、记忆演化抽取与质量诊断等 5 大官方基准模板；支持严格变量完整性校验与默认值回退；按目标模型家族（`Qwen` / `DeepSeek` / `Claude` / `OpenAI-Compatible`）动态注入专属系统指令前缀与输出格式约束；生成确定性哈希凭证以供审计与版本溯源。
+- 新增创作反馈与微调数据闭环采集系统（Human Feedback & SFT/DPO Dataset Collector）：在作家人工修改、审阅修订及最终采用时自动沉淀高质量数据对；支持生成 SFT 指令微调示范集与 DPO/RLHF 人类偏好对齐正负例数据；提供标准 JSONL、ShareGPT 与 OpenAI Chat 多格式导出；内置微小改动过滤与多维度数据集统计指标。
 
 ### 变更
 
