@@ -16,7 +16,7 @@
 - 新增本地模型 Benchmark Runner 与 10 个固定 Scene-to-Prose 案例；CLI 先写 TESTING，通过率达标并形成 SHA-256 报告身份后才写 AVAILABLE。
 - 新增训练生命周期 CLI；它可以标记 TRAINING/TESTING/FAILED/DISABLED，但明确不能绕过 Benchmark 直接标记 AVAILABLE。
 - 新增无本地模型的正式云端正文模式：未配置或关闭专用本地模型时，全局 DeepSeek / OpenAI-Compatible Provider 成为 Scene/Beat 的主路由，而不是伪装成 Fallback。
-- 新增专用远程正文模型（Remote Writer）网络策略与路由支持：支持公网 HTTPS 与局域网/VPC（RFC 1918 / CGNAT / Link-Local / 回环）HTTP/HTTPS 访问；强制要求 API Key/Token 鉴权以杜绝匿名调用；当本地作家不可用时优先降级至 Remote Writer 或 Cloud Provider。
+- 新增通用外部模型网关（AI Model Gateway）客户端接入层与网络策略：将远程正文模型抽象为通用 Remote Model Provider，统一采用 OpenAI-Compatible API 契约；支持公网 HTTPS 与局域网/VPC（RFC 1918 / CGNAT / Link-Local / 回环）HTTP/HTTPS 访问；强制要求 API Key/Token 鉴权以杜绝匿名调用；自动向下兼容迁移旧版 `remoteWriter` 设置；当本地模型不可用时优先调度至外部 AI Gateway 或全局 Cloud Provider。
 
 ### 变更
 

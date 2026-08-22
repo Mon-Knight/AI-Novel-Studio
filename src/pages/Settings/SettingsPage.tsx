@@ -12,7 +12,7 @@ import AppearanceSettingsCard from '../../components/settings/AppearanceSettings
 import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSettingsCard';
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
 import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
-import RemoteWriterSettingsCard from '../../components/settings/RemoteWriterSettingsCard';
+import AiGatewaySettingsCard from '../../components/settings/AiGatewaySettingsCard';
 import {
   checkLocalChapterModel,
   type LocalChapterModelHealthResult,
@@ -205,7 +205,7 @@ function SettingsPage() {
         healthChecking={localHealthChecking}
         onCheckHealth={handleCheckLocalHealth}
       />
-      <RemoteWriterSettingsCard
+      <AiGatewaySettingsCard
         settings={settings}
         onChange={update}
         onSave={handleSave}

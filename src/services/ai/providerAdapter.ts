@@ -9,7 +9,7 @@ import type {
 import type { AiTaskType } from '../../types/ai-task';
 import type { RouteDecision } from '../../types/modelRuntime';
 import { MockAiClient } from './mockAiClient';
-import { RealAiClient, validateRealAiConfig, validateRemoteWriterConfig } from './realAiClient';
+import { RealAiClient, validateGatewayConfig, validateRealAiConfig } from './realAiClient';
 import { calculateAiUsageCost, createAiPricingSnapshot } from './aiCost';
 import { isAiRequestCancelled } from './aiCancellation';
 import { aiPerformanceMonitor } from '../observability/aiPerformanceMonitor';
@@ -55,7 +55,7 @@ export function createProviderAdapter(
   route?: Pick<RouteDecision, 'selected'>,
 ): ProviderAdapter {
   const local = settings.localChapterModel;
-  const remote = settings.remoteWriter;
+  const remote = settings.gateway ?? settings.remoteWriter;
   if (taskType === 'chapter_scene_generate' && !route) {
     throw new Error('chapter_scene_generate 必须携带冻结的 Model Router 决策。');
   }
@@ -71,13 +71,13 @@ export function createProviderAdapter(
   }
 
   if (isRemoteChapterScene && taskType !== 'chapter_scene_generate') {
-    throw new Error('专用远程正文模型只能执行 chapter_scene_generate。');
+    throw new Error('专用远程模型 / AI Gateway 只能执行 chapter_scene_generate。');
   }
   if (isRemoteChapterScene && (!remote || !remote.enabled)) {
-    throw new Error('Model Router 选择了未启用的专用远程正文模型，已拒绝派发。');
+    throw new Error('Model Router 选择了未启用的专用远程模型 / AI Gateway，已拒绝派发。');
   }
   if (isRemoteChapterScene && remote) {
-    validateRemoteWriterConfig(remote);
+    validateGatewayConfig(remote);
   }
 
   const effective: {

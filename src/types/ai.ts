@@ -32,8 +32,10 @@ export interface AiSettings {
   budgetWarningPercent?: number;
   /** Optional task-specific local model used only for chapter prose generation. */
   localChapterModel?: LocalChapterModelSettings;
-  /** Optional dedicated remote OpenAI-compatible model used for chapter scene prose generation. */
-  remoteWriter?: RemoteWriterSettings;
+  /** Optional dedicated AI Model Gateway / Remote OpenAI-compatible model endpoint. */
+  gateway?: GatewayModelConfig;
+  /** Deprecated alias for gateway compatibility */
+  remoteWriter?: GatewayModelConfig;
   mockMode: boolean; // 兼容旧字段，从 runtimeMode 派生
   lastTestAt?: string;
   lastTestOk?: boolean;
@@ -60,7 +62,7 @@ export interface LocalChapterModelSettings {
   allowCloudWriterFallback?: boolean;
 }
 
-export interface RemoteWriterSettings {
+export interface GatewayModelConfig {
   enabled: boolean;
   providerId: string;
   baseUrl: string;
@@ -77,6 +79,9 @@ export interface RemoteWriterSettings {
   noRepeatNgramSize?: number;
   seed?: number;
 }
+
+export type AiGatewaySettings = GatewayModelConfig;
+export type RemoteWriterSettings = GatewayModelConfig;
 
 export interface AiConnectionTestResult {
   ok: boolean;

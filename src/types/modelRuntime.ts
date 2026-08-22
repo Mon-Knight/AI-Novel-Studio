@@ -33,6 +33,7 @@ export type ModelHealth = 'ok' | 'down' | 'unknown';
 export type RouteReason =
   | 'role_default'
   | 'cloud_writer_primary'
+  | 'remote_gateway_primary'
   | 'remote_writer_primary'
   | 'local_available'
   | 'local_training'
@@ -41,6 +42,7 @@ export type RouteReason =
   | 'local_disabled'
   | 'local_unhealthy'
   | 'context_too_large_for_local'
+  | 'remote_gateway_fallback'
   | 'remote_writer_fallback'
   | 'cloud_writer_fallback'
   | 'mock';
@@ -52,6 +54,13 @@ export interface ModelRef {
   kind: ModelKind;
 }
 
+export interface RemoteModelProvider {
+  providerId: string;
+  baseUrl: string;
+  protocol: 'openai_compatible';
+  authType: 'bearer_token' | 'api_key';
+}
+
 export interface ModelEndpoint extends ModelRef {
   protocol: 'chat_completions_v1';
   providerFamily: 'mock' | 'openai_compatible' | 'local_openai_compatible';
@@ -60,6 +69,11 @@ export interface ModelEndpoint extends ModelRef {
   maxOutputTokens: number;
   loopbackRequired: boolean;
   priced: boolean;
+}
+
+export interface RemoteModelEndpoint extends ModelEndpoint {
+  kind: 'remote';
+  providerFamily: 'openai_compatible';
 }
 
 export type LocalModelBenchmarkStatus = 'pending' | 'passed' | 'failed';

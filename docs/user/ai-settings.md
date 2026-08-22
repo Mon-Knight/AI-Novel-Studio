@@ -41,20 +41,20 @@ Mock 模式允许你在没有 API Key 的情况下体验完整工作流。
 Scene/Beat 计划时，Runtime 仍按 `scene-beat-prose-v1` 逐 Beat 生成；没有 Scene 计划时使用原有
 云端整章候选流程。两条路径都只生成候选 Artifact，继续经过质量门、人工审核和 Safe Apply。
 
-## 专用远程正文模型（Remote Writer）
+## 外部模型网关（AI Model Gateway）
 
-支持将微调作家模型部署在远程独立 GPU 服务器、私有云或云端 VPC：
+支持通过 OpenAI-Compatible API 接入外部 GPU 算力集群、私有云网关或 VPC 网络中的模型服务：
 
-1. 进入「设置中心」中的「专用远程正文模型（Remote Writer / 可选）」卡片；
-2. 勾选「启用专用远程 Scene/Beat 正文模型」；
+1. 进入「设置中心」中的「AI Model Gateway（外部模型网关 / 可选）」卡片；
+2. 勾选「启用外部 AI Model Gateway 接入」；
 3. 填写配置：
    - **Base URL**：公网访问必须使用 `https://`，局域网/VPC（如 10.x / 192.168.x / 100.64.x）支持 `http://` 或 `https://`；
    - **API Key / Token**：必填，禁止匿名访问；
-   - **模型名称**：远程部署的模型名称（如 `qwen35-32b-novel-v1`）；
+   - **模型名称**：网关代理或后端部署的模型名称（如 `qwen35-32b-novel-v1`）；
    - **参数预算**：支持自定义上下文 Token 预算与单次最大输出 Token。
-4. 点击「测试远程模型连接」确认服务可用。
+4. 点击「测试网关连接」确认服务可用。
 
-启用后，Beat 正文生成将优先调度至远程 Writer；当本地 Writer 启用且为 `AVAILABLE` 时，本地优先；当本地处于 TRAINING/FAILED 时，将自动平滑降级至远程 Writer 或全局云端 Provider。
+启用后，Beat 正文生成在本地模型不可用或未启用时，将优先调度至外部 AI Gateway；当本地模型启用且为 `AVAILABLE` 时，本地优先；当本地与网关均不可用时，将自动平滑降级至全局云端 Provider。
 
 ## 可选本地章节场景模型
 

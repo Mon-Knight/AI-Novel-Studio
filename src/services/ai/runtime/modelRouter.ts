@@ -4,11 +4,11 @@ import type { CreativeRole, RouteDecision, RouteRequest } from '../../../types/m
 import {
   allowCloudWriterFallback,
   cloudModelRef,
+  gatewayModelRef,
   isCloudEndpointAvailable,
-  isRemoteEndpointAvailable,
+  isGatewayEndpointAvailable,
   localModelRef,
   mockModelRef,
-  remoteModelRef,
 } from './modelCatalog';
 import { modelLifecycleManager } from './modelLifecycle';
 import { decideModelRoute, roleForTaskType } from './routeDecision';
@@ -20,8 +20,8 @@ export function buildRouteRequest(
 ): RouteRequest {
   const local = settings.localChapterModel;
   const localRef = local ? localModelRef(local) : undefined;
-  const remote = settings.remoteWriter;
-  const remoteRef = remote ? remoteModelRef(remote) : undefined;
+  const gateway = settings.gateway ?? settings.remoteWriter;
+  const remoteRef = gateway ? gatewayModelRef(gateway) : undefined;
   return {
     role: options.role ?? roleForTaskType(taskType),
     taskType,
@@ -33,10 +33,10 @@ export function buildRouteRequest(
     localHealth: localRef ? modelLifecycleManager.getHealth(localRef.endpointId) : 'unknown',
     localContextTokens: local?.contextTokens,
     localMaxOutputTokens: local?.maxTokens,
-    remoteEnabled: remote?.enabled === true,
-    remoteAvailable: isRemoteEndpointAvailable(remote),
-    remoteContextTokens: remote?.contextTokens,
-    remoteMaxOutputTokens: remote?.maxTokens,
+    remoteEnabled: gateway?.enabled === true,
+    remoteAvailable: isGatewayEndpointAvailable(gateway),
+    remoteContextTokens: gateway?.contextTokens,
+    remoteMaxOutputTokens: gateway?.maxTokens,
     cloudAvailable: isCloudEndpointAvailable(settings),
     runtimeMode: settings.runtimeMode,
     allowCloudWriterFallback: allowCloudWriterFallback(local),

@@ -1,4 +1,4 @@
-import type { AiSettings, LocalChapterModelSettings, RemoteWriterSettings } from '../../types/ai';
+import type { AiSettings, GatewayModelConfig, LocalChapterModelSettings } from '../../types/ai';
 import { lsGet, lsSet } from '../database/db';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
@@ -7,13 +7,13 @@ const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
 interface SessionCredentials {
   providerApiKey: string;
   localChapterModelApiKey: string;
-  remoteWriterApiKey: string;
+  gatewayApiKey: string;
 }
 
 let sessionCredentials: SessionCredentials = {
   providerApiKey: '',
   localChapterModelApiKey: 'local-no-key-required',
-  remoteWriterApiKey: '',
+  gatewayApiKey: '',
 };
 
 export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings {
@@ -34,10 +34,10 @@ export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings
   };
 }
 
-export function getDefaultRemoteWriterSettings(): RemoteWriterSettings {
+export function getDefaultGatewaySettings(): GatewayModelConfig {
   return {
     enabled: false,
-    providerId: 'remote_openai_compatible',
+    providerId: 'ai_gateway',
     baseUrl: '',
     apiKey: '',
     modelName: '',
@@ -50,6 +50,8 @@ export function getDefaultRemoteWriterSettings(): RemoteWriterSettings {
     repeatPenalty: 1.08,
   };
 }
+
+export const getDefaultRemoteWriterSettings = getDefaultGatewaySettings;
 
 const defaultSettings: AiSettings = {
   runtimeMode: 'mock',
@@ -66,31 +68,41 @@ const defaultSettings: AiSettings = {
   mockMode: true,
 };
 
-function normalizeNumber(value: unknown, fallback: number, min: number, max: number): number {
-  const numberValue = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numberValue)) return fallback;
-  return Math.min(max, Math.max(min, numberValue));
+function normalizeNumber(
+  val: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (val === null || val === undefined || val === '') return fallback;
+  const n = Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
 }
 
-function normalizeOptionalPrice(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return undefined;
-  return Math.min(1_000_000, Math.max(0, numeric));
+function normalizeOptionalPrice(val: unknown): number | undefined {
+  if (val === null || val === undefined || val === '') return undefined;
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.min(n, 1000);
 }
 
-function normalizeOptionalBudget(value: unknown, maximum: number): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
-  return Math.min(maximum, numeric);
+function normalizeOptionalBudget(val: unknown, max: number): number | undefined {
+  if (val === null || val === undefined || val === '') return undefined;
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(n, max);
 }
 
-function normalizeOptionalInteger(value: unknown, min: number, max: number): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return undefined;
-  return Math.round(Math.min(max, Math.max(min, numeric)));
+function normalizeOptionalInteger(
+  val: unknown,
+  min: number,
+  max: number,
+): number | undefined {
+  if (val === null || val === undefined || val === '') return undefined;
+  const n = Number(val);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(Math.max(Math.round(n), min), max);
 }
 
 function normalizeLocalChapterModelSettings(
@@ -121,11 +133,11 @@ function normalizeLocalChapterModelSettings(
   };
 }
 
-function normalizeRemoteWriterSettings(
-  stored: RemoteWriterSettings | undefined,
-): RemoteWriterSettings | undefined {
+function normalizeGatewaySettings(
+  stored: GatewayModelConfig | undefined,
+): GatewayModelConfig | undefined {
   if (!stored) return undefined;
-  const defaults = getDefaultRemoteWriterSettings();
+  const defaults = getDefaultGatewaySettings();
   return {
     enabled: stored.enabled === true,
     providerId: String(stored.providerId ?? defaults.providerId).trim() || defaults.providerId,
@@ -135,9 +147,12 @@ function normalizeRemoteWriterSettings(
     timeoutSeconds: Math.round(
       normalizeNumber(stored.timeoutSeconds, defaults.timeoutSeconds, 1, 1800),
     ),
-    contextTokens:
-      normalizeOptionalInteger(stored.contextTokens, 1024, 200000) ?? defaults.contextTokens,
-    maxTokens: normalizeOptionalInteger(stored.maxTokens, 1, 32000) ?? defaults.maxTokens,
+    contextTokens: Math.round(
+      normalizeNumber(stored.contextTokens, defaults.contextTokens ?? 32000, 1024, 200000),
+    ),
+    maxTokens: Math.round(
+      normalizeNumber(stored.maxTokens, defaults.maxTokens ?? 4000, 1, 32000),
+    ),
     temperature: normalizeNumber(stored.temperature, defaults.temperature ?? 0.7, 0, 2),
     topP: normalizeNumber(stored.topP, defaults.topP ?? 0.8, 0, 1),
     topK: Math.round(normalizeNumber(stored.topK, defaults.topK ?? 20, 0, 4096)),
@@ -147,6 +162,8 @@ function normalizeRemoteWriterSettings(
     seed: normalizeOptionalInteger(stored.seed, -2_147_483_648, 2_147_483_647),
   };
 }
+
+export const normalizeRemoteWriterSettings = normalizeGatewaySettings;
 
 export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
   const merged = { ...defaultSettings, ...stored } as AiSettings;
@@ -193,16 +210,22 @@ export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
   if (localChapterModel) merged.localChapterModel = localChapterModel;
   else delete merged.localChapterModel;
 
-  const remoteWriter = normalizeRemoteWriterSettings(stored.remoteWriter);
-  if (remoteWriter) merged.remoteWriter = remoteWriter;
-  else delete merged.remoteWriter;
+  const rawGateway = stored.gateway ?? stored.remoteWriter;
+  const gateway = normalizeGatewaySettings(rawGateway);
+  if (gateway) {
+    merged.gateway = gateway;
+    merged.remoteWriter = gateway;
+  } else {
+    delete merged.gateway;
+    delete merged.remoteWriter;
+  }
 
   return merged;
 }
 
 function withoutCredentials(settings: AiSettings): Record<string, unknown> {
   const local = settings.localChapterModel;
-  const remote = settings.remoteWriter;
+  const gateway = settings.gateway ?? settings.remoteWriter;
   return {
     runtimeMode: settings.runtimeMode,
     provider: settings.provider,
@@ -243,23 +266,39 @@ function withoutCredentials(settings: AiSettings): Record<string, unknown> {
           },
         }
       : {}),
-    ...(remote
+    ...(gateway
       ? {
+          gateway: {
+            enabled: gateway.enabled,
+            providerId: gateway.providerId,
+            baseUrl: gateway.baseUrl,
+            modelName: gateway.modelName,
+            timeoutSeconds: gateway.timeoutSeconds,
+            contextTokens: gateway.contextTokens,
+            maxTokens: gateway.maxTokens,
+            temperature: gateway.temperature,
+            topP: gateway.topP,
+            topK: gateway.topK,
+            repeatPenalty: gateway.repeatPenalty,
+            minTokens: gateway.minTokens,
+            noRepeatNgramSize: gateway.noRepeatNgramSize,
+            seed: gateway.seed,
+          },
           remoteWriter: {
-            enabled: remote.enabled,
-            providerId: remote.providerId,
-            baseUrl: remote.baseUrl,
-            modelName: remote.modelName,
-            timeoutSeconds: remote.timeoutSeconds,
-            contextTokens: remote.contextTokens,
-            maxTokens: remote.maxTokens,
-            temperature: remote.temperature,
-            topP: remote.topP,
-            topK: remote.topK,
-            repeatPenalty: remote.repeatPenalty,
-            minTokens: remote.minTokens,
-            noRepeatNgramSize: remote.noRepeatNgramSize,
-            seed: remote.seed,
+            enabled: gateway.enabled,
+            providerId: gateway.providerId,
+            baseUrl: gateway.baseUrl,
+            modelName: gateway.modelName,
+            timeoutSeconds: gateway.timeoutSeconds,
+            contextTokens: gateway.contextTokens,
+            maxTokens: gateway.maxTokens,
+            temperature: gateway.temperature,
+            topP: gateway.topP,
+            topK: gateway.topK,
+            repeatPenalty: gateway.repeatPenalty,
+            minTokens: gateway.minTokens,
+            noRepeatNgramSize: gateway.noRepeatNgramSize,
+            seed: gateway.seed,
           },
         }
       : {}),
@@ -267,6 +306,13 @@ function withoutCredentials(settings: AiSettings): Record<string, unknown> {
 }
 
 function withSessionCredentials(settings: AiSettings): AiSettings {
+  const gatewayWithKey = (settings.gateway ?? settings.remoteWriter)
+    ? {
+        ...(settings.gateway ?? settings.remoteWriter)!,
+        apiKey: sessionCredentials.gatewayApiKey,
+      }
+    : undefined;
+
   return {
     ...settings,
     apiKey: sessionCredentials.providerApiKey,
@@ -278,12 +324,10 @@ function withSessionCredentials(settings: AiSettings): AiSettings {
           },
         }
       : {}),
-    ...(settings.remoteWriter
+    ...(gatewayWithKey
       ? {
-          remoteWriter: {
-            ...settings.remoteWriter,
-            apiKey: sessionCredentials.remoteWriterApiKey,
-          },
+          gateway: gatewayWithKey,
+          remoteWriter: gatewayWithKey,
         }
       : {}),
   };
@@ -299,6 +343,10 @@ export function getAiSettings(): AiSettings {
     stored.localChapterModel ?? {},
     'apiKey',
   );
+  const hasLegacyGatewayKey = Object.prototype.hasOwnProperty.call(
+    stored.gateway ?? {},
+    'apiKey',
+  );
   const hasLegacyRemoteKey = Object.prototype.hasOwnProperty.call(
     stored.remoteWriter ?? {},
     'apiKey',
@@ -309,12 +357,14 @@ export function getAiSettings(): AiSettings {
   if (hasLegacyLocalKey && typeof stored.localChapterModel?.apiKey === 'string') {
     sessionCredentials.localChapterModelApiKey = stored.localChapterModel.apiKey;
   }
-  if (hasLegacyRemoteKey && typeof stored.remoteWriter?.apiKey === 'string') {
-    sessionCredentials.remoteWriterApiKey = stored.remoteWriter.apiKey;
+  if (hasLegacyGatewayKey && typeof stored.gateway?.apiKey === 'string') {
+    sessionCredentials.gatewayApiKey = stored.gateway.apiKey;
+  } else if (hasLegacyRemoteKey && typeof stored.remoteWriter?.apiKey === 'string') {
+    sessionCredentials.gatewayApiKey = stored.remoteWriter.apiKey;
   }
 
   const normalized = normalizeAiSettings(stored);
-  if (hasLegacyProviderKey || hasLegacyLocalKey || hasLegacyRemoteKey) {
+  if (hasLegacyProviderKey || hasLegacyLocalKey || hasLegacyGatewayKey || hasLegacyRemoteKey) {
     lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
   }
   return withSessionCredentials(normalized);
@@ -326,7 +376,10 @@ export function saveAiSettings(settings: AiSettings): void {
     providerApiKey: normalized.apiKey,
     localChapterModelApiKey:
       normalized.localChapterModel?.apiKey ?? sessionCredentials.localChapterModelApiKey,
-    remoteWriterApiKey: normalized.remoteWriter?.apiKey ?? sessionCredentials.remoteWriterApiKey,
+    gatewayApiKey:
+      normalized.gateway?.apiKey ??
+      normalized.remoteWriter?.apiKey ??
+      sessionCredentials.gatewayApiKey,
   };
   lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
 }

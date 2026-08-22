@@ -1,4 +1,8 @@
-import type { AiSettings, LocalChapterModelSettings, RemoteWriterSettings } from '../../../types/ai';
+import type {
+  AiSettings,
+  GatewayModelConfig,
+  LocalChapterModelSettings,
+} from '../../../types/ai';
 import type { ModelEndpoint, ModelRef } from '../../../types/modelRuntime';
 
 export function mockModelRef(): ModelRef {
@@ -32,9 +36,9 @@ export function localModelRef(local: LocalChapterModelSettings): ModelRef {
   };
 }
 
-export function remoteModelRef(remote: RemoteWriterSettings): ModelRef {
-  const modelId = remote.modelName.trim() || 'remote-model';
-  const providerId = remote.providerId.trim() || 'remote_openai_compatible';
+export function gatewayModelRef(gateway: GatewayModelConfig): ModelRef {
+  const modelId = gateway.modelName.trim() || 'gateway-model';
+  const providerId = gateway.providerId.trim() || 'ai_gateway';
   return {
     endpointId: 'remote.' + providerId + '.' + modelId,
     providerId,
@@ -42,6 +46,8 @@ export function remoteModelRef(remote: RemoteWriterSettings): ModelRef {
     kind: 'remote',
   };
 }
+
+export const remoteModelRef = gatewayModelRef;
 
 export function cloudModelEndpoint(settings: AiSettings): ModelEndpoint {
   const ref = cloudModelRef(settings);
@@ -81,28 +87,32 @@ export function localModelEndpoint(local: LocalChapterModelSettings): ModelEndpo
   };
 }
 
-export function remoteModelEndpoint(remote: RemoteWriterSettings): ModelEndpoint {
+export function gatewayModelEndpoint(gateway: GatewayModelConfig): ModelEndpoint {
   return {
-    ...remoteModelRef(remote),
+    ...gatewayModelRef(gateway),
     protocol: 'chat_completions_v1',
     providerFamily: 'openai_compatible',
     capabilities: ['writer.scene_prose', 'writer.beat_prose'],
-    contextTokens: remote.contextTokens ?? 32_000,
-    maxOutputTokens: remote.maxTokens ?? 4_000,
+    contextTokens: gateway.contextTokens ?? 32_000,
+    maxOutputTokens: gateway.maxTokens ?? 4_000,
     loopbackRequired: false,
     priced: true,
   };
 }
+
+export const remoteModelEndpoint = gatewayModelEndpoint;
 
 export function isCloudEndpointAvailable(settings: AiSettings): boolean {
   if (settings.runtimeMode === 'mock') return true;
   return Boolean(settings.baseUrl.trim() && settings.modelName.trim());
 }
 
-export function isRemoteEndpointAvailable(remote?: RemoteWriterSettings): boolean {
-  if (!remote || !remote.enabled) return false;
-  return Boolean(remote.baseUrl.trim() && remote.modelName.trim() && remote.apiKey.trim());
+export function isGatewayEndpointAvailable(gateway?: GatewayModelConfig): boolean {
+  if (!gateway || !gateway.enabled) return false;
+  return Boolean(gateway.baseUrl.trim() && gateway.modelName.trim() && gateway.apiKey.trim());
 }
+
+export const isRemoteEndpointAvailable = isGatewayEndpointAvailable;
 
 export function allowCloudWriterFallback(local?: LocalChapterModelSettings): boolean {
   return local?.allowCloudWriterFallback !== false;

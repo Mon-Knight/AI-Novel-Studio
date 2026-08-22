@@ -142,37 +142,39 @@ export function isPrivateOrLoopbackHost(hostname: string): boolean {
   return false;
 }
 
-export function validateRemoteWriterConfig(config: {
+export function validateGatewayConfig(config: {
   baseUrl: string;
   apiKey: string;
   modelName: string;
 }): void {
   if (!config.baseUrl?.trim()) {
-    throw new Error('Remote Writer API Base URL 未配置。');
+    throw new Error('AI Gateway API Base URL 未配置。');
   }
   if (!config.apiKey?.trim()) {
-    throw new Error('Remote Writer 必须配置鉴权 Token / API Key，不允许匿名调用。');
+    throw new Error('AI Gateway 必须配置鉴权 Token / API Key，不允许匿名调用。');
   }
   if (!config.modelName?.trim()) {
-    throw new Error('Remote Writer 模型名称未配置。');
+    throw new Error('AI Gateway 模型名称未配置。');
   }
 
   let url: URL;
   try {
     url = new URL(config.baseUrl.trim());
   } catch {
-    throw new Error('Remote Writer API Base URL 格式无效。');
+    throw new Error('AI Gateway API Base URL 格式无效。');
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Remote Writer URL 协议必须为 http 或 https。');
+    throw new Error('AI Gateway URL 协议必须为 http 或 https。');
   }
 
   const isPrivate = isPrivateOrLoopbackHost(url.hostname);
   if (!isPrivate && url.protocol !== 'https:') {
-    throw new Error('公网 Remote Writer Endpoint 必须使用 HTTPS 协议以保证通信安全。');
+    throw new Error('公网 AI Gateway Endpoint 必须使用 HTTPS 协议以保证通信安全。');
   }
 }
+
+export const validateRemoteWriterConfig = validateGatewayConfig;
 
 export function requireLoopbackAiBaseUrl(baseUrl: string): void {
   if (!isLoopbackAiBaseUrl(baseUrl)) {

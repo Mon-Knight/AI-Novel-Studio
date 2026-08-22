@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isPrivateOrLoopbackHost,
+  validateGatewayConfig,
   validateRemoteWriterConfig,
 } from '../realAiClient';
 import {
+  getDefaultGatewaySettings,
   getDefaultRemoteWriterSettings,
   normalizeAiSettings,
 } from '../aiSettingsStore';
@@ -56,10 +58,10 @@ test('isPrivateOrLoopbackHost accurately identifies private, loopback and VPC ad
   assert.equal(isPrivateOrLoopbackHost('1.1.1.1'), false);
 });
 
-test('validateRemoteWriterConfig enforces HTTPS for public endpoints and allows HTTP for private VPC', () => {
+test('validateGatewayConfig enforces HTTPS for public endpoints and allows HTTP for private VPC', () => {
   // Valid public HTTPS
   assert.doesNotThrow(() =>
-    validateRemoteWriterConfig({
+    validateGatewayConfig({
       baseUrl: 'https://api.writer-cluster.com/v1',
       apiKey: 'secret-token-123',
       modelName: 'qwen35-32b-novel-v1',
@@ -69,38 +71,38 @@ test('validateRemoteWriterConfig enforces HTTPS for public endpoints and allows 
   // Invalid public HTTP -> must reject
   assert.throws(
     () =>
-      validateRemoteWriterConfig({
+      validateGatewayConfig({
         baseUrl: 'http://api.writer-cluster.com/v1',
         apiKey: 'secret-token-123',
         modelName: 'qwen35-32b-novel-v1',
       }),
-    /公网 Remote Writer Endpoint 必须使用 HTTPS 协议以保证通信安全/,
+    /公网 AI Gateway Endpoint 必须使用 HTTPS 协议以保证通信安全/,
   );
 
   // Valid private HTTP (10.x, 192.168.x, 172.16-31.x, 100.64.x, localhost)
   assert.doesNotThrow(() =>
-    validateRemoteWriterConfig({
+    validateGatewayConfig({
       baseUrl: 'http://10.0.1.50:8000/v1',
       apiKey: 'secret-vpc-key',
       modelName: 'qwen35-32b-novel-v1',
     }),
   );
   assert.doesNotThrow(() =>
-    validateRemoteWriterConfig({
+    validateGatewayConfig({
       baseUrl: 'http://192.168.1.100:8000/v1',
       apiKey: 'secret-vpc-key',
       modelName: 'qwen35-32b-novel-v1',
     }),
   );
   assert.doesNotThrow(() =>
-    validateRemoteWriterConfig({
+    validateGatewayConfig({
       baseUrl: 'http://100.64.10.20:8000/v1',
       apiKey: 'secret-vpc-key',
       modelName: 'qwen35-32b-novel-v1',
     }),
   );
   assert.doesNotThrow(() =>
-    validateRemoteWriterConfig({
+    validateGatewayConfig({
       baseUrl: 'http://writer-gpu.internal:8000/v1',
       apiKey: 'secret-vpc-key',
       modelName: 'qwen35-32b-novel-v1',
@@ -110,7 +112,7 @@ test('validateRemoteWriterConfig enforces HTTPS for public endpoints and allows 
   // Empty or missing API Key must be rejected (no anonymous calls)
   assert.throws(
     () =>
-      validateRemoteWriterConfig({
+      validateGatewayConfig({
         baseUrl: 'http://10.0.1.50:8000/v1',
         apiKey: '',
         modelName: 'qwen35-32b-novel-v1',
@@ -119,24 +121,36 @@ test('validateRemoteWriterConfig enforces HTTPS for public endpoints and allows 
   );
   assert.throws(
     () =>
-      validateRemoteWriterConfig({
+      validateGatewayConfig({
         baseUrl: 'http://10.0.1.50:8000/v1',
         apiKey: '   ',
         modelName: 'qwen35-32b-novel-v1',
       }),
     /必须配置鉴权 Token \/ API Key，不允许匿名调用/,
   );
+
+  // validateRemoteWriterConfig backward-compatibility alias
+  assert.doesNotThrow(() =>
+    validateRemoteWriterConfig({
+      baseUrl: 'https://api.writer-cluster.com/v1',
+      apiKey: 'secret-token-123',
+      modelName: 'qwen35-32b-novel-v1',
+    }),
+  );
 });
 
-test('getDefaultRemoteWriterSettings returns safe disabled defaults', () => {
-  const defaults = getDefaultRemoteWriterSettings();
+test('getDefaultGatewaySettings and alias return safe disabled defaults', () => {
+  const defaults = getDefaultGatewaySettings();
   assert.equal(defaults.enabled, false);
-  assert.equal(defaults.providerId, 'remote_openai_compatible');
+  assert.equal(defaults.providerId, 'ai_gateway');
   assert.equal(defaults.contextTokens, 32000);
   assert.equal(defaults.maxTokens, 4000);
+
+  const aliasDefaults = getDefaultRemoteWriterSettings();
+  assert.equal(aliasDefaults.enabled, false);
 });
 
-test('normalizeAiSettings correctly processes and bounds remoteWriter settings', () => {
+test('normalizeAiSettings correctly processes gateway settings and auto-migrates remoteWriter', () => {
   const normalized = normalizeAiSettings({
     remoteWriter: {
       enabled: true,
@@ -154,14 +168,15 @@ test('normalizeAiSettings correctly processes and bounds remoteWriter settings',
     },
   });
 
+  assert.equal(normalized.gateway?.enabled, true);
   assert.equal(normalized.remoteWriter?.enabled, true);
-  assert.equal(normalized.remoteWriter?.providerId, 'my_remote_writer');
-  assert.equal(normalized.remoteWriter?.contextTokens, 64000);
-  assert.equal(normalized.remoteWriter?.maxTokens, 8000);
-  assert.equal(normalized.remoteWriter?.temperature, 0.8);
+  assert.equal(normalized.gateway?.providerId, 'my_remote_writer');
+  assert.equal(normalized.gateway?.contextTokens, 64000);
+  assert.equal(normalized.gateway?.maxTokens, 8000);
+  assert.equal(normalized.gateway?.temperature, 0.8);
 });
 
-test('createProviderAdapter enforces remote writer routing contracts', () => {
+test('createProviderAdapter enforces gateway routing contracts', () => {
   const settings: AiSettings = {
     runtimeMode: 'api',
     provider: 'deepseek',
@@ -169,9 +184,9 @@ test('createProviderAdapter enforces remote writer routing contracts', () => {
     apiKey: 'sk-cloud',
     modelName: 'deepseek-chat',
     mockMode: false,
-    remoteWriter: {
+    gateway: {
       enabled: true,
-      providerId: 'remote_openai_compatible',
+      providerId: 'ai_gateway',
       baseUrl: 'https://api.remote-writer.com/v1',
       apiKey: 'sk-remote',
       modelName: 'qwen35-32b-novel-v1',
@@ -187,13 +202,13 @@ test('createProviderAdapter enforces remote writer routing contracts', () => {
 
   const adapter = createProviderAdapter(settings, 'chapter_scene_generate', {
     selected: {
-      endpointId: 'remote.remote_openai_compatible.qwen35-32b-novel-v1',
-      providerId: 'remote_openai_compatible',
+      endpointId: 'remote.ai_gateway.qwen35-32b-novel-v1',
+      providerId: 'ai_gateway',
       modelId: 'qwen35-32b-novel-v1',
       kind: 'remote',
     },
   });
 
-  assert.equal(adapter.providerId, 'remote_openai_compatible');
+  assert.equal(adapter.providerId, 'ai_gateway');
   assert.equal(adapter.modelId, 'qwen35-32b-novel-v1');
 });
