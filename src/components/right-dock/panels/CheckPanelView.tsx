@@ -59,19 +59,61 @@ const FILTER_OPTIONS: QualityIssueFilter[] = ['all', 'pending', 'resolved', 'ign
 
 function statusStyle(status: QualityIssueStatus) {
   switch (status) {
-    case 'resolved': return { background: 'color-mix(in srgb, var(--color-success) 13%, transparent)', color: 'var(--color-success)', border: '1px solid color-mix(in srgb, var(--color-success) 25%, transparent)' };
-    case 'ignored': return { background: 'color-mix(in srgb, var(--color-text-muted) 13%, transparent)', color: 'var(--color-text-muted)', border: '1px solid color-mix(in srgb, var(--color-text-muted) 25%, transparent)' };
-    default: return { background: 'color-mix(in srgb, var(--color-warning) 13%, transparent)', color: 'var(--color-warning-text)', border: '1px solid color-mix(in srgb, var(--color-warning) 25%, transparent)' };
+    case 'resolved':
+      return {
+        background: 'color-mix(in srgb, var(--color-success) 13%, transparent)',
+        color: 'var(--color-success)',
+        border: '1px solid color-mix(in srgb, var(--color-success) 25%, transparent)',
+      };
+    case 'ignored':
+      return {
+        background: 'color-mix(in srgb, var(--color-text-muted) 13%, transparent)',
+        color: 'var(--color-text-muted)',
+        border: '1px solid color-mix(in srgb, var(--color-text-muted) 25%, transparent)',
+      };
+    default:
+      return {
+        background: 'color-mix(in srgb, var(--color-warning) 13%, transparent)',
+        color: 'var(--color-warning-text)',
+        border: '1px solid color-mix(in srgb, var(--color-warning) 25%, transparent)',
+      };
   }
 }
 
 export function CheckPanelView({
-  chapter, aiSettings, currentDraft, loading, operationPhase, activeReport,
-  viewingHistory, statistics, fixLoading, fixStage, fixProgress, fixError,
-  fixRoundUsed, error, historyReports, selectedReportId, historyLoading, reportOutdated,
-  fixComparison, fixScopeValidation, activeItems, filter, locateMessage,
-  filteredItems, onRunCheck, onStopOperation, onAiFix, onHistoryChange,
-  onFilterChange, onLocate, onStatusChange, onRevertFix, onConfirmFix,
+  chapter,
+  aiSettings,
+  currentDraft,
+  loading,
+  operationPhase,
+  activeReport,
+  viewingHistory,
+  statistics,
+  fixLoading,
+  fixStage,
+  fixProgress,
+  fixError,
+  fixRoundUsed,
+  error,
+  historyReports,
+  selectedReportId,
+  historyLoading,
+  reportOutdated,
+  fixComparison,
+  fixScopeValidation,
+  activeItems,
+  filter,
+  locateMessage,
+  filteredItems,
+  onRunCheck,
+  onStopOperation,
+  onAiFix,
+  onHistoryChange,
+  onFilterChange,
+  onLocate,
+  onStatusChange,
+  onRevertFix,
+  onConfirmFix,
 }: CheckPanelViewProps) {
   return (
     <div>
@@ -83,7 +125,9 @@ export function CheckPanelView({
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>⚠️ 未配置 API Key，请先到设置中心配置</div>
+              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
+                ⚠️ 未配置 API Key，请先到设置中心配置
+              </div>
             )}
           </>
         )}
@@ -143,14 +187,26 @@ export function CheckPanelView({
                   fixRoundUsed || fixLoading
                     ? 'var(--color-text-muted)'
                     : 'var(--color-on-primary)',
-                border: 'none', cursor: fixRoundUsed || fixLoading ? 'not-allowed' : 'pointer',
+                border: 'none',
+                cursor: fixRoundUsed || fixLoading ? 'not-allowed' : 'pointer',
               }}
             >
               {fixLoading ? (
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
                   ⏳ {fixStage || '修复中...'}
                 </span>
-              ) : fixRoundUsed ? '已使用外部修稿轮次' : '🤖 AI 修复并复检'}
+              ) : fixRoundUsed ? (
+                '已使用外部修稿轮次'
+              ) : (
+                '🤖 AI 修复并复检'
+              )}
             </button>
             {fixRoundUsed && !fixLoading && (
               <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
@@ -158,17 +214,38 @@ export function CheckPanelView({
               </div>
             )}
             {fixLoading && (
-              <div style={{ marginTop: 6, background: 'var(--color-bg-primary)', borderRadius: 4, height: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${fixProgress}%`, background: 'var(--color-secondary-accent)', transition: 'width 0.3s ease' }} />
+              <div
+                style={{
+                  marginTop: 6,
+                  background: 'var(--color-bg-primary)',
+                  borderRadius: 4,
+                  height: 4,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${fixProgress}%`,
+                    background: 'var(--color-secondary-accent)',
+                    transition: 'width 0.3s ease',
+                  }}
+                />
               </div>
             )}
           </div>
         )}
         {fixStage && !fixLoading && (
-          <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4 }}>✅ {fixStage}</div>
+          <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4 }}>
+            ✅ {fixStage}
+          </div>
         )}
-        {fixError && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{fixError}</div>}
-        {error && <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>}
+        {fixError && (
+          <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{fixError}</div>
+        )}
+        {error && (
+          <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>
+        )}
       </div>
 
       {historyReports.length > 0 && (
@@ -190,12 +267,17 @@ export function CheckPanelView({
               <option key={historyReport.id} value={historyReport.id}>
                 {index === 0 ? '最新 · ' : ''}
                 {new Date(historyReport.checkedAt || historyReport.createdAt).toLocaleString()}
-                {historyReport.overallScore === undefined ? '' : ` · ${historyReport.overallScore} 分`}
+                {historyReport.overallScore === undefined
+                  ? ''
+                  : ` · ${historyReport.overallScore} 分`}
               </option>
             ))}
           </select>
           {viewingHistory && (
-            <div data-testid="quality-history-readonly" style={{ marginTop: 6, fontSize: 11, color: 'var(--color-text-muted)' }}>
+            <div
+              data-testid="quality-history-readonly"
+              style={{ marginTop: 6, fontSize: 11, color: 'var(--color-text-muted)' }}
+            >
               历史快照 · 只读
             </div>
           )}
@@ -203,15 +285,18 @@ export function CheckPanelView({
       )}
 
       {reportOutdated && (
-        <div className="panel-section" style={{
-          border: '1px solid color-mix(in srgb, var(--color-warning) 33%, transparent)',
-          background: 'color-mix(in srgb, var(--color-warning) 7%, transparent)',
-          borderRadius: 6,
-          padding: 10,
-          color: 'var(--color-warning-text)',
-          fontSize: 12,
-          lineHeight: 1.6,
-        }}>
+        <div
+          className="panel-section"
+          style={{
+            border: '1px solid color-mix(in srgb, var(--color-warning) 33%, transparent)',
+            background: 'color-mix(in srgb, var(--color-warning) 7%, transparent)',
+            borderRadius: 6,
+            padding: 10,
+            color: 'var(--color-warning-text)',
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
           正文已修改，此检测结果可能已过期。建议重新进行质量检测。
         </div>
       )}
@@ -226,11 +311,18 @@ export function CheckPanelView({
         >
           <div className="panel-section-title">📊 检查结果</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <div style={{
-              fontSize: 28, fontWeight: 700,
-              color: (activeReport.overallScore ?? 0) >= 80 ? 'var(--color-success)'
-                : (activeReport.overallScore ?? 0) >= 60 ? 'var(--color-warning)' : 'var(--color-error)',
-            }}>
+            <div
+              style={{
+                fontSize: 28,
+                fontWeight: 700,
+                color:
+                  (activeReport.overallScore ?? 0) >= 80
+                    ? 'var(--color-success)'
+                    : (activeReport.overallScore ?? 0) >= 60
+                      ? 'var(--color-warning)'
+                      : 'var(--color-error)',
+              }}
+            >
               {activeReport.overallScore ?? '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>/ 100</div>
@@ -245,30 +337,68 @@ export function CheckPanelView({
 
       {/* v1.7.19 AI 修复对比结果（增强版） */}
       {fixComparison && (
-        <div className="panel-section" style={{
-          border: `1px solid ${fixComparison.isBetter ? 'color-mix(in srgb, var(--color-success) 25%, transparent)' : fixComparison.isWorse ? 'color-mix(in srgb, var(--color-error) 25%, transparent)' : 'color-mix(in srgb, var(--color-warning) 25%, transparent)'}`,
-          background: fixComparison.isBetter ? 'color-mix(in srgb, var(--color-success) 3%, transparent)' : fixComparison.isWorse ? 'color-mix(in srgb, var(--color-error) 3%, transparent)' : 'color-mix(in srgb, var(--color-warning) 3%, transparent)',
-          borderRadius: 6, padding: 10,
-        }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: fixComparison.isBetter ? 'var(--color-success)' : fixComparison.isWorse ? 'var(--color-error)' : 'var(--color-warning-text)' }}>
-            {fixComparison.isBetter ? '✅ 修复成功（已自动采用）' : fixComparison.isWorse ? '⚠️ 修复效果不佳（保留原版）' : '📊 修复效果一般（保留原版）'}
+        <div
+          className="panel-section"
+          style={{
+            border: `1px solid ${fixComparison.isBetter ? 'color-mix(in srgb, var(--color-success) 25%, transparent)' : fixComparison.isWorse ? 'color-mix(in srgb, var(--color-error) 25%, transparent)' : 'color-mix(in srgb, var(--color-warning) 25%, transparent)'}`,
+            background: fixComparison.isBetter
+              ? 'color-mix(in srgb, var(--color-success) 3%, transparent)'
+              : fixComparison.isWorse
+                ? 'color-mix(in srgb, var(--color-error) 3%, transparent)'
+                : 'color-mix(in srgb, var(--color-warning) 3%, transparent)',
+            borderRadius: 6,
+            padding: 10,
+          }}
+        >
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 13,
+              marginBottom: 8,
+              color: fixComparison.isBetter
+                ? 'var(--color-success)'
+                : fixComparison.isWorse
+                  ? 'var(--color-error)'
+                  : 'var(--color-warning-text)',
+            }}
+          >
+            {fixComparison.isBetter
+              ? '✅ 修复成功（已自动采用）'
+              : fixComparison.isWorse
+                ? '⚠️ 修复效果不佳（保留原版）'
+                : '📊 修复效果一般（保留原版）'}
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.8 }}>
-            <div>修复前：{fixComparison.beforeScore} 分，待处理 {fixComparison.beforePendingCount}，严重 {fixComparison.beforeSeriousCount}</div>
-            <div>修复后：{fixComparison.afterScore} 分，待处理 {fixComparison.afterPendingCount}，严重 {fixComparison.afterSeriousCount}</div>
+            <div>
+              修复前：{fixComparison.beforeScore} 分，待处理 {fixComparison.beforePendingCount}
+              ，严重 {fixComparison.beforeSeriousCount}
+            </div>
+            <div>
+              修复后：{fixComparison.afterScore} 分，待处理 {fixComparison.afterPendingCount}，严重{' '}
+              {fixComparison.afterSeriousCount}
+            </div>
             <div style={{ marginTop: 4 }}>
               已修复 {fixComparison.fixedIssueCount} 个问题
-              {fixComparison.newIssueCount > 0 && <span style={{ color: 'var(--color-warning-text)' }}>，新增 {fixComparison.newIssueCount} 个问题</span>}
+              {fixComparison.newIssueCount > 0 && (
+                <span style={{ color: 'var(--color-warning-text)' }}>
+                  ，新增 {fixComparison.newIssueCount} 个问题
+                </span>
+              )}
             </div>
           </div>
           {fixScopeValidation && (
             <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
-              范围校验：{fixScopeValidation.passed ? `通过 (${fixScopeValidation.riskLevel})` : `未通过`}
-              {fixScopeValidation.warnings.length > 0 && <span> | {fixScopeValidation.warnings.join('; ')}</span>}
+              范围校验：
+              {fixScopeValidation.passed ? `通过 (${fixScopeValidation.riskLevel})` : `未通过`}
+              {fixScopeValidation.warnings.length > 0 && (
+                <span> | {fixScopeValidation.warnings.join('; ')}</span>
+              )}
             </div>
           )}
           {fixComparison.isBetter && (
-            <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4, fontWeight: 500 }}>
+            <div
+              style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4, fontWeight: 500 }}
+            >
               已自动采用修复后版本。
             </div>
           )}
@@ -312,10 +442,16 @@ export function CheckPanelView({
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {(['critical', 'high', 'medium', 'low'] as QualityIssueSeverity[]).map((s) =>
               statistics[s] > 0 ? (
-                <span key={s} style={{
-                  fontSize: 11, padding: '2px 6px', borderRadius: 3,
-                  background: QualityIssueSeverityColors[s] + '20', color: QualityIssueSeverityColors[s],
-                }}>
+                <span
+                  key={s}
+                  style={{
+                    fontSize: 11,
+                    padding: '2px 6px',
+                    borderRadius: 3,
+                    background: QualityIssueSeverityColors[s] + '20',
+                    color: QualityIssueSeverityColors[s],
+                  }}
+                >
                   {QualityIssueSeverityLabels[s]}：{statistics[s]}
                 </span>
               ) : null,
@@ -335,12 +471,15 @@ export function CheckPanelView({
                 onClick={() => onFilterChange(f)}
                 style={{ fontSize: 11, padding: '3px 8px' }}
               >
-                {QualityIssueFilterLabels[f]}（{
-                  f === 'all' ? statistics.total
-                    : f === 'pending' ? statistics.pending
-                    : f === 'resolved' ? statistics.resolved
-                    : statistics.ignored
-                }）
+                {QualityIssueFilterLabels[f]}（
+                {f === 'all'
+                  ? statistics.total
+                  : f === 'pending'
+                    ? statistics.pending
+                    : f === 'resolved'
+                      ? statistics.resolved
+                      : statistics.ignored}
+                ）
               </button>
             ))}
           </div>
@@ -349,10 +488,16 @@ export function CheckPanelView({
 
       {/* 定位提示 */}
       {locateMessage && (
-        <div style={{
-          fontSize: 11, color: 'var(--color-text-muted)', padding: '6px 8px',
-          background: 'var(--color-bg-primary)', borderRadius: 4, margin: '4px 0',
-        }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--color-text-muted)',
+            padding: '6px 8px',
+            background: 'var(--color-bg-primary)',
+            borderRadius: 4,
+            margin: '4px 0',
+          }}
+        >
           {locateMessage}
         </div>
       )}
@@ -373,35 +518,69 @@ export function CheckPanelView({
           }}
         >
           {/* 标签行 */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4, alignItems: 'center' }}>
-            <span style={{
-              fontSize: 10, padding: '1px 6px', borderRadius: 3,
-              background: QualityIssueSeverityColors[item.severity] + '20',
-              color: QualityIssueSeverityColors[item.severity], fontWeight: 500,
-            }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 6,
+              flexWrap: 'wrap',
+              marginBottom: 4,
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                padding: '1px 6px',
+                borderRadius: 3,
+                background: QualityIssueSeverityColors[item.severity] + '20',
+                color: QualityIssueSeverityColors[item.severity],
+                fontWeight: 500,
+              }}
+            >
               {QualityIssueSeverityLabels[item.severity]}
             </span>
-            <span style={{
-              fontSize: 10, padding: '1px 6px', borderRadius: 3,
-              background: 'var(--color-bg-primary)', color: 'var(--color-text-muted)',
-            }}>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '1px 6px',
+                borderRadius: 3,
+                background: 'var(--color-bg-primary)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
               {item.category || QualityIssueTypeLabels[item.issueType]}
             </span>
-            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, ...statusStyle(item.status) }}>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '1px 6px',
+                borderRadius: 3,
+                ...statusStyle(item.status),
+              }}
+            >
               {QualityIssueStatusLabels[item.status]}
             </span>
           </div>
 
           {/* 标题 */}
           <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 3 }}>{item.title}</div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{item.description}</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            {item.description}
+          </div>
 
           {/* 原文引用 */}
           {(item.quote || item.evidence) && (
-            <div style={{
-              fontSize: 11, fontStyle: 'italic', color: 'var(--color-text-muted)',
-              marginTop: 4, padding: '4px 6px', background: 'var(--color-bg-primary)', borderRadius: 3,
-            }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontStyle: 'italic',
+                color: 'var(--color-text-muted)',
+                marginTop: 4,
+                padding: '4px 6px',
+                background: 'var(--color-bg-primary)',
+                borderRadius: 3,
+              }}
+            >
               📝 {item.quote || item.evidence}
             </div>
           )}
@@ -461,14 +640,28 @@ export function CheckPanelView({
 
       {/* 空状态 */}
       {!activeReport && !loading && (
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', textAlign: 'center', padding: 16 }}>
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--color-text-muted)',
+            textAlign: 'center',
+            padding: 16,
+          }}
+        >
           点击上方按钮对当前草稿进行质量检查
         </div>
       )}
 
       {/* 筛选后无结果 */}
       {activeReport && filteredItems.length === 0 && activeItems.length > 0 && (
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', textAlign: 'center', padding: 16 }}>
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--color-text-muted)',
+            textAlign: 'center',
+            padding: 16,
+          }}
+        >
           当前筛选条件下没有匹配的问题
         </div>
       )}

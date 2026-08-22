@@ -154,8 +154,7 @@ export function useLoadingTask(): UseLoadingTaskReturn {
         currentTaskRef.current = null;
         return result;
       } catch (error: unknown) {
-        const errorMsg =
-          error instanceof Error ? error.message : String(error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
 
         // 错误状态
         setState((prev) => ({

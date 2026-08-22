@@ -24,7 +24,9 @@ function ContextOverviewCard({ novelId }: ContextOverviewCardProps) {
     setActiveRecordCount(records.filter((r) => r.isActive).length);
   }, [novelId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div className="detail-card">
@@ -33,16 +35,43 @@ function ContextOverviewCard({ novelId }: ContextOverviewCardProps) {
         <span style={{ fontSize: 16, fontWeight: 600 }}>上下文记录</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 12 }}>
-        <div style={{ textAlign: 'center', padding: 10, background: 'var(--color-bg-primary)', borderRadius: 6 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-primary)' }}>{summaryCount}</div>
+        <div
+          style={{
+            textAlign: 'center',
+            padding: 10,
+            background: 'var(--color-bg-primary)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-primary)' }}>
+            {summaryCount}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>章节总结</div>
         </div>
-        <div style={{ textAlign: 'center', padding: 10, background: 'var(--color-bg-primary)', borderRadius: 6 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-success)' }}>{activeRecordCount}</div>
+        <div
+          style={{
+            textAlign: 'center',
+            padding: 10,
+            background: 'var(--color-bg-primary)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-success)' }}>
+            {activeRecordCount}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>启用上下文</div>
         </div>
-        <div style={{ textAlign: 'center', padding: 10, background: 'var(--color-bg-primary)', borderRadius: 6 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-text-muted)' }}>{recordCount}</div>
+        <div
+          style={{
+            textAlign: 'center',
+            padding: 10,
+            background: 'var(--color-bg-primary)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-text-muted)' }}>
+            {recordCount}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>总记录数</div>
         </div>
       </div>

@@ -15,9 +15,15 @@ function BackButton({ label = '返回', to, fallbackTo = '/', onBeforeBack }: Ba
 
   const handleClick = async () => {
     if (onBeforeBack && !(await onBeforeBack())) return;
-    if (to) { navigate(to); return; }
-    if (window.history.length > 2) { navigate(-1); }
-    else { navigate(fallbackTo); }
+    if (to) {
+      navigate(to);
+      return;
+    }
+    if (window.history.length > 2) {
+      navigate(-1);
+    } else {
+      navigate(fallbackTo);
+    }
   };
 
   return (

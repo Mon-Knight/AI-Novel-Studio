@@ -26,6 +26,7 @@ import { useWorkspaceRecoveryActions } from '../../features/workspace/useWorkspa
 import { useWorkspaceRecovery } from '../../hooks/useWorkspaceRecovery';
 import { useWorkspaceLeaveGuard } from '../../hooks/useWorkspaceLeaveGuard';
 import { useWorkspaceSummary } from '../../features/workspace/useWorkspaceSummary';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { getCurrentWritingContext, type WritingContext } from '../../utils/writingContext';
 import { useRightSidebarStore } from '../../store/rightSidebarStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
@@ -368,13 +369,18 @@ function WritingWorkspacePage() {
     closeSidebar();
   }, [closeSidebar, confirmDiscardChapterGoal]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClosePanel();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleClosePanel]);
+  useKeyboardShortcuts(
+    useMemo(
+      () => [
+        {
+          key: 'Escape',
+          action: () => void handleClosePanel(),
+          description: '关闭 AI 侧边栏',
+        },
+      ],
+      [handleClosePanel],
+    ),
+  );
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {

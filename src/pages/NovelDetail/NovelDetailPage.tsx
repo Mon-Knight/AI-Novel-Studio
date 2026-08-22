@@ -14,6 +14,7 @@ import OutlineManager from '../../components/outline/OutlineManager';
 import CharacterLibraryCard from '../../components/novel-card/CharacterLibraryCard';
 import ContextOverviewCard from '../../components/novel-card/ContextOverviewCard';
 import ExportCard from '../../components/novel-card/ExportCard';
+import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import type { Novel } from '../../types/novel';
 import type { WorldSetting, RuleSystem } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
@@ -231,50 +232,73 @@ function NovelDetailPage() {
       </div>
 
       <div className="detail-cards-grid">
-        <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
-        <WorldSettingCard
-          novelId={novel.id}
-          settings={worldSettings}
-          onSave={handleSaveWorldSetting}
-        />
-        <div style={{ gridColumn: '1 / -1' }}>
-          <RuleSystemCard
+        <PanelErrorBoundary panelTitle="作品基本信息">
+          <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
+        </PanelErrorBoundary>
+
+        <PanelErrorBoundary panelTitle="世界观设定">
+          <WorldSettingCard
             novelId={novel.id}
-            ruleSystems={ruleSystems}
-            onSave={handleSaveRuleSystem}
-            onDelete={handleDeleteRuleSystem}
+            settings={worldSettings}
+            onSave={handleSaveWorldSetting}
           />
-        </div>
-        <ProtagonistCard
-          novelId={novel.id}
-          novel={novel}
-          protagonist={protagonist}
-          onSave={async (data) => {
-            if (!novelId) return;
-            try {
-              const updated = await novelService.updateNovelProtagonists(novelId, {
-                protagonistMode: data.protagonistMode,
-                protagonists: data.protagonists,
-                dualProtagonistRelation: data.dualProtagonistRelation,
-              });
-              if (updated) setNovel(updated);
-            } catch (e: unknown) {
-              appLogger.captureError('NOVEL_PROTAGONIST_SAVE_FAILED', e, { novelId: novel.id });
-              await showError({
-                title: '保存主角设定失败',
-                message: describeUnknownError(e, '保存主角设定失败'),
-              });
-              throw e; // 重新抛出让卡片组件显示错误
-            }
-          }}
-        />
+        </PanelErrorBoundary>
+
         <div style={{ gridColumn: '1 / -1' }}>
-          <OutlineManager novelId={novel.id} />
+          <PanelErrorBoundary panelTitle="法则体系">
+            <RuleSystemCard
+              novelId={novel.id}
+              ruleSystems={ruleSystems}
+              onSave={handleSaveRuleSystem}
+              onDelete={handleDeleteRuleSystem}
+            />
+          </PanelErrorBoundary>
         </div>
-        <CharacterLibraryCard novelId={novel.id} />
-        <ContextOverviewCard novelId={novel.id} />
+
+        <PanelErrorBoundary panelTitle="主角设定">
+          <ProtagonistCard
+            novelId={novel.id}
+            novel={novel}
+            protagonist={protagonist}
+            onSave={async (data) => {
+              if (!novelId) return;
+              try {
+                const updated = await novelService.updateNovelProtagonists(novelId, {
+                  protagonistMode: data.protagonistMode,
+                  protagonists: data.protagonists,
+                  dualProtagonistRelation: data.dualProtagonistRelation,
+                });
+                if (updated) setNovel(updated);
+              } catch (e: unknown) {
+                appLogger.captureError('NOVEL_PROTAGONIST_SAVE_FAILED', e, { novelId: novel.id });
+                await showError({
+                  title: '保存主角设定失败',
+                  message: describeUnknownError(e, '保存主角设定失败'),
+                });
+                throw e; // 重新抛出让卡片组件显示错误
+              }
+            }}
+          />
+        </PanelErrorBoundary>
+
         <div style={{ gridColumn: '1 / -1' }}>
-          <ExportCard novelId={novel.id} novelTitle={novel.title} />
+          <PanelErrorBoundary panelTitle="大纲管理">
+            <OutlineManager novelId={novel.id} />
+          </PanelErrorBoundary>
+        </div>
+
+        <PanelErrorBoundary panelTitle="角色库">
+          <CharacterLibraryCard novelId={novel.id} />
+        </PanelErrorBoundary>
+
+        <PanelErrorBoundary panelTitle="上下文概览">
+          <ContextOverviewCard novelId={novel.id} />
+        </PanelErrorBoundary>
+
+        <div style={{ gridColumn: '1 / -1' }}>
+          <PanelErrorBoundary panelTitle="导出">
+            <ExportCard novelId={novel.id} novelTitle={novel.title} />
+          </PanelErrorBoundary>
         </div>
       </div>
     </div>

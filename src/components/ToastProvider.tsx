@@ -22,7 +22,10 @@ function ToastProvider({ children }: { children: React.ReactNode }) {
         // 移除最旧的一条
         const removed = next.shift()!;
         const timer = timersRef.current.get(removed.id);
-        if (timer) { clearTimeout(timer); timersRef.current.delete(removed.id); }
+        if (timer) {
+          clearTimeout(timer);
+          timersRef.current.delete(removed.id);
+        }
       }
       return next;
     });
@@ -37,7 +40,10 @@ function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const dismissToast = useCallback((id: number) => {
     const timer = timersRef.current.get(id);
-    if (timer) { clearTimeout(timer); timersRef.current.delete(id); }
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -62,7 +68,13 @@ function ToastProvider({ children }: { children: React.ReactNode }) {
               key={toast.id}
               className={`toast-item toast-${toast.kind}`}
               role="status"
-              data-testid={toast.kind === 'error' ? 'error-notice' : toast.kind === 'success' ? 'success-notice' : undefined}
+              data-testid={
+                toast.kind === 'error'
+                  ? 'error-notice'
+                  : toast.kind === 'success'
+                    ? 'success-notice'
+                    : undefined
+              }
               data-toast-id={toast.id}
             >
               <div className="toast-content">

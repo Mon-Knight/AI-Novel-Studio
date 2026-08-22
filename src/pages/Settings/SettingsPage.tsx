@@ -12,7 +12,10 @@ import AppearanceSettingsCard from '../../components/settings/AppearanceSettings
 import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSettingsCard';
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
 import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
-import { checkLocalChapterModel, type LocalChapterModelHealthResult } from '../../services/ai/localChapterModelHealthService';
+import {
+  checkLocalChapterModel,
+  type LocalChapterModelHealthResult,
+} from '../../services/ai/localChapterModelHealthService';
 import DiagnosticsSettingsCard from '../../components/settings/DiagnosticsSettingsCard';
 import AppUpdateSettingsCard from '../../components/settings/AppUpdateSettingsCard';
 
@@ -22,7 +25,9 @@ function SettingsPage() {
   const [message, setMessage] = useState('');
   const [testing, setTesting] = useState(false);
   const [localHealthChecking, setLocalHealthChecking] = useState(false);
-  const [localHealthResult, setLocalHealthResult] = useState<LocalChapterModelHealthResult | null>(null);
+  const [localHealthResult, setLocalHealthResult] = useState<LocalChapterModelHealthResult | null>(
+    null,
+  );
   const [repairMsg, setRepairMsg] = useState('');
   const [policySnapshotVersion, setPolicySnapshotVersion] = useState(0);
   const connectionAbortRef = useRef<AbortController | null>(null);

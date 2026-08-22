@@ -21,6 +21,7 @@ import GlobalAiTaskModal from '../../components/workspace/GlobalAiTaskModal';
 import RecoveryDialog from '../../components/workspace/RecoveryDialog';
 import StatusBar from '../../components/workspace/StatusBar';
 import VolumeTree from '../../components/workspace/VolumeTree';
+import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import type { useWorkspaceChapterLoader } from '../../features/workspace/useWorkspaceChapterLoader';
 import type { useWorkspaceCreationActions } from '../../features/workspace/useWorkspaceCreationActions';
 import type { useWorkspaceDraftApplication } from '../../features/workspace/useWorkspaceDraftApplication';
@@ -251,16 +252,18 @@ export default function WritingWorkspaceView({
         </div>
         {novel && <div className="workspace-novel-title">📖 {novel.title}</div>}
         {novelId && (
-          <VolumeTree
-            volumes={volumes}
-            chapters={chapters}
-            activeChapterId={activeChapterId}
-            loading={pageLoading}
-            onSelectChapter={actions.selectChapter}
-            onCreateVolume={creationActions.handleCreateVolume}
-            onCreateChapter={creationActions.handleCreateChapter}
-            onCreateFirstChapter={creationActions.handleCreateFirstChapter}
-          />
+          <PanelErrorBoundary panelTitle="卷章目录">
+            <VolumeTree
+              volumes={volumes}
+              chapters={chapters}
+              activeChapterId={activeChapterId}
+              loading={pageLoading}
+              onSelectChapter={actions.selectChapter}
+              onCreateVolume={creationActions.handleCreateVolume}
+              onCreateChapter={creationActions.handleCreateChapter}
+              onCreateFirstChapter={creationActions.handleCreateFirstChapter}
+            />
+          </PanelErrorBoundary>
         )}
       </div>
 
@@ -323,31 +326,33 @@ export default function WritingWorkspaceView({
                 </button>
               </div>
             )}
-            <EditorArea
-              ref={refs.editor}
-              chapter={activeChapter}
-              novelTitle={novel?.title}
-              novelId={novelId}
-              currentDraft={activeDraft}
-              documentState={isChapterDocumentBlocked ? chapterDocumentLoad.status : 'ready'}
-              contentStateOverride={activeContentState}
-              onEditorContentChange={actions.editorContentChange}
-              onDraftSaved={handlePersistentDraftSaved}
-              applyTextRequest={applyTextRequest}
-              onApplyTextConsumed={handleApplyTextConsumed}
-              onApplyTextRejected={handleApplyTextRejected}
-              commandRequest={editorCommandRequest}
-              onChapterUpdated={actions.chapterOutlineApplied}
-              locateTarget={locateTarget}
-              onLocateDone={actions.locateDone}
-              onRetryContent={() => void retryActiveChapterContent()}
-              retryingContent={retryingContent}
-              onOpenDraftHistory={() => actions.openSidebarTool('draft-history')}
-              onBackToChapters={() => navigate(`/novels/${novelId}`)}
-              reviewLocked={reviewLocked}
-              onUnlockReview={onUnlockReview}
-              onBeforeAdopt={onBeforeAdopt}
-            />
+            <PanelErrorBoundary panelTitle="正文编辑区">
+              <EditorArea
+                ref={refs.editor}
+                chapter={activeChapter}
+                novelTitle={novel?.title}
+                novelId={novelId}
+                currentDraft={activeDraft}
+                documentState={isChapterDocumentBlocked ? chapterDocumentLoad.status : 'ready'}
+                contentStateOverride={activeContentState}
+                onEditorContentChange={actions.editorContentChange}
+                onDraftSaved={handlePersistentDraftSaved}
+                applyTextRequest={applyTextRequest}
+                onApplyTextConsumed={handleApplyTextConsumed}
+                onApplyTextRejected={handleApplyTextRejected}
+                commandRequest={editorCommandRequest}
+                onChapterUpdated={actions.chapterOutlineApplied}
+                locateTarget={locateTarget}
+                onLocateDone={actions.locateDone}
+                onRetryContent={() => void retryActiveChapterContent()}
+                retryingContent={retryingContent}
+                onOpenDraftHistory={() => actions.openSidebarTool('draft-history')}
+                onBackToChapters={() => navigate(`/novels/${novelId}`)}
+                reviewLocked={reviewLocked}
+                onUnlockReview={onUnlockReview}
+                onBeforeAdopt={onBeforeAdopt}
+              />
+            </PanelErrorBoundary>
             <StatusBar
               chapter={activeChapter}
               draftWordCount={draftWordCount}

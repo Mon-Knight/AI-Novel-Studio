@@ -8,8 +8,10 @@ const vite = await createServer({
   server: { middlewareMode: true, hmr: false },
 });
 const editorModule = await vite.ssrLoadModule('/src/components/workspace/EditorArea.tsx');
-const resolveEditorDraftContent = editorModule.resolveEditorDraftContent as typeof import('./EditorArea').resolveEditorDraftContent;
-const isDraftSaveResultForDocument = editorModule.isDraftSaveResultForDocument as typeof import('./EditorArea').isDraftSaveResultForDocument;
+const resolveEditorDraftContent =
+  editorModule.resolveEditorDraftContent as typeof import('./EditorArea').resolveEditorDraftContent;
+const isDraftSaveResultForDocument =
+  editorModule.isDraftSaveResultForDocument as typeof import('./EditorArea').isDraftSaveResultForDocument;
 
 after(async () => {
   await vite.close();
@@ -29,28 +31,37 @@ const completeDraft: ChapterDraft = {
 };
 
 test('loading or failed hydration preserves the last known complete editor content', () => {
-  assert.deepEqual(resolveEditorDraftContent({
-    documentState: 'loading',
-    novelId: 'novel-a',
-    chapterId: 'chapter-b',
-    draft: null,
-  }), { action: 'preserve' });
+  assert.deepEqual(
+    resolveEditorDraftContent({
+      documentState: 'loading',
+      novelId: 'novel-a',
+      chapterId: 'chapter-b',
+      draft: null,
+    }),
+    { action: 'preserve' },
+  );
 
-  assert.deepEqual(resolveEditorDraftContent({
-    documentState: 'error',
-    novelId: 'novel-a',
-    chapterId: 'chapter-b',
-    draft: completeDraft,
-  }), { action: 'preserve' });
+  assert.deepEqual(
+    resolveEditorDraftContent({
+      documentState: 'error',
+      novelId: 'novel-a',
+      chapterId: 'chapter-b',
+      draft: completeDraft,
+    }),
+    { action: 'preserve' },
+  );
 });
 
 test('only a fully hydrated draft owned by the live document may replace editor content', () => {
-  assert.deepEqual(resolveEditorDraftContent({
-    documentState: 'ready',
-    novelId: 'novel-a',
-    chapterId: 'chapter-b',
-    draft: completeDraft,
-  }), { action: 'replace', content: completeDraft.content, draft: completeDraft });
+  assert.deepEqual(
+    resolveEditorDraftContent({
+      documentState: 'ready',
+      novelId: 'novel-a',
+      chapterId: 'chapter-b',
+      draft: completeDraft,
+    }),
+    { action: 'replace', content: completeDraft.content, draft: completeDraft },
+  );
 
   const mismatched = resolveEditorDraftContent({
     documentState: 'ready',
@@ -63,12 +74,15 @@ test('only a fully hydrated draft owned by the live document may replace editor 
 });
 
 test('a verified chapter with no draft clears the editor instead of retaining another chapter', () => {
-  assert.deepEqual(resolveEditorDraftContent({
-    documentState: 'ready',
-    novelId: 'novel-a',
-    chapterId: 'chapter-empty',
-    draft: null,
-  }), { action: 'replace', content: '', draft: null });
+  assert.deepEqual(
+    resolveEditorDraftContent({
+      documentState: 'ready',
+      novelId: 'novel-a',
+      chapterId: 'chapter-empty',
+      draft: null,
+    }),
+    { action: 'replace', content: '', draft: null },
+  );
 });
 
 test('a backend-verified adopted fork is accepted by document ownership instead of a stale draft id', () => {
@@ -80,14 +94,6 @@ test('a backend-verified adopted fork is accepted by document ownership instead 
     versionNo: completeDraft.versionNo + 1,
   };
 
-  assert.equal(isDraftSaveResultForDocument(
-    forkedDraft,
-    'novel-a',
-    'chapter-b',
-  ), true);
-  assert.equal(isDraftSaveResultForDocument(
-    forkedDraft,
-    'novel-a',
-    'chapter-other',
-  ), false);
+  assert.equal(isDraftSaveResultForDocument(forkedDraft, 'novel-a', 'chapter-b'), true);
+  assert.equal(isDraftSaveResultForDocument(forkedDraft, 'novel-a', 'chapter-other'), false);
 });

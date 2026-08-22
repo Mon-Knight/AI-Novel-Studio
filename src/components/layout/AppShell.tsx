@@ -13,9 +13,7 @@ function AppShell({ children }: AppShellProps) {
       <Sidebar />
       <div className="app-main">
         <TopBar />
-        <div className="app-content">
-          {children}
-        </div>
+        <div className="app-content">{children}</div>
       </div>
     </div>
   );

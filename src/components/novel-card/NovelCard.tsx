@@ -13,21 +13,21 @@ interface NovelCardProps {
 }
 
 const genreIcons: Record<string, string> = {
-  '科幻': '🚀',
-  '仙侠': '⚔️',
-  '都市悬疑': '🌃',
-  '奇幻': '🐉',
-  '历史': '📜',
-  '言情': '💕',
+  科幻: '🚀',
+  仙侠: '⚔️',
+  都市悬疑: '🌃',
+  奇幻: '🐉',
+  历史: '📜',
+  言情: '💕',
 };
 
 const statusLabels: Record<string, string> = {
-  'draft': '草稿',
-  'planning': '规划中',
-  'writing': '创作中',
-  'completed': '已完成',
-  'paused': '已暂停',
-  'archived': '已归档',
+  draft: '草稿',
+  planning: '规划中',
+  writing: '创作中',
+  completed: '已完成',
+  paused: '已暂停',
+  archived: '已归档',
 };
 
 function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProps) {
@@ -56,10 +56,14 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
         } else {
           setProgressLabel('尚未创建章节');
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [novel.id, novel.currentVolumeId, novel.currentChapterId]);
 
   return (
@@ -111,15 +115,9 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
         <div className="novel-card-desc">{novel.description || ''}</div>
         {progressLabel && <div className="novel-card-progress">{progressLabel}</div>}
         <div className="novel-card-meta">
-          <span className="novel-card-meta-item">
-            {formatNumber(wordCount)} 字
-          </span>
-          <span className="novel-card-meta-item">
-            目标 {formatNumber(targetCount)} 字
-          </span>
-          <span className="novel-card-meta-item">
-            {formatDate(novel.updatedAt)}
-          </span>
+          <span className="novel-card-meta-item">{formatNumber(wordCount)} 字</span>
+          <span className="novel-card-meta-item">目标 {formatNumber(targetCount)} 字</span>
+          <span className="novel-card-meta-item">{formatDate(novel.updatedAt)}</span>
         </div>
         <div className="novel-card-footer">
           <span className={`novel-card-status ${novel.status}`}>

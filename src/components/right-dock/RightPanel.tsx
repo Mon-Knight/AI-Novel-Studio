@@ -18,6 +18,7 @@ import type { AiTextApplyPayload, DraftResultMetadata } from '../../types/worksp
 import type { WritingContext } from '../../utils/writingContext';
 import type { RightSidebarState, PanelToolState } from '../../store/rightSidebarStore';
 import { getOrCreateToolState, createInitialSidebarState } from '../../store/rightSidebarStore';
+import PanelErrorBoundary from '../common/PanelErrorBoundary';
 
 const AiGeneratePanel = lazy(() => import('./panels/AiGeneratePanel'));
 const ChapterEngineeringPanel = lazy(() => import('./panels/ChapterEngineeringPanel'));
@@ -356,12 +357,14 @@ function RightPanel({
                 </div>
               }
             >
-              <MemoizedPanelRuntime
-                panelType={effectivePanelType}
-                component={PanelComponent}
-                model={panelModel}
-                onUpdateToolState={onUpdateToolState}
-              />
+              <PanelErrorBoundary panelTitle={config.title}>
+                <MemoizedPanelRuntime
+                  panelType={effectivePanelType}
+                  component={PanelComponent}
+                  model={panelModel}
+                  onUpdateToolState={onUpdateToolState}
+                />
+              </PanelErrorBoundary>
             </Suspense>
           )}
         </div>

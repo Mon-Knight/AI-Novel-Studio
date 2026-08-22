@@ -8,7 +8,11 @@ import type {
   WorkspaceLeaveRequest,
 } from '../types/workspaceLeave';
 import { isTauriRuntime } from '../services/tauri/runtime';
-import { createTraceId, logWorkspaceError, logWorkspaceWarning } from '../services/workspace/workspaceErrorService';
+import {
+  createTraceId,
+  logWorkspaceError,
+  logWorkspaceWarning,
+} from '../services/workspace/workspaceErrorService';
 import { getAppErrorUserMessage, normalizeAppError } from '../types/appError';
 
 interface UseWorkspaceLeaveGuardOptions {
@@ -42,68 +46,74 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
   const [errorMessage, setErrorMessage] = useState('');
   optionsRef.current = options;
 
-  const blocker = useBlocker(useCallback<BlockerFunction>(({ currentLocation, nextLocation }) => {
-    if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return false;
-    return `${currentLocation.pathname}${currentLocation.search}${currentLocation.hash}`
-      !== `${nextLocation.pathname}${nextLocation.search}${nextLocation.hash}`;
-  }, []));
+  const blocker = useBlocker(
+    useCallback<BlockerFunction>(({ currentLocation, nextLocation }) => {
+      if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return false;
+      return (
+        `${currentLocation.pathname}${currentLocation.search}${currentLocation.hash}` !==
+        `${nextLocation.pathname}${nextLocation.search}${nextLocation.hash}`
+      );
+    }, []),
+  );
 
-  const requestWorkspaceLeave = useCallback(async (
-    request: WorkspaceLeaveRequest,
-  ): Promise<LeaveDecision> => {
-    if (activeRef.current || preflightPendingRef.current) {
-      logWorkspaceWarning('leave_request_ignored_while_deciding', {
-        traceId: createTraceId('leave-ignored'),
-        reason: request.reason,
-        targetNovelId: request.targetNovelId,
-        targetChapterId: request.targetChapterId,
-      });
-      return 'cancel';
-    }
-
-    const requiresPreflight = request.reason !== 'draft_adopt' && request.reason !== 'draft_restore';
-    if (optionsRef.current.shouldPreflight && requiresPreflight) {
-      preflightPendingRef.current = true;
-      try {
-        const approved = await optionsRef.current.preflight?.();
-        if (approved !== true) return 'cancel';
-      } catch (error) {
-        logWorkspaceError('leave_preflight_failed', error, {
-          traceId: createTraceId('leave-preflight'),
+  const requestWorkspaceLeave = useCallback(
+    async (request: WorkspaceLeaveRequest): Promise<LeaveDecision> => {
+      if (activeRef.current || preflightPendingRef.current) {
+        logWorkspaceWarning('leave_request_ignored_while_deciding', {
+          traceId: createTraceId('leave-ignored'),
           reason: request.reason,
           targetNovelId: request.targetNovelId,
           targetChapterId: request.targetChapterId,
         });
         return 'cancel';
-      } finally {
-        preflightPendingRef.current = false;
       }
-    }
 
-    if (!optionsRef.current.shouldGuard) {
-      await request.continueAction?.();
-      return 'proceed';
-    }
+      const requiresPreflight =
+        request.reason !== 'draft_adopt' && request.reason !== 'draft_restore';
+      if (optionsRef.current.shouldPreflight && requiresPreflight) {
+        preflightPendingRef.current = true;
+        try {
+          const approved = await optionsRef.current.preflight?.();
+          if (approved !== true) return 'cancel';
+        } catch (error) {
+          logWorkspaceError('leave_preflight_failed', error, {
+            traceId: createTraceId('leave-preflight'),
+            reason: request.reason,
+            targetNovelId: request.targetNovelId,
+            targetChapterId: request.targetChapterId,
+          });
+          return 'cancel';
+        } finally {
+          preflightPendingRef.current = false;
+        }
+      }
 
-    // Capture the latest edit in its original target before asking the user.
-    void optionsRef.current.flushRecovery?.().catch((error) => {
-      logWorkspaceError('leave_recovery_flush_failed', error, {
-        traceId: createTraceId('leave-flush'),
-        reason: request.reason,
+      if (!optionsRef.current.shouldGuard) {
+        await request.continueAction?.();
+        return 'proceed';
+      }
+
+      // Capture the latest edit in its original target before asking the user.
+      void optionsRef.current.flushRecovery?.().catch((error) => {
+        logWorkspaceError('leave_recovery_flush_failed', error, {
+          traceId: createTraceId('leave-flush'),
+          reason: request.reason,
+        });
       });
-    });
 
-    return new Promise<LeaveDecision>((resolve) => {
-      const pending: PendingWorkspaceLeave = {
-        ...request,
-        id: createTraceId('leave'),
-      };
-      activeRef.current = { request: pending, resolve };
-      setErrorMessage('');
-      setBusy(false);
-      setActiveRequest(pending);
-    });
-  }, []);
+      return new Promise<LeaveDecision>((resolve) => {
+        const pending: PendingWorkspaceLeave = {
+          ...request,
+          id: createTraceId('leave'),
+        };
+        activeRef.current = { request: pending, resolve };
+        setErrorMessage('');
+        setBusy(false);
+        setActiveRequest(pending);
+      });
+    },
+    [],
+  );
 
   const finish = useCallback(async (decision: LeaveDecision, proceed: boolean) => {
     const active = activeRef.current;
@@ -211,44 +221,47 @@ export function useWorkspaceLeaveGuard(options: UseWorkspaceLeaveGuardOptions) {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void appWindow.onCloseRequested((event) => {
-      if (bypassCloseGuardRef.current) {
-        bypassCloseGuardRef.current = false;
-        return;
-      }
-      if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return;
-      event.preventDefault();
-      if (activeRef.current) return;
-      void requestWorkspaceLeave({
-        reason: 'window_close',
-        continueAction: async () => {
-          bypassCloseGuardRef.current = true;
-          try {
-            await appWindow.close();
-          } catch (error) {
-            // close() can reject before Tauri emits the recursive close event.
-            // Never leave the one-shot bypass armed for the next user request.
-            bypassCloseGuardRef.current = false;
-            throw error;
-          }
-        },
-      }).catch((error) => {
-        // The document-guard path converts continueAction failures into
-        // save_failed. Goal-only preflight closes execute directly and can
-        // reject, so contain and record that promise here as well.
-        bypassCloseGuardRef.current = false;
-        logWorkspaceError('window_close_failed', error, {
-          traceId: createTraceId('window-close'),
+    void appWindow
+      .onCloseRequested((event) => {
+        if (bypassCloseGuardRef.current) {
+          bypassCloseGuardRef.current = false;
+          return;
+        }
+        if (!optionsRef.current.shouldGuard && !optionsRef.current.shouldPreflight) return;
+        event.preventDefault();
+        if (activeRef.current) return;
+        void requestWorkspaceLeave({
+          reason: 'window_close',
+          continueAction: async () => {
+            bypassCloseGuardRef.current = true;
+            try {
+              await appWindow.close();
+            } catch (error) {
+              // close() can reject before Tauri emits the recursive close event.
+              // Never leave the one-shot bypass armed for the next user request.
+              bypassCloseGuardRef.current = false;
+              throw error;
+            }
+          },
+        }).catch((error) => {
+          // The document-guard path converts continueAction failures into
+          // save_failed. Goal-only preflight closes execute directly and can
+          // reject, so contain and record that promise here as well.
+          bypassCloseGuardRef.current = false;
+          logWorkspaceError('window_close_failed', error, {
+            traceId: createTraceId('window-close'),
+          });
+        });
+      })
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch((error) => {
+        logWorkspaceError('window_close_listener_failed', error, {
+          traceId: createTraceId('window-close-listener'),
         });
       });
-    }).then((stop) => {
-      if (disposed) stop();
-      else unlisten = stop;
-    }).catch((error) => {
-      logWorkspaceError('window_close_listener_failed', error, {
-        traceId: createTraceId('window-close-listener'),
-      });
-    });
     return () => {
       disposed = true;
       unlisten?.();

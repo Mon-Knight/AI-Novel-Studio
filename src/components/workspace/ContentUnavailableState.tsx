@@ -17,12 +17,17 @@ function ContentUnavailableState({
   onBackToChapters,
 }: ContentUnavailableStateProps) {
   const [title, detail] = state.error
-    ? [getAppErrorUserMessage(state.error), `${state.error.code}${state.error.traceId ? ` · traceId: ${state.error.traceId}` : ''}`]
+    ? [
+        getAppErrorUserMessage(state.error),
+        `${state.error.code}${state.error.traceId ? ` · traceId: ${state.error.traceId}` : ''}`,
+      ]
     : ['完整正文暂时无法读取。', state.errorCode];
 
   return (
     <div className="content-unavailable-state" role="alert" data-testid="content-unavailable-state">
-      <div className="content-unavailable-icon" aria-hidden="true">⚠️</div>
+      <div className="content-unavailable-icon" aria-hidden="true">
+        ⚠️
+      </div>
       <div className="content-unavailable-title">正文暂时无法完整读取</div>
       <p>{title}</p>
       <p className="text-muted">
@@ -43,14 +48,18 @@ function ContentUnavailableState({
             className="btn btn-secondary btn-sm"
             data-testid="content-unavailable-history"
             onClick={onOpenHistory}
-          >打开草稿历史</button>
+          >
+            打开草稿历史
+          </button>
         )}
         {onBackToChapters && (
           <button
             className="btn btn-secondary btn-sm"
             data-testid="content-unavailable-back"
             onClick={onBackToChapters}
-          >返回章节列表</button>
+          >
+            返回章节列表
+          </button>
         )}
       </div>
       <details className="content-unavailable-details">

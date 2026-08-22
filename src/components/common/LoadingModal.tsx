@@ -64,10 +64,7 @@ function LoadingModal({
 
   return (
     <>
-      <div
-        className="loading-modal-overlay"
-        onClick={state === 'error' ? onClose : undefined}
-      />
+      <div className="loading-modal-overlay" onClick={state === 'error' ? onClose : undefined} />
       <div
         className="loading-modal-card"
         onClick={(e) => e.stopPropagation()}
@@ -76,15 +73,9 @@ function LoadingModal({
       >
         {/* 图标区 */}
         <div className="loading-modal-icon">
-          {state === 'loading' && (
-            <div className="loading-modal-spinner" />
-          )}
-          {state === 'success' && (
-            <div className="loading-modal-check">✅</div>
-          )}
-          {state === 'error' && (
-            <div className="loading-modal-cross">❌</div>
-          )}
+          {state === 'loading' && <div className="loading-modal-spinner" />}
+          {state === 'success' && <div className="loading-modal-check">✅</div>}
+          {state === 'error' && <div className="loading-modal-cross">❌</div>}
         </div>
 
         {/* 标题 */}
@@ -121,36 +112,24 @@ function LoadingModal({
         {/* 操作按钮 */}
         <div className="loading-modal-actions">
           {state === 'loading' && cancelable && (
-            <button
-              className="loading-modal-btn loading-modal-btn-cancel"
-              onClick={onCancel}
-            >
+            <button className="loading-modal-btn loading-modal-btn-cancel" onClick={onCancel}>
               取消
             </button>
           )}
           {state === 'error' && (
             <>
               {onRetry && (
-                <button
-                  className="loading-modal-btn loading-modal-btn-retry"
-                  onClick={onRetry}
-                >
+                <button className="loading-modal-btn loading-modal-btn-retry" onClick={onRetry}>
                   重试
                 </button>
               )}
-              <button
-                className="loading-modal-btn loading-modal-btn-close"
-                onClick={onClose}
-              >
+              <button className="loading-modal-btn loading-modal-btn-close" onClick={onClose}>
                 关闭
               </button>
             </>
           )}
           {state === 'success' && autoCloseMs === 0 && (
-            <button
-              className="loading-modal-btn loading-modal-btn-close"
-              onClick={onClose}
-            >
+            <button className="loading-modal-btn loading-modal-btn-close" onClick={onClose}>
               完成
             </button>
           )}

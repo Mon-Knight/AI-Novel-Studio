@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { workspaceRecoveryService } from '../services/workspace/workspaceRecoveryService';
-import { createTraceId, logWorkspaceError, logWorkspaceWarning } from '../services/workspace/workspaceErrorService';
+import {
+  createTraceId,
+  logWorkspaceError,
+  logWorkspaceWarning,
+} from '../services/workspace/workspaceErrorService';
 import type {
   RecoveryPromptState,
   WorkspaceRecoverySaveStatus,
@@ -29,26 +33,30 @@ interface PendingRecoveryWrite extends WorkspaceRecoveryEditorState {
   traceId: string;
 }
 
-function sameOptional(left: string | number | undefined, right: string | number | undefined): boolean {
+function sameOptional(
+  left: string | number | undefined,
+  right: string | number | undefined,
+): boolean {
   return left === right || (left === undefined && right === undefined);
 }
 
 function snapshotMatchesBase(
   snapshot: WorkspaceRecoverySnapshot,
-  editor: Pick<WorkspaceRecoveryEditorState,
-    'novelId' | 'chapterId' | 'draftId' | 'draftVersion' | 'baseContentHash'>,
+  editor: Pick<
+    WorkspaceRecoveryEditorState,
+    'novelId' | 'chapterId' | 'draftId' | 'draftVersion' | 'baseContentHash'
+  >,
 ): boolean {
-  return snapshot.novelId === editor.novelId
-    && snapshot.chapterId === editor.chapterId
-    && sameOptional(snapshot.baseDraftId, editor.draftId)
-    && sameOptional(snapshot.baseDraftVersion, editor.draftVersion)
-    && sameOptional(snapshot.baseContentHash, editor.baseContentHash);
+  return (
+    snapshot.novelId === editor.novelId &&
+    snapshot.chapterId === editor.chapterId &&
+    sameOptional(snapshot.baseDraftId, editor.draftId) &&
+    sameOptional(snapshot.baseDraftVersion, editor.draftVersion) &&
+    sameOptional(snapshot.baseContentHash, editor.baseContentHash)
+  );
 }
 
-export function useWorkspaceRecovery({
-  editor,
-  debounceMs = 1500,
-}: UseWorkspaceRecoveryOptions) {
+export function useWorkspaceRecovery({ editor, debounceMs = 1500 }: UseWorkspaceRecoveryOptions) {
   const [prompt, setPrompt] = useState<RecoveryPromptState>({ status: 'none' });
   const [saveStatus, setSaveStatus] = useState<WorkspaceRecoverySaveStatus>('idle');
   const editorRef = useRef(editor);
@@ -73,7 +81,9 @@ export function useWorkspaceRecovery({
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const cancelTimer = useCallback(() => {
@@ -199,7 +209,9 @@ export function useWorkspaceRecovery({
   // cleanup itself only cancels the timer so StrictMode replay cannot bypass
   // the 1500 ms debounce contract.
   useEffect(() => {
-    const handlePageHide = () => { void flush(); };
+    const handlePageHide = () => {
+      void flush();
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') void flush();
     };
@@ -228,77 +240,83 @@ export function useWorkspaceRecovery({
     };
     const traceId = createTraceId('recovery-read');
     setPrompt({ status: 'loading' });
-    void workspaceRecoveryService.get(target, traceId).then(async (snapshot) => {
-      if (epoch !== loadEpochRef.current) return;
-      if (!snapshot) {
+    void workspaceRecoveryService
+      .get(target, traceId)
+      .then(async (snapshot) => {
+        if (epoch !== loadEpochRef.current) return;
+        if (!snapshot) {
+          setPrompt({ status: 'none' });
+          return;
+        }
+        // baseContentHash is the verified persisted document identity. Using it
+        // here avoids reloading recovery on every dirty keystroke while still
+        // recognizing a snapshot that is identical to the saved正文.
+        if (editorBaseContentHash && snapshot.recoveryContentHash === editorBaseContentHash) {
+          await workspaceRecoveryService
+            .delete(target, createTraceId('recovery-stale-cleanup'))
+            .catch((error) => {
+              const normalized = logWorkspaceError('recovery_stale_cleanup_failed', error, {
+                traceId,
+                novelId: target.novelId,
+                chapterId: target.chapterId,
+              });
+              logWorkspaceWarning('recovery_stale_cleanup_deferred', {
+                traceId,
+                novelId: target.novelId,
+                chapterId: target.chapterId,
+                code: normalized.code,
+              });
+            });
+          if (epoch === loadEpochRef.current) setPrompt({ status: 'none' });
+          return;
+        }
+        if (snapshotMatchesBase(snapshot, baseIdentity)) {
+          setPrompt({ status: 'available', snapshot, conflict: false });
+        } else {
+          setPrompt({
+            status: 'conflict',
+            snapshot,
+            conflict: true,
+            errorCode: 'RECOVERY_BASE_CONFLICT',
+          });
+        }
+      })
+      .catch((error) => {
+        if (epoch !== loadEpochRef.current) return;
         setPrompt({ status: 'none' });
-        return;
-      }
-      // baseContentHash is the verified persisted document identity. Using it
-      // here avoids reloading recovery on every dirty keystroke while still
-      // recognizing a snapshot that is identical to the saved正文.
-      if (editorBaseContentHash && snapshot.recoveryContentHash === editorBaseContentHash) {
-        await workspaceRecoveryService.delete(target, createTraceId('recovery-stale-cleanup')).catch((error) => {
-          const normalized = logWorkspaceError('recovery_stale_cleanup_failed', error, {
-            traceId,
-            novelId: target.novelId,
-            chapterId: target.chapterId,
-          });
-          logWorkspaceWarning('recovery_stale_cleanup_deferred', {
-            traceId,
-            novelId: target.novelId,
-            chapterId: target.chapterId,
-            code: normalized.code,
-          });
-        });
-        if (epoch === loadEpochRef.current) setPrompt({ status: 'none' });
-        return;
-      }
-      if (snapshotMatchesBase(snapshot, baseIdentity)) {
-        setPrompt({ status: 'available', snapshot, conflict: false });
-      } else {
-        setPrompt({
-          status: 'conflict',
-          snapshot,
-          conflict: true,
-          errorCode: 'RECOVERY_BASE_CONFLICT',
-        });
-      }
-    }).catch((error) => {
-      if (epoch !== loadEpochRef.current) return;
-      setPrompt({ status: 'none' });
-      logWorkspaceError('recovery_read_failed', error, { traceId, ...target });
-    });
-  }, [
-    editorNovelId,
-    editorChapterId,
-    editorDraftId,
-    editorDraftVersion,
-    editorBaseContentHash,
-  ]);
+        logWorkspaceError('recovery_read_failed', error, { traceId, ...target });
+      });
+  }, [editorNovelId, editorChapterId, editorDraftId, editorDraftVersion, editorBaseContentHash]);
 
-  const clear = useCallback(async (target?: WorkspaceRecoveryTarget): Promise<void> => {
-    const resolvedTarget = target ?? (editorRef.current
-      ? { novelId: editorRef.current.novelId, chapterId: editorRef.current.chapterId }
-      : null);
-    if (!resolvedTarget?.novelId || !resolvedTarget.chapterId) return;
-    cancelTimer();
-    if (pendingRef.current?.novelId === resolvedTarget.novelId
-      && pendingRef.current.chapterId === resolvedTarget.chapterId) {
-      pendingRef.current = null;
-    }
-    // A leave-triggered flush may already be writing this exact snapshot.
-    // Wait before deleting so a late UPSERT cannot recreate a discarded or
-    // formally saved recovery row.
-    await writeInFlightRef.current;
-    await workspaceRecoveryService.delete(resolvedTarget, createTraceId('recovery-delete'));
-    const live = editorRef.current;
-    if (live?.novelId === resolvedTarget.novelId && live.chapterId === resolvedTarget.chapterId) {
-      setPrompt({ status: 'none' });
-      setSaveStatus('idle');
-      lastWrittenSignatureRef.current = '';
-    }
-  }, [cancelTimer]);
+  const clear = useCallback(
+    async (target?: WorkspaceRecoveryTarget): Promise<void> => {
+      const resolvedTarget =
+        target ??
+        (editorRef.current
+          ? { novelId: editorRef.current.novelId, chapterId: editorRef.current.chapterId }
+          : null);
+      if (!resolvedTarget?.novelId || !resolvedTarget.chapterId) return;
+      cancelTimer();
+      if (
+        pendingRef.current?.novelId === resolvedTarget.novelId &&
+        pendingRef.current.chapterId === resolvedTarget.chapterId
+      ) {
+        pendingRef.current = null;
+      }
+      // A leave-triggered flush may already be writing this exact snapshot.
+      // Wait before deleting so a late UPSERT cannot recreate a discarded or
+      // formally saved recovery row.
+      await writeInFlightRef.current;
+      await workspaceRecoveryService.delete(resolvedTarget, createTraceId('recovery-delete'));
+      const live = editorRef.current;
+      if (live?.novelId === resolvedTarget.novelId && live.chapterId === resolvedTarget.chapterId) {
+        setPrompt({ status: 'none' });
+        setSaveStatus('idle');
+        lastWrittenSignatureRef.current = '';
+      }
+    },
+    [cancelTimer],
+  );
 
   const dismissPrompt = useCallback(() => setPrompt({ status: 'none' }), []);
 
@@ -308,6 +326,8 @@ export function useWorkspaceRecovery({
     flush,
     clear,
     dismissPrompt,
-    waitForWrite: async () => { await writeInFlightRef.current; },
+    waitForWrite: async () => {
+      await writeInFlightRef.current;
+    },
   };
 }

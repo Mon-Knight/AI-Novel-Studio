@@ -35,7 +35,9 @@ function WorkspaceLeaveDialog({
         {saveDisabled ? (
           <>
             <p>为避免用截断内容覆盖完整正文，编辑与保存功能已暂停。</p>
-            <p className="text-muted">可以继续离开或取消；继续离开不会删除恢复快照或修改持久正文。</p>
+            <p className="text-muted">
+              可以继续离开或取消；继续离开不会删除恢复快照或修改持久正文。
+            </p>
           </>
         ) : (
           <>
@@ -43,7 +45,11 @@ function WorkspaceLeaveDialog({
             <p className="text-muted">恢复快照不等同于正式保存；只有“保存并继续”会写入正式草稿。</p>
           </>
         )}
-        {errorMessage && <div className="workspace-leave-error" role="alert">{errorMessage}</div>}
+        {errorMessage && (
+          <div className="workspace-leave-error" role="alert">
+            {errorMessage}
+          </div>
+        )}
         <div className="workspace-leave-actions">
           {!saveDisabled && (
             <button
@@ -68,7 +74,9 @@ function WorkspaceLeaveDialog({
             data-testid="workspace-leave-cancel"
             onClick={onCancel}
             disabled={busy}
-          >取消</button>
+          >
+            取消
+          </button>
         </div>
       </div>
     </div>

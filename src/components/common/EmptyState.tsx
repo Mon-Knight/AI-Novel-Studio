@@ -2,7 +2,10 @@
  * AI Novel Studio - 通用空状态组件
  */
 interface EmptyStateProps {
-  icon?: string; title?: string; description?: string; action?: { label: string; onClick: () => void };
+  icon?: string;
+  title?: string;
+  description?: string;
+  action?: { label: string; onClick: () => void };
 }
 
 function EmptyState({ icon = '📭', title = '暂无数据', description, action }: EmptyStateProps) {
@@ -11,7 +14,11 @@ function EmptyState({ icon = '📭', title = '暂无数据', description, action
       <div style={{ fontSize: 40, marginBottom: 12 }}>{icon}</div>
       <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>{title}</div>
       {description && <div style={{ fontSize: 12, marginBottom: 12 }}>{description}</div>}
-      {action && <button className="btn btn-primary btn-sm" onClick={action.onClick}>{action.label}</button>}
+      {action && (
+        <button className="btn btn-primary btn-sm" onClick={action.onClick}>
+          {action.label}
+        </button>
+      )}
     </div>
   );
 }
