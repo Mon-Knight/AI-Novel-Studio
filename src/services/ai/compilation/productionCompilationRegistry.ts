@@ -343,7 +343,7 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
       mustFollowCompiledContext: true,
       messageMode: 'single_user',
     },
-    allowedSourceTypes: ['request_context'],
+    allowedSourceTypes: ['request_context', 'memory_context'],
     requiredSourceTypes: ['request_context'],
     allowedTools: [],
     // Cloud writers may use the full governed window; the compiler narrows

@@ -15,7 +15,8 @@ export type AiContextSourceType =
   | 'context_record'
   | 'style_profile'
   | 'output_profile'
-  | 'request_context';
+  | 'request_context'
+  | 'memory_context';
 
 export type AiContextSourceOrigin = 'sqlite' | 'request' | 'system';
 

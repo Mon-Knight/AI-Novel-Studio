@@ -18,6 +18,7 @@
 - 新增无本地模型的正式云端正文模式：未配置或关闭专用本地模型时，全局 DeepSeek / OpenAI-Compatible Provider 成为 Scene/Beat 的主路由，而不是伪装成 Fallback。
 - 新增通用外部模型网关（AI Model Gateway）客户端接入层与网络策略：将远程正文模型抽象为通用 Remote Model Provider，统一采用 OpenAI-Compatible API 契约；支持公网 HTTPS 与局域网/VPC（RFC 1918 / CGNAT / Link-Local / 回环）HTTP/HTTPS 访问；强制要求 API Key/Token 鉴权以杜绝匿名调用；自动向下兼容迁移旧版 `remoteWriter` 设置；当本地模型不可用时优先调度至外部 AI Gateway 或全局 Cloud Provider。
 - 新增长篇小说记忆层（Novel Memory Layer Phase 1）领域模型与服务契约：建立长期记忆（世界规则/人物底层/核心伏笔）、中期记忆（本卷主线/角色动态状态/阵营态势）、短期工作记忆（分镜 POV/活跃角色/即时冲突）三层记忆架构；定义 `CharacterDynamicState`、`WorldStateSnapshot`、`SceneMemoryContext` 与 `INovelMemoryManager` 接口，为百万字创作及 Qwen3.8-27B 场景写作提供结构化上下文供给基础。
+- 新增场景记忆召回与装配引擎（Novel Memory Retrieval Engine Phase 2）：实现基于实体相关性与重要度权重（1~5）的三层记忆过滤召回；支持按模型 Context 预算进行 `核心设定 > 场景冲突/POV > 近期事件/动态 > 辅助线索` 优先级裁剪；提供 `formatSceneMemoryForCompilation` 将结构化记忆包络注入 `executionContractCompiler`，无缝增强 Scene 作家生成质量并保持旧流程向后兼容。
 
 ### 变更
 

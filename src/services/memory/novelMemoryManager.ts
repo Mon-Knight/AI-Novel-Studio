@@ -7,6 +7,8 @@ import type {
   WorldStateSnapshot,
 } from '../../types/novelMemory';
 
+import { novelMemoryRetriever } from './retrieval/novelMemoryRetriever';
+
 export class NovelMemoryManager implements INovelMemoryManager {
   private characterStates = new Map<string, Map<string, CharacterDynamicState>>();
   private worldStates = new Map<string, WorldStateSnapshot>();
@@ -14,62 +16,16 @@ export class NovelMemoryManager implements INovelMemoryManager {
 
   async retrieveContext(query: MemoryRetrievalQuery): Promise<SceneMemoryContext> {
     const novelId = query.novelId.trim();
-    const novelFragments = this.fragments.get(novelId) ?? [];
-    const charMap = this.characterStates.get(novelId) ?? new Map<string, CharacterDynamicState>();
+    const fragments = this.fragments.get(novelId) ?? [];
+    const characterStates =
+      this.characterStates.get(novelId) ?? new Map<string, CharacterDynamicState>();
+    const worldState = this.worldStates.get(novelId);
 
-    // 1. 长期记忆（世界观、核心设定、基础人设）
-    const longTermMemories = novelFragments
-      .filter((f) => f.tier === 'long_term')
-      .sort((a, b) => b.importance - a.importance);
-
-    // 2. 中期记忆（当前卷进展、动态状态、伏笔）
-    const midTermMemories = novelFragments
-      .filter((f) => f.tier === 'mid_term')
-      .sort((a, b) => b.importance - a.importance);
-
-    // 3. 短期记忆（当前场景相关）
-    const shortTermMemories = novelFragments
-      .filter((f) => f.tier === 'short_term')
-      .sort((a, b) => b.importance - a.importance);
-
-    // 视点角色 (POV)
-    const povCharacter = query.povCharacterId
-      ? {
-          id: query.povCharacterId,
-          name: charMap.get(query.povCharacterId)?.characterName ?? query.povCharacterId,
-          dynamicState: charMap.get(query.povCharacterId),
-        }
-      : undefined;
-
-    // 活跃角色
-    const activeCharacters = (query.activeCharacterIds ?? []).map((id) => ({
-      id,
-      name: charMap.get(id)?.characterName ?? id,
-      dynamicState: charMap.get(id),
-    }));
-
-    const totalBudget = query.maxMemoryTokens ?? 1500;
-    const longTermUsed = Math.min(Math.round(totalBudget * 0.3), 450);
-    const midTermUsed = Math.min(Math.round(totalBudget * 0.4), 600);
-    const shortTermUsed = Math.min(Math.round(totalBudget * 0.3), 450);
-
-    return {
-      novelId,
-      chapterId: query.chapterId,
-      sceneId: query.sceneId,
-      povCharacter,
-      activeCharacters,
-      longTermMemories,
-      midTermMemories,
-      shortTermMemories,
-      constraints: [],
-      tokenBudget: {
-        totalBudget,
-        longTermUsed,
-        midTermUsed,
-        shortTermUsed,
-      },
-    };
+    return novelMemoryRetriever.retrieve(query, {
+      fragments,
+      characterStates,
+      worldState,
+    });
   }
 
   async updateCharacterState(
