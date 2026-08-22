@@ -3,23 +3,24 @@ import type {
   INovelMemoryManager,
   MemoryFragment,
   MemoryRetrievalQuery,
+  MemoryStateDelta,
+  MemoryUpdateResult,
+  MemoryVersionSnapshot,
   SceneMemoryContext,
   WorldStateSnapshot,
 } from '../../types/novelMemory';
 
 import { novelMemoryRetriever } from './retrieval/novelMemoryRetriever';
+import { novelMemoryStateUpdater } from './update/novelMemoryStateUpdater';
 
 export class NovelMemoryManager implements INovelMemoryManager {
-  private characterStates = new Map<string, Map<string, CharacterDynamicState>>();
-  private worldStates = new Map<string, WorldStateSnapshot>();
   private fragments = new Map<string, MemoryFragment[]>();
 
   async retrieveContext(query: MemoryRetrievalQuery): Promise<SceneMemoryContext> {
     const novelId = query.novelId.trim();
     const fragments = this.fragments.get(novelId) ?? [];
-    const characterStates =
-      this.characterStates.get(novelId) ?? new Map<string, CharacterDynamicState>();
-    const worldState = this.worldStates.get(novelId);
+    const characterStates = novelMemoryStateUpdater.getAllCharacterStates(novelId);
+    const worldState = novelMemoryStateUpdater.getWorldState(novelId);
 
     return novelMemoryRetriever.retrieve(query, {
       fragments,
@@ -33,50 +34,14 @@ export class NovelMemoryManager implements INovelMemoryManager {
     characterId: string,
     patch: Partial<CharacterDynamicState>,
   ): Promise<CharacterDynamicState> {
-    const nid = novelId.trim();
-    const cid = characterId.trim();
-    if (!this.characterStates.has(nid)) {
-      this.characterStates.set(nid, new Map());
-    }
-    const map = this.characterStates.get(nid)!;
-    const current = map.get(cid) ?? {
-      characterId: cid,
-      characterName: patch.characterName?.trim() || cid,
-      stateVersion: 0,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const next: CharacterDynamicState = {
-      ...current,
-      ...patch,
-      characterId: cid,
-      stateVersion: (current.stateVersion || 0) + 1,
-      updatedAt: new Date().toISOString(),
-    };
-    map.set(cid, next);
-    return next;
+    return novelMemoryStateUpdater.updateCharacterState(novelId, characterId, patch);
   }
 
   async updateWorldState(
     novelId: string,
     patch: Partial<WorldStateSnapshot>,
   ): Promise<WorldStateSnapshot> {
-    const nid = novelId.trim();
-    const current = this.worldStates.get(nid) ?? {
-      novelId: nid,
-      snapshotVersion: 0,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const next: WorldStateSnapshot = {
-      ...current,
-      ...patch,
-      novelId: nid,
-      snapshotVersion: (current.snapshotVersion || 0) + 1,
-      updatedAt: new Date().toISOString(),
-    };
-    this.worldStates.set(nid, next);
-    return next;
+    return novelMemoryStateUpdater.updateWorldSnapshot(novelId, patch);
   }
 
   async addMemoryFragment(
@@ -98,27 +63,38 @@ export class NovelMemoryManager implements INovelMemoryManager {
 
   async createSnapshot(novelId: string): Promise<WorldStateSnapshot> {
     const nid = novelId.trim();
-    const worldState = this.worldStates.get(nid) ?? {
+    const world = novelMemoryStateUpdater.getWorldState(nid);
+    if (world) return world;
+    return novelMemoryStateUpdater.updateWorldSnapshot(nid, {
       novelId: nid,
       snapshotVersion: 1,
-      updatedAt: new Date().toISOString(),
-    };
-    return {
-      ...worldState,
-      updatedAt: new Date().toISOString(),
-    };
+    });
+  }
+
+  async applyStateDelta(
+    novelId: string,
+    deltas: MemoryStateDelta[],
+    description?: string,
+  ): Promise<MemoryUpdateResult> {
+    return novelMemoryStateUpdater.applyStateDelta(novelId, deltas, description);
+  }
+
+  async rollbackMemoryVersion(novelId: string, versionId: string): Promise<boolean> {
+    return novelMemoryStateUpdater.rollbackMemoryVersion(novelId, versionId);
+  }
+
+  listMemoryVersions(novelId: string): MemoryVersionSnapshot[] {
+    return novelMemoryStateUpdater.listMemoryVersions(novelId);
   }
 
   reset(novelId?: string): void {
     if (novelId) {
       const nid = novelId.trim();
-      this.characterStates.delete(nid);
-      this.worldStates.delete(nid);
       this.fragments.delete(nid);
+      novelMemoryStateUpdater.reset(nid);
     } else {
-      this.characterStates.clear();
-      this.worldStates.clear();
       this.fragments.clear();
+      novelMemoryStateUpdater.reset();
     }
   }
 }

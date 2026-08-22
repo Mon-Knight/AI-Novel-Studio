@@ -163,4 +163,62 @@ export interface INovelMemoryManager {
    * 生成当前小说的完整世界与人物状态快照
    */
   createSnapshot(novelId: string): Promise<WorldStateSnapshot>;
+
+  /**
+   * 批量应用状态增量 Delta 并创建版本快照
+   */
+  applyStateDelta(
+    novelId: string,
+    deltas: MemoryStateDelta[],
+    description?: string,
+  ): Promise<MemoryUpdateResult>;
+
+  /**
+   * 回滚至特定历史记忆版本快照
+   */
+  rollbackMemoryVersion(novelId: string, versionId: string): Promise<boolean>;
+
+  /**
+   * 获取小说历史版本快照列表
+   */
+  listMemoryVersions(novelId: string): MemoryVersionSnapshot[];
+}
+
+/** 状态增量变更实体类型 */
+export type MemoryStateDeltaEntityType = 'character' | 'world' | 'faction' | 'rule' | 'mystery';
+
+/** 状态增量变更对象（用于剧情演进后的结构化状态提交） */
+export interface MemoryStateDelta {
+  entityId: string;
+  entityType: MemoryStateDeltaEntityType;
+  /** 具体的属性变更键值对 */
+  changes: Record<string, unknown>;
+  /** 触发该变更的来源分镜/章节（如 "chap-05/scene-02"） */
+  sourceScene?: string;
+  /** 变更置信度 (0.0 ~ 1.0) */
+  confidence?: number;
+  /** 变更发生的时间戳 */
+  timestamp?: string;
+}
+
+/** 不可变记忆版本快照（用于状态追溯与版本安全回滚） */
+export interface MemoryVersionSnapshot {
+  versionId: string;
+  novelId: string;
+  versionNumber: number;
+  description: string;
+  /** 快照时刻各角色动态状态副本 */
+  characterStates: Record<string, CharacterDynamicState>;
+  /** 快照时刻世界状态副本 */
+  worldState: WorldStateSnapshot;
+  /** 快照创建时间戳 */
+  createdAt: string;
+}
+
+/** 状态增量批量应用结果 */
+export interface MemoryUpdateResult {
+  appliedDeltas: number;
+  updatedCharacters: string[];
+  worldUpdated: boolean;
+  versionSnapshot: MemoryVersionSnapshot;
 }
