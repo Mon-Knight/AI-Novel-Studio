@@ -37,3 +37,4 @@ export * from './generationJob';
 export * from './ai-task';
 export * from './result-artifact';
 export * from './modelRuntime';
+export * from './novelMemory';
