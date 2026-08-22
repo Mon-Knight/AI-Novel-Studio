@@ -215,13 +215,20 @@ fn recover_complete_staging(data_dir: &std::path::Path) -> Option<std::path::Pat
     let mut staged = Vec::new();
     for entry in std::fs::read_dir(data_dir).ok()?.flatten() {
         let path = entry.path();
-        let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
         if !name.starts_with(".dsh-runtime-unpack-") {
             continue;
         }
         let candidate = path.join("dsh-runtime");
         if payload_complete(&candidate) {
-            staged.push((entry.metadata().and_then(|meta| meta.modified()).ok(), path, candidate));
+            staged.push((
+                entry.metadata().and_then(|meta| meta.modified()).ok(),
+                path,
+                candidate,
+            ));
         }
     }
     staged.sort_by(|left, right| right.0.cmp(&left.0));
@@ -235,7 +242,9 @@ fn recover_complete_staging(data_dir: &std::path::Path) -> Option<std::path::Pat
 }
 
 fn unpack_bundled_payload(exe_dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let _guard = UNPACK_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = UNPACK_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let destination = crate::db::get_data_dir();
     let root = destination.join("dsh-runtime");
     if payload_complete(&root) {

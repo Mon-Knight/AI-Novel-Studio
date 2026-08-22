@@ -1333,8 +1333,9 @@ fn ensure_worker_process(
         if healthy {
             return Ok(existing.clone());
         }
-        let previous = holder.take().expect("existing worker process");
-        let _ = previous.runtime.shutdown_and_wait(Duration::from_secs(10));
+        if let Some(previous) = holder.take() {
+            let _ = previous.runtime.shutdown_and_wait(Duration::from_secs(10));
+        }
     }
     let process = spawn_worker_process(
         input,

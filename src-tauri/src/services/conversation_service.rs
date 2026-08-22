@@ -213,9 +213,8 @@ pub fn publish_structured_candidate(
     required(&input.title, "title")?;
     required(&input.summary, "summary")?;
     required(&input.created_at, "createdAt")?;
-    let raw = serde_json::to_string(&input.structured_payload_json).map_err(|error| {
-        AppError::new("TASK_RUNTIME_JSON", error.to_string(), false)
-    })?;
+    let raw = serde_json::to_string(&input.structured_payload_json)
+        .map_err(|error| AppError::new("TASK_RUNTIME_JSON", error.to_string(), false))?;
     let prompt_body = "只生成可确认候选，不写入正式小说事实。";
     let operation_id = format!("workbench-candidate-{}", uuid::Uuid::new_v4());
     let task = ai_task_service::create_task(
@@ -345,7 +344,8 @@ pub fn record_artifact_decision(
     required(&input.conversation_id, "conversationId")?;
     required(&input.idempotency_key, "idempotencyKey")?;
     required(&input.target_id, "targetId")?;
-    if !["confirm", "reject", "request_revision", "request_apply"].contains(&input.decision.as_str())
+    if !["confirm", "reject", "request_revision", "request_apply"]
+        .contains(&input.decision.as_str())
     {
         return Err(AppError::new(
             "ARTIFACT_DECISION_INVALID",

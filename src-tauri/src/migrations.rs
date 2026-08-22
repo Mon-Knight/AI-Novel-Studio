@@ -3355,9 +3355,7 @@ fn apply_conversation_artifact_projection(transaction: &Transaction<'_>) -> Resu
         .map_err(AppError::database)
 }
 
-fn apply_artifact_decisions_and_review_auth(
-    transaction: &Transaction<'_>,
-) -> Result<(), AppError> {
+fn apply_artifact_decisions_and_review_auth(transaction: &Transaction<'_>) -> Result<(), AppError> {
     transaction
         .execute_batch(
             "CREATE TABLE IF NOT EXISTS artifact_decisions (

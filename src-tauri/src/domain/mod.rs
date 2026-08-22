@@ -1,5 +1,10 @@
 pub mod agent_plan;
+pub mod ai;
 pub mod ai_task;
+pub mod context;
 pub mod placement;
+pub mod project;
 pub mod reference_library;
 pub mod result_artifact;
+pub mod world;
+pub mod writing;
