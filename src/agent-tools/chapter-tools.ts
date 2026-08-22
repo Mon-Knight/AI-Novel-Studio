@@ -4,11 +4,11 @@
 // 用途：提供章节/大纲的只读 Tool 接口
 // 安全：只读，不创建/修改/删除章节正文
 
-import type { AgentToolResult, AgentToolContext } from "./tool-types";
-import { errorResult, notImplemented, resolveNovelId, successResult } from "./tool-types";
-import { chapterRepository } from "../services/database/chapterRepository";
-import { volumeRepository } from "../services/database/volumeRepository";
-import { draftService } from "../services/database/draftService";
+import type { AgentToolResult, AgentToolContext } from './tool-types';
+import { errorResult, notImplemented, resolveNovelId, successResult } from './tool-types';
+import { chapterRepository } from '../services/database/chapterRepository';
+import { volumeRepository } from '../services/database/volumeRepository';
+import { draftService } from '../services/database/draftService';
 
 /**
  * 读取章节大纲
@@ -17,17 +17,17 @@ import { draftService } from "../services/database/draftService";
  * @returns Promise<AgentToolResult> — 章节大纲信息
  */
 export async function readChapterOutline(
-  context: AgentToolContext
+  context: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const chapterId = context.chapterId;
   if (!chapterId) {
-    return errorResult("缺少章节 ID（chapterId）", { source: "tool-layer" });
+    return errorResult('缺少章节 ID（chapterId）', { source: 'tool-layer' });
   }
 
   try {
     const chapter = await chapterRepository.getById(chapterId);
     if (!chapter) {
-      return errorResult(`章节 ${chapterId} 不存在`, { source: "database" });
+      return errorResult(`章节 ${chapterId} 不存在`, { source: 'database' });
     }
 
     const warnings: string[] = [];
@@ -35,9 +35,9 @@ export async function readChapterOutline(
     // 读取所属卷
     let volume: unknown = null;
     try {
-      volume = await volumeRepository.getById(chapter.volumeId ?? "");
+      volume = await volumeRepository.getById(chapter.volumeId ?? '');
     } catch {
-      warnings.push("无法读取所属分卷信息");
+      warnings.push('无法读取所属分卷信息');
     }
 
     // 读取草稿
@@ -45,7 +45,7 @@ export async function readChapterOutline(
     try {
       drafts = await draftService.getByChapterId(chapterId);
     } catch {
-      warnings.push("无法读取章节草稿");
+      warnings.push('无法读取章节草稿');
     }
 
     return successResult(
@@ -55,8 +55,8 @@ export async function readChapterOutline(
           novelId: chapter.novelId,
           volumeId: chapter.volumeId,
           title: chapter.title,
-          outline: chapter.outline ?? "",
-          goal: chapter.goal ?? "",
+          outline: chapter.outline ?? '',
+          goal: chapter.goal ?? '',
           status: chapter.status,
           targetWordCount: chapter.targetWordCount,
           wordCount: chapter.wordCount,
@@ -72,15 +72,14 @@ export async function readChapterOutline(
         drafts,
       },
       {
-        source: "database",
+        source: 'database',
         warnings: warnings.length > 0 ? warnings : undefined,
-      }
+      },
     );
   } catch (err) {
-    return errorResult(
-      `读取章节大纲失败: ${err instanceof Error ? err.message : String(err)}`,
-      { source: "database" }
-    );
+    return errorResult(`读取章节大纲失败: ${err instanceof Error ? err.message : String(err)}`, {
+      source: 'database',
+    });
   }
 }
 
@@ -92,17 +91,17 @@ export async function readChapterOutline(
  * @returns Promise<AgentToolResult> — 章节上下文信息
  */
 export async function readChapterContext(
-  context: AgentToolContext
+  context: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const chapterId = context.chapterId;
   if (!chapterId) {
-    return errorResult("缺少章节 ID（chapterId）", { source: "tool-layer" });
+    return errorResult('缺少章节 ID（chapterId）', { source: 'tool-layer' });
   }
 
   try {
     const chapter = await chapterRepository.getById(chapterId);
     if (!chapter) {
-      return errorResult(`章节 ${chapterId} 不存在`, { source: "database" });
+      return errorResult(`章节 ${chapterId} 不存在`, { source: 'database' });
     }
 
     const novelId = resolveNovelId(context) ?? chapter.novelId;
@@ -111,23 +110,20 @@ export async function readChapterContext(
     // 尝试读取出场角色
     let chapterCharacters: unknown = null;
     try {
-      const { chapterCharacterService } = await import(
-        "../services/characters/chapterCharacterService"
-      );
+      const { chapterCharacterService } =
+        await import('../services/characters/chapterCharacterService');
       chapterCharacters = await chapterCharacterService.getByChapterId(chapterId);
     } catch {
-      warnings.push("无法读取本章出场角色");
+      warnings.push('无法读取本章出场角色');
     }
 
     // 尝试读取章节事件
     let chapterEvents: unknown = null;
     try {
-      const { chapterEventService } = await import(
-        "../services/characters/chapterEventService"
-      );
+      const { chapterEventService } = await import('../services/characters/chapterEventService');
       chapterEvents = await chapterEventService.getByChapterId(chapterId);
     } catch {
-      warnings.push("无法读取本章事件");
+      warnings.push('无法读取本章事件');
     }
 
     return successResult(
@@ -146,15 +142,14 @@ export async function readChapterContext(
         chapterEvents,
       },
       {
-        source: "database",
+        source: 'database',
         warnings: warnings.length > 0 ? warnings : undefined,
-      }
+      },
     );
   } catch (err) {
-    return errorResult(
-      `读取章节上下文失败: ${err instanceof Error ? err.message : String(err)}`,
-      { source: "database" }
-    );
+    return errorResult(`读取章节上下文失败: ${err instanceof Error ? err.message : String(err)}`, {
+      source: 'database',
+    });
   }
 }
 
@@ -170,12 +165,11 @@ export async function readChapterContext(
  */
 export async function saveCandidateDraft(
   context: AgentToolContext,
-  draft: string
+  draft: string,
 ): Promise<AgentToolResult> {
   void context;
   void draft;
   // v1.0.46: 仍然保持安全策略，不实际写入
   // 后续版本在确认候选稿数据结构后再接入
-  return notImplemented("saveCandidateDraft");
+  return notImplemented('saveCandidateDraft');
 }
-

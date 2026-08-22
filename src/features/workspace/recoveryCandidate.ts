@@ -20,12 +20,14 @@ function isExactRecoveryCandidate(
   draft: ChapterDraft,
   snapshot: WorkspaceRecoverySnapshot,
 ): boolean {
-  return draft.novelId === snapshot.novelId
-    && draft.chapterId === snapshot.chapterId
-    && draft.note === RECOVERY_CANDIDATE_NOTE
-    && draft.contentState?.status === 'ready'
-    && draft.contentState.contentHash.toLowerCase() === snapshot.recoveryContentHash.toLowerCase()
-    && draft.contentState.content === snapshot.recoveryContent;
+  return (
+    draft.novelId === snapshot.novelId &&
+    draft.chapterId === snapshot.chapterId &&
+    draft.note === RECOVERY_CANDIDATE_NOTE &&
+    draft.contentState?.status === 'ready' &&
+    draft.contentState.contentHash.toLowerCase() === snapshot.recoveryContentHash.toLowerCase() &&
+    draft.contentState.content === snapshot.recoveryContent
+  );
 }
 
 async function recoveryOperationId(snapshot: WorkspaceRecoverySnapshot): Promise<string> {

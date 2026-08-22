@@ -6,10 +6,7 @@ import type {
   ClaimAiTaskAttemptInput,
   CreateAiTaskInput,
 } from '../../types/ai-task';
-import type {
-  CreateResultArtifactInput,
-  ResultArtifactBundle,
-} from '../../types/result-artifact';
+import type { CreateResultArtifactInput, ResultArtifactBundle } from '../../types/result-artifact';
 import { tauriInvoke } from '../tauri/runtime';
 
 export const aiTaskRuntimeService = {

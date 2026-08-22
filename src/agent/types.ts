@@ -6,12 +6,7 @@
 /**
  * Agent 任务状态
  */
-export type AgentTaskStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+export type AgentTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 /**
  * 单个 Agent 任务

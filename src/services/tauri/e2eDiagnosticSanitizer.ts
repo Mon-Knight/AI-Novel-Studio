@@ -4,8 +4,10 @@ const MAX_OBJECT_FIELDS = 30;
 const MAX_TEXT_LENGTH = 500;
 
 const SAFE_DIAGNOSTIC_FIELDS = new Set(['command', 'errorMessage']);
-const SENSITIVE_FIELD = /^(?:args?|arguments?|prompt|prompts|headers?|body|payload|input|messages?|content|completion|response|token|accessToken|refreshToken|apiKey|key|auth|authorization|password|secret|cookie|url|uri)$/i;
-const SENSITIVE_TEXT = /(?:\bargs?\s*[:=]|\bprompt\s*[:=]|\bheaders?\s*[:=]|\bbody\s*[:=]|\bpayload\s*[:=]|\b(?:api[_ -]?key|token|auth(?:orization)?|password|secret|cookie)\b)/i;
+const SENSITIVE_FIELD =
+  /^(?:args?|arguments?|prompt|prompts|headers?|body|payload|input|messages?|content|completion|response|token|accessToken|refreshToken|apiKey|key|auth|authorization|password|secret|cookie|url|uri)$/i;
+const SENSITIVE_TEXT =
+  /(?:\bargs?\s*[:=]|\bprompt\s*[:=]|\bheaders?\s*[:=]|\bbody\s*[:=]|\bpayload\s*[:=]|\b(?:api[_ -]?key|token|auth(?:orization)?|password|secret|cookie)\b)/i;
 
 function extractSafeDiagnosticFields(text: string): string[] {
   const fields: string[] = [];
@@ -42,7 +44,12 @@ function isSensitiveField(name: string): boolean {
 }
 
 function sanitizeValue(value: unknown, seen: WeakSet<object>, depth: number): unknown {
-  if (value === null || value === undefined || typeof value === 'boolean' || typeof value === 'number') {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === 'boolean' ||
+    typeof value === 'number'
+  ) {
     return value;
   }
   if (typeof value === 'string' || typeof value === 'bigint' || typeof value === 'symbol') {
@@ -67,7 +74,8 @@ function sanitizeValue(value: unknown, seen: WeakSet<object>, depth: number): un
       const result = value
         .slice(0, MAX_ARRAY_ITEMS)
         .map((item) => sanitizeValue(item, seen, depth + 1));
-      if (value.length > MAX_ARRAY_ITEMS) result.push(`[${value.length - MAX_ARRAY_ITEMS} more items]`);
+      if (value.length > MAX_ARRAY_ITEMS)
+        result.push(`[${value.length - MAX_ARRAY_ITEMS} more items]`);
       return result;
     } catch {
       return '[Uninspectable Array]';
@@ -78,7 +86,10 @@ function sanitizeValue(value: unknown, seen: WeakSet<object>, depth: number): un
   let descriptors: Array<[string, PropertyDescriptor]>;
   let fieldCount: number;
   try {
-    descriptors = Object.entries(Object.getOwnPropertyDescriptors(value)).slice(0, MAX_OBJECT_FIELDS);
+    descriptors = Object.entries(Object.getOwnPropertyDescriptors(value)).slice(
+      0,
+      MAX_OBJECT_FIELDS,
+    );
     fieldCount = Reflect.ownKeys(value).length;
   } catch {
     return '[Uninspectable Object]';
@@ -101,16 +112,20 @@ export function sanitizeDiagnosticValue(value: unknown): unknown {
 }
 
 function labelsSensitiveFollowingArgument(value: unknown): boolean {
-  return typeof value === 'string'
-    && /^(?:args?|prompt|headers?|body|payload|input|messages?|content|token|key|auth(?:orization)?|password|secret|cookie)\s*:?\s*$/i.test(value);
+  return (
+    typeof value === 'string' &&
+    /^(?:args?|prompt|headers?|body|payload|input|messages?|content|token|key|auth(?:orization)?|password|secret|cookie)\s*:?\s*$/i.test(
+      value,
+    )
+  );
 }
 
 export function serializeConsoleArguments(args: unknown[]): string {
-  const values = args.map((value, index) => (
+  const values = args.map((value, index) =>
     index > 0 && labelsSensitiveFollowingArgument(args[index - 1])
       ? '[REDACTED]'
-      : sanitizeDiagnosticValue(value)
-  ));
+      : sanitizeDiagnosticValue(value),
+  );
   try {
     return JSON.stringify(values).slice(0, MAX_TEXT_LENGTH);
   } catch {

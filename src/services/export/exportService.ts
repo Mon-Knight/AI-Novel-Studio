@@ -23,7 +23,9 @@ async function isTauriEnv(): Promise<boolean> {
     const { getVersion } = await import('@tauri-apps/api/app');
     await getVersion();
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 async function saveFile(text: string, filename: string, mime: string): Promise<string> {
@@ -32,7 +34,11 @@ async function saveFile(text: string, filename: string, mime: string): Promise<s
     const { writeTextFile } = await import('@tauri-apps/api/fs');
     const ext = filename.endsWith('.md') ? 'md' : filename.endsWith('.json') ? 'json' : 'txt';
     const label = ext === 'md' ? 'Markdown' : ext === 'json' ? 'JSON' : '文本文件';
-    const filePath = await save({ title: '导出文件', defaultPath: filename, filters: [{ name: label, extensions: [ext] }] });
+    const filePath = await save({
+      title: '导出文件',
+      defaultPath: filename,
+      filters: [{ name: label, extensions: [ext] }],
+    });
     if (!filePath) throw new Error('用户取消了导出');
     await writeTextFile(filePath, text);
     return filePath;
@@ -40,9 +46,12 @@ async function saveFile(text: string, filename: string, mime: string): Promise<s
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
   return filename;
 }
 
@@ -58,7 +67,10 @@ export async function exportChapterToTxt(chapterId: string): Promise<string> {
   const content = await getAdoptedContent(chapterId);
   if (!content) throw new Error('该章节没有已采用的正文，无法导出');
   const header = `第${chapter.chapterNumber}章 ${chapter.title}`;
-  const text = buildTxt(novel?.title || '', `${header}\n\n${content}\n\n字数：${formatNumber(chapter.wordCount)} 字\n导出时间：${formatDateTime(new Date())}`);
+  const text = buildTxt(
+    novel?.title || '',
+    `${header}\n\n${content}\n\n字数：${formatNumber(chapter.wordCount)} 字\n导出时间：${formatDateTime(new Date())}`,
+  );
   const filename = `${sanitizeFilename(novel?.title || '作品')}_第${chapter.chapterNumber}章_${sanitizeFilename(chapter.title)}.txt`;
   return await saveFile(text, filename, 'text/plain');
 }
@@ -78,7 +90,9 @@ export async function exportNovelToTxt(novelId: string): Promise<string> {
   const novel = await novelRepository.getById(novelId);
   if (!novel) throw new Error('作品不存在');
   const chapters = await chapterRepository.getByNovelId(novelId);
-  const adoptedChapters = chapters.filter((c) => c.status === 'adopted' || c.status === 'summarized');
+  const adoptedChapters = chapters.filter(
+    (c) => c.status === 'adopted' || c.status === 'summarized',
+  );
   if (adoptedChapters.length === 0) throw new Error('该作品没有已采用的章节，无法导出');
 
   let text = `${novel.title}\n${novel.description || ''}\n\n`;
@@ -100,21 +114,27 @@ export async function exportNovelToMarkdown(novelId: string): Promise<string> {
   const novel = await novelRepository.getById(novelId);
   if (!novel) throw new Error('作品不存在');
   const chapters = await chapterRepository.getByNovelId(novelId);
-  const adoptedChapters = chapters.filter((c) => c.status === 'adopted' || c.status === 'summarized');
+  const adoptedChapters = chapters.filter(
+    (c) => c.status === 'adopted' || c.status === 'summarized',
+  );
   if (adoptedChapters.length === 0) throw new Error('该作品没有已采用的章节，无法导出');
 
   let md = `# ${novel.title}\n\n${novel.description || ''}\n\n`;
   const volumes = await volumeRepository.getByNovelId(novelId);
   for (const vol of volumes.sort((a, b) => a.orderIndex - b.orderIndex)) {
     md += `## ${vol.title}\n\n`;
-    const volChapters = adoptedChapters.filter((c) => c.volumeId === vol.id).sort((a, b) => a.orderIndex - b.orderIndex);
+    const volChapters = adoptedChapters
+      .filter((c) => c.volumeId === vol.id)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
     for (const ch of volChapters) {
       const content = await getAdoptedContent(ch.id);
       if (!content) continue;
       md += `### 第${ch.chapterNumber}章 ${ch.title}\n\n${content}\n\n---\n\n`;
     }
   }
-  const orphanChapters = adoptedChapters.filter((c) => !c.volumeId).sort((a, b) => a.orderIndex - b.orderIndex);
+  const orphanChapters = adoptedChapters
+    .filter((c) => !c.volumeId)
+    .sort((a, b) => a.orderIndex - b.orderIndex);
   for (const ch of orphanChapters) {
     const content = await getAdoptedContent(ch.id);
     if (!content) continue;
@@ -140,7 +160,9 @@ export async function exportNovelBackupJson(novelId: string): Promise<string> {
 }
 
 export const exportService = {
-  exportChapterToTxt, exportChapterToMarkdown,
-  exportNovelToTxt, exportNovelToMarkdown,
+  exportChapterToTxt,
+  exportChapterToMarkdown,
+  exportNovelToTxt,
+  exportNovelToMarkdown,
   exportNovelBackupJson,
 };

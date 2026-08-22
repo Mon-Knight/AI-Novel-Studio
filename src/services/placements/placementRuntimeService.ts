@@ -17,10 +17,9 @@ export const placementRuntimeService = {
     candidateIndex: number;
     expectedArtifactHash: string;
   }): Promise<PlacementBundle> {
-    return withCommitReplay(() => tauriInvoke<PlacementBundle>(
-      'prepare_placement_proposal',
-      { input },
-    ));
+    return withCommitReplay(() =>
+      tauriInvoke<PlacementBundle>('prepare_placement_proposal', { input }),
+    );
   },
 
   get(proposalId: string): Promise<PlacementBundle> {
@@ -34,10 +33,9 @@ export const placementRuntimeService = {
     operationId: string;
     expectedPlanHash: string;
   }): Promise<ApplyPlacementResult> {
-    return withCommitReplay(() => tauriInvoke<ApplyPlacementResult>(
-      'apply_placement_plan',
-      { input },
-    ));
+    return withCommitReplay(() =>
+      tauriInvoke<ApplyPlacementResult>('apply_placement_plan', { input }),
+    );
   },
 };
 

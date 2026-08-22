@@ -4,13 +4,7 @@
  * Tauri 桌面端只读写 SQLite；只有浏览器开发模式使用 localStorage。
  * 两条路径不会在 IPC 失败时互相回退，避免出现“界面显示已保存、重启后丢失”。
  */
-import {
-  dbCall,
-  generateId,
-  getDbMode,
-  lsGet,
-  nowISO,
-} from '../database/db';
+import { dbCall, generateId, getDbMode, lsGet, nowISO } from '../database/db';
 import type {
   ChapterSummary,
   ChapterSummaryValidation,
@@ -32,9 +26,11 @@ function saveAllLocal(items: ChapterSummary[]): void {
 }
 
 function compareNewest(left: ChapterSummary, right: ChapterSummary): number {
-  return right.updatedAt.localeCompare(left.updatedAt)
-    || right.createdAt.localeCompare(left.createdAt)
-    || right.id.localeCompare(left.id);
+  return (
+    right.updatedAt.localeCompare(left.updatedAt) ||
+    right.createdAt.localeCompare(left.createdAt) ||
+    right.id.localeCompare(left.id)
+  );
 }
 
 function latestByChapterInStableOrder(items: ChapterSummary[]): ChapterSummary[] {
@@ -45,9 +41,9 @@ function latestByChapterInStableOrder(items: ChapterSummary[]): ChapterSummary[]
       latestByChapter.set(item.chapterId, item);
     }
   }
-  return [...latestByChapter.values()].sort((left, right) => (
-    left.chapterId.localeCompare(right.chapterId) || compareNewest(left, right)
-  ));
+  return [...latestByChapter.values()].sort(
+    (left, right) => left.chapterId.localeCompare(right.chapterId) || compareNewest(left, right),
+  );
 }
 
 export function toTauriChapterSummaryInput(
@@ -62,9 +58,13 @@ export function toTauriChapterSummaryInput(
     summary: input.summary,
     keyEvents: input.keyEvents ? JSON.stringify(input.keyEvents) : null,
     characterChanges: input.characterChanges ? JSON.stringify(input.characterChanges) : null,
-    relationshipChanges: input.relationshipChanges ? JSON.stringify(input.relationshipChanges) : null,
+    relationshipChanges: input.relationshipChanges
+      ? JSON.stringify(input.relationshipChanges)
+      : null,
     newForeshadows: input.newForeshadows ? JSON.stringify(input.newForeshadows) : null,
-    resolvedForeshadows: input.resolvedForeshadows ? JSON.stringify(input.resolvedForeshadows) : null,
+    resolvedForeshadows: input.resolvedForeshadows
+      ? JSON.stringify(input.resolvedForeshadows)
+      : null,
     nextChapterHints: input.nextChapterHints ?? null,
     coreEvents: input.coreEvents ? JSON.stringify(input.coreEvents) : null,
     protagonistStateChange: input.protagonistStateChange ?? null,
@@ -80,9 +80,7 @@ export function toTauriChapterSummaryInput(
     unresolvedQuestions: input.unresolvedQuestions
       ? JSON.stringify(input.unresolvedQuestions)
       : null,
-    factsMustRemember: input.factsMustRemember
-      ? JSON.stringify(input.factsMustRemember)
-      : null,
+    factsMustRemember: input.factsMustRemember ? JSON.stringify(input.factsMustRemember) : null,
     nextChapterHook: input.nextChapterHook ?? null,
     validationStatus: input.validationStatus ?? null,
     validationResult: input.validationResult ? JSON.stringify(input.validationResult) : null,
@@ -118,7 +116,7 @@ function safeJsonParseObject(value: unknown): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value);
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
+      ? (parsed as Record<string, unknown>)
       : {};
   } catch {
     return {};
@@ -145,8 +143,11 @@ export function mapChapterSummaryFromTauriDto(dto: unknown): ChapterSummary {
   const summary = readDtoValue(dto, 'summary', 'summary');
   const createdAt = readDtoValue(dto, 'createdAt', 'created_at');
   const updatedAt = readDtoValue(dto, 'updatedAt', 'updated_at');
-  if (![id, novelId, chapterId, adoptedDraftId, summary, createdAt, updatedAt]
-    .every((value) => typeof value === 'string')) {
+  if (
+    ![id, novelId, chapterId, adoptedDraftId, summary, createdAt, updatedAt].every(
+      (value) => typeof value === 'string',
+    )
+  ) {
     throw new Error('SQLite 返回了无效的章节总结。');
   }
 
@@ -160,10 +161,18 @@ export function mapChapterSummaryFromTauriDto(dto: unknown): ChapterSummary {
     adoptedDraftId: adoptedDraftId as string,
     summary: summary as string,
     keyEvents: safeJsonParseArray(readDtoValue(dto, 'keyEvents', 'key_events')) as string[],
-    characterChanges: safeJsonParseObject(readDtoValue(dto, 'characterChanges', 'character_changes')),
-    relationshipChanges: safeJsonParseObject(readDtoValue(dto, 'relationshipChanges', 'relationship_changes')),
-    newForeshadows: safeJsonParseArray(readDtoValue(dto, 'newForeshadows', 'new_foreshadows')) as string[],
-    resolvedForeshadows: safeJsonParseArray(readDtoValue(dto, 'resolvedForeshadows', 'resolved_foreshadows')) as string[],
+    characterChanges: safeJsonParseObject(
+      readDtoValue(dto, 'characterChanges', 'character_changes'),
+    ),
+    relationshipChanges: safeJsonParseObject(
+      readDtoValue(dto, 'relationshipChanges', 'relationship_changes'),
+    ),
+    newForeshadows: safeJsonParseArray(
+      readDtoValue(dto, 'newForeshadows', 'new_foreshadows'),
+    ) as string[],
+    resolvedForeshadows: safeJsonParseArray(
+      readDtoValue(dto, 'resolvedForeshadows', 'resolved_foreshadows'),
+    ) as string[],
     nextChapterHints: optionalString(readDtoValue(dto, 'nextChapterHints', 'next_chapter_hints')),
     coreEvents: safeJsonParseArray(readDtoValue(dto, 'coreEvents', 'core_events')) as string[],
     protagonistStateChange: optionalString(
@@ -172,12 +181,18 @@ export function mapChapterSummaryFromTauriDto(dto: unknown): ChapterSummary {
     importantCharacterChanges: safeJsonParseArray(
       readDtoValue(dto, 'importantCharacterChanges', 'important_character_changes'),
     ) as ChapterSummary['importantCharacterChanges'],
-    settingChanges: safeJsonParseArray(readDtoValue(dto, 'settingChanges', 'setting_changes')) as string[],
-    newLocations: safeJsonParseArray(readDtoValue(dto, 'newLocations', 'new_locations')) as string[],
+    settingChanges: safeJsonParseArray(
+      readDtoValue(dto, 'settingChanges', 'setting_changes'),
+    ) as string[],
+    newLocations: safeJsonParseArray(
+      readDtoValue(dto, 'newLocations', 'new_locations'),
+    ) as string[],
     newItemsOrAbilities: safeJsonParseArray(
       readDtoValue(dto, 'newItemsOrAbilities', 'new_items_or_abilities'),
     ) as string[],
-    foreshadowing: safeJsonParseArray(readDtoValue(dto, 'foreshadowing', 'foreshadowing')) as string[],
+    foreshadowing: safeJsonParseArray(
+      readDtoValue(dto, 'foreshadowing', 'foreshadowing'),
+    ) as string[],
     unresolvedQuestions: safeJsonParseArray(
       readDtoValue(dto, 'unresolvedQuestions', 'unresolved_questions'),
     ) as string[],
@@ -210,9 +225,11 @@ export const chapterSummaryService = {
       const dto = await dbCall<unknown | null>('get_chapter_summary', { chapterId });
       return dto ? mapChapterSummaryFromTauriDto(dto) : null;
     }
-    return getAllLocal()
-      .filter((item) => item.chapterId === chapterId)
-      .sort(compareNewest)[0] ?? null;
+    return (
+      getAllLocal()
+        .filter((item) => item.chapterId === chapterId)
+        .sort(compareNewest)[0] ?? null
+    );
   },
 
   async getByNovelId(novelId: string): Promise<ChapterSummary[]> {
@@ -229,9 +246,7 @@ export const chapterSummaryService = {
         return true;
       });
     }
-    return latestByChapterInStableOrder(
-      getAllLocal().filter((item) => item.novelId === novelId),
-    );
+    return latestByChapterInStableOrder(getAllLocal().filter((item) => item.novelId === novelId));
   },
 
   async create(input: CreateChapterSummaryInput): Promise<ChapterSummary> {
@@ -302,20 +317,27 @@ export const chapterSummaryService = {
     const summarySnapshot = localStorage.getItem(CHAPTER_SUMMARIES_STORAGE_KEY);
     const contextSnapshot = localStorage.getItem(CONTEXT_RECORDS_STORAGE_KEY);
     const now = nowISO();
-    const summaries = getAllLocal().map((item) => item.chapterId === chapterId
-      ? { ...item, isExpired: true, updatedAt: now }
-      : item);
-    const contexts = (lsGet<ContextRecord[]>(CONTEXT_RECORDS_STORAGE_KEY) ?? [])
-      .map((item) => item.chapterId === chapterId
-        ? { ...item, isExpired: true, updatedAt: now }
-        : item);
+    const summaries = getAllLocal().map((item) =>
+      item.chapterId === chapterId ? { ...item, isExpired: true, updatedAt: now } : item,
+    );
+    const contexts = (lsGet<ContextRecord[]>(CONTEXT_RECORDS_STORAGE_KEY) ?? []).map((item) =>
+      item.chapterId === chapterId ? { ...item, isExpired: true, updatedAt: now } : item,
+    );
     try {
       localStorage.setItem(CHAPTER_SUMMARIES_STORAGE_KEY, JSON.stringify(summaries));
       localStorage.setItem(CONTEXT_RECORDS_STORAGE_KEY, JSON.stringify(contexts));
     } catch (error) {
       const rollbackErrors: unknown[] = [];
-      try { restoreLocalSnapshot(CHAPTER_SUMMARIES_STORAGE_KEY, summarySnapshot); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
-      try { restoreLocalSnapshot(CONTEXT_RECORDS_STORAGE_KEY, contextSnapshot); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+      try {
+        restoreLocalSnapshot(CHAPTER_SUMMARIES_STORAGE_KEY, summarySnapshot);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+      try {
+        restoreLocalSnapshot(CONTEXT_RECORDS_STORAGE_KEY, contextSnapshot);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
       if (rollbackErrors.length > 0) {
         const rollbackFailure = new Error('章节上下文本地保存失败，且回滚未完全成功。');
         Object.assign(rollbackFailure, { cause: error, rollbackErrors });

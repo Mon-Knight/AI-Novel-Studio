@@ -19,8 +19,10 @@ function cancellationMarker(value: unknown): string {
 }
 
 export function isAiRequestCancelled(error: unknown): boolean {
-  return error instanceof AiRequestCancelledError
-    || cancellationMarker(error).includes(AI_REQUEST_CANCELLED);
+  return (
+    error instanceof AiRequestCancelledError ||
+    cancellationMarker(error).includes(AI_REQUEST_CANCELLED)
+  );
 }
 
 export function throwIfAiRequestCancelled(signal?: AbortSignal): void {

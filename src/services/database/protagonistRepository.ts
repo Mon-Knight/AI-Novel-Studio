@@ -22,10 +22,7 @@ export const protagonistRepository = {
     });
   },
 
-  async save(
-    id: string | null,
-    input: SaveProtagonistInput,
-  ): Promise<Protagonist> {
+  async save(id: string | null, input: SaveProtagonistInput): Promise<Protagonist> {
     return dbCall<Protagonist>('save_protagonist', { id, input }, () => {
       const items = getLocalProtagonists();
       const now = nowISO();

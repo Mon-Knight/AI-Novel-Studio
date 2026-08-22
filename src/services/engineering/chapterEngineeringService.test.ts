@@ -26,7 +26,11 @@ test('legacy ScenePlan fields are normalized into ordered scene-local Beats', ()
 
   assert.equal(scenes[0].sceneNo, 1);
   assert.deepEqual(
-    scenes[0].beats.map((beat) => ({ order: beat.order, text: beat.text, required: beat.required })),
+    scenes[0].beats.map((beat) => ({
+      order: beat.order,
+      text: beat.text,
+      required: beat.required,
+    })),
     [
       { order: 1, text: '发现入口', required: true },
       { order: 2, text: '进入房间', required: true },
@@ -64,7 +68,10 @@ test('SceneBeat order is sorted and normalized while optional metadata survives'
     },
   ]);
 
-  assert.deepEqual(scene.beats.map((beat) => beat.order), [1, 2]);
+  assert.deepEqual(
+    scene.beats.map((beat) => beat.order),
+    [1, 2],
+  );
   assert.equal(scene.beats[0].text, '第一步');
   assert.deepEqual(scene.beats[0].characterIds, ['c1']);
   assert.equal(scene.beats[1].required, false);

@@ -3,12 +3,18 @@
  */
 
 export interface ImportedChapterDraft {
-  title: string; content: string; orderIndex: number; wordCount: number;
+  title: string;
+  content: string;
+  orderIndex: number;
+  wordCount: number;
 }
 
 export interface TxtAnalyzeResult {
-  totalChars: number; totalWords: number; detectedChapterCount: number;
-  chapters: ImportedChapterDraft[]; warnings: string[];
+  totalChars: number;
+  totalWords: number;
+  detectedChapterCount: number;
+  chapters: ImportedChapterDraft[];
+  warnings: string[];
 }
 
 const CHAPTER_PATTERNS = [
@@ -21,7 +27,10 @@ function countWords(text: string): number {
   const cleaned = text.replace(/[\s\n\r]+/g, ' ').trim();
   if (!cleaned) return 0;
   const cjk = (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  const other = cleaned.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ').split(/\s+/).filter(Boolean).length;
+  const other = cleaned
+    .replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
   return cjk + other;
 }
 
@@ -35,7 +44,14 @@ export function readTextFile(file: File): Promise<string> {
 }
 
 export function analyzeTxtForChapters(content: string): TxtAnalyzeResult {
-  if (!content?.trim()) return { totalChars: 0, totalWords: 0, detectedChapterCount: 0, chapters: [], warnings: ['文件内容为空'] };
+  if (!content?.trim())
+    return {
+      totalChars: 0,
+      totalWords: 0,
+      detectedChapterCount: 0,
+      chapters: [],
+      warnings: ['文件内容为空'],
+    };
 
   const totalChars = content.length;
   const totalWords = countWords(content);
@@ -58,8 +74,12 @@ export function analyzeTxtForChapters(content: string): TxtAnalyzeResult {
   if (matches.length === 0) {
     warnings.push('未识别到章节标题，建议作为单章导入');
     return {
-      totalChars, totalWords, detectedChapterCount: 0,
-      chapters: [{ title: '第1章：导入正文', content: content.trim(), orderIndex: 1, wordCount: totalWords }],
+      totalChars,
+      totalWords,
+      detectedChapterCount: 0,
+      chapters: [
+        { title: '第1章：导入正文', content: content.trim(), orderIndex: 1, wordCount: totalWords },
+      ],
       warnings,
     };
   }
@@ -71,7 +91,8 @@ export function analyzeTxtForChapters(content: string): TxtAnalyzeResult {
     const end = i < matches.length - 1 ? matches[i + 1].index : content.length;
     const body = content.slice(start, end).trim();
     const titleLineEnd = body.indexOf('\n');
-    const title = titleLineEnd > 0 ? body.slice(0, titleLineEnd).trim().slice(0, 60) : body.slice(0, 60);
+    const title =
+      titleLineEnd > 0 ? body.slice(0, titleLineEnd).trim().slice(0, 60) : body.slice(0, 60);
     const bodyContent = titleLineEnd > 0 ? body.slice(titleLineEnd).trim() : body;
     chapters.push({
       title,

@@ -9,14 +9,8 @@ import { dbCall, getDbMode } from '../database/db';
 import type { CharacterState } from '../../types/character';
 import type { ChapterSummary } from '../../types/chapterSummary';
 import type { ContextRecord } from '../../types/context';
-import {
-  CHAPTER_SUMMARIES_STORAGE_KEY,
-  toTauriChapterSummaryInput,
-} from './chapterSummaryService';
-import {
-  CHARACTER_STATES_STORAGE_KEY,
-  toTauriCharacterStateInput,
-} from './characterStateService';
+import { CHAPTER_SUMMARIES_STORAGE_KEY, toTauriChapterSummaryInput } from './chapterSummaryService';
+import { CHARACTER_STATES_STORAGE_KEY, toTauriCharacterStateInput } from './characterStateService';
 import { toTauriContextRecordInput } from './chapterContextPersistenceService';
 
 export const CONTEXT_RECORDS_STORAGE_KEY = 'ai_novel_studio_context_records';
@@ -80,20 +74,30 @@ function hasStringFields(value: unknown, fields: string[]): value is Record<stri
 
 function isLegacySummary(value: unknown): value is ChapterSummary {
   return hasStringFields(value, [
-    'id', 'novelId', 'chapterId', 'adoptedDraftId', 'summary', 'createdAt', 'updatedAt',
+    'id',
+    'novelId',
+    'chapterId',
+    'adoptedDraftId',
+    'summary',
+    'createdAt',
+    'updatedAt',
   ]);
 }
 
 function isLegacyContext(value: unknown): value is ContextRecord {
   return hasStringFields(value, [
-    'id', 'novelId', 'contextType', 'title', 'content', 'createdAt', 'updatedAt',
+    'id',
+    'novelId',
+    'contextType',
+    'title',
+    'content',
+    'createdAt',
+    'updatedAt',
   ]);
 }
 
 function isLegacyCharacterState(value: unknown): value is CharacterState {
-  return hasStringFields(value, [
-    'id', 'novelId', 'characterId', 'stateSummary', 'createdAt',
-  ]);
+  return hasStringFields(value, ['id', 'novelId', 'characterId', 'stateSummary', 'createdAt']);
 }
 
 function readLegacyCollection<T>(
@@ -141,9 +145,10 @@ function itemId(value: unknown): string | undefined {
   return isRecord(value) && typeof value.id === 'string' ? value.id : undefined;
 }
 
-function excludeAmbiguousIds(
-  collections: Array<LegacyCollection<unknown>>,
-): { allowedIds: Set<string>; warnings: string[] } {
+function excludeAmbiguousIds(collections: Array<LegacyCollection<unknown>>): {
+  allowedIds: Set<string>;
+  warnings: string[];
+} {
   const idCounts = new Map<string, number>();
   for (const collection of collections) {
     for (const item of collection.items) {
@@ -193,7 +198,11 @@ function readNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-function readCounts(result: unknown, camelKey: string, snakeKey: string): LegacyMigrationEntityCounts {
+function readCounts(
+  result: unknown,
+  camelKey: string,
+  snakeKey: string,
+): LegacyMigrationEntityCounts {
   if (!isRecord(result)) return emptyCounts();
   const raw = result[camelKey] ?? result[snakeKey];
   if (!isRecord(raw)) return emptyCounts();
@@ -204,7 +213,9 @@ function readCounts(result: unknown, camelKey: string, snakeKey: string): Legacy
   };
 }
 
-function readMigrationResult(result: unknown): Omit<LegacyChapterContextMigrationResult, 'performed' | 'localRecordsRemoved'> {
+function readMigrationResult(
+  result: unknown,
+): Omit<LegacyChapterContextMigrationResult, 'performed' | 'localRecordsRemoved'> {
   if (!isRecord(result)) throw new Error('SQLite 返回了无效的旧上下文迁移结果。');
   const rawIdMap = result.idMap ?? result.id_map;
   const rawWarnings = result.warnings;
@@ -212,9 +223,9 @@ function readMigrationResult(result: unknown): Omit<LegacyChapterContextMigratio
     throw new Error('SQLite 返回了无效的旧上下文迁移映射。');
   }
   const idMap = Object.fromEntries(
-    Object.entries(rawIdMap).filter((entry): entry is [string, string] => (
-      typeof entry[1] === 'string'
-    )),
+    Object.entries(rawIdMap).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
   );
   return {
     chapterSummaries: readCounts(result, 'chapterSummaries', 'chapter_summaries'),

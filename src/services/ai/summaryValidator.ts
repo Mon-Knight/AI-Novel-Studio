@@ -18,9 +18,14 @@ export function validateSummary(
   // 1. 检查 keyEvents 中的关键实体是否在正文中出现
   for (const event of summaryResult.keyEvents) {
     const keywords = extractKeywords(event);
-    const missing = keywords.filter((kw) => kw.length >= 2 && !draftLower.includes(kw.toLowerCase()));
+    const missing = keywords.filter(
+      (kw) => kw.length >= 2 && !draftLower.includes(kw.toLowerCase()),
+    );
     if (missing.length >= keywords.length * 0.6 && keywords.length >= 3) {
-      problems.push({ type: 'fabrication', message: `关键事件「${event.slice(0, 40)}」中的关键信息可能在正文中不存在。` });
+      problems.push({
+        type: 'fabrication',
+        message: `关键事件「${event.slice(0, 40)}」中的关键信息可能在正文中不存在。`,
+      });
     }
   }
 
@@ -28,7 +33,10 @@ export function validateSummary(
   for (const cc of summaryResult.characterChanges) {
     const name = cc.characterName;
     if (name && name.length >= 2 && !draftLower.includes(name.toLowerCase())) {
-      problems.push({ type: 'character_error', message: `角色「${name}」未在正文中出现，但总结中记录了其状态变化。` });
+      problems.push({
+        type: 'character_error',
+        message: `角色「${name}」未在正文中出现，但总结中记录了其状态变化。`,
+      });
     }
   }
 
@@ -36,9 +44,14 @@ export function validateSummary(
   if (summaryResult.settingChanges) {
     for (const sc of summaryResult.settingChanges) {
       const keywords = extractKeywords(sc);
-      const missing = keywords.filter((kw) => kw.length >= 2 && !draftLower.includes(kw.toLowerCase()));
+      const missing = keywords.filter(
+        (kw) => kw.length >= 2 && !draftLower.includes(kw.toLowerCase()),
+      );
       if (missing.length >= keywords.length * 0.5 && keywords.length >= 2) {
-        problems.push({ type: 'setting_error', message: `设定变更「${sc.slice(0, 40)}」在正文中可能缺乏依据。` });
+        problems.push({
+          type: 'setting_error',
+          message: `设定变更「${sc.slice(0, 40)}」在正文中可能缺乏依据。`,
+        });
       }
     }
   }
@@ -46,9 +59,14 @@ export function validateSummary(
   // 4. 检查 nextChapterHook 是否基于正文已有线索
   if (summaryResult.nextChapterHook && summaryResult.nextChapterHook.length > 20) {
     const hookWords = extractKeywords(summaryResult.nextChapterHook);
-    const foundCount = hookWords.filter((kw) => kw.length >= 2 && draftLower.includes(kw.toLowerCase())).length;
+    const foundCount = hookWords.filter(
+      (kw) => kw.length >= 2 && draftLower.includes(kw.toLowerCase()),
+    ).length;
     if (hookWords.length >= 3 && foundCount < hookWords.length * 0.3) {
-      problems.push({ type: 'speculation', message: '下一章衔接建议可能基于推测而非正文已有线索。' });
+      problems.push({
+        type: 'speculation',
+        message: '下一章衔接建议可能基于推测而非正文已有线索。',
+      });
     }
   }
 

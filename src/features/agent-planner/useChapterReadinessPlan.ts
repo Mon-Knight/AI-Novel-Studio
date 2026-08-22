@@ -53,31 +53,37 @@ export function useChapterReadinessPlan(novelId?: string, chapterId?: string) {
     void reload();
   }, [reload]);
 
-  const run = useCallback(async (action: () => Promise<AgentPlanBundle>) => {
-    setRunning(true);
-    setError('');
-    try {
-      const result = await action();
-      acceptBundle(result);
-      return result;
-    } catch (reason) {
-      setError(describeUnknownError(reason, '章节准备计划执行失败'));
-      throw reason;
-    } finally {
-      setRunning(false);
-    }
-  }, [acceptBundle]);
+  const run = useCallback(
+    async (action: () => Promise<AgentPlanBundle>) => {
+      setRunning(true);
+      setError('');
+      try {
+        const result = await action();
+        acceptBundle(result);
+        return result;
+      } catch (reason) {
+        setError(describeUnknownError(reason, '章节准备计划执行失败'));
+        throw reason;
+      } finally {
+        setRunning(false);
+      }
+    },
+    [acceptBundle],
+  );
 
   const createAndRun = useCallback(async () => {
     if (!novelId || !chapterId) return;
-    createOperationRef.current ??= agentPlanPersistenceService
-      .newOperationId('chapter-readiness-create');
+    createOperationRef.current ??= agentPlanPersistenceService.newOperationId(
+      'chapter-readiness-create',
+    );
     const operationId = createOperationRef.current;
     try {
-      await run(() => agentPlanRuntimeService.createAndRun(
-        { novelId, chapterId, operationId },
-        { onProgress: ({ bundle: next }) => acceptBundle(next) },
-      ));
+      await run(() =>
+        agentPlanRuntimeService.createAndRun(
+          { novelId, chapterId, operationId },
+          { onProgress: ({ bundle: next }) => acceptBundle(next) },
+        ),
+      );
       createOperationRef.current = undefined;
     } catch {
       // Keep the operation ID so a repeated user click safely replays create.
@@ -86,20 +92,22 @@ export function useChapterReadinessPlan(novelId?: string, chapterId?: string) {
 
   const runExisting = useCallback(async () => {
     if (!bundle) return;
-    await run(() => agentPlanRuntimeService.runExisting(bundle.plan.planId, {
-      onProgress: ({ bundle: next }) => acceptBundle(next),
-    })).catch(() => undefined);
+    await run(() =>
+      agentPlanRuntimeService.runExisting(bundle.plan.planId, {
+        onProgress: ({ bundle: next }) => acceptBundle(next),
+      }),
+    ).catch(() => undefined);
   }, [acceptBundle, bundle, run]);
 
   const retry = useCallback(async () => {
     if (!bundle) return;
     const step = bundle.steps.find((candidate) => candidate.status === 'waiting_retry');
     if (!step) return;
-    await run(() => agentPlanRuntimeService.authorizeRetryAndRun(
-      bundle.plan.planId,
-      step.stepId,
-      { onProgress: ({ bundle: next }) => acceptBundle(next) },
-    )).catch(() => undefined);
+    await run(() =>
+      agentPlanRuntimeService.authorizeRetryAndRun(bundle.plan.planId, step.stepId, {
+        onProgress: ({ bundle: next }) => acceptBundle(next),
+      }),
+    ).catch(() => undefined);
   }, [acceptBundle, bundle, run]);
 
   return {

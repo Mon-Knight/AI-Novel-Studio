@@ -61,15 +61,18 @@ function protocolOf(target: unknown, baseHref: string): string {
 }
 
 function sameEndpoint(target: URL, base: URL): boolean {
-  return target.protocol === base.protocol
-    && target.hostname === base.hostname
-    && target.port === base.port;
+  return (
+    target.protocol === base.protocol &&
+    target.hostname === base.hostname &&
+    target.port === base.port
+  );
 }
 
 function isExternalTarget(target: unknown, baseHref: string): boolean {
   const parsed = parseTarget(target, baseHref);
   if (!parsed) return true;
-  if (parsed.protocol === 'data:' || parsed.protocol === 'blob:' || parsed.protocol === 'about:') return false;
+  if (parsed.protocol === 'data:' || parsed.protocol === 'blob:' || parsed.protocol === 'about:')
+    return false;
   try {
     return !sameEndpoint(parsed, new URL(baseHref));
   } catch {
@@ -111,11 +114,14 @@ export function installE2eNetworkGuard(target: E2eNetworkTarget): E2eNetworkGuar
   const record = (transport: E2eNetworkTransport, requestTarget: unknown) => {
     total += 1;
     byTransport[transport] += 1;
-    attempts = [...attempts, {
-      transport,
-      protocol: protocolOf(requestTarget, baseHref),
-      at: new Date().toISOString(),
-    }].slice(-MAX_RECORDED_ATTEMPTS);
+    attempts = [
+      ...attempts,
+      {
+        transport,
+        protocol: protocolOf(requestTarget, baseHref),
+        at: new Date().toISOString(),
+      },
+    ].slice(-MAX_RECORDED_ATTEMPTS);
   };
 
   const guard: E2eNetworkGuard = {
@@ -148,7 +154,12 @@ export function installE2eNetworkGuard(target: E2eNetworkTarget): E2eNetworkGuar
   const xhrPrototype = target.XMLHttpRequest?.prototype;
   if (xhrPrototype && typeof xhrPrototype.open === 'function') {
     const originalOpen = xhrPrototype.open;
-    const guardedOpen = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+    const guardedOpen = function (
+      this: XMLHttpRequest,
+      method: string,
+      url: string | URL,
+      ...rest: unknown[]
+    ) {
       if (isExternalTarget(url, baseHref)) {
         record('xhr', url);
         throw blockedError('xhr');

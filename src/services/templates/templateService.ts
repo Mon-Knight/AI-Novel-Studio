@@ -106,7 +106,12 @@ export const templateService = {
   },
 
   /** 更新模板 */
-  update(id: string, input: Partial<Pick<UserTemplate, 'name' | 'type' | 'description' | 'content' | 'tags' | 'variables'>>): UserTemplate | null {
+  update(
+    id: string,
+    input: Partial<
+      Pick<UserTemplate, 'name' | 'type' | 'description' | 'content' | 'tags' | 'variables'>
+    >,
+  ): UserTemplate | null {
     const list = getAll();
     const idx = list.findIndex((t) => t.id === id);
     if (idx === -1) return null;

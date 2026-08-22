@@ -3,7 +3,9 @@ export async function computeContentSha256(content: string): Promise<string> {
   if (typeof crypto !== 'undefined' && crypto.subtle) {
     const bytes = new TextEncoder().encode(content);
     const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
+      '',
+    );
   }
 
   // Browser fallback is intentionally deterministic. Tauri/web production

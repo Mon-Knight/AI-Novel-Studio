@@ -223,7 +223,10 @@ function normalizeChapterCard(value: unknown, chapter?: ChapterEngineeringSeed):
   };
 }
 
-export function normalizeScenePlan(value: unknown, chapter?: ChapterEngineeringSeed): ScenePlanItem[] {
+export function normalizeScenePlan(
+  value: unknown,
+  chapter?: ChapterEngineeringSeed,
+): ScenePlanItem[] {
   const raw = parseJsonField<Partial<ScenePlanItem>[]>(value, []);
   if (!Array.isArray(raw) || raw.length === 0) return createDefaultScenePlan(chapter);
   return raw

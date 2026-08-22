@@ -13,13 +13,7 @@ export interface WorldSetting {
   updatedAt: string;
 }
 
-export type RuleCategory =
-  | 'magic'
-  | 'technology'
-  | 'cultivation'
-  | 'combat'
-  | 'social'
-  | 'other';
+export type RuleCategory = 'magic' | 'technology' | 'cultivation' | 'combat' | 'social' | 'other';
 
 export const RuleCategoryLabels: Record<RuleCategory, string> = {
   magic: '魔法',

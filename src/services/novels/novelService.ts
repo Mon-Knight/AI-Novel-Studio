@@ -2,7 +2,12 @@
  * AI Novel Studio - Novel Service
  */
 import type { Novel, CreateNovelInput, UpdateNovelInput } from '../../types/novel';
-import { novelRepository, type NovelRepairResult, type NovelRepairSummary, type UpdateNovelProtagonistsInput } from '../database/novelRepository';
+import {
+  novelRepository,
+  type NovelRepairResult,
+  type NovelRepairSummary,
+  type UpdateNovelProtagonistsInput,
+} from '../database/novelRepository';
 
 export const novelService = {
   listNovels(): Promise<Novel[]> {

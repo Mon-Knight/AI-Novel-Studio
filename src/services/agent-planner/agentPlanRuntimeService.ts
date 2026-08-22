@@ -1,18 +1,11 @@
-import type {
-  AgentPlanBundle,
-  AgentPlanError,
-  AgentPlanLeaseProof,
-} from '../../types/agentPlan';
+import type { AgentPlanBundle, AgentPlanError, AgentPlanLeaseProof } from '../../types/agentPlan';
 import type { ToolRegistry } from '../agent-tools/toolRegistry';
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import {
   agentPlanPersistenceService,
   type AgentPlanPersistence,
 } from './agentPlanPersistenceService';
-import {
-  nextRunnableStep,
-  verifyChapterReadinessPlan,
-} from './chapterReadinessPlanner';
+import { nextRunnableStep, verifyChapterReadinessPlan } from './chapterReadinessPlanner';
 
 export interface AgentPlanRuntimeDependencies {
   persistence: AgentPlanPersistence;
@@ -38,7 +31,9 @@ class AgentPlanToolResultError extends Error {
   }
 }
 
-function leaseProof(grant: Awaited<ReturnType<AgentPlanPersistence['acquireLease']>>): AgentPlanLeaseProof {
+function leaseProof(
+  grant: Awaited<ReturnType<AgentPlanPersistence['acquireLease']>>,
+): AgentPlanLeaseProof {
   return {
     leaseId: grant.lease.leaseId,
     epoch: grant.lease.epoch,
@@ -48,12 +43,14 @@ function leaseProof(grant: Awaited<ReturnType<AgentPlanPersistence['acquireLease
 }
 
 function safeRuntimeError(error: unknown): AgentPlanError {
-  const record = error && typeof error === 'object'
-    ? error as { code?: unknown; message?: unknown; retryable?: unknown }
-    : undefined;
-  const message = typeof record?.message === 'string' && record.message.length <= 500
-    ? record.message
-    : '本地工具执行失败';
+  const record =
+    error && typeof error === 'object'
+      ? (error as { code?: unknown; message?: unknown; retryable?: unknown })
+      : undefined;
+  const message =
+    typeof record?.message === 'string' && record.message.length <= 500
+      ? record.message
+      : '本地工具执行失败';
   return {
     code: typeof record?.code === 'string' ? record.code : 'AGENT_PLAN_TOOL_FAILED',
     message,
@@ -63,9 +60,7 @@ function safeRuntimeError(error: unknown): AgentPlanError {
   };
 }
 
-export function createAgentPlanRuntime(
-  dependencies: AgentPlanRuntimeDependencies,
-) {
+export function createAgentPlanRuntime(dependencies: AgentPlanRuntimeDependencies) {
   const { persistence, registry } = dependencies;
 
   async function runExisting(
@@ -75,9 +70,12 @@ export function createAgentPlanRuntime(
     let bundle = await persistence.get(planId);
     const manifest = await registry.getManifest();
     await verifyChapterReadinessPlan(bundle, manifest);
-    if (bundle.plan.status === 'completed'
-      || bundle.plan.status === 'failed'
-      || bundle.plan.status === 'cancelled') return bundle;
+    if (
+      bundle.plan.status === 'completed' ||
+      bundle.plan.status === 'failed' ||
+      bundle.plan.status === 'cancelled'
+    )
+      return bundle;
     if (bundle.plan.status === 'waiting_retry') {
       throw new AgentPlanToolResultError('计划等待用户显式继续，不能自动重试。');
     }
@@ -97,21 +95,18 @@ export function createAgentPlanRuntime(
         options.onProgress?.({ bundle: await persistence.get(planId), activeStepId: step.stepId });
         let result: Awaited<ReturnType<ToolRegistry['invoke']>>;
         try {
-          result = await registry.invoke(
-            step.toolName,
-            step.toolVersion,
-            step.argumentsJson,
-            {
-              invocationId: claim.attempt.attemptId,
-              novelId: bundle.plan.novelId,
-              chapterId: bundle.plan.chapterId,
-              grantedPermissions: step.permissionsJson,
-              allowedTools: [step.toolIdentity],
-              dryRun: true,
-            },
-          );
+          result = await registry.invoke(step.toolName, step.toolVersion, step.argumentsJson, {
+            invocationId: claim.attempt.attemptId,
+            novelId: bundle.plan.novelId,
+            chapterId: bundle.plan.chapterId,
+            grantedPermissions: step.permissionsJson,
+            allowedTools: [step.toolIdentity],
+            dryRun: true,
+          });
           if (!result.ok) {
-            throw new AgentPlanToolResultError(result.error || `工具 ${step.toolIdentity} 返回失败`);
+            throw new AgentPlanToolResultError(
+              result.error || `工具 ${step.toolIdentity} 返回失败`,
+            );
           }
         } catch (error) {
           bundle = await persistence.fail({
@@ -156,8 +151,7 @@ export function createAgentPlanRuntime(
         novelId: input.novelId,
         chapterId: input.chapterId,
         registryHash: manifest.registryHash,
-        operationId: input.operationId
-          ?? persistence.newOperationId('chapter-readiness-create'),
+        operationId: input.operationId ?? persistence.newOperationId('chapter-readiness-create'),
       });
       options.onProgress?.({ bundle });
       return runExisting(bundle.plan.planId, options);

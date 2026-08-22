@@ -32,10 +32,7 @@ export const settingRepository = {
     );
   },
 
-  async saveWorldSetting(
-    id: string | null,
-    input: SaveWorldSettingInput,
-  ): Promise<WorldSetting> {
+  async saveWorldSetting(id: string | null, input: SaveWorldSettingInput): Promise<WorldSetting> {
     return dbCall<WorldSetting>('save_world_setting', { id, input }, () => {
       const items = getLocalWorldSettings();
       const now = nowISO();
@@ -69,10 +66,7 @@ export const settingRepository = {
     );
   },
 
-  async saveRuleSystem(
-    id: string | null,
-    input: SaveRuleSystemInput,
-  ): Promise<RuleSystem> {
+  async saveRuleSystem(id: string | null, input: SaveRuleSystemInput): Promise<RuleSystem> {
     return dbCall<RuleSystem>('save_rule_system', { id, input }, () => {
       const items = getLocalRuleSystems();
       const now = nowISO();

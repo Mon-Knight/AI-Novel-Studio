@@ -21,12 +21,7 @@ export const ChapterStatusLabels: Record<ChapterStatus, string> = {
   summarized: '已总结',
 };
 
-export type DraftSource =
-  | 'ai_generate'
-  | 'ai_regenerate'
-  | 'ai_polish'
-  | 'user_edit'
-  | 'import';
+export type DraftSource = 'ai_generate' | 'ai_regenerate' | 'ai_polish' | 'user_edit' | 'import';
 
 export interface Chapter {
   id: string;

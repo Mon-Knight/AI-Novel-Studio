@@ -1,20 +1,10 @@
 import type { ToolPermission, ToolResult } from './toolRegistry';
 
 export type AgentPlanStatus =
-  | 'ready'
-  | 'running'
-  | 'waiting_retry'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'ready' | 'running' | 'waiting_retry' | 'completed' | 'failed' | 'cancelled';
 
 export type AgentPlanStepStatus =
-  | 'pending'
-  | 'running'
-  | 'waiting_retry'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'pending' | 'running' | 'waiting_retry' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentPlanRecord {
   planId: string;

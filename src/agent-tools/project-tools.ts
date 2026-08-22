@@ -4,14 +4,14 @@
 // 用途：提供项目/作品上下文的只读 Tool 接口
 // 安全：只读，不创建/修改/删除数据
 
-import type { AgentToolResult, AgentToolContext } from "./tool-types";
-import { errorResult, resolveNovelId, successResult } from "./tool-types";
-import { novelService } from "../services/novels/novelService";
-import { volumeRepository } from "../services/database/volumeRepository";
-import { chapterRepository } from "../services/database/chapterRepository";
-import { settingRepository } from "../services/database/settingRepository";
-import { protagonistRepository } from "../services/database/protagonistRepository";
-import { novelRepository } from "../services/database/novelRepository";
+import type { AgentToolResult, AgentToolContext } from './tool-types';
+import { errorResult, resolveNovelId, successResult } from './tool-types';
+import { novelService } from '../services/novels/novelService';
+import { volumeRepository } from '../services/database/volumeRepository';
+import { chapterRepository } from '../services/database/chapterRepository';
+import { settingRepository } from '../services/database/settingRepository';
+import { protagonistRepository } from '../services/database/protagonistRepository';
+import { novelRepository } from '../services/database/novelRepository';
 
 /**
  * 读取项目上下文
@@ -21,19 +21,19 @@ import { novelRepository } from "../services/database/novelRepository";
  * @returns Promise<AgentToolResult> — 作品上下文信息
  */
 export async function readProjectContext(
-  context: AgentToolContext
+  context: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const novelId = resolveNovelId(context);
   if (!novelId) {
-    return errorResult("缺少作品 ID（projectId / novelId / workId）", {
-      source: "tool-layer",
+    return errorResult('缺少作品 ID（projectId / novelId / workId）', {
+      source: 'tool-layer',
     });
   }
 
   try {
     const novel = await novelRepository.getById(novelId);
     if (!novel) {
-      return errorResult(`作品 ${novelId} 不存在`, { source: "database" });
+      return errorResult(`作品 ${novelId} 不存在`, { source: 'database' });
     }
 
     const warnings: string[] = [];
@@ -43,7 +43,7 @@ export async function readProjectContext(
     try {
       worldSettings = await settingRepository.getWorldSettings(novelId);
     } catch {
-      warnings.push("无法读取世界设定");
+      warnings.push('无法读取世界设定');
     }
 
     // 读取主角
@@ -51,7 +51,7 @@ export async function readProjectContext(
     try {
       protagonists = await protagonistRepository.getByNovelId(novelId);
     } catch {
-      warnings.push("无法读取主角信息");
+      warnings.push('无法读取主角信息');
     }
 
     // 读取卷结构
@@ -59,7 +59,7 @@ export async function readProjectContext(
     try {
       volumes = await volumeRepository.getByNovelId(novelId);
     } catch {
-      warnings.push("无法读取分卷信息");
+      warnings.push('无法读取分卷信息');
     }
 
     // 读取章节列表
@@ -67,7 +67,7 @@ export async function readProjectContext(
     try {
       chapters = await chapterRepository.getByNovelId(novelId);
     } catch {
-      warnings.push("无法读取章节列表");
+      warnings.push('无法读取章节列表');
     }
 
     return successResult(
@@ -75,10 +75,10 @@ export async function readProjectContext(
         novel: {
           id: novel.id,
           title: novel.title,
-          description: (novel as unknown as Record<string, unknown>).description ?? "",
+          description: (novel as unknown as Record<string, unknown>).description ?? '',
           status: novel.status,
           totalWordCount: novel.totalWordCount,
-          updatedAt: (novel as unknown as Record<string, unknown>).updatedAt ?? "",
+          updatedAt: (novel as unknown as Record<string, unknown>).updatedAt ?? '',
         },
         worldSettings,
         protagonists,
@@ -86,15 +86,14 @@ export async function readProjectContext(
         chapters,
       },
       {
-        source: "database",
+        source: 'database',
         warnings: warnings.length > 0 ? warnings : undefined,
-      }
+      },
     );
   } catch (err) {
-    return errorResult(
-      `读取项目上下文失败: ${err instanceof Error ? err.message : String(err)}`,
-      { source: "database" }
-    );
+    return errorResult(`读取项目上下文失败: ${err instanceof Error ? err.message : String(err)}`, {
+      source: 'database',
+    });
   }
 }
 
@@ -105,7 +104,7 @@ export async function readProjectContext(
  * @returns Promise<AgentToolResult> — 作品列表摘要
  */
 export async function readProjectList(
-  context?: AgentToolContext
+  context?: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>[]>> {
   void context;
   try {
@@ -115,14 +114,13 @@ export async function readProjectList(
       title: n.title,
       status: n.status,
       totalWordCount: n.totalWordCount,
-      updatedAt: (n as unknown as Record<string, unknown>).updatedAt ?? "",
+      updatedAt: (n as unknown as Record<string, unknown>).updatedAt ?? '',
     }));
-    return successResult(summaries, { source: "database" });
+    return successResult(summaries, { source: 'database' });
   } catch (err) {
-    return errorResult(
-      `读取作品列表失败: ${err instanceof Error ? err.message : String(err)}`,
-      { source: "database" }
-    );
+    return errorResult(`读取作品列表失败: ${err instanceof Error ? err.message : String(err)}`, {
+      source: 'database',
+    });
   }
 }
 
@@ -133,17 +131,17 @@ export async function readProjectList(
  * @returns Promise<AgentToolResult> — 作品设置信息
  */
 export async function readProjectSettings(
-  context: AgentToolContext
+  context: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const novelId = resolveNovelId(context);
   if (!novelId) {
-    return errorResult("缺少作品 ID", { source: "tool-layer" });
+    return errorResult('缺少作品 ID', { source: 'tool-layer' });
   }
 
   try {
     const novel = await novelRepository.getById(novelId);
     if (!novel) {
-      return errorResult(`作品 ${novelId} 不存在`, { source: "database" });
+      return errorResult(`作品 ${novelId} 不存在`, { source: 'database' });
     }
 
     const warnings: string[] = [];
@@ -152,14 +150,14 @@ export async function readProjectSettings(
     try {
       worldSettings = await settingRepository.getWorldSettings(novelId);
     } catch {
-      warnings.push("无法读取世界设定");
+      warnings.push('无法读取世界设定');
     }
 
     let protagonists: unknown = null;
     try {
       protagonists = await protagonistRepository.getByNovelId(novelId);
     } catch {
-      warnings.push("无法读取主角信息");
+      warnings.push('无法读取主角信息');
     }
 
     return successResult(
@@ -171,15 +169,13 @@ export async function readProjectSettings(
         protagonists,
       },
       {
-        source: "database",
+        source: 'database',
         warnings: warnings.length > 0 ? warnings : undefined,
-      }
+      },
     );
   } catch (err) {
-    return errorResult(
-      `读取作品设置失败: ${err instanceof Error ? err.message : String(err)}`,
-      { source: "database" }
-    );
+    return errorResult(`读取作品设置失败: ${err instanceof Error ? err.message : String(err)}`, {
+      source: 'database',
+    });
   }
 }
-

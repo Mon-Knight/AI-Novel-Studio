@@ -6,19 +6,9 @@
  */
 import { dbCall, generateId, getDbMode, nowISO } from '../database/db';
 import type { Chapter } from '../../types/chapter';
-import type {
-  Character,
-  CharacterState,
-  CreateCharacterStateInput,
-} from '../../types/character';
-import type {
-  ChapterSummary,
-  CreateChapterSummaryInput,
-} from '../../types/chapterSummary';
-import type {
-  ContextRecord,
-  CreateContextRecordInput,
-} from '../../types/context';
+import type { Character, CharacterState, CreateCharacterStateInput } from '../../types/character';
+import type { ChapterSummary, CreateChapterSummaryInput } from '../../types/chapterSummary';
+import type { ContextRecord, CreateContextRecordInput } from '../../types/context';
 import {
   CHAPTER_SUMMARIES_STORAGE_KEY,
   mapChapterSummaryFromTauriDto,
@@ -84,7 +74,11 @@ function writeLocalBundle(
   } catch (error) {
     const rollbackErrors: unknown[] = [];
     for (const [key, value] of Object.entries(snapshots)) {
-      try { restoreSnapshot(key, value); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+      try {
+        restoreSnapshot(key, value);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
     }
     if (rollbackErrors.length > 0) {
       const rollbackFailure = new Error('章节上下文本地保存失败，且补偿回滚未完全成功。');
@@ -96,24 +90,32 @@ function writeLocalBundle(
 }
 
 function normalizeIdentity(input: SaveChapterContextBundleInput): void {
-  if (input.summary.novelId !== input.novelId
-    || input.summary.chapterId !== input.chapterId
-    || input.summary.adoptedDraftId !== input.adoptedDraftId) {
+  if (
+    input.summary.novelId !== input.novelId ||
+    input.summary.chapterId !== input.chapterId ||
+    input.summary.adoptedDraftId !== input.adoptedDraftId
+  ) {
     throw new Error('章节总结与原子保存目标不一致。');
   }
-  if (input.contextRecords.some((item) => (
-    item.novelId !== input.novelId || item.chapterId !== input.chapterId
-  ))) {
+  if (
+    input.contextRecords.some(
+      (item) => item.novelId !== input.novelId || item.chapterId !== input.chapterId,
+    )
+  ) {
     throw new Error('上下文记录与原子保存目标不一致。');
   }
-  if (input.characterStates.some((item) => (
-    item.novelId !== input.novelId || item.chapterId !== input.chapterId
-  ))) {
+  if (
+    input.characterStates.some(
+      (item) => item.novelId !== input.novelId || item.chapterId !== input.chapterId,
+    )
+  ) {
     throw new Error('角色状态与原子保存目标不一致。');
   }
 }
 
-export function toTauriContextRecordInput(input: PersistableContextRecordInput): Record<string, unknown> {
+export function toTauriContextRecordInput(
+  input: PersistableContextRecordInput,
+): Record<string, unknown> {
   return {
     id: input.id,
     novelId: input.novelId,
@@ -140,8 +142,12 @@ function mapTauriBundleResult(result: unknown): SaveChapterContextBundleResult {
   const contexts = readResultField(result, 'contextRecords', 'context_records');
   const states = readResultField(result, 'characterStates', 'character_states');
   const chapterStatus = readResultField(result, 'chapterStatus', 'chapter_status');
-  if (!summary || !Array.isArray(contexts) || !Array.isArray(states)
-    || chapterStatus !== 'summarized') {
+  if (
+    !summary ||
+    !Array.isArray(contexts) ||
+    !Array.isArray(states) ||
+    chapterStatus !== 'summarized'
+  ) {
     throw new Error('SQLite 返回了无效的章节上下文保存结果。');
   }
   return {
@@ -157,8 +163,9 @@ function chapterNovelId(chapter: Chapter | Record<string, unknown>): unknown {
 }
 
 function chapterAdoptedDraftId(chapter: Chapter | Record<string, unknown>): unknown {
-  return (chapter as Chapter).adoptedDraftId
-    ?? (chapter as Record<string, unknown>).adopted_draft_id;
+  return (
+    (chapter as Chapter).adoptedDraftId ?? (chapter as Record<string, unknown>).adopted_draft_id
+  );
 }
 
 function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterContextBundleResult {
@@ -169,9 +176,7 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
     CHARACTERS_STORAGE_KEY,
     CHAPTERS_STORAGE_KEY,
   ];
-  const snapshots = Object.fromEntries(
-    keys.map((key) => [key, localStorage.getItem(key)]),
-  );
+  const snapshots = Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
   const summaries = readArrayStrict<ChapterSummary>(CHAPTER_SUMMARIES_STORAGE_KEY);
   const contexts = readArrayStrict<ContextRecord>(CONTEXT_RECORDS_STORAGE_KEY);
   const states = readArrayStrict<CharacterState>(CHARACTER_STATES_STORAGE_KEY);
@@ -184,8 +189,7 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
     throw new Error('章节不存在或不属于当前作品。');
   }
   const currentAdoptedDraftId = chapterAdoptedDraftId(chapter);
-  if (typeof currentAdoptedDraftId === 'string'
-    && currentAdoptedDraftId !== input.adoptedDraftId) {
+  if (typeof currentAdoptedDraftId === 'string' && currentAdoptedDraftId !== input.adoptedDraftId) {
     throw new Error('章节当前采用稿与总结目标不一致。');
   }
 
@@ -193,17 +197,20 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
   const requestedSummaryId = input.summary.id;
   const summaryIndex = requestedSummaryId
     ? summaries.findIndex((item) => item.id === requestedSummaryId)
-    : summaries
-      .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.novelId === input.novelId && item.chapterId === input.chapterId)
-      .sort((left, right) => (
-        right.item.updatedAt.localeCompare(left.item.updatedAt)
-        || right.item.createdAt.localeCompare(left.item.createdAt)
-        || right.item.id.localeCompare(left.item.id)
-      ))[0]?.index ?? -1;
+    : (summaries
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.novelId === input.novelId && item.chapterId === input.chapterId)
+        .sort(
+          (left, right) =>
+            right.item.updatedAt.localeCompare(left.item.updatedAt) ||
+            right.item.createdAt.localeCompare(left.item.createdAt) ||
+            right.item.id.localeCompare(left.item.id),
+        )[0]?.index ?? -1);
   const existingSummary = summaryIndex >= 0 ? summaries[summaryIndex] : undefined;
-  if (existingSummary && (existingSummary.novelId !== input.novelId
-    || existingSummary.chapterId !== input.chapterId)) {
+  if (
+    existingSummary &&
+    (existingSummary.novelId !== input.novelId || existingSummary.chapterId !== input.chapterId)
+  ) {
     throw new Error('章节总结 ID 已属于其他章节。');
   }
   const savedSummary: ChapterSummary = {
@@ -221,8 +228,10 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
     const id = item.id ?? generateId();
     const existingIndex = contexts.findIndex((record) => record.id === id);
     const existing = existingIndex >= 0 ? contexts[existingIndex] : undefined;
-    if (existing && (existing.novelId !== input.novelId
-      || existing.chapterId !== input.chapterId)) {
+    if (
+      existing &&
+      (existing.novelId !== input.novelId || existing.chapterId !== input.chapterId)
+    ) {
       throw new Error('上下文记录 ID 已属于其他章节。');
     }
     const saved: ContextRecord = {
@@ -240,18 +249,21 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
   });
 
   const savedStates = input.characterStates.map((item): CharacterState => {
-    const characterIndex = characters.findIndex((character) => (
-      character.id === item.characterId && character.novelId === input.novelId
-    ));
+    const characterIndex = characters.findIndex(
+      (character) => character.id === item.characterId && character.novelId === input.novelId,
+    );
     if (characterIndex === -1) {
       throw new Error('角色状态所属角色不存在或不属于当前作品。');
     }
     const id = item.id ?? generateId();
     const existingIndex = states.findIndex((state) => state.id === id);
     const existing = existingIndex >= 0 ? states[existingIndex] : undefined;
-    if (existing && (existing.novelId !== input.novelId
-      || existing.characterId !== item.characterId
-      || existing.chapterId !== input.chapterId)) {
+    if (
+      existing &&
+      (existing.novelId !== input.novelId ||
+        existing.characterId !== item.characterId ||
+        existing.chapterId !== input.chapterId)
+    ) {
       throw new Error('角色状态 ID 已属于其他目标。');
     }
     const saved: CharacterState = {
@@ -274,13 +286,16 @@ function saveBrowserBundle(input: SaveChapterContextBundleInput): SaveChapterCon
     status: 'summarized',
     updatedAt: now,
   };
-  writeLocalBundle({
-    [CHAPTER_SUMMARIES_STORAGE_KEY]: summaries,
-    [CONTEXT_RECORDS_STORAGE_KEY]: contexts,
-    [CHARACTER_STATES_STORAGE_KEY]: states,
-    [CHARACTERS_STORAGE_KEY]: characters,
-    [CHAPTERS_STORAGE_KEY]: chapters,
-  }, snapshots);
+  writeLocalBundle(
+    {
+      [CHAPTER_SUMMARIES_STORAGE_KEY]: summaries,
+      [CONTEXT_RECORDS_STORAGE_KEY]: contexts,
+      [CHARACTER_STATES_STORAGE_KEY]: states,
+      [CHARACTERS_STORAGE_KEY]: characters,
+      [CHAPTERS_STORAGE_KEY]: chapters,
+    },
+    snapshots,
+  );
   return {
     summary: savedSummary,
     contextRecords: savedContexts,

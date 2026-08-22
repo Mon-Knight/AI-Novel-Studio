@@ -24,12 +24,10 @@ export interface ChapterVerificationInput {
  * @param input - 验证输入参数
  * @returns 构建好的 Prompt 字符串
  */
-export function buildChapterVerificationPrompt(
-  input: ChapterVerificationInput
-): string {
+export function buildChapterVerificationPrompt(input: ChapterVerificationInput): string {
   const parts: string[] = [];
 
-  parts.push("## 章节验证");
+  parts.push('## 章节验证');
 
   if (input.outline) {
     parts.push(`参考大纲：\n${input.outline}`);
@@ -37,12 +35,12 @@ export function buildChapterVerificationPrompt(
 
   parts.push(`待验证正文：\n${input.draft}`);
   parts.push(
-    "请检查以上正文是否：\n" +
-      "1. 覆盖了章节大纲的主要要点\n" +
-      "2. 角色行为符合设定\n" +
-      "3. 与前后文保持连贯\n" +
-      "4. 没有逻辑矛盾"
+    '请检查以上正文是否：\n' +
+      '1. 覆盖了章节大纲的主要要点\n' +
+      '2. 角色行为符合设定\n' +
+      '3. 与前后文保持连贯\n' +
+      '4. 没有逻辑矛盾',
   );
 
-  return parts.join("\n\n");
+  return parts.join('\n\n');
 }

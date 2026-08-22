@@ -84,40 +84,48 @@ async function harness(failingIdentity?: string) {
       calls.push(identity);
       if (identity === failingIdentity) throw new Error('local read failed');
       return identity === 'verification.check_readiness@1'
-        ? { ok: true, data: { ready: true, score: 100, missing: [], warnings: [], summary: 'ready' } }
+        ? {
+            ok: true,
+            data: { ready: true, score: 100, missing: [], warnings: [], summary: 'ready' },
+          }
         : { ok: true, data: { identity } };
     },
   }));
   const registry = new ToolRegistry(definitions);
   const manifest = await registry.getManifest();
   const now = '2026-07-26T00:00:00Z';
-  const steps = await Promise.all(identities.map(async (identity, index) => {
-    const tool = manifest.tools.find((candidate) => `${candidate.name}@${candidate.version}` === identity)!;
-    const argumentsJson = tool.scope === 'chapter'
-      ? { novelId: 'novel-1', chapterId: 'chapter-1' }
-      : { novelId: 'novel-1' };
-    return {
-      stepId: `step-${index + 1}`,
-      planId: 'plan-1',
-      stepKey: stepKeys[index],
-      ordinal: index + 1,
-      title: stepKeys[index],
-      toolName: tool.name,
-      toolVersion: tool.version,
-      toolIdentity: identity,
-      registryHash: manifest.registryHash,
-      inputSchemaHash: await canonicalHash(tool.inputSchema),
-      outputSchemaHash: await canonicalHash(tool.outputSchema),
-      permissionsJson: tool.permissions,
-      scope: tool.scope,
-      argumentsJson,
-      argumentsHash: await canonicalHash(argumentsJson),
-      status: 'pending' as const,
-      stateRevision: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-  }));
+  const steps = await Promise.all(
+    identities.map(async (identity, index) => {
+      const tool = manifest.tools.find(
+        (candidate) => `${candidate.name}@${candidate.version}` === identity,
+      )!;
+      const argumentsJson =
+        tool.scope === 'chapter'
+          ? { novelId: 'novel-1', chapterId: 'chapter-1' }
+          : { novelId: 'novel-1' };
+      return {
+        stepId: `step-${index + 1}`,
+        planId: 'plan-1',
+        stepKey: stepKeys[index],
+        ordinal: index + 1,
+        title: stepKeys[index],
+        toolName: tool.name,
+        toolVersion: tool.version,
+        toolIdentity: identity,
+        registryHash: manifest.registryHash,
+        inputSchemaHash: await canonicalHash(tool.inputSchema),
+        outputSchemaHash: await canonicalHash(tool.outputSchema),
+        permissionsJson: tool.permissions,
+        scope: tool.scope,
+        argumentsJson,
+        argumentsHash: await canonicalHash(argumentsJson),
+        status: 'pending' as const,
+        stateRevision: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }),
+  );
   const bundle: AgentPlanBundle = {
     plan: {
       planId: 'plan-1',
@@ -135,20 +143,25 @@ async function harness(failingIdentity?: string) {
       updatedAt: now,
     },
     steps,
-    dependencies: dependencies.flatMap((parents, childIndex) => parents.map((parentIndex, dependencyIndex) => ({
-      planId: 'plan-1',
-      stepId: `step-${childIndex + 1}`,
-      dependsOnStepId: `step-${parentIndex + 1}`,
-      dependencyOrdinal: dependencyIndex + 1,
-      createdAt: now,
-    }))),
+    dependencies: dependencies.flatMap((parents, childIndex) =>
+      parents.map((parentIndex, dependencyIndex) => ({
+        planId: 'plan-1',
+        stepId: `step-${childIndex + 1}`,
+        dependsOnStepId: `step-${parentIndex + 1}`,
+        dependencyOrdinal: dependencyIndex + 1,
+        createdAt: now,
+      })),
+    ),
     attempts: [],
     checkpoints: [],
   };
   let attemptCounter = 0;
   let released = 0;
   const proof: AgentPlanLeaseProof = {
-    leaseId: 'lease-1', epoch: 1, ownerId: 'owner-1', token: 'transient-token',
+    leaseId: 'lease-1',
+    epoch: 1,
+    ownerId: 'owner-1',
+    token: 'transient-token',
   };
   const persistence = {
     isAvailable: () => true,
@@ -199,7 +212,11 @@ async function harness(failingIdentity?: string) {
       }
       return clone(bundle);
     },
-    fail: async (input: { stepId: string; attemptId: string; error: { code: string; message: string; retryable: boolean } }) => {
+    fail: async (input: {
+      stepId: string;
+      attemptId: string;
+      error: { code: string; message: string; retryable: boolean };
+    }) => {
       const step = bundle.steps.find((candidate) => candidate.stepId === input.stepId)!;
       const attempt = bundle.attempts.find((candidate) => candidate.attemptId === input.attemptId)!;
       step.status = 'waiting_retry';
@@ -232,7 +249,9 @@ async function harness(failingIdentity?: string) {
     calls,
     getBundle: () => clone(bundle),
     getReleased: () => released,
-    tamper: () => { bundle.steps[0].argumentsHash = '0'.repeat(64); },
+    tamper: () => {
+      bundle.steps[0].argumentsHash = '0'.repeat(64);
+    },
   };
 }
 
@@ -257,10 +276,7 @@ test('planner runtime persists one failed Attempt and does not automatically ret
 test('planner runtime rejects persisted contract drift before claiming a tool', async () => {
   const testHarness = await harness();
   testHarness.tamper();
-  await assert.rejects(
-    () => testHarness.runtime.runExisting('plan-1'),
-    /schema、权限或参数已漂移/,
-  );
+  await assert.rejects(() => testHarness.runtime.runExisting('plan-1'), /schema、权限或参数已漂移/);
   assert.deepEqual(testHarness.calls, []);
   assert.equal(testHarness.getBundle().attempts.length, 0);
 });

@@ -783,9 +783,8 @@ export const draftVersionService = {
       appLogger.warn('[AutonomousCreation] 章节采用进度同步失败', error);
     }
     if (options.actor !== 'autonomous_full_auto') {
-      const { autonomousSchedulerWorker } = await import(
-        '../autonomous-creation/autonomousSchedulerWorker'
-      );
+      const { autonomousSchedulerWorker } =
+        await import('../autonomous-creation/autonomousSchedulerWorker');
       await autonomousSchedulerWorker.promoteUserAdoptedDraft(adoptedWithContent);
     }
     return adoptedWithContent;

@@ -20,12 +20,7 @@ export type LargeTextTargetType =
 
 /** 保存进度阶段 */
 export type LargeTextSaveStage =
-  | 'creating'
-  | 'uploading'
-  | 'finalizing'
-  | 'done'
-  | 'error'
-  | 'aborted';
+  'creating' | 'uploading' | 'finalizing' | 'done' | 'error' | 'aborted';
 
 /** 保存进度信息 */
 export interface LargeTextSaveProgress {

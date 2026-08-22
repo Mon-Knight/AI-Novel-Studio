@@ -10,7 +10,16 @@ export * from './style';
 export * from './output';
 export * from './setting';
 export * from './protagonist';
-export type { Character, CharacterRoleType, CharacterSource, ChapterCharacterRole, ChapterCharacter, CharacterState, CreateCharacterInput, CharacterCandidate } from './character';
+export type {
+  Character,
+  CharacterRoleType,
+  CharacterSource,
+  ChapterCharacterRole,
+  ChapterCharacter,
+  CharacterState,
+  CreateCharacterInput,
+  CharacterCandidate,
+} from './character';
 export { CharacterRoleLabels, ChapterCharacterRoleLabels } from './character';
 export * from './chapterEvent';
 export * from './context';

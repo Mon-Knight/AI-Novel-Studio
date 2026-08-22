@@ -16,11 +16,7 @@ export interface PlacementProposal {
   createdAt: string;
 }
 
-export type ApplyPlanStatus =
-  | 'awaiting_confirmation'
-  | 'applying'
-  | 'applied'
-  | 'conflict';
+export type ApplyPlanStatus = 'awaiting_confirmation' | 'applying' | 'applied' | 'conflict';
 
 export interface ApplyPlan {
   planId: string;

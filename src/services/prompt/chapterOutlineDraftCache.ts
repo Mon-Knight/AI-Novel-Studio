@@ -30,4 +30,3 @@ export function clearCachedChapterOutlineDraft(chapterId: string): void {
   if (!storage || !chapterId) return;
   storage.removeItem(keyOf(chapterId));
 }
-

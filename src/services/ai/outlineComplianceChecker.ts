@@ -3,25 +3,84 @@ import type { OutlineComplianceResult, OutlineKeyPoint } from '../../types/ai';
 export type { OutlineComplianceResult } from '../../types/ai';
 
 const STOP_WORDS = new Set([
-  '本章', '章节', '大纲', '剧情', '事件', '需要', '必须', '进行', '开始', '之后', '然后',
-  '一个', '一些', '这个', '那个', '当前', '通过', '展现', '体现', '推进', '安排',
+  '本章',
+  '章节',
+  '大纲',
+  '剧情',
+  '事件',
+  '需要',
+  '必须',
+  '进行',
+  '开始',
+  '之后',
+  '然后',
+  '一个',
+  '一些',
+  '这个',
+  '那个',
+  '当前',
+  '通过',
+  '展现',
+  '体现',
+  '推进',
+  '安排',
 ]);
 
 const DOMAIN_TERMS = [
-  '系统', '倒计时', '开服', '末世', '重生', '直播', '直播间', '代练', '榜一', '礼物',
-  '悬念', '钩子', '绑定', '危机', '真相', '伏笔', '冲突', '任务', '副本', '基地',
-  '组织', '能力', '规则', '目标', '结尾', '女主', '男主', '主角',
+  '系统',
+  '倒计时',
+  '开服',
+  '末世',
+  '重生',
+  '直播',
+  '直播间',
+  '代练',
+  '榜一',
+  '礼物',
+  '悬念',
+  '钩子',
+  '绑定',
+  '危机',
+  '真相',
+  '伏笔',
+  '冲突',
+  '任务',
+  '副本',
+  '基地',
+  '组织',
+  '能力',
+  '规则',
+  '目标',
+  '结尾',
+  '女主',
+  '男主',
+  '主角',
 ];
 
 const ACTION_TERMS = [
-  '完成', '确认', '进入', '出现', '发现', '决定', '爆发', '遭遇', '解决', '制造',
-  '推动', '留下', '绑定', '重生', '开服', '刷成', '刷礼物', '成为', '展现',
+  '完成',
+  '确认',
+  '进入',
+  '出现',
+  '发现',
+  '决定',
+  '爆发',
+  '遭遇',
+  '解决',
+  '制造',
+  '推动',
+  '留下',
+  '绑定',
+  '重生',
+  '开服',
+  '刷成',
+  '刷礼物',
+  '成为',
+  '展现',
 ];
 
 function normalizeText(text: string): string {
-  return text
-    .replace(/[#*`>~\-—\s，。！？；：、,.!?;:《》「」『』“”"']/g, '')
-    .trim();
+  return text.replace(/[#*`>~\-—\s，。！？；：、,.!?;:《》「」『』“”"']/g, '').trim();
 }
 
 function addKeyword(keywords: string[], value: string | undefined): void {
@@ -47,11 +106,15 @@ function extractPointKeywords(pointText: string): string[] {
     if (pointText.includes(term)) addKeyword(keywords, term);
   }
 
-  for (const match of pointText.matchAll(/([\u4e00-\u9fff]{2,4})(?=完成|确认|进入|刷|成为|重生|发现|决定|遭遇|出现|留下|开始|绑定|获得|失去|打开|前往|抵达|参与|推动|解决|制造|爆发)/g)) {
+  for (const match of pointText.matchAll(
+    /([\u4e00-\u9fff]{2,4})(?=完成|确认|进入|刷|成为|重生|发现|决定|遭遇|出现|留下|开始|绑定|获得|失去|打开|前往|抵达|参与|推动|解决|制造|爆发)/g,
+  )) {
     addKeyword(keywords, match[1]);
   }
 
-  for (const match of pointText.matchAll(/[\u4e00-\u9fffA-Za-z0-9]{2,10}(?:系统|直播间|倒计时|榜一|末世|开服|悬念|代练|直播|礼物|冲突|线索|真相|计划|目标|结尾|钩子|危机|战斗|任务|副本|道具|身份|能力|地点|基地|组织|阵营)/g)) {
+  for (const match of pointText.matchAll(
+    /[\u4e00-\u9fffA-Za-z0-9]{2,10}(?:系统|直播间|倒计时|榜一|末世|开服|悬念|代练|直播|礼物|冲突|线索|真相|计划|目标|结尾|钩子|危机|战斗|任务|副本|道具|身份|能力|地点|基地|组织|阵营)/g,
+  )) {
     addKeyword(keywords, match[0]);
   }
 
@@ -93,9 +156,8 @@ function isPointCovered(generatedText: string, point: OutlineKeyPoint): boolean 
     return generatedText.includes(keyword) || normalizedGenerated.includes(normalizedKeyword);
   }).length;
 
-  const requiredHits = keywords.length === 1
-    ? 1
-    : Math.min(3, Math.max(2, Math.ceil(keywords.length * 0.5)));
+  const requiredHits =
+    keywords.length === 1 ? 1 : Math.min(3, Math.max(2, Math.ceil(keywords.length * 0.5)));
   return hitCount >= requiredHits;
 }
 
@@ -113,7 +175,9 @@ export function checkOutlineCompliance(
   }
 
   const coveredPoints = outlineKeyPoints.filter((point) => isPointCovered(generatedText, point));
-  const missingPoints = outlineKeyPoints.filter((point) => !coveredPoints.some((covered) => covered.id === point.id));
+  const missingPoints = outlineKeyPoints.filter(
+    (point) => !coveredPoints.some((covered) => covered.id === point.id),
+  );
   const score = Math.round((coveredPoints.length / outlineKeyPoints.length) * 100);
   const warnings: string[] = [];
 
@@ -132,4 +196,3 @@ export function checkOutlineCompliance(
     warnings,
   };
 }
-

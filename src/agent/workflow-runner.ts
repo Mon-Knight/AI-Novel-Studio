@@ -4,7 +4,7 @@
 // 用途：对 AgentWorkflow 进行统计摘要和结构校验
 // 注意：不执行真实任务，只验证结构
 
-import type { AgentWorkflow, WorkflowSummary } from "./types";
+import type { AgentWorkflow, WorkflowSummary } from './types';
 
 /**
  * 对工作流进行统计摘要
@@ -29,19 +29,19 @@ export function summarizeWorkflow(workflow: AgentWorkflow): WorkflowSummary {
 
   for (const task of tasks) {
     switch (task.status) {
-      case "pending":
+      case 'pending':
         pending++;
         break;
-      case "running":
+      case 'running':
         running++;
         break;
-      case "completed":
+      case 'completed':
         completed++;
         break;
-      case "failed":
+      case 'failed':
         failed++;
         break;
-      case "skipped":
+      case 'skipped':
         skipped++;
         break;
     }
@@ -51,9 +51,7 @@ export function summarizeWorkflow(workflow: AgentWorkflow): WorkflowSummary {
   const dependencyLines: string[] = [];
   for (const task of tasks) {
     if (task.dependsOn && task.dependsOn.length > 0) {
-      dependencyLines.push(
-        `  ${task.id} → depends on: [${task.dependsOn.join(", ")}]`
-      );
+      dependencyLines.push(`  ${task.id} → depends on: [${task.dependsOn.join(', ')}]`);
     }
   }
 
@@ -84,11 +82,11 @@ export function formatSummary(summary: WorkflowSummary): string {
   ];
 
   if (summary.dependencyLines.length > 0) {
-    lines.push("Dependencies:");
+    lines.push('Dependencies:');
     lines.push(...summary.dependencyLines);
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 /**
@@ -115,12 +113,12 @@ export function validateWorkflow(workflow: AgentWorkflow): {
 
   // 1. 检查 workflow id
   if (!workflow.id || workflow.id.trim().length === 0) {
-    errors.push("Workflow 缺少 id");
+    errors.push('Workflow 缺少 id');
   }
 
   // 2. 检查是否有 task
   if (tasks.length === 0) {
-    errors.push("Workflow 没有任何 task");
+    errors.push('Workflow 没有任何 task');
     return { ok: false, errors, warnings };
   }
 
@@ -139,9 +137,7 @@ export function validateWorkflow(workflow: AgentWorkflow): {
     if (task.dependsOn) {
       for (const depId of task.dependsOn) {
         if (!taskIds.has(depId)) {
-          errors.push(
-            `Task "${task.id}" 依赖了不存在的 task: "${depId}"`
-          );
+          errors.push(`Task "${task.id}" 依赖了不存在的 task: "${depId}"`);
         }
         // 5. 检查自依赖
         if (depId === task.id) {
@@ -157,9 +153,7 @@ export function validateWorkflow(workflow: AgentWorkflow): {
       for (const depId of task.dependsOn) {
         const depTask = tasks.find((t) => t.id === depId);
         if (depTask?.dependsOn?.includes(task.id)) {
-          errors.push(
-            `检测到直接循环依赖: "${task.id}" ↔ "${depId}"`
-          );
+          errors.push(`检测到直接循环依赖: "${task.id}" ↔ "${depId}"`);
         }
       }
     }
@@ -168,10 +162,10 @@ export function validateWorkflow(workflow: AgentWorkflow): {
   // 7. 检查 task id 为空
   for (const task of tasks) {
     if (!task.id || task.id.trim().length === 0) {
-      errors.push("存在 id 为空的 task");
+      errors.push('存在 id 为空的 task');
     }
     if (!task.title || task.title.trim().length === 0) {
-      warnings.push(`Task (id: ${task.id || "?"}) 缺少 title`);
+      warnings.push(`Task (id: ${task.id || '?'}) 缺少 title`);
     }
   }
 

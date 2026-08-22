@@ -56,13 +56,11 @@ export interface AgentReadableSummary {
 /**
  * 创建一个 "not implemented" 结果
  */
-export function notImplemented<T>(
-  toolName: string
-): AgentToolResult<T> {
+export function notImplemented<T>(toolName: string): AgentToolResult<T> {
   return {
     ok: false,
     error: `Tool '${toolName}' is not yet implemented`,
-    source: "placeholder",
+    source: 'placeholder',
   };
 }
 
@@ -71,12 +69,12 @@ export function notImplemented<T>(
  */
 export function successResult<T>(
   data: T,
-  options?: { source?: string; warnings?: string[] }
+  options?: { source?: string; warnings?: string[] },
 ): AgentToolResult<T> {
   return {
     ok: true,
     data,
-    source: options?.source ?? "unknown",
+    source: options?.source ?? 'unknown',
     warnings: options?.warnings,
   };
 }
@@ -86,12 +84,12 @@ export function successResult<T>(
  */
 export function errorResult(
   error: string,
-  options?: { source?: string; warnings?: string[] }
+  options?: { source?: string; warnings?: string[] },
 ): AgentToolResult<never> {
   return {
     ok: false,
     error,
-    source: options?.source ?? "unknown",
+    source: options?.source ?? 'unknown',
     warnings: options?.warnings,
   };
 }
@@ -103,4 +101,3 @@ export function errorResult(
 export function resolveNovelId(context: AgentToolContext): string | undefined {
   return context.projectId ?? context.novelId ?? context.workId;
 }
-

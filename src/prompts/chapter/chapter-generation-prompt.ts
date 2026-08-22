@@ -22,9 +22,7 @@ export interface ChapterGenerationInput {
  * @param input - 章节生成输入参数
  * @returns 构建好的 Prompt 字符串
  */
-export function buildChapterGenerationPrompt(
-  input: ChapterGenerationInput
-): string {
+export function buildChapterGenerationPrompt(input: ChapterGenerationInput): string {
   const parts: string[] = [];
 
   parts.push(`## 本章目标\n${input.chapterGoal}`);
@@ -37,9 +35,7 @@ export function buildChapterGenerationPrompt(
     parts.push(`## 风格要求\n${input.styleSummary}`);
   }
 
-  parts.push(
-    "请根据以上要求生成本章正文。注意保持与前后章节的连贯性。"
-  );
+  parts.push('请根据以上要求生成本章正文。注意保持与前后章节的连贯性。');
 
-  return parts.join("\n\n");
+  return parts.join('\n\n');
 }

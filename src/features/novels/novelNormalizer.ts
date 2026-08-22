@@ -16,7 +16,12 @@ export interface NovelNormalizeReport {
 }
 
 const VALID_STATUS: NovelStatus[] = [
-  'draft', 'planning', 'writing', 'paused', 'completed', 'archived',
+  'draft',
+  'planning',
+  'writing',
+  'paused',
+  'completed',
+  'archived',
 ];
 
 const VALID_RELATION_TYPES: DualProtagonistRelation['type'][] = [
@@ -148,10 +153,12 @@ export function normalizeDualProtagonistRelation(raw: unknown): DualProtagonistR
   if (!isPlainObject(raw)) return getDefaultDualProtagonistRelation();
 
   const type = VALID_RELATION_TYPES.includes(raw.type as DualProtagonistRelation['type'])
-    ? raw.type as DualProtagonistRelation['type']
+    ? (raw.type as DualProtagonistRelation['type'])
     : 'partner';
-  const narrativeWeight = VALID_NARRATIVE_WEIGHTS.includes(raw.narrativeWeight as DualProtagonistRelation['narrativeWeight'])
-    ? raw.narrativeWeight as DualProtagonistRelation['narrativeWeight']
+  const narrativeWeight = VALID_NARRATIVE_WEIGHTS.includes(
+    raw.narrativeWeight as DualProtagonistRelation['narrativeWeight'],
+  )
+    ? (raw.narrativeWeight as DualProtagonistRelation['narrativeWeight'])
     : 'balanced';
 
   return {
@@ -171,11 +178,16 @@ function normalizeProtagonists(
   const rawProtagonists = readJsonField<unknown[]>(raw, 'protagonists', 'protagonists_json', []);
   const list = Array.isArray(rawProtagonists)
     ? rawProtagonists
-      .filter((item) => isPlainObject(item))
-      .map((item, index) => normalizeProtagonistProfile(item, index === 1 ? 'secondary' : 'primary'))
+        .filter((item) => isPlainObject(item))
+        .map((item, index) =>
+          normalizeProtagonistProfile(item, index === 1 ? 'secondary' : 'primary'),
+        )
     : [];
 
-  const mainCharacter = toSafeString(raw.mainCharacter ?? raw.main_character ?? raw.protagonistName, '');
+  const mainCharacter = toSafeString(
+    raw.mainCharacter ?? raw.main_character ?? raw.protagonistName,
+    '',
+  );
   const protagonistAbility = toSafeString(raw.protagonistAbility ?? raw.protagonist_ability, '');
 
   if (list.length === 0) {
@@ -206,7 +218,9 @@ function normalizeProtagonists(
 function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: boolean } {
   if (!isPlainObject(raw)) return { novel: null, repaired: false };
   let repaired = false;
-  const mark = () => { repaired = true; };
+  const mark = () => {
+    repaired = true;
+  };
 
   const now = nowISO();
   const id = typeof raw.id === 'string' && raw.id ? raw.id : (mark(), generateId());
@@ -219,16 +233,23 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   const coverPath = toSafeString(raw.coverPath ?? raw.cover_path, '') || undefined;
   const coverUrl = typeof raw.coverUrl === 'string' ? raw.coverUrl : undefined;
   const status = VALID_STATUS.includes(raw.status as NovelStatus)
-    ? raw.status as NovelStatus
+    ? (raw.status as NovelStatus)
     : (mark(), 'draft');
 
-  const totalWordCountSource = raw.totalWordCount ?? raw.total_word_count ?? raw.totalWords ?? raw.wordCount;
+  const totalWordCountSource =
+    raw.totalWordCount ?? raw.total_word_count ?? raw.totalWords ?? raw.wordCount;
   const totalWordCount = toSafeNumber(totalWordCountSource, 0);
-  if (raw.totalWordCount == null && raw.total_word_count == null && (raw.totalWords != null || raw.wordCount != null)) mark();
+  if (
+    raw.totalWordCount == null &&
+    raw.total_word_count == null &&
+    (raw.totalWords != null || raw.wordCount != null)
+  )
+    mark();
 
   const targetWordCountSource = raw.targetWordCount ?? raw.target_word_count ?? raw.targetWords;
   const targetWordCount = toSafeNumber(targetWordCountSource, 0);
-  if (raw.targetWordCount == null && raw.target_word_count == null && raw.targetWords != null) mark();
+  if (raw.targetWordCount == null && raw.target_word_count == null && raw.targetWords != null)
+    mark();
 
   const chapterCountSource = raw.chapterCount ?? raw.chapterTotal ?? raw.chapterNum;
   const chapterCount = toSafeNumber(chapterCountSource, 0);
@@ -250,10 +271,12 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   const lastOpenedAt = normalizeDate(raw.lastOpenedAt ?? raw.last_opened_at) ?? undefined;
   const deletedAt = normalizeDate(raw.deletedAt ?? raw.deleted_at) ?? undefined;
 
-  const currentVolumeId = toSafeString(raw.currentVolumeId ?? raw.current_volume_id, '') || undefined;
-  const currentChapterId = toSafeString(raw.currentChapterId ?? raw.current_chapter_id, '') || undefined;
+  const currentVolumeId =
+    toSafeString(raw.currentVolumeId ?? raw.current_volume_id, '') || undefined;
+  const currentChapterId =
+    toSafeString(raw.currentChapterId ?? raw.current_chapter_id, '') || undefined;
 
-  const volumes = Array.isArray(raw.volumes) ? raw.volumes : (raw.volumes ? (mark(), []) : []);
+  const volumes = Array.isArray(raw.volumes) ? raw.volumes : raw.volumes ? (mark(), []) : [];
 
   const rawMode = raw.protagonistMode ?? raw.protagonist_mode;
   const protagonistMode: ProtagonistMode = rawMode === 'dual' ? 'dual' : 'single';
@@ -266,9 +289,15 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
   );
   const dualProtagonistRelation = normalizeDualProtagonistRelation(dualRelationRaw);
 
-  const mainCharacter = toSafeString(raw.mainCharacter ?? raw.main_character ?? protagonists[0]?.name, '');
+  const mainCharacter = toSafeString(
+    raw.mainCharacter ?? raw.main_character ?? protagonists[0]?.name,
+    '',
+  );
   const protagonistAbility = toSafeString(
-    raw.protagonistAbility ?? raw.protagonist_ability ?? protagonists[0]?.ability ?? protagonists[0]?.specialAbility,
+    raw.protagonistAbility ??
+      raw.protagonist_ability ??
+      protagonists[0]?.ability ??
+      protagonists[0]?.specialAbility,
     '',
   );
 

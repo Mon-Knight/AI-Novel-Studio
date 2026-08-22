@@ -4,13 +4,7 @@
 
 import type { Volume } from './volume';
 
-export type NovelStatus =
-  | 'draft'
-  | 'planning'
-  | 'writing'
-  | 'paused'
-  | 'completed'
-  | 'archived';
+export type NovelStatus = 'draft' | 'planning' | 'writing' | 'paused' | 'completed' | 'archived';
 
 export type ProtagonistMode = 'single' | 'dual';
 
@@ -34,7 +28,16 @@ export interface ProtagonistProfile {
 }
 
 export interface DualProtagonistRelation {
-  type: 'partner' | 'romance' | 'rival' | 'bound' | 'mentor_student' | 'family' | 'enemy_to_ally' | 'parallel' | 'custom';
+  type:
+    | 'partner'
+    | 'romance'
+    | 'rival'
+    | 'bound'
+    | 'mentor_student'
+    | 'family'
+    | 'enemy_to_ally'
+    | 'parallel'
+    | 'custom';
   description: string;
   conflict: string;
   cooperation: string;

@@ -26,7 +26,14 @@ test('local chapter queue runs requests strictly serially', async () => {
   const results = await Promise.all([run('one'), run('two'), run('three')]);
   assert.deepEqual(results, ['one', 'two', 'three']);
   assert.equal(maximumActive, 1);
-  assert.deepEqual(events, ['one:start', 'one:end', 'two:start', 'two:end', 'three:start', 'three:end']);
+  assert.deepEqual(events, [
+    'one:start',
+    'one:end',
+    'two:start',
+    'two:end',
+    'three:start',
+    'three:end',
+  ]);
 });
 
 test('queued local request can be cancelled before it reaches the model', async () => {

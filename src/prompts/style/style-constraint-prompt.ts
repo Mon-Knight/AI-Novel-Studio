@@ -20,10 +20,8 @@ export interface StyleConstraintInput {
  * @param input - 风格约束输入参数
  * @returns 构建好的 Prompt 字符串
  */
-export function buildStyleConstraintPrompt(
-  input: StyleConstraintInput
-): string {
-  const parts: string[] = ["## 风格约束"];
+export function buildStyleConstraintPrompt(input: StyleConstraintInput): string {
+  const parts: string[] = ['## 风格约束'];
 
   if (input.styleName) {
     parts.push(`应用风格方案：${input.styleName}`);
@@ -32,8 +30,8 @@ export function buildStyleConstraintPrompt(
   if (input.styleRules) {
     parts.push(`风格规则：\n${input.styleRules}`);
   } else {
-    parts.push("（未指定风格约束）");
+    parts.push('（未指定风格约束）');
   }
 
-  return parts.join("\n");
+  return parts.join('\n');
 }

@@ -76,9 +76,7 @@ export type GuardedDocumentLoadResult<T> =
       reason: DocumentSafetyFailure;
     };
 
-export type DocumentApplyClaim =
-  | { accepted: true; key: string }
-  | { accepted: false; key: string };
+export type DocumentApplyClaim = { accepted: true; key: string } | { accepted: false; key: string };
 
 const PASS: DocumentSafetyPass = Object.freeze({ ok: true });
 
@@ -127,7 +125,12 @@ export function validateLiveDocumentTarget(
 
   const liveTarget = normalizeTarget(live);
   if (!liveTarget) {
-    return fail('missing_live_target', '当前工作台没有完整的作品和章节目标。', expectedTarget, live);
+    return fail(
+      'missing_live_target',
+      '当前工作台没有完整的作品和章节目标。',
+      expectedTarget,
+      live,
+    );
   }
 
   if (expectedTarget.novelId !== liveTarget.novelId) {
@@ -158,7 +161,12 @@ export function validateDraftChapter(
 ): DocumentSafetyDecision {
   const expected = normalizeRequired(expectedChapterId);
   if (!expected) {
-    return fail('invalid_target', '草稿校验缺少目标章节标识。', expectedChapterId, draft?.chapterId);
+    return fail(
+      'invalid_target',
+      '草稿校验缺少目标章节标识。',
+      expectedChapterId,
+      draft?.chapterId,
+    );
   }
 
   const actual = normalizeRequired(draft?.chapterId);
@@ -261,7 +269,12 @@ export function validateDocumentApplication(
     return fail('invalid_result_id', 'AI 结果缺少稳定 resultId，无法防止重复应用。');
   }
   if (identity.mode !== 'append' && identity.mode !== 'replace_all') {
-    return fail('invalid_apply_mode', '正文应用模式不受支持。', ['append', 'replace_all'], identity.mode);
+    return fail(
+      'invalid_apply_mode',
+      '正文应用模式不受支持。',
+      ['append', 'replace_all'],
+      identity.mode,
+    );
   }
   const targetDecision = validateLiveDocumentTarget(identity.target, live);
   if (!targetDecision.ok) return targetDecision;
@@ -316,9 +329,10 @@ export class DocumentApplyIdempotencyGuard {
   }
 
   release(identityOrKey: DocumentApplyIdentity | string): boolean {
-    const key = typeof identityOrKey === 'string'
-      ? identityOrKey
-      : createDocumentApplyIdempotencyKey(identityOrKey);
+    const key =
+      typeof identityOrKey === 'string'
+        ? identityOrKey
+        : createDocumentApplyIdempotencyKey(identityOrKey);
     return this.claimedKeys.delete(key);
   }
 
@@ -350,10 +364,7 @@ export class MonotonicDocumentLoadGuard {
     return this.epoch;
   }
 
-  validateCommit(
-    token: DocumentLoadToken,
-    live: DocumentTargetLike,
-  ): DocumentSafetyDecision {
+  validateCommit(token: DocumentLoadToken, live: DocumentTargetLike): DocumentSafetyDecision {
     if (token.epoch !== this.epoch) {
       return fail(
         'stale_load_token',

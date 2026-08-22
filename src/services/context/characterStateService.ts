@@ -4,18 +4,8 @@
  * Tauri 桌面端以 SQLite 为唯一事实源；浏览器开发模式才使用
  * localStorage。状态记录与 characters.currentState 始终一起提交或回滚。
  */
-import {
-  dbCall,
-  generateId,
-  getDbMode,
-  lsGet,
-  nowISO,
-} from '../database/db';
-import type {
-  Character,
-  CharacterState,
-  CreateCharacterStateInput,
-} from '../../types/character';
+import { dbCall, generateId, getDbMode, lsGet, nowISO } from '../database/db';
+import type { Character, CharacterState, CreateCharacterStateInput } from '../../types/character';
 
 export const CHARACTER_STATES_STORAGE_KEY = 'ai_novel_studio_character_states';
 export const CHARACTERS_STORAGE_KEY = 'ai_novel_studio_characters';
@@ -49,8 +39,16 @@ function commitLocalStateAndCharacters(
     localStorage.setItem(CHARACTERS_STORAGE_KEY, JSON.stringify(characters));
   } catch (error) {
     const rollbackErrors: unknown[] = [];
-    try { restoreLocalSnapshot(CHARACTER_STATES_STORAGE_KEY, snapshots.states); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
-    try { restoreLocalSnapshot(CHARACTERS_STORAGE_KEY, snapshots.characters); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+    try {
+      restoreLocalSnapshot(CHARACTER_STATES_STORAGE_KEY, snapshots.states);
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    try {
+      restoreLocalSnapshot(CHARACTERS_STORAGE_KEY, snapshots.characters);
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
     if (rollbackErrors.length > 0) {
       const rollbackFailure = new Error('角色状态本地保存失败，且回滚未完全成功。');
       Object.assign(rollbackFailure, { cause: error, rollbackErrors });
@@ -93,8 +91,9 @@ export function mapCharacterStateFromTauriDto(dto: unknown): CharacterState {
   const characterId = readDtoValue(dto, 'characterId', 'character_id');
   const stateSummary = readDtoValue(dto, 'stateSummary', 'state_summary');
   const createdAt = readDtoValue(dto, 'createdAt', 'created_at');
-  if (![id, novelId, characterId, stateSummary, createdAt]
-    .every((value) => typeof value === 'string')) {
+  if (
+    ![id, novelId, characterId, stateSummary, createdAt].every((value) => typeof value === 'string')
+  ) {
     throw new Error('SQLite 返回了无效的角色状态。');
   }
   return {
@@ -159,9 +158,9 @@ export const characterStateService = {
       characters: localStorage.getItem(CHARACTERS_STORAGE_KEY),
     };
     const characters = getLocalCharacters();
-    const characterIndex = characters.findIndex((item) => (
-      item.id === input.characterId && item.novelId === input.novelId
-    ));
+    const characterIndex = characters.findIndex(
+      (item) => item.id === input.characterId && item.novelId === input.novelId,
+    );
     if (characterIndex === -1) {
       throw new Error('角色状态所属角色不存在或不属于当前作品。');
     }
@@ -196,9 +195,9 @@ export const characterStateService = {
     if (!removed) return;
     const remaining = states.filter((item) => item.id !== id);
     const characters = getLocalCharacters();
-    const characterIndex = characters.findIndex((item) => (
-      item.id === removed.characterId && item.novelId === removed.novelId
-    ));
+    const characterIndex = characters.findIndex(
+      (item) => item.id === removed.characterId && item.novelId === removed.novelId,
+    );
     if (characterIndex === -1) {
       throw new Error('角色状态所属角色不存在或不属于当前作品。');
     }

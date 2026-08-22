@@ -24,13 +24,11 @@ export interface ChapterReadinessPlanCardProps {
   chapterId?: string;
 }
 
-export function ChapterReadinessPlanCard({
-  novelId,
-  chapterId,
-}: ChapterReadinessPlanCardProps) {
+export function ChapterReadinessPlanCard({ novelId, chapterId }: ChapterReadinessPlanCardProps) {
   const planner = useChapterReadinessPlan(novelId, chapterId);
   const result = planner.bundle?.plan.resultJson?.data as ChapterReadinessResult | undefined;
-  const completedSteps = planner.bundle?.steps.filter((step) => step.status === 'completed').length ?? 0;
+  const completedSteps =
+    planner.bundle?.steps.filter((step) => step.status === 'completed').length ?? 0;
   const waitingStep = planner.bundle?.steps.find((step) => step.status === 'waiting_retry');
 
   return (
@@ -65,9 +63,11 @@ export function ChapterReadinessPlanCard({
       {planner.bundle && (
         <>
           <div className="agent-plan-progress">
-            <span>{completedSteps}/{planner.bundle.steps.length} 步</span>
+            <span>
+              {completedSteps}/{planner.bundle.steps.length} 步
+            </span>
             <div className="agent-plan-progress__track" aria-hidden="true">
-              <span style={{ width: `${completedSteps / planner.bundle.steps.length * 100}%` }} />
+              <span style={{ width: `${(completedSteps / planner.bundle.steps.length) * 100}%` }} />
             </div>
           </div>
           <ol className="agent-plan-steps">
@@ -98,7 +98,11 @@ export function ChapterReadinessPlanCard({
           “{waitingStep.title}”已中止，不会自动重放。请明确点击继续。
         </div>
       )}
-      {planner.error && <div className="agent-plan-card__error" role="alert">{planner.error}</div>}
+      {planner.error && (
+        <div className="agent-plan-card__error" role="alert">
+          {planner.error}
+        </div>
+      )}
 
       {planner.available && (
         <div className="agent-plan-card__actions">
@@ -113,7 +117,8 @@ export function ChapterReadinessPlanCard({
               {planner.running ? '运行中…' : '创建并检查'}
             </button>
           )}
-          {(planner.bundle?.plan.status === 'ready' || planner.bundle?.plan.status === 'running') && (
+          {(planner.bundle?.plan.status === 'ready' ||
+            planner.bundle?.plan.status === 'running') && (
             <button
               className="btn btn-primary btn-sm"
               type="button"
@@ -144,9 +149,8 @@ export function ChapterReadinessPlanCard({
               刷新
             </button>
           )}
-          {planner.bundle
-            && ['completed', 'failed', 'cancelled'].includes(planner.bundle.plan.status)
-            && (
+          {planner.bundle &&
+            ['completed', 'failed', 'cancelled'].includes(planner.bundle.plan.status) && (
               <button
                 className="btn btn-secondary btn-sm"
                 type="button"

@@ -31,11 +31,22 @@ class FailingMemoryStorage implements Storage {
   private failKey: string | null = null;
   private failuresRemaining = 0;
 
-  get length(): number { return this.values.size; }
-  clear(): void { this.values.clear(); this.resetFailure(); }
-  getItem(key: string): string | null { return this.values.get(key) ?? null; }
-  key(index: number): string | null { return [...this.values.keys()][index] ?? null; }
-  removeItem(key: string): void { this.values.delete(key); }
+  get length(): number {
+    return this.values.size;
+  }
+  clear(): void {
+    this.values.clear();
+    this.resetFailure();
+  }
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+  key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
   setItem(key: string, value: string): void {
     if (key === this.failKey && this.failuresRemaining > 0) {
       this.failuresRemaining -= 1;
@@ -63,12 +74,24 @@ const vite = await createServer({
   appType: 'custom',
   server: { middlewareMode: true, hmr: false },
 });
-const summaryModule = await vite.ssrLoadModule('/src/services/context/chapterSummaryService.ts') as typeof import('./chapterSummaryService');
-const characterStateModule = await vite.ssrLoadModule('/src/services/context/characterStateService.ts') as typeof import('./characterStateService');
-const contextModule = await vite.ssrLoadModule('/src/services/context/contextRecordService.ts') as typeof import('./contextRecordService');
-const bundleModule = await vite.ssrLoadModule('/src/services/context/chapterContextPersistenceService.ts') as typeof import('./chapterContextPersistenceService');
-const migrationModule = await vite.ssrLoadModule('/src/services/context/legacyChapterContextMigrationService.ts') as typeof import('./legacyChapterContextMigrationService');
-const draftModule = await vite.ssrLoadModule('/src/services/database/draftVersionService.ts') as typeof import('../database/draftVersionService');
+const summaryModule = (await vite.ssrLoadModule(
+  '/src/services/context/chapterSummaryService.ts',
+)) as typeof import('./chapterSummaryService');
+const characterStateModule = (await vite.ssrLoadModule(
+  '/src/services/context/characterStateService.ts',
+)) as typeof import('./characterStateService');
+const contextModule = (await vite.ssrLoadModule(
+  '/src/services/context/contextRecordService.ts',
+)) as typeof import('./contextRecordService');
+const bundleModule = (await vite.ssrLoadModule(
+  '/src/services/context/chapterContextPersistenceService.ts',
+)) as typeof import('./chapterContextPersistenceService');
+const migrationModule = (await vite.ssrLoadModule(
+  '/src/services/context/legacyChapterContextMigrationService.ts',
+)) as typeof import('./legacyChapterContextMigrationService');
+const draftModule = (await vite.ssrLoadModule(
+  '/src/services/database/draftVersionService.ts',
+)) as typeof import('../database/draftVersionService');
 
 after(async () => {
   clearMocks();
@@ -123,20 +146,24 @@ function bundleInput(): SaveChapterContextBundleInput {
       summary: '第一章摘要',
       keyEvents: ['初遇'],
     },
-    contextRecords: [{
-      novelId: IDS.novel,
-      chapterId: IDS.chapter,
-      contextType: 'chapter_summary',
-      title: '第一章',
-      content: '第一章上下文',
-      importance: 4,
-    }],
-    characterStates: [{
-      novelId: IDS.novel,
-      chapterId: IDS.chapter,
-      characterId: IDS.character,
-      stateSummary: '已经抵达城门',
-    }],
+    contextRecords: [
+      {
+        novelId: IDS.novel,
+        chapterId: IDS.chapter,
+        contextType: 'chapter_summary',
+        title: '第一章',
+        content: '第一章上下文',
+        importance: 4,
+      },
+    ],
+    characterStates: [
+      {
+        novelId: IDS.novel,
+        chapterId: IDS.chapter,
+        characterId: IDS.character,
+        stateSummary: '已经抵达城门',
+      },
+    ],
   };
 }
 
@@ -149,9 +176,7 @@ function seedBrowserOwners(): void {
 }
 
 function snapshotAll(): Record<string, string | null> {
-  return Object.fromEntries(
-    Object.values(KEYS).map((key) => [key, storage.getItem(key)]),
-  );
+  return Object.fromEntries(Object.values(KEYS).map((key) => [key, storage.getItem(key)]));
 }
 
 test('Tauri IPC failures never write chapter context into localStorage', async () => {
@@ -160,15 +185,25 @@ test('Tauri IPC failures never write chapter context into localStorage', async (
   const originalError = console.error;
   console.error = () => {};
   try {
-    mockIPC(() => { throw new Error('sqlite unavailable'); });
-    await assert.rejects(summaryModule.chapterSummaryService.create(bundleInput().summary), /sqlite unavailable/);
-    await assert.rejects(characterStateModule.characterStateService.create(
-      bundleInput().characterStates[0],
-    ), /sqlite unavailable/);
-    await assert.rejects(contextModule.contextRecordService.create(
-      bundleInput().contextRecords[0],
-    ), /sqlite unavailable/);
-    await assert.rejects(bundleModule.chapterContextPersistenceService.save(bundleInput()), /sqlite unavailable/);
+    mockIPC(() => {
+      throw new Error('sqlite unavailable');
+    });
+    await assert.rejects(
+      summaryModule.chapterSummaryService.create(bundleInput().summary),
+      /sqlite unavailable/,
+    );
+    await assert.rejects(
+      characterStateModule.characterStateService.create(bundleInput().characterStates[0]),
+      /sqlite unavailable/,
+    );
+    await assert.rejects(
+      contextModule.contextRecordService.create(bundleInput().contextRecords[0]),
+      /sqlite unavailable/,
+    );
+    await assert.rejects(
+      bundleModule.chapterContextPersistenceService.save(bundleInput()),
+      /sqlite unavailable/,
+    );
     assert.deepEqual(snapshotAll(), before);
   } finally {
     console.error = originalError;
@@ -176,21 +211,28 @@ test('Tauri IPC failures never write chapter context into localStorage', async (
 });
 
 test('Tauri reads propagate errors instead of returning legacy localStorage rows', async () => {
-  storage.setItem(KEYS.summaries, JSON.stringify([{
-    id: IDS.summary,
-    novelId: IDS.novel,
-    chapterId: IDS.chapter,
-    adoptedDraftId: IDS.draft,
-    summary: '不应被读取',
-    enabled: true,
-    isExpired: false,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  }]));
+  storage.setItem(
+    KEYS.summaries,
+    JSON.stringify([
+      {
+        id: IDS.summary,
+        novelId: IDS.novel,
+        chapterId: IDS.chapter,
+        adoptedDraftId: IDS.draft,
+        summary: '不应被读取',
+        enabled: true,
+        isExpired: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]),
+  );
   const originalError = console.error;
   console.error = () => {};
   try {
-    mockIPC(() => { throw new Error('read failed'); });
+    mockIPC(() => {
+      throw new Error('read failed');
+    });
     await assert.rejects(
       summaryModule.chapterSummaryService.getByNovelId(IDS.novel),
       /read failed/,
@@ -266,48 +308,61 @@ test('browser character-state create compensates the state write when character 
 
 function seedBrowserAdoption(): void {
   const createdAt = '2026-01-01T00:00:00.000Z';
-  storage.setItem(KEYS.drafts, JSON.stringify([
-    {
-      id: IDS.draft,
-      novelId: IDS.novel,
-      chapterId: IDS.chapter,
-      content: '旧正文',
-      source: 'user_edited',
-      versionNo: 1,
-      wordCount: 3,
-      isAdopted: true,
-      createdAt,
-      updatedAt: createdAt,
-    },
-    {
-      id: IDS.revisedDraft,
-      novelId: IDS.novel,
-      chapterId: IDS.chapter,
-      content: '新正文',
-      source: 'user_edited',
-      versionNo: 2,
-      wordCount: 3,
-      isAdopted: false,
-      createdAt,
-      updatedAt: createdAt,
-    },
-  ]));
-  storage.setItem(KEYS.summaries, JSON.stringify([{
-    id: IDS.summary,
-    ...bundleInput().summary,
-    enabled: true,
-    isExpired: false,
-    createdAt,
-    updatedAt: createdAt,
-  }]));
-  storage.setItem(KEYS.contexts, JSON.stringify([{
-    id: IDS.context,
-    ...bundleInput().contextRecords[0],
-    isActive: true,
-    isExpired: false,
-    createdAt,
-    updatedAt: createdAt,
-  }]));
+  storage.setItem(
+    KEYS.drafts,
+    JSON.stringify([
+      {
+        id: IDS.draft,
+        novelId: IDS.novel,
+        chapterId: IDS.chapter,
+        content: '旧正文',
+        source: 'user_edited',
+        versionNo: 1,
+        wordCount: 3,
+        isAdopted: true,
+        createdAt,
+        updatedAt: createdAt,
+      },
+      {
+        id: IDS.revisedDraft,
+        novelId: IDS.novel,
+        chapterId: IDS.chapter,
+        content: '新正文',
+        source: 'user_edited',
+        versionNo: 2,
+        wordCount: 3,
+        isAdopted: false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]),
+  );
+  storage.setItem(
+    KEYS.summaries,
+    JSON.stringify([
+      {
+        id: IDS.summary,
+        ...bundleInput().summary,
+        enabled: true,
+        isExpired: false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]),
+  );
+  storage.setItem(
+    KEYS.contexts,
+    JSON.stringify([
+      {
+        id: IDS.context,
+        ...bundleInput().contextRecords[0],
+        isActive: true,
+        isExpired: false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]),
+  );
 }
 
 test('summary source lookup ignores a newer unadopted draft', async () => {
@@ -369,7 +424,9 @@ test('legacy migration keeps local data when the SQLite transaction fails', asyn
   const originalError = console.error;
   console.error = () => {};
   try {
-    mockIPC(() => { throw new Error('migration rollback'); });
+    mockIPC(() => {
+      throw new Error('migration rollback');
+    });
     await assert.rejects(
       migrationModule.legacyChapterContextMigrationService.migrate(),
       /migration rollback/,

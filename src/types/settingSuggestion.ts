@@ -5,16 +5,9 @@
 
 export type SettingSuggestionType = 'character' | 'faction' | 'location' | 'rule';
 
-export type SettingSuggestionStatus =
-  | 'pending'
-  | 'adopted'
-  | 'edited_adopted'
-  | 'discarded';
+export type SettingSuggestionStatus = 'pending' | 'adopted' | 'edited_adopted' | 'discarded';
 
-export type SettingSuggestionTargetType =
-  | 'character'
-  | 'world_setting'
-  | 'rule_system';
+export type SettingSuggestionTargetType = 'character' | 'world_setting' | 'rule_system';
 
 export type SettingSuggestionPayload = Record<string, string>;
 

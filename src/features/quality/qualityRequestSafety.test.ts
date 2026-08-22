@@ -4,7 +4,9 @@ import { resolveCurrentQualityRequest } from './qualityRequestSafety';
 
 test('a deferred quality history response is discarded after the live target changes', async () => {
   let resolve!: (value: string[]) => void;
-  const deferred = new Promise<string[]>((done) => { resolve = done; });
+  const deferred = new Promise<string[]>((done) => {
+    resolve = done;
+  });
   let liveChapterId = 'chapter-a';
 
   const pending = resolveCurrentQualityRequest(

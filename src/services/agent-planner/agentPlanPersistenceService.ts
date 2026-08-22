@@ -70,7 +70,11 @@ export const agentPlanPersistenceService = {
     });
   },
 
-  async claim(planId: string, stepId: string, lease: AgentPlanLeaseProof): Promise<AgentPlanStepClaim> {
+  async claim(
+    planId: string,
+    stepId: string,
+    lease: AgentPlanLeaseProof,
+  ): Promise<AgentPlanStepClaim> {
     requireDesktop();
     return dbCall('claim_agent_plan_step', { input: { planId, stepId, lease } });
   },

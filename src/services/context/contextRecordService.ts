@@ -4,13 +4,7 @@
  * 桌面端以 SQLite 为唯一事实源；浏览器开发模式才使用 localStorage。
  * Tauri IPC 失败必须向上传播，禁止静默写入另一套存储。
  */
-import {
-  lsGet,
-  generateId,
-  nowISO,
-  dbCall,
-  getDbMode,
-} from '../database/db';
+import { lsGet, generateId, nowISO, dbCall, getDbMode } from '../database/db';
 import type { ContextRecord, CreateContextRecordInput } from '../../types/context';
 
 const KEY = 'ai_novel_studio_context_records';
@@ -67,9 +61,8 @@ export const contextRecordService = {
     excludeExpired?: boolean;
   }): Promise<ContextRecord[]> {
     const active = await this.getActiveByNovelId(input.novelId);
-    const filtered = input.excludeExpired !== false
-      ? active.filter((record) => !record.isExpired)
-      : active;
+    const filtered =
+      input.excludeExpired !== false ? active.filter((record) => !record.isExpired) : active;
     return [...filtered]
       .sort((left, right) => right.importance - left.importance)
       .slice(0, input.maxCount || 15);
@@ -187,7 +180,11 @@ export function mapContextRecordFromTauriDto(dto: unknown): ContextRecord {
   const content = readDtoValue(dto, 'content', 'content');
   const createdAt = readDtoValue(dto, 'createdAt', 'created_at');
   const updatedAt = readDtoValue(dto, 'updatedAt', 'updated_at');
-  if (![id, novelId, contextType, title, content, createdAt, updatedAt].every((value) => typeof value === 'string')) {
+  if (
+    ![id, novelId, contextType, title, content, createdAt, updatedAt].every(
+      (value) => typeof value === 'string',
+    )
+  ) {
     throw new Error('SQLite 返回了无效的上下文记录。');
   }
 
@@ -214,13 +211,14 @@ export function mapContextRecordFromTauriDto(dto: unknown): ContextRecord {
 
 export function buildContextSummary(records: ContextRecord[], maxLength = 1200): string {
   if (records.length === 0) return '';
-  const lines = records.filter((record) => !record.isExpired).map((record) => {
-    const prefix = `[${record.title}]`;
-    const short = record.content.length > 200
-      ? `${record.content.slice(0, 200)}…`
-      : record.content;
-    return `${prefix}${short}`;
-  });
+  const lines = records
+    .filter((record) => !record.isExpired)
+    .map((record) => {
+      const prefix = `[${record.title}]`;
+      const short =
+        record.content.length > 200 ? `${record.content.slice(0, 200)}…` : record.content;
+      return `${prefix}${short}`;
+    });
   let result = lines.join('\n');
   if (result.length > maxLength) result = `${result.slice(0, maxLength)}\n…（上下文已截断）`;
   return result;

@@ -40,7 +40,8 @@ const vite = await createServer({
   server: { middlewareMode: true, hmr: false },
 });
 const qualityModule = await vite.ssrLoadModule('/src/services/quality/qualityCheckService.ts');
-const qualityCheckService = qualityModule.qualityCheckService as typeof import('./qualityCheckService').qualityCheckService;
+const qualityCheckService =
+  qualityModule.qualityCheckService as typeof import('./qualityCheckService').qualityCheckService;
 
 after(async () => {
   await vite.close();
@@ -53,15 +54,17 @@ beforeEach(() => {
 const result: QualityCheckResult = {
   overallScore: 78,
   summary: '固定质量检查结果',
-  items: [{
-    issueType: 'continuity',
-    severity: 'high',
-    category: '连续性',
-    title: '同一问题',
-    description: '这个问题会在复检时再次出现。',
-    quote: '固定引用',
-    suggestion: '固定建议',
-  }],
+  items: [
+    {
+      issueType: 'continuity',
+      severity: 'high',
+      category: '连续性',
+      title: '同一问题',
+      description: '这个问题会在复检时再次出现。',
+      quote: '固定引用',
+      suggestion: '固定建议',
+    },
+  ],
 };
 
 async function saveCompletedReport(draftId: string, checkedAt: string) {
@@ -164,8 +167,12 @@ test('legacy item state is synthesized without leaking into old or new snapshots
   assert.ok(second.report);
   storage.removeItem('ai_novel_studio_quality_issue_states');
   const legacyItems = JSON.parse(storage.getItem('ai_novel_studio_quality_items') || '[]');
-  const olderItem = legacyItems.find((item: { reportId: string }) => item.reportId === first.report?.id);
-  const newerItem = legacyItems.find((item: { reportId: string }) => item.reportId === second.report?.id);
+  const olderItem = legacyItems.find(
+    (item: { reportId: string }) => item.reportId === first.report?.id,
+  );
+  const newerItem = legacyItems.find(
+    (item: { reportId: string }) => item.reportId === second.report?.id,
+  );
   olderItem.status = 'ignored';
   olderItem.resolutionNote = '旧版忽略原因';
   olderItem.updatedAt = '2099-01-01T00:00:00.000Z';
@@ -175,9 +182,18 @@ test('legacy item state is synthesized without leaking into old or new snapshots
 
   const currentBeforeRecheck = await qualityCheckService.getChapterIssues('chapter-1');
   assert.equal(currentBeforeRecheck.items[0]?.status, 'ignored');
-  assert.equal((await qualityCheckService.getReportSnapshot(first.report.id)).items[0]?.status, 'ignored');
-  assert.equal((await qualityCheckService.getReportSnapshot(second.report.id)).items[0]?.status, 'pending');
-  assert.equal((await qualityCheckService.getChapterIssues('chapter-1')).items[0]?.resolutionNote, '旧版忽略原因');
+  assert.equal(
+    (await qualityCheckService.getReportSnapshot(first.report.id)).items[0]?.status,
+    'ignored',
+  );
+  assert.equal(
+    (await qualityCheckService.getReportSnapshot(second.report.id)).items[0]?.status,
+    'pending',
+  );
+  assert.equal(
+    (await qualityCheckService.getChapterIssues('chapter-1')).items[0]?.resolutionNote,
+    '旧版忽略原因',
+  );
 });
 
 test('completed result retries require the same AI task and respect current-versus-history reads', async () => {
@@ -233,8 +249,10 @@ test('a late older report cannot reset the current issue workflow state', async 
     checkedAt: '2026-01-02T00:00:00.000Z',
   });
   const reports = JSON.parse(storage.getItem('ai_novel_studio_quality_reports') || '[]');
-  reports.find((report: { id: string }) => report.id === older.id).createdAt = '2026-01-01T00:00:00.000Z';
-  reports.find((report: { id: string }) => report.id === newer.id).createdAt = '2026-01-02T00:00:00.000Z';
+  reports.find((report: { id: string }) => report.id === older.id).createdAt =
+    '2026-01-01T00:00:00.000Z';
+  reports.find((report: { id: string }) => report.id === newer.id).createdAt =
+    '2026-01-02T00:00:00.000Z';
   storage.setItem('ai_novel_studio_quality_reports', JSON.stringify(reports));
 
   const savedNewer = await qualityCheckService.saveResult({
@@ -279,8 +297,10 @@ test('newer incomplete reports do not block the current completed workflow state
     draftId: 'draft-3',
   });
   const reports = JSON.parse(storage.getItem('ai_novel_studio_quality_reports') || '[]');
-  reports.find((report: { id: string }) => report.id === current.id).createdAt = '2026-01-02T00:00:00.000Z';
-  reports.find((report: { id: string }) => report.id === newerPending.id).createdAt = '2026-01-03T00:00:00.000Z';
+  reports.find((report: { id: string }) => report.id === current.id).createdAt =
+    '2026-01-02T00:00:00.000Z';
+  reports.find((report: { id: string }) => report.id === newerPending.id).createdAt =
+    '2026-01-03T00:00:00.000Z';
   storage.setItem('ai_novel_studio_quality_reports', JSON.stringify(reports));
 
   const saved = await qualityCheckService.saveResult({
