@@ -18,6 +18,8 @@ import { agentPlanner } from './agentPlanner';
 import { agentToolExecutor } from './agentToolExecutor';
 import { agentEvaluator } from './agentEvaluator';
 import { toolUsageMemory } from './toolUsageMemory';
+import { agentQualityJudge } from './agentQualityJudge';
+import { qualityFeedbackMemory } from './qualityFeedbackMemory';
 
 export class CreativeAgentHarness {
   async run(
@@ -158,6 +160,39 @@ export class CreativeAgentHarness {
         taskState.failureReason = record.error || '工具执行未成功';
       }
 
+      // 4.1 正文生成后的自主质量审查与反馈沉淀
+      if (toolCall.name === 'generate_prose' && record.success) {
+        const prose =
+          typeof (record.output as Record<string, unknown>)?.prose === 'string'
+            ? String((record.output as Record<string, unknown>).prose)
+            : '';
+        const qualityReview = await agentQualityJudge.judgeQuality({
+          userGoal: userInput,
+          scenePlan: context.taskState?.goal,
+          prose,
+          threshold: config?.qualityThreshold ?? 80,
+          modelSettings: config?.modelSettings,
+        });
+        context.qualityReviews = context.qualityReviews ?? [];
+        context.qualityReviews.push(qualityReview);
+        events?.onQualityReview?.(qualityReview);
+
+        if (qualityReview.passed) {
+          qualityFeedbackMemory.recordSuccessfulGeneration({
+            userGoal: userInput,
+            inputConditions: {
+              sceneGoal: userInput,
+            },
+            generationParams: {
+              modelName: config?.modelSettings?.modelName || 'mock-agent-planner',
+              temperature: config?.temperature ?? 0.7,
+            },
+            qualityReview,
+            proseSnippet: prose,
+          });
+        }
+      }
+
       events?.onTaskStateUpdate?.(taskState);
 
       // 上下文注入观察反馈
@@ -193,6 +228,7 @@ export class CreativeAgentHarness {
       turns,
       executionRecords: context.executionRecords,
       decisionTraces: context.decisionTraces ?? [],
+      qualityReviews: context.qualityReviews ?? [],
       taskState,
       context,
     };

@@ -103,6 +103,7 @@ export interface AgentContext {
   messages: AgentMessage[];
   executionRecords: AgentToolExecutionRecord[];
   decisionTraces?: AgentDecisionTrace[];
+  qualityReviews?: AgentQualityReview[];
   status: AgentTaskStatus;
   currentGoal?: string;
   currentThought?: string;
@@ -134,6 +135,7 @@ export interface AgentHarnessEvents {
   onTaskStateUpdate?: (taskState: AgentTaskState) => void;
   onTurnComplete?: (decision: AgentDecision, turn: number) => void;
   onDecisionTrace?: (trace: AgentDecisionTrace) => void;
+  onQualityReview?: (review: AgentQualityReview) => void;
 }
 
 export interface AgentHarnessConfig {
@@ -143,6 +145,7 @@ export interface AgentHarnessConfig {
   modelSettings?: AiSettings;
   enableAutoRecovery?: boolean;
   enableSelfEvaluation?: boolean;
+  qualityThreshold?: number; // 默认 80
 }
 
 export interface AgentExecutionResult {
@@ -151,6 +154,7 @@ export interface AgentExecutionResult {
   turns: number;
   executionRecords: AgentToolExecutionRecord[];
   decisionTraces: AgentDecisionTrace[];
+  qualityReviews?: AgentQualityReview[];
   taskState?: AgentTaskState;
   context: AgentContext;
 }
@@ -172,4 +176,33 @@ export interface ToolUsageExperience {
   qualityScore: number;
   successCount: number;
   lastUsedAt: string;
+}
+
+export interface AgentQualityReview {
+  id: string;
+  coherence: number; // 连贯性 0-100
+  characterConsistency: number; // 人物一致性 0-100
+  plotProgression: number; // 剧情推进 0-100
+  styleMatch: number; // 文风匹配 0-100
+  overallScore: number; // 最终得分 0-100
+  suggestions: string[];
+  passed: boolean;
+  timestamp: string;
+}
+
+export interface QualityFeedbackRecord {
+  id: string;
+  userGoal: string;
+  inputConditions: {
+    sceneGoal?: string;
+    sceneBeats?: string;
+    povCharacter?: string;
+  };
+  generationParams: {
+    modelName: string;
+    temperature: number;
+  };
+  qualityReview: AgentQualityReview;
+  proseSnippet: string;
+  timestamp: string;
 }

@@ -411,6 +411,92 @@ export function AgentChatWorkspace({
           </div>
         )}
 
+        {/* 4.2 Quality Review 卡片 (📝 Quality Review) */}
+        {conversation.qualityReviews && conversation.qualityReviews.length > 0 && (
+          <div
+            className="agent-quality-reviews-section"
+            data-testid="agent-quality-reviews-section"
+            style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+          >
+            {conversation.qualityReviews.map((review, idx) => (
+              <div
+                key={review.id || idx}
+                className="agent-quality-review-card"
+                data-testid="agent-quality-review-card"
+                style={{
+                  border: '1px solid #fed7aa',
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                  background: '#fffbeb',
+                  fontSize: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: '#c2410c' }}>
+                    <span>📝</span>
+                    <span>Quality Review 质量审查</span>
+                  </div>
+                  <span
+                    data-testid="agent-quality-overall-badge"
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: review.passed ? '#dcfce7' : '#fee2e2',
+                      color: review.passed ? '#15803d' : '#b91c1c',
+                      border: `1px solid ${review.passed ? '#86efac' : '#fca5a5'}`,
+                    }}
+                  >
+                    最终: {review.overallScore}/100 {review.passed ? '✓ 达标' : '⚠️ 需重写'}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: 8,
+                    marginBottom: 8,
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ padding: '6px', background: '#ffffff', borderRadius: 4, border: '1px solid #fef3c7' }}>
+                    <div style={{ color: '#9a3412', fontSize: 11 }}>人物一致性</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>{review.characterConsistency}</div>
+                  </div>
+                  <div style={{ padding: '6px', background: '#ffffff', borderRadius: 4, border: '1px solid #fef3c7' }}>
+                    <div style={{ color: '#9a3412', fontSize: 11 }}>剧情推进</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>{review.plotProgression}</div>
+                  </div>
+                  <div style={{ padding: '6px', background: '#ffffff', borderRadius: 4, border: '1px solid #fef3c7' }}>
+                    <div style={{ color: '#9a3412', fontSize: 11 }}>文风匹配</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>{review.styleMatch}</div>
+                  </div>
+                  <div style={{ padding: '6px', background: '#ffffff', borderRadius: 4, border: '1px solid #fef3c7' }}>
+                    <div style={{ color: '#9a3412', fontSize: 11 }}>连贯性</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#431407' }}>{review.coherence}</div>
+                  </div>
+                </div>
+
+                {review.suggestions.length > 0 && (
+                  <div style={{ color: '#78350f', fontSize: 11 }}>
+                    <span style={{ fontWeight: 600 }}>建议: </span>
+                    {review.suggestions.join('; ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* 5. 工具执行记录卡片 (Tool Calling & Observation) */}
         {conversation.toolRecords.map((record, i) => {
           const meta = AGENT_TOOL_METADATA[record.toolName] || { label: record.toolName, icon: '⚙️' };

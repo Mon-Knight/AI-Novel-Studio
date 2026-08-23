@@ -310,33 +310,61 @@ export class AgentPlanner {
         };
       }
 
-      // 场景 4: 正文生成完成 -> 进行质量检查
-      if (
-        lastRecord?.toolName === 'generate_prose' &&
-        !records.some((r) => r.toolName === 'quality_check')
-      ) {
-        const proseText =
-          typeof (lastRecord.output as Record<string, unknown>)?.prose === 'string'
-            ? String((lastRecord.output as Record<string, unknown>).prose)
-            : '正文生成完成';
+      // 场景 4: 正文生成完成 -> 检查质量裁判结果；如未达标自主重写，如达标则推进质检或记忆演进
+      if (lastRecord?.toolName === 'generate_prose') {
+        const latestReview =
+          context.qualityReviews && context.qualityReviews.length > 0
+            ? context.qualityReviews[context.qualityReviews.length - 1]
+            : null;
 
-        return {
-          thought: '正文已生成完毕，现在自主触发质量合规检查以确保没有错别字、大纲偏离或约束违规。',
-          plan: ['正文生成 (已完成)', '质量检查', '更新记忆', '保存版本'],
-          selectedTool: {
-            name: 'quality_check',
-            arguments: {
-              novelId: context.novelId || 'novel-01',
-              chapterId: context.chapterId || 'chap-01',
-              content: proseText,
+        if (latestReview && !latestReview.passed) {
+          return {
+            thought: `正文初稿质量审查未通过（总分 ${latestReview.overallScore}/100，未达阈值），审查建议：${latestReview.suggestions.join('; ')}。现在自主启动正文重写（rewrite_prose）以扩充文学细节与戏剧冲突。`,
+            plan: ['正文初稿 (质检未通过)', '正文重写与自愈', '质量检查', '更新记忆', '保存版本'],
+            selectedTool: {
+              name: 'generate_prose',
+              arguments: {
+                novelId: context.novelId || 'novel-01',
+                chapterId: context.chapterId || 'chap-01',
+                chapterTitle: '第五章 第一节 遗迹探秘 (重写修订版)',
+                sceneGoal: '主角进入遗迹探寻线索，隐忍克制不揭开最终谜底（重写扩充细节）',
+                sceneBeats: '主角深入古代遗迹殿堂，仔细勘查断裂石柱与古老铭文，感知四周隐蔽的机关波动，神情戒备谨慎推进。',
+                rewriteMode: true,
+                improvementSuggestions: latestReview.suggestions,
+              },
             },
-          },
-          reasoningSummary: '正文初稿落盘，执行前置文学质量与设定合规性审查',
-          selectedToolReason: '正文已生成，需要检验行文质量、设定一致性与违规问题',
-          expectedOutcome: '获得质量评分与合规检测报告',
-          confidenceScore: 0.96,
-          isDone: false,
-        };
+            reasoningSummary: `初稿质量得分 ${latestReview.overallScore} 偏低，依据评判建议触发重写优化`,
+            selectedToolReason: '初稿质量未达标，调用重写工具增强文学细节与情节张力',
+            expectedOutcome: '产出质量达标的高质量重写正文',
+            confidenceScore: 0.95,
+            isDone: false,
+          };
+        }
+
+        if (!records.some((r) => r.toolName === 'quality_check')) {
+          const proseText =
+            typeof (lastRecord.output as Record<string, unknown>)?.prose === 'string'
+              ? String((lastRecord.output as Record<string, unknown>).prose)
+              : '正文生成完成';
+
+          return {
+            thought: '正文已生成完毕并通过质量裁判初审，现在自主触发质量合规检查以确保没有错别字、大纲偏离或约束违规。',
+            plan: ['正文生成 (已通过质量裁判)', '质量检查', '更新记忆', '保存版本'],
+            selectedTool: {
+              name: 'quality_check',
+              arguments: {
+                novelId: context.novelId || 'novel-01',
+                chapterId: context.chapterId || 'chap-01',
+                content: proseText,
+              },
+            },
+            reasoningSummary: '正文初稿达标，执行前置文学质量与设定合规性审查',
+            selectedToolReason: '正文已生成，需要检验行文质量、设定一致性与违规问题',
+            expectedOutcome: '获得质量评分与合规检测报告',
+            confidenceScore: 0.96,
+            isDone: false,
+          };
+        }
       }
 
       // 场景 5: 质检完成 -> 如果是全流程章节生产，更新记忆状态

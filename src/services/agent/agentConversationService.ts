@@ -6,6 +6,7 @@ import type {
   AgentContext,
   AgentDecisionTrace,
   AgentMessage,
+  AgentQualityReview,
   AgentTaskStatus,
   AgentToolExecutionRecord,
 } from '../../types/agentHarness';
@@ -34,6 +35,7 @@ export interface AgentConversationItem {
   context: AgentContext;
   toolRecords: AgentToolExecutionRecord[];
   decisionTraces: AgentDecisionTrace[];
+  qualityReviews: AgentQualityReview[];
   pendingConfirmations: PendingToolConfirmation[];
   status: AgentTaskStatus;
   createdAt: string;
@@ -77,6 +79,7 @@ export class AgentConversationService {
       context: initialContext,
       toolRecords: [],
       decisionTraces: [],
+      qualityReviews: [],
       pendingConfirmations: [],
       status: 'idle',
       createdAt: new Date().toISOString(),
@@ -154,6 +157,7 @@ export class AgentConversationService {
     conversation.messages = [...execResult.context.messages];
     conversation.toolRecords = [...execResult.executionRecords];
     conversation.decisionTraces = [...execResult.decisionTraces];
+    conversation.qualityReviews = [...(execResult.qualityReviews ?? [])];
     conversation.status = execResult.status;
     conversation.updatedAt = new Date().toISOString();
 
