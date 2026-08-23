@@ -32,6 +32,7 @@
 - 新增创作智能体自主任务运行时（Creative Agent Autonomous Task Runtime）：将 Agent 循环从单步工具调用全面演进为 `Observe -> Plan -> Act -> Evaluate -> Retry` 5 阶段自主循环；引入任务状态管理（`AgentTaskState`：目标分解、已完成步骤、进度百分比、评估记录）；新增 Agent 自我评估与反思引擎（`AgentEvaluator`）；支持目标驱动复合创作任务模板（自动编排记忆检索、分镜规划、正文生成与质量核验）及自适应错误恢复重试。
 - 新增创作智能体端到端小说章节创作集成验证（Creative Agent End-to-End Creative Story Workflow）：通过 `agentStoryWorkflow.test.ts` 完整验证 Agent 依据自然语言约束（如“主角进入遗迹探寻线索但隐忍不揭开最终秘密”）自主完成从感知世界规则与人物状态、分镜规划、正文生成、质量核验、记忆演化（Memory State Delta）到不可变章节版本落盘存证（Chapter Version Revision）的 7 阶段全生命周期闭环。
 - 新增创作智能体决策质量追踪与推理审计层（Creative Agent Decision Quality Layer & Reasoning Audit）：扩展 `AgentDecision`（`reasoningSummary`、`selectedToolReason`、`expectedOutcome` 与 `confidenceScore`）；引入结构化决策追踪体系（`AgentDecisionTrace`）全程审计工具选择依据、执行产物与多轮自适应调整；在对话工作台（`AgentChatWorkspace`）可视化沉淀决策追踪卡片（🧠 Agent Decision），透明化展现创作推理链条。
+- 新增创作智能体工具选择优化与经验沉淀层（Creative Agent Tool Selection Optimization Layer & Usage Memory）：引入工具选择评估器（`ToolSelectionEvaluator`）多维度量化相关度（`relevanceScore`）、冗余度（`unnecessaryToolScore`）与缺失度（`missingToolScore`）；新增工具使用经验记忆（`ToolUsageMemory`）沉淀高分历史成功案例（如角色性格调整工具链 `query_character_state -> generate_scene_plan -> update_memory`）；在规划器（`AgentPlanner`）中自动检索并注入历史经验以优化决策准确性与收敛效率。
 
 ### 变更
 

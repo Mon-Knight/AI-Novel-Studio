@@ -154,3 +154,22 @@ export interface AgentExecutionResult {
   taskState?: AgentTaskState;
   context: AgentContext;
 }
+
+export interface ToolSelectionScore {
+  relevanceScore: number; // 0-100 相关度得分（越高越好）
+  unnecessaryToolScore: number; // 0-100 冗余度惩罚（越低越好，0表示无冗余）
+  missingToolScore: number; // 0-100 缺失度惩罚（越低越好，0表示无缺失）
+  overallScore: number; // 0-100 综合质量得分
+  feedback: string;
+  isOptimal: boolean;
+}
+
+export interface ToolUsageExperience {
+  id: string;
+  userGoal: string;
+  taskIntent: string;
+  toolSequence: string[];
+  qualityScore: number;
+  successCount: number;
+  lastUsedAt: string;
+}

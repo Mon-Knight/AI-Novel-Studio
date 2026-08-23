@@ -17,6 +17,7 @@ import { agentContextManager } from './agentContextManager';
 import { agentPlanner } from './agentPlanner';
 import { agentToolExecutor } from './agentToolExecutor';
 import { agentEvaluator } from './agentEvaluator';
+import { toolUsageMemory } from './toolUsageMemory';
 
 export class CreativeAgentHarness {
   async run(
@@ -173,6 +174,17 @@ export class CreativeAgentHarness {
       if (!finalResponse) {
         finalResponse = `已成功完成本阶段创作任务并调度 ${context.executionRecords.length} 个工具步骤，所有状态与产物均已保存。`;
       }
+    }
+
+    if (taskState.completedSteps.length > 0) {
+      const avgScore =
+        taskState.evaluations.length > 0
+          ? Math.round(
+              taskState.evaluations.reduce((sum, e) => sum + e.score, 0) /
+                taskState.evaluations.length,
+            )
+          : 90;
+      toolUsageMemory.recordExperience(userInput, taskState.completedSteps, avgScore);
     }
 
     return {

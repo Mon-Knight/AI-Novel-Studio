@@ -3,6 +3,7 @@ import type { AgentContext, AgentDecision, AgentHarnessConfig } from '../../type
 import { createAiClient } from '../ai/aiClient';
 import { aiSettingsService } from '../ai/aiSettingsService';
 import { agentContextManager } from './agentContextManager';
+import { toolUsageMemory } from './toolUsageMemory';
 
 const FALLBACK_AI_SETTINGS: AiSettings = {
   runtimeMode: 'mock',
@@ -41,7 +42,21 @@ export class AgentPlanner {
       })
       .join('\n\n');
 
-    const prompt = `${systemPrompt}\n\n### 对话与工具执行历史:\n${historyText}\n\n请输出你的下一步 JSON 决策 (包含 thought, plan, action, actionInput, reasoningSummary, selectedToolReason, expectedOutcome, confidenceScore):`;
+    const lastUserMessage = [...context.messages].reverse().find((m) => m.role === 'user');
+    const userGoal = lastUserMessage?.content || context.currentGoal || '';
+    const similarExperiences = toolUsageMemory.findSimilarExperiences(userGoal, 80);
+    const expText =
+      similarExperiences.length > 0
+        ? `\n### 历史高分工具执行经验参考 (Tool Usage Memory):\n${similarExperiences
+            .slice(0, 2)
+            .map(
+              (e) =>
+                `- 相似目标: "${e.userGoal}" -> 推荐工具链: [${e.toolSequence.join(' -> ')}] (成功质量分: ${e.qualityScore})`,
+            )
+            .join('\n')}\n`
+        : '';
+
+    const prompt = `${systemPrompt}${expText}\n\n### 对话与工具执行历史:\n${historyText}\n\n请输出你的下一步 JSON 决策 (包含 thought, plan, action, actionInput, reasoningSummary, selectedToolReason, expectedOutcome, confidenceScore):`;
 
     // 1. 如果在真实模型环境，调用真实 AI Client
     if (settings.runtimeMode !== 'mock') {
@@ -154,6 +169,69 @@ export class AgentPlanner {
 
     // B. 自主多步骤任务推进 (Autonomous Multi-Step Execution)
     if (records.length > 0) {
+      // 场景 0: 人物性格调整专项链路 (Character Modification Trajectory: query_character_state -> generate_scene_plan -> update_memory)
+      if (
+        (userGoal.includes('性格') || userGoal.includes('修改人物') || userGoal.includes('调整角色')) &&
+        !userGoal.includes('完成') &&
+        !userGoal.includes('全篇')
+      ) {
+        if (lastRecord?.toolName === 'query_character_state' && !records.some((r) => r.toolName === 'generate_scene_plan')) {
+          return {
+            thought: '参考历史成功案例[修改人物性格]，角色状态已就绪，现在规划展示性格转变的分镜节拍。',
+            plan: ['查询人物状态 (已完成)', '分镜规划', '更新记忆'],
+            selectedTool: {
+              name: 'generate_scene_plan',
+              arguments: {
+                novelId: context.novelId || 'novel-01',
+                chapterId: context.chapterId || 'chap-01',
+                chapterTitle: '角色性格转变篇',
+                goal: userGoal,
+              },
+            },
+            reasoningSummary: '参考历史成功经验，为性格调整编排分镜节拍',
+            selectedToolReason: '已有角色状态，需要通过场景分镜呈现性格转变的戏剧冲突',
+            expectedOutcome: '获得体现新性格的分镜节拍',
+            confidenceScore: 0.94,
+            isDone: false,
+          };
+        }
+
+        if (lastRecord?.toolName === 'generate_scene_plan' && !records.some((r) => r.toolName === 'update_memory')) {
+          return {
+            thought: '参考历史成功案例，性格调整分镜已就绪，将新性格特征沉淀至 Novel Memory Layer。',
+            plan: ['分镜规划 (已完成)', '更新记忆', '任务交付'],
+            selectedTool: {
+              name: 'update_memory',
+              arguments: {
+                novelId: context.novelId || 'novel-01',
+                characterId: 'char-protagonist',
+                emotion: '果决坚毅',
+                goal: '贯彻新信念并破局前行',
+              },
+            },
+            reasoningSummary: '参考历史成功经验，持久化角色最新性格与动态心境',
+            selectedToolReason: '性格调整分镜已就绪，需将新性格与心境更新至记忆层',
+            expectedOutcome: '记忆层角色性格更新并生成新版本快照',
+            confidenceScore: 0.96,
+            isDone: false,
+          };
+        }
+
+        if (lastRecord?.toolName === 'update_memory') {
+          return {
+            thought: '人物性格调整与记忆层更新已闭环达成，输出成果报告。',
+            plan: ['全流程闭环达成'],
+            selectedTool: undefined,
+            reasoningSummary: '人物性格优化全流程完成',
+            selectedToolReason: '目标已达成',
+            expectedOutcome: '交付角色性格调整结果',
+            confidenceScore: 1.0,
+            finalResponse: `已根据需求“${userGoal}”成功完成主角性格与心境的动态调整，分镜节拍与记忆层快照均已妥善沉淀。`,
+            isDone: true,
+          };
+        }
+      }
+
       // 场景 1: 查询世界状态完成 -> 如果需要人物心境且未查询过，调用 query_character_state
       if (
         lastRecord?.toolName === 'query_world_state' &&
@@ -364,6 +442,27 @@ export class AgentPlanner {
         reasoningSummary: '命中显式工具调用指令',
         selectedToolReason: '用户指令明确指定调用 flaky_writer_tool',
         expectedOutcome: '执行指定工具完成特定任务',
+        confidenceScore: 0.95,
+        isDone: false,
+      };
+    }
+
+    // 目标 0.1: 人物性格修改（匹配 ToolUsageMemory 推荐轨迹）
+    if (
+      (userGoal.includes('性格') || userGoal.includes('修改人物') || userGoal.includes('调整角色')) &&
+      !userGoal.includes('完成') &&
+      !userGoal.includes('全篇')
+    ) {
+      return {
+        thought: '参考历史成功案例[修改人物性格与心理动态]，推荐执行链：query_character_state -> generate_scene_plan -> update_memory。首先查询当前人物心境。',
+        plan: ['查询人物状态', '分镜规划', '更新记忆'],
+        selectedTool: {
+          name: 'query_character_state',
+          arguments: { novelId: context.novelId || 'novel-01', characterId: 'char-protagonist' },
+        },
+        reasoningSummary: '参考历史成功经验，首先检索主角当前性格与心境基线',
+        selectedToolReason: '修改人物性格需要先获取当前角色的基础设定与心理状态',
+        expectedOutcome: '获取角色当前动态心境与目标',
         confidenceScore: 0.95,
         isDone: false,
       };
