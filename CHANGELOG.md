@@ -27,6 +27,7 @@
 - 新增分镜生成与小说记忆层深度联调（Scene Generation & Novel Memory Deep Integration）：在分镜场景与 Beat 生成前自动检索三层记忆、角色心境与世界态势，并将 `memory_context` 编译源及记忆审计元数据（`memoryVersion`、`retrievedFragments`）注入 Execution Contract；正文生成成功后自动生成 State Delta 并驱动快照版本自增；提供针对无记忆旧章节的平滑降级 Fallback 机制。
 - 新增创作工作台记忆检查器面板（Creative Workbench Memory Inspector Panel）：在右侧栏与工作台沉淀 `MemoryInspectorPanel` / `MemoryInspectorCard`；实时可视化当前 Scene、POV 视点角色心境/目标/状态、Memory Version、三层记忆（长期/中期/短期）及召回碎片列表（Retrieved Fragments）；提供优雅的空状态降级支持。
 - 新增创作工作台生成追溯面板（Creative Workbench Generation Trace Panel）：在右侧栏沉淀 `GenerationTracePanel`；可视化呈现当前任务、Model RouteDecision、服务提供商（Provider）、模型名称、Memory Version、编译 Hash、提示词模板、Token 消耗、耗时与 Fallback 回退告警；无任务时平滑展示空状态。
+- 新增内置模型驱动创作智能体底座（Creative Agent Harness Phase 1）：将硬编码创作流程全面升级为 ReAct 循环与任务规划器（`AgentLoop`、`AgentPlanner`、`AgentToolRegistry`、`AgentToolExecutor`、`AgentContextManager`）；封装查询世界状态、人物动态、章节信息、生成大纲、生成分镜、生成正文、质量检查、更新 Memory 与保存版本等 9 大领域工具；支持真实 LLM 意图理解、自主工具选择、多步任务规划与错误自愈恢复，所有写操作经由严格安全契约链条。
 
 ### 变更
 

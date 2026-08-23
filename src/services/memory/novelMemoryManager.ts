@@ -29,6 +29,14 @@ export class NovelMemoryManager implements INovelMemoryManager {
     });
   }
 
+  getCharacterState(novelId: string, characterId: string): CharacterDynamicState | undefined {
+    return novelMemoryStateUpdater.getCharacterState(novelId, characterId);
+  }
+
+  getWorldState(novelId: string): WorldStateSnapshot | undefined {
+    return novelMemoryStateUpdater.getWorldState(novelId);
+  }
+
   async updateCharacterState(
     novelId: string,
     characterId: string,
