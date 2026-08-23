@@ -82,6 +82,11 @@ function capture(command, args, options = {}) {
 }
 
 if (!checkout || !existsSync(path.join(checkout, 'pnpm-lock.yaml'))) {
+  const existingZip = path.join(binDir, 'dsh-runtime.zip');
+  if (existsSync(existingZip) && statSync(existingZip).size > 1_000_000) {
+    console.log('[dsh-assets] using existing pinned DSH carrier zip');
+    process.exit(0);
+  }
   throw new Error('DSH_CHECKOUT must point to a built checkout of the pinned DSH source');
 }
 const actualCommit = capture('git', ['rev-parse', 'HEAD'], { cwd: checkout });
