@@ -54,7 +54,7 @@ test('CreativeAgentHarness Autonomous Runtime: 复合多步骤自主创作与工
   const result = await creativeAgentHarness.run(
     '完成第三章创作',
     { novelId, chapterId: 'chap-03' },
-    { maxTurns: 6 },
+    { maxTurns: 8 },
     {
       onTaskStateUpdate: (state) => {
         taskUpdates.push(state.progressPercentage);

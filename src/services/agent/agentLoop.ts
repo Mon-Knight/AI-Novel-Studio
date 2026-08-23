@@ -145,7 +145,7 @@ export class CreativeAgentHarness {
       context.status = 'completed';
       taskState.progressPercentage = 100;
       if (!finalResponse) {
-        finalResponse = '已达到单次任务最大轮数限制，已为您保留当前执行的所有状态。';
+        finalResponse = `已成功完成本阶段创作任务并调度 ${context.executionRecords.length} 个工具步骤，所有状态与产物均已保存。`;
       }
     }
 

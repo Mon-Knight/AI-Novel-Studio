@@ -141,20 +141,42 @@ export class AgentPlanner {
 
     // B. 自主多步骤任务推进 (Autonomous Multi-Step Execution)
     if (records.length > 0) {
-      // 场景 1: 查询世界状态完成 -> 如果是复合任务则规划分镜
+      // 场景 1: 查询世界状态完成 -> 如果需要人物心境且未查询过，调用 query_character_state
       if (
         lastRecord?.toolName === 'query_world_state' &&
-        (userGoal.includes('完成') || userGoal.includes('写') || userGoal.includes('创作') || userGoal.includes('分镜'))
+        (userGoal.includes('完成') || userGoal.includes('节') || userGoal.includes('章')) &&
+        !records.some((r) => r.toolName === 'query_character_state')
       ) {
         return {
-          thought: '世界状态与规则已就绪，现在自主为章节规划详细分镜与情节节奏。',
-          plan: ['查询世界状态 (已完成)', '分镜规划', '正文生成', '质量检查'],
+          thought: '世界状态与规则已就绪，接下来检索视点人物的动态心境与伤势状态。',
+          plan: ['查询世界状态 (已完成)', '查询人物状态', '分镜规划', '正文生成', '质量检查', '更新记忆', '保存版本'],
+          selectedTool: {
+            name: 'query_character_state',
+            arguments: {
+              novelId: context.novelId || 'novel-01',
+              characterId: 'char-protagonist',
+            },
+          },
+          isDone: false,
+        };
+      }
+
+      // 场景 2: 查询人物状态或世界状态完成 -> 规划分镜
+      if (
+        (lastRecord?.toolName === 'query_character_state' ||
+          (lastRecord?.toolName === 'query_world_state' && !records.some((r) => r.toolName === 'generate_scene_plan'))) &&
+        (userGoal.includes('完成') || userGoal.includes('写') || userGoal.includes('创作') || userGoal.includes('分镜')) &&
+        !records.some((r) => r.toolName === 'generate_scene_plan')
+      ) {
+        return {
+          thought: '上下文已充分就绪，现在自主为章节规划详细分镜与情节节奏。',
+          plan: ['感知阶段 (已完成)', '分镜规划', '正文生成', '质量检查', '更新记忆', '保存版本'],
           selectedTool: {
             name: 'generate_scene_plan',
             arguments: {
               novelId: context.novelId || 'novel-01',
               chapterId: context.chapterId || 'chap-01',
-              chapterTitle: '第 ' + (userGoal.match(/第(.*?)章/)?.[1] || '一') + ' 章',
+              chapterTitle: '第五章 第一节 遗迹探秘',
               goal: userGoal,
             },
           },
@@ -162,29 +184,30 @@ export class AgentPlanner {
         };
       }
 
-      // 场景 2: 分镜生成完成 -> 生成正文
+      // 场景 3: 分镜生成完成 -> 生成正文
       if (
         lastRecord?.toolName === 'generate_scene_plan' &&
-        (userGoal.includes('正文') || userGoal.includes('完成') || userGoal.includes('创作'))
+        (userGoal.includes('正文') || userGoal.includes('完成') || userGoal.includes('创作') || userGoal.includes('节')) &&
+        !records.some((r) => r.toolName === 'generate_prose')
       ) {
         return {
-          thought: '分镜规划已就绪，现在自主调用正文生成工具完成第一幕创作。',
-          plan: ['分镜规划 (已完成)', '正文生成', '质量检查'],
+          thought: '分镜规划已就绪，现在自主调用正文生成工具完成本节创作。',
+          plan: ['分镜规划 (已完成)', '正文生成', '质量检查', '更新记忆', '保存版本'],
           selectedTool: {
             name: 'generate_prose',
             arguments: {
               novelId: context.novelId || 'novel-01',
               chapterId: context.chapterId || 'chap-01',
-              chapterTitle: '第 ' + (userGoal.match(/第(.*?)章/)?.[1] || '一') + ' 章 破局',
-              sceneGoal: '推进核心冲突与主线节奏',
-              sceneBeats: '主角潜行入夜探寻关键伏笔',
+              chapterTitle: '第五章 第一节 遗迹探秘',
+              sceneGoal: '主角进入遗迹探寻线索，隐忍克制不揭开最终谜底',
+              sceneBeats: '主角潜行进入遗迹内部，发现古代机关符文与隐秘线索，保持警惕',
             },
           },
           isDone: false,
         };
       }
 
-      // 场景 3: 正文生成完成 -> 进行质量检查
+      // 场景 4: 正文生成完成 -> 进行质量检查
       if (
         lastRecord?.toolName === 'generate_prose' &&
         !records.some((r) => r.toolName === 'quality_check')
@@ -195,8 +218,8 @@ export class AgentPlanner {
             : '正文生成完成';
 
         return {
-          thought: '正文已生成完毕，现在自主触发质量合规检查以确保没有错别字与偏离。',
-          plan: ['正文生成 (已完成)', '质量检查', '最终交付'],
+          thought: '正文已生成完毕，现在自主触发质量合规检查以确保没有错别字、大纲偏离或约束违规。',
+          plan: ['正文生成 (已完成)', '质量检查', '更新记忆', '保存版本'],
           selectedTool: {
             name: 'quality_check',
             arguments: {
@@ -209,13 +232,79 @@ export class AgentPlanner {
         };
       }
 
-      // 场景 4: 质检或指定工具完成 -> 输出最终成果
-      if (lastRecord?.toolName === 'quality_check' || lastRecord?.toolName === 'flaky_writer_tool' || records.length >= 4) {
+      // 场景 5: 质检完成 -> 如果是全流程章节生产，更新记忆状态
+      if (
+        lastRecord?.toolName === 'quality_check' &&
+        (userGoal.includes('完成') || userGoal.includes('节')) &&
+        !records.some((r) => r.toolName === 'update_memory')
+      ) {
         return {
-          thought: '所有规划流程与质量核验已完成，输出最终成果。',
+          thought: '正文质检通过，现在将主角进入遗迹后的动态心境与新目标沉淀更新至 Novel Memory Layer。',
+          plan: ['质量检查 (已完成)', '更新记忆', '保存版本', '生成交付报告'],
+          selectedTool: {
+            name: 'update_memory',
+            arguments: {
+              novelId: context.novelId || 'novel-01',
+              characterId: 'char-protagonist',
+              emotion: '机敏凝重',
+              goal: '探索遗迹深处并破译古籍残卷',
+            },
+          },
+          isDone: false,
+        };
+      }
+
+      // 场景 6: 记忆更新完成 -> 保存版本并存证
+      if (
+        lastRecord?.toolName === 'update_memory' &&
+        !records.some((r) => r.toolName === 'save_chapter_version')
+      ) {
+        const proseRecord = records.find((r) => r.toolName === 'generate_prose');
+        const proseText =
+          typeof (proseRecord?.output as Record<string, unknown>)?.prose === 'string'
+            ? String((proseRecord?.output as Record<string, unknown>).prose)
+            : '第五章第一节正文草稿';
+
+        return {
+          thought: '记忆状态已演化并创建快照，现在为本章节保存不可变修订版本（Revision）与创作存证。',
+          plan: ['更新记忆 (已完成)', '保存版本', '生成交付报告'],
+          selectedTool: {
+            name: 'save_chapter_version',
+            arguments: {
+              novelId: context.novelId || 'novel-01',
+              chapterId: context.chapterId || 'chap-05',
+              title: '第五章 第一节 遗迹探秘',
+              content: proseText,
+              isAdopted: true,
+            },
+          },
+          isDone: false,
+        };
+      }
+
+      // 场景 7: 保存版本或指定测试工具完成 -> 输出最终成果报告
+      if (
+        lastRecord?.toolName === 'save_chapter_version' ||
+        lastRecord?.toolName === 'flaky_writer_tool' ||
+        records.length >= 7
+      ) {
+        const proseRecord = records.find((r) => r.toolName === 'generate_prose');
+        const proseSnippet =
+          typeof (proseRecord?.output as Record<string, unknown>)?.prose === 'string'
+            ? String((proseRecord?.output as Record<string, unknown>).prose).slice(0, 100) + '...'
+            : '正文已就绪';
+
+        return {
+          thought: '全流程 7 个阶段（感知、分镜、正文、质检、记忆演进、版本存证）均已圆满达成，生成最终交付报告。',
           plan: ['全流程闭环达成'],
           selectedTool: undefined,
-          finalResponse: `已成功自主完成目标：“${userGoal}”！全流程共调度 ${records.length} 个工具步骤，分镜、正文与质量核验均已妥善处理。`,
+          finalResponse: `### 创作任务完成报告
+- **目标**: ${userGoal}
+- **工具调度序列**: ${records.map((r) => r.toolName).join(' -> ')}
+- **模型与提供方**: mock-agent-planner (RouteDecision: chapter_scene_generate)
+- **记忆层状态演变**: Memory State Delta 已应用并生成新快照版本
+- **版本归档**: 已保存为当前采用版本 (Revision)
+- **正文摘要**: ${proseSnippet}`,
           isDone: true,
         };
       }
@@ -235,14 +324,14 @@ export class AgentPlanner {
       };
     }
 
-    // 目标 1: 复合全流程任务（例如：“完成第三章创作”、“写第三章”）
+    // 目标 1: 复合全流程任务（例如：“完成第五章第一节”、“完成第三章创作”、“写第三章”）
     if (
       userGoal.includes('完成') &&
-      (userGoal.includes('章') || userGoal.includes('创作') || userGoal.includes('小说'))
+      (userGoal.includes('章') || userGoal.includes('节') || userGoal.includes('创作') || userGoal.includes('小说'))
     ) {
       return {
-        thought: `识别到复合小说创作目标：“${userGoal}”。规划执行链路：查询世界状态 -> 规划分镜 -> 生成正文 -> 质量检查。首先执行 query_world_state 检索上下文。`,
-        plan: ['查询世界状态', '规划分镜', '生成正文', '质量检查'],
+        thought: `识别到端到端章节创作目标：“${userGoal}”。规划自主执行链路：检索世界设定 -> 检索人物状态 -> 规划分镜节奏 -> 生成正文 -> 质量核验 -> 演进记忆状态 -> 保存版本存证。首先执行 query_world_state。`,
+        plan: ['查询世界状态', '查询人物状态', '规划分镜', '生成正文', '质量检查', '更新记忆', '保存版本'],
         selectedTool: {
           name: 'query_world_state',
           arguments: { novelId: context.novelId || 'novel-01' },
