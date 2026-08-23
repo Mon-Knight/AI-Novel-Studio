@@ -72,9 +72,28 @@ export interface AgentDecision {
     name: string;
     arguments: Record<string, unknown>;
   };
+  reasoningSummary?: string;
+  selectedToolReason?: string;
+  expectedOutcome?: string;
+  confidenceScore?: number; // 0.0 - 1.0 or 0 - 100
   finalResponse?: string;
   isDone: boolean;
   needsRetry?: boolean;
+}
+
+export interface AgentDecisionTrace {
+  id: string;
+  turn: number;
+  goal: string;
+  decision: AgentDecision;
+  selectedTool?: string;
+  selectedToolReason?: string;
+  expectedOutcome?: string;
+  confidenceScore?: number;
+  toolResult?: unknown;
+  toolSuccess?: boolean;
+  nextAdjustment?: string;
+  timestamp: string;
 }
 
 export interface AgentContext {
@@ -83,6 +102,7 @@ export interface AgentContext {
   sceneId?: string;
   messages: AgentMessage[];
   executionRecords: AgentToolExecutionRecord[];
+  decisionTraces?: AgentDecisionTrace[];
   status: AgentTaskStatus;
   currentGoal?: string;
   currentThought?: string;
@@ -113,6 +133,7 @@ export interface AgentHarnessEvents {
   onEvaluation?: (evaluation: AgentSelfEvaluation) => void;
   onTaskStateUpdate?: (taskState: AgentTaskState) => void;
   onTurnComplete?: (decision: AgentDecision, turn: number) => void;
+  onDecisionTrace?: (trace: AgentDecisionTrace) => void;
 }
 
 export interface AgentHarnessConfig {
@@ -129,6 +150,7 @@ export interface AgentExecutionResult {
   status: AgentTaskStatus;
   turns: number;
   executionRecords: AgentToolExecutionRecord[];
+  decisionTraces: AgentDecisionTrace[];
   taskState?: AgentTaskState;
   context: AgentContext;
 }

@@ -4,6 +4,7 @@
  */
 import type {
   AgentContext,
+  AgentDecisionTrace,
   AgentMessage,
   AgentTaskStatus,
   AgentToolExecutionRecord,
@@ -32,6 +33,7 @@ export interface AgentConversationItem {
   messages: AgentMessage[];
   context: AgentContext;
   toolRecords: AgentToolExecutionRecord[];
+  decisionTraces: AgentDecisionTrace[];
   pendingConfirmations: PendingToolConfirmation[];
   status: AgentTaskStatus;
   createdAt: string;
@@ -74,6 +76,7 @@ export class AgentConversationService {
       messages: [],
       context: initialContext,
       toolRecords: [],
+      decisionTraces: [],
       pendingConfirmations: [],
       status: 'idle',
       createdAt: new Date().toISOString(),
@@ -150,6 +153,7 @@ export class AgentConversationService {
     conversation.context = execResult.context;
     conversation.messages = [...execResult.context.messages];
     conversation.toolRecords = [...execResult.executionRecords];
+    conversation.decisionTraces = [...execResult.decisionTraces];
     conversation.status = execResult.status;
     conversation.updatedAt = new Date().toISOString();
 

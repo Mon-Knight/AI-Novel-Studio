@@ -21,6 +21,7 @@ export class AgentContextManager {
       sceneId: params.sceneId,
       messages: [],
       executionRecords: [],
+      decisionTraces: [],
       status: 'idle',
       currentGoal: params.goal,
     };

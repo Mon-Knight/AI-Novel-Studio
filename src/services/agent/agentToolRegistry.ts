@@ -20,6 +20,10 @@ export class AgentToolRegistry {
     this.tools.set(tool.descriptor.name, tool);
   }
 
+  unregisterTool(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   getTool(name: string): AgentTool | undefined {
     return this.tools.get(name);
   }

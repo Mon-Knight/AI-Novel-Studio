@@ -325,6 +325,92 @@ export function AgentChatWorkspace({
           </div>
         )}
 
+        {/* 4.1 Decision Trace 卡片 (🧠 Agent Decision) */}
+        {conversation.decisionTraces && conversation.decisionTraces.length > 0 && (
+          <div
+            className="agent-decision-traces-section"
+            data-testid="agent-decision-traces-section"
+            style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+          >
+            {conversation.decisionTraces.map((trace, idx) => (
+              <div
+                key={trace.id || idx}
+                className="agent-decision-trace-card"
+                data-testid="agent-decision-trace-card"
+                style={{
+                  border: '1px solid #c7d2fe',
+                  borderRadius: 8,
+                  padding: '12px 14px',
+                  background: '#f5f3ff',
+                  fontSize: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: '#4338ca' }}>
+                    <span>🧠</span>
+                    <span>Agent Decision (第 {trace.turn} 轮)</span>
+                  </div>
+                  {typeof trace.confidenceScore === 'number' && (
+                    <span
+                      data-testid="decision-confidence-badge"
+                      style={{
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        fontSize: 11,
+                        background: '#ede9fe',
+                        color: '#6d28d9',
+                        fontWeight: 600,
+                      }}
+                    >
+                      置信度: {Math.round(trace.confidenceScore <= 1 ? trace.confidenceScore * 100 : trace.confidenceScore)}%
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, color: '#334155' }}>
+                  <div>
+                    <strong style={{ color: '#475569' }}>目标: </strong>
+                    <span>{trace.goal}</span>
+                  </div>
+                  {trace.selectedTool && (
+                    <div>
+                      <strong style={{ color: '#475569' }}>当前选择: </strong>
+                      <code style={{ background: '#e0e7ff', padding: '1px 4px', borderRadius: 3, color: '#3730a3' }}>
+                        {trace.selectedTool}
+                      </code>
+                    </div>
+                  )}
+                  {trace.selectedToolReason && (
+                    <div>
+                      <strong style={{ color: '#475569' }}>原因: </strong>
+                      <span>{trace.selectedToolReason}</span>
+                    </div>
+                  )}
+                  {trace.expectedOutcome && (
+                    <div>
+                      <strong style={{ color: '#475569' }}>预期产出: </strong>
+                      <span>{trace.expectedOutcome}</span>
+                    </div>
+                  )}
+                  {trace.nextAdjustment && (
+                    <div style={{ marginTop: 2, color: '#6366f1', fontSize: 11 }}>
+                      <strong>下一步调整: </strong>
+                      <span>{trace.nextAdjustment}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* 5. 工具执行记录卡片 (Tool Calling & Observation) */}
         {conversation.toolRecords.map((record, i) => {
           const meta = AGENT_TOOL_METADATA[record.toolName] || { label: record.toolName, icon: '⚙️' };

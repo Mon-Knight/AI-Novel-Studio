@@ -1,10 +1,11 @@
 /**
  * Creative Agent Harness - Autonomous Task Execution Loop
- * 编排 Observe -> Plan -> Act -> Evaluate -> Retry 的完整自适应创作循环
+ * 编排 Observe -> Plan -> Act -> Evaluate -> Retry 的完整自适应创作循环与决策质量追踪
  */
 import type {
   AgentContext,
   AgentDecision,
+  AgentDecisionTrace,
   AgentExecutionResult,
   AgentHarnessConfig,
   AgentHarnessEvents,
@@ -35,6 +36,7 @@ export class CreativeAgentHarness {
       sceneId: initialContextParams?.sceneId,
       goal: userInput,
     });
+    context.decisionTraces = context.decisionTraces ?? [];
 
     const taskState: AgentTaskState = {
       goal: userInput,
@@ -68,9 +70,25 @@ export class CreativeAgentHarness {
         events?.onThought?.(decision.thought);
       }
 
+      const decisionTrace: AgentDecisionTrace = {
+        id: `trace-${createUniqueId()}`,
+        turn: turns,
+        goal: context.currentGoal || taskState.goal,
+        decision,
+        selectedTool: decision.selectedTool?.name,
+        selectedToolReason: decision.selectedToolReason,
+        expectedOutcome: decision.expectedOutcome,
+        confidenceScore: decision.confidenceScore,
+        timestamp: new Date().toISOString(),
+      };
+
       // 2. 检查是否达成终止条件 / 输出最终答复
       if (decision.isDone || !decision.selectedTool) {
         finalResponse = decision.finalResponse || decision.thought;
+        decisionTrace.nextAdjustment = '任务达成交付成果';
+        context.decisionTraces.push(decisionTrace);
+        events?.onDecisionTrace?.(decisionTrace);
+
         agentContextManager.addAssistantMessage(context, finalResponse, decision.thought);
         context.status = 'completed';
         taskState.progressPercentage = 100;
@@ -119,6 +137,14 @@ export class CreativeAgentHarness {
       taskState.evaluations.push(evaluation);
       events?.onEvaluation?.(evaluation);
 
+      // 决策追踪补充执行结果与反思调整
+      decisionTrace.toolResult = record.output;
+      decisionTrace.toolSuccess = record.success;
+      decisionTrace.nextAdjustment =
+        evaluation.suggestedAdjustment || (evaluation.needsRetry ? '调整入参重试' : '继续推进下一步');
+      context.decisionTraces.push(decisionTrace);
+      events?.onDecisionTrace?.(decisionTrace);
+
       // 如果工具成功且评估达标，记录完成步骤并更新进度
       if (record.success && evaluation.isSatisfied) {
         taskState.completedSteps.push(toolCall.name);
@@ -154,6 +180,7 @@ export class CreativeAgentHarness {
       status: context.status,
       turns,
       executionRecords: context.executionRecords,
+      decisionTraces: context.decisionTraces ?? [],
       taskState,
       context,
     };

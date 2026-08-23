@@ -41,7 +41,7 @@ export class AgentPlanner {
       })
       .join('\n\n');
 
-    const prompt = `${systemPrompt}\n\n### 对话与工具执行历史:\n${historyText}\n\n请输出你的下一步 JSON 决策:`;
+    const prompt = `${systemPrompt}\n\n### 对话与工具执行历史:\n${historyText}\n\n请输出你的下一步 JSON 决策 (包含 thought, plan, action, actionInput, reasoningSummary, selectedToolReason, expectedOutcome, confidenceScore):`;
 
     // 1. 如果在真实模型环境，调用真实 AI Client
     if (settings.runtimeMode !== 'mock') {
@@ -94,6 +94,11 @@ export class AgentPlanner {
               name: parsed.action,
               arguments: parsed.actionInput || {},
             },
+        reasoningSummary: parsed.reasoningSummary || parsed.thought,
+        selectedToolReason: parsed.selectedToolReason || parsed.reason,
+        expectedOutcome: parsed.expectedOutcome || parsed.expected,
+        confidenceScore:
+          typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.9,
         finalResponse: isFinal ? parsed.actionInput?.response || parsed.thought : undefined,
         isDone: isFinal,
       };
@@ -125,6 +130,10 @@ export class AgentPlanner {
               retryAttempt: retryCount + 1,
             },
           },
+          reasoningSummary: `工具 ${lastRecord.toolName} 遇到异常，启用自适应降级重试策略`,
+          selectedToolReason: '前序调用报错，通过调整参数与降级策略恢复执行',
+          expectedOutcome: '自愈恢复并获得正确输出',
+          confidenceScore: 0.85,
           needsRetry: true,
           isDone: false,
         };
@@ -134,6 +143,10 @@ export class AgentPlanner {
         thought: `工具 [${lastRecord.toolName}] 达到最大重试次数，执行安全降级与结果总结。`,
         plan: ['捕获异常', '给出降级说明'],
         selectedTool: undefined,
+        reasoningSummary: '达到最大重试上限，执行安全终态收敛',
+        selectedToolReason: '触发安全保护，避免无限重试循环',
+        expectedOutcome: '保存现场错误并提示作者',
+        confidenceScore: 1.0,
         finalResponse: `工具 ${lastRecord.toolName} 遇到问题: ${lastRecord.error}。已自动记录异常并完成安全降级保护。`,
         isDone: true,
       };
@@ -157,6 +170,10 @@ export class AgentPlanner {
               characterId: 'char-protagonist',
             },
           },
+          reasoningSummary: '已掌握世界观设定，进入角色心理维度感知',
+          selectedToolReason: '正文生成需要确认主角当前心理状态、动机与伤势',
+          expectedOutcome: '获得角色目标、情绪与当前所在地',
+          confidenceScore: 0.92,
           isDone: false,
         };
       }
@@ -180,6 +197,10 @@ export class AgentPlanner {
               goal: userGoal,
             },
           },
+          reasoningSummary: '背景与人物上下文完备，开始构建章节情节节奏与冲突节点',
+          selectedToolReason: '已有角色和世界信息，需要生成冲突结构与分镜节拍',
+          expectedOutcome: '获得分镜列表与各 Beat 节奏安排',
+          confidenceScore: 0.90,
           isDone: false,
         };
       }
@@ -203,6 +224,10 @@ export class AgentPlanner {
               sceneBeats: '主角潜行进入遗迹内部，发现古代机关符文与隐秘线索，保持警惕',
             },
           },
+          reasoningSummary: '分镜节拍已明确，驱动正文生成引擎执行文学渲染',
+          selectedToolReason: '分镜结构已确定，调用正文模型生成高质量小说正文',
+          expectedOutcome: '产出符合字数与视角约束的章节草稿',
+          confidenceScore: 0.93,
           isDone: false,
         };
       }
@@ -228,6 +253,10 @@ export class AgentPlanner {
               content: proseText,
             },
           },
+          reasoningSummary: '正文初稿落盘，执行前置文学质量与设定合规性审查',
+          selectedToolReason: '正文已生成，需要检验行文质量、设定一致性与违规问题',
+          expectedOutcome: '获得质量评分与合规检测报告',
+          confidenceScore: 0.96,
           isDone: false,
         };
       }
@@ -250,6 +279,10 @@ export class AgentPlanner {
               goal: '探索遗迹深处并破译古籍残卷',
             },
           },
+          reasoningSummary: '本节剧情达标闭环，将情节产生的新心境与态势沉淀为长期记忆',
+          selectedToolReason: '正文已通过质量检查，需将角色心境与状态演进沉淀至记忆层',
+          expectedOutcome: '记忆层状态更新并生成新版本快照',
+          confidenceScore: 0.94,
           isDone: false,
         };
       }
@@ -278,6 +311,10 @@ export class AgentPlanner {
               isAdopted: true,
             },
           },
+          reasoningSummary: '全要素演进完成，保存持久化版本并记录 Provenance',
+          selectedToolReason: '创作全流程达标，需要持久化章节 Revision 与 Provenance 溯源信息',
+          expectedOutcome: '产生新的不可变章节版本并归档',
+          confidenceScore: 0.98,
           isDone: false,
         };
       }
@@ -298,6 +335,10 @@ export class AgentPlanner {
           thought: '全流程 7 个阶段（感知、分镜、正文、质检、记忆演进、版本存证）均已圆满达成，生成最终交付报告。',
           plan: ['全流程闭环达成'],
           selectedTool: undefined,
+          reasoningSummary: '全流程各环节验证通过，生成结构化交付报告',
+          selectedToolReason: '创作目标圆满达成，无需进一步工具调度',
+          expectedOutcome: '交付完整的小说产物与决策审计链路',
+          confidenceScore: 1.0,
           finalResponse: `### 创作任务完成报告
 - **目标**: ${userGoal}
 - **工具调度序列**: ${records.map((r) => r.toolName).join(' -> ')}
@@ -320,6 +361,10 @@ export class AgentPlanner {
           name: 'flaky_writer_tool',
           arguments: { novelId: context.novelId || 'novel-01' },
         },
+        reasoningSummary: '命中显式工具调用指令',
+        selectedToolReason: '用户指令明确指定调用 flaky_writer_tool',
+        expectedOutcome: '执行指定工具完成特定任务',
+        confidenceScore: 0.95,
         isDone: false,
       };
     }
@@ -336,6 +381,10 @@ export class AgentPlanner {
           name: 'query_world_state',
           arguments: { novelId: context.novelId || 'novel-01' },
         },
+        reasoningSummary: `识别到小说创作目标：“${userGoal}”，首先建立世界观与环境约束感知`,
+        selectedToolReason: '小说创作需要了解当前世界规则、力量体系与势力背景',
+        expectedOutcome: '获取世界观规则与当前时间线设定',
+        confidenceScore: 0.95,
         isDone: false,
       };
     }
@@ -349,6 +398,10 @@ export class AgentPlanner {
           name: 'query_world_state',
           arguments: { novelId: context.novelId || 'novel-01' },
         },
+        reasoningSummary: '作者请求查询作品世界规则与世界状态',
+        selectedToolReason: '检索世界观规则库以提供精准设定信息',
+        expectedOutcome: '输出世界观规则与当前状态',
+        confidenceScore: 0.95,
         isDone: false,
       };
     }
@@ -362,6 +415,10 @@ export class AgentPlanner {
           name: 'query_character_state',
           arguments: { novelId: context.novelId || 'novel-01', characterId: 'char-protagonist' },
         },
+        reasoningSummary: '作者请求检索指定角色的心境与状态',
+        selectedToolReason: '正文生成需要确认主角当前心理状态',
+        expectedOutcome: '获得角色目标和情绪',
+        confidenceScore: 0.92,
         isDone: false,
       };
     }
@@ -380,6 +437,10 @@ export class AgentPlanner {
             goal: userGoal,
           },
         },
+        reasoningSummary: '作者请求章节分镜与冲突规划',
+        selectedToolReason: '已有角色和世界信息，需要生成冲突结构与分镜节拍',
+        expectedOutcome: '获得分镜列表与各 Beat 节奏安排',
+        confidenceScore: 0.90,
         isDone: false,
       };
     }
@@ -393,6 +454,10 @@ export class AgentPlanner {
           name: 'generate_outline',
           arguments: { novelId: context.novelId || 'novel-01', theme: userGoal },
         },
+        reasoningSummary: '作者请求构思长篇小说大纲架构',
+        selectedToolReason: '调用大纲生成工具构建长篇情节脉络',
+        expectedOutcome: '获得主线与分卷大纲结构',
+        confidenceScore: 0.90,
         isDone: false,
       };
     }
@@ -401,6 +466,10 @@ export class AgentPlanner {
     return {
       thought: '作者输入属于一般创作探讨，无需调度工程写工具，直接回答。',
       selectedTool: undefined,
+      reasoningSummary: '常规创作问答探讨',
+      selectedToolReason: '无需调度工程工具',
+      expectedOutcome: '向作者提供自然语言创作建议',
+      confidenceScore: 1.0,
       finalResponse: `我是 AI Novel Studio 创作智能体，已理解您的需求：“${userGoal}”。请指示具体创作步骤。`,
       isDone: true,
     };
