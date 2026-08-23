@@ -33,6 +33,7 @@ const ChapterSummaryPanel = lazy(() => import('./panels/ChapterSummaryPanel'));
 const ContextViewPanel = lazy(() => import('./panels/ContextViewPanel'));
 const MultiAgentPanelRuntime = lazy(() => import('./panels/MultiAgentPanelRuntime'));
 const MemoryInspectorPanel = lazy(() => import('./panels/MemoryInspectorPanel'));
+const GenerationTracePanel = lazy(() => import('./panels/GenerationTracePanel'));
 
 interface RightPanelProps {
   panelType: PanelType;
@@ -121,6 +122,10 @@ const panelConfig: Record<RightDockPanelType, PanelConfig> = {
   'memory-inspector': {
     title: '记忆检查器',
     component: (props) => <MemoryInspectorPanel {...props} />,
+  },
+  'generation-trace': {
+    title: '生成追溯',
+    component: (props) => <GenerationTracePanel {...props} />,
   },
 };
 

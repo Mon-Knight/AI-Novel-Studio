@@ -61,6 +61,7 @@ export const TOOL_KEYS: Record<string, string> = {
   'chapter-summary': 'chapter-summary',
   'context-view': 'context-view',
   'memory-inspector': 'memory-inspector',
+  'generation-trace': 'generation-trace',
 };
 
 // ==================== 工厂函数 ====================

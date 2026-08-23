@@ -13,6 +13,7 @@ export type PanelType =
   | 'chapter-summary'
   | 'context-view'
   | 'memory-inspector'
+  | 'generation-trace'
   | null;
 
 export type RightDockPanelType = Exclude<PanelType, 'draft-history' | null>;
@@ -22,6 +23,7 @@ export const WORKSPACE_REVIEW_PANELS = [
   'draft-history',
   'chapter-summary',
   'memory-inspector',
+  'generation-trace',
 ] as const;
 
 /** Desktop E2E still exercises these job/quality/setting surfaces after the AI dock was removed. */

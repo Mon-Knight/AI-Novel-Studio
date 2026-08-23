@@ -26,6 +26,7 @@
 - 新增创作反馈与微调数据闭环采集系统（Human Feedback & SFT/DPO Dataset Collector）：在作家人工修改、审阅修订及最终采用时自动沉淀高质量数据对；支持生成 SFT 指令微调示范集与 DPO/RLHF 人类偏好对齐正负例数据；提供标准 JSONL、ShareGPT 与 OpenAI Chat 多格式导出；内置微小改动过滤与多维度数据集统计指标。
 - 新增分镜生成与小说记忆层深度联调（Scene Generation & Novel Memory Deep Integration）：在分镜场景与 Beat 生成前自动检索三层记忆、角色心境与世界态势，并将 `memory_context` 编译源及记忆审计元数据（`memoryVersion`、`retrievedFragments`）注入 Execution Contract；正文生成成功后自动生成 State Delta 并驱动快照版本自增；提供针对无记忆旧章节的平滑降级 Fallback 机制。
 - 新增创作工作台记忆检查器面板（Creative Workbench Memory Inspector Panel）：在右侧栏与工作台沉淀 `MemoryInspectorPanel` / `MemoryInspectorCard`；实时可视化当前 Scene、POV 视点角色心境/目标/状态、Memory Version、三层记忆（长期/中期/短期）及召回碎片列表（Retrieved Fragments）；提供优雅的空状态降级支持。
+- 新增创作工作台生成追溯面板（Creative Workbench Generation Trace Panel）：在右侧栏沉淀 `GenerationTracePanel`；可视化呈现当前任务、Model RouteDecision、服务提供商（Provider）、模型名称、Memory Version、编译 Hash、提示词模板、Token 消耗、耗时与 Fallback 回退告警；无任务时平滑展示空状态。
 
 ### 变更
 
