@@ -27,7 +27,7 @@
     "test:ai-panels": "tsx --test --test-concurrency=1 src/components/right-dock/panels/CheckPanel.test.tsx && tsx --test --test-concurrency=1 src/components/right-dock/panels/IndependentAiPanelsCancellation.test.tsx && tsx --test --test-concurrency=1 src/components/right-dock/panels/StylePanel.test.tsx",
     "test:vitest": "vitest run src/test src/components/right-dock/RightPanel.test.tsx src/services/ai/aiRequestPolicyService.test.ts src/services/ai/aiTaskPagination.test.ts src/services/observability/appLogger.test.ts src/services/update/appUpdateService.test.ts src/store/themeStore.test.ts src/store/workspaceSessionStore.test.ts",
     "test:workbench": "node --test scripts/dsh/ans-task-server-template.test.mjs scripts/dsh/mock-workbench-upstream.test.mjs scripts/dsh/model-proxy.test.mjs && tsx --test --test-concurrency=1 src/services/conversation/taskRuntimeAdapter.test.ts src/services/conversation/workbenchFailure.test.ts src/services/conversation/taskGoalRouting.test.ts src/services/memory/adoptedDraftMemory.test.ts src/services/conversation/currentPluginService.test.ts src/services/conversation/artifactApply.test.ts src/services/context/novelContextCompressionProvider.test.ts src/services/agent-tools/toolRegistry.test.ts",
-    "test:performance": "node --expose-gc --import tsx --test scripts/performance/performance.test.ts",
+    "test:performance": "node --expose-gc --import tsx --test scripts/performance/performance.test.ts scripts/performance/workbench-render-performance.test.ts",
     "test:component-size": "node scripts/quality/check-component-size.mjs",
     "test:bundle-size": "node scripts/quality/check-bundle-size.mjs",
     "test:ai-request-governance": "node scripts/quality/check-ai-request-options.mjs",

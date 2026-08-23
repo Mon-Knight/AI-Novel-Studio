@@ -12,14 +12,12 @@ import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
 
+import { autonomousSchedulerWorker } from './services/autonomous-creation/autonomousSchedulerWorker';
+
 performance.mark('app-script-start');
 initializeTheme();
 installGlobalErrorHandlers();
-void import('./services/autonomous-creation/autonomousSchedulerWorker').then(
-  ({ autonomousSchedulerWorker }) => {
-    void autonomousSchedulerWorker.recoverStartup();
-  },
-);
+void autonomousSchedulerWorker.recoverStartup();
 
 const startupScriptStartedAt = performance.now();
 const MIN_STARTUP_SPLASH_MS = 700;
@@ -93,9 +91,8 @@ async function applySystemAccentColor() {
 
 async function bootstrapApplication() {
   try {
-    const { taskConversationService } = await import(
-      './services/conversation/taskConversationService'
-    );
+    const { taskConversationService } =
+      await import('./services/conversation/taskConversationService');
     await taskConversationService.recoverInterruptedRuns();
   } catch (error) {
     appLogger.error('[STARTUP_CONVERSATION_RECOVERY_FAILED]', {
@@ -105,9 +102,8 @@ async function bootstrapApplication() {
 
   let startupContextMigration;
   try {
-    const { legacyChapterContextMigrationService } = await import(
-      './services/context/legacyChapterContextMigrationService'
-    );
+    const { legacyChapterContextMigrationService } =
+      await import('./services/context/legacyChapterContextMigrationService');
     startupContextMigration = await legacyChapterContextMigrationService.migrate();
   } catch (error) {
     const message = describeUnknownError(error, '旧章节上下文迁移失败');

@@ -130,8 +130,40 @@ const mockBundle: TaskConversationBundle = {
       createdAt: '2026-08-20T00:00:00.000Z',
     },
   ],
-  runs: [],
-  toolEvents: [],
+  runs: [
+    {
+      runId: 'run-001',
+      conversationId: 'conv-001',
+      turnId: 'turn-001',
+      workerId: 'worker-ans-1',
+      status: 'completed',
+      modelSnapshot: {
+        providerId: 'mock',
+        modelId: 'Mock',
+        runtimeMode: 'mock',
+        capabilities: ['chat'],
+        options: {},
+        capturedAt: '2026-08-20T00:00:00.000Z',
+      },
+      startedAt: '2026-08-20T00:00:00.000Z',
+      finishedAt: '2026-08-20T00:00:02.000Z',
+      createdAt: '2026-08-20T00:00:00.000Z',
+      updatedAt: '2026-08-20T00:00:02.000Z',
+    },
+  ],
+  toolEvents: [
+    {
+      eventId: 'evt-001',
+      runId: 'run-001',
+      sequence: 1,
+      toolName: 'novel.read_context',
+      argumentsSummary: { novelId: 'novel-001' },
+      status: 'succeeded',
+      durationMs: 42,
+      createdAt: '2026-08-20T00:00:00.000Z',
+      finishedAt: '2026-08-20T00:00:01.000Z',
+    },
+  ],
   artifacts: [],
 };
 
@@ -211,8 +243,10 @@ test('WorkbenchPage clicking a task template fills the input draft', async () =>
   const templateButton = screen.getByText('生成下一章');
   fireEvent.click(templateButton);
 
-  const textarea = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
-  assert.equal(textarea.value, '生成下一章');
+  await waitFor(() => {
+    const textarea = screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement;
+    assert.equal(textarea.value, '生成下一章');
+  });
 });
 
 test('WorkbenchPage handles empty novels state gracefully', async () => {
@@ -267,5 +301,41 @@ test('WorkbenchPage disables generate templates when the novel has no chapters',
       (screen.getByTestId('workbench-template-generate-chapter') as HTMLButtonElement).disabled,
       true,
     );
+  });
+});
+
+test('Agent Console: renders Agent status bar, dual tabs, and switches between Chat and Trace views', async () => {
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => {
+    assert.ok(screen.getAllByText('天命修仙录').length > 0);
+  });
+  fireEvent.click(screen.getByTestId('workbench-task'));
+
+  // 1. 验证 Agent Console 状态栏存在
+  await waitFor(() => {
+    assert.ok(screen.getByTestId('agent-console-status-bar'));
+    assert.ok(screen.getByTestId('workbench-tab-chat'));
+    assert.ok(screen.getByTestId('workbench-tab-trace'));
+  });
+
+  // 2. 初始为 Chat 视图
+  assert.ok(screen.getByTestId('workbench-message-list'));
+
+  // 3. 点击切换到 Trace 视图
+  fireEvent.click(screen.getByTestId('workbench-tab-trace'));
+  await waitFor(() => {
+    assert.ok(screen.getByTestId('agent-trace-canvas'));
+    assert.ok(screen.getByTestId('agent-trace-run'));
+  });
+
+  // 4. 再次切回 Chat 视图
+  fireEvent.click(screen.getByTestId('workbench-tab-chat'));
+  await waitFor(() => {
+    assert.ok(screen.getByTestId('workbench-message-list'));
   });
 });

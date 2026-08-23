@@ -1,32 +1,16 @@
-import { useMemo } from 'react';
-import type { ConversationArtifactCard, ToolCallEvent } from '../../types/conversation';
+import { memo, useMemo, useState } from 'react';
+import type {
+  ConversationArtifactCard,
+  TaskConversationBundle,
+  ToolCallEvent,
+} from '../../types/conversation';
 import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
+import { TOOL_LABELS, statusLabel } from './workbenchHelpers';
 
-function statusLabel(status: string): string {
-  return (
-    {
-      queued: '排队中',
-      cancel_requested: '取消中',
-      cancelled: '已取消',
-    }[status] ?? status
-  );
-}
-
-const TOOL_LABELS: Record<string, string> = {
-  'novel.read_context': '读取小说上下文',
-  'chapter.read_outline': '读取章节大纲',
-  search_memory: '检索长期记忆',
-  generate_chapter: '生成章节候选',
-  generate_outline: '生成大纲候选',
-  generate_characters: '生成角色候选',
-  suggest_events: '生成事件候选',
-  expand_settings: '扩展设定候选',
-  polish_chapter: '润色章节候选',
-  check_quality: '质量检查报告',
-  summarize_chapter: '章节总结候选',
-};
-
-export function ToolEventRow({ event }: { event: ToolCallEvent }) {
+/**
+ * 简化工具摘要行（默认在对话流中紧凑展示）
+ */
+export const ToolEventRow = memo(function ToolEventRow({ event }: { event: ToolCallEvent }) {
   const semanticName = TOOL_LABELS[event.toolName] ?? '运行时事件';
   return (
     <div
@@ -60,9 +44,12 @@ export function ToolEventRow({ event }: { event: ToolCallEvent }) {
       )}
     </div>
   );
-}
+});
 
-export function ArtifactCard({
+/**
+ * 候选产物交互卡片（支持采纳、确认入审、申请应用、修改与拒绝）
+ */
+export const ArtifactCard = memo(function ArtifactCard({
   artifact,
   onDecide,
   busy = false,
@@ -153,7 +140,270 @@ export function ArtifactCard({
       )}
     </article>
   );
-}
+});
+
+/**
+ * Agent 状态栏（规划、生成、检查、完成/待命）
+ */
+export const AgentConsoleStatusBar = memo(function AgentConsoleStatusBar({
+  status,
+  activeWorkerId,
+  latestToolName,
+}: {
+  status: string;
+  activeWorkerId?: string;
+  latestToolName?: string;
+}) {
+  const stage =
+    status === 'running'
+      ? latestToolName?.includes('check') || latestToolName?.includes('evaluate')
+        ? 'checking'
+        : latestToolName?.includes('read') || latestToolName?.includes('outline')
+          ? 'planning'
+          : 'executing'
+      : status === 'completed'
+        ? 'completed'
+        : status === 'failed'
+          ? 'failed'
+          : 'idle';
+
+  return (
+    <div
+      className="agent-console-status-bar"
+      data-testid="agent-console-status-bar"
+      data-stage={stage}
+    >
+      <div className="agent-status-pipeline">
+        <div className={`agent-status-step ${stage === 'planning' ? 'is-active' : ''}`}>
+          <span className="agent-step-icon">🧠</span>
+          <span className="agent-step-label">规划</span>
+        </div>
+        <div className="agent-status-arrow">→</div>
+        <div className={`agent-status-step ${stage === 'executing' ? 'is-active' : ''}`}>
+          <span className="agent-step-icon">⚙️</span>
+          <span className="agent-step-label">生成</span>
+        </div>
+        <div className="agent-status-arrow">→</div>
+        <div className={`agent-status-step ${stage === 'checking' ? 'is-active' : ''}`}>
+          <span className="agent-step-icon">📝</span>
+          <span className="agent-step-label">检查</span>
+        </div>
+        <div className="agent-status-arrow">→</div>
+        <div className={`agent-status-step ${stage === 'completed' ? 'is-active' : ''}`}>
+          <span className="agent-step-icon">✓</span>
+          <span className="agent-step-label">完成</span>
+        </div>
+      </div>
+
+      <div className="agent-status-current">
+        <span className={`agent-status-indicator is-${status}`} />
+        <span className="agent-status-text">
+          {status === 'running'
+            ? `Agent 正在执行: ${TOOL_LABELS[latestToolName ?? ''] ?? latestToolName ?? '创作任务'} (${activeWorkerId || 'Worker'})`
+            : status === 'completed'
+              ? 'Agent 创作任务已就绪'
+              : status === 'failed'
+                ? '任务执行中断'
+                : 'Agent 待命中，请输入目标'}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * 对话 / 轨迹 双 Tab 切换器
+ */
+export const AgentConsoleTabs = memo(function AgentConsoleTabs({
+  activeTab,
+  onTabChange,
+  eventCount = 0,
+}: {
+  activeTab: 'chat' | 'trace';
+  onTabChange: (tab: 'chat' | 'trace') => void;
+  eventCount?: number;
+}) {
+  return (
+    <nav className="agent-console-tabs" data-testid="agent-console-tabs" aria-label="视图切换">
+      <button
+        type="button"
+        className={`agent-console-tab-btn ${activeTab === 'chat' ? 'is-active' : ''}`}
+        data-testid="workbench-tab-chat"
+        onClick={() => onTabChange('chat')}
+      >
+        <span className="tab-icon">💬</span>
+        <span>创作对话</span>
+      </button>
+      <button
+        type="button"
+        className={`agent-console-tab-btn ${activeTab === 'trace' ? 'is-active' : ''}`}
+        data-testid="workbench-tab-trace"
+        onClick={() => onTabChange('trace')}
+      >
+        <span className="tab-icon">🔍</span>
+        <span>执行轨迹</span>
+        {eventCount > 0 && <span className="tab-badge">{eventCount}</span>}
+      </button>
+    </nav>
+  );
+});
+
+/**
+ * 轨迹视图画布（展示详细 Tool Call、参数/返回值 JSON、Decision Traces 与 Quality Reviews）
+ */
+export const AgentTraceCanvas = memo(function AgentTraceCanvas({
+  bundle,
+  onRetry,
+}: {
+  bundle: TaskConversationBundle;
+  onRetry?: (previousGoal: string) => void;
+}) {
+  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(() => new Set());
+
+  const toggleExpand = (eventId: string) => {
+    setExpandedEvents((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
+  };
+
+  const runs = bundle.runs ?? [];
+  const events = bundle.toolEvents ?? [];
+
+  if (runs.length === 0 && events.length === 0) {
+    return (
+      <div className="agent-trace-empty" data-testid="agent-trace-empty">
+        <div className="trace-empty-icon">🔍</div>
+        <h3>暂无 Agent 执行轨迹</h3>
+        <p>当向 Agent 发送创作指令后，所有工具调用、决策树、评估打分将在此全景展现。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="agent-trace-canvas" data-testid="agent-trace-canvas">
+      {runs.map((run, runIndex) => {
+        const runEvents = events.filter((e) => e.runId === run.runId);
+        const relatedTurn = bundle.turns.find((t) => t.turnId === run.turnId);
+
+        return (
+          <section
+            className="agent-trace-run-card"
+            key={run.runId}
+            data-testid="agent-trace-run"
+            data-run-id={run.runId}
+            data-status={run.status}
+          >
+            <div className="trace-run-header">
+              <div className="trace-run-title">
+                <span className="run-index-badge">Run #{runIndex + 1}</span>
+                <strong>{relatedTurn?.content?.slice(0, 40) || '创作运行'}</strong>
+                <span className="worker-tag">Worker: {run.workerId}</span>
+              </div>
+              <span className={`workbench-run-badge is-${run.status}`}>
+                {statusLabel(run.status)}
+              </span>
+            </div>
+
+            {/* 模型快照信息 */}
+            {run.modelSnapshot && (
+              <div className="trace-model-snapshot">
+                <span>
+                  🧠 模型快照: {run.modelSnapshot.providerId || 'default'}:
+                  {run.modelSnapshot.modelId || 'auto'}
+                </span>
+                {run.startedAt && <time>开始: {new Date(run.startedAt).toLocaleTimeString()}</time>}
+                {run.finishedAt && (
+                  <time>结束: {new Date(run.finishedAt).toLocaleTimeString()}</time>
+                )}
+              </div>
+            )}
+
+            {/* 工具执行时间线 */}
+            <div className="trace-events-timeline">
+              <h4>🛠️ 工具调用序列 ({runEvents.length})</h4>
+              {runEvents.length === 0 ? (
+                <p className="trace-no-events">该 Run 未产生工具调用</p>
+              ) : (
+                runEvents.map((evt) => {
+                  const isExpanded = expandedEvents.has(evt.eventId);
+                  const semantic = TOOL_LABELS[evt.toolName] ?? evt.toolName;
+                  return (
+                    <div
+                      key={evt.eventId}
+                      className={`trace-event-item is-${evt.status}`}
+                      data-testid="trace-event-item"
+                    >
+                      <div
+                        className="trace-event-summary"
+                        onClick={() => toggleExpand(evt.eventId)}
+                      >
+                        <span className="trace-status-icon">
+                          {evt.status === 'succeeded' ? '✓' : evt.status === 'failed' ? '!' : '…'}
+                        </span>
+                        <strong className="trace-tool-title">{semantic}</strong>
+                        <code className="trace-tool-code">{evt.toolName}</code>
+                        <span className="trace-duration">
+                          {evt.durationMs ? `${evt.durationMs}ms` : ''}
+                        </span>
+                        <span className="trace-expand-btn">
+                          {isExpanded ? '▲ 收起' : '▼ 展开 JSON'}
+                        </span>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="trace-event-detail">
+                          <div className="trace-json-block">
+                            <span className="json-label">输入参数:</span>
+                            <pre>{JSON.stringify(evt.argumentsSummary, null, 2)}</pre>
+                          </div>
+                          {evt.result !== undefined && (
+                            <div className="trace-json-block">
+                              <span className="json-label">返回结果:</span>
+                              <pre>
+                                {typeof evt.result === 'string'
+                                  ? evt.result
+                                  : JSON.stringify(evt.result, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {evt.error && <div className="trace-error-text">错误: {evt.error}</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* 错误与重试 */}
+            {run.error && (
+              <div className="workbench-inline-error" data-testid="trace-run-error">
+                {run.error}
+              </div>
+            )}
+
+            {run.status === 'failed' && onRetry && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm trace-retry-btn"
+                data-testid="trace-retry-turn"
+                onClick={() => {
+                  const prevUserTurn = [...bundle.turns].reverse().find((t) => t.role === 'user');
+                  if (prevUserTurn?.content) onRetry(prevUserTurn.content);
+                }}
+              >
+                重试该回合
+              </button>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+});
 
 const pluginLifecycleLabel = {
   available: '可用',
@@ -165,7 +415,7 @@ const pluginLifecycleLabel = {
   failed: '失败',
 } as const;
 
-export function PluginPanel({
+export const PluginPanel = memo(function PluginPanel({
   plugins,
   onClose,
 }: {
@@ -252,9 +502,9 @@ export function PluginPanel({
       </p>
     </aside>
   );
-}
+});
 
-export function MemoryInspectorCard({
+export const MemoryInspectorCard = memo(function MemoryInspectorCard({
   sceneName,
   povName,
   versionNumber = 1,
@@ -308,11 +558,18 @@ export function MemoryInspectorCard({
       <div style={{ color: 'var(--color-text-secondary, #475569)', marginBottom: 4 }}>
         POV: {povName || '默认全知'} · 召回碎片: {retrievedCount} 条
       </div>
-      <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--color-text-muted, #64748b)' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          fontSize: 11,
+          color: 'var(--color-text-muted, #64748b)',
+        }}
+      >
         <span>长期: {longTermCount}</span>
         <span>中期: {midTermCount}</span>
         <span>短期: {shortTermCount}</span>
       </div>
     </div>
   );
-}
+});
