@@ -32,6 +32,7 @@ const PolishPanel = lazy(() => import('./panels/PolishPanel'));
 const ChapterSummaryPanel = lazy(() => import('./panels/ChapterSummaryPanel'));
 const ContextViewPanel = lazy(() => import('./panels/ContextViewPanel'));
 const MultiAgentPanelRuntime = lazy(() => import('./panels/MultiAgentPanelRuntime'));
+const MemoryInspectorPanel = lazy(() => import('./panels/MemoryInspectorPanel'));
 
 interface RightPanelProps {
   panelType: PanelType;
@@ -116,6 +117,10 @@ const panelConfig: Record<RightDockPanelType, PanelConfig> = {
   'context-view': {
     title: '上下文记录',
     component: (props) => <ContextViewPanel {...props} />,
+  },
+  'memory-inspector': {
+    title: '记忆检查器',
+    component: (props) => <MemoryInspectorPanel {...props} />,
   },
 };
 

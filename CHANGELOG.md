@@ -25,6 +25,7 @@
 - 新增提示词模板注册与多模型动态适配引擎（Prompt Template Registry & Model-Adaptive Engine）：声明式统一管理分镜创作、Beat推进、专家评审、记忆演化抽取与质量诊断等 5 大官方基准模板；支持严格变量完整性校验与默认值回退；按目标模型家族（`Qwen` / `DeepSeek` / `Claude` / `OpenAI-Compatible`）动态注入专属系统指令前缀与输出格式约束；生成确定性哈希凭证以供审计与版本溯源。
 - 新增创作反馈与微调数据闭环采集系统（Human Feedback & SFT/DPO Dataset Collector）：在作家人工修改、审阅修订及最终采用时自动沉淀高质量数据对；支持生成 SFT 指令微调示范集与 DPO/RLHF 人类偏好对齐正负例数据；提供标准 JSONL、ShareGPT 与 OpenAI Chat 多格式导出；内置微小改动过滤与多维度数据集统计指标。
 - 新增分镜生成与小说记忆层深度联调（Scene Generation & Novel Memory Deep Integration）：在分镜场景与 Beat 生成前自动检索三层记忆、角色心境与世界态势，并将 `memory_context` 编译源及记忆审计元数据（`memoryVersion`、`retrievedFragments`）注入 Execution Contract；正文生成成功后自动生成 State Delta 并驱动快照版本自增；提供针对无记忆旧章节的平滑降级 Fallback 机制。
+- 新增创作工作台记忆检查器面板（Creative Workbench Memory Inspector Panel）：在右侧栏与工作台沉淀 `MemoryInspectorPanel` / `MemoryInspectorCard`；实时可视化当前 Scene、POV 视点角色心境/目标/状态、Memory Version、三层记忆（长期/中期/短期）及召回碎片列表（Retrieved Fragments）；提供优雅的空状态降级支持。
 
 ### 变更
 

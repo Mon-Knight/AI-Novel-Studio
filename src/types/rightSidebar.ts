@@ -12,12 +12,17 @@ export type PanelType =
   | 'draft-history'
   | 'chapter-summary'
   | 'context-view'
+  | 'memory-inspector'
   | null;
 
 export type RightDockPanelType = Exclude<PanelType, 'draft-history' | null>;
 
 /** Review-only panels still offered in the writing workspace toolbar. */
-export const WORKSPACE_REVIEW_PANELS = ['draft-history', 'chapter-summary'] as const;
+export const WORKSPACE_REVIEW_PANELS = [
+  'draft-history',
+  'chapter-summary',
+  'memory-inspector',
+] as const;
 
 /** Desktop E2E still exercises these job/quality/setting surfaces after the AI dock was removed. */
 export const WORKSPACE_E2E_PANELS = ['ai-generate', 'engineering', 'check', 'setting'] as const;

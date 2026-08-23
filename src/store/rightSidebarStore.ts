@@ -60,6 +60,7 @@ export const TOOL_KEYS: Record<string, string> = {
   polish: 'polish',
   'chapter-summary': 'chapter-summary',
   'context-view': 'context-view',
+  'memory-inspector': 'memory-inspector',
 };
 
 // ==================== 工厂函数 ====================
