@@ -4,14 +4,10 @@ import ReactDOM from 'react-dom/client';
 import { createHashRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
-import { generationJobService } from './services/generation/generationJobService';
-import { legacyChapterContextMigrationService } from './services/context/legacyChapterContextMigrationService';
 import { tauriInvoke } from './services/tauri/runtime';
 import { describeUnknownError } from './utils/errorMessage';
 import { initializeTheme } from './store/themeStore';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
-import { autonomousSchedulerWorker } from './services/autonomous-creation/autonomousSchedulerWorker';
-import { taskConversationService } from './services/conversation/taskConversationService';
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
@@ -19,7 +15,11 @@ import './styles/theme.css';
 performance.mark('app-script-start');
 initializeTheme();
 installGlobalErrorHandlers();
-void autonomousSchedulerWorker.recoverStartup();
+void import('./services/autonomous-creation/autonomousSchedulerWorker').then(
+  ({ autonomousSchedulerWorker }) => {
+    void autonomousSchedulerWorker.recoverStartup();
+  },
+);
 
 const startupScriptStartedAt = performance.now();
 const MIN_STARTUP_SPLASH_MS = 700;
@@ -93,6 +93,9 @@ async function applySystemAccentColor() {
 
 async function bootstrapApplication() {
   try {
+    const { taskConversationService } = await import(
+      './services/conversation/taskConversationService'
+    );
     await taskConversationService.recoverInterruptedRuns();
   } catch (error) {
     appLogger.error('[STARTUP_CONVERSATION_RECOVERY_FAILED]', {
@@ -102,6 +105,9 @@ async function bootstrapApplication() {
 
   let startupContextMigration;
   try {
+    const { legacyChapterContextMigrationService } = await import(
+      './services/context/legacyChapterContextMigrationService'
+    );
     startupContextMigration = await legacyChapterContextMigrationService.migrate();
   } catch (error) {
     const message = describeUnknownError(error, '旧章节上下文迁移失败');
@@ -120,6 +126,7 @@ async function bootstrapApplication() {
 
   let startupRecovery;
   try {
+    const { generationJobService } = await import('./services/generation/generationJobService');
     startupRecovery = await generationJobService.recoverInterruptedAtStartup();
   } catch (error) {
     const message = describeUnknownError(error, '生成任务恢复检查失败');

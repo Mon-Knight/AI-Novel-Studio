@@ -7,6 +7,7 @@ import { ArtifactCard, ToolEventRow } from '../../pages/Workbench/WorkbenchCompo
 import { taskConversationService } from './taskConversationService';
 import { taskRuntimeAdapter } from './taskRuntimeAdapter';
 import { taskSessionAdapter, WORKBENCH_CONVERSATIONAL_REPLY } from '../dsh/taskSessionAdapter';
+import { workbenchChapterWriter } from './workbenchChapterWriter';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -23,6 +24,11 @@ class MemoryStorage {
     this.values.clear();
   }
 }
+
+workbenchChapterWriter.generate = async () => ({
+  text: '这是一段足够长度的章节候选正文，用于工作台写章验收。',
+  source: 'writer',
+});
 
 function mockModel(modelId = 'Mock') {
   return {
@@ -104,10 +110,10 @@ test('two task workers keep independent runs and event projections', async () =>
     firstBundle?.toolEvents.map((event) => event.status),
     firstBundle?.toolEvents.map(() => 'succeeded'),
   );
-  assert.equal(firstBundle?.artifacts.length, 0);
+  assert.equal(firstBundle?.artifacts.length, 1);
   assert.match(
     firstBundle?.turns.find((turn) => turn.role === 'assistant')?.content ?? '',
-    /不会冒充 DSH 或 ResultArtifact/,
+    /正式写章管线/,
   );
   assert.ok(firstBundle?.toolEvents.some((event) => event.toolName === 'generate_chapter'));
 });
@@ -163,7 +169,11 @@ test('browser fallback selects domain candidate tools from the user goal', async
       `${fixture.goal} should invoke ${fixture.tool}`,
     );
     assert.ok(bundle?.toolEvents.every((event) => event.status === 'succeeded'));
-    assert.equal(bundle?.artifacts.length, 0);
+    if (fixture.tool === 'generate_chapter' || fixture.tool === 'polish_chapter') {
+      assert.equal(bundle?.artifacts.length, 1, fixture.goal);
+    } else {
+      assert.equal(bundle?.artifacts.length, 0, fixture.goal);
+    }
     if (!fixture.chapterId) {
       assert.equal(
         bundle?.toolEvents.some((event) => event.toolName === 'generate_characters'),
@@ -216,6 +226,34 @@ test('greetings complete without generate_chapter or a DSH worker', async () => 
     bundle?.turns.find((item) => item.role === 'assistant')?.content,
     WORKBENCH_CONVERSATIONAL_REPLY,
   );
+});
+
+test('chapter write without a bound chapter fails with an actionable data error', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  localStorage.setItem('ai_novel_studio_novels', JSON.stringify(mockNovels));
+  const conversation = await taskConversationService.create('novel-001', '新的创作任务');
+  const turn = await taskConversationService.appendTurn(
+    conversation.conversationId,
+    'user',
+    '生成下一章',
+  );
+  const run = await taskSessionAdapter.startTurn({
+    conversationId: conversation.conversationId,
+    novelId: 'novel-001',
+    turnId: turn.turnId,
+    goal: '生成下一章',
+    modelSnapshot: mockModel(),
+  });
+  assert.equal(run.status, 'failed');
+  assert.match(run.error ?? '', /【data】/);
+  assert.match(run.error ?? '', /选择目标章节/);
+  const bundle = await taskConversationService.get(conversation.conversationId);
+  assert.equal(
+    bundle?.toolEvents.some((event) => event.toolName === 'generate_chapter'),
+    false,
+  );
+  assert.equal(bundle?.conversation.title, '生成下一章');
 });
 
 test('cancelling an active worker is scoped to its conversation', async () => {

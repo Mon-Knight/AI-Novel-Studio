@@ -7,6 +7,7 @@ import type {
   TaskModelSnapshot,
 } from '../../../types/conversation';
 import { novelRepository } from '../../../services/database/novelRepository';
+import { novelService } from '../../../services/novels/novelService';
 import { chapterRepository } from '../../../services/database/chapterRepository';
 import { taskConversationService } from '../../../services/conversation/taskConversationService';
 import { captureTaskModelSnapshot } from '../../../services/conversation/taskModelSnapshot';
@@ -118,6 +119,20 @@ export function useWorkbenchConversations(input: {
     });
   }, [novels, selectedNovelId]);
 
+  async function selectChapter(nextChapterId: string) {
+    const value = nextChapterId.trim();
+    setChapterId(value || undefined);
+    if (!selectedNovelId || !value) return;
+    try {
+      const updated = await novelService.updateNovel(selectedNovelId, { currentChapterId: value });
+      if (updated) {
+        setNovels((current) => current.map((novel) => (novel.id === updated.id ? updated : novel)));
+      }
+    } catch {
+      // Binding is still applied in-session even if persistence fails.
+    }
+  }
+
   async function createTask() {
     if (!selectedNovelId) return;
     const created = await taskConversationService.create(
@@ -140,6 +155,7 @@ export function useWorkbenchConversations(input: {
     setBundle,
     chapterId,
     setChapterId,
+    selectChapter,
     chapters,
     selectedModel,
     setSelectedModel,

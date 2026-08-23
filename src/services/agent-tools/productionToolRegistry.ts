@@ -164,7 +164,12 @@ const definitions: ToolDefinition[] = [
         return { ok: true, data: result, source: 'memory' };
       } catch (error) {
         if (!isTauri()) {
-          return { ok: true, data: { items: [], total: 0 }, source: 'localstorage' };
+          const { retrieveLocalMemory } = await import('../memory/adoptedDraftMemory');
+          return {
+            ok: true,
+            data: retrieveLocalMemory(String(args.novelId), String(args.query ?? '')),
+            source: 'localstorage',
+          };
         }
         return {
           ok: false,

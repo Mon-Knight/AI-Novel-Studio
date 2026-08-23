@@ -447,7 +447,31 @@ pub fn append_turn(
     let tx = connection.transaction().map_err(AppError::database)?;
     let sequence: i64 = tx.query_row("SELECT COALESCE(MAX(sequence), -1) + 1 FROM conversation_turns WHERE conversation_id=?1", params![input.conversation_id], |row| row.get(0)).map_err(AppError::database)?;
     tx.execute("INSERT INTO conversation_turns (turn_id, conversation_id, sequence, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![input.turn_id, input.conversation_id, sequence, input.role, input.content, input.created_at]).map_err(AppError::database)?;
-    tx.execute("UPDATE task_conversations SET updated_at=?2, status=CASE WHEN ?3='user' THEN 'idle' ELSE status END WHERE conversation_id=?1", params![input.conversation_id, input.created_at, input.role]).map_err(AppError::database)?;
+    let current_title: String = tx
+        .query_row(
+            "SELECT title FROM task_conversations WHERE conversation_id=?1",
+            params![input.conversation_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    let next_title = if input.role == "user"
+        && matches!(current_title.as_str(), "新的创作任务" | "未命名任务")
+    {
+        let trimmed = input.content.trim();
+        let title: String = trimmed.chars().take(40).collect();
+        if title.is_empty() {
+            current_title
+        } else {
+            title
+        }
+    } else {
+        current_title
+    };
+    tx.execute(
+        "UPDATE task_conversations SET updated_at=?2, status=CASE WHEN ?3='user' THEN 'idle' ELSE status END, title=?4 WHERE conversation_id=?1",
+        params![input.conversation_id, input.created_at, input.role, next_title],
+    )
+    .map_err(AppError::database)?;
     let row = tx.query_row("SELECT turn_id, conversation_id, sequence, role, content, run_id, created_at FROM conversation_turns WHERE turn_id=?1", params![input.turn_id], turn_from_row).map_err(AppError::database)?;
     tx.commit().map_err(AppError::database)?;
     Ok(row)

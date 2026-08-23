@@ -230,3 +230,42 @@ test('WorkbenchPage handles empty novels state gracefully', async () => {
     assert.ok(screen.getByText('还没有小说项目'));
   });
 });
+
+test('WorkbenchPage shows a chapter selector for the current novel', async () => {
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => {
+    assert.ok(screen.getAllByText('天命修仙录').length > 0);
+  });
+  fireEvent.click(screen.getByTestId('workbench-task'));
+  await waitFor(() => {
+    const select = screen.getByTestId('workbench-chapter-select') as HTMLSelectElement;
+    assert.equal(select.value, 'chapter-001');
+    assert.ok(screen.getByRole('option', { name: '第一章：初入宗门' }));
+  });
+});
+
+test('WorkbenchPage disables generate templates when the novel has no chapters', async () => {
+  chapterRepository.getByNovelId = async () => [];
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => {
+    assert.ok(screen.getAllByText('天命修仙录').length > 0);
+  });
+  fireEvent.click(screen.getByTestId('workbench-task'));
+  await waitFor(() => {
+    assert.ok(screen.getByTestId('workbench-create-chapter'));
+    assert.equal(
+      (screen.getByTestId('workbench-template-generate-chapter') as HTMLButtonElement).disabled,
+      true,
+    );
+  });
+});

@@ -118,7 +118,7 @@ function AssetsPage() {
 
   return (
     <div className="page-container" style={{ height: '100%', overflowY: 'auto' }}>
-      <BackButton label="返回首页" to="/" />
+      <BackButton label="返回工作台" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>
         📦 创作资产中心
       </div>
@@ -141,10 +141,10 @@ function AssetsPage() {
               fontSize: 13,
             }}
           >
-            暂无作品，请先在首页创建
+            暂无作品，请先创建小说
             <div style={{ marginTop: 8 }}>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>
-                ← 返回首页
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/novels')}>
+                前往小说作品
               </button>
             </div>
           </div>

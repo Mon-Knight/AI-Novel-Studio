@@ -1,7 +1,7 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.5.0
+> 版本：v3.6.0
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---

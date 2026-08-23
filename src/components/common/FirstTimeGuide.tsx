@@ -68,7 +68,7 @@ function FirstTimeGuide() {
           6. ⚡ <strong>添加事件</strong> — 规划本章必须发生的剧情
         </div>
         <div>
-          7. ✏️ <strong>进入写作工作台</strong> — AI 逐章生成正文
+          7. ✦ <strong>打开创作工作台</strong> — 选择章节后用对话生成候选正文
         </div>
         <div>
           8. ✅ <strong>确认采用</strong> — 选择满意的草稿版本作为正式正文

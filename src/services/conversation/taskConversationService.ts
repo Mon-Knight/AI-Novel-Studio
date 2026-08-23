@@ -280,6 +280,12 @@ export const taskConversationService = {
       };
       bundle.turns.push(turn);
       bundle.conversation.updatedAt = input.createdAt;
+      if (
+        role === 'user' &&
+        (bundle.conversation.title === '新的创作任务' || bundle.conversation.title === '未命名任务')
+      ) {
+        bundle.conversation.title = Array.from(content.trim()).slice(0, 40).join('') || bundle.conversation.title;
+      }
       upsertLocal(bundle);
       return turn;
     });

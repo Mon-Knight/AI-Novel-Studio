@@ -63,15 +63,18 @@ function WorkbenchPage() {
     selectedModel,
     setSelectedModel,
     loading,
+    chapters,
     selectedNovel,
     selectedChapter,
     selectedNovelRef,
     selectNovel,
     selectConversation,
+    selectChapter,
     loadConversations,
     refreshBundle,
     createTask,
   } = useWorkbenchConversations({ setPlugins });
+  const hasChapter = Boolean(chapterId && selectedChapter);
 
   const {
     draft,
@@ -115,6 +118,7 @@ function WorkbenchPage() {
     loadConversations,
     selectedNovelRef,
     setComposerError,
+    setDraft,
   });
 
   useEffect(() => {
@@ -231,11 +235,35 @@ function WorkbenchPage() {
               <div>
                 <div className="workbench-eyebrow">{selectedNovel?.title || '小说项目'}</div>
                 <h2>{bundle.conversation.title}</h2>
-                <p className="workbench-chapter-target" data-testid="workbench-chapter-target">
-                  {selectedChapter
-                    ? `章节目标：${selectedChapter.title}`
-                    : '未绑定章节：只读检索，不生成候选'}
-                </p>
+                <div className="workbench-chapter-target" data-testid="workbench-chapter-target">
+                  <label htmlFor="workbench-chapter-select">目标章节</label>
+                  {chapters.length === 0 ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      data-testid="workbench-create-chapter"
+                      onClick={() => navigate(`/novels/${selectedNovelId}`)}
+                    >
+                      去创建章节
+                    </button>
+                  ) : (
+                    <select
+                      id="workbench-chapter-select"
+                      data-testid="workbench-chapter-select"
+                      value={chapterId ?? ''}
+                      onChange={(event) => void selectChapter(event.target.value)}
+                    >
+                      {chapters.map((chapter) => (
+                        <option key={chapter.id} value={chapter.id}>
+                          {chapter.title || '未命名章节'}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!hasChapter && (
+                    <span className="workbench-chapter-hint">未绑定章节：不能生成或润色正文</span>
+                  )}
+                </div>
               </div>
               <div className="workbench-task-header-actions">
                 <span
@@ -273,7 +301,7 @@ function WorkbenchPage() {
                     <div className="workbench-intro-icon">✦</div>
                     <h3>从一个创作目标开始</h3>
                     <p>
-                      例如“生成下一章”或“审计前十章人物一致性”。运行中的工具和候选产物会直接出现在这里。
+                      先选择目标章节，再说“生成下一章”。系统会走正式写章管线生成候选，确认后才进入写作工作台审阅。
                     </p>
                   </div>
                 )}
@@ -317,9 +345,16 @@ function WorkbenchPage() {
                   const events = run
                     ? bundle.toolEvents.filter((event) => event.runId === run.runId)
                     : [];
-                  const artifacts = run
-                    ? bundle.artifacts.filter((artifact) => artifact.runId === run.runId)
-                    : [];
+                  const isLatestTurn =
+                    turn.turnId === bundle.turns[bundle.turns.length - 1]?.turnId;
+                  const artifacts = [
+                    ...(run
+                      ? bundle.artifacts.filter((artifact) => artifact.runId === run.runId)
+                      : []),
+                    ...(isLatestTurn
+                      ? bundle.artifacts.filter((artifact) => !artifact.runId)
+                      : []),
+                  ];
                   return (
                     <div
                       className={`workbench-turn is-${turn.role}`}
@@ -469,7 +504,8 @@ function WorkbenchPage() {
                     className="workbench-template-chip"
                     key={template.id}
                     data-testid={`workbench-template-${template.id}`}
-                    disabled={selectedConversationRunning}
+                    disabled={selectedConversationRunning || !hasChapter}
+                    title={!hasChapter ? '请先选择或创建目标章节' : undefined}
                     onClick={() => setDraft(template.goal)}
                   >
                     {template.label}

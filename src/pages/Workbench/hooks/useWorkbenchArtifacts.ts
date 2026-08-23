@@ -10,6 +10,7 @@ export function useWorkbenchArtifacts(input: {
   loadConversations: (novelId?: string) => Promise<void>;
   selectedNovelRef: React.MutableRefObject<string>;
   setComposerError: (error: string) => void;
+  setDraft?: (draft: string) => void;
 }) {
   const {
     selectedNovelId,
@@ -18,6 +19,7 @@ export function useWorkbenchArtifacts(input: {
     loadConversations,
     selectedNovelRef,
     setComposerError,
+    setDraft,
   } = input;
   const navigate = useNavigate();
   const [decisionBusyCardId, setDecisionBusyCardId] = useState('');
@@ -48,6 +50,9 @@ export function useWorkbenchArtifacts(input: {
       await refreshBundle(artifact.conversationId);
       if (selectedNovelRef.current === selectedNovelId) {
         await loadConversations(selectedNovelId);
+      }
+      if (decision === 'request_revision') {
+        setDraft?.('请根据以下要求修改上一版章节候选：\n');
       }
       if (result.authorization && chapterId) {
         navigate(

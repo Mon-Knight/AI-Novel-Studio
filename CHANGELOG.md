@@ -1,53 +1,40 @@
 # AI Novel Studio - CHANGELOG
 
-> 当前版本：v3.5.0。v3.3.0/v3.4.0 工作台、确认/Safe Apply 与 v3.5.0 领域工具、上下文压缩和写作工作台审阅收敛在同一实施分支一并收口。
+> 当前版本：v3.6.0。融合对话式创作工作台核心链路闭环、双模型创作运行时、三层小说长程记忆架构与创作智能体底座。
 
-## Unreleased - Phase 5.1-B/C Dual Model Creative Runtime（Cloud-first 稳定化）
+## v3.6.0 (2026-08-23) - 智能体创作平台与长篇小说记忆层
 
 ### 新增
 
-- 新增模型无关的 Creative Runtime：`RouteDecision` 纯函数按 Role 选择云端导演或本地作家，不把 `chapter_generate` 绑到具体厂商。
-- 本地作家生命周期（AVAILABLE / TRAINING / TESTING / FAILED / DISABLED）为进程内状态；设置页健康检查写入 health，不新增 IPC 或 SQLite 表。
-- `chapter_scene_generate` 在本地训练、失败、不健康或上下文超限时，可自动用云端代写**同一 Beat 契约**，不改 Scene/目标，也不滑回整章 `chapter_generate`。
-- 设置增加「允许云端作家 Fallback」（默认开启）；关闭后本地不可用即失败关闭。
-- 路由结果写入已有 `taskInput.routeDecision`，进入 compilationHash，不改 `providerOptionsJson` 白名单。
-- 新增凭据无关的本地模型生命周期 sidecar；应用在每个 Beat 前同步 TRAINING / TESTING / FAILED / DISABLED / AVAILABLE，跨重启仍能自动使用云端代写或恢复本地。
-- 新增 Qwen/Llama OpenAI-compatible endpoint 能力目录；本地 endpoint 只声明 Scene/Beat 正文能力，不获得导演能力。
-- 新增本地模型 Benchmark Runner 与 10 个固定 Scene-to-Prose 案例；CLI 先写 TESTING，通过率达标并形成 SHA-256 报告身份后才写 AVAILABLE。
-- 新增训练生命周期 CLI；它可以标记 TRAINING/TESTING/FAILED/DISABLED，但明确不能绕过 Benchmark 直接标记 AVAILABLE。
-- 新增无本地模型的正式云端正文模式：未配置或关闭专用本地模型时，全局 DeepSeek / OpenAI-Compatible Provider 成为 Scene/Beat 的主路由，而不是伪装成 Fallback。
-- 新增通用外部模型网关（AI Model Gateway）客户端接入层与网络策略：将远程正文模型抽象为通用 Remote Model Provider，统一采用 OpenAI-Compatible API 契约；支持公网 HTTPS 与局域网/VPC（RFC 1918 / CGNAT / Link-Local / 回环）HTTP/HTTPS 访问；强制要求 API Key/Token 鉴权以杜绝匿名调用；自动向下兼容迁移旧版 `remoteWriter` 设置；当本地模型不可用时优先调度至外部 AI Gateway 或全局 Cloud Provider。
-- 新增长篇小说记忆层（Novel Memory Layer Phase 1）领域模型与服务契约：建立长期记忆（世界规则/人物底层/核心伏笔）、中期记忆（本卷主线/角色动态状态/阵营态势）、短期工作记忆（分镜 POV/活跃角色/即时冲突）三层记忆架构；定义 `CharacterDynamicState`、`WorldStateSnapshot`、`SceneMemoryContext` 与 `INovelMemoryManager` 接口，为百万字创作及 Qwen3.8-27B 场景写作提供结构化上下文供给基础。
-- 新增场景记忆召回与装配引擎（Novel Memory Retrieval Engine Phase 2）：实现基于实体相关性与重要度权重（1~5）的三层记忆过滤召回；支持按模型 Context 预算进行 `核心设定 > 场景冲突/POV > 近期事件/动态 > 辅助线索` 优先级裁剪；提供 `formatSceneMemoryForCompilation` 将结构化记忆包络注入 `executionContractCompiler`，无缝增强 Scene 作家生成质量并保持旧流程向后兼容。
-- 新增记忆状态演进与版本快照引擎（Novel Memory State Update Engine Phase 3）：实现创作生成后的结构化状态增量（`MemoryStateDelta`）批量应用；支持角色动态心境/目标/伤势/阵营演化及世界时间线/大事件/势力态势更新；沉淀不可变版本快照（`MemoryVersionSnapshot`）并支持状态安全回滚。
-- 新增小说作家评测体系（Novel Writer Benchmark Evaluation System Phase 4）：建立包含人物一致性（`CharacterConsistency`）、世界观（`WorldConsistency`）、情节连贯性（`PlotContinuity`）、伏笔留存（`ForeshadowingRetention`）及文风一致性（`StyleConsistency`）的 5 大维度评测算法；支持无 Memory 的 Baseline 与启用 Novel Memory Layer 的 Enhanced 模式 A/B 对照实验；自动生成包含 Token 消耗、耗时与提升 Delta 的结构化评测报告。
-- 新增章节版本演进与全链路创作溯源系统（Chapter Version & Provenance System）：提供 Git 式章节多版本管理（`ChapterRevision`）；自动沉淀生成模型（Model）、提供商（Provider）、路由原因（RouteDecision）、提示词快照与记忆版本；内置行级与字符级轻量 Diff 比对引擎；支持版本采用（Adopt）与不可变安全历史回滚。
-- 新增提示词模板注册与多模型动态适配引擎（Prompt Template Registry & Model-Adaptive Engine）：声明式统一管理分镜创作、Beat推进、专家评审、记忆演化抽取与质量诊断等 5 大官方基准模板；支持严格变量完整性校验与默认值回退；按目标模型家族（`Qwen` / `DeepSeek` / `Claude` / `OpenAI-Compatible`）动态注入专属系统指令前缀与输出格式约束；生成确定性哈希凭证以供审计与版本溯源。
-- 新增创作反馈与微调数据闭环采集系统（Human Feedback & SFT/DPO Dataset Collector）：在作家人工修改、审阅修订及最终采用时自动沉淀高质量数据对；支持生成 SFT 指令微调示范集与 DPO/RLHF 人类偏好对齐正负例数据；提供标准 JSONL、ShareGPT 与 OpenAI Chat 多格式导出；内置微小改动过滤与多维度数据集统计指标。
-- 新增分镜生成与小说记忆层深度联调（Scene Generation & Novel Memory Deep Integration）：在分镜场景与 Beat 生成前自动检索三层记忆、角色心境与世界态势，并将 `memory_context` 编译源及记忆审计元数据（`memoryVersion`、`retrievedFragments`）注入 Execution Contract；正文生成成功后自动生成 State Delta 并驱动快照版本自增；提供针对无记忆旧章节的平滑降级 Fallback 机制。
-- 新增创作工作台记忆检查器面板（Creative Workbench Memory Inspector Panel）：在右侧栏与工作台沉淀 `MemoryInspectorPanel` / `MemoryInspectorCard`；实时可视化当前 Scene、POV 视点角色心境/目标/状态、Memory Version、三层记忆（长期/中期/短期）及召回碎片列表（Retrieved Fragments）；提供优雅的空状态降级支持。
-- 新增创作工作台生成追溯面板（Creative Workbench Generation Trace Panel）：在右侧栏沉淀 `GenerationTracePanel`；可视化呈现当前任务、Model RouteDecision、服务提供商（Provider）、模型名称、Memory Version、编译 Hash、提示词模板、Token 消耗、耗时与 Fallback 回退告警；无任务时平滑展示空状态。
-- 新增内置模型驱动创作智能体底座（Creative Agent Harness Phase 1）：将硬编码创作流程全面升级为 ReAct 循环与任务规划器（`AgentLoop`、`AgentPlanner`、`AgentToolRegistry`、`AgentToolExecutor`、`AgentContextManager`）；封装查询世界状态、人物动态、章节信息、生成大纲、生成分镜、生成正文、质量检查、更新 Memory 与保存版本等 9 大领域工具；支持真实 LLM 意图理解、自主工具选择、多步任务规划与错误自愈恢复，所有写操作经由严格安全契约链条。
-- 新增创作智能体对话工作台（Creative Agent Conversation Workspace）：实现模型驱动的自然语言交互工作台（`AgentChatWorkspace`、`AgentConversationService`）；支持用户自然语言输入、实时思考与规划流（Thinking）、富文本工具调用卡片（Tool Card 输入输出与时延展示）及正文产物一键采纳；针对更新记忆与保存版本等写操作建立双重安全确认授权机制（Confirmation Gate）。
-- 新增创作智能体自主任务运行时（Creative Agent Autonomous Task Runtime）：将 Agent 循环从单步工具调用全面演进为 `Observe -> Plan -> Act -> Evaluate -> Retry` 5 阶段自主循环；引入任务状态管理（`AgentTaskState`：目标分解、已完成步骤、进度百分比、评估记录）；新增 Agent 自我评估与反思引擎（`AgentEvaluator`）；支持目标驱动复合创作任务模板（自动编排记忆检索、分镜规划、正文生成与质量核验）及自适应错误恢复重试。
-- 新增创作智能体端到端小说章节创作集成验证（Creative Agent End-to-End Creative Story Workflow）：通过 `agentStoryWorkflow.test.ts` 完整验证 Agent 依据自然语言约束（如“主角进入遗迹探寻线索但隐忍不揭开最终秘密”）自主完成从感知世界规则与人物状态、分镜规划、正文生成、质量核验、记忆演化（Memory State Delta）到不可变章节版本落盘存证（Chapter Version Revision）的 7 阶段全生命周期闭环。
-- 新增创作智能体决策质量追踪与推理审计层（Creative Agent Decision Quality Layer & Reasoning Audit）：扩展 `AgentDecision`（`reasoningSummary`、`selectedToolReason`、`expectedOutcome` 与 `confidenceScore`）；引入结构化决策追踪体系（`AgentDecisionTrace`）全程审计工具选择依据、执行产物与多轮自适应调整；在对话工作台（`AgentChatWorkspace`）可视化沉淀决策追踪卡片（🧠 Agent Decision），透明化展现创作推理链条。
-- 新增创作智能体工具选择优化与经验沉淀层（Creative Agent Tool Selection Optimization Layer & Usage Memory）：引入工具选择评估器（`ToolSelectionEvaluator`）多维度量化相关度（`relevanceScore`）、冗余度（`unnecessaryToolScore`）与缺失度（`missingToolScore`）；新增工具使用经验记忆（`ToolUsageMemory`）沉淀高分历史成功案例（如角色性格调整工具链 `query_character_state -> generate_scene_plan -> update_memory`）；在规划器（`AgentPlanner`）中自动检索并注入历史经验以优化决策准确性与收敛效率。
-- 新增创作智能体正文质量自主审查与控制闭环（Creative Agent Quality Control Loop & Feedback Memory）：新增正文质量裁判（`AgentQualityJudge`）多维度审查人物一致性（`characterConsistency`）、剧情推进（`plotProgression`）、文风匹配（`styleMatch`）与连贯性（`coherence`）；支持未达标正文初稿自主重写（`rewrite_prose`）自愈修复与二次合规质检；沉淀高质量生成范例记忆（`QualityFeedbackMemory`）；在对话工作台（`AgentChatWorkspace`）可视化展现质量审查卡片（📝 Quality Review）。
-- 新增创作智能体全流程端到端 E2E 自动化测试规范（Creative Agent Autonomous Workflow E2E Spec）：在 `tests/e2e/creative-agent-workflow.spec.ts` 中覆盖智能体对话工作台生命周期、自然语言目标驱动执行、决策追踪卡片（🧠 Agent Decision Trace）、正文质量审查卡片（📝 Quality Review）、工具调度与记忆落盘的真实 UI 自动化验证。
-- 重构设置中心为桌面级分类架构（Desktop Settings Center Architecture）：将单列垂直长列表全面重构为「左侧分类导航 + 右侧精细配置面板」架构；支持常规外观（`general`）、AI 模型服务（`ai_models`）、网关与治理（`governance`）、数据与存储（`data`）及诊断关于（`diagnostics`）5 大分类；新增 AI 运行时全局概览看板（`AiRuntimeOverviewCard`）与模型调度优先级指示；模块化抽离 `DataStorageSettingsCard`、`AboutSettingsCard` 与 `SecuritySettingsCard`。
+- **创作工作台核心主路径闭环**：创作工作台接入真实写章管线 `workbenchChapterWriter` 与精准意图路由（`taskGoalRouting`），彻底分离只读/检索意图与写章意图；增加顶部显式目标章节下拉选择与无章节空状态安全引导；失败按参数/数据/服务/模型分层精准诊断。
+- **草稿采用与长程记忆自动沉淀**：章节草稿采用（Adopt）后自动进行正文切片，并持久化写入 SQLite `memory_documents`（浏览器环境写入本地持久化存储），使后续长篇创作 `search_memory` 能真实召回已采用的正文与实体上下文。
+- **产物决定与迭代修改增强**：产物卡片「要求修改」操作与输入框深度联动，自动带上修改提示前缀与上下文；左侧各二级功能模块（资产中心、风格方案、模板中心、AI任务记录）统一导航回创作工作台（`/`）。
+- **模型无关 Creative Runtime 与双模型架构（Phase 5.1）**：`RouteDecision` 纯函数按 Role 智能选择云端导演或本地作家；本地作家生命周期（AVAILABLE / TRAINING / TESTING / FAILED / DISABLED）为进程内状态；`chapter_scene_generate` 在本地训练、失败、不健康或超限时自动使用云端代写**同一 Beat 契约**；新增无本地模型的正式云端正文模式与外部模型网关（AI Model Gateway）。
+- **三层长篇小说记忆层（Novel Memory Layer Phase 1-3）**：建立长期记忆（世界规则/人物底层/核心伏笔）、中期记忆（本卷主线/角色动态状态/阵营态势）、短期工作记忆（分镜 POV/活跃角色/即时冲突）三层记忆架构；提供场景记忆召回与装配引擎及状态增量演进与不可变版本快照引擎（`MemoryVersionSnapshot`）。
+- **小说作家 5 维评测体系（Novel Writer Benchmark Evaluation Phase 4）**：建立包含人物一致性、世界观、情节连贯性、伏笔留存与文风一致性的 5 大维度评测算法；支持无 Memory 的 Baseline 与启用 Novel Memory Layer 的 Enhanced 模式 A/B 对照实验。
+- **章节版本演进与全链路创作溯源系统（Chapter Revision & Provenance System）**：提供 Git 式章节多版本管理；自动沉淀生成模型、提供商、路由原因、提示词快照与记忆版本；内置轻量 Diff 比对引擎与安全历史回滚。
+- **提示词模板注册与多模型动态适配引擎（Prompt Template Registry）**：声明式管理分镜、Beat推进、专家评审、记忆演化抽取与质量诊断等 5 大官方基准模板；按目标模型家族（Qwen / DeepSeek / Claude / OpenAI-Compatible）动态注入专属指令前缀与格式约束。
+- **创作反馈与微调数据闭环采集系统（Human Feedback & SFT/DPO Dataset Collector）**：在作家修改、审阅及采用时自动沉淀高质量数据对；支持标准 JSONL、ShareGPT 与 OpenAI Chat 导出 SFT 与 DPO 数据集。
+- **创作智能体底座与自主对话工作台（Creative Agent Harness & AgentChatWorkspace）**：将硬编码流程升级为 ReAct 循环与任务规划器，封装 9 大领域工具；支持 5 阶段自主循环（Observe -> Plan -> Act -> Evaluate -> Retry）、决策质量追踪（Agent Decision Trace）、正文质量审查（Quality Review）与工具经验沉淀。
+- **桌面级分类设置中心（Desktop Settings Center Architecture）**：重构为「左侧分类导航 + 右侧精细配置」架构，支持常规、模型、网关、存储及诊断分类看板。
 
-### 变更
+### 修复
 
-- `createProviderAdapter` 改为消费 Router 选中的 endpoint，不再仅凭 `taskType` 推断本地或云端；本地 endpoint 仍严格限制为 `chapter_scene_generate`。
-- 本地串行队列只约束本地 endpoint；云端作家 Fallback 不再占用 llama-server 队列。
-- 已确认 Scene/Beat 计划即使本地模型被禁用，也继续逐 Beat 走云端作家契约；不会回退为整章 `chapter_generate`；没有 Scene 计划时仍可走原有云端整章候选流程。
-- `chapter_scene_generate` 编译不再硬性要求启用本地模型；只有冻结 RouteDecision 确认选中本地 endpoint 时才采用本地 4096/1024 与采样参数，云端路由使用云端 Context 预算。
-- 本地生命周期由乐观默认 `AVAILABLE` 改为无 sidecar 即 `TESTING`；尚未训练或未通过 Benchmark 的模型不会获得生产流量。
-- 章节生成 preflight 在允许 Fallback 时不再因本地训练、离线或模型不匹配阻断创作，而是记录原因并转交云端；禁用 Fallback 时继续失败关闭。
-- Provider Adapter 要求 Scene/Beat 调用携带冻结 RouteDecision，并复验 endpoint 与当前设置身份；Beat 协议改为模型无关的 `scene-beat-prose-v1`。
-- Scene/Beat 质量修复与人工确认门不再以“本地模型已启用”为条件，云端逐 Beat 正文沿用相同门禁且不自动应用低风险 patch。
-- 同步 AI 设置用户文档：明确当前云端临时作家、本地可选及未来独立 Remote Writer Endpoint 边界，移除旧版“不自动回退”说明。
+- 修复创作工作台只读与检索查询误入 `generate_chapter` 校验槽导致无章节绑定时秒崩的缺陷。
+- 修复左侧子页面 Back 按钮跳回旧首页文案错位的问题，统一规范为「返回工作台」。
+- 修复风格方案与输出控制未深度注入写章编译层的断层，确保选定文风与篇幅设定在工作台生成正文中真实生效。
+- 全面对齐 `user-guide.md`、`quick-start.md` 与应用内首次引导（`FirstTimeGuide`）至工作台创作心智。
+
+### 验证
+
+- `npm run test:workbench`：39 项全通（覆盖 DSH 协议、并发隔离、意图路由、参数脱敏与 Memory 回写）。
+- `npm run test:components`：15 项前端组件稳定性测试全通。
+- `npm run test:workspace-reliability`：15 项工作区可靠性测试全通。
+- `npm run test:workspace-safety`：5 项文档安全隔离测试全通。
+- `npm run test:large-text-integrity` & `test:workspace-recovery`：318 项 Rust SQLite 大文本存储与事务容灾测试全通。
+- `npm run test:docs-sync` & `test:version-sync`：文档与全局 12 处版本同步校验通过。
+- `npm run lint:ci`：0 error, 0 warning。
+- `npm run build`：TypeScript 编译与 Vite 生产构建打包成功。
 
 ## v3.5.0 (2026-08-21) - 对话式创作工作台与审阅收敛
 

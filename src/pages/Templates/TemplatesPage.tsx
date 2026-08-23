@@ -301,7 +301,7 @@ function TemplatesPage() {
     <div
       style={{ padding: 32, maxWidth: 900, margin: '0 auto', height: '100%', overflowY: 'auto' }}
     >
-      <BackButton label="返回首页" to="/" />
+      <BackButton label="返回工作台" to="/" />
       <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>
         📋 模板中心
       </div>

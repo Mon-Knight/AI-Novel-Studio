@@ -371,6 +371,31 @@
 }
 
 .workbench-chapter-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.workbench-chapter-target label {
+  color: var(--color-text-muted);
+}
+.workbench-chapter-target select {
+  min-width: 180px;
+  max-width: 320px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: inherit;
+  padding: 0 8px;
+}
+.workbench-chapter-hint {
+  color: var(--color-warning-text, #9a6b2f);
+}
+.workbench-chapter-target-legacy {
   margin: 6px 0 0;
   color: var(--color-text-muted);
   font-size: 12px;

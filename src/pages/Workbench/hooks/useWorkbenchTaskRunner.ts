@@ -3,6 +3,7 @@ import type { TaskConversation, TaskModelSnapshot } from '../../../types/convers
 import { taskConversationService } from '../../../services/conversation/taskConversationService';
 import { taskSessionAdapter } from '../../../services/dsh/taskSessionAdapter';
 import { findTaskTargetConflict } from '../../../services/conversation/taskGoalRouting';
+import { formatWorkbenchFailure } from '../../../services/conversation/workbenchFailure';
 
 export function useWorkbenchTaskRunner(input: {
   selectedNovelId: string;
@@ -139,7 +140,7 @@ export function useWorkbenchTaskRunner(input: {
       await refreshBundle(conversationId);
       if (selectedNovelRef.current === novelId) await loadConversations(novelId);
     } catch (error) {
-      setComposerError(error instanceof Error ? error.message : '任务启动失败');
+      setComposerError(formatWorkbenchFailure(error));
       await refreshBundle(conversationId);
       if (selectedNovelRef.current === novelId) await loadConversations(novelId);
     } finally {

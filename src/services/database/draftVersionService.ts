@@ -787,6 +787,8 @@ export const draftVersionService = {
         await import('../autonomous-creation/autonomousSchedulerWorker');
       await autonomousSchedulerWorker.promoteUserAdoptedDraft(adoptedWithContent);
     }
+    const { ingestAdoptedDraftMemorySafe } = await import('../memory/adoptedDraftMemory');
+    await ingestAdoptedDraftMemorySafe(adoptedWithContent);
     return adoptedWithContent;
   },
 

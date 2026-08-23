@@ -33,7 +33,7 @@
 | [architecture.md](technical/architecture.md)                                                            | 项目架构总览                                               | 🚧 占位，待后续细化  |
 | [database.md](technical/database.md)                                                                    | 数据库设计与迁移                                           | 🚧 占位，待后续细化  |
 | [desktop-build.md](technical/desktop-build.md)                                                          | 桌面端构建指南                                             | 🚧 占位，待后续细化  |
-| [testing.md](technical/testing.md)                                                                      | 测试策略与用例                                             | ✅ v3.5.0 已补充     |
+| [testing.md](technical/testing.md)                                                                      | 测试策略与用例                                             | ✅ v3.6.0 已补充     |
 | [diagnostics.md](technical/diagnostics.md)                                                              | 前端异常、原生 panic、本地脱敏导出与隐私边界               | ✅ v3.0.0 已实现     |
 | [ai-execution-facts.md](architecture/ai-execution-facts.md)                                             | v2.3.0 Task / Snapshot / Artifact 执行事实架构             | ✅ 已冻结并实现      |
 | [provider-execution-pipeline.md](architecture/provider-execution-pipeline.md)                           | v2.3.1 Provider Adapter 与首批入口迁移                     | ✅ 已实现            |

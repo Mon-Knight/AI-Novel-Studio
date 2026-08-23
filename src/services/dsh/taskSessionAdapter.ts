@@ -8,7 +8,7 @@ import type { TaskRun } from '../../types/conversation';
 import { dshTaskRuntimeService } from './taskRuntimeService';
 import { captureTaskModelSnapshot } from '../conversation/taskModelSnapshot';
 import { taskConversationService } from '../conversation/taskConversationService';
-import { isConversationalGoal } from '../conversation/taskGoalRouting';
+import { classifyTaskIntent, isConversationalGoal } from '../conversation/taskGoalRouting';
 
 export const WORKBENCH_CONVERSATIONAL_REPLY =
   '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。问候和能力询问不会调用生成工具。';
@@ -99,6 +99,10 @@ export const taskSessionAdapter = {
     if (isConversationalGoal(input.goal)) {
       return completeConversationalTurn(input, session, onEvent);
     }
+    // Chapter write goes through the ANS writer, not the DSH candidate sink.
+    if (!isTauri() || classifyTaskIntent(input.goal) === 'chapter_write') {
+      return taskRuntimeAdapter.start({ ...input, workerId: session.workerId }, onEvent);
+    }
     if (isTauri()) {
       return dshTaskRuntimeService
         .start(
@@ -122,28 +126,33 @@ export const taskSessionAdapter = {
   },
 
   cancel(conversationId: string): boolean {
+    if (taskRuntimeAdapter.isRunning(conversationId)) {
+      return taskRuntimeAdapter.cancel(conversationId);
+    }
     if (isTauri()) {
       if (!dshTaskRuntimeService.isRunning(conversationId)) return false;
       dshTaskRuntimeService.cancel(conversationId);
       return true;
     }
-    return taskRuntimeAdapter.cancel(conversationId);
+    return false;
   },
 
   isRunning(conversationId: string): boolean {
-    return isTauri()
-      ? dshTaskRuntimeService.isRunning(conversationId)
-      : taskRuntimeAdapter.isRunning(conversationId);
+    return (
+      taskRuntimeAdapter.isRunning(conversationId) ||
+      (isTauri() && dshTaskRuntimeService.isRunning(conversationId))
+    );
   },
 
   async listRunningConversationIds(): Promise<string[]> {
-    if (!isTauri()) {
-      return [];
+    const ids = new Set(taskRuntimeAdapter.listRunningConversationIds());
+    if (isTauri()) {
+      const statuses = await dshTaskRuntimeService.listStatuses();
+      statuses
+        .filter((item) => item.status === 'running' || item.status === 'cancel_requested')
+        .forEach((item) => ids.add(item.conversationId));
     }
-    const statuses = await dshTaskRuntimeService.listStatuses();
-    return statuses
-      .filter((item) => item.status === 'running' || item.status === 'cancel_requested')
-      .map((item) => item.conversationId);
+    return [...ids];
   },
 
   clear(conversationId: string): void {
