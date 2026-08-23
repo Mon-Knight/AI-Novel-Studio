@@ -34,6 +34,7 @@
 - 新增创作智能体决策质量追踪与推理审计层（Creative Agent Decision Quality Layer & Reasoning Audit）：扩展 `AgentDecision`（`reasoningSummary`、`selectedToolReason`、`expectedOutcome` 与 `confidenceScore`）；引入结构化决策追踪体系（`AgentDecisionTrace`）全程审计工具选择依据、执行产物与多轮自适应调整；在对话工作台（`AgentChatWorkspace`）可视化沉淀决策追踪卡片（🧠 Agent Decision），透明化展现创作推理链条。
 - 新增创作智能体工具选择优化与经验沉淀层（Creative Agent Tool Selection Optimization Layer & Usage Memory）：引入工具选择评估器（`ToolSelectionEvaluator`）多维度量化相关度（`relevanceScore`）、冗余度（`unnecessaryToolScore`）与缺失度（`missingToolScore`）；新增工具使用经验记忆（`ToolUsageMemory`）沉淀高分历史成功案例（如角色性格调整工具链 `query_character_state -> generate_scene_plan -> update_memory`）；在规划器（`AgentPlanner`）中自动检索并注入历史经验以优化决策准确性与收敛效率。
 - 新增创作智能体正文质量自主审查与控制闭环（Creative Agent Quality Control Loop & Feedback Memory）：新增正文质量裁判（`AgentQualityJudge`）多维度审查人物一致性（`characterConsistency`）、剧情推进（`plotProgression`）、文风匹配（`styleMatch`）与连贯性（`coherence`）；支持未达标正文初稿自主重写（`rewrite_prose`）自愈修复与二次合规质检；沉淀高质量生成范例记忆（`QualityFeedbackMemory`）；在对话工作台（`AgentChatWorkspace`）可视化展现质量审查卡片（📝 Quality Review）。
+- 新增创作智能体全流程端到端 E2E 自动化测试规范（Creative Agent Autonomous Workflow E2E Spec）：在 `tests/e2e/creative-agent-workflow.spec.ts` 中覆盖智能体对话工作台生命周期、自然语言目标驱动执行、决策追踪卡片（🧠 Agent Decision Trace）、正文质量审查卡片（📝 Quality Review）、工具调度与记忆落盘的真实 UI 自动化验证。
 
 ### 变更
 
