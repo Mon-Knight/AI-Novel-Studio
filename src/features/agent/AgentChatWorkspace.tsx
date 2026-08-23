@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { AgentTaskStatus } from '../../types/agentHarness';
+import type { AgentTaskState, AgentTaskStatus } from '../../types/agentHarness';
 import {
   agentConversationService,
   AGENT_TOOL_METADATA,
@@ -29,11 +29,14 @@ export function AgentChatWorkspace({
   const [inputVal, setInputVal] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [currentThought, setCurrentThought] = useState('');
+  const [taskState, setTaskState] = useState<AgentTaskState | undefined>(
+    conversation.context.taskState,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView?.({ behavior: 'smooth' });
-  }, [conversation.messages, conversation.toolRecords, currentThought]);
+  }, [conversation.messages, conversation.toolRecords, currentThought, taskState]);
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend || inputVal).trim();
@@ -57,6 +60,9 @@ export function AgentChatWorkspace({
         },
       );
       setConversation({ ...updated });
+      if (updated.context.taskState) {
+        setTaskState(updated.context.taskState);
+      }
     } catch {
       // Error caught by service
     } finally {
@@ -87,6 +93,10 @@ export function AgentChatWorkspace({
         return '正在执行工具...';
       case 'observing':
         return '分析结果中...';
+      case 'evaluating':
+        return '自我评估反思中...';
+      case 'retrying':
+        return '自适应重试中...';
       case 'completed':
         return '已完成';
       default:
@@ -140,6 +150,7 @@ export function AgentChatWorkspace({
           onClick={() => {
             const newConv = agentConversationService.createConversation(novelId, chapterId);
             setConversation(newConv);
+            setTaskState(undefined);
           }}
           style={{ fontSize: 12, padding: '4px 8px', cursor: 'pointer' }}
         >
@@ -147,7 +158,91 @@ export function AgentChatWorkspace({
         </button>
       </header>
 
-      {/* 2. Message & Tool Flow Scroll Area */}
+      {/* 2. Autonomous Task State Progress Banner */}
+      {taskState && taskState.plannedSteps.length > 0 && (
+        <div
+          className="agent-task-state-banner"
+          data-testid="agent-task-state-banner"
+          style={{
+            padding: '10px 16px',
+            background: '#f0fdf4',
+            borderBottom: '1px solid #bbf7d0',
+            fontSize: 12,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontWeight: 600, color: '#166534' }}>
+              🎯 任务目标: {taskState.goal}
+            </span>
+            <span
+              data-testid="agent-progress-percentage"
+              style={{ fontWeight: 600, color: '#15803d' }}
+            >
+              进度: {taskState.progressPercentage}%
+            </span>
+          </div>
+
+          {/* Progress Bar */}
+          <div
+            style={{
+              height: 6,
+              background: '#dcfce7',
+              borderRadius: 3,
+              overflow: 'hidden',
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                height: '100%',
+                width: `${taskState.progressPercentage}%`,
+                background: '#22c55e',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+
+          {/* Planned Steps */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {taskState.plannedSteps.map((step, idx) => {
+              const isDone = taskState.completedSteps.some((c) => step.includes(c) || step.includes('完成'));
+              return (
+                <span
+                  key={idx}
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 11,
+                    background: isDone ? '#bbf7d0' : '#ffffff',
+                    color: isDone ? '#14532d' : '#475569',
+                    border: '1px solid #86efac',
+                  }}
+                >
+                  {isDone ? '✓ ' : '○ '}
+                  {step}
+                </span>
+              );
+            })}
+          </div>
+
+          {/* Latest Evaluation Feedback */}
+          {taskState.evaluations.length > 0 && (
+            <div
+              data-testid="agent-latest-evaluation"
+              style={{
+                marginTop: 6,
+                color: '#15803d',
+                fontSize: 11,
+                fontStyle: 'italic',
+              }}
+            >
+              💡 自我反思: {taskState.evaluations[taskState.evaluations.length - 1].critique}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. Message & Tool Flow Scroll Area */}
       <div
         className="agent-message-scroll"
         data-testid="agent-message-scroll"
@@ -164,7 +259,7 @@ export function AgentChatWorkspace({
               向创作智能体描述您的目标
             </h3>
             <p style={{ fontSize: 13, maxWidth: 420, margin: '0 auto' }}>
-              例如：“为第一章规划分镜并生成前 1000 字正文”或“查询当前世界观设定”。Agent 将自主分析任务并调度工具。
+              例如：“完成第三章创作”或“查询当前世界观设定”。Agent 将自主拆解目标、调度工具、评估质量并自愈完成。
             </p>
           </div>
         )}
@@ -211,7 +306,7 @@ export function AgentChatWorkspace({
           );
         })}
 
-        {/* 3. 正在思考/规划气泡 */}
+        {/* 4. 正在思考/规划气泡 */}
         {currentThought && (
           <div
             className="agent-thinking-card"
@@ -230,7 +325,7 @@ export function AgentChatWorkspace({
           </div>
         )}
 
-        {/* 4. 工具执行记录卡片 (Tool Calling & Observation) */}
+        {/* 5. 工具执行记录卡片 (Tool Calling & Observation) */}
         {conversation.toolRecords.map((record, i) => {
           const meta = AGENT_TOOL_METADATA[record.toolName] || { label: record.toolName, icon: '⚙️' };
           const isProseGen = record.toolName === 'generate_prose';
@@ -323,7 +418,7 @@ export function AgentChatWorkspace({
           );
         })}
 
-        {/* 5. 写操作安全确认卡片 (Safety Confirmation Gate) */}
+        {/* 6. 写操作安全确认卡片 (Safety Confirmation Gate) */}
         {conversation.pendingConfirmations
           .filter((c) => c.status === 'pending')
           .map((conf) => (
@@ -385,7 +480,7 @@ export function AgentChatWorkspace({
         <div ref={scrollRef} />
       </div>
 
-      {/* 6. Prompt Shortcut Chips & Input Bar */}
+      {/* 7. Prompt Shortcut Chips & Input Bar */}
       <footer
         style={{
           borderTop: '1px solid var(--color-border-light, #e2e8f0)',
@@ -396,6 +491,7 @@ export function AgentChatWorkspace({
         {/* Quick Chips */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, overflowX: 'auto' }}>
           {[
+            '完成第三章创作',
             '构思本章分镜规划',
             '生成本章第一幕正文',
             '执行正文质量合规检查',
@@ -428,7 +524,7 @@ export function AgentChatWorkspace({
             type="text"
             className="input-text"
             data-testid="agent-chat-input"
-            placeholder="向创作智能体输入指令（如：构思本章分镜并生成前 1000 字正文）..."
+            placeholder="向创作智能体输入指令（如：完成第三章创作）..."
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={(e) => {

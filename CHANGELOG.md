@@ -29,6 +29,7 @@
 - 新增创作工作台生成追溯面板（Creative Workbench Generation Trace Panel）：在右侧栏沉淀 `GenerationTracePanel`；可视化呈现当前任务、Model RouteDecision、服务提供商（Provider）、模型名称、Memory Version、编译 Hash、提示词模板、Token 消耗、耗时与 Fallback 回退告警；无任务时平滑展示空状态。
 - 新增内置模型驱动创作智能体底座（Creative Agent Harness Phase 1）：将硬编码创作流程全面升级为 ReAct 循环与任务规划器（`AgentLoop`、`AgentPlanner`、`AgentToolRegistry`、`AgentToolExecutor`、`AgentContextManager`）；封装查询世界状态、人物动态、章节信息、生成大纲、生成分镜、生成正文、质量检查、更新 Memory 与保存版本等 9 大领域工具；支持真实 LLM 意图理解、自主工具选择、多步任务规划与错误自愈恢复，所有写操作经由严格安全契约链条。
 - 新增创作智能体对话工作台（Creative Agent Conversation Workspace）：实现模型驱动的自然语言交互工作台（`AgentChatWorkspace`、`AgentConversationService`）；支持用户自然语言输入、实时思考与规划流（Thinking）、富文本工具调用卡片（Tool Card 输入输出与时延展示）及正文产物一键采纳；针对更新记忆与保存版本等写操作建立双重安全确认授权机制（Confirmation Gate）。
+- 新增创作智能体自主任务运行时（Creative Agent Autonomous Task Runtime）：将 Agent 循环从单步工具调用全面演进为 `Observe -> Plan -> Act -> Evaluate -> Retry` 5 阶段自主循环；引入任务状态管理（`AgentTaskState`：目标分解、已完成步骤、进度百分比、评估记录）；新增 Agent 自我评估与反思引擎（`AgentEvaluator`）；支持目标驱动复合创作任务模板（自动编排记忆检索、分镜规划、正文生成与质量核验）及自适应错误恢复重试。
 
 ### 变更
 

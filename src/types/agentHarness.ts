@@ -22,6 +22,8 @@ export type AgentTaskStatus =
   | 'planning'
   | 'executing_tool'
   | 'observing'
+  | 'evaluating'
+  | 'retrying'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -42,6 +44,27 @@ export interface AgentToolExecutionRecord {
   durationMs: number;
 }
 
+export interface AgentSelfEvaluation {
+  score: number; // 0-100
+  isSatisfied: boolean;
+  critique: string;
+  needsRetry: boolean;
+  suggestedAdjustment?: string;
+  evaluatedAt: string;
+}
+
+export interface AgentTaskState {
+  goal: string;
+  completedSteps: string[];
+  currentStep?: string;
+  plannedSteps: string[];
+  activeTool?: string;
+  failureReason?: string;
+  retryCount: number;
+  progressPercentage: number;
+  evaluations: AgentSelfEvaluation[];
+}
+
 export interface AgentDecision {
   thought: string;
   plan?: string[];
@@ -51,6 +74,7 @@ export interface AgentDecision {
   };
   finalResponse?: string;
   isDone: boolean;
+  needsRetry?: boolean;
 }
 
 export interface AgentContext {
@@ -62,6 +86,7 @@ export interface AgentContext {
   status: AgentTaskStatus;
   currentGoal?: string;
   currentThought?: string;
+  taskState?: AgentTaskState;
   modelSettings?: AiSettings;
 }
 
@@ -85,14 +110,18 @@ export interface AgentHarnessEvents {
   onThought?: (thought: string) => void;
   onToolStart?: (toolCall: AgentToolCall) => void;
   onToolEnd?: (record: AgentToolExecutionRecord) => void;
+  onEvaluation?: (evaluation: AgentSelfEvaluation) => void;
+  onTaskStateUpdate?: (taskState: AgentTaskState) => void;
   onTurnComplete?: (decision: AgentDecision, turn: number) => void;
 }
 
 export interface AgentHarnessConfig {
   maxTurns?: number;
+  maxRetries?: number;
   temperature?: number;
   modelSettings?: AiSettings;
   enableAutoRecovery?: boolean;
+  enableSelfEvaluation?: boolean;
 }
 
 export interface AgentExecutionResult {
@@ -100,5 +129,6 @@ export interface AgentExecutionResult {
   status: AgentTaskStatus;
   turns: number;
   executionRecords: AgentToolExecutionRecord[];
+  taskState?: AgentTaskState;
   context: AgentContext;
 }
