@@ -6,8 +6,8 @@ export function captureTaskModelSnapshot(providerId?: string, modelId?: string):
   const useMock = providerId === 'mock' || (!providerId && settings.runtimeMode === 'mock');
   const runtimeMode = useMock ? 'mock' : 'api';
   return {
-    providerId: useMock ? 'mock' : providerId || settings.provider,
-    modelId: useMock ? 'Mock' : modelId || settings.modelName || 'default',
+    providerId: providerId || (useMock ? 'mock' : settings.provider),
+    modelId: modelId || (useMock ? 'Mock' : settings.modelName || 'default'),
     runtimeMode,
     baseUrl: runtimeMode === 'api' ? settings.baseUrl : undefined,
     capabilities: ['conversation_turn', 'chapter_generate', 'tool_calling'],

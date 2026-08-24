@@ -15,6 +15,7 @@ export type GenerationContextSourceType =
   | 'chapter_character'
   | 'chapter_event'
   | 'context_record'
+  | 'user_instruction'
   | 'provisional_candidate'
   | 'current_editor';
 

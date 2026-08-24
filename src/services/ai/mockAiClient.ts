@@ -188,6 +188,10 @@ function extractInfo(messages: { role: string; content: string }[]) {
       /【章节大纲执行清单】\s*([\s\S]+?)(?:\n\n|【本章必须直接出场角色】|【修正要求】|请直接输出)/,
     )?.[1]
     ?.trim();
+  const userInstruction = allText
+    .match(/## 本轮用户创作指令\s*([\s\S]+?)(?:\n\n---|\n\n【待修改\/润色原正文】|$)/)?.[1]
+    ?.trim();
+  const rewriteSource = allText.match(/【待修改\/润色原正文】\s*([\s\S]+)$/)?.[1]?.trim();
   return {
     novelTitle,
     protagonist,
@@ -196,11 +200,33 @@ function extractInfo(messages: { role: string; content: string }[]) {
     targetWords,
     chapterOutline,
     outlineChecklist,
+    userInstruction,
+    rewriteSource,
   };
 }
 
 function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
-  const { protagonist: protag, chapterOutline, outlineChecklist, targetWords } = info;
+  const {
+    protagonist: protag,
+    chapterOutline,
+    outlineChecklist,
+    targetWords,
+    userInstruction,
+    rewriteSource,
+  } = info;
+  const instructionSeed = Array.from(userInstruction ?? '').reduce(
+    (total, character) => (total + (character.codePointAt(0) ?? 0)) % 997,
+    0,
+  );
+  if (rewriteSource) {
+    const revisionLeads = [
+      `风声贴着墙根缓慢游走，${protag}没有立刻动作，只让压在胸口的情绪一点点沉入呼吸。`,
+      `四周的声音仿佛被拉远了，${protag}在短暂的停顿里重新看清眼前每一道细微变化。`,
+      `空气比先前更沉，${protag}放慢脚步，任由尚未说出口的话在寂静中积蓄重量。`,
+      `光影从${protag}脸上缓缓移过，原本急促的片刻被拉长，危险也因此显得更加清晰。`,
+    ];
+    return `${revisionLeads[instructionSeed % revisionLeads.length]}\n\n${rewriteSource}`;
+  }
   const hasOutline = !!chapterOutline;
   const paragraphs: string[] = [];
 

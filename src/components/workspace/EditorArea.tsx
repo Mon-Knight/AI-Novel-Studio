@@ -21,6 +21,8 @@ export type {
 // eslint-disable-next-line react-refresh/only-export-components
 export { isDraftSaveResultForDocument } from './editor-area/editorDocumentSafety';
 // eslint-disable-next-line react-refresh/only-export-components
+export { getEditorDocumentSourceKey } from './editor-area/editorDocumentSafety';
+// eslint-disable-next-line react-refresh/only-export-components
 export { resolveEditorDraftContent } from './editor-area/editorDocumentSafety';
 
 const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function EditorArea(props, ref) {
@@ -40,6 +42,9 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     commandRequest: props.commandRequest,
     onChapterUpdated: props.onChapterUpdated,
     onBeforeAdopt: props.onBeforeAdopt,
+    reviewCandidate: props.reviewCandidate,
+    reviewAuthorizationId: props.reviewAuthorizationId,
+    reviewArtifactId: props.reviewArtifactId,
   });
   const outline = useChapterOutlineEditor({
     chapter: props.chapter,

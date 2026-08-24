@@ -5,6 +5,7 @@ import { chapterEventService } from '../characters/chapterEventService';
 import { chapterOutlineService, masterOutlineService } from '../outlines/outlineService';
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { isTauri } from '../database/db';
+import { draftVersionService } from '../database/draftVersionService';
 import { placementRuntimeService } from '../placements/placementRuntimeService';
 import {
   CONTEXT_COMPRESSION_TITLE_PREFIX,
@@ -160,6 +161,7 @@ async function applyOutline(
         sourceType: 'ai_generated',
         saveAsNewVersion: true,
       });
+      await chapterOutlineService.setActive(saved.id, input.novelId);
       return { applyTransactionId: saved.id };
     }
     const saved = await masterOutlineService.save({
@@ -169,6 +171,7 @@ async function applyOutline(
       sourceType: 'workbench_apply',
       saveAsNewVersion: true,
     });
+    await masterOutlineService.setActive(saved.id, input.novelId);
     return { applyTransactionId: saved.id };
   } catch (error) {
     return {
@@ -258,6 +261,13 @@ async function applyChapterSummary(
   bundle: ResultArtifactBundle,
 ): Promise<ArtifactApplyOutcome> {
   if (!input.chapterId) return { conflictCode: 'CHAPTER_TARGET_REQUIRED' };
+  const adoptedDraft = await draftVersionService.getAdoptedByChapterId(input.chapterId);
+  if (!adoptedDraft) {
+    return { conflictCode: 'CHAPTER_SUMMARY_ADOPTED_DRAFT_REQUIRED' };
+  }
+  if (bundle.artifact.sourceDraftId && bundle.artifact.sourceDraftId !== adoptedDraft.id) {
+    return { conflictCode: 'CHAPTER_SUMMARY_ADOPTED_DRAFT_MISMATCH' };
+  }
   const payload = record(extractCandidatePayload(bundle));
   const nested = record(payload?.data);
   const parsed = record(parseJsonValue(extractCandidateText(bundle)));
@@ -270,11 +280,12 @@ async function applyChapterSummary(
   const saved = await chapterSummaryService.create({
     novelId: input.novelId,
     chapterId: input.chapterId,
-    adoptedDraftId: bundle.artifact.sourceDraftId || input.baseRevision || 'workbench-unadopted',
+    adoptedDraftId: adoptedDraft.id,
     summary,
     enabled: true,
     aiTaskId: bundle.artifact.taskId,
     contentHash: bundle.artifact.contentHash,
+    draftVersion: adoptedDraft.versionNo,
   });
   return { applyTransactionId: saved.id };
 }

@@ -122,8 +122,12 @@ const defaultSeed: CreateStyleProfileInput[] = [
   },
 ];
 
+function getLocalStoredAll(): StyleProfile[] {
+  return lsGet<StyleProfile[]>(STYLE_KEY) ?? [];
+}
+
 function getLocalAll(): StyleProfile[] {
-  let list = lsGet<StyleProfile[]>(STYLE_KEY) ?? [];
+  let list = getLocalStoredAll();
   if (list.length === 0) {
     const now = nowISO();
     list = defaultSeed.map((s) => ({
@@ -150,13 +154,15 @@ function getLocalAll(): StyleProfile[] {
 }
 
 export const styleProfileService = {
-  async getAll(novelId?: string): Promise<StyleProfile[]> {
+  async getAll(novelId?: string, options: { initialize?: boolean } = {}): Promise<StyleProfile[]> {
+    const initialize = options.initialize !== false;
+    const readLocal = initialize ? getLocalAll : getLocalStoredAll;
     try {
       const dtos = await dbCall<StyleProfileDto[]>(
         'list_style_profiles',
         { projectId: novelId },
         () => {
-          return getLocalAll().map((s): StyleProfileDto => ({
+          return readLocal().map((s): StyleProfileDto => ({
             id: s.id,
             projectId: s.novelId || '',
             name: s.name,
@@ -192,13 +198,11 @@ export const styleProfileService = {
       if (profiles.length > 0)
         return novelId ? profiles.filter((s) => s.novelId === novelId) : profiles;
       return novelId
-        ? getLocalAll().filter((profile) => !profile.novelId || profile.novelId === novelId)
-        : getLocalAll();
+        ? readLocal().filter((profile) => !profile.novelId || profile.novelId === novelId)
+        : readLocal();
     } catch (error) {
       if (getDbMode() === 'tauri') throw error;
-      return novelId
-        ? getLocalAll().filter((s) => !s.novelId || s.novelId === novelId)
-        : getLocalAll();
+      return novelId ? readLocal().filter((s) => !s.novelId || s.novelId === novelId) : readLocal();
     }
   },
 

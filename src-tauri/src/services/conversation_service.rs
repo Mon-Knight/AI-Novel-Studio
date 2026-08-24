@@ -8,7 +8,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub use repository::{
-    AppendToolEventInput, AppendTurnInput, ArtifactDecisionRecord, ConsumeReviewAuthorizationInput,
+    AdoptReviewAuthorizedDraftInput, AdoptReviewAuthorizedDraftResult, AppendToolEventInput,
+    AppendTurnInput, ArtifactDecisionRecord, ConsumeReviewAuthorizationInput,
     ConversationArtifactCardRecord, ConversationTurnRecord, CreateArtifactCardInput,
     CreateConversationInput, CreateRunInput, RecordArtifactDecisionInput, RecoverRunsInput,
     ReviewAuthorizationRecord, TaskConversationBundle, TaskConversationRecord, TaskRunRecord,
@@ -195,6 +196,8 @@ pub fn create_artifact_card(
 pub struct PublishStructuredCandidateInput {
     pub conversation_id: String,
     pub novel_id: String,
+    #[serde(default)]
+    pub chapter_id: Option<String>,
     pub artifact_type: String,
     pub derivation_type: Option<String>,
     pub title: String,
@@ -213,6 +216,23 @@ pub fn publish_structured_candidate(
     required(&input.title, "title")?;
     required(&input.summary, "summary")?;
     required(&input.created_at, "createdAt")?;
+    if let Some(chapter_id) = input.chapter_id.as_deref() {
+        required(chapter_id, "chapterId")?;
+        let chapter_matches: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chapters WHERE id = ?1 AND novel_id = ?2 AND deleted_at IS NULL)",
+                rusqlite::params![chapter_id, input.novel_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if !chapter_matches {
+            return Err(AppError::new(
+                "CONVERSATION_SCOPE_MISMATCH",
+                "结构化候选章节不属于当前作品或不存在",
+                false,
+            ));
+        }
+    }
     let raw = serde_json::to_string(&input.structured_payload_json)
         .map_err(|error| AppError::new("TASK_RUNTIME_JSON", error.to_string(), false))?;
     let prompt_body = "只生成可确认候选，不写入正式小说事实。";
@@ -226,9 +246,13 @@ pub fn publish_structured_candidate(
             trace_id: None,
             task_type: "context_summarize".to_string(),
             novel_id: input.novel_id.clone(),
-            chapter_id: None,
+            chapter_id: input.chapter_id.clone(),
             draft_id: None,
-            scope_type: "novel".to_string(),
+            scope_type: if input.chapter_id.is_some() {
+                "chapter".to_string()
+            } else {
+                "novel".to_string()
+            },
             expected_artifact_type: input.artifact_type.clone(),
             expected_artifact_schema_version: 1,
             target_hint_json: Some(json!({
@@ -388,4 +412,29 @@ pub fn consume_review_authorization(
     required(&input.authorization_id, "authorizationId")?;
     required(&input.draft_id, "draftId")?;
     repository::consume_review_authorization(connection, input)
+}
+
+pub fn get_review_authorization(
+    connection: &Connection,
+    authorization_id: &str,
+) -> Result<Option<ReviewAuthorizationRecord>, AppError> {
+    required(authorization_id, "authorizationId")?;
+    repository::get_review_authorization(connection, authorization_id)
+}
+
+pub fn adopt_review_authorized_draft(
+    connection: &mut Connection,
+    input: AdoptReviewAuthorizedDraftInput,
+) -> Result<AdoptReviewAuthorizedDraftResult, AppError> {
+    required(&input.authorization_id, "authorizationId")?;
+    required(&input.draft_id, "draftId")?;
+    required(&input.expected_content_hash, "expectedContentHash")?;
+    if input.expected_draft_version < 1 {
+        return Err(AppError::new(
+            "DRAFT_VERSION_INVALID",
+            "expectedDraftVersion 必须大于零",
+            false,
+        ));
+    }
+    repository::adopt_review_authorized_draft(connection, input)
 }

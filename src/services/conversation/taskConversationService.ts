@@ -284,7 +284,8 @@ export const taskConversationService = {
         role === 'user' &&
         (bundle.conversation.title === '新的创作任务' || bundle.conversation.title === '未命名任务')
       ) {
-        bundle.conversation.title = Array.from(content.trim()).slice(0, 40).join('') || bundle.conversation.title;
+        bundle.conversation.title =
+          Array.from(content.trim()).slice(0, 40).join('') || bundle.conversation.title;
       }
       upsertLocal(bundle);
       return turn;
@@ -461,6 +462,7 @@ export const taskConversationService = {
   async publishStructuredCandidate(input: {
     conversationId: string;
     novelId: string;
+    chapterId?: string;
     artifactType: ConversationArtifactCard['artifactType'];
     derivationType?: string;
     title: string;
@@ -474,6 +476,7 @@ export const taskConversationService = {
         input: {
           conversationId: input.conversationId,
           novelId: input.novelId,
+          chapterId: input.chapterId,
           artifactType: input.artifactType,
           derivationType: input.derivationType,
           title: input.title,

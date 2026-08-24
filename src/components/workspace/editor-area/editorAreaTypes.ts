@@ -47,6 +47,9 @@ export interface EditorAreaProps {
   onBackToChapters?: () => void;
   reviewLocked?: boolean;
   onUnlockReview?: () => void;
+  reviewCandidate?: import('../../../types/conversation').ReviewCandidateDocument | null;
+  reviewAuthorizationId?: string;
+  reviewArtifactId?: string;
   onBeforeAdopt?: (draftId: string) => Promise<void>;
 }
 

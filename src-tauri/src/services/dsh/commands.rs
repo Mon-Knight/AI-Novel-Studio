@@ -7,6 +7,8 @@
 //! returning. The runtime tree dies with the handle (Job Object).
 
 use std::io::{BufRead, BufReader};
+#[cfg(test)]
+use std::net::IpAddr;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -456,6 +458,50 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TOKENS: u64 = 8192;
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 
+/// Normalize the provider base URL before handing it to the pinned DSH
+/// provider. The provider appends `/chat/completions` itself, so a trailing
+/// slash would otherwise produce a double slash and some OpenAI-compatible
+/// servers reject that route. Keep the validation here at the boundary so a
+/// malformed test/profile value fails before a worker is started.
+fn normalize_model_base_url(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("DSH baseUrl 不能为空".to_string());
+    }
+    let parsed =
+        reqwest::Url::parse(trimmed).map_err(|error| format!("DSH baseUrl 无效: {}", error))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("DSH baseUrl 必须是带主机的 http(s) URL".to_string());
+    }
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("DSH baseUrl 不得包含 userinfo、query 或 fragment".to_string());
+    }
+    Ok(trimmed.trim_end_matches('/').to_string())
+}
+
+#[cfg(test)]
+fn normalize_loopback_test_base_url(value: &str) -> Result<String, String> {
+    let normalized = normalize_model_base_url(value)?;
+    let parsed = reqwest::Url::parse(&normalized)
+        .map_err(|error| format!("DSH test baseUrl 无效: {}", error))?;
+    let is_loopback = parsed.host_str().is_some_and(|host| {
+        let host = host.trim_matches(|character| character == '[' || character == ']');
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<IpAddr>()
+                .map(|address| address.is_loopback())
+                .unwrap_or(false)
+    });
+    if !is_loopback {
+        return Err("DSH test baseUrl 只能使用 loopback 主机".to_string());
+    }
+    Ok(normalized)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DshPrepareOptions {
@@ -688,7 +734,11 @@ fn prepare(
     // Model gateway (option A): explicit baseUrl wins; otherwise spawn the local
     // proxy and hand the DSH child a dummy downstream key (key isolation).
     let (proxy_guard, base_url, downstream_key) = match options.base_url {
-        Some(url) => (None, url, options.api_key.clone()),
+        Some(url) => (
+            None,
+            normalize_model_base_url(&url)?,
+            options.api_key.clone(),
+        ),
         None => {
             let (guard, url) = spawn_proxy(&work, &options.api_key)?;
             (Some(guard), url, "local-proxy".to_string())
@@ -1127,7 +1177,7 @@ mod e2e_tests {
     use super::*;
 
     #[test]
-    #[ignore = "real api + full dsh stack; run explicitly with DSH_RUNTIME_ROOT/DSH_E2E_API_KEY/DSH_GATEWAY_BIN"]
+    #[ignore = "real api + full dsh stack; run explicitly with DSH_RUNTIME_ROOT/DSH_E2E_API_KEY/DSH_GATEWAY_BIN (optional DSH_E2E_BASE_URL/DSH_E2E_MODEL)"]
     fn e2e_prepare_via_local_proxy() {
         let api_key = std::env::var("DSH_E2E_API_KEY").expect("set DSH_E2E_API_KEY");
         let gateway_bin = std::env::var("DSH_GATEWAY_BIN").expect("set DSH_GATEWAY_BIN");
@@ -1154,10 +1204,26 @@ mod e2e_tests {
                 })
                 .collect(),
         };
+        // The default exercises the connected DeepSeek account.  An explicit
+        // base URL/model lets the same DSH test drive a loopback OpenAI-
+        // compatible model while retaining the exact proxy, tool-call and
+        // proposal-validation path.  The API key remains process-only; the
+        // model snapshot and test output never contain it.
+        let base_url = std::env::var("DSH_E2E_BASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| {
+                normalize_loopback_test_base_url(&value)
+                    .expect("DSH_E2E_BASE_URL must be a loopback http(s) URL")
+            });
+        let model = std::env::var("DSH_E2E_MODEL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "deepseek-v4-flash".to_string());
         let options = DshPrepareOptions {
             api_key,
-            base_url: None,
-            model: Some("deepseek-v4-flash".to_string()),
+            base_url,
+            model: Some(model),
         };
         let proposal = prepare(input, options).expect("prepare e2e failed");
         assert_eq!(proposal.schema_version, 1);
@@ -1165,5 +1231,38 @@ mod e2e_tests {
         assert!(!proposal.chapter_goals.is_empty());
         assert!(proposal.metrics.prompt_tokens.unwrap_or(0) > 0);
         assert!(proposal.metrics.tool_call_count.unwrap_or(0) > 0);
+    }
+}
+
+#[cfg(test)]
+mod base_url_tests {
+    use super::{normalize_loopback_test_base_url, normalize_model_base_url};
+
+    #[test]
+    fn normalizes_whitespace_and_trailing_slashes() {
+        assert_eq!(
+            normalize_model_base_url("  http://127.0.0.1:8080/v1///  ").unwrap(),
+            "http://127.0.0.1:8080/v1"
+        );
+        assert_eq!(
+            normalize_model_base_url("https://api.deepseek.com/").unwrap(),
+            "https://api.deepseek.com"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_non_http_urls() {
+        assert!(normalize_model_base_url(" ").is_err());
+        assert!(normalize_model_base_url("file:///tmp/model").is_err());
+        assert!(normalize_model_base_url("not-a-url").is_err());
+        assert!(normalize_model_base_url("https://user:secret@example.com").is_err());
+        assert!(normalize_model_base_url("https://example.com/v1?token=secret").is_err());
+    }
+
+    #[test]
+    fn loopback_test_urls_are_enforced() {
+        assert!(normalize_loopback_test_base_url("http://127.0.0.1:8080/v1/").is_ok());
+        assert!(normalize_loopback_test_base_url("http://[::1]:8080/v1").is_ok());
+        assert!(normalize_loopback_test_base_url("https://example.com/v1").is_err());
     }
 }

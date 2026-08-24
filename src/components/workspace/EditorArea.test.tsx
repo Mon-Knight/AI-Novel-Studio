@@ -12,6 +12,8 @@ const resolveEditorDraftContent =
   editorModule.resolveEditorDraftContent as typeof import('./EditorArea').resolveEditorDraftContent;
 const isDraftSaveResultForDocument =
   editorModule.isDraftSaveResultForDocument as typeof import('./EditorArea').isDraftSaveResultForDocument;
+const getEditorDocumentSourceKey =
+  editorModule.getEditorDocumentSourceKey as typeof import('./EditorArea').getEditorDocumentSourceKey;
 
 after(async () => {
   await vite.close();
@@ -96,4 +98,45 @@ test('a backend-verified adopted fork is accepted by document ownership instead 
 
   assert.equal(isDraftSaveResultForDocument(forkedDraft, 'novel-a', 'chapter-b'), true);
   assert.equal(isDraftSaveResultForDocument(forkedDraft, 'novel-a', 'chapter-other'), false);
+});
+
+test('the same review artifact keeps a stable load identity across parent rerenders', () => {
+  const reviewCandidate = {
+    authorizationId: 'auth-1',
+    artifactId: 'artifact-1',
+    content: '候选正文',
+    contentHash: 'sha256-1',
+    novelId: 'novel-a',
+    chapterId: 'chapter-b',
+  };
+  const firstKey = getEditorDocumentSourceKey({
+    documentState: 'ready',
+    novelId: 'novel-a',
+    chapterId: 'chapter-b',
+    reviewCandidate,
+  });
+  const rerenderKey = getEditorDocumentSourceKey({
+    documentState: 'ready',
+    novelId: 'novel-a',
+    chapterId: 'chapter-b',
+    reviewCandidate: { ...reviewCandidate },
+  });
+  const revisedKey = getEditorDocumentSourceKey({
+    documentState: 'ready',
+    novelId: 'novel-a',
+    chapterId: 'chapter-b',
+    reviewCandidate: { ...reviewCandidate, artifactId: 'artifact-2', contentHash: 'sha256-2' },
+  });
+
+  assert.equal(rerenderKey, firstKey);
+  assert.notEqual(revisedKey, firstKey);
+  assert.notEqual(
+    getEditorDocumentSourceKey({
+      documentState: 'ready',
+      novelId: 'novel-a',
+      chapterId: 'chapter-b',
+      draft: completeDraft,
+    }),
+    firstKey,
+  );
 });

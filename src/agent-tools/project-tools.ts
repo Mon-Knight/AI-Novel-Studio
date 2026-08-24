@@ -12,6 +12,11 @@ import { chapterRepository } from '../services/database/chapterRepository';
 import { settingRepository } from '../services/database/settingRepository';
 import { protagonistRepository } from '../services/database/protagonistRepository';
 import { novelRepository } from '../services/database/novelRepository';
+import { getDbMode } from '../services/database/db';
+
+function dataSource(): 'sqlite' | 'localstorage' {
+  return getDbMode() === 'tauri' ? 'sqlite' : 'localstorage';
+}
 
 /**
  * 读取项目上下文
@@ -33,7 +38,7 @@ export async function readProjectContext(
   try {
     const novel = await novelRepository.getById(novelId);
     if (!novel) {
-      return errorResult(`作品 ${novelId} 不存在`, { source: 'database' });
+      return errorResult(`作品 ${novelId} 不存在`, { source: dataSource() });
     }
 
     const warnings: string[] = [];
@@ -86,13 +91,13 @@ export async function readProjectContext(
         chapters,
       },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`读取项目上下文失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }
@@ -116,10 +121,10 @@ export async function readProjectList(
       totalWordCount: n.totalWordCount,
       updatedAt: (n as unknown as Record<string, unknown>).updatedAt ?? '',
     }));
-    return successResult(summaries, { source: 'database' });
+    return successResult(summaries, { source: dataSource() });
   } catch (err) {
     return errorResult(`读取作品列表失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }
@@ -141,7 +146,7 @@ export async function readProjectSettings(
   try {
     const novel = await novelRepository.getById(novelId);
     if (!novel) {
-      return errorResult(`作品 ${novelId} 不存在`, { source: 'database' });
+      return errorResult(`作品 ${novelId} 不存在`, { source: dataSource() });
     }
 
     const warnings: string[] = [];
@@ -169,13 +174,13 @@ export async function readProjectSettings(
         protagonists,
       },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`读取作品设置失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }

@@ -2,7 +2,30 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 const { installE2eNetworkGuard } = await import('./e2eNetworkGuard.ts');
-const { sanitizeDiagnosticValue, serializeConsoleArguments } = await import('./e2eDiagnosticSanitizer.ts');
+const { sanitizeDiagnosticValue, serializeConsoleArguments } =
+  await import('./e2eDiagnosticSanitizer.ts');
+const { isE2eBridgeCommandAllowed } = await import('./e2eBridgePolicy.ts');
+
+test('closed-loop E2E additions expose queries but not adoption mutations', () => {
+  for (const command of [
+    'get_review_authorization',
+    'get_e2e_agent_closed_loop_state',
+    'get_task_conversation',
+    'get_result_artifact',
+  ]) {
+    assert.equal(isE2eBridgeCommandAllowed(command), true, command);
+  }
+
+  for (const command of [
+    'adopt_review_authorized_draft',
+    'consume_review_authorization',
+    'create_task_conversation',
+    'delete_chapter_draft',
+    'save_chapter_draft',
+  ]) {
+    assert.equal(isE2eBridgeCommandAllowed(command), false, command);
+  }
+});
 
 function createWindow() {
   const calls = { fetch: [], xhr: [], websocket: 0, eventsource: 0, beacon: 0 };
@@ -52,11 +75,26 @@ test('E2E network guard permits app-local assets and blocks external transports'
   assert.deepEqual(calls.fetch, ['/prompts/style.md']);
   assert.deepEqual(calls.xhr, [['GET', '/local.json']]);
 
-  await assert.rejects(fakeWindow.fetch('https://secret.example/api?api_key=never-store'), /blocked/);
+  await assert.rejects(
+    fakeWindow.fetch('https://secret.example/api?api_key=never-store'),
+    /blocked/,
+  );
   assert.throws(() => xhr.open('POST', 'https://secret.example/private'), /blocked/);
-  assert.throws(() => new fakeWindow.WebSocket('wss://secret.example/socket?token=never-store'), /blocked/);
-  assert.throws(() => new fakeWindow.EventSource('https://secret.example/events?token=never-store'), /blocked/);
-  assert.equal(fakeWindow.navigator.sendBeacon('https://secret.example/report?token=never-store', 'private body'), false);
+  assert.throws(
+    () => new fakeWindow.WebSocket('wss://secret.example/socket?token=never-store'),
+    /blocked/,
+  );
+  assert.throws(
+    () => new fakeWindow.EventSource('https://secret.example/events?token=never-store'),
+    /blocked/,
+  );
+  assert.equal(
+    fakeWindow.navigator.sendBeacon(
+      'https://secret.example/report?token=never-store',
+      'private body',
+    ),
+    false,
+  );
 
   assert.equal(calls.websocket, 0);
   assert.equal(calls.eventsource, 0);
@@ -70,9 +108,10 @@ test('E2E network guard permits app-local assets and blocks external transports'
     eventsource: 1,
     beacon: 1,
   });
-  assert.deepEqual(diagnostics.attempts.map((attempt) => attempt.transport), [
-    'fetch', 'xhr', 'websocket', 'eventsource', 'beacon',
-  ]);
+  assert.deepEqual(
+    diagnostics.attempts.map((attempt) => attempt.transport),
+    ['fetch', 'xhr', 'websocket', 'eventsource', 'beacon'],
+  );
   const serialized = JSON.stringify(diagnostics);
   assert.doesNotMatch(serialized, /secret\.example|never-store|private/);
 
@@ -105,7 +144,10 @@ test('console diagnostics retain safe context and redact sensitive fields in eve
   assert.match(text, /generate_chapter/);
   assert.match(text, /provider unavailable/);
   assert.match(text, /request failed/);
-  assert.doesNotMatch(text, /chapter-1|manuscript|Bearer secret|private body|secret-token|abcdefghijklmnop|private content/);
+  assert.doesNotMatch(
+    text,
+    /chapter-1|manuscript|Bearer secret|private body|secret-token|abcdefghijklmnop|private content/,
+  );
   assert.equal((text.match(/\[REDACTED\]/g) ?? []).length >= 6, true);
 });
 
@@ -117,16 +159,29 @@ test('console label arguments redact the following value and handle cycles', () 
   assert.match(text, /save_chapter/);
   assert.match(text, /Circular/);
 
-  assert.deepEqual(sanitizeDiagnosticValue({
-    command: 'save',
-    errorMessage: 'timeout',
-    auth: 'secret',
-  }), {
-    command: 'save',
-    errorMessage: 'timeout',
-    auth: '[REDACTED]',
-  });
+  assert.deepEqual(
+    sanitizeDiagnosticValue({
+      command: 'save',
+      errorMessage: 'timeout',
+      auth: 'secret',
+    }),
+    {
+      command: 'save',
+      errorMessage: 'timeout',
+      auth: '[REDACTED]',
+    },
+  );
 
-  const throwingProxy = new Proxy({}, { ownKeys: () => { throw new Error('private proxy data'); } });
-  assert.equal(serializeConsoleArguments(['proxy', throwingProxy]), '["proxy","[Uninspectable Object]"]');
+  const throwingProxy = new Proxy(
+    {},
+    {
+      ownKeys: () => {
+        throw new Error('private proxy data');
+      },
+    },
+  );
+  assert.equal(
+    serializeConsoleArguments(['proxy', throwingProxy]),
+    '["proxy","[Uninspectable Object]"]',
+  );
 });

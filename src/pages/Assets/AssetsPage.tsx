@@ -11,6 +11,7 @@ import { contextRecordService } from '../../services/context/contextRecordServic
 import { styleProfileService } from '../../services/styles/styleProfileService';
 import { settingSuggestionService } from '../../services/settingSuggestions/settingSuggestionService';
 import { contentTransactionService } from '../../services/content-transactions/contentTransactionService';
+import { importedAssetService } from '../../services/styles/importedAssetService';
 import { getDbMode } from '../../services/database/db';
 import type { Novel } from '../../types/novel';
 
@@ -43,19 +44,21 @@ function AssetsPage() {
       contextRecordService.getByNovelId(selectedNovelId),
       styleProfileService.getAll(selectedNovelId),
       settingSuggestionService.getByNovelId(selectedNovelId),
+      importedAssetService.getAll(selectedNovelId),
       getDbMode() === 'tauri'
         ? Promise.all([
             contentTransactionService.listFactions(selectedNovelId),
             contentTransactionService.listLocations(selectedNovelId),
           ])
         : Promise.resolve([[], []] as const),
-    ]).then(([chars, sums, ctx, styles, suggestions, [factions, locations]]) => {
+    ]).then(([chars, sums, ctx, styles, suggestions, importedAssets, [factions, locations]]) => {
       setStats({
         chars: String(chars.length),
         sums: String(sums.length),
         ctx: String(ctx.length),
         styles: String(styles.length),
         suggestions: String(suggestions.filter((item) => item.status === 'pending').length),
+        importedAssets: String(importedAssets.length),
         storyAssets: String(factions.length + locations.length),
       });
     });
@@ -113,7 +116,13 @@ function AssetsPage() {
       desc: '正式资产与跨章事务',
       path: selectedNovelId ? `/novels/${selectedNovelId}/story-assets` : '',
     },
-    { title: '导入资产', icon: '📥', count: '0', desc: '外部导入素材', path: '/import-export' },
+    {
+      title: '导入资产',
+      icon: '📥',
+      count: stats.importedAssets || '0',
+      desc: '外部导入素材',
+      path: '/import-export',
+    },
   ];
 
   return (

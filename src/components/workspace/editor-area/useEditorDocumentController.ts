@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { runWithLoading } from '../../../lib/runWithLoading';
+import { artifactDecisionService } from '../../../services/conversation/artifactDecisionService';
 import { draftVersionService } from '../../../services/database/draftVersionService';
 import { logWorkspaceWarning } from '../../../services/workspace/workspaceErrorService';
 import type { ChapterDraft } from '../../../types/ai';
 import { getAppErrorUserMessage, normalizeAppError } from '../../../types/appError';
 import type { Chapter } from '../../../types/chapter';
+import type { ReviewCandidateDocument } from '../../../types/conversation';
 import type { DraftContentState } from '../../../types/draftContentState';
 import type { AiTextApplyRequest, EditorContentSnapshot } from '../../../types/workspaceSafety';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
+import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { formatDateTime } from '../../../utils/date';
 import { confirmInfo } from '../../../utils/nativeDialog';
 import type { EditorAreaProps, EditorCommandRequest, EditorDocumentState } from './editorAreaTypes';
-import { isDraftSaveResultForDocument, resolveEditorDraftContent } from './editorDocumentSafety';
+import {
+  getEditorDocumentSourceKey,
+  isDraftSaveResultForDocument,
+  resolveEditorDraftContent,
+} from './editorDocumentSafety';
 
 interface UseEditorDocumentControllerOptions {
   chapter?: Chapter;
@@ -28,6 +35,9 @@ interface UseEditorDocumentControllerOptions {
   commandRequest?: EditorCommandRequest | null;
   onChapterUpdated?: EditorAreaProps['onChapterUpdated'];
   onBeforeAdopt?: EditorAreaProps['onBeforeAdopt'];
+  reviewCandidate?: ReviewCandidateDocument | null;
+  reviewAuthorizationId?: string;
+  reviewArtifactId?: string;
 }
 
 export function useEditorDocumentController({
@@ -45,6 +55,8 @@ export function useEditorDocumentController({
   commandRequest,
   onChapterUpdated,
   onBeforeAdopt,
+  reviewCandidate,
+  reviewAuthorizationId,
 }: UseEditorDocumentControllerOptions) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -59,6 +71,7 @@ export function useEditorDocumentController({
   const liveDraftIdRef = useRef(currentDraft?.id);
   const liveContentRef = useRef(content);
   const loadedChapterIdRef = useRef<string>();
+  const loadedSourceKeyRef = useRef<string>();
   const saveInFlightRef = useRef<Promise<ChapterDraft | null> | null>(null);
 
   liveDocumentRef.current = { novelId, chapterId: chapter?.id };
@@ -95,12 +108,16 @@ export function useEditorDocumentController({
   );
 
   useEffect(() => {
-    const resolution = resolveEditorDraftContent({
+    const sourceInput = {
       documentState,
       novelId,
       chapterId: chapter?.id,
       draft: currentDraft,
-    });
+      reviewCandidate,
+    };
+    const sourceKey = getEditorDocumentSourceKey(sourceInput);
+    if (sourceKey && loadedSourceKeyRef.current === sourceKey) return;
+    const resolution = resolveEditorDraftContent(sourceInput);
     if (resolution.action === 'replace') {
       const unavailable = effectiveContentState?.status === 'unavailable';
       const safeContent = unavailable ? '' : resolution.content;
@@ -109,6 +126,7 @@ export function useEditorDocumentController({
       setSaveMsg('');
       setLastSaved(resolution.draft ? formatDateTime(resolution.draft.updatedAt) : '');
       loadedChapterIdRef.current = chapter?.id;
+      loadedSourceKeyRef.current = sourceKey;
       emitContentSnapshot(safeContent, false, resolution.draft);
     } else if (resolution.reason) {
       setSaveMsg(resolution.reason);
@@ -120,6 +138,7 @@ export function useEditorDocumentController({
     effectiveContentState,
     emitContentSnapshot,
     novelId,
+    reviewCandidate,
   ]);
 
   const handleContentChange = useCallback(
@@ -399,17 +418,40 @@ export function useEditorDocumentController({
     const draftForAdoption = draftToAdopt;
     setAdopting(true);
     try {
-      if (onBeforeAdopt) await onBeforeAdopt(draftForAdoption.id);
-      const adopted = await runWithLoading(
-        {
-          title: '正在确认采用',
-          initialMessage: '正在更新正式正文版本……',
-          successMessage: '已采用为正式正文',
-          errorMessage: '采用失败',
-          successAutoCloseMs: 800,
-        },
-        async () => await draftVersionService.adopt(draftForAdoption.id, requestChapterId),
-      );
+      const activeAuthId = reviewCandidate?.authorizationId || reviewAuthorizationId;
+      let adopted: ChapterDraft;
+      if (activeAuthId) {
+        const expectedContentHash = await computeContentSha256(draftForAdoption.content);
+        const adoptResult = await runWithLoading(
+          {
+            title: '正在确认采用',
+            initialMessage: '正在原子校验授权并更新正文……',
+            successMessage: '已采用为正式正文',
+            errorMessage: '采用失败',
+            successAutoCloseMs: 800,
+          },
+          async () =>
+            await artifactDecisionService.adoptReviewAuthorizedDraft({
+              authorizationId: activeAuthId,
+              draftId: draftForAdoption.id,
+              expectedDraftVersion: draftForAdoption.versionNo,
+              expectedContentHash,
+            }),
+        );
+        adopted = adoptResult.adoptedDraft;
+      } else {
+        if (onBeforeAdopt) await onBeforeAdopt(draftForAdoption.id);
+        adopted = await runWithLoading(
+          {
+            title: '正在确认采用',
+            initialMessage: '正在更新正式正文版本……',
+            successMessage: '已采用为正式正文',
+            errorMessage: '采用失败',
+            successAutoCloseMs: 800,
+          },
+          async () => await draftVersionService.adopt(draftForAdoption.id, requestChapterId),
+        );
+      }
       if (
         adopted.id !== draftForAdoption.id ||
         adopted.novelId !== requestNovelId ||
@@ -431,10 +473,11 @@ export function useEditorDocumentController({
       emitContentSnapshot(adopted.content, false, adopted);
       onChapterUpdated?.(requestChapterId);
       setTimeout(() => setSaveMsg(''), 2000);
-    } catch {
+    } catch (error) {
       const liveDocument = liveDocumentRef.current;
       if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
-        setSaveMsg('采用失败');
+        const appError = normalizeAppError(error, '采用失败。');
+        setSaveMsg(`❌ ${getAppErrorUserMessage(appError)}`);
         setTimeout(() => setSaveMsg(''), 3000);
       }
     } finally {
@@ -451,9 +494,11 @@ export function useEditorDocumentController({
     handleSave,
     isDirty,
     novelId,
+    onBeforeAdopt,
     onChapterUpdated,
     onDraftSaved,
-    onBeforeAdopt,
+    reviewAuthorizationId,
+    reviewCandidate?.authorizationId,
     saving,
   ]);
 

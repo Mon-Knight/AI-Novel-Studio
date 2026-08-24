@@ -4,6 +4,7 @@ import type { ResultArtifactBundle } from '../../types/result-artifact';
 import { characterService } from '../characters/characterService';
 import { chapterEventService } from '../characters/chapterEventService';
 import { chapterSummaryService } from '../context/chapterSummaryService';
+import { draftVersionService } from '../database/draftVersionService';
 import { applyArtifactBundle } from './artifactApply';
 
 class MemoryStorage {
@@ -90,6 +91,20 @@ test('character and event candidates apply through domain services without writi
   assert.equal(storedEvents.length, 1);
   assert.equal(storedEvents[0].status, 'adopted');
 
+  const withoutAdoptedDraft = await applyArtifactBundle(
+    { novelId: 'novel-without-draft', chapterId: 'ch-without-draft' },
+    bundle('chapter_summary', JSON.stringify({ summary: '不应写入无采用稿章节。' })),
+  );
+  assert.equal(withoutAdoptedDraft.conflictCode, 'CHAPTER_SUMMARY_ADOPTED_DRAFT_REQUIRED');
+
+  const adoptedSource = await draftVersionService.create({
+    novelId: 'novel-apply',
+    chapterId: 'ch-apply',
+    title: '第 1 章草稿',
+    content: '已采用正文。',
+    source: 'user_edited',
+  });
+  const adoptedDraft = await draftVersionService.adopt(adoptedSource.id, 'ch-apply');
   const summary = await applyArtifactBundle(
     { novelId: 'novel-apply', chapterId: 'ch-apply' },
     bundle('chapter_summary', JSON.stringify({ summary: '本章确认雨巷线索。' })),
@@ -97,6 +112,15 @@ test('character and event candidates apply through domain services without writi
   assert.ok(summary.applyTransactionId);
   const storedSummary = await chapterSummaryService.getByChapterId('ch-apply');
   assert.equal(storedSummary?.summary, '本章确认雨巷线索。');
+  assert.equal(storedSummary?.adoptedDraftId, adoptedDraft.id);
+
+  const mismatchedSummary = await applyArtifactBundle(
+    { novelId: 'novel-apply', chapterId: 'ch-apply' },
+    bundle('chapter_summary', JSON.stringify({ summary: '不应应用的总结。' }), {
+      sourceDraftId: 'draft-mismatch',
+    }),
+  );
+  assert.equal(mismatchedSummary.conflictCode, 'CHAPTER_SUMMARY_ADOPTED_DRAFT_MISMATCH');
 
   const chapter = await applyArtifactBundle(
     { novelId: 'novel-apply', chapterId: 'ch-apply' },

@@ -8,6 +8,11 @@ import type { AgentToolResult, AgentToolContext } from './tool-types';
 import { errorResult, resolveNovelId, successResult } from './tool-types';
 import { styleProfileService } from '../services/styles/styleProfileService';
 import { outputProfileService } from '../services/styles/outputProfileService';
+import { getDbMode } from '../services/database/db';
+
+function dataSource(): 'sqlite' | 'localstorage' {
+  return getDbMode() === 'tauri' ? 'sqlite' : 'localstorage';
+}
 
 /**
  * 读取风格方案
@@ -33,7 +38,7 @@ export async function readStyleProfile(
     const warnings: string[] = [];
 
     try {
-      allStyles = await styleProfileService.getAll(novelId);
+      allStyles = await styleProfileService.getAll(novelId, { initialize: false });
     } catch {
       warnings.push('无法读取风格方案列表');
     }
@@ -84,13 +89,13 @@ export async function readStyleProfile(
         hasActiveStyle: activeStyle !== null,
       },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`读取风格方案失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }
@@ -115,7 +120,7 @@ export async function readOutputControl(
     let profiles: unknown[] = [];
 
     try {
-      profiles = await outputProfileService.getAll(novelId);
+      profiles = await outputProfileService.getAll(novelId, { initialize: false });
     } catch {
       warnings.push('无法读取输出控制方案');
     }
@@ -124,7 +129,7 @@ export async function readOutputControl(
       warnings.push('该作品没有输出控制方案');
       return successResult(
         { profiles: [], count: 0, hasDefault: false },
-        { source: 'database', warnings },
+        { source: dataSource(), warnings },
       );
     }
 
@@ -155,13 +160,13 @@ export async function readOutputControl(
         hasDefault: defaultProfile !== undefined,
       },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`读取输出控制失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { aiTaskRuntimeService } from '../../services/ai-tasks/aiTaskRuntimeService';
+import { artifactDecisionService } from '../../services/conversation/artifactDecisionService';
 import { chapterRepository } from '../../services/database/chapterRepository';
 import { draftVersionService } from '../../services/database/draftVersionService';
 import { novelRepository } from '../../services/database/novelRepository';
@@ -8,10 +10,13 @@ import { createTraceId, logWorkspaceError } from '../../services/workspace/works
 import type { ChapterDraft } from '../../types/ai';
 import { normalizeAppError } from '../../types/appError';
 import type { Chapter } from '../../types/chapter';
+import type { ReviewCandidateDocument } from '../../types/conversation';
 import type { DraftContentState } from '../../types/draftContentState';
 import type { EditorContentSnapshot } from '../../types/workspaceSafety';
 import type { Novel } from '../../types/novel';
 import type { Volume } from '../../types/volume';
+import { countTextWords } from '../../utils/contentHash';
+import { computeContentSha256 } from '../../utils/contentIntegrity';
 import {
   MonotonicDocumentLoadGuard,
   resolveGuardedDocumentLoad,
@@ -41,6 +46,8 @@ interface UseWorkspaceChapterLoaderInput {
   novelId?: string;
   requestedChapterId?: string | null;
   requestedDraftId?: string;
+  requestedArtifactId?: string;
+  requestedAuthorizationId?: string;
   refs: WorkspaceLoaderRefs;
   setNovel(value: Novel | null): void;
   setVolumes(value: Volume[]): void;
@@ -83,6 +90,8 @@ export function useWorkspaceChapterLoader({
   novelId,
   requestedChapterId,
   requestedDraftId,
+  requestedArtifactId,
+  requestedAuthorizationId,
   refs,
   setNovel,
   setVolumes,
@@ -95,6 +104,7 @@ export function useWorkspaceChapterLoader({
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState('');
   const [loadState, setLoadState] = useState<WorkspaceLoadState>('loading');
+  const [reviewCandidate, setReviewCandidate] = useState<ReviewCandidateDocument | null>(null);
   const [chapterDocumentLoad, setChapterDocumentLoad] = useState<ChapterDocumentLoadState>({
     status: 'ready',
   });
@@ -124,7 +134,13 @@ export function useWorkspaceChapterLoader({
   );
 
   const loadChapterDraft = useCallback(
-    async (chapterId: string, activateOnSuccess = false, selectedDraftId?: string) => {
+    async (
+      chapterId: string,
+      activateOnSuccess = false,
+      selectedDraftId?: string,
+      candidateArtifactId?: string,
+      candidateAuthorizationId?: string,
+    ) => {
       const requestNovelId = refs.activeNovelId.current;
       if (!requestNovelId) return false;
       const target = { novelId: requestNovelId, chapterId };
@@ -133,6 +149,77 @@ export function useWorkspaceChapterLoader({
       setChapterDocumentLoad({ status: 'loading', chapterId });
       setContentLoadError(null);
       try {
+        if (candidateAuthorizationId) {
+          const auth = await artifactDecisionService.getAuthorization(candidateAuthorizationId);
+          if (!auth || auth.status === 'expired') {
+            throw new Error('审阅授权不存在或已失效。');
+          }
+          if (auth.novelId !== requestNovelId || auth.chapterId !== chapterId) {
+            throw new Error('审阅授权与当前作品或章节不匹配。');
+          }
+          if (candidateArtifactId && auth.artifactId !== candidateArtifactId) {
+            throw new Error('审阅授权与产物标识不匹配。');
+          }
+          if (auth.status === 'consumed') {
+            if (!auth.consumedByDraftId) {
+              throw new Error('审阅授权已消费，但缺少采用草稿引用。');
+            }
+            const adoptedDraft = await draftVersionService.getById(
+              chapterId,
+              auth.consumedByDraftId,
+            );
+            if (
+              !adoptedDraft ||
+              !adoptedDraft.isAdopted ||
+              adoptedDraft.novelId !== requestNovelId ||
+              adoptedDraft.chapterId !== chapterId
+            ) {
+              throw new Error('审阅授权已消费，但采用草稿状态不一致。');
+            }
+            if (activateOnSuccess) commitActiveChapter(chapterId);
+            setReviewCandidate(null);
+            setCurrentDraft(adoptedDraft);
+            refs.currentDraft.current = adoptedDraft;
+            setDraftWordCount(adoptedDraft.wordCount);
+            setDirty(false);
+            documentBlockedRef.current = false;
+            setChapterDocumentLoad({ status: 'ready', chapterId });
+            return true;
+          }
+          const artifactBundle = await aiTaskRuntimeService
+            .getArtifact(auth.artifactId)
+            .catch(() => null);
+          if (!artifactBundle?.rawContent) {
+            throw new Error('候选产物正文为空或无法读取。');
+          }
+          const computedHash = await computeContentSha256(artifactBundle.rawContent);
+          if (
+            artifactBundle.artifact.contentHash &&
+            !computedHash.startsWith('fallback_') &&
+            computedHash.toLowerCase() !== artifactBundle.artifact.contentHash.toLowerCase()
+          ) {
+            throw new Error('候选产物内容哈希校验失败。');
+          }
+          if (activateOnSuccess) commitActiveChapter(chapterId);
+          const candidateDoc: ReviewCandidateDocument = {
+            authorizationId: auth.authorizationId,
+            artifactId: auth.artifactId,
+            content: artifactBundle.rawContent,
+            contentHash: artifactBundle.artifact.contentHash || computedHash,
+            chapterId,
+            novelId: requestNovelId,
+          };
+          setReviewCandidate(candidateDoc);
+          setCurrentDraft(null);
+          refs.currentDraft.current = null;
+          setDraftWordCount(countTextWords(candidateDoc.content));
+          setDirty(false);
+          documentBlockedRef.current = false;
+          setChapterDocumentLoad({ status: 'ready', chapterId });
+          return true;
+        }
+
+        setReviewCandidate(null);
         const draftRequest = selectedDraftId
           ? draftVersionService.getById(chapterId, selectedDraftId).then((draft) => {
               if (!draft) throw new Error('指定的候选草稿不存在或不属于当前章节。');
@@ -178,6 +265,11 @@ export function useWorkspaceChapterLoader({
         }
         const traceId = createTraceId('workspace-draft-load');
         const normalized = normalizeAppError(error, '完整正文暂时无法读取。', { traceId });
+        logWorkspaceError('workspace_draft_load_failed', normalized, {
+          traceId,
+          novelId: requestNovelId,
+          chapterId,
+        });
         if (
           token.epoch === documentLoadGuardRef.current.currentEpoch &&
           refs.activeChapterId.current === chapterId &&
@@ -196,11 +288,6 @@ export function useWorkspaceChapterLoader({
                 : normalized,
           });
         }
-        logWorkspaceError('workspace_draft_load_failed', normalized, {
-          traceId,
-          novelId: requestNovelId,
-          chapterId,
-        });
         return false;
       }
     },
@@ -264,6 +351,8 @@ export function useWorkspaceChapterLoader({
             targetId,
             true,
             targetId === requestedChapterId ? requestedDraftId : undefined,
+            targetId === requestedChapterId ? requestedArtifactId : undefined,
+            targetId === requestedChapterId ? requestedAuthorizationId : undefined,
           );
         } else {
           setChapterDocumentLoad({ status: 'ready' });
@@ -278,6 +367,8 @@ export function useWorkspaceChapterLoader({
   }, [
     loadChapterDraft,
     novelId,
+    requestedArtifactId,
+    requestedAuthorizationId,
     requestedChapterId,
     requestedDraftId,
     setChapters,
@@ -330,6 +421,7 @@ export function useWorkspaceChapterLoader({
     pageError,
     loadState,
     setLoadState,
+    reviewCandidate,
     chapterDocumentLoad,
     setChapterDocumentLoad,
     contentLoadError,

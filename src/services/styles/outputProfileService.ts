@@ -192,15 +192,16 @@ async function ensureDesktopInitialized(): Promise<void> {
 }
 
 export const outputProfileService = {
-  async getAll(novelId?: string): Promise<OutputProfile[]> {
+  async getAll(novelId?: string, options: { initialize?: boolean } = {}): Promise<OutputProfile[]> {
+    const initialize = options.initialize !== false;
     if (getDbMode() === 'tauri') {
-      await ensureDesktopInitialized();
+      if (initialize) await ensureDesktopInitialized();
       const dtos = await dbCall<OutputProfileDto[]>('list_output_profiles', {
         projectId: novelId ?? null,
       });
       return dtos.map(fromDto);
     }
-    const list = localEnsureSeeded();
+    const list = initialize ? localEnsureSeeded() : localGetAll();
     if (novelId) return list.filter((o) => !o.novelId || o.novelId === novelId);
     return list;
   },

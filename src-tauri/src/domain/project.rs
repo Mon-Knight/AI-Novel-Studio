@@ -99,3 +99,17 @@ pub struct UpdateNovelInput {
     pub main_character: Option<String>,
     pub protagonist_ability: Option<String>,
 }
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseRepairResult {
+    pub storage: String,
+    pub before: i64,
+    pub after: i64,
+    pub repaired_count: i64,
+    pub skipped_count: i64,
+    pub backup_key: String,
+    pub integrity_ok: bool,
+    pub integrity_message: String,
+    pub foreign_key_violations: i64,
+}

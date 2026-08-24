@@ -38,9 +38,11 @@ async function waitFor(predicate, timeoutMs = 3_000) {
   throw new Error('timed out waiting for proxy observation');
 }
 
-async function startFixture({ upstreamResponse, timeoutMs = 2_000 }) {
+async function startFixture({ upstreamResponse, timeoutMs = 2_000, model = 'fixture-model' }) {
   const policyCalls = [];
+  const upstreamPaths = [];
   const upstream = http.createServer(async (request, response) => {
+    upstreamPaths.push(request.url);
     for await (const _chunk of request) {
       // Drain the request without retaining prompts or tool arguments.
     }
@@ -57,16 +59,16 @@ async function startFixture({ upstreamResponse, timeoutMs = 2_000 }) {
     response.end(JSON.stringify(body));
   });
   const policyPort = await listen(policy);
-  const proxyPort = await freePort();
   const child = spawn(process.execPath, [script], {
     env: {
       ...process.env,
-      PROXY_PORT: String(proxyPort),
+      PROXY_PORT: '0',
       PROXY_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       PROXY_UPSTREAM_KEY: 'fixture-secret-never-log',
       PROXY_POLICY_URL: `http://127.0.0.1:${policyPort}`,
       PROXY_REQUEST_PREFIX: 'integration',
       PROXY_REQUEST_TIMEOUT_MS: String(timeoutMs),
+      PROXY_MODEL: model,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -78,10 +80,14 @@ async function startFixture({ upstreamResponse, timeoutMs = 2_000 }) {
   child.stderr.on('data', (chunk) => {
     output += chunk.toString('utf8');
   });
-  await waitFor(() => output.includes('[model-proxy] listening'));
+  const portMatch = await waitFor(() =>
+    output.match(/\[model-proxy\] listening on 127\.0\.0\.1:(\d+)/),
+  );
+  const proxyPort = Number(portMatch[1]);
   return {
     url: `http://127.0.0.1:${proxyPort}`,
     policyCalls,
+    upstreamPaths,
     output: () => output,
     async stop() {
       if (child.exitCode === null) child.kill();
@@ -131,6 +137,36 @@ test('governed proxy settles successful usage with the measured token pair', asy
     });
     assert.match(fixture.policyCalls[0].payload.providerRequestId, /^integration:1$/);
     assert.equal(fixture.output().includes('fixture-secret-never-log'), false);
+  } finally {
+    await fixture.stop();
+  }
+});
+
+test('proxy exposes a redacted model catalog and preserves /v1 downstream prefixes', async () => {
+  const fixture = await startFixture({
+    model: 'dsh-real-model-fixture',
+    upstreamResponse: async (_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+      );
+    },
+  });
+  try {
+    const models = await fetch(`${fixture.url}/v1/models`);
+    assert.equal(models.status, 200);
+    assert.deepEqual((await models.json()).data, [
+      { id: 'dsh-real-model-fixture', object: 'model' },
+    ]);
+
+    const response = await fetch(`${fixture.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: requestBody(),
+    });
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+    assert.deepEqual(fixture.upstreamPaths, ['/chat/completions']);
   } finally {
     await fixture.stop();
   }

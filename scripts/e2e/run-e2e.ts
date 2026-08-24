@@ -51,6 +51,8 @@ const allSpecs = [
   'chapter-readiness-planner.spec.ts',
   'story-assets-transaction.spec.ts',
   'conversational-workbench.spec.ts',
+  'agent-production-closed-loop.spec.ts',
+  'domain-facade-sqlite.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 

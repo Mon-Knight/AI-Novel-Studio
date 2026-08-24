@@ -174,6 +174,8 @@ function WritingWorkspacePage() {
     novelId,
     requestedChapterId: searchParams.get('chapterId'),
     requestedDraftId: searchParams.get('draftId')?.trim() || undefined,
+    requestedArtifactId: searchParams.get('artifactId')?.trim() || undefined,
+    requestedAuthorizationId: authorizationId,
     refs: chapterLoaderRefs,
     setNovel,
     setVolumes,
@@ -490,6 +492,9 @@ function WritingWorkspacePage() {
       leaveGuardDialog={leaveGuardDialog}
       reviewLocked={reviewLocked}
       onUnlockReview={() => setReviewLocked(false)}
+      reviewCandidate={chapterLoader.reviewCandidate}
+      reviewAuthorizationId={authorizationId}
+      reviewArtifactId={searchParams.get('artifactId')?.trim() || undefined}
       onBeforeAdopt={consumeReviewAuthorization}
     />
   );

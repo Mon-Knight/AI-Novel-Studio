@@ -114,7 +114,7 @@ describe('conversational creative workbench', () => {
     await waitForTestId('workbench-template-generate-chapter');
     await waitForTestId('workbench-template-audit-chapter');
     const chapterTarget = await waitForTestId('workbench-chapter-target');
-    expect(await chapterTarget.getText()).toMatch(/章节目标|未绑定章节/);
+    expect(await chapterTarget.getText()).toMatch(/目标章节|未绑定章节/);
 
     await clickTestId('workbench-current-plugins');
     const pluginPanel = await waitForTestId('workbench-plugin-panel');

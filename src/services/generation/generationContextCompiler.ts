@@ -349,6 +349,9 @@ export const generationContextCompiler = {
     addSection(sections, 'context_records', '创作上下文包', baseContext.previousContext, [
       'context_record',
     ]);
+    addSection(sections, 'user_instruction', '本轮用户创作指令', baseContext.userInstruction, [
+      'user_instruction',
+    ]);
     addSection(
       sections,
       'provisional_previous_chapter',
@@ -421,6 +424,11 @@ export const generationContextCompiler = {
       ),
       source('chapter_event', '本章事件', baseContext.chapterEvents ? 'used' : 'missing'),
       source('context_record', '创作上下文包', baseContext.previousContext ? 'used' : 'missing'),
+      source(
+        'user_instruction',
+        '本轮用户创作指令',
+        baseContext.userInstruction ? 'used' : 'missing',
+      ),
       source(
         'provisional_candidate',
         '前一章候选承接',

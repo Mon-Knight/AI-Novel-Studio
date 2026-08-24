@@ -497,7 +497,7 @@ export async function buildChapterContext(
     masterOutlineSource,
   };
 
-  if (import.meta.env.DEV) {
+  if (import.meta.env?.DEV) {
     appLogger.info('[ContextBuilder] context compiled', {
       chapterId: chapter.id,
       chapterTitleLength: chapter.title.length,

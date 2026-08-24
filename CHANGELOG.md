@@ -20,6 +20,16 @@
 
 ### 修复
 
+- **第一阶段生产链路二次纠偏与 Mock 伪造彻底移除**：彻底移除 `workbenchChapterWriter` 中发生异常时吞咽错误伪造 `mock-task-` / `mock-art-` 候选卡片的绕行逻辑，执行失败一律 Fail-Closed 向上抛出；修复模型快照穿透，严格从 `TaskRun.modelSnapshot` 派生执行参数，杜绝全局设置修改影响任务运行。
+- **两阶段审阅采用协议与无草稿候选载入**：路由携带 `authorizationId` 与 `artifactId` 进入审阅工作台时，若当前章节尚无草稿，自动从权威 `ResultArtifact` 载入候选正文；首次保存创建真实草稿，确认采用在同一 SQLite 事务内完成授权/决定/作用域/版本/正文哈希校验、草稿采用、章节指针更新、授权消费与会话完成，失败全部回滚且重放幂等。
+- **章节总结应用链路采用真实已采纳草稿**：`chapter_summary` 应用不再接受占位 `workbench-unadopted`，改为回查当前章节已采用草稿并在错配时拒绝写入，确保 summary/context bundle 与正式草稿同源。
+- **审计阻断入口修复**：桌面作品删除新增事务级 `delete_novel_cascade`，复用项目备份清理顺序真实清除 SQLite 所有权威关联记录；设置中的数据修复按钮接入 SQLite 基础字段规范化与 `integrity_check/foreign_key_check`；资产中心导入资产数量改为读取真实服务数据，不再硬编码 `0`。
+- **大纲版本指针修复**：`set_active_master/volume/chapter_outline` 改为目标存在校验、事务更新，并按卷/章作用域清理旧 active 指针；候选大纲采用后显式激活，修正写入成功但后续读取不到的问题。
+- **真实 DSH 测试入口收口**：新增显式 `test:dsh:real` smoke profile；真实凭据仅在当前进程环境中传递，支持通过回环限定的 `DSH_E2E_BASE_URL/DSH_E2E_MODEL` 让本地 OpenAI-compatible 模型复用同一 DSH 协议，不改变默认 Mock E2E 或生产路由。显式参数优先于环境变量，回环 profile 默认使用无凭据哨兵；代理补充 `/v1` 路径与只读 `/v1/models` 投影，避免本地模型身份预检误报；Windows PowerShell 5 的 cargo stderr 证据捕获也已去除 `NativeCommandError` 噪声。最新真实 smoke 通过（本次 3 次上游请求；模型修复回合通常为 3–4 次）。
+- **审阅编辑防覆盖与 E2E 证据收敛**：审阅来源使用稳定键只装载一次，避免父组件重复渲染覆盖未保存正文；E2E IPC 保持显式 allowlist，本次仅增加闭环只读查询而不暴露原子采用命令，证据只保存计数、ID、正文哈希和授权指纹，并从持久化卡片关系读取运行 ID。
+- **生产链路收敛与并行 Harness 清理**：彻底移除未接入生产的 `src/services/agent-harness/` 与非权威文档 `docs/agent/`，收敛为唯一生产链路（`Workbench -> useWorkbenchTaskRunner -> taskConversationService -> taskSessionAdapter -> DSH Task Worker / Production Tool Registry -> ResultArtifact -> ArtifactDecision -> ReviewAuthorization -> Writing Workspace -> Safe Apply / SQLite`）。
+- **工具失败严格阻断**：修复工具抛错时被错误吞咽包装为成功的缺陷，工具失败时严格标记 `ToolCallEvent` 为 `failed` 并阻断后续工具链执行，防止 SQLite 脏写入。
+- **长程记忆穿透与上一版候选正文继承**：`search_memory` 事实检索切片可靠注入写章服务提示词；多轮重写与润色自动从会话历史提取上一版候选正文并注入修改提示词。
 - 修复创作工作台只读与检索查询误入 `generate_chapter` 校验槽导致无章节绑定时秒崩的缺陷。
 - 修复左侧子页面 Back 按钮跳回旧首页文案错位的问题，统一规范为「返回工作台」。
 - 修复风格方案与输出控制未深度注入写章编译层的断层，确保选定文风与篇幅设定在工作台生成正文中真实生效。
@@ -27,14 +37,30 @@
 
 ### 验证
 
-- `npm run test:workbench`：39 项全通（覆盖 DSH 协议、并发隔离、意图路由、参数脱敏与 Memory 回写）。
-- `npm run test:components`：15 项前端组件稳定性测试全通。
-- `npm run test:workspace-reliability`：15 项工作区可靠性测试全通。
-- `npm run test:workspace-safety`：5 项文档安全隔离测试全通。
-- `npm run test:large-text-integrity` & `test:workspace-recovery`：318 项 Rust SQLite 大文本存储与事务容灾测试全通。
-- `npm run test:docs-sync` & `test:version-sync`：文档与全局 12 处版本同步校验通过。
-- `npm run lint:ci`：0 error, 0 warning。
-- `npm run build`：TypeScript 编译与 Vite 生产构建打包成功。
+- **第二次全量能力审计**：新增 `docs/audit-v2/` 六份权威审计，按真实入口、调用链、SQLite/模型反查重建 75 个能力族地图；结论为 21 WORKING、37 PARTIAL、3 BROKEN、11 LEGACY、3 UNKNOWN，并确认当前阶段不得直接扩展 Context Agent。审计同时识别桌面“级联删除”只软删除主记录、“扫描并修复数据库”只操作 LocalStorage、资产导入计数硬编码等真实性缺口。
+- **第二次能力整合与 Agent 重构准备**：新增 `docs/architecture-audit-v2/` 七份整合文档，明确 14 个宏观重复组、16 个具体冲突簇（13 个可归并、3 个边界治理）、12 个 canonical Domain Capability 和 18 个目标 Agent 动作；补充草稿多事实源、outline active/version、summary/context bundle、角色事实、AI task ledger 与 Registry 漂移风险。本轮仅冻结事实与迁移计划，不删除旧实现、不扩展 Agent。
+- **第一阶段生产闭环验收结论**：`CONDITIONAL`（阶段二准入：`NO`；真实外部模型在线决策：`NOT RUN`）。
+- **真实模型补充验证**：固定 DSH payload 通过真实 `deepseek-v4-flash` Provider smoke（3 次请求、工具调用、Proposal schema 校验通过）；该证据仅覆盖 DSH preparation，Workbench `chapter_write`/独立 Writing SubAgent 仍保持未验证。
+- **阶段判断重分类**：将当前成果标记为 `Phase 0.5 — Model / Provider Infrastructure Verified`；新增 [Phase 1A 真实 Agent Runtime 接入验证任务书](docs/audit-v2/phase1a_real_agent_taskbook.md)，明确真实 Main Agent、Tool Call 事件、candidate-only Artifact 和负向边界的独立准入条件，不提前宣称 Harness 或 Writing SubAgent 完成。
+- **阶段顺序再次纠偏为能力资产化优先**：确认 DSH 真实模型层只是基础设施，现有业务能力尚未形成可靠 Capability Registry；新增只读 `Capability Catalog v1` 与 [Phase 1A-A 能力资产化任务书](docs/audit-v2/phase1a_capability_assetization_taskbook.md)，18 个 canonical action 全部保持 `catalog_only`，Main Agent Runtime、Tool Projection、Writing SubAgent 和 Context Agent 均后置。
+- **能力资产目录（catalog-only）**：新增 `src/services/capabilities/capabilityCatalog.ts` 及定向测试，登记领域入口、调用链、事实源、健康状态、旧别名、副作用和迁移阻断；不复用或替换现有 TS/Rust/DSH Tool Registry，不新增数据库结构或生产工具。
+- **Phase 1A-B Domain Facade**：新增 `src/services/capabilities/domain/` 五个领域 Facade、统一 `DomainRequest/DomainResult`、公开 DTO/source/hash 契约及真实浏览器生产链验证；Facade 仍保持 `catalog_only`，未接入 Canonical Tool Projection、Main Agent 或 Writing SubAgent。
+- **Domain Facade SQLite 生产链收口**：新增仅 E2E 构建启用的 `runDomainFacadeSqliteSmoke` 验证入口与 `domain-facade-sqlite.spec.ts`，在真实 Windows Tauri/WebView2 隔离 SQLite 中验证 Project/Context/Conversation、候选发布、用户审阅授权、CAS 采用、重放冲突和重载读回（1/1 PASS）；该入口不进入生产 Tool Registry 或模型 prompt。
+- **Phase 1A-C Canonical Tool Projection**：新增独立 `src/services/capabilities/canonical/`，将 `novel.read`、`structure.read`、`context.read`、`memory.search` 通过固定函数映射接入已验证 Domain Facade；统一严格输入 schema、公开 `DomainResult` 输出 envelope、宿主 scope 复验和稳定 manifest hash。四项仍为 `catalog_only`，模型可见 manifest 为 0，未改动 production Registry、DSH allowlist、Main Agent 或 Writing SubAgent。
+- **Facade 作用域与来源修复**：生产只读 handler 现在区分 `sqlite` 与 `localstorage` 来源；章节读取复验分卷、角色关联和事件关联的作品归属，跨作品和损坏关系 fail-closed。
+- **Canonical 只读链路副作用收口**：风格与输出控制的 Facade 读取改用 `initialize:false` 纯读模式，不再因首次读取隐式播种 LocalStorage/SQLite 默认方案；Canonical `context.read` 的 `sideEffect=none` 现在有真实存储快照证据。
+- **章节候选作用域修复**：结构化章节候选现在显式携带 `chapterId`，SQLite 服务端复验章节归属并写入 AI task scope，避免合法候选在审阅阶段因 `sourceChapterId` 丢失而被拒绝；非章节候选保持作品级 scope。
+- **已完成 Tool 工作性门禁**：新增隔离 fixture 的 `productionToolRuntime.test.ts`，真实调用全部 18 个 TypeScript production handler（含 `novel.read_context`、`chapter.read_outline`、`search_memory`、style/verification 与 candidate validator），并验证跨作品 scope 与缺少 authoritative scope 时 fail-closed；候选 validator 仍只计为 schema 验证，不计为正文生成能力。
+- `npm run test:workbench`：DSH/代理 15 项 + Workbench 60 项通过，0 失败；新增闭环测试覆盖模型快照、失败关闭、修改稿来源、授权作用域、生产 Tool handler、Domain Facade 和浏览器协议边界。
+- `productionToolRuntime.test.ts`：18/18 个现有 TypeScript production handler 在隔离 fixture 中合法调用返回 `ok=true`；`cargo test --locked -p novel-domain-gateway`：9/9 通过，覆盖 Gateway schema、scope、candidate-only 和 MCP error。
+- `domainFacade.test.ts`：6/6 定向 Domain Facade 真实浏览器回退链测试通过，覆盖 Project/Context/Memory/Conversation/Artifact/Writing 边界、跨作品负例、候选审阅授权、重复采用阻断和存储重启读回；该结果明确标记为 `browser_fallback`，不冒充 SQLite E2E。
+- `canonicalToolProjection.test.ts` 与 `domain-facade-sqlite.spec.ts`：四个 Canonical adapter 在 Browser fixture 与真实 Windows Tauri/SQLite E2E 中均通过公开 DTO、来源/hash、权限/scope、旧 alias 拒绝和只读快照验证；Canonical Agent manifest 仍为 0。
+- `npm run test:e2e -- --spec agent-production-closed-loop.spec.ts`：受控 Mock 下的真实 Windows Tauri + WebView2 + SQLite 五轮闭环与进程重启验收通过（2 作品、5 独立章节、10 TaskRun、10 ResultArtifact、5 次授权消费、5 个已采用章节）；机器证据记录于 `test-results/e2e/agent-production-closed-loop/closed-loop-evidence.json`。该结果不等同于外部 LLM 或 DSH 自主 Planner 验收。
+- `npm run lint:ci`：0 errors, 0 warnings。
+- `npm run build`：TypeScript 编译与 Vite 生产前端构建成功；本次未执行 `npm run tauri:build`，不声明 MSI/NSIS 安装包验收通过。
+- `cargo check --locked`（`src-tauri`）：通过，0 error（4 个 dead-code warning）。
+- `cargo test --locked`（`src-tauri`）：326 passed，0 failed，2 ignored。
+- `npm run test:docs-sync` 与 `npm run test:version-sync`：通过。
 
 ## v3.5.0 (2026-08-21) - 对话式创作工作台与审阅收敛
 

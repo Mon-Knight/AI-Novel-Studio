@@ -2676,7 +2676,7 @@ fn purge_conversation_workbench_facts(tx: &Transaction<'_>, novel_id: &str) -> R
     Ok(())
 }
 
-fn purge_project_in_tx(tx: &Transaction<'_>, novel_id: &str) -> Result<(), String> {
+pub(crate) fn purge_project_in_tx(tx: &Transaction<'_>, novel_id: &str) -> Result<(), String> {
     let backup = export_project_backup_in_conn(&*tx, novel_id)?;
     tx.execute_batch(
         "PRAGMA defer_foreign_keys = ON;

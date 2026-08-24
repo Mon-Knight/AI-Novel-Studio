@@ -176,3 +176,23 @@ pub fn consume_review_authorization(
         .map_err(|_| AppError::poisoned_lock())?;
     service::consume_review_authorization(&mut connection, input)
 }
+
+#[tauri::command]
+pub fn get_review_authorization(
+    authorization_id: String,
+) -> Result<Option<service::ReviewAuthorizationRecord>, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    service::get_review_authorization(&connection, &authorization_id)
+}
+
+#[tauri::command]
+pub fn adopt_review_authorized_draft(
+    input: service::AdoptReviewAuthorizedDraftInput,
+) -> Result<service::AdoptReviewAuthorizedDraftResult, AppError> {
+    let mut connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    service::adopt_review_authorized_draft(&mut connection, input)
+}

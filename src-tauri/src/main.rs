@@ -30,6 +30,7 @@ macro_rules! generate_app_handler {
             $($command,)*
             runtime::get_e2e_large_text_draft_state,
             runtime::corrupt_e2e_large_text_chunk,
+            runtime::get_e2e_agent_closed_loop_state,
         ]
     };
 }
@@ -230,6 +231,8 @@ fn main() {
             commands::create_novel,
             commands::update_novel,
             commands::delete_novel,
+            commands::delete_novel_cascade,
+            commands::repair_database,
             commands::get_world_settings,
             commands::save_world_setting,
             commands::get_rule_systems,
@@ -332,6 +335,8 @@ fn main() {
             commands::conversations::record_artifact_decision,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,
+            commands::conversations::get_review_authorization,
+            commands::conversations::adopt_review_authorized_draft,
             commands::recovery::get_workspace_recovery_snapshot,
             commands::recovery::upsert_workspace_recovery_snapshot,
             commands::recovery::delete_workspace_recovery_snapshot,

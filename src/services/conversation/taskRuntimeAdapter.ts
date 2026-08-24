@@ -1,4 +1,5 @@
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
+import { aiTaskRuntimeService } from '../ai-tasks/aiTaskRuntimeService';
 import { isTauri } from '../database/db';
 import { taskConversationService } from './taskConversationService';
 import { captureTaskModelSnapshot } from './taskModelSnapshot';
@@ -30,7 +31,14 @@ interface ActiveWorker {
   promise: Promise<TaskRun>;
 }
 
-const activeWorkers = new Map<string, ActiveWorker>();
+interface ChapterWriterPort {
+  generate: typeof workbenchChapterWriter.generate;
+}
+
+export interface TaskRuntimeAdapterDependencies {
+  chapterWriter?: ChapterWriterPort;
+}
+
 const WRITER_TOOLS = new Set(['generate_chapter', 'polish_chapter']);
 
 function summarizeArguments(args: Record<string, unknown>): Record<string, unknown> {
@@ -119,7 +127,6 @@ async function publishChapterCandidate(input: {
       artifactType: 'chapter_text',
       title,
       summary,
-      content: '',
       status: 'candidate',
       createdAt: new Date().toISOString(),
     });
@@ -141,9 +148,53 @@ async function publishChapterCandidate(input: {
   });
 }
 
+async function findLatestCandidateText(
+  conversationId: string,
+  novelId: string,
+  chapterId: string,
+): Promise<string | undefined> {
+  const conversation = await taskConversationService.get(conversationId);
+  if (!conversation) throw new Error('修改来源任务会话不存在。');
+  const cards = conversation.artifacts.filter((item) => item.artifactType === 'chapter_text');
+  const latestCard = cards[cards.length - 1];
+  if (!latestCard) return undefined;
+  if (!isTauri()) {
+    if (!latestCard.content) throw new Error('浏览器候选卡片缺少修改来源正文。');
+    try {
+      const payload = JSON.parse(latestCard.content) as {
+        data?: { novelId?: string; chapterId?: string; text?: string };
+      };
+      if (
+        payload.data?.novelId !== novelId ||
+        payload.data?.chapterId !== chapterId ||
+        !payload.data.text?.trim()
+      ) {
+        throw new Error('浏览器候选卡片与当前作品或章节不匹配。');
+      }
+      return payload.data.text;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('不匹配')) throw error;
+      throw new Error('浏览器候选卡片无法解析修改来源正文。');
+    }
+  }
+  if (!latestCard.artifactId) throw new Error('上一版章节候选缺少 ResultArtifact 引用。');
+  const artifact = await aiTaskRuntimeService.getArtifact(latestCard.artifactId);
+  if (
+    artifact.artifact.artifactType !== 'chapter_text' ||
+    artifact.artifact.sourceNovelId !== novelId ||
+    artifact.artifact.sourceChapterId !== chapterId ||
+    !['valid', 'valid_with_warnings'].includes(artifact.artifact.processingStatus)
+  ) {
+    throw new Error('上一版章节候选与当前作品或章节不匹配。');
+  }
+  if (!artifact.rawContent.trim()) throw new Error('上一版章节候选正文为空。');
+  return artifact.rawContent;
+}
+
 async function execute(
   input: TaskRuntimeInput,
   controller: AbortController,
+  chapterWriter: ChapterWriterPort,
   onEvent?: (event: TaskRuntimeEvent) => void,
 ): Promise<TaskRun> {
   const modelSnapshot = input.modelSnapshot ?? captureTaskModelSnapshot();
@@ -224,11 +275,23 @@ async function execute(
       let finalized = false;
       try {
         if (WRITER_TOOLS.has(step.name) && input.chapterId) {
-          const written = await workbenchChapterWriter.generate({
+          const isPolishOrRewrite =
+            step.name === 'polish_chapter' || /重新|重写|修改|优化|调整/i.test(input.goal);
+          const prevCandidate = isPolishOrRewrite
+            ? await findLatestCandidateText(input.conversationId, input.novelId, input.chapterId)
+            : undefined;
+          if (/重新|重写|修改|优化|调整/i.test(input.goal) && !prevCandidate) {
+            throw new Error('当前任务没有可供修改的上一版章节 ResultArtifact。');
+          }
+
+          const written = await chapterWriter.generate({
             novelId: input.novelId,
             chapterId: input.chapterId,
             goal: input.goal,
             mode: step.name === 'polish_chapter' ? 'polish' : 'generate',
+            previousCandidateText: prevCandidate,
+            memoryContext: evidence['search_memory'],
+            modelSnapshot: currentRun.modelSnapshot ?? run.modelSnapshot,
             signal: controller.signal,
           });
           args = {
@@ -322,32 +385,38 @@ async function execute(
   }
 }
 
-export const taskRuntimeAdapter = {
-  start(input: TaskRuntimeInput, onEvent?: (event: TaskRuntimeEvent) => void): Promise<TaskRun> {
-    const existing = activeWorkers.get(input.conversationId);
-    if (existing) {
-      return Promise.reject(new Error('当前任务已有活动运行'));
-    }
-    const controller = new AbortController();
-    const promise = execute(input, controller, onEvent).finally(() => {
-      activeWorkers.delete(input.conversationId);
-    });
-    activeWorkers.set(input.conversationId, { controller, promise });
-    return promise;
-  },
+export function createTaskRuntimeAdapter(deps: TaskRuntimeAdapterDependencies = {}) {
+  const chapterWriter = deps.chapterWriter ?? workbenchChapterWriter;
+  const activeWorkers = new Map<string, ActiveWorker>();
+  return {
+    start(input: TaskRuntimeInput, onEvent?: (event: TaskRuntimeEvent) => void): Promise<TaskRun> {
+      const existing = activeWorkers.get(input.conversationId);
+      if (existing) {
+        return Promise.reject(new Error('当前任务已有活动运行'));
+      }
+      const controller = new AbortController();
+      const promise = execute(input, controller, chapterWriter, onEvent).finally(() => {
+        activeWorkers.delete(input.conversationId);
+      });
+      activeWorkers.set(input.conversationId, { controller, promise });
+      return promise;
+    },
 
-  cancel(conversationId: string): boolean {
-    const worker = activeWorkers.get(conversationId);
-    if (!worker) return false;
-    worker.controller.abort();
-    return true;
-  },
+    cancel(conversationId: string): boolean {
+      const worker = activeWorkers.get(conversationId);
+      if (!worker) return false;
+      worker.controller.abort();
+      return true;
+    },
 
-  isRunning(conversationId: string): boolean {
-    return activeWorkers.has(conversationId);
-  },
+    isRunning(conversationId: string): boolean {
+      return activeWorkers.has(conversationId);
+    },
 
-  listRunningConversationIds(): string[] {
-    return [...activeWorkers.keys()];
-  },
-};
+    listRunningConversationIds(): string[] {
+      return [...activeWorkers.keys()];
+    },
+  };
+}
+
+export const taskRuntimeAdapter = createTaskRuntimeAdapter();

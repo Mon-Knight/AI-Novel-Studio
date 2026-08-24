@@ -1,5 +1,5 @@
 use crate::errors::AppError;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -249,6 +249,22 @@ pub struct ConsumeReviewAuthorizationInput {
     pub authorization_id: String,
     pub draft_id: String,
     pub consumed_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptReviewAuthorizedDraftInput {
+    pub authorization_id: String,
+    pub draft_id: String,
+    pub expected_draft_version: i64,
+    pub expected_content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptReviewAuthorizedDraftResult {
+    pub authorization: ReviewAuthorizationRecord,
+    pub adopted_draft: crate::domain::writing::ChapterDraftDto,
 }
 
 fn parse_json(raw: Option<String>) -> Option<Value> {
@@ -1112,6 +1128,150 @@ pub fn record_artifact_decision(
         .map_err(AppError::database)
 }
 
+fn validate_review_decision_scope(
+    connection: &Connection,
+    decision_id: &str,
+    artifact_id: &str,
+    novel_id: &str,
+    chapter_id: &str,
+) -> Result<ArtifactDecisionRecord, AppError> {
+    let decision = connection
+        .query_row(
+            "SELECT decision_id, artifact_id, artifact_hash, card_id, conversation_id, decision, idempotency_key, actor, target_type, target_id, base_revision, apply_transaction_id, conflict_code, created_at
+             FROM artifact_decisions WHERE decision_id=?1",
+            params![decision_id],
+            decision_from_row,
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| {
+            AppError::new(
+                "ARTIFACT_DECISION_NOT_FOUND",
+                "关联的产物决策不存在",
+                false,
+            )
+        })?;
+
+    if decision.decision != "confirm"
+        || decision.actor != "user"
+        || decision.target_type != "chapter"
+        || decision.target_id != chapter_id
+        || decision.artifact_id != artifact_id
+    {
+        return Err(AppError::new(
+            "REVIEW_DECISION_SCOPE_MISMATCH",
+            "产物决策不是当前章节的有效用户确认",
+            false,
+        ));
+    }
+
+    let (card_artifact_id, card_conversation_id, conversation_novel_id) = connection
+        .query_row(
+            "SELECT card.artifact_id, card.conversation_id, conversation.novel_id
+             FROM conversation_artifact_cards AS card
+             INNER JOIN task_conversations AS conversation
+                ON conversation.conversation_id = card.conversation_id
+             WHERE card.card_id=?1",
+            params![&decision.card_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| {
+            AppError::new(
+                "REVIEW_ARTIFACT_CARD_NOT_FOUND",
+                "确认决定关联的产物卡片不存在",
+                false,
+            )
+        })?;
+    if card_artifact_id.as_deref() != Some(artifact_id)
+        || card_conversation_id != decision.conversation_id
+        || conversation_novel_id != novel_id
+    {
+        return Err(AppError::new(
+            "REVIEW_ARTIFACT_CARD_SCOPE_MISMATCH",
+            "产物卡片、任务会话或作品归属不一致",
+            false,
+        ));
+    }
+
+    let artifact =
+        crate::repositories::artifact_repository::find_artifact(connection, artifact_id)?
+            .ok_or_else(|| {
+                AppError::new(
+                    "RESULT_ARTIFACT_NOT_FOUND",
+                    "确认决定关联的章节产物不存在",
+                    false,
+                )
+            })?;
+    if artifact.artifact_type != "chapter_text"
+        || !matches!(
+            artifact.processing_status.as_str(),
+            "valid" | "valid_with_warnings"
+        )
+        || artifact.source_novel_id != novel_id
+        || artifact.source_chapter_id.as_deref() != Some(chapter_id)
+        || artifact.content_hash != decision.artifact_hash
+    {
+        return Err(AppError::new(
+            "RESULT_ARTIFACT_SCOPE_MISMATCH",
+            "章节产物类型、状态、归属或内容哈希不一致",
+            false,
+        ));
+    }
+
+    let chapter_matches = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM chapters
+                WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL
+             )",
+            params![chapter_id, novel_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(AppError::database)?;
+    if !chapter_matches {
+        return Err(AppError::new(
+            "REVIEW_CHAPTER_SCOPE_MISMATCH",
+            "确认决定关联的章节不存在或不属于当前作品",
+            false,
+        ));
+    }
+
+    Ok(decision)
+}
+
+fn complete_review_conversation(
+    transaction: &Transaction<'_>,
+    decision_id: &str,
+    completed_at: &str,
+) -> Result<(), AppError> {
+    let updated = transaction
+        .execute(
+            "UPDATE task_conversations
+             SET status='completed', updated_at=?1
+             WHERE conversation_id=(
+                 SELECT conversation_id FROM artifact_decisions WHERE decision_id=?2
+             ) AND status <> 'archived'",
+            params![completed_at, decision_id],
+        )
+        .map_err(AppError::database)?;
+    if updated != 1 {
+        return Err(AppError::new(
+            "REVIEW_CONVERSATION_COMPLETE_FAILED",
+            "审阅采用成功但任务会话未能收敛为完成状态",
+            false,
+        ));
+    }
+    Ok(())
+}
+
 pub fn issue_review_authorization(
     connection: &mut Connection,
     authorization_id: &str,
@@ -1131,8 +1291,21 @@ pub fn issue_review_authorization(
         .optional()
         .map_err(AppError::database)?;
     if let Some(existing) = existing {
+        if existing.authorization_id != authorization_id
+            || existing.artifact_id != artifact_id
+            || existing.novel_id != novel_id
+            || existing.chapter_id != chapter_id
+        {
+            return Err(AppError::new(
+                "REVIEW_AUTHORIZATION_IDENTITY_CONFLICT",
+                "既有审阅授权与当前请求身份不一致",
+                false,
+            ));
+        }
+        validate_review_decision_scope(connection, decision_id, artifact_id, novel_id, chapter_id)?;
         return Ok(existing);
     }
+    validate_review_decision_scope(connection, decision_id, artifact_id, novel_id, chapter_id)?;
     connection
         .execute(
             "INSERT INTO review_authorizations (
@@ -1212,6 +1385,181 @@ pub fn consume_review_authorization(
         .map_err(AppError::database)
 }
 
+pub fn get_review_authorization(
+    connection: &Connection,
+    authorization_id: &str,
+) -> Result<Option<ReviewAuthorizationRecord>, AppError> {
+    let result = connection.query_row(
+        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+         FROM review_authorizations WHERE authorization_id=?1",
+        params![authorization_id],
+        authorization_from_row,
+    );
+    match result {
+        Ok(record) => Ok(Some(record)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(AppError::database(err)),
+    }
+}
+
+pub fn adopt_review_authorized_draft(
+    connection: &mut Connection,
+    input: AdoptReviewAuthorizedDraftInput,
+) -> Result<AdoptReviewAuthorizedDraftResult, AppError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = connection.transaction().map_err(AppError::database)?;
+
+    let authorization = match transaction.query_row(
+        "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+         FROM review_authorizations WHERE authorization_id=?1",
+        params![&input.authorization_id],
+        authorization_from_row,
+    ) {
+        Ok(auth) => auth,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(AppError::new(
+                "REVIEW_AUTHORIZATION_NOT_FOUND",
+                "审阅授权不存在",
+                false,
+            ));
+        }
+        Err(err) => return Err(AppError::database(err)),
+    };
+
+    validate_review_decision_scope(
+        &transaction,
+        &authorization.decision_id,
+        &authorization.artifact_id,
+        &authorization.novel_id,
+        &authorization.chapter_id,
+    )?;
+
+    let draft = crate::repositories::chapter_repository::get_draft_by_id_and_chapter_internal(
+        &transaction,
+        &input.draft_id,
+        &authorization.chapter_id,
+    )
+    .map_err(|_| {
+        AppError::new(
+            "DRAFT_NOT_FOUND",
+            "目标采用草稿不存在或不属于授权章节",
+            false,
+        )
+    })?;
+    if draft.novel_id != authorization.novel_id || draft.chapter_id != authorization.chapter_id {
+        return Err(AppError::new(
+            "DRAFT_SCOPE_MISMATCH",
+            "草稿所属作品或章节与审阅授权不一致",
+            false,
+        ));
+    }
+    if draft.version_no != input.expected_draft_version {
+        return Err(AppError::new(
+            "DRAFT_VERSION_CONFLICT",
+            "草稿版本冲突",
+            false,
+        ));
+    }
+    let full_content = if let Some(document_id) = draft.large_text_ref_id.as_deref() {
+        crate::large_text_save::read_large_text_document_internal(&transaction, document_id)
+            .map_err(|error| {
+                AppError::new(
+                    "DRAFT_CONTENT_UNAVAILABLE",
+                    format!("完整草稿正文无法读取：{error}"),
+                    false,
+                )
+            })?
+    } else {
+        draft.content.clone()
+    };
+    let actual_content_hash = crate::repositories::large_text_repository::sha256(&full_content);
+    if actual_content_hash != input.expected_content_hash {
+        return Err(AppError::new(
+            "DRAFT_CONTENT_HASH_MISMATCH",
+            "草稿完整正文哈希不匹配",
+            false,
+        ));
+    }
+
+    if authorization.status == "consumed" {
+        let adopted_pointer = transaction
+            .query_row(
+                "SELECT adopted_draft_id FROM chapters WHERE id=?1 AND deleted_at IS NULL",
+                params![&authorization.chapter_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(AppError::database)?
+            .flatten();
+        if authorization.consumed_by_draft_id.as_deref() == Some(input.draft_id.as_str())
+            && adopted_pointer.as_deref() == Some(input.draft_id.as_str())
+            && draft.is_adopted
+        {
+            complete_review_conversation(&transaction, &authorization.decision_id, &now)?;
+            transaction.commit().map_err(AppError::database)?;
+            return Ok(AdoptReviewAuthorizedDraftResult {
+                authorization,
+                adopted_draft: draft,
+            });
+        }
+        return Err(AppError::new(
+            "REVIEW_AUTHORIZATION_CONSUMED",
+            "审阅授权已经消费且采用状态与当前草稿不一致",
+            false,
+        ));
+    }
+    if authorization.status != "issued" {
+        return Err(AppError::new(
+            "REVIEW_AUTHORIZATION_INVALID_STATUS",
+            "审阅授权已失效",
+            false,
+        ));
+    }
+
+    let adopted_draft = crate::services::chapter_service::adopt_chapter_draft_in_transaction(
+        &transaction,
+        &input.draft_id,
+        &authorization.chapter_id,
+        &now,
+    )
+    .map_err(|error| AppError::new("AUTHORIZED_DRAFT_ADOPT_FAILED", error, false))?;
+
+    let auth_updated = transaction
+        .execute(
+            "UPDATE review_authorizations
+             SET status='consumed', consumed_at=?1, consumed_by_draft_id=?2
+             WHERE authorization_id=?3 AND status='issued'",
+            params![&now, &input.draft_id, &input.authorization_id],
+        )
+        .map_err(AppError::database)?;
+
+    if auth_updated != 1 {
+        return Err(AppError::new(
+            "REVIEW_AUTHORIZATION_CONSUME_FAILED",
+            "审阅授权消费失败",
+            false,
+        ));
+    }
+
+    complete_review_conversation(&transaction, &authorization.decision_id, &now)?;
+
+    let updated_auth = transaction
+        .query_row(
+            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+             FROM review_authorizations WHERE authorization_id=?1",
+            params![&input.authorization_id],
+            authorization_from_row,
+        )
+        .map_err(AppError::database)?;
+
+    transaction.commit().map_err(AppError::database)?;
+
+    Ok(AdoptReviewAuthorizedDraftResult {
+        authorization: updated_auth,
+        adopted_draft,
+    })
+}
+
 pub fn get_bundle(
     connection: &Connection,
     id: &str,
@@ -1259,6 +1607,70 @@ mod tests {
             [],
         ).expect("novel");
         connection
+    }
+
+    fn insert_valid_chapter_artifact(
+        connection: &Connection,
+        artifact_id: &str,
+        novel_id: &str,
+        chapter_id: &str,
+        content: &str,
+    ) -> String {
+        let content_hash = crate::repositories::large_text_repository::sha256(content);
+        let task_id = format!("task-{artifact_id}");
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys=OFF;
+                 DROP TRIGGER IF EXISTS trg_result_artifacts_validate_insert;",
+            )
+            .expect("disable fixture foreign keys");
+        connection
+            .execute(
+                "INSERT INTO ai_tasks (
+                task_id, task_type, novel_id, chapter_id, scope_type, status,
+                input_snapshot_id, context_snapshot_id, constraint_snapshot_id,
+                trace_id, operation_id, request_hash_version, request_hash,
+                expected_artifact_type, expected_artifact_schema_version, created_at, updated_at
+             ) VALUES (?1, 'chapter_generate', ?2, ?3, 'chapter', 'completed', ?4, ?5, ?6,
+                ?7, ?8, 1, ?9, 'chapter_text', 1, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')",
+                params![
+                    &task_id,
+                    novel_id,
+                    chapter_id,
+                    format!("input-{artifact_id}"),
+                    format!("context-{artifact_id}"),
+                    format!("constraint-{artifact_id}"),
+                    format!("trace-{artifact_id}"),
+                    format!("operation-{artifact_id}"),
+                    "0".repeat(64),
+                ],
+            )
+            .expect("insert artifact task fixture");
+        connection
+            .execute(
+                "INSERT INTO result_artifacts (
+                artifact_id, task_id, attempt_id, source_input_snapshot_id, artifact_type,
+                schema_version, raw_content_ref_id, source_novel_id, source_chapter_id,
+                content_hash, content_length, processing_status, created_at
+             ) VALUES (?1, ?2, ?3, ?4, 'chapter_text', 1, ?5, ?6, ?7, ?8, ?9, 'valid',
+                '2026-08-21T00:00:00Z')",
+                params![
+                    artifact_id,
+                    &task_id,
+                    format!("attempt-{artifact_id}"),
+                    format!("input-{artifact_id}"),
+                    format!("raw-{artifact_id}"),
+                    novel_id,
+                    chapter_id,
+                    &content_hash,
+                    content.chars().count() as i64,
+                ],
+            )
+            .expect("insert result artifact fixture");
+        connection
+            .execute_batch("PRAGMA foreign_keys=ON;")
+            .expect("enable fixture foreign keys");
+        content_hash
     }
 
     #[test]
@@ -1468,6 +1880,18 @@ mod tests {
     #[test]
     fn artifact_decision_is_idempotent_and_authorization_consumes_once() {
         let mut connection = connection();
+        connection.execute(
+            "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+             VALUES ('chapter-1', 'novel-conversation-test', '第一章', 1, 'drafted', 0, '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')",
+            [],
+        ).expect("chapter");
+        let artifact_hash = insert_valid_chapter_artifact(
+            &connection,
+            "artifact-decision-hash",
+            "novel-conversation-test",
+            "chapter-1",
+            "候选正文",
+        );
         let conversation = create_conversation(
             &mut connection,
             CreateConversationInput {
@@ -1505,8 +1929,8 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO conversation_artifact_cards
-                    (card_id, conversation_id, turn_id, run_id, artifact_type, title, summary, content, status, created_at)
-                 VALUES ('card-decision', ?1, ?2, ?3, 'chapter_text', '候选', '摘要', '正文', 'candidate', '2026-08-21T00:00:03Z')",
+                    (card_id, conversation_id, turn_id, run_id, artifact_id, artifact_type, title, summary, content, status, created_at)
+                 VALUES ('card-decision', ?1, ?2, ?3, 'artifact-decision-hash', 'chapter_text', '候选', '摘要', '', 'candidate', '2026-08-21T00:00:03Z')",
                 params![conversation.conversation_id, run.turn_id, run.run_id],
             )
             .expect("card");
@@ -1516,7 +1940,7 @@ mod tests {
             RecordArtifactDecisionInput {
                 decision_id: "decision-1".to_string(),
                 artifact_id: "artifact-decision-hash".to_string(),
-                artifact_hash: "hash-1".to_string(),
+                artifact_hash: artifact_hash.clone(),
                 card_id: card_id.clone(),
                 conversation_id: conversation.conversation_id.clone(),
                 decision: "confirm".to_string(),
@@ -1536,7 +1960,7 @@ mod tests {
             RecordArtifactDecisionInput {
                 decision_id: "decision-2".to_string(),
                 artifact_id: "artifact-decision-hash".to_string(),
-                artifact_hash: "hash-1".to_string(),
+                artifact_hash,
                 card_id: card_id,
                 conversation_id: conversation.conversation_id.clone(),
                 decision: "confirm".to_string(),
@@ -1583,5 +2007,296 @@ mod tests {
         .expect("consume replay");
         assert_eq!(replayed.status, "consumed");
         assert_eq!(replayed.consumed_by_draft_id.as_deref(), Some("draft-1"));
+    }
+
+    #[test]
+    fn test_adopt_review_authorized_draft_atomic_transaction() {
+        let mut connection = connection();
+
+        // 1. 初始化作品、章节与草稿
+        connection.execute(
+            "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+             VALUES ('chapter-100', 'novel-conversation-test', '第一章', 1, 'drafted', 500, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+            [],
+        ).expect("insert chapter");
+
+        connection.execute(
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, content, version_no, is_adopted, word_count, created_at, updated_at)
+             VALUES ('draft-100', 'novel-conversation-test', 'chapter-100', '第一章测试正文内容', 1, 0, 500, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+            [],
+        ).expect("insert draft 100");
+
+        connection.execute(
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, content, version_no, is_adopted, word_count, created_at, updated_at)
+             VALUES ('draft-101', 'novel-conversation-test', 'chapter-100', '第二版候选正文内容', 2, 0, 600, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+            [],
+        ).expect("insert draft 101");
+        let artifact_hash = insert_valid_chapter_artifact(
+            &connection,
+            "art-100",
+            "novel-conversation-test",
+            "chapter-100",
+            "章节候选正文",
+        );
+
+        // 2. 初始化会话、决策与授权
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conv-adopt-test".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "采用测试会话".to_string(),
+                default_model: None,
+                created_at: "2026-08-21T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+
+        connection.execute(
+            "INSERT INTO conversation_artifact_cards
+                (card_id, conversation_id, turn_id, run_id, artifact_id, artifact_type, title, summary, content, status, created_at)
+             VALUES ('card-100', 'conv-adopt-test', NULL, NULL, 'art-100', 'chapter_text', '候选', '摘要', '', 'candidate', '2026-08-21T00:00:01Z')",
+            [],
+        ).expect("insert card");
+
+        record_artifact_decision(
+            &mut connection,
+            RecordArtifactDecisionInput {
+                decision_id: "dec-adopt-100".to_string(),
+                artifact_id: "art-100".to_string(),
+                artifact_hash: artifact_hash.clone(),
+                card_id: "card-100".to_string(),
+                conversation_id: "conv-adopt-test".to_string(),
+                decision: "confirm".to_string(),
+                idempotency_key: "card-100:confirm".to_string(),
+                actor: "user".to_string(),
+                target_type: "chapter".to_string(),
+                target_id: "chapter-100".to_string(),
+                base_revision: None,
+                apply_transaction_id: None,
+                conflict_code: None,
+                created_at: "2026-08-21T00:00:01Z".to_string(),
+            },
+        )
+        .expect("record decision");
+
+        let auth = issue_review_authorization(
+            &mut connection,
+            "auth-adopt-100",
+            "dec-adopt-100",
+            "art-100",
+            "novel-conversation-test",
+            "chapter-100",
+            "2026-08-21T00:00:02Z",
+        )
+        .expect("issue auth");
+
+        assert_eq!(auth.status, "issued");
+
+        // 3. 校验失败路径必须无副作用
+        let missing_authorization = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "missing-auth".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        );
+        assert_eq!(
+            missing_authorization.unwrap_err().code,
+            "REVIEW_AUTHORIZATION_NOT_FOUND"
+        );
+
+        let err_draft = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "non-existent-draft".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256("正文"),
+            },
+        );
+        assert_eq!(err_draft.unwrap_err().code, "DRAFT_NOT_FOUND");
+
+        let version_conflict = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 2,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        );
+        assert_eq!(version_conflict.unwrap_err().code, "DRAFT_VERSION_CONFLICT");
+
+        let hash_conflict = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: "f".repeat(64),
+            },
+        );
+        assert_eq!(
+            hash_conflict.unwrap_err().code,
+            "DRAFT_CONTENT_HASH_MISMATCH"
+        );
+
+        // 验证失败后无任何副作用（授权仍为 issued，草稿仍为未采用）
+        let auth_check = get_review_authorization(&connection, "auth-adopt-100")
+            .expect("get auth")
+            .expect("found");
+        assert_eq!(auth_check.status, "issued");
+
+        connection
+            .execute_batch(
+                "CREATE TRIGGER test_block_authorization_consume
+                 BEFORE UPDATE OF status ON review_authorizations
+                 WHEN NEW.status = 'consumed'
+                 BEGIN SELECT RAISE(ABORT, 'test consume failure'); END;",
+            )
+            .expect("install consume failure trigger");
+        let consume_failure = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        );
+        assert!(consume_failure.is_err());
+        let rolled_back_auth = get_review_authorization(&connection, "auth-adopt-100")
+            .expect("get rolled back auth")
+            .expect("rolled back auth present");
+        assert_eq!(rolled_back_auth.status, "issued");
+        let rolled_back_draft =
+            crate::repositories::chapter_repository::get_draft_by_id_and_chapter_internal(
+                &connection,
+                "draft-100",
+                "chapter-100",
+            )
+            .expect("rolled back draft");
+        assert!(!rolled_back_draft.is_adopted);
+        let rolled_back_pointer: Option<String> = connection
+            .query_row(
+                "SELECT adopted_draft_id FROM chapters WHERE id='chapter-100'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("rolled back chapter pointer");
+        assert_eq!(rolled_back_pointer, None);
+        let rolled_back_conversation_status: String = connection
+            .query_row(
+                "SELECT status FROM task_conversations WHERE conversation_id='conv-adopt-test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("rolled back conversation status");
+        assert_eq!(rolled_back_conversation_status, "waiting_user");
+        connection
+            .execute_batch("DROP TRIGGER test_block_authorization_consume;")
+            .expect("remove consume failure trigger");
+
+        // 4. 正常采用事务执行
+        let result = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        )
+        .expect("adopt success");
+
+        assert_eq!(result.authorization.status, "consumed");
+        assert_eq!(
+            result.authorization.consumed_by_draft_id.as_deref(),
+            Some("draft-100")
+        );
+        assert!(result.adopted_draft.is_adopted);
+        assert_eq!(result.adopted_draft.id, "draft-100");
+
+        // 5. 校验 SQLite 数据库实际状态
+        let adopted_draft_in_db =
+            crate::repositories::chapter_repository::get_draft_by_id_and_chapter_internal(
+                &connection,
+                "draft-100",
+                "chapter-100",
+            )
+            .expect("get draft in db");
+        assert!(adopted_draft_in_db.is_adopted);
+
+        let chapter_in_db: Option<String> = connection
+            .query_row(
+                "SELECT adopted_draft_id FROM chapters WHERE id='chapter-100'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query chapter");
+        assert_eq!(chapter_in_db.as_deref(), Some("draft-100"));
+        let completed_conversation_status: String = connection
+            .query_row(
+                "SELECT status FROM task_conversations WHERE conversation_id='conv-adopt-test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("completed conversation status");
+        assert_eq!(completed_conversation_status, "completed");
+
+        // 6. 重放幂等性
+        let replay = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        )
+        .expect("replay success");
+        assert_eq!(replay.authorization.status, "consumed");
+        assert_eq!(replay.adopted_draft.id, "draft-100");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM task_conversations WHERE conversation_id='conv-adopt-test'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("replayed conversation status"),
+            "completed"
+        );
+
+        // 7. 已被其他草稿消费报错
+        let err_consumed = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-101".to_string(),
+                expected_draft_version: 2,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第二版候选正文内容",
+                ),
+            },
+        );
+        assert!(err_consumed.is_err());
+        assert_eq!(
+            err_consumed.unwrap_err().code,
+            "REVIEW_AUTHORIZATION_CONSUMED"
+        );
     }
 }

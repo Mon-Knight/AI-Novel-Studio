@@ -109,7 +109,10 @@ export function isLoopbackAiBaseUrl(baseUrl: string): boolean {
 }
 
 export function isPrivateOrLoopbackHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase().trim();
+  const host = hostname
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase()
+    .trim();
   if (
     host === 'localhost' ||
     host.endsWith('.local') ||
@@ -363,7 +366,7 @@ export class RealAiClient implements AiClient {
       governedOptions.requestId,
     );
 
-    if (import.meta.env.DEV) {
+    if (import.meta.env?.DEV) {
       const lastUserMessage = getLastUserMessage(request);
       appLogger.info(`[RealAiClient] messages count=${request.messages.length}`);
       appLogger.info(

@@ -12,6 +12,7 @@ import {
   type E2eNetworkAttempts,
   type E2eNetworkGuard,
 } from './e2eNetworkGuard';
+import { isE2eBridgeCommandAllowed } from './e2eBridgePolicy';
 
 type E2eLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -23,6 +24,8 @@ interface E2eConsoleEntry {
 
 interface E2eBridge {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+  /** E2E-only direct exercise of the real Domain Facade + SQLite chain. */
+  runDomainFacadeSqliteSmoke: (options: { allowMutation: true }) => Promise<unknown>;
   getDiagnostics: () => Promise<unknown>;
   getConsoleLogs: () => E2eConsoleEntry[];
   getUnhandledErrors: () => string[];
@@ -34,44 +37,8 @@ interface E2eBridge {
   clearDiagnostics: () => void;
 }
 
-const E2E_ENABLED = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
 const MAX_ENTRIES = 200;
-const SAFE_COMMANDS = new Set([
-  'get_e2e_diagnostics',
-  'get_all_novels',
-  'get_novel_by_id',
-  'get_chapter_by_id',
-  'get_chapters_by_novel_id',
-  'get_drafts_by_chapter_id',
-  'count_drafts_by_chapter_id',
-  'get_adopted_draft_by_chapter_id',
-  'get_chapter_summary',
-  'get_chapter_summaries_by_novel',
-  'get_context_records',
-  'get_ai_task_records_by_chapter_id',
-  'list_ai_tasks',
-  'get_ai_task',
-  'list_agent_plans_by_chapter',
-  'get_agent_plan',
-  'create_agent_plan',
-  'acquire_agent_plan_lease',
-  'claim_agent_plan_step',
-  'get_result_artifact',
-  'prepare_placement_proposal',
-  'get_placement_proposal',
-  'apply_placement_plan',
-  'get_world_settings',
-  'list_faction_assets',
-  'get_quality_check_issues',
-  'list_quality_check_reports',
-  'get_quality_check_report_snapshot',
-  'get_generation_jobs_by_chapter_id',
-  'get_generation_step_results',
-  'get_e2e_novel_commit_state',
-  'get_e2e_large_text_draft_state',
-  'corrupt_e2e_large_text_chunk',
-]);
-
 let consoleEntries: E2eConsoleEntry[] = [];
 let unhandledErrors: string[] = [];
 let installed = false;
@@ -116,10 +83,33 @@ function installCapture(): void {
 function createBridge(): E2eBridge {
   return {
     async invoke(command, args) {
-      if (!SAFE_COMMANDS.has(command)) {
+      if (!isE2eBridgeCommandAllowed(command)) {
         throw new Error(`E2E bridge command is not allowlisted: ${command}`);
       }
       return invoke(command, args);
+    },
+    async runDomainFacadeSqliteSmoke(options) {
+      // Keep the probe branch compile-time gated so normal production builds
+      // do not ship the E2E fixture module as a reachable chunk.
+      if (import.meta.env.VITE_AI_NOVEL_STUDIO_E2E !== '1') {
+        throw new Error('Domain Facade E2E probe is disabled.');
+      }
+      if (!options || options.allowMutation !== true) {
+        throw new Error('Domain Facade E2E probe requires explicit allowMutation=true.');
+      }
+      const diagnostics = await invoke('get_e2e_diagnostics');
+      if (
+        !diagnostics ||
+        typeof diagnostics !== 'object' ||
+        (diagnostics as { enabled?: unknown }).enabled !== true ||
+        (diagnostics as { schemaReady?: unknown }).schemaReady !== true ||
+        (diagnostics as { integrityCheck?: unknown }).integrityCheck !== 'ok' ||
+        (diagnostics as { networkBlocked?: unknown }).networkBlocked !== true
+      ) {
+        throw new Error('Domain Facade E2E probe requires healthy isolated desktop diagnostics.');
+      }
+      const { runDomainFacadeSqliteSmoke } = await import('./e2eDomainFacadeProbe');
+      return runDomainFacadeSqliteSmoke();
     },
     async getDiagnostics() {
       const backend = await invoke('get_e2e_diagnostics');

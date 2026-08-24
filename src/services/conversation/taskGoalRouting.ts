@@ -43,6 +43,15 @@ export function isConversationalGoal(goal: string): boolean {
 function matchCandidateTool(goal: string): CandidateToolChoice | undefined {
   const text = goal.toLowerCase();
   const generating = /生成|候选|扩展|建议|generate|expand|suggest/.test(text);
+  if (
+    /正文|第[\d一二三四五六七八九十百千万]+章/.test(text) ||
+    (generating && /章节|下一章/.test(text))
+  ) {
+    if (/润色|修改|改写|polish|rewrite/.test(text)) {
+      return { name: 'polish_chapter', artifactType: 'chapter_text' };
+    }
+    return { name: 'generate_chapter', artifactType: 'chapter_text' };
+  }
   if (/大纲|outline/.test(text)) return { name: 'generate_outline', artifactType: 'outline' };
   if (/风格分析|style analysis/.test(text)) {
     return { name: 'check_quality', artifactType: 'quality_report' };

@@ -116,6 +116,15 @@ export interface ReviewAuthorization {
   consumedByDraftId?: string;
 }
 
+export interface ReviewCandidateDocument {
+  authorizationId: string;
+  artifactId: string;
+  content: string;
+  contentHash: string;
+  chapterId: string;
+  novelId: string;
+}
+
 export interface ConversationArtifactCard {
   cardId: string;
   conversationId: string;
@@ -125,7 +134,7 @@ export interface ConversationArtifactCard {
   artifactType: ResultArtifactType | 'generic';
   title: string;
   summary: string;
-  content: string;
+  content?: string;
   status: 'candidate' | 'confirmed' | 'rejected';
   createdAt: string;
   latestDecision?: ArtifactDecision;

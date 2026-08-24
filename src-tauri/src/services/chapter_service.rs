@@ -3,7 +3,7 @@ use crate::domain::writing::{
     CHAPTER_STATUSES,
 };
 use crate::repositories::chapter_repository;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 pub fn validate_chapter_update_input(input: &UpdateChapterInput) -> Result<(), String> {
     if let Some(status) = input.status.as_deref() {
@@ -286,18 +286,14 @@ fn expire_chapter_context_rows(
     Ok(())
 }
 
-pub fn adopt_chapter_draft(
-    conn: &mut Connection,
+pub(crate) fn adopt_chapter_draft_in_transaction(
+    conn: &Transaction<'_>,
     draft_id: &str,
     chapter_id: &str,
+    now: &str,
 ) -> Result<ChapterDraftDto, String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let transaction = conn
-        .transaction()
-        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
-
-    let word_count = validate_live_draft_target(&transaction, draft_id, chapter_id)?;
-    let (chapter_novel_id, previous_adopted_draft_id) = transaction
+    let word_count = validate_live_draft_target(conn, draft_id, chapter_id)?;
+    let (chapter_novel_id, previous_adopted_draft_id) = conn
         .query_row(
             "SELECT novel_id, adopted_draft_id FROM chapters
              WHERE id = ?1 AND deleted_at IS NULL",
@@ -307,16 +303,15 @@ pub fn adopt_chapter_draft(
         .map_err(|e| format!("adopt_previous_draft_lookup_failed: {}", e))?;
     let adopted_draft_changed = previous_adopted_draft_id.as_deref() != Some(draft_id);
 
-    transaction
-        .execute(
-            "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
-            params![&now, chapter_id],
-        )
-        .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
+    conn.execute(
+        "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
+        params![now, chapter_id],
+    )
+    .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
 
-    let adopted_rows = transaction.execute(
+    let adopted_rows = conn.execute(
         "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3 AND EXISTS (SELECT 1 FROM chapters AS c WHERE c.id = chapter_drafts.chapter_id AND c.novel_id = chapter_drafts.novel_id AND c.deleted_at IS NULL)",
-        params![&now, draft_id, chapter_id],
+        params![now, draft_id, chapter_id],
     ).map_err(|e| format!("adopt_target_update_failed: {}", e))?;
     if adopted_rows != 1 {
         return Err(format!(
@@ -325,9 +320,9 @@ pub fn adopt_chapter_draft(
         ));
     }
 
-    let chapter_rows = transaction.execute(
+    let chapter_rows = conn.execute(
         "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3 WHERE id = ?4 AND deleted_at IS NULL AND novel_id = (SELECT novel_id FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?4)",
-        params![draft_id, word_count, &now, chapter_id],
+        params![draft_id, word_count, now, chapter_id],
     ).map_err(|e| format!("adopt_chapter_update_failed: {}", e))?;
     if chapter_rows != 1 {
         return Err(format!(
@@ -337,23 +332,20 @@ pub fn adopt_chapter_draft(
     }
 
     if adopted_draft_changed {
-        expire_chapter_context_rows(&transaction, chapter_id, &now)?;
+        expire_chapter_context_rows(conn, chapter_id, now)?;
         crate::services::memory_service::invalidate_for_adopted_draft_change(
-            &transaction,
+            conn,
             &chapter_novel_id,
             chapter_id,
             draft_id,
-            &now,
+            now,
         )
         .map_err(|e| format!("adopt_memory_invalidation_failed: {}", e))?;
     }
 
-    let adopted = chapter_repository::get_draft_by_id_and_chapter_internal(
-        &transaction,
-        draft_id,
-        chapter_id,
-    )
-    .map_err(|e| format!("adopt_readback_failed: {}", e))?;
+    let adopted =
+        chapter_repository::get_draft_by_id_and_chapter_internal(conn, draft_id, chapter_id)
+            .map_err(|e| format!("adopt_readback_failed: {}", e))?;
     if !adopted.is_adopted {
         return Err(format!(
             "adopt_readback_conflict: draft '{}' is not marked adopted",
@@ -361,6 +353,19 @@ pub fn adopt_chapter_draft(
         ));
     }
 
+    Ok(adopted)
+}
+
+pub fn adopt_chapter_draft(
+    conn: &mut Connection,
+    draft_id: &str,
+    chapter_id: &str,
+) -> Result<ChapterDraftDto, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
+    let adopted = adopt_chapter_draft_in_transaction(&transaction, draft_id, chapter_id, &now)?;
     transaction
         .commit()
         .map_err(|e| format!("adopt_transaction_commit_failed: {}", e))?;

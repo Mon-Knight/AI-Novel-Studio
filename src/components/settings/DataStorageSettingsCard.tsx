@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { novelRepository } from '../../services/database/novelRepository';
+import { getDbMode } from '../../services/database/db';
 import { confirmInfo } from '../../utils/nativeDialog';
 import { describeUnknownError } from '../../utils/errorMessage';
 
@@ -11,7 +12,10 @@ export default function DataStorageSettingsCard() {
     if (
       !(await confirmInfo({
         title: '数据修复',
-        message: '将尝试修复异常作品数据，修复前会自动备份。是否继续？',
+        message:
+          getDbMode() === 'tauri'
+            ? '将对 SQLite 作品基础字段执行可回滚事务并检查完整性。是否继续？'
+            : '将修复浏览器开发数据，并在修复前创建 LocalStorage 备份。是否继续？',
       }))
     ) {
       return;
@@ -20,7 +24,17 @@ export default function DataStorageSettingsCard() {
     setRepairing(true);
     try {
       const result = await novelRepository.repairData();
-      setRepairMsg(`✅ 修复完成：${result.before} 条 → ${result.after} 条（已自动备份原数据）`);
+      if (result.storage === 'sqlite') {
+        setRepairMsg(
+          result.integrityOk
+            ? `✅ SQLite 检查完成：${result.repairedCount} 条记录已规范化，完整性正常`
+            : `⚠️ SQLite 检查发现问题：${result.integrityMessage}，外键问题 ${result.foreignKeyViolations ?? 0} 条`,
+        );
+      } else {
+        setRepairMsg(
+          `✅ 浏览器数据修复完成：${result.before} 条 → ${result.after} 条（已自动备份原数据）`,
+        );
+      }
       setTimeout(() => setRepairMsg(''), 5000);
     } catch (e: unknown) {
       setRepairMsg(`❌ 修复失败：${describeUnknownError(e, '未知错误')}`);
@@ -30,7 +44,11 @@ export default function DataStorageSettingsCard() {
   };
 
   return (
-    <div className="detail-card" data-testid="settings-data-storage-card" style={{ marginBottom: 16 }}>
+    <div
+      className="detail-card"
+      data-testid="settings-data-storage-card"
+      style={{ marginBottom: 16 }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: 18 }}>💾</span>
         <span style={{ fontSize: 16, fontWeight: 600 }}>数据与存储架构</span>
@@ -42,7 +60,14 @@ export default function DataStorageSettingsCard() {
         <div>
           <strong>数据根目录：</strong> <code>%LOCALAPPDATA%\AI Novel Studio\</code>
         </div>
-        <div style={{ marginTop: 10, padding: 10, background: 'var(--color-bg-hover, #f8fafc)', borderRadius: 6 }}>
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            background: 'var(--color-bg-hover, #f8fafc)',
+            borderRadius: 6,
+          }}
+        >
           <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-text-primary)' }}>
             📦 备份与安全恢复机制
           </div>
@@ -71,14 +96,17 @@ export default function DataStorageSettingsCard() {
               style={{
                 marginTop: 6,
                 fontSize: 12,
-                color: repairMsg.includes('✅') ? 'var(--color-success, #16a34a)' : 'var(--color-error, #dc2626)',
+                color: repairMsg.includes('✅')
+                  ? 'var(--color-success, #16a34a)'
+                  : 'var(--color-error, #dc2626)',
               }}
             >
               {repairMsg}
             </div>
           )}
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            自动修复缺失字段、异常时间戳与损坏记录，修复前系统将自动生成安全镜像副本。
+            桌面端规范化 SQLite 作品基础字段并执行完整性检查；浏览器开发模式会先生成 LocalStorage
+            安全镜像。
           </div>
         </div>
       </div>

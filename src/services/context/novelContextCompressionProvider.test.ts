@@ -144,7 +144,7 @@ test('workbench compression candidate publishes a card and applies through the d
     structuredPayloadJson: candidate,
   });
   assert.ok(card.artifactId);
-  assert.match(card.content, /ans.novel-context.extractive-v1/);
+  assert.match(card.content ?? '', /ans.novel-context.extractive-v1/);
   const applied = await artifactDecisionService.applyStructured({
     conversationId: conversation.conversationId,
     cardId: card.cardId,

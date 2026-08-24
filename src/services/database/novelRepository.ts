@@ -9,7 +9,7 @@ import type {
   ProtagonistProfile,
   UpdateNovelInput,
 } from '../../types/novel';
-import { dbCall, lsGet, lsSet, generateId, nowISO } from './db';
+import { dbCall, getDbMode, lsGet, lsSet, generateId, nowISO } from './db';
 import { mockNovels } from '../../features/novels/mockNovels';
 import {
   getDefaultDualProtagonistRelation,
@@ -28,6 +28,10 @@ export interface NovelRepairResult {
   repairedCount: number;
   skippedCount: number;
   backupKey: string;
+  storage?: 'sqlite' | 'localstorage';
+  integrityOk?: boolean;
+  integrityMessage?: string;
+  foreignKeyViolations?: number;
 }
 
 export interface NovelRepairSummary {
@@ -147,6 +151,10 @@ export const novelRepository = {
   },
 
   async repairData(): Promise<NovelRepairResult> {
+    if (getDbMode() === 'tauri') {
+      return dbCall<NovelRepairResult>('repair_database');
+    }
+
     const raw = lsGet<unknown>(NOVELS_KEY);
     const before = Array.isArray(raw) ? raw.length : 0;
     const backupKey = createBackupKey();
@@ -157,6 +165,7 @@ export const novelRepository = {
     setRepairSummary(report, before);
 
     return {
+      storage: 'localstorage',
       before,
       after: report.items.length,
       repairedCount: report.repairedCount,
@@ -244,6 +253,13 @@ export const novelRepository = {
   },
 
   async deleteCascade(novelId: string): Promise<void> {
+    if (getDbMode() === 'tauri') {
+      await dbCall<void>('delete_novel_cascade', { id: novelId });
+      const remaining = await this.getById(novelId);
+      if (remaining) throw new Error('作品删除后仍可读取，请检查 SQLite 级联删除链路');
+      return;
+    }
+
     const purge = (key: string) => {
       try {
         const data = lsGet<unknown>(key);

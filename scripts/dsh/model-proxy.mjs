@@ -16,6 +16,9 @@ const UPSTREAM = process.env.PROXY_UPSTREAM ?? 'https://api.deepseek.com';
 const UPSTREAM_KEY = process.env.PROXY_UPSTREAM_KEY ?? process.env.DEEPSEEK_API_KEY;
 const POLICY_URL = process.env.PROXY_POLICY_URL;
 const REQUEST_PREFIX = process.env.PROXY_REQUEST_PREFIX ?? 'dsh';
+// The catalog is only a test/probe projection. It never changes the model
+// request and it deliberately exposes no credentials or upstream details.
+const PROXY_MODEL = process.env.PROXY_MODEL ?? 'deepseek-v4-flash';
 const configuredTimeoutMs = Number(process.env.PROXY_REQUEST_TIMEOUT_MS ?? 120_000);
 const REQUEST_TIMEOUT_MS =
   Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs >= 1_000
@@ -78,12 +81,25 @@ function parseUsage(raw) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url === '/health') {
+  const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+  const pathname = requestUrl.pathname;
+  if (req.method === 'GET' && pathname === '/health') {
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end('ok');
     return;
   }
-  if (req.method !== 'POST' || req.url !== '/chat/completions') {
+  if (req.method === 'GET' && (pathname === '/v1/models' || pathname === '/models')) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ object: 'list', data: [{ id: PROXY_MODEL, object: 'model' }] }));
+    return;
+  }
+  if (
+    req.method !== 'POST' ||
+    (pathname !== '/chat/completions' &&
+      pathname !== '/v1/chat/completions' &&
+      pathname !== '/responses' &&
+      pathname !== '/v1/responses')
+  ) {
     res.writeHead(404);
     res.end('not found');
     return;
@@ -137,7 +153,18 @@ const server = http.createServer(async (req, res) => {
     }
   });
   try {
-    const upstream = await fetch(UPSTREAM + '/chat/completions', {
+    const upstreamBase = new URL(UPSTREAM);
+    const upstreamPath = pathname.replace(/^\/v1(?=\/)/, '');
+    const basePath = upstreamBase.pathname.replace(/\/+$/, '');
+    // Callers may provide either an origin or an OpenAI-compatible /v1 base.
+    // Avoid producing /v1/v1 when the downstream already includes the prefix.
+    const targetPath =
+      basePath.endsWith('/v1') && upstreamPath.startsWith('/v1/')
+        ? upstreamPath.slice(3)
+        : basePath + upstreamPath;
+    upstreamBase.pathname = targetPath || '/';
+    upstreamBase.search = requestUrl.search;
+    const upstream = await fetch(upstreamBase, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -214,5 +241,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('[model-proxy] listening on 127.0.0.1:' + PORT + ' upstream=' + UPSTREAM);
+  const actualPort = server.address()?.port ?? PORT;
+  console.log('[model-proxy] listening on 127.0.0.1:' + actualPort + ' upstream=' + UPSTREAM);
 });

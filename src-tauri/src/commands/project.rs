@@ -32,6 +32,18 @@ pub fn update_novel(id: String, input: UpdateNovelInput) -> Result<NovelDto, Str
 
 #[tauri::command]
 pub fn delete_novel(id: String) -> Result<(), String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    project_service::delete_novel(&conn, &id)
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    project_service::delete_novel(&mut conn, &id)
+}
+
+#[tauri::command]
+pub fn delete_novel_cascade(id: String) -> Result<(), String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    project_service::delete_novel_cascade(&mut conn, &id)
+}
+
+#[tauri::command]
+pub fn repair_database() -> Result<crate::domain::project::DatabaseRepairResult, String> {
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    project_service::repair_database(&mut conn)
 }

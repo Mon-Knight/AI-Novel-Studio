@@ -112,6 +112,9 @@ interface WritingWorkspaceViewProps {
   leaveGuardDialog: ReactNode;
   reviewLocked?: boolean;
   onUnlockReview?: () => void;
+  reviewCandidate?: import('../../types/conversation').ReviewCandidateDocument | null;
+  reviewAuthorizationId?: string;
+  reviewArtifactId?: string;
   onBeforeAdopt?: (draftId: string) => Promise<void>;
 }
 
@@ -135,6 +138,9 @@ export default function WritingWorkspaceView({
   leaveGuardDialog,
   reviewLocked = false,
   onUnlockReview,
+  reviewCandidate,
+  reviewAuthorizationId,
+  reviewArtifactId,
   onBeforeAdopt,
 }: WritingWorkspaceViewProps) {
   const {
@@ -350,6 +356,9 @@ export default function WritingWorkspaceView({
                 onBackToChapters={() => navigate(`/novels/${novelId}`)}
                 reviewLocked={reviewLocked}
                 onUnlockReview={onUnlockReview}
+                reviewCandidate={reviewCandidate ?? chapterLoader.reviewCandidate}
+                reviewAuthorizationId={reviewAuthorizationId}
+                reviewArtifactId={reviewArtifactId}
                 onBeforeAdopt={onBeforeAdopt}
               />
             </PanelErrorBoundary>

@@ -30,11 +30,39 @@ export type MockGateMethod =
 
 interface BridgeShape {
   invoke: (command: string, args?: Record<string, unknown>) => unknown;
+  runDomainFacadeSqliteSmoke?: (options: { allowMutation: true }) => unknown;
   getDiagnostics?: () => unknown;
   getConsoleLogs?: () => unknown;
   getUnhandledErrors?: () => unknown;
   getNetworkAttempts?: () => unknown;
   clearDiagnostics?: () => unknown;
+}
+
+export async function runDomainFacadeSqliteSmoke<T>(): Promise<T> {
+  const response = await browser.executeAsync((done) => {
+    const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: BridgeShape })
+      .__AI_NOVEL_STUDIO_E2E__;
+    if (!bridge?.runDomainFacadeSqliteSmoke) {
+      return done({ ok: false, error: 'Domain Facade SQLite E2E probe is unavailable' });
+    }
+    let settled = false;
+    const finish = (value: { ok: boolean; value?: unknown; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      done(value);
+    };
+    const timer = window.setTimeout(
+      () => finish({ ok: false, error: 'timeout running Domain Facade SQLite E2E probe' }),
+      120000,
+    );
+    Promise.resolve(bridge.runDomainFacadeSqliteSmoke({ allowMutation: true }))
+      .then((value) => finish({ ok: true, value }))
+      .catch((error) => finish({ ok: false, error: String(error) }));
+  });
+  const result = response as { ok: boolean; value?: T; error?: string };
+  if (!result.ok) throw new Error(result.error ?? 'Domain Facade SQLite E2E probe failed');
+  return result.value as T;
 }
 
 let fixtureSequence = 0;
