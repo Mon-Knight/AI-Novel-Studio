@@ -48,12 +48,14 @@ function ChapterWindowListComponent({
   return (
     <div ref={containerRef}>
       {window.items.map((chapter) => (
-        <div
+        <button
+          type="button"
           key={chapter.id}
           data-testid="chapter-item"
           data-chapter-id={chapter.id}
           data-chapter-title={chapter.title}
           data-active={activeChapterId === chapter.id ? 'true' : 'false'}
+          aria-current={activeChapterId === chapter.id ? 'page' : undefined}
           className={`tree-chapter ${activeChapterId === chapter.id ? 'active' : ''}`}
           onClick={() => onSelectChapter(chapter.id)}
         >
@@ -71,7 +73,7 @@ function ChapterWindowListComponent({
               {ChapterStatusLabels[chapter.status]}
             </span>
           )}
-        </div>
+        </button>
       ))}
       {(window.hasPrevious || window.hasNext) && (
         <nav className="tree-window-controls" aria-label="章节窗口导航">

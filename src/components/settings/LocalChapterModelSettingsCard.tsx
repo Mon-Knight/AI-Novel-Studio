@@ -1,5 +1,8 @@
 import type { AiSettings, LocalChapterModelSettings } from '../../types/ai';
-import { getDefaultLocalChapterModelSettings } from '../../services/ai/aiSettingsStore';
+import {
+  getDefaultLocalChapterModelSettings,
+  resolveSessionModelApiKey,
+} from '../../services/ai/aiSettingsStore';
 import type { LocalChapterModelHealthResult } from '../../services/ai/localChapterModelHealthService';
 
 interface LocalChapterModelSettingsCardProps {
@@ -26,8 +29,32 @@ function LocalChapterModelSettingsCard({
   onCheckHealth,
 }: LocalChapterModelSettingsCardProps) {
   const local = settings.localChapterModel ?? getDefaultLocalChapterModelSettings();
-  const update = (patch: Partial<LocalChapterModelSettings>) =>
-    onChange({ localChapterModel: { ...local, ...patch } });
+  const update = (patch: Partial<LocalChapterModelSettings>) => {
+    const updated = { ...local, ...patch };
+    const identityChanged =
+      updated.providerId !== local.providerId ||
+      updated.baseUrl !== local.baseUrl ||
+      updated.modelName !== local.modelName;
+    if (
+      identityChanged &&
+      local.apiKey ===
+        resolveSessionModelApiKey({
+          scope: 'local_chapter_model',
+          providerId: local.providerId,
+          baseUrl: local.baseUrl,
+          modelId: local.modelName,
+        })
+    ) {
+      updated.apiKey =
+        resolveSessionModelApiKey({
+          scope: 'local_chapter_model',
+          providerId: updated.providerId,
+          baseUrl: updated.baseUrl,
+          modelId: updated.modelName,
+        }) || 'local-no-key-required';
+    }
+    onChange({ localChapterModel: updated });
+  };
 
   return (
     <section className="detail-card settings-card" aria-labelledby="local-chapter-model-title">

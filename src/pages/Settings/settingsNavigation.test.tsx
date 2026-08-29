@@ -108,3 +108,63 @@ test('SettingsPage: 桌面级左侧分类导航与面板动态切换', async () 
     assert.ok(screen.getByTestId('settings-about-card'));
   });
 });
+
+test('SettingsPage keeps session API keys fixed to their exact model identity', async () => {
+  localStorage.removeItem('ai_novel_studio_ai_settings');
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-ai_models'));
+  });
+  const mockMode = screen.getByRole('checkbox', { name: /Mock 模式/ });
+  await act(async () => {
+    fireEvent.click(mockMode);
+  });
+
+  const baseUrl = screen.getByPlaceholderText(/api\.deepseek\.com\/v1/) as HTMLInputElement;
+  const apiKey = screen.getByPlaceholderText('sk-...') as HTMLInputElement;
+  const modelName = screen.getByPlaceholderText(
+    '例如：deepseek-chat / deepseek-reasoner',
+  ) as HTMLInputElement;
+  const saveProvider = screen.getAllByRole('button', { name: /保存设置/ })[0];
+  assert.ok(saveProvider);
+
+  await act(async () => {
+    fireEvent.change(baseUrl, { target: { value: 'https://session-provider.invalid/v1' } });
+    fireEvent.change(modelName, { target: { value: 'session-model-a' } });
+    fireEvent.change(apiKey, { target: { value: 'session-key-model-a' } });
+    fireEvent.click(saveProvider);
+  });
+  await waitFor(() => assert.equal(apiKey.value, 'session-key-model-a'));
+
+  const persistedA = localStorage.getItem('ai_novel_studio_ai_settings') ?? '';
+  assert.equal(persistedA.includes('session-key-model-a'), false);
+  assert.equal(persistedA.includes('apiKey'), false);
+
+  await act(async () => {
+    fireEvent.change(modelName, { target: { value: 'session-model-b' } });
+  });
+  assert.equal(apiKey.value, '');
+
+  await act(async () => {
+    fireEvent.change(apiKey, { target: { value: 'session-key-model-b' } });
+    fireEvent.click(saveProvider);
+  });
+  await waitFor(() => assert.equal(apiKey.value, 'session-key-model-b'));
+
+  const persistedB = localStorage.getItem('ai_novel_studio_ai_settings') ?? '';
+  assert.equal(persistedB.includes('session-key-model-a'), false);
+  assert.equal(persistedB.includes('session-key-model-b'), false);
+  assert.equal(persistedB.includes('apiKey'), false);
+
+  await act(async () => {
+    fireEvent.change(modelName, { target: { value: 'session-model-a' } });
+  });
+  assert.equal(apiKey.value, 'session-key-model-a');
+});

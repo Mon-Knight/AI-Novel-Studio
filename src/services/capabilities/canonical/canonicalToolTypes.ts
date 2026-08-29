@@ -57,10 +57,31 @@ export interface CanonicalToolDescriptor {
   evidence: CanonicalToolEvidence;
 }
 
+/**
+ * Cross-runtime contract stored in the shared JSON artifact.  Runtime-only
+ * binding data and audit evidence deliberately stay in TypeScript.
+ */
+export interface CanonicalPortableToolDescriptor {
+  id: CanonicalToolId;
+  version: '1';
+  name: CanonicalToolId;
+  description: string;
+  inputSchema: ToolJsonSchema;
+  outputSchema: ToolJsonSchema;
+  scope: CapabilityScope;
+  permissions: readonly string[];
+  sideEffect: CapabilitySideEffect;
+  confirmationPolicy: CapabilityConfirmation;
+  timeoutMs: number;
+  exposure: CapabilityExposure;
+  projectionState: CanonicalProjectionState;
+  health: CapabilityHealth;
+}
+
 /** Public shape reserved for a future model-facing manifest. */
 export type CanonicalModelToolDescriptor = Omit<
-  CanonicalToolDescriptor,
-  'projectionState' | 'evidence' | 'exposure' | 'executor' | 'facade'
+  CanonicalPortableToolDescriptor,
+  'projectionState' | 'exposure' | 'health'
 >;
 
 /**
@@ -72,6 +93,25 @@ export interface CanonicalToolInvocationContext {
   chapterId?: string;
   grantedPermissions?: readonly string[];
   signal?: AbortSignal;
+}
+
+/** Versioned call envelope pinned to the manifest the caller actually saw. */
+export interface CanonicalToolCall {
+  name: string;
+  version: string;
+  argumentsJson: unknown;
+  expectedProjectionHash: string;
+}
+
+/**
+ * Host-owned authorization for one Canonical execution.  The public runtime
+ * always applies Agent exposure; a separate deep-import validation helper is
+ * reserved for tests and the E2E-only desktop probe.
+ */
+export interface CanonicalToolExecutionContext extends CanonicalToolInvocationContext {
+  invocationId: string;
+  allowedTools: readonly string[];
+  grantedPermissions: readonly string[];
 }
 
 export interface CanonicalToolBinding {
@@ -88,13 +128,16 @@ export interface CanonicalToolBinding {
 export interface CanonicalToolManifest {
   contractVersion: 'canonical_tool_manifest_v1';
   projectionVersion: '1';
+  canonicalization: 'ans_canonical_json_v1';
   projectionHash: string;
-  tools: readonly CanonicalToolDescriptor[];
+  modelVisibleToolIdentities: readonly string[];
+  tools: readonly CanonicalPortableToolDescriptor[];
 }
 
 export interface CanonicalModelToolManifest {
   contractVersion: 'canonical_tool_manifest_v1';
   projectionVersion: '1';
+  canonicalization: 'ans_canonical_json_v1';
   projectionHash: string;
   tools: readonly CanonicalModelToolDescriptor[];
 }

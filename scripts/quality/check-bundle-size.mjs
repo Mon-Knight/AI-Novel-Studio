@@ -17,6 +17,11 @@ export const REQUIRED_VENDOR_CHUNKS = Object.freeze([
   'vendor-tauri',
 ]);
 
+export const PRODUCTION_FORBIDDEN_MARKERS = Object.freeze([
+  'runDomainFacadeSqliteSmoke',
+  'e2eDomainFacadeProbe',
+]);
+
 const DEFAULT_DIST_DIR = 'dist';
 const MANIFEST_RELATIVE_PATH = '.vite/manifest.json';
 const EXPECTED_ENTRY_KEY = 'index.html';
@@ -117,6 +122,14 @@ async function inspectJavaScriptFile(distDirectory, relativeFile) {
   const content = await readFile(absolutePath);
   if (content.byteLength !== fileMetadata.size) {
     throw new BundleSizeError(`Bundle file changed while it was being measured: ${absolutePath}`);
+  }
+
+  for (const marker of PRODUCTION_FORBIDDEN_MARKERS) {
+    if (content.includes(marker)) {
+      throw new BundleSizeError(
+        `Production bundle ${relativeFile} contains forbidden E2E marker: ${marker}`,
+      );
+    }
   }
 
   return {

@@ -40,7 +40,15 @@ function valueType(value: unknown): string {
   return typeof value;
 }
 
-function validateSchema(value: unknown, schema: ToolJsonSchema, path = '$'): string[] {
+function hasOwn(record: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+export function validateToolJsonSchema(
+  value: unknown,
+  schema: ToolJsonSchema,
+  path = '$',
+): string[] {
   const errors: string[] = [];
   if (schema.enum && !schema.enum.some((candidate) => Object.is(candidate, value))) {
     errors.push(`${path} 不在允许的枚举值中`);
@@ -82,22 +90,23 @@ function validateSchema(value: unknown, schema: ToolJsonSchema, path = '$'): str
     }
     if (schema.items) {
       value.forEach((item, index) => {
-        errors.push(...validateSchema(item, schema.items!, `${path}[${index}]`));
+        errors.push(...validateToolJsonSchema(item, schema.items!, `${path}[${index}]`));
       });
     }
   }
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
     for (const required of schema.required ?? []) {
-      if (!(required in record)) errors.push(`${path}.${required} 为必填字段`);
+      if (!hasOwn(record, required)) errors.push(`${path}.${required} 为必填字段`);
     }
     for (const [key, child] of Object.entries(record)) {
-      const childSchema = schema.properties?.[key];
+      const childSchema =
+        schema.properties && hasOwn(schema.properties, key) ? schema.properties[key] : undefined;
       if (!childSchema) {
         if (schema.additionalProperties === false) errors.push(`${path}.${key} 是未知字段`);
         continue;
       }
-      errors.push(...validateSchema(child, childSchema, `${path}.${key}`));
+      errors.push(...validateToolJsonSchema(child, childSchema, `${path}.${key}`));
     }
   }
   return errors;
@@ -219,7 +228,7 @@ export class ToolRegistry {
         missingPermissions,
       });
     }
-    const argumentErrors = validateSchema(argumentsJson, exact.descriptor.inputSchema);
+    const argumentErrors = validateToolJsonSchema(argumentsJson, exact.descriptor.inputSchema);
     if (
       argumentErrors.length > 0 ||
       argumentsJson === null ||
@@ -306,7 +315,7 @@ export class ToolRegistry {
           `工具 ${identity} 输出不是可持久化 JSON。`,
         );
       }
-      const outputErrors = validateSchema(jsonResult, exact.descriptor.outputSchema);
+      const outputErrors = validateToolJsonSchema(jsonResult, exact.descriptor.outputSchema);
       if (outputErrors.length > 0) {
         throw new ToolRegistryError('TOOL_OUTPUT_INVALID', `工具 ${identity} 输出不符合 schema。`, {
           errors: outputErrors.slice(0, 20),
@@ -328,4 +337,7 @@ export class ToolRegistry {
   }
 }
 
-export const toolRegistryPrivate = { validateSchema, descriptorIdentity };
+export const toolRegistryPrivate = {
+  validateSchema: validateToolJsonSchema,
+  descriptorIdentity,
+};

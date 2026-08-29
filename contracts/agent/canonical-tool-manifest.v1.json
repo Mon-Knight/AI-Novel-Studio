@@ -1,0 +1,408 @@
+{
+  "contractVersion": "canonical_tool_manifest_v1",
+  "projectionVersion": "1",
+  "canonicalization": "ans_canonical_json_v1",
+  "modelVisibleToolIdentities": [],
+  "tools": [
+    {
+      "id": "context.read",
+      "name": "context.read",
+      "version": "1",
+      "description": "读取已采用正文、章节总结和上下文记录的可审计快照。",
+      "inputSchema": {
+        "type": "object",
+        "required": ["novelId", "chapterId"],
+        "additionalProperties": false,
+        "properties": {
+          "novelId": {
+            "type": "string",
+            "description": "目标作品 ID",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "chapterId": {
+            "type": "string",
+            "description": "目标章节 ID",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "可选的记忆检索词"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["ok", "source", "storageMode", "warnings"],
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_SCOPE",
+                  "INVALID_ARGUMENT",
+                  "PERMISSION_DENIED",
+                  "SCOPE_MISMATCH",
+                  "NOT_FOUND",
+                  "INTEGRITY_ERROR",
+                  "CONFIRMATION_REQUIRED",
+                  "MODEL_SNAPSHOT_REQUIRED",
+                  "CANDIDATE_ONLY",
+                  "UPSTREAM_FAILURE",
+                  "CONFLICT"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": ["sqlite", "localstorage", "runtime", "artifact"]
+          },
+          "storageMode": {
+            "type": "string",
+            "enum": ["sqlite", "browser_fallback", "runtime", "artifact"]
+          },
+          "warnings": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "revision": {},
+          "contentHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
+      },
+      "scope": "chapter",
+      "permissions": ["novel.read", "chapter.read"],
+      "sideEffect": "none",
+      "confirmationPolicy": "never",
+      "timeoutMs": 30000,
+      "exposure": "catalog_only",
+      "projectionState": "catalog_only",
+      "health": "partial"
+    },
+    {
+      "id": "memory.search",
+      "name": "memory.search",
+      "version": "1",
+      "description": "在当前作品已采用事实中检索带来源的记忆片段。",
+      "inputSchema": {
+        "type": "object",
+        "required": ["novelId", "query"],
+        "additionalProperties": false,
+        "properties": {
+          "novelId": {
+            "type": "string",
+            "description": "目标作品 ID",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["ok", "source", "storageMode", "warnings"],
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_SCOPE",
+                  "INVALID_ARGUMENT",
+                  "PERMISSION_DENIED",
+                  "SCOPE_MISMATCH",
+                  "NOT_FOUND",
+                  "INTEGRITY_ERROR",
+                  "CONFIRMATION_REQUIRED",
+                  "MODEL_SNAPSHOT_REQUIRED",
+                  "CANDIDATE_ONLY",
+                  "UPSTREAM_FAILURE",
+                  "CONFLICT"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": ["sqlite", "localstorage", "runtime", "artifact"]
+          },
+          "storageMode": {
+            "type": "string",
+            "enum": ["sqlite", "browser_fallback", "runtime", "artifact"]
+          },
+          "warnings": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "revision": {},
+          "contentHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
+      },
+      "scope": "novel",
+      "permissions": ["novel.read"],
+      "sideEffect": "none",
+      "confirmationPolicy": "never",
+      "timeoutMs": 20000,
+      "exposure": "catalog_only",
+      "projectionState": "catalog_only",
+      "health": "partial"
+    },
+    {
+      "id": "novel.read",
+      "name": "novel.read",
+      "version": "1",
+      "description": "读取当前作品及其可供创作使用的基础设定摘要。",
+      "inputSchema": {
+        "type": "object",
+        "required": ["novelId"],
+        "additionalProperties": false,
+        "properties": {
+          "novelId": {
+            "type": "string",
+            "description": "目标作品 ID",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["ok", "source", "storageMode", "warnings"],
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_SCOPE",
+                  "INVALID_ARGUMENT",
+                  "PERMISSION_DENIED",
+                  "SCOPE_MISMATCH",
+                  "NOT_FOUND",
+                  "INTEGRITY_ERROR",
+                  "CONFIRMATION_REQUIRED",
+                  "MODEL_SNAPSHOT_REQUIRED",
+                  "CANDIDATE_ONLY",
+                  "UPSTREAM_FAILURE",
+                  "CONFLICT"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": ["sqlite", "localstorage", "runtime", "artifact"]
+          },
+          "storageMode": {
+            "type": "string",
+            "enum": ["sqlite", "browser_fallback", "runtime", "artifact"]
+          },
+          "warnings": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "revision": {},
+          "contentHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
+      },
+      "scope": "novel",
+      "permissions": ["novel.read"],
+      "sideEffect": "none",
+      "confirmationPolicy": "never",
+      "timeoutMs": 20000,
+      "exposure": "catalog_only",
+      "projectionState": "catalog_only",
+      "health": "partial"
+    },
+    {
+      "id": "structure.read",
+      "name": "structure.read",
+      "version": "1",
+      "description": "读取卷、章节和已激活的大纲版本及其修订信息。",
+      "inputSchema": {
+        "type": "object",
+        "required": ["novelId", "chapterId"],
+        "additionalProperties": false,
+        "properties": {
+          "novelId": {
+            "type": "string",
+            "description": "目标作品 ID",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "chapterId": {
+            "type": "string",
+            "description": "目标章节 ID",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["ok", "source", "storageMode", "warnings"],
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_SCOPE",
+                  "INVALID_ARGUMENT",
+                  "PERMISSION_DENIED",
+                  "SCOPE_MISMATCH",
+                  "NOT_FOUND",
+                  "INTEGRITY_ERROR",
+                  "CONFIRMATION_REQUIRED",
+                  "MODEL_SNAPSHOT_REQUIRED",
+                  "CANDIDATE_ONLY",
+                  "UPSTREAM_FAILURE",
+                  "CONFLICT"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": ["sqlite", "localstorage", "runtime", "artifact"]
+          },
+          "storageMode": {
+            "type": "string",
+            "enum": ["sqlite", "browser_fallback", "runtime", "artifact"]
+          },
+          "warnings": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "revision": {},
+          "contentHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        }
+      },
+      "scope": "chapter",
+      "permissions": ["novel.read", "chapter.read"],
+      "sideEffect": "none",
+      "confirmationPolicy": "never",
+      "timeoutMs": 15000,
+      "exposure": "catalog_only",
+      "projectionState": "catalog_only",
+      "health": "partial"
+    }
+  ],
+  "projectionHash": "36023c1b7e573dddc8b741c6a383e47ff72a7ead67d43b2f0159fd32c43d140c"
+}

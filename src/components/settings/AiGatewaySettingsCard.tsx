@@ -1,6 +1,9 @@
 import { useState, useRef } from 'react';
 import type { AiSettings, GatewayModelConfig } from '../../types/ai';
-import { getDefaultGatewaySettings } from '../../services/ai/aiSettingsStore';
+import {
+  getDefaultGatewaySettings,
+  resolveSessionModelApiKey,
+} from '../../services/ai/aiSettingsStore';
 import { validateGatewayConfig } from '../../services/ai/realAiClient';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
@@ -34,6 +37,27 @@ export default function AiGatewaySettingsCard({
 
   const update = (patch: Partial<GatewayModelConfig>) => {
     const updated = { ...gateway, ...patch };
+    const identityChanged =
+      updated.providerId !== gateway.providerId ||
+      updated.baseUrl !== gateway.baseUrl ||
+      updated.modelName !== gateway.modelName;
+    if (
+      identityChanged &&
+      gateway.apiKey ===
+        resolveSessionModelApiKey({
+          scope: 'gateway',
+          providerId: gateway.providerId,
+          baseUrl: gateway.baseUrl,
+          modelId: gateway.modelName,
+        })
+    ) {
+      updated.apiKey = resolveSessionModelApiKey({
+        scope: 'gateway',
+        providerId: updated.providerId,
+        baseUrl: updated.baseUrl,
+        modelId: updated.modelName,
+      });
+    }
     onChange({ gateway: updated, remoteWriter: updated });
   };
 
@@ -233,9 +257,7 @@ export default function AiGatewaySettingsCard({
             min={1}
             max={32000}
             value={gateway.maxTokens ?? 4000}
-            onChange={(event) =>
-              update({ maxTokens: optionalInteger(event.target.value) ?? 4000 })
-            }
+            onChange={(event) => update({ maxTokens: optionalInteger(event.target.value) ?? 4000 })}
           />
         </label>
 

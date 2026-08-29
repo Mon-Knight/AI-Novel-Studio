@@ -2,6 +2,7 @@
  * AI Novel Studio - 统一返回按钮组件
  */
 import { useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 
 interface BackButtonProps {
   label?: string;
@@ -28,7 +29,8 @@ function BackButton({ label = '返回', to, fallbackTo = '/', onBeforeBack }: Ba
 
   return (
     <button className="back-button" onClick={handleClick} title={label}>
-      ← <span style={{ marginLeft: 4 }}>{label}</span>
+      <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+      <span>{label}</span>
     </button>
   );
 }

@@ -1,4 +1,8 @@
-import type { ResultArtifactType } from './result-artifact';
+import type {
+  ArtifactProcessingStatus,
+  ArtifactValidationIssue,
+  ResultArtifactType,
+} from './result-artifact';
 
 export type ConversationStatus =
   'idle' | 'running' | 'waiting_user' | 'failed' | 'completed' | 'archived';
@@ -10,6 +14,19 @@ export type TaskRunStatus =
 
 export type ToolCallStatus =
   'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
+
+export interface ModelToolCallingAttestation {
+  protocol: 'ans_model_tool_attestation_v1';
+  provider: string;
+  model: string;
+  verified: true;
+  cached: boolean;
+  verifiedAt: string;
+  expiresAt: string;
+  cacheTtlMs: number;
+  finishKind: 'tool-calls';
+  observedToolCalls: 1;
+}
 
 export interface TaskModelSnapshot {
   providerId: string;
@@ -28,6 +45,7 @@ export interface TaskModelSnapshot {
     dshSourceCommit?: string;
     bundle: string;
     profile: string;
+    toolCallingAttestation?: ModelToolCallingAttestation;
   };
   capturedAt: string;
 }
@@ -58,6 +76,8 @@ export interface TaskRun {
   runId: string;
   conversationId: string;
   turnId: string;
+  /** Immutable chapter scope captured when this run is created. */
+  chapterId?: string;
   status: TaskRunStatus;
   modelSnapshot: TaskModelSnapshot;
   workerId: string;
@@ -125,6 +145,17 @@ export interface ReviewCandidateDocument {
   novelId: string;
 }
 
+export interface ConversationArtifactEvidence {
+  sourceNovelId: string;
+  sourceChapterId?: string;
+  sourceDraftId?: string;
+  sourceDraftVersion?: number;
+  baseContentHash?: string;
+  derivationType?: string;
+  processingStatus: ArtifactProcessingStatus;
+  validationIssues: ArtifactValidationIssue[];
+}
+
 export interface ConversationArtifactCard {
   cardId: string;
   conversationId: string;
@@ -135,10 +166,12 @@ export interface ConversationArtifactCard {
   title: string;
   summary: string;
   content?: string;
+  contentLoadError?: string;
   status: 'candidate' | 'confirmed' | 'rejected';
   createdAt: string;
   latestDecision?: ArtifactDecision;
   reviewAuthorization?: ReviewAuthorization;
+  artifactEvidence?: ConversationArtifactEvidence;
 }
 
 export interface TaskConversationBundle {
@@ -149,4 +182,9 @@ export interface TaskConversationBundle {
   artifacts: ConversationArtifactCard[];
   decisions?: ArtifactDecision[];
   authorizations?: ReviewAuthorization[];
+}
+
+export interface InitializedTaskConversation {
+  conversation: TaskConversation;
+  turn: ConversationTurn;
 }

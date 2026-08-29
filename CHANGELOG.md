@@ -1,8 +1,10 @@
 # AI Novel Studio - CHANGELOG
 
-> 当前版本：v3.6.0。融合对话式创作工作台核心链路闭环、双模型创作运行时、三层小说长程记忆架构与创作智能体底座。
+> 当前版本：v3.6.0。本节记录对话式创作工作台、能力资产化和实验运行时的本地发布候选；机器可读版本号不代表已经发布。
 
 ## v3.6.0 (2026-08-23) - 智能体创作平台与长篇小说记忆层
+
+发布状态：当前 v3.6.0 改动尚未 commit，尚未创建 PR、合并到 `main`、创建 `v3.6.0` tag 或发布 GitHub Release；下列验证记录仅是本地候选证据，不表示远端发布流程已完成。
 
 ### 新增
 
@@ -10,16 +12,50 @@
 - **草稿采用与长程记忆自动沉淀**：章节草稿采用（Adopt）后自动进行正文切片，并持久化写入 SQLite `memory_documents`（浏览器环境写入本地持久化存储），使后续长篇创作 `search_memory` 能真实召回已采用的正文与实体上下文。
 - **产物决定与迭代修改增强**：产物卡片「要求修改」操作与输入框深度联动，自动带上修改提示前缀与上下文；左侧各二级功能模块（资产中心、风格方案、模板中心、AI任务记录）统一导航回创作工作台（`/`）。
 - **模型无关 Creative Runtime 与双模型架构（Phase 5.1）**：`RouteDecision` 纯函数按 Role 智能选择云端导演或本地作家；本地作家生命周期（AVAILABLE / TRAINING / TESTING / FAILED / DISABLED）为进程内状态；`chapter_scene_generate` 在本地训练、失败、不健康或超限时自动使用云端代写**同一 Beat 契约**；新增无本地模型的正式云端正文模式与外部模型网关（AI Model Gateway）。
-- **三层长篇小说记忆层（Novel Memory Layer Phase 1-3）**：建立长期记忆（世界规则/人物底层/核心伏笔）、中期记忆（本卷主线/角色动态状态/阵营态势）、短期工作记忆（分镜 POV/活跃角色/即时冲突）三层记忆架构；提供场景记忆召回与装配引擎及状态增量演进与不可变版本快照引擎（`MemoryVersionSnapshot`）。
+- **三层 Novel Memory 实验算法（Phase 1-3）**：提供长期/中期/短期片段的场景召回、角色/世界状态增量演进和 `MemoryVersionSnapshot` A/B 评测能力；这些片段、状态与快照当前由 TypeScript 进程内 `Map` 管理，不具备跨重启持久化语义。它与章节采用后写入 SQLite `memory_documents` 的正式持久化记忆链是两套边界，不能互相替代或合并宣称。
 - **小说作家 5 维评测体系（Novel Writer Benchmark Evaluation Phase 4）**：建立包含人物一致性、世界观、情节连贯性、伏笔留存与文风一致性的 5 大维度评测算法；支持无 Memory 的 Baseline 与启用 Novel Memory Layer 的 Enhanced 模式 A/B 对照实验。
 - **章节版本演进与全链路创作溯源系统（Chapter Revision & Provenance System）**：提供 Git 式章节多版本管理；自动沉淀生成模型、提供商、路由原因、提示词快照与记忆版本；内置轻量 Diff 比对引擎与安全历史回滚。
 - **提示词模板注册与多模型动态适配引擎（Prompt Template Registry）**：声明式管理分镜、Beat推进、专家评审、记忆演化抽取与质量诊断等 5 大官方基准模板；按目标模型家族（Qwen / DeepSeek / Claude / OpenAI-Compatible）动态注入专属指令前缀与格式约束。
 - **创作反馈与微调数据闭环采集系统（Human Feedback & SFT/DPO Dataset Collector）**：在作家修改、审阅及采用时自动沉淀高质量数据对；支持标准 JSONL、ShareGPT 与 OpenAI Chat 导出 SFT 与 DPO 数据集。
-- **创作智能体底座与自主对话工作台（Creative Agent Harness & AgentChatWorkspace）**：将硬编码流程升级为 ReAct 循环与任务规划器，封装 9 大领域工具；支持 5 阶段自主循环（Observe -> Plan -> Act -> Evaluate -> Retry）、决策质量追踪（Agent Decision Trace）、正文质量审查（Quality Review）与工具经验沉淀。
+- **Creative Agent Harness（非生产 / legacy 实验底座）**：保留 9 个实验领域工具、ReAct 五阶段循环（Observe -> Plan -> Act -> Evaluate -> Retry）、Decision Trace、Quality Review 与工具经验算法，用于测试和能力研究；它未接入当前生产 Workbench。生产章节路径仍由 `taskGoalRouting` 与 `workbenchChapterWriter` 确定性编排，Canonical 模型可见数量保持为 0，真实 Main Agent 尚未放行。
+- **Phase 1A-D 共享 Canonical Manifest 与宿主门禁**：新增 `contracts/agent/canonical-tool-manifest.v1.json`，固定 `context.read / memory.search / novel.read / structure.read` 四个 portable contract；TypeScript、Rust 与 DSH/Node 独立验证同一 canonical SHA-256、identity、排序和 exposure，TypeScript 另做递归 schema/Catalog/binding 漂移门禁，Windows SQLite E2E 比对 TS/Rust attestation。Canonical 执行入口新增 exact version、projection hash、固定入口 exposure、单次 allowlist、权限、输入/输出 schema、timeout/cancellation 与 adapter 二次 scope 复验；公开入口固定按 Agent 可见集合失败关闭，四项仍为 `catalog_only + partial`，模型可见集合保持为空，未替换 legacy Workbench/DSH Tool 链。
 - **桌面级分类设置中心（Desktop Settings Center Architecture）**：重构为「左侧分类导航 + 右侧精细配置」架构，支持常规、模型、网关、存储及诊断分类看板。
 
 ### 修复
 
+- **短提示长篇写作收敛与连续性门禁**：Writer 字数控制补齐 80% 硬下限，偏短候选会在不新增剧情事实、场景、角色、线索或尾部续写的前提下进行最多 3 次完整扩写，偏长候选继续执行有界压缩，最终仍越界则失败关闭。存在前章采用稿、ContextRecord、Memory、人物状态或地点资产时，生成快照追加仅供 Writer 使用的连续性账本，冻结 `storyNow / deadlineAt` 及地点、物件、伤势和系统状态；章节切换不再允许把“次日/明天”重新起算，内部规则不进入公开摘要或正文。
+- **启动通知与运行中草稿体验**：启动恢复和旧上下文迁移通知改为去重串行队列，同时就绪时先显示恢复结果，后到通知不会抢占当前弹窗；工作台壳和 Composer 始终先挂载。任务运行期间输入框继续可编辑并按任务保存下一条草稿，停止按钮仍是唯一可执行动作，不会并发发送或改变冻结模型。
+- **章节自动总结协议恢复**：保留 DSH 必需上下文读取必须早于候选工具一个 step 的严格门禁；章节采用后的自动总结若精确命中 `DSH_REQUIRED_CONTEXT_READ_MISSING`，会在同一自动回合与冻结模型下最多追加 2 个不可变 Run，重新完成全部读取后再生成候选。重试预算由同回合失败事实持久计算，且在继续前拒绝已有有效总结 Artifact/卡片或同采用稿正式总结，避免重复候选与重复应用。
+- **章节自动总结启动调度修复**：自动总结回合从 `ensure_turn` 持久化为 `ready_to_start` 后会在互斥操作释放时可靠重调度；Renderer 外 Runtime 占用释放另有同回合单次 1.5 秒保底重查，避免最后一章已采用且总结 Turn 已落库，却因瞬时 guard 后没有新 React 事件而长期停在零 Run。
+- **长篇上下文正式写章闭环**：修复只有手动 `ContextRecord` 时未进入 Writer Prompt 的条件遗漏；正式写章快照现按章节顺序读取本章关联人物与主角在当前章之前的最新动态状态，并以独立 `character_state` 分区和脱敏来源回执冻结。全书规划或人物候选应用后会按章纲、章节目标和主角语义证据保守建立章级角色关系；能够确认主角出场时写入 `main / mustAppear=true`，没有出场证据时不再凭空创建 `hidden / mustAppear=false` 关系，读取旧错误投影时也会按现有证据修正，既有人工关系不被覆盖。章节正文原子采用后不静默写入 AI 总结，而是在原任务中持久化“总结本章”待办；总结仍须生成候选并由用户确认应用后才成为正式上下文。
+- **工作台自动回合与上下文证据闭环**：自动补齐世界设定、主角和章纲的内部 Turn 继续兼容既有 `user` Run 绑定，但通过版本化内容信封明确投影为“工作台自动准备”，信封同时向桌面权威执行说明它不是用户的新消息，界面与前端重试均只呈现解码后的纯目标。缺失资产卡完整展示有序清单，仅开放当前项并在执行 handler 二次拒绝越序触发；Writer 显示后端显式的“已使用/缺失/已降级”来源，DSH 优先显示后端显式回执，兼容路径仅依据同 Run 成功只读事件显示“已读取”，缺少证据时明确标注未提供而不伪造使用。当前插件面板同步区分加载、失败与真实空目录，并补齐 `get_character_states` 的人物状态语义标签。
+- **工作台上下文回执语义与可读性**：成功的 Memory 检索仅在明确召回条目时显示“已读取”，0 条结果改为“本轮无来源”并展示召回数量；工具行收敛为世界、规则、主角、大纲和 Memory 五类紧凑摘要，完整脱敏回执移至展开详情顶部，并提高回执说明、分组与状态字号。
+- **短指令正文任务的核心资产准备闭环**：工作台在正文 Run 创建前使用与正式 Writer 一致的规则只读检查世界设定、主角设定和章节大纲；缺失时保留原正文目标并在对话内显示逐项状态，可通过自然语言任务生成既有结构化候选或跳转人工编辑。候选仍须在产物卡片显式确认并经既有原子应用写入，应用后重新检查即可恢复原回合，且未提交目标在本次应用会话内跨页面保留；不新增数据库写入口，也不绕过审阅或应用门禁。
+- **极简输入资产恢复与证据收口**：空白项目收到普通整书目标后，会按世界与规则、主角、全书规划的固定顺序生成候选并等待显式应用；世界与规则成套候选不会再重复排入独立规则步骤，仅在已有世界但正式规则确实缺失时单独补规则。规划应用后原子创建卷章并恢复原始目标，后续只需“继续写”即可沿采用稿与自动总结推进。真实验收新增对刚落库世界、规则和主角正文的冻结快照反查，并要求清洗后的证据继续保留安全的 Prompt SHA-256、世界/规则等 Provider 来源状态，避免只凭详细测试提示词或 UI 标签判定接入。
+- **稀疏创意真实验收通用化**：真实对话验收默认改为 `sparse-idea`，主用户输入只描述约 6 万字的普通故事创意，不再指定 15 章或粘贴世界、人物和章纲。Full 先从已校验并正式应用的 `story_plan` 产物推导卷章顺序、章节数和目标字数，再向同一任务逐章发送“继续写”；Gate 现执行规划前 4 章，覆盖至少三次跨章承接。`prepared-assets` 保留为显式独立场景，固定 4/15 章夹具不再冒充主验收产品行为。
+- **全局内置风格桌面事实源修复**：新建 SQLite 数据库幂等写入 3 个固定身份的 `system_default` 风格，并仅激活“默认小说风格”；全局风格统一以 `novel_id = NULL` 保存、读取、激活和删除，按作品读取时同时返回全局与作品风格且优先作品当前项。前端不再把 Tauri 空结果静默替换为 LocalStorage 随机 ID，冻结快照中的默认风格现在可由 SQLite 与真实验收 bridge 反查为同一记录。
+- **稀疏整书规划字数契约**：从首个非自动用户回合解析并冻结整书目标、容差与来源 hash；Story Plan 回合要求根目标和逐章目标经末章校正一致，Gateway 在 Artifact 形成前复验根值与章节合计，Safe Apply 再按原始回合/hash 原子复验且不放宽冲突门禁。真实验收失败证据仅追加 root、章节合计、冻结上下界和来源身份等安全标量，不保存候选正文或凭据。
+- **对话工作台领域上下文接入**：桌面 DSH 结构化任务的只读链路补齐活动世界设定、规则体系、总纲/卷纲/章纲、章节字段、角色状态与章节角色，并通过 `search_memory` 保留按需 Memory 检索；`chapter.read_outline` 现可返回带 SHA-256、原始字符数和 12 万字符暴露上限的当前已采用正文，分片缺失、顺序/长度/哈希异常均失败关闭。质量检查与章节总结在没有有效已采用正文时拒绝候选；Runtime allowlist、公开工具身份、健康检查与 Mock 上游同步加入 `get_character_states`。候选 Artifact 的 ContextSnapshot 仅冻结实际成功读取工具的事件 ID、参数哈希、结果引用、内容哈希与长度，不复制正文、提示词或凭据。
+- **会话级模型凭据固定绑定与防泄漏**：API Key 改为仅在当前应用进程内按 `scope + providerId + baseUrl + modelId` 精确注册；默认 DeepSeek 快照统一冻结为 Runtime 使用的 `deepseek-official` 身份。设置切换不再把已加载 Key 带到另一模型，旧任务与冻结 Run 只解析同一身份凭据，错配时失败关闭。TypeScript、Rust、Novel Gateway 与项目备份导入/导出边界递归拒绝 `apiKey`、`x-api-key`、`openaiApiKey`、`credentials` 等凭据形态，短 Key 也始终脱敏；Key 不进入 SQLite、LocalStorage、项目备份、Git 或应用自有同步，真实鉴权仅发往精确绑定的 Provider Endpoint。
+- **真实模型工作台链路修复**：冻结的 `provider / model / baseUrl` 现在贯穿 Workbench、DSH 模型目录、Worker 与 governed proxy，`openai_compatible` 不再因缺失其他预设模型中断。Runtime 目录查询改为非阻塞、单航复用并与请求读取隔离；代理补齐 SSE 结束、reasoning/累计正文 JSON 回退和 Windows 路径兼容。显式写章指令不再被提示词中间的“改写”误分类，长文本与连续新建任务的受控表单写入也已稳定收口。
+- **章节采用字数账本修复**：草稿采用与章节软删除现在于同一 SQLite 事务内重算非删除章节字数并更新 `novels.total_word_count`；同章重新采用、授权回滚与幂等重放不再重复累加或留下过期小说总字数。
+- **启动等待与创作工作台体验优化**：React 壳层不再串行等待会话恢复、旧上下文迁移和生成任务恢复，也移除固定 700ms 启动画面；三项恢复转为后台并行，并分别约束会话读取、上下文依赖与生成入口。根路由同步收敛为 56px 导航轨、稳定任务树、同轴对话流与 Composer，补齐内联工具详情、原子任务切换、加载骨架、2K 阅读宽度和 `prefers-reduced-motion` 降级。上下文整理和模型目录刷新现在只是局部准备状态：Composer 和新建弹窗保持可编辑/可关闭，仅禁用真正依赖未就绪资源的提交动作。
+- **创作与写作工作台视觉精修**：全局导航、任务操作、写作工具与章节审阅改用统一的 Lucide 线性图标；任务树补充任务数、最近活动、可键盘操作的 Portal 菜单，新建任务对话框补齐焦点闭环和背景隔离。写作工作台保留 240px 卷章目录、48px 审阅工具轨和 920px 正文纸张，载入时使用与最终布局同尺寸的局部骨架，不再以全屏遮罩阻断进入；1024、1440 与 2K 档保持稳定阅读宽度和无横向溢出。
+- **消息流最新进展停靠**：用户离开消息底部时，“查看最新进展”改为消息区独立底部停靠行，动态占用布局高度，不再以绝对定位覆盖工具详情、上下文回执或产物卡片；自动跟随和减少动态效果偏好保持不变。
+- **工作台任务连续性与运行证据门禁**：恢复最近有效任务，补齐搜索、重命名、归档/恢复和带目标/章节范围/初始模型的新任务流程；新任务与首个用户回合在同一 SQLite 事务中创建，失败不留下空任务。Composer 与新建入口只接受当前 Runtime 目录中精确匹配且已加载的模型，发送前再次刷新重验，失败保留草稿且不追加回合或启动 Run；模型目录不可用时提供原位重试与模型设置入口，本地确定性问候/能力回复仍可发送，并以 `ans-local` 快照记录真实来源，新建入口中的同类本地目标也不再被模型目录阻断。带章节的新任务会先原子同步当前作品与章节选择，再创建首轮 Run；跨作品章节引用失败关闭且不残留任务。目录门禁本身不冒充网络或 tool-calling attestation。失败重试绑定原失败回合目标；产物卡显示持久化来源、生成基线和校验问题，未通过契约校验的响应不会形成可确认/可应用卡片。
+- **工作台任务状态与同回合重试闭环**：候选卡片与 `waiting_user` 在同一 SQLite 事务内写入，Run 完成、失败、取消或重启恢复不再覆盖未决候选；拒绝/要求修改、章节确认、真实采用和应用冲突按持久事实归约。重试直接在原 user Turn 下创建新 Run，不追加重复用户消息，并逐次保留模型快照、工具事件、错误和产物；同任务的草稿、Composer 错误、压缩候选与忙碌状态按 `conversationId` 隔离，后台迟到结果不会污染当前任务。浏览器 LocalStorage fallback 同步持久化 append-only 决定与审阅授权，但仍不伪造 ResultArtifact 或结构化领域写入。
+- **DSH 模型工具调用真实性门禁**：桌面 DSH 模型任务在创建 Run 前，经同一 governed proxy 对精确 `provider/model` 执行一次无副作用原生 tool-call nonce 探针；Rust 仅接受协议、身份、时效、finish 与唯一调用均严格匹配的正证据。失败零 Run 且不缓存；成功证据精简冻结进 `model_snapshot_json`，不含 nonce、usage、原始错误或凭据，同 Worker 最多缓存 10 分钟并在 Worker 重启后复探。`attesting` 可取消并终止专属 Worker，请求治理 active lease 会结算为 0；仅保留 governed proxy 必需的 `ai_request_reservations` 预留/结算审计，不写 TaskRun/Turn/Tool/Artifact/Session 领域事实。
+- **对话式工作台界面收敛**：移除独立 Trace 页签与画布，工具调用、错误和候选产物统一在任务对话中内联展示；写作工作台继续聚焦章节审阅、显式编辑、保存与采用，同时保留可达的草稿历史、章节准备与总结能力。
+- **结构化产物应用失败关闭**：在领域写入与 `ArtifactDecision` 尚未纳入同一 Rust/SQLite 事务前，桌面端与浏览器端的 `request_apply` 均以稳定冲突拒绝，且不产生任何领域写入；章节正文继续使用既有审阅授权与原子采用链路，修改和拒绝决定不受影响。
+- **前端组件体积门禁恢复**：按既有页面、视图和业务边界拆分模板页、工作台消息流、写作工作台及右侧面板；收尾阶段把 `WorkbenchPage` / `WorkbenchMessageStream` 再拆为状态、任务头、进度条和压缩卡片，生产 TSX 重新回到 500 行上限内，不改变原有交互契约。
+- **Schema 原型键严格校验**：Tool Registry 与 Canonical Runtime 的 JSON Schema 校验改为只接受 schema 自有属性，拒绝 `constructor`、`toString`、`__proto__` 等原型链命中及继承的必填字段，避免 `additionalProperties:false` 被绕过。
+- **浏览器测试与暗色设置页修复**：Browser E2E 的 Vite 服务关闭依赖自动发现并显式预打包 React 启动入口，消除首屏导航及 WebDriver session 回收超时；同步当前首页路由与设置页语义面，修复设置页使用不存在的背景 token 导致暗色主题出现白底浅字。
+- **覆盖率测试进程回收**：`EditorArea` 的 Vite SSR 测试关闭依赖自动发现与文件监听，避免 Windows 覆盖率运行完成断言后仍持有 esbuild 子进程。
+- **Mock 上游随机端口稳定性**：Workbench 测试上游不再直接接受可能被 WHATWG Fetch 禁止的系统随机端口；`port: 0` 命中禁止端口时有限重试，显式配置禁止端口则在启动前失败关闭，消除 Windows 动态端口范围与 Node `fetch` 禁止表交叉导致的偶发 `bad port` 发布门禁失败。
+- **工作台异步隔离测试收口**：延迟完成的发送与上下文压缩回调统一在 React `act(...)` 边界内结算，清除跨任务草稿、错误和忙碌状态测试中的异步刷新警告，不改变生产工作台行为。
+- **DSH 权威任务作用域、取消与进程隔离**：DSH 启动路径在创建 Run 或 Worker 前，通过 SQLite 将 `conversationId`、用户 `turnId`、`novelId` 与可选 `chapterId` 绑定到权威任务事实，并以该 user turn 的持久正文覆盖调用方传入的 `goal`；跨对话、跨作品、跨章节或非用户回合均失败关闭。宿主把已验证的小说/章节 scope 注入只读 Novel Gateway，Gateway 在每次工具调用时重新读取并复验参数 scope；缺失、错配、越权或非 Unicode `ANS_ALLOWED_TOOLS` 均失败关闭，且错误不回显敏感 ID。同步修复 Worker/Provider 建立阶段的早期取消竞态，取消不再假等待 480 秒 session timeout；本地模型代理也纳入 Windows `KILL_ON_JOB_CLOSE` Job Object，创建隔离失败即终止进程并失败关闭。
+- **DSH carrier 新鲜度失败关闭**：打包准备阶段始终从当前源码编译 Novel Gateway，并对新建或复用的 carrier ZIP 同时校验固定 `VERSION_MATRIX` commit 与内嵌 Gateway 精确 SHA-256；旧 Gateway、commit 漂移或缺失 Gateway 的缓存均拒绝复用，避免安装包静默携带过期运行载体。
+- **生产 E2E bridge 构建隔离**：普通生产构建通过 Vite 别名把 E2E bridge 替换为空模块，仅显式 E2E 构建装载真实 bridge；bundle 门禁扫描 `runDomainFacadeSqliteSmoke` 与 `e2eDomainFacadeProbe` 标记，防止测试入口和诊断依赖进入正式前端。
 - **第一阶段生产链路二次纠偏与 Mock 伪造彻底移除**：彻底移除 `workbenchChapterWriter` 中发生异常时吞咽错误伪造 `mock-task-` / `mock-art-` 候选卡片的绕行逻辑，执行失败一律 Fail-Closed 向上抛出；修复模型快照穿透，严格从 `TaskRun.modelSnapshot` 派生执行参数，杜绝全局设置修改影响任务运行。
 - **两阶段审阅采用协议与无草稿候选载入**：路由携带 `authorizationId` 与 `artifactId` 进入审阅工作台时，若当前章节尚无草稿，自动从权威 `ResultArtifact` 载入候选正文；首次保存创建真实草稿，确认采用在同一 SQLite 事务内完成授权/决定/作用域/版本/正文哈希校验、草稿采用、章节指针更新、授权消费与会话完成，失败全部回滚且重放幂等。
 - **章节总结应用链路采用真实已采纳草稿**：`chapter_summary` 应用不再接受占位 `workbench-unadopted`，改为回查当前章节已采用草稿并在错配时拒绝写入，确保 summary/context bundle 与正式草稿同源。
@@ -30,6 +66,10 @@
 - **生产链路收敛与并行 Harness 清理**：彻底移除未接入生产的 `src/services/agent-harness/` 与非权威文档 `docs/agent/`，收敛为唯一生产链路（`Workbench -> useWorkbenchTaskRunner -> taskConversationService -> taskSessionAdapter -> DSH Task Worker / Production Tool Registry -> ResultArtifact -> ArtifactDecision -> ReviewAuthorization -> Writing Workspace -> Safe Apply / SQLite`）。
 - **工具失败严格阻断**：修复工具抛错时被错误吞咽包装为成功的缺陷，工具失败时严格标记 `ToolCallEvent` 为 `failed` 并阻断后续工具链执行，防止 SQLite 脏写入。
 - **长程记忆穿透与上一版候选正文继承**：`search_memory` 事实检索切片可靠注入写章服务提示词；多轮重写与润色自动从会话历史提取上一版候选正文并注入修改提示词。
+- **已采用前章连续性基线**：工作台写章现在按卷序与卷内章序读取紧邻前章的权威采用稿，将来源章节、草稿和正文 SHA-256 冻结进持久化 generation context snapshot；长正文分区同时保留开头与结尾，避免截断最终时间、人物、物件和系统状态。工具事件只投影上下文哈希与来源章节，真实验收必须从生产事件反查连续性，不能由测试侧自行回填。
+- **写章上下文脱敏回执**：工作台写章工具事件现在从真实 generation context snapshot 投影本轮资产来源，并按“已使用 / 缺失 / 已降级”显示世界设定、大纲、角色、记忆、风格等类别；回执不展示完整提示词、正文、来源 ID、内部摘要或上下文哈希，短指令测试无需再人工复述项目资产。
+- **连续性与运行证据失败关闭**：写章服务区分真正首章、前章未采用和采用稿正文不可读取，后两者在编译 Prompt 与调用模型前阻断；工具事件保留原 `ToolResult` 顶层契约并仅追加 generation context 哈希。公开 Tauri 对话命令与浏览器写入口拒绝客户端伪造 `toolCallingAttestation`，DSH 经严格 nonce 探针后的 Rust 内部注入路径保持不变；Web Crypto 不可用时耐久哈希明确失败，不再用 FNV 短值冒充 SHA-256。同步修正真实验收分析脚本把文件末尾换行排除在 `novelSha256` 之外的口径错误，现有正文文件未改写。
+- **产物校验语义纠偏**：对话产物卡把笼统的“校验通过”收窄为“结构与来源校验通过”，警告、失败和禁用原因使用同一口径，避免把 ResultArtifact 结构、来源与哈希有效误解为小说连续性或内容质量合格。
 - 修复创作工作台只读与检索查询误入 `generate_chapter` 校验槽导致无章节绑定时秒崩的缺陷。
 - 修复左侧子页面 Back 按钮跳回旧首页文案错位的问题，统一规范为「返回工作台」。
 - 修复风格方案与输出控制未深度注入写章编译层的断层，确保选定文风与篇幅设定在工作台生成正文中真实生效。
@@ -37,6 +77,18 @@
 
 ### 验证
 
+- **工作台上下文回执专项验证**：回执模型、消息流、任务运行适配与章节资产准备共 78/78 项定向测试通过；目标文件 ESLint、Vite 生产构建、文档同步、Prettier 与差异空白检查通过。全仓 `lint:ci` 和 `npm run build` 分别被本次范围外的启动弹窗既有 warning/type error 阻断；未修改这些无关文件，也未运行 Tauri、MSI 或 NSIS 打包。
+- **工作台 UI 闭环定向验证**：Workbench 页面 30/30、任务运行与内联组件 41/41、自动回合信封 2/2 通过，覆盖稀疏创意触发的完整资产队列、越序门禁、自动来源身份、Writer/DSH 上下文回执及插件三态；TypeScript、目标 ESLint、Prettier 与差异空白检查通过。本项未运行 MSI/NSIS 或其他安装包构建。
+- **会话级模型凭据专项定向验证**：会话注册表、设置页切换、冻结写章、DSH 解析、模型目录身份、对话持久化与工作台旧任务切换共 75/75 项通过；Rust 应用、Novel Gateway 与项目备份安全门禁 8/8 项通过，`lint:ci`、TypeScript/Vite 生产构建、`cargo check --locked`、文档同步与格式检查通过。本项未运行全量发布矩阵或 MSI/NSIS 打包。
+- **真实 UI 对话 6 万字验收纠偏**：回环 OpenAI-compatible Endpoint 固定使用 `gpt-5.6-luna`，真实 UI 完成 15/15 章的生成、确认入审、保存与采用；采用稿独立计数、章节表合计与小说缓存总字数均为 61,396，总耗时 1,181,369ms，工程闭环通过。复核确认原运行实际为 15 个独立任务，并非单任务连续 15 回合；当前主验收已改为 1 个稀疏创意任务，先从正式 `story_plan` 产物推导章节数，再按该数量逐章追加 user turn，并逐项核对 turn/run/artifact/决定/授权和上一章采用哈希连续。新的稀疏 Gate 已以“写个六万字左右的悬疑故事。”加三次“继续写”在同一任务内完成前 4 章：空项目自动准备并应用世界与规则、主角和 16 章/60,000 字全书规划，4 章采用稿合计 15,470 字，世界、规则、主角、三级大纲、风格、输出控制及后续章连续性来源均有 Provider 注入证据；完整规划的 Full 仍未通过。原 61,396 字采用稿人工审读不通过：第 12～14 章存在倒计时回跳、沈砚告别与归还重复、全城归还和分批释放两套互斥高潮，且陆惟川问责未闭环。因此本项结论为“旧独立任务工程闭环通过、稀疏单任务四章 Gate 通过、完整 Full 与内容质量未通过”，不得记为最终验收通过；详见 `docs/audit-v2/real_conversation_ui_acceptance.md`。证据摘要不含 API Key；当前修复阶段未再次执行 MSI/NSIS 打包。
+- **修复后的最终无安装包全量门禁**：`npm test` 共 518 项通过；`npm run test:workbench` 为 Node 27/27 + TypeScript 111/111；覆盖率总体 statements/lines 52.66%、branches 71.48%、functions 60.39%，核心专项 87.67%，关键组件覆盖率 90.96%。148 个生产 TSX 文件和 114 个 JavaScript chunk 通过体积门禁，入口 gzip-9 21.48 KiB、最大 chunk gzip-9 44.49 KiB；真实 Edge Browser E2E 为 4/4 specs、21/21 cases。Rust workspace 共 382 passed、0 failed、2 ignored，`cargo fmt --check` 与 `cargo check --workspace --all-targets` 通过；最终 Windows Tauri + WebView2 + SQLite 为 18/18 specs、21/21 cases。ESLint、TypeScript/Vite 生产构建、版本/文档同步、真实验收安全 profile 11/11、AI 任务删除 3/3 与项目备份 17/17 均通过。桌面测试载体显式使用 `--bundles none --ci`；本次修复后的最终验证未运行 `verify_project.ps1`、`tauri:build`，也未再次运行 MSI/NSIS 打包。
+- **启动与工作台阶段性定向验证**：启动协调器、生成恢复门禁、自主调度入口和 Workbench 组件共 32/32 项测试通过；TypeScript 类型检查通过；真实 Edge 浏览器在 1024x700、1440x900、2560x1440 三档窗口及非工作台路由共 4/4 项布局检查通过；前端构建与包体门禁通过，主入口为 61.62 KiB raw / 21.31 KiB gzip-9。本项不包含最终全量发布矩阵或 MSI/NSIS 打包。
+- **UI 精修最终前端验收**：Workbench 24/24、RightToolbar/WritingWorkspaceView/WorkspaceAuxiliaryPanels/EditorArea 17/17 项组件测试通过；真实 Edge Browser E2E 共 4/4 specs、21/21 cases，覆盖 1024x700、1440x900、2560x1440、右侧审阅面板、新建任务初始焦点与任务菜单键盘操作。`lint:ci`、TypeScript/Vite 生产构建、组件体积、Bundle 体积、文档同步、Prettier 与差异空白检查通过；本项未运行 Tauri、MSI 或 NSIS 打包。
+- **真实桌面冷启动预算**：`cold-start.spec.ts` 在全新隔离 SQLite 和 WebView2 profile 下 1/1 通过；窗口 617ms 可见、数据库 219ms 就绪、Tauri setup 1258ms，从进程创建到 React 壳层/工作台/内容就绪分别约为 1839/1927/1946ms；HTML 到 React 壳层 182ms、壳层到工作台 89ms、工作台到内容 19ms，全部低于 2500/1500/4000ms 分段预算和 8000ms 总预算。SQLite `integrity_check=ok`，console/未处理异常/外网请求均为 0；Tauri 构建显式使用 `--bundles none`，未生成 MSI/NSIS。
+- **工作台连续性第二阶段定向验证**：选择恢复、模型目录门禁、任务运行投影和 Workbench 页面共 50/50 项通过，TypeScript 与目标 ESLint 通过；真实 Edge 在 1024x700、1440x900、2560x1440 下验证任务树/消息流/Composer，并在最小桌面视口验证新建任务弹窗和标准路由壳层，共 5/5 项通过。真实 Windows Tauri/WebView2 隔离 SQLite 验证无 Runtime 模型时保留目标、禁用创建、重启后仍不产生空任务及插件只读投影，共 1/1 项通过；Rust 产物候选门禁定向测试 1/1 通过。桌面规格使用 `--bundles none`，本项未运行最终全量发布矩阵或 MSI/NSIS 打包。
+- **模型目录恢复专项定向验证**：Workbench 页面与模型可用性 21/21 项通过，覆盖目录不可用时保留未发送目标、原位刷新、进入模型设置、继续编辑，以及问候/能力询问使用本地确定性回复并显示真实可用性；TypeScript 与目标 ESLint 通过。真实 Edge 工作台布局 6/6 项通过，覆盖 1024x700、1440x900、2560x1440、新建弹窗、恢复提示与非工作台路由，无溢出或布局跳动。本项未运行全量发布矩阵或 MSI/NSIS 打包。
+- **DSH 模型探针专项定向验证**：Bridge 6/6、model proxy 6/6、Rust attestation 生命周期 4/4、TypeScript 快照 1/1 与当前插件投影 6/6 通过；Worker 重启、10 分钟成功缓存、失败不缓存、冻结证据和取消零 Run 连续 5/5 通过。未运行外部真实模型验收、全量发布矩阵或 MSI/NSIS 打包。
+- **工作台状态一致性专项定向验证**：Rust conversation repository 11/11、Workbench 服务链 95/95、Workbench 页面与模型投影 31/31 通过，覆盖未决候选优先级、多候选决定、章节授权采用、同回合重试、双击防重、跨任务临时状态隔离、本地目标离线创建与首轮章节同步；`lint:ci`、TypeScript、生产前端构建通过。真实 Edge 在 1024x700、1440x900、2560x1440 及新建弹窗、模型恢复、标准路由共 6/6 通过，验证两次 Run、失败证据和待处理候选无横向溢出或控件重叠。本项未运行最终全量发布矩阵或 MSI/NSIS 打包。
 - **第二次全量能力审计**：新增 `docs/audit-v2/` 六份权威审计，按真实入口、调用链、SQLite/模型反查重建 75 个能力族地图；结论为 21 WORKING、37 PARTIAL、3 BROKEN、11 LEGACY、3 UNKNOWN，并确认当前阶段不得直接扩展 Context Agent。审计同时识别桌面“级联删除”只软删除主记录、“扫描并修复数据库”只操作 LocalStorage、资产导入计数硬编码等真实性缺口。
 - **第二次能力整合与 Agent 重构准备**：新增 `docs/architecture-audit-v2/` 七份整合文档，明确 14 个宏观重复组、16 个具体冲突簇（13 个可归并、3 个边界治理）、12 个 canonical Domain Capability 和 18 个目标 Agent 动作；补充草稿多事实源、outline active/version、summary/context bundle、角色事实、AI task ledger 与 Registry 漂移风险。本轮仅冻结事实与迁移计划，不删除旧实现、不扩展 Agent。
 - **第一阶段生产闭环验收结论**：`CONDITIONAL`（阶段二准入：`NO`；真实外部模型在线决策：`NOT RUN`）。
@@ -51,15 +103,23 @@
 - **Canonical 只读链路副作用收口**：风格与输出控制的 Facade 读取改用 `initialize:false` 纯读模式，不再因首次读取隐式播种 LocalStorage/SQLite 默认方案；Canonical `context.read` 的 `sideEffect=none` 现在有真实存储快照证据。
 - **章节候选作用域修复**：结构化章节候选现在显式携带 `chapterId`，SQLite 服务端复验章节归属并写入 AI task scope，避免合法候选在审阅阶段因 `sourceChapterId` 丢失而被拒绝；非章节候选保持作品级 scope。
 - **已完成 Tool 工作性门禁**：新增隔离 fixture 的 `productionToolRuntime.test.ts`，真实调用全部 18 个 TypeScript production handler（含 `novel.read_context`、`chapter.read_outline`、`search_memory`、style/verification 与 candidate validator），并验证跨作品 scope 与缺少 authoritative scope 时 fail-closed；候选 validator 仍只计为 schema 验证，不计为正文生成能力。
-- `npm run test:workbench`：DSH/代理 15 项 + Workbench 60 项通过，0 失败；新增闭环测试覆盖模型快照、失败关闭、修改稿来源、授权作用域、生产 Tool handler、Domain Facade 和浏览器协议边界。
-- `productionToolRuntime.test.ts`：18/18 个现有 TypeScript production handler 在隔离 fixture 中合法调用返回 `ok=true`；`cargo test --locked -p novel-domain-gateway`：9/9 通过，覆盖 Gateway schema、scope、candidate-only 和 MCP error。
+- `npm run test:workbench`：Node DSH/代理 27/27 + TypeScript Workbench 111/111 通过，0 失败；新增闭环测试覆盖模型快照、失败关闭、修改稿来源、授权作用域、结构化应用零副作用、Schema 原型键拒绝、生产 Tool handler、Canonical Manifest、carrier freshness、Domain Facade、浏览器协议边界、显式 E2E 模型投影与 Fetch 禁止端口防护。
+- `productionToolRuntime.test.ts`：18/18 个现有 TypeScript production handler 在隔离 fixture 中合法调用返回 `ok=true`；`cargo test --locked -p novel-domain-gateway`：16 个 Gateway unit tests 与 1 个真实子进程 integration test 全部通过，覆盖 schema、权威 scope、非 Unicode allowlist 失败关闭、candidate-only、MCP error 与进程边界。
+- DSH 定向动态测试 10/10 通过：正向启动固定 DSH 真实载体并验证 user turn 权威 goal、小说/章节 scope 进入 Gateway 和合法工具调用成功，同时覆盖同进程 follow-up、模型切换、恢复、并发隔离与早期取消；测试结束后 DSH Worker、Novel Gateway、本地模型代理及其 Job Object 子进程残留均为 0。
 - `domainFacade.test.ts`：6/6 定向 Domain Facade 真实浏览器回退链测试通过，覆盖 Project/Context/Memory/Conversation/Artifact/Writing 边界、跨作品负例、候选审阅授权、重复采用阻断和存储重启读回；该结果明确标记为 `browser_fallback`，不冒充 SQLite E2E。
 - `canonicalToolProjection.test.ts` 与 `domain-facade-sqlite.spec.ts`：四个 Canonical adapter 在 Browser fixture 与真实 Windows Tauri/SQLite E2E 中均通过公开 DTO、来源/hash、权限/scope、旧 alias 拒绝和只读快照验证；Canonical Agent manifest 仍为 0。
-- `npm run test:e2e -- --spec agent-production-closed-loop.spec.ts`：受控 Mock 下的真实 Windows Tauri + WebView2 + SQLite 五轮闭环与进程重启验收通过（2 作品、5 独立章节、10 TaskRun、10 ResultArtifact、5 次授权消费、5 个已采用章节）；机器证据记录于 `test-results/e2e/agent-production-closed-loop/closed-loop-evidence.json`。该结果不等同于外部 LLM 或 DSH 自主 Planner 验收。
+- `npm run test:e2e -- --spec agent-production-closed-loop.spec.ts`：受控 Mock 下的真实 Windows Tauri + WebView2 + SQLite 五轮闭环与进程重启验收通过（2 作品、5 独立章节、10 TaskRun、10 ResultArtifact、10 ArtifactDecision，其中 5 次要求修改、5 次确认并消费授权，最终采用 5 个章节）；机器证据记录于 `test-results/e2e/agent-production-closed-loop/closed-loop-evidence.json`。该结果不等同于外部 LLM 或 DSH 自主 Planner 验收。
 - `npm run lint:ci`：0 errors, 0 warnings。
-- `npm run build`：TypeScript 编译与 Vite 生产前端构建成功；本次未执行 `npm run tauri:build`，不声明 MSI/NSIS 安装包验收通过。
+- `npm run build` 与 `npm run test:bundle-size`：TypeScript/Vite 生产构建成功，114 个 JavaScript chunk 通过包体门禁；入口 gzip-9 21.48 KiB、最大 chunk gzip-9 44.49 KiB，生产 `dist` 对 `runDomainFacadeSqliteSmoke` 与 `e2eDomainFacadeProbe` 均为 0 命中。
+- `npm test`：共 518 项通过，0 失败。
+- `npm run test:coverage`：通过；整体 statements/lines 52.66%、branches 71.48%、functions 60.39%，核心专项 87.67%，关键组件覆盖率 90.96%。
+- `npm run test:e2e:browser`：4/4 specs、21/21 cases 通过，WebDriver/Edge 进程与端口正常回收。
+- `npm run test:e2e`：真实 Windows Tauri + WebView2 + SQLite 完整串行套件 18/18 specs、21/21 cases 通过；18 轮均无前端未处理错误、console error、外网请求、超时、清理错误或残留进程，SQLite `integrity_check` 全部为 `ok`。
+- `npm run test:component-size`：148 个生产 TSX 文件通过，最大文件 500 行。
 - `cargo check --locked`（`src-tauri`）：通过，0 error（4 个 dead-code warning）。
-- `cargo test --locked`（`src-tauri`）：326 passed，0 failed，2 ignored。
+- `cargo test --locked`（`src-tauri`）：382 passed，0 failed，2 ignored。
+- **安装包时间线纠正**：工作区中的 `AI Novel Studio_3.6.0_x64_en-US.msi` 与 `AI Novel Studio_3.6.0_x64-setup.exe` 是早于本次 6 万字验收和连续性修复生成的本地候选，不能作为当前修复后最终产物；本次修复后的桌面全链路仅使用 `--bundles none --ci`，没有再次执行 MSI/NSIS。固定 DSH commit、carrier 内嵌 Gateway 与当前 release Gateway 的匹配及陈旧 carrier 失败关闭由独立门禁验证。
+- `npm audit --omit=dev --audit-level=high`：通过；无 high/critical，保留 React Router 6.30.4 的 2 个 moderate 公告待独立依赖修补。
 - `npm run test:docs-sync` 与 `npm run test:version-sync`：通过。
 
 ## v3.5.0 (2026-08-21) - 对话式创作工作台与审阅收敛

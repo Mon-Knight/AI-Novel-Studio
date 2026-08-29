@@ -492,6 +492,19 @@ test('chapter generation is registered as a candidate-only compiled contract', (
   const definition =
     compilationRegistryModule.productionCompilationRegistryPrivate.definitions.chapter_generate;
   assert.equal(definition?.expectedArtifactType, 'chapter_text');
+  assert.equal(definition?.promptTemplateVersion, '3');
+  assert.match(
+    definition?.promptTemplateBody ?? '',
+    /Treat its outline as the creative plan.*factual boundary/,
+  );
+  assert.match(
+    definition?.promptTemplateBody ?? '',
+    /A character may use information only after.*establishes how it was learned/,
+  );
+  assert.match(
+    definition?.promptTemplateBody ?? '',
+    /move beyond the preceding chapter's completed boundary instead of replaying it/,
+  );
   assert.deepEqual(definition?.requiredSourceTypes, ['request_context']);
   assert.equal(definition?.constraints.candidateOnly, true);
   assert.equal(definition?.constraints.mayWriteBusinessData, false);

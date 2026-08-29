@@ -1,50 +1,163 @@
-import { memo, useMemo, useState } from 'react';
-import type {
-  ConversationArtifactCard,
-  TaskConversationBundle,
-  ToolCallEvent,
-} from '../../types/conversation';
-import type { CurrentPluginProjection } from '../../services/conversation/currentPluginService';
+import { memo, useState } from 'react';
+import {
+  Brain,
+  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
+  CircleDashed,
+  Database,
+  LoaderCircle,
+  ShieldCheck,
+} from 'lucide-react';
+import type { ConversationArtifactCard, ToolCallEvent } from '../../types/conversation';
+import { isContextCompressionCandidate } from '../../services/context/novelContextCompressionProvider';
+import { GenerationContextReceipt, GenerationContextSummary } from './WorkbenchContextReceipt';
+import {
+  hideContextReceiptInternals,
+  resolveToolContextReceipt,
+} from './workbenchContextReceiptModel';
 import { TOOL_LABELS, statusLabel } from './workbenchHelpers';
+
+function ToolStatusIcon({ status }: { status: ToolCallEvent['status'] }) {
+  const props = { 'aria-hidden': true as const, size: 14, strokeWidth: 1.9 };
+  if (status === 'succeeded') return <CheckCircle2 {...props} />;
+  if (status === 'failed') return <CircleAlert {...props} />;
+  if (status === 'running') return <LoaderCircle {...props} />;
+  return <CircleDashed {...props} />;
+}
 
 /**
  * 简化工具摘要行（默认在对话流中紧凑展示）
  */
-export const ToolEventRow = memo(function ToolEventRow({ event }: { event: ToolCallEvent }) {
+export const ToolEventRow = memo(function ToolEventRow({
+  event,
+  runEvents = [],
+}: {
+  event: ToolCallEvent;
+  runEvents?: ToolCallEvent[];
+}) {
+  const [expanded, setExpanded] = useState(false);
   const semanticName = TOOL_LABELS[event.toolName] ?? '运行时事件';
-  return (
-    <div
-      className={`workbench-tool-event is-${event.status}`}
-      data-testid="workbench-tool-event"
-      data-event-id={event.eventId}
-      data-call-id={event.callId}
-      data-tool-name={event.toolName}
-      data-status={event.status}
-    >
+  const visibleArguments = hideContextReceiptInternals(event.argumentsSummary);
+  const hasArguments = visibleArguments !== undefined;
+  const contextReceipt = resolveToolContextReceipt(event, runEvents);
+  const visibleResult = hideContextReceiptInternals(event.result);
+  const hasDetails =
+    Boolean(contextReceipt) || hasArguments || visibleResult !== undefined || Boolean(event.error);
+  const summary = (
+    <>
       <span className="workbench-tool-icon" aria-hidden="true">
-        {event.status === 'succeeded'
-          ? '✓'
-          : event.status === 'failed'
-            ? '!'
-            : event.status === 'running'
-              ? '…'
-              : '·'}
+        <ToolStatusIcon status={event.status} />
       </span>
       <span className="workbench-tool-label">{semanticName}</span>
       <span className="workbench-tool-name">{event.toolName}</span>
       <span className="workbench-tool-status">
-        {event.status === 'succeeded'
-          ? '已完成'
-          : event.status === 'failed'
-            ? event.error || '失败'
-            : statusLabel(event.status)}
+        {event.status === 'succeeded' ? '已完成' : statusLabel(event.status)}
       </span>
       {event.durationMs !== undefined && (
         <span className="workbench-tool-duration">{event.durationMs} ms</span>
       )}
-    </div>
+      {hasDetails && (
+        <span className="workbench-tool-disclosure" aria-hidden="true">
+          <ChevronRight size={14} strokeWidth={1.8} />
+        </span>
+      )}
+      {contextReceipt && <GenerationContextSummary receipt={contextReceipt} />}
+    </>
+  );
+  const commonProps = {
+    className: `workbench-tool-event is-${event.status}`,
+    'data-testid': 'workbench-tool-event',
+    'data-event-id': event.eventId,
+    'data-call-id': event.callId,
+    'data-tool-name': event.toolName,
+    'data-status': event.status,
+  };
+
+  if (!hasDetails) return <div {...commonProps}>{summary}</div>;
+
+  return (
+    <details {...commonProps} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+      <summary>{summary}</summary>
+      {expanded && (
+        <div className="workbench-tool-detail">
+          {contextReceipt && <GenerationContextReceipt receipt={contextReceipt} />}
+          {hasArguments && (
+            <div>
+              <span>输入摘要</span>
+              <pre>{JSON.stringify(visibleArguments, null, 2)}</pre>
+            </div>
+          )}
+          {visibleResult !== undefined && (
+            <div>
+              <span>执行结果</span>
+              <pre>
+                {typeof visibleResult === 'string'
+                  ? visibleResult
+                  : JSON.stringify(visibleResult, null, 2)}
+              </pre>
+            </div>
+          )}
+          {event.error && <div className="workbench-tool-error">{event.error}</div>}
+        </div>
+      )}
+    </details>
   );
 });
+
+const ARTIFACT_LABELS: Record<string, string> = {
+  generic_text: '文本候选',
+  generic_json: '结构化候选',
+  chapter_text: '章节正文候选',
+  scene_text: '分镜正文候选',
+  outline: '大纲候选',
+  character_candidates: '人物候选',
+  event_candidates: '事件候选',
+  setting_candidates: '设定候选',
+  quality_report: '质量检查报告',
+  style_analysis: '风格分析报告',
+  chapter_summary: '章节总结候选',
+  volume_summary: '分卷总结候选',
+  tool_result: '工具结果',
+  plan: '创作规划候选',
+  generic: '创作候选',
+};
+
+const ARTIFACT_VALIDATION_LABELS = {
+  raw: '等待结构与来源校验',
+  parsing: '正在校验结构与来源',
+  valid: '结构与来源校验通过',
+  valid_with_warnings: '结构与来源校验通过，含警告',
+  invalid: '结构与来源校验未通过',
+} as const;
+
+const STRUCTURED_APPLY_TYPES = new Set([
+  'outline',
+  'character_candidates',
+  'event_candidates',
+  'setting_candidates',
+  'chapter_summary',
+]);
+
+function isApplicableContextCompression(artifact: ConversationArtifactCard): boolean {
+  if (artifact.artifactType !== 'generic_json') return false;
+  if (artifact.artifactEvidence?.derivationType === 'context_compression') return true;
+  if (!artifact.content) return false;
+  try {
+    const candidate = JSON.parse(artifact.content) as unknown;
+    return isContextCompressionCandidate(candidate) && candidate.valid;
+  } catch {
+    return false;
+  }
+}
+
+function compactHash(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 12)}...` : value;
+}
+
+function compactIdentifier(value: string): string {
+  return value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
+}
 
 /**
  * 候选产物交互卡片（支持采纳、确认入审、申请应用、修改与拒绝）
@@ -52,34 +165,67 @@ export const ToolEventRow = memo(function ToolEventRow({ event }: { event: ToolC
 export const ArtifactCard = memo(function ArtifactCard({
   artifact,
   onDecide,
+  onReload,
   busy = false,
 }: {
   artifact: ConversationArtifactCard;
   onDecide?: (decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply') => void;
+  onReload?: () => void;
   busy?: boolean;
 }) {
+  const [contentExpanded, setContentExpanded] = useState(false);
   const decision = artifact.latestDecision?.decision;
-  const projectedStatus = artifact.latestDecision?.conflictCode
-    ? `冲突 · ${artifact.latestDecision.conflictCode}`
-    : artifact.latestDecision?.applyTransactionId
-      ? '已应用'
-      : decision === 'confirm'
-        ? '已确认'
-        : decision === 'reject'
-          ? '已拒绝'
-          : decision === 'request_revision'
-            ? '需修订'
-            : decision === 'request_apply'
-              ? '待应用'
-              : artifact.status === 'candidate'
-                ? '待确认'
-                : artifact.status;
+  const evidence = artifact.artifactEvidence;
+  const validationIssues = evidence?.validationIssues ?? [];
+  const validationErrors = validationIssues.filter((issue) => issue.severity === 'error').length;
+  const validationWarnings = validationIssues.filter(
+    (issue) => issue.severity === 'warning',
+  ).length;
+  const isInvalid = evidence?.processingStatus === 'invalid';
   const isChapter = artifact.artifactType === 'chapter_text';
-  const isReport = artifact.artifactType === 'quality_report';
-  const canAct = Boolean(onDecide && artifact.artifactId && !decision);
+  const supportsStructuredApply =
+    STRUCTURED_APPLY_TYPES.has(artifact.artifactType) || isApplicableContextCompression(artifact);
+  const structuredApplyAvailable = !artifact.artifactId?.startsWith('browser-');
+  const projectedStatus = isInvalid
+    ? '结构与来源未通过'
+    : artifact.latestDecision?.conflictCode
+      ? artifact.latestDecision.conflictCode === 'STRUCTURED_APPLY_ATOMIC_UNAVAILABLE'
+        ? '原子应用迁移中'
+        : artifact.latestDecision.conflictCode === 'BROWSER_APPLY_UNSUPPORTED'
+          ? '当前环境不可应用'
+          : `冲突 · ${artifact.latestDecision.conflictCode}`
+      : artifact.latestDecision?.applyTransactionId
+        ? '已应用'
+        : decision === 'confirm'
+          ? '已确认'
+          : decision === 'reject'
+            ? '已拒绝'
+            : decision === 'request_revision'
+              ? '需修订'
+              : decision === 'request_apply'
+                ? '待应用'
+                : supportsStructuredApply
+                  ? structuredApplyAvailable
+                    ? '待应用'
+                    : '当前环境不可应用'
+                  : artifact.status === 'candidate'
+                    ? '待确认'
+                    : artifact.status === 'confirmed'
+                      ? '已确认'
+                      : '已拒绝';
+  const canAct = Boolean(
+    onDecide &&
+    artifact.artifactId &&
+    (!decision ||
+      (decision === 'request_apply' &&
+        artifact.latestDecision?.conflictCode &&
+        !artifact.latestDecision.applyTransactionId)),
+  );
+  const canApply = supportsStructuredApply && !decision;
+  const applyUnavailable = canApply && !structuredApplyAvailable;
   return (
     <article
-      className="workbench-artifact-card"
+      className={`workbench-artifact-card ${isChapter ? 'is-chapter' : ''}`}
       data-testid="workbench-artifact-card"
       data-card-id={artifact.cardId}
       data-artifact-id={artifact.artifactId}
@@ -89,15 +235,76 @@ export const ArtifactCard = memo(function ArtifactCard({
     >
       <div className="workbench-artifact-heading">
         <div>
-          <div className="workbench-eyebrow">候选产物 · {artifact.artifactType}</div>
+          <div className="workbench-eyebrow">
+            {ARTIFACT_LABELS[artifact.artifactType] ?? '创作候选'}
+          </div>
           <h3>{artifact.title}</h3>
         </div>
         <span className="workbench-artifact-status">{projectedStatus}</span>
       </div>
-      <p>{artifact.summary}</p>
-      <details>
-        <summary>{artifact.artifactId ? '查看 ResultArtifact 候选内容' : '查看候选内容'}</summary>
-        <pre>{artifact.content || '产物正文正在从权威 Artifact Service 加载。'}</pre>
+      {!isInvalid && <p>{artifact.summary}</p>}
+      {evidence && (
+        <div
+          className="workbench-artifact-evidence"
+          data-testid="workbench-artifact-evidence"
+          data-processing-status={evidence.processingStatus}
+        >
+          <div className="workbench-artifact-evidence-summary">
+            <ShieldCheck aria-hidden="true" size={15} strokeWidth={1.8} />
+            <p data-testid="workbench-artifact-validation">
+              {ARTIFACT_VALIDATION_LABELS[evidence.processingStatus]}
+              {validationErrors > 0 ? ` · ${validationErrors} 个错误` : ''}
+              {validationWarnings > 0 ? ` · ${validationWarnings} 个警告` : ''}
+            </p>
+          </div>
+          <details className="workbench-artifact-technical-evidence">
+            <summary>
+              <Database aria-hidden="true" size={13} strokeWidth={1.8} />
+              <span>技术证据</span>
+            </summary>
+            <div>
+              <p data-testid="workbench-artifact-source">
+                生成来源：作品 {compactIdentifier(evidence.sourceNovelId)}
+                {evidence.sourceChapterId
+                  ? ` · 章节 ${compactIdentifier(evidence.sourceChapterId)}`
+                  : ''}
+                {evidence.sourceDraftId
+                  ? ` · 草稿 ${compactIdentifier(evidence.sourceDraftId)}`
+                  : ''}
+              </p>
+              {(evidence.sourceDraftVersion !== undefined || evidence.baseContentHash) && (
+                <p data-testid="workbench-artifact-baseline">
+                  生成时基线：
+                  {evidence.sourceDraftVersion !== undefined
+                    ? `源草稿 v${evidence.sourceDraftVersion}`
+                    : ''}
+                  {evidence.sourceDraftVersion !== undefined && evidence.baseContentHash
+                    ? ' · '
+                    : ''}
+                  {evidence.baseContentHash
+                    ? `内容哈希 ${compactHash(evidence.baseContentHash)}`
+                    : ''}
+                </p>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
+      <details onToggle={(event) => setContentExpanded(event.currentTarget.open)}>
+        <summary>查看候选内容</summary>
+        {contentExpanded &&
+          (artifact.contentLoadError ? (
+            <div className="workbench-artifact-load-error" role="alert">
+              <span>{artifact.contentLoadError}</span>
+              {onReload && (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={onReload}>
+                  重新读取
+                </button>
+              )}
+            </div>
+          ) : (
+            <pre>{artifact.content || '候选内容正在载入。'}</pre>
+          ))}
       </details>
       {canAct && (
         <div className="workbench-artifact-actions">
@@ -105,21 +312,36 @@ export const ArtifactCard = memo(function ArtifactCard({
             <button
               className="btn btn-primary btn-sm"
               data-testid="workbench-artifact-confirm-review"
-              disabled={busy}
+              disabled={busy || isInvalid}
+              title={isInvalid ? '产物结构与来源校验未通过，不能进入章节审阅' : undefined}
               onClick={() => onDecide?.('confirm')}
             >
               确认进入审阅
             </button>
-          ) : isReport ? null : (
+          ) : canApply ? (
             <button
-              className="btn btn-primary btn-sm"
+              className="btn btn-secondary btn-sm"
               data-testid="workbench-artifact-apply"
-              disabled={busy}
+              data-availability={
+                isInvalid
+                  ? 'validation-failed'
+                  : applyUnavailable
+                    ? 'runtime-unsupported'
+                    : 'available'
+              }
+              disabled={busy || isInvalid || applyUnavailable}
+              title={
+                isInvalid
+                  ? '产物结构与来源校验未通过，不能申请应用'
+                  : applyUnavailable
+                    ? '浏览器开发预览不会写入小说正式事实，请在桌面应用中完成应用'
+                    : '通过原子事务应用到小说正式事实'
+              }
               onClick={() => onDecide?.('request_apply')}
             >
-              确认并申请应用
+              {isInvalid ? '结构与来源未通过' : applyUnavailable ? '仅桌面端可应用' : '应用到作品'}
             </button>
-          )}
+          ) : null}
           <button
             className="btn btn-secondary btn-sm"
             data-testid="workbench-artifact-revise"
@@ -139,368 +361,6 @@ export const ArtifactCard = memo(function ArtifactCard({
         </div>
       )}
     </article>
-  );
-});
-
-/**
- * Agent 状态栏（规划、生成、检查、完成/待命）
- */
-export const AgentConsoleStatusBar = memo(function AgentConsoleStatusBar({
-  status,
-  activeWorkerId,
-  latestToolName,
-}: {
-  status: string;
-  activeWorkerId?: string;
-  latestToolName?: string;
-}) {
-  const stage =
-    status === 'running'
-      ? latestToolName?.includes('check') || latestToolName?.includes('evaluate')
-        ? 'checking'
-        : latestToolName?.includes('read') || latestToolName?.includes('outline')
-          ? 'planning'
-          : 'executing'
-      : status === 'completed'
-        ? 'completed'
-        : status === 'failed'
-          ? 'failed'
-          : 'idle';
-
-  return (
-    <div
-      className="agent-console-status-bar"
-      data-testid="agent-console-status-bar"
-      data-stage={stage}
-    >
-      <div className="agent-status-pipeline">
-        <div className={`agent-status-step ${stage === 'planning' ? 'is-active' : ''}`}>
-          <span className="agent-step-icon">🧠</span>
-          <span className="agent-step-label">规划</span>
-        </div>
-        <div className="agent-status-arrow">→</div>
-        <div className={`agent-status-step ${stage === 'executing' ? 'is-active' : ''}`}>
-          <span className="agent-step-icon">⚙️</span>
-          <span className="agent-step-label">生成</span>
-        </div>
-        <div className="agent-status-arrow">→</div>
-        <div className={`agent-status-step ${stage === 'checking' ? 'is-active' : ''}`}>
-          <span className="agent-step-icon">📝</span>
-          <span className="agent-step-label">检查</span>
-        </div>
-        <div className="agent-status-arrow">→</div>
-        <div className={`agent-status-step ${stage === 'completed' ? 'is-active' : ''}`}>
-          <span className="agent-step-icon">✓</span>
-          <span className="agent-step-label">完成</span>
-        </div>
-      </div>
-
-      <div className="agent-status-current">
-        <span className={`agent-status-indicator is-${status}`} />
-        <span className="agent-status-text">
-          {status === 'running'
-            ? `Agent 正在执行: ${TOOL_LABELS[latestToolName ?? ''] ?? latestToolName ?? '创作任务'} (${activeWorkerId || 'Worker'})`
-            : status === 'completed'
-              ? 'Agent 创作任务已就绪'
-              : status === 'failed'
-                ? '任务执行中断'
-                : 'Agent 待命中，请输入目标'}
-        </span>
-      </div>
-    </div>
-  );
-});
-
-/**
- * 对话 / 轨迹 双 Tab 切换器
- */
-export const AgentConsoleTabs = memo(function AgentConsoleTabs({
-  activeTab,
-  onTabChange,
-  eventCount = 0,
-}: {
-  activeTab: 'chat' | 'trace';
-  onTabChange: (tab: 'chat' | 'trace') => void;
-  eventCount?: number;
-}) {
-  return (
-    <nav className="agent-console-tabs" data-testid="agent-console-tabs" aria-label="视图切换">
-      <button
-        type="button"
-        className={`agent-console-tab-btn ${activeTab === 'chat' ? 'is-active' : ''}`}
-        data-testid="workbench-tab-chat"
-        onClick={() => onTabChange('chat')}
-      >
-        <span className="tab-icon">💬</span>
-        <span>创作对话</span>
-      </button>
-      <button
-        type="button"
-        className={`agent-console-tab-btn ${activeTab === 'trace' ? 'is-active' : ''}`}
-        data-testid="workbench-tab-trace"
-        onClick={() => onTabChange('trace')}
-      >
-        <span className="tab-icon">🔍</span>
-        <span>执行轨迹</span>
-        {eventCount > 0 && <span className="tab-badge">{eventCount}</span>}
-      </button>
-    </nav>
-  );
-});
-
-/**
- * 轨迹视图画布（展示详细 Tool Call、参数/返回值 JSON、Decision Traces 与 Quality Reviews）
- */
-export const AgentTraceCanvas = memo(function AgentTraceCanvas({
-  bundle,
-  onRetry,
-}: {
-  bundle: TaskConversationBundle;
-  onRetry?: (previousGoal: string) => void;
-}) {
-  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(() => new Set());
-
-  const toggleExpand = (eventId: string) => {
-    setExpandedEvents((prev) => {
-      const next = new Set(prev);
-      if (next.has(eventId)) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
-  };
-
-  const runs = bundle.runs ?? [];
-  const events = bundle.toolEvents ?? [];
-
-  if (runs.length === 0 && events.length === 0) {
-    return (
-      <div className="agent-trace-empty" data-testid="agent-trace-empty">
-        <div className="trace-empty-icon">🔍</div>
-        <h3>暂无 Agent 执行轨迹</h3>
-        <p>当向 Agent 发送创作指令后，所有工具调用、决策树、评估打分将在此全景展现。</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="agent-trace-canvas" data-testid="agent-trace-canvas">
-      {runs.map((run, runIndex) => {
-        const runEvents = events.filter((e) => e.runId === run.runId);
-        const relatedTurn = bundle.turns.find((t) => t.turnId === run.turnId);
-
-        return (
-          <section
-            className="agent-trace-run-card"
-            key={run.runId}
-            data-testid="agent-trace-run"
-            data-run-id={run.runId}
-            data-status={run.status}
-          >
-            <div className="trace-run-header">
-              <div className="trace-run-title">
-                <span className="run-index-badge">Run #{runIndex + 1}</span>
-                <strong>{relatedTurn?.content?.slice(0, 40) || '创作运行'}</strong>
-                <span className="worker-tag">Worker: {run.workerId}</span>
-              </div>
-              <span className={`workbench-run-badge is-${run.status}`}>
-                {statusLabel(run.status)}
-              </span>
-            </div>
-
-            {/* 模型快照信息 */}
-            {run.modelSnapshot && (
-              <div className="trace-model-snapshot">
-                <span>
-                  🧠 模型快照: {run.modelSnapshot.providerId || 'default'}:
-                  {run.modelSnapshot.modelId || 'auto'}
-                </span>
-                {run.startedAt && <time>开始: {new Date(run.startedAt).toLocaleTimeString()}</time>}
-                {run.finishedAt && (
-                  <time>结束: {new Date(run.finishedAt).toLocaleTimeString()}</time>
-                )}
-              </div>
-            )}
-
-            {/* 工具执行时间线 */}
-            <div className="trace-events-timeline">
-              <h4>🛠️ 工具调用序列 ({runEvents.length})</h4>
-              {runEvents.length === 0 ? (
-                <p className="trace-no-events">该 Run 未产生工具调用</p>
-              ) : (
-                runEvents.map((evt) => {
-                  const isExpanded = expandedEvents.has(evt.eventId);
-                  const semantic = TOOL_LABELS[evt.toolName] ?? evt.toolName;
-                  return (
-                    <div
-                      key={evt.eventId}
-                      className={`trace-event-item is-${evt.status}`}
-                      data-testid="trace-event-item"
-                    >
-                      <div
-                        className="trace-event-summary"
-                        onClick={() => toggleExpand(evt.eventId)}
-                      >
-                        <span className="trace-status-icon">
-                          {evt.status === 'succeeded' ? '✓' : evt.status === 'failed' ? '!' : '…'}
-                        </span>
-                        <strong className="trace-tool-title">{semantic}</strong>
-                        <code className="trace-tool-code">{evt.toolName}</code>
-                        <span className="trace-duration">
-                          {evt.durationMs ? `${evt.durationMs}ms` : ''}
-                        </span>
-                        <span className="trace-expand-btn">
-                          {isExpanded ? '▲ 收起' : '▼ 展开 JSON'}
-                        </span>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="trace-event-detail">
-                          <div className="trace-json-block">
-                            <span className="json-label">输入参数:</span>
-                            <pre>{JSON.stringify(evt.argumentsSummary, null, 2)}</pre>
-                          </div>
-                          {evt.result !== undefined && (
-                            <div className="trace-json-block">
-                              <span className="json-label">返回结果:</span>
-                              <pre>
-                                {typeof evt.result === 'string'
-                                  ? evt.result
-                                  : JSON.stringify(evt.result, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-                          {evt.error && <div className="trace-error-text">错误: {evt.error}</div>}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* 错误与重试 */}
-            {run.error && (
-              <div className="workbench-inline-error" data-testid="trace-run-error">
-                {run.error}
-              </div>
-            )}
-
-            {run.status === 'failed' && onRetry && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm trace-retry-btn"
-                data-testid="trace-retry-turn"
-                onClick={() => {
-                  const prevUserTurn = [...bundle.turns].reverse().find((t) => t.role === 'user');
-                  if (prevUserTurn?.content) onRetry(prevUserTurn.content);
-                }}
-              >
-                重试该回合
-              </button>
-            )}
-          </section>
-        );
-      })}
-    </div>
-  );
-});
-
-const pluginLifecycleLabel = {
-  available: '可用',
-  unavailable: '不可用',
-  initialized: '已初始化',
-  not_initialized: '未初始化',
-  healthy: '健康',
-  unknown: '未知',
-  failed: '失败',
-} as const;
-
-export const PluginPanel = memo(function PluginPanel({
-  plugins,
-  onClose,
-}: {
-  plugins: CurrentPluginProjection[];
-  onClose: () => void;
-}) {
-  const grouped = useMemo(
-    () => ({
-      function: plugins.filter((plugin) => plugin.category === 'function'),
-      model: plugins.filter((plugin) => plugin.category === 'model'),
-      other: plugins.filter((plugin) => plugin.category === 'other'),
-    }),
-    [plugins],
-  );
-  return (
-    <aside
-      className="workbench-plugin-panel"
-      data-testid="workbench-plugin-panel"
-      aria-label="当前插件"
-    >
-      <div className="workbench-plugin-header">
-        <div>
-          <div className="workbench-eyebrow">Runtime Registry</div>
-          <h2>当前插件</h2>
-        </div>
-        <button
-          className="workbench-icon-button"
-          data-testid="workbench-plugin-close"
-          onClick={onClose}
-          aria-label="关闭当前插件"
-        >
-          ×
-        </button>
-      </div>
-      {(['function', 'model', 'other'] as const).map((category) => (
-        <section
-          key={category}
-          className="workbench-plugin-group"
-          data-testid="workbench-plugin-group"
-          data-category={category}
-        >
-          <h3>
-            {category === 'function' ? '功能插件' : category === 'model' ? '模型插件' : '其他插件'}
-          </h3>
-          {grouped[category].length === 0 ? (
-            <p className="workbench-empty-inline">暂无可用插件</p>
-          ) : (
-            grouped[category].map((plugin) => (
-              <div
-                className="workbench-plugin-row"
-                key={plugin.id}
-                data-testid="workbench-plugin-row"
-                data-plugin-id={plugin.id}
-                data-category={plugin.category}
-                data-status={plugin.status}
-                data-availability={plugin.availability}
-                data-initialization={plugin.initialization}
-                data-health={plugin.health}
-              >
-                <div className="workbench-plugin-row-top">
-                  <strong>{plugin.name}</strong>
-                  <span className={`workbench-plugin-state is-${plugin.status}`}>
-                    {plugin.status}
-                  </span>
-                </div>
-                <div className="workbench-plugin-meta">
-                  v{plugin.version} · {plugin.description}
-                </div>
-                <div className="workbench-plugin-lifecycle">
-                  可用性：{pluginLifecycleLabel[plugin.availability]} · 初始化：
-                  {pluginLifecycleLabel[plugin.initialization]} · 健康：
-                  {pluginLifecycleLabel[plugin.health]}
-                </div>
-                <div className="workbench-plugin-capabilities">
-                  {plugin.capabilities.join(' · ')}
-                </div>
-              </div>
-            ))
-          )}
-        </section>
-      ))}
-      <p className="workbench-plugin-note">
-        此处只读显示运行时实际加载能力，不提供安装、启停、配置或市场操作。
-      </p>
-    </aside>
   );
 });
 
@@ -552,7 +412,10 @@ export const MemoryInspectorCard = memo(function MemoryInspectorCard({
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-        <strong>🧠 Memory Context · v{versionNumber}</strong>
+        <strong className="workbench-memory-title">
+          <Brain aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span>Memory Context · v{versionNumber}</span>
+        </strong>
         <span style={{ color: 'var(--color-text-muted, #64748b)' }}>{sceneName || '当前分镜'}</span>
       </div>
       <div style={{ color: 'var(--color-text-secondary, #475569)', marginBottom: 4 }}>

@@ -144,6 +144,11 @@ describe('Agent production closed loop & restart verification', () => {
   it('executes 5-round multi-novel generation, revision, review authorization, adoption & survives restart', async () => {
     const roundEvidence: ClosedLoopRoundEvidence[] = [];
 
+    await waitForTestId('app-shell');
+    await browser.execute(() => {
+      window.localStorage.setItem('ai_novel_studio_e2e_workbench_model', 'enabled');
+    });
+
     // =========================================================================
     // 1. 初始化两本作品与五个目标章节
     // =========================================================================
@@ -225,9 +230,22 @@ describe('Agent production closed loop & restart verification', () => {
         task.novelId,
       );
       await projectRow.click();
+      await browser.waitUntil(
+        async () => (await projectRow.getAttribute('data-selected')) === 'true',
+        { timeout: 30000, timeoutMsg: `作品 ${task.novelId} 未成为当前工作台项目` },
+      );
 
-      // 创建独立任务会话
+      // 原子创建独立任务会话，并由创建动作启动首个 Run
       await clickTestId('workbench-create-task');
+      await waitForTestId('workbench-task-creator');
+      await fillTestId('workbench-new-task-goal', task.generatePrompt);
+      const newTaskChapter = await waitForTestId('workbench-new-task-chapter');
+      await newTaskChapter.selectByAttribute('value', task.chapterId);
+      expect(await newTaskChapter.getValue()).toBe(task.chapterId);
+      const createAndStart = await waitForTestId('workbench-create-and-start');
+      await createAndStart.waitForEnabled({ timeout: 30000 });
+      await createAndStart.click();
+
       const taskHeader = await waitForTestId('workbench-task-header');
       const conversationId = (await taskHeader.getAttribute('data-conversation-id'))!;
       expect(conversationId).toBeTruthy();
@@ -237,12 +255,7 @@ describe('Agent production closed loop & restart verification', () => {
       await chapterSelect.selectByAttribute('value', task.chapterId);
       expect(await chapterSelect.getValue()).toBe(task.chapterId);
 
-      // --- 第 1 步：生成初版 ---
-      await fillTestId('workbench-composer-input', task.generatePrompt);
-      const sendBtn = await waitForTestId('workbench-send-task');
-      await sendBtn.waitForEnabled({ timeout: 30000 });
-      await sendBtn.click();
-
+      // --- 第 1 步：等待原子创建启动的首版生成 ---
       await browser.waitUntil(
         async () => {
           const cards = await browser.$$('[data-testid="workbench-artifact-card"]');
@@ -253,7 +266,7 @@ describe('Agent production closed loop & restart verification', () => {
       await waitForTestIdAttribute(
         'workbench-conversation-status',
         'data-status',
-        'completed',
+        'waiting_user',
         60000,
       );
 
@@ -266,7 +279,18 @@ describe('Agent production closed loop & restart verification', () => {
       const initialArtifactId = (await firstCard.getAttribute('data-artifact-id'))?.trim();
       expect(initialArtifactId).toBeTruthy();
 
-      // --- 第 2 步：修改生成第二版 ---
+      // --- 第 2 步：显式要求修改初版，再生成第二版 ---
+      const reviseButton = await firstCard.$('[data-testid="workbench-artifact-revise"]');
+      expect(await reviseButton.isExisting()).toBe(true);
+      await reviseButton.click();
+      await waitForTestIdAttribute(
+        'workbench-artifact-card',
+        'data-decision',
+        'request_revision',
+        30000,
+      );
+      await waitForTestIdAttribute('workbench-conversation-status', 'data-status', 'idle', 30000);
+
       await fillTestId('workbench-composer-input', task.revisionPrompt);
       const secondSendBtn = await waitForTestId('workbench-send-task');
       await secondSendBtn.waitForEnabled({ timeout: 30000 });
@@ -282,7 +306,7 @@ describe('Agent production closed loop & restart verification', () => {
       await waitForTestIdAttribute(
         'workbench-conversation-status',
         'data-status',
-        'completed',
+        'waiting_user',
         60000,
       );
 
@@ -405,6 +429,12 @@ describe('Agent production closed loop & restart verification', () => {
         { timeout: 30000, timeoutMsg: '草稿采用未变为已采用状态' },
       );
 
+      const completedBundle = await bridgeCall<TaskConversationBundle | null>(
+        'get_task_conversation',
+        { conversationId },
+      );
+      expect(completedBundle?.conversation.status).toBe('completed');
+
       // --- 第 8 步：核实数据库与授权状态 ---
       const chaptersInDb = await bridgeCall<ChapterRecord[]>('get_chapters_by_novel_id', {
         novelId: task.novelId,
@@ -490,7 +520,7 @@ describe('Agent production closed loop & restart verification', () => {
     expect(afterState.conversationsCount).toBe(expectedRounds);
     expect(afterState.runsCount).toBe(expectedRuns);
     expect(afterState.resultArtifactsCount).toBe(expectedRuns);
-    expect(afterState.artifactDecisionsCount).toBe(expectedRounds);
+    expect(afterState.artifactDecisionsCount).toBe(expectedRounds * 2);
     expect(afterState.reviewAuthorizationsCount).toBe(expectedRounds);
     expect(afterState.consumedAuthorizationsCount).toBe(expectedRounds);
     expect(afterState.draftsCount).toBe(expectedRounds * 2);
@@ -535,13 +565,22 @@ describe('Agent production closed loop & restart verification', () => {
         bundle?.artifacts.every((card) => card.conversationId === evidence.conversationId),
       ).toBe(true);
 
-      const decision = bundle?.decisions.find((item) => item.decisionId === evidence.decisionId);
-      expect(bundle?.decisions).toHaveLength(1);
-      expect(decision?.artifactId).toBe(evidence.revisedArtifactId);
-      expect(decision?.conversationId).toBe(evidence.conversationId);
-      expect(decision?.decision).toBe('confirm');
-      expect(decision?.actor).toBe('user');
-      expect(decision?.targetId).toBe(evidence.chapterId);
+      const revisionDecision = bundle?.decisions.find(
+        (item) =>
+          item.artifactId === evidence.initialArtifactId && item.decision === 'request_revision',
+      );
+      const confirmationDecision = bundle?.decisions.find(
+        (item) => item.decisionId === evidence.decisionId,
+      );
+      expect(bundle?.decisions).toHaveLength(2);
+      expect(revisionDecision?.conversationId).toBe(evidence.conversationId);
+      expect(revisionDecision?.actor).toBe('user');
+      expect(revisionDecision?.targetId).toBe(evidence.chapterId);
+      expect(confirmationDecision?.artifactId).toBe(evidence.revisedArtifactId);
+      expect(confirmationDecision?.conversationId).toBe(evidence.conversationId);
+      expect(confirmationDecision?.decision).toBe('confirm');
+      expect(confirmationDecision?.actor).toBe('user');
+      expect(confirmationDecision?.targetId).toBe(evidence.chapterId);
 
       const authorization = bundle?.authorizations.find(
         (item) => item.authorizationId === evidence.authorizationId,

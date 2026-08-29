@@ -134,11 +134,9 @@ function WritingWorkspacePage() {
     resetSidebar();
   }, [novelId, resetSidebar, startSession]);
 
-  // v1.0.42 上下文版本号（角色变更/字数变更时递增，触发 AiGeneratePanel 刷新摘要）
   const [contextVersion, setContextVersion] = useState(0);
   const bumpContextVersion = useCallback(() => setContextVersion((v) => v + 1), []);
 
-  // v1.7.12/v1.7.16 质量检查正文定位
   const [locateTarget, setLocateTarget] = useState<{
     startOffset: number;
     endOffset: number;
@@ -153,7 +151,6 @@ function WritingWorkspacePage() {
   );
   const handleLocateDone = useCallback(() => setLocateTarget(null), []);
 
-  // v1.7.19 全局 AI 任务弹窗状态
   const showAiModal = useCallback(
     (title: string, subtitle?: string) => {
       setAiModal({ running: true, title, subtitle, stage: '', progress: 0 });
@@ -207,8 +204,6 @@ function WritingWorkspacePage() {
     [chapterDocumentBlockedRef],
   );
 
-  // v1.7.19 质量检查状态上移（不随面板卸载丢失）
-
   const activeChapter = chapters.find((ch) => ch.id === activeChapterId);
   const activeDraft = currentDraft?.chapterId === activeChapterId ? currentDraft : null;
   const activeContentState = contentLoadError ?? activeDraft?.contentState;
@@ -221,7 +216,6 @@ function WritingWorkspacePage() {
     setChapters,
     bumpContextVersion,
   });
-  // v1.0.45 统一写作上下文（派生状态，面板通过此获取全文/选中文本/章节等）
   const writingContext: WritingContext = getCurrentWritingContext({
     fullText: contentAvailable
       ? editorSnapshot.chapterId === activeChapterId
@@ -344,7 +338,6 @@ function WritingWorkspacePage() {
         continueAction: async () => {
           setChapterGoalDirty(false);
           chapterGoalDirtyRef.current = false;
-          // 面板保持挂载，但正文相关面板将读取新的安全状态。
           await loadChapterDraft(chapterId, true);
         },
       });
@@ -418,7 +411,6 @@ function WritingWorkspacePage() {
     [setEditorActivity],
   );
 
-  // v1.0.34 章节大纲应用回调：刷新父组件的章节状态
   const handleChapterOutlineApplied = useCallback(
     async (chapterId: string) => {
       if (!chapterId) return;

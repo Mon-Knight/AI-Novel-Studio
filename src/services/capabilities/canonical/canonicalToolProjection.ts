@@ -1,15 +1,13 @@
-import { canonicalHash, compareCanonicalText } from '../../ai/compilation/canonical';
 import { getCapability, type CapabilityDefinition } from '../capabilityCatalog';
-import { failure } from '../domain/domainResult';
-import type { DomainResult } from '../domain/domainTypes';
 import { CANONICAL_TOOL_BINDINGS, getCanonicalToolBinding } from './canonicalToolAdapters';
+import { loadCanonicalToolManifest } from './canonicalToolManifest';
 import type {
   CanonicalModelToolDescriptor,
   CanonicalModelToolManifest,
+  CanonicalPortableToolDescriptor,
   CanonicalProjectionDiagnostic,
   CanonicalToolDescriptor,
   CanonicalToolId,
-  CanonicalToolInvocationContext,
   CanonicalToolManifest,
 } from './canonicalToolTypes';
 
@@ -165,18 +163,7 @@ export function getCanonicalProjectionDiagnostics(): CanonicalProjectionDiagnost
  * still partial and the catalog has not granted an exposure gate.
  */
 export async function getCanonicalToolManifest(): Promise<CanonicalToolManifest> {
-  const tools = listCanonicalToolDescriptors().sort((left, right) =>
-    compareCanonicalText(left.id, right.id),
-  );
-  const manifestWithoutHash = {
-    contractVersion: 'canonical_tool_manifest_v1' as const,
-    projectionVersion: '1' as const,
-    tools,
-  };
-  return {
-    ...manifestWithoutHash,
-    projectionHash: await canonicalHash(manifestWithoutHash),
-  };
+  return loadCanonicalToolManifest(listCanonicalToolDescriptors());
 }
 
 /**
@@ -184,58 +171,43 @@ export async function getCanonicalToolManifest(): Promise<CanonicalToolManifest>
  * may opt in only descriptors that are both `stable` and backed by working
  * evidence; candidates and catalog-only entries never leak into prompts.
  */
-export function listCanonicalToolsForAgent(): CanonicalModelToolDescriptor[] {
-  return listCanonicalToolDescriptors()
-    .filter(
-      (descriptor) =>
-        descriptor.projectionState === 'stable' &&
-        descriptor.exposure === 'stable' &&
-        descriptor.evidence.health === 'working',
-    )
-    .map(toModelDescriptor);
+/**
+ * Model projection is deliberately async so it must pass through the shared
+ * artifact validation rather than reading the dynamic Catalog directly.
+ */
+export async function listCanonicalToolsForAgent(): Promise<CanonicalModelToolDescriptor[]> {
+  const manifest = await getCanonicalToolManifest();
+  const visible = new Set(manifest.modelVisibleToolIdentities);
+  return manifest.tools
+    .filter((tool) => visible.has(`${tool.id}@${tool.version}`))
+    .map(portableToModelDescriptor);
 }
 
-function toModelDescriptor(descriptor: CanonicalToolDescriptor): CanonicalModelToolDescriptor {
+function portableToModelDescriptor(
+  descriptor: CanonicalPortableToolDescriptor,
+): CanonicalModelToolDescriptor {
   const {
     projectionState: _projectionState,
-    evidence: _evidence,
     exposure: _exposure,
-    executor: _executor,
-    facade: _facade,
+    health: _health,
     ...publicDescriptor
   } = descriptor;
   return clone(publicDescriptor);
 }
 
 export async function getCanonicalAgentManifest(): Promise<CanonicalModelToolManifest> {
-  const tools = listCanonicalToolsForAgent();
-  const manifestWithoutHash = {
-    contractVersion: 'canonical_tool_manifest_v1' as const,
-    projectionVersion: '1' as const,
+  const artifact = await getCanonicalToolManifest();
+  const visible = new Set(artifact.modelVisibleToolIdentities);
+  const tools = artifact.tools
+    .filter((tool) => visible.has(`${tool.id}@${tool.version}`))
+    .map(portableToModelDescriptor);
+  return {
+    contractVersion: artifact.contractVersion,
+    projectionVersion: artifact.projectionVersion,
+    canonicalization: artifact.canonicalization,
+    projectionHash: artifact.projectionHash,
     tools,
   };
-  return {
-    ...manifestWithoutHash,
-    projectionHash: await canonicalHash(manifestWithoutHash),
-  };
-}
-
-/**
- * Resolve and execute only a projected canonical action.  The fixed binding
- * lookup and the catalog gate together prevent legacy or technical handler
- * names from becoming an implicit execution path.
- */
-export async function invokeCanonicalTool(
-  id: string,
-  argumentsJson: unknown,
-  context: CanonicalToolInvocationContext,
-): Promise<DomainResult<unknown>> {
-  const descriptor = getCanonicalToolDescriptor(id);
-  const binding = getCanonicalToolBinding(id);
-  if (!descriptor || !binding) {
-    return failure('NOT_FOUND', `Canonical Tool ${id} 未通过 projection gate。`);
-  }
-  return binding.execute(argumentsJson, context);
 }
 
 export const canonicalToolProjection = {
@@ -245,5 +217,4 @@ export const canonicalToolProjection = {
   manifest: getCanonicalToolManifest,
   agentList: listCanonicalToolsForAgent,
   agentManifest: getCanonicalAgentManifest,
-  invoke: invokeCanonicalTool,
 };

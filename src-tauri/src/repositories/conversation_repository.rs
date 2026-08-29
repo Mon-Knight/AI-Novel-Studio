@@ -91,6 +91,13 @@ pub struct TaskConversationBundle {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InitializedTaskConversation {
+    pub conversation: TaskConversationRecord,
+    pub turn: ConversationTurnRecord,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArtifactDecisionRecord {
     pub decision_id: String,
     pub artifact_id: String,
@@ -134,6 +141,18 @@ pub struct CreateConversationInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateInitializedConversationInput {
+    pub conversation_id: String,
+    pub turn_id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub goal: String,
+    pub default_model: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppendTurnInput {
     pub turn_id: String,
     pub conversation_id: String,
@@ -147,6 +166,22 @@ pub struct AppendTurnInput {
 pub struct UpdateConversationModelInput {
     pub conversation_id: String,
     pub default_model: Value,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameConversationInput {
+    pub conversation_id: String,
+    pub title: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetConversationArchivedInput {
+    pub conversation_id: String,
+    pub archived: bool,
     pub updated_at: String,
 }
 
@@ -265,6 +300,17 @@ pub struct AdoptReviewAuthorizedDraftInput {
 pub struct AdoptReviewAuthorizedDraftResult {
     pub authorization: ReviewAuthorizationRecord,
     pub adopted_draft: crate::domain::writing::ChapterDraftDto,
+    pub summary_follow_up: ChapterSummaryFollowUp,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSummaryFollowUp {
+    pub status: String,
+    pub next_action: Option<String>,
+    pub instruction: Option<String>,
+    pub chapter_id: String,
+    pub adopted_draft_id: String,
 }
 
 fn parse_json(raw: Option<String>) -> Option<Value> {
@@ -279,6 +325,14 @@ fn json_text(value: &Value) -> Result<String, AppError> {
             false,
         )
     })
+}
+
+fn model_lock_projection(value: &Value) -> Value {
+    let mut projected = value.clone();
+    if let Some(runtime) = projected.get_mut("runtime").and_then(Value::as_object_mut) {
+        runtime.remove("toolCallingAttestation");
+    }
+    projected
 }
 
 fn task_run_transition_allowed(from: &str, to: &str) -> bool {
@@ -312,6 +366,125 @@ fn terminal_task_run(status: &str) -> bool {
 
 fn terminal_tool_event(status: &str) -> bool {
     matches!(status, "succeeded" | "failed" | "cancelled" | "skipped")
+}
+
+fn has_unresolved_artifact_candidate(
+    connection: &Connection,
+    conversation_id: &str,
+) -> Result<bool, AppError> {
+    connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM conversation_artifact_cards AS card
+                LEFT JOIN artifact_decisions AS decision
+                  ON decision.decision_id = (
+                    SELECT latest.decision_id
+                    FROM artifact_decisions AS latest
+                    WHERE latest.card_id = card.card_id
+                      AND latest.conversation_id = card.conversation_id
+                    ORDER BY latest.created_at DESC, latest.rowid DESC
+                    LIMIT 1
+                  )
+                WHERE card.conversation_id = ?1
+                  AND card.status IN ('candidate', 'confirmed')
+                  AND (
+                    decision.decision_id IS NULL
+                    OR (
+                      decision.decision = 'confirm'
+                      AND NOT EXISTS(
+                        SELECT 1
+                        FROM review_authorizations AS authorization
+                        JOIN chapters AS chapter
+                          ON chapter.id = authorization.chapter_id
+                         AND chapter.novel_id = authorization.novel_id
+                         AND chapter.deleted_at IS NULL
+                         AND chapter.adopted_draft_id = authorization.consumed_by_draft_id
+                        JOIN chapter_drafts AS draft
+                          ON draft.id = authorization.consumed_by_draft_id
+                         AND draft.chapter_id = authorization.chapter_id
+                         AND draft.novel_id = authorization.novel_id
+                         AND draft.is_adopted = 1
+                        WHERE authorization.decision_id = decision.decision_id
+                          AND authorization.status = 'consumed'
+                      )
+                    )
+                    OR (
+                      decision.decision = 'request_apply'
+                      AND decision.apply_transaction_id IS NULL
+                      AND decision.conflict_code IS NULL
+                    )
+                  )
+            )",
+            params![conversation_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)
+}
+
+pub(crate) fn reconcile_conversation_status(
+    connection: &Connection,
+    conversation_id: &str,
+    fallback_status: &str,
+    updated_at: &str,
+) -> Result<(), AppError> {
+    let has_unresolved = has_unresolved_artifact_candidate(connection, conversation_id)?;
+    let has_active_run: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM task_runs
+                WHERE conversation_id=?1
+                  AND status IN ('queued', 'running', 'cancel_requested')
+            )",
+            params![conversation_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    let status = if has_unresolved {
+        "waiting_user"
+    } else if has_active_run {
+        "running"
+    } else {
+        fallback_status
+    };
+    let updated = connection
+        .execute(
+            "UPDATE task_conversations
+             SET status=?2, updated_at=?3
+             WHERE conversation_id=?1 AND archived_at IS NULL",
+            params![conversation_id, status, updated_at],
+        )
+        .map_err(AppError::database)?;
+    if updated == 0 {
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_conversations WHERE conversation_id=?1)",
+                params![conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if !exists {
+            return Err(AppError::new(
+                "CONVERSATION_NOT_FOUND",
+                "任务对话不存在",
+                false,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn decision_fallback_status(decision: &ArtifactDecisionRecord) -> &'static str {
+    if decision.conflict_code.is_some() {
+        "failed"
+    } else {
+        match decision.decision.as_str() {
+            "reject" | "request_revision" => "idle",
+            "request_apply" if decision.apply_transaction_id.is_some() => "completed",
+            "confirm" | "request_apply" => "waiting_user",
+            _ => "idle",
+        }
+    }
 }
 
 fn conversation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskConversationRecord> {
@@ -404,16 +577,76 @@ pub fn create_conversation(
         .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话创建后无法读取", false))
 }
 
+pub fn create_initialized_conversation(
+    connection: &mut Connection,
+    input: CreateInitializedConversationInput,
+) -> Result<InitializedTaskConversation, AppError> {
+    let transaction = connection.transaction().map_err(AppError::database)?;
+    let model = json_text(&input.default_model)?;
+    transaction
+        .execute(
+            "INSERT INTO task_conversations (conversation_id, novel_id, title, status, default_model_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'idle', ?4, ?5, ?5)",
+            params![
+                input.conversation_id,
+                input.novel_id,
+                input.title,
+                model,
+                input.created_at
+            ],
+        )
+        .map_err(AppError::database)?;
+    transaction
+        .execute(
+            "INSERT INTO conversation_turns (turn_id, conversation_id, sequence, role, content, created_at)
+             VALUES (?1, ?2, 0, 'user', ?3, ?4)",
+            params![
+                input.turn_id,
+                input.conversation_id,
+                input.goal,
+                input.created_at
+            ],
+        )
+        .map_err(AppError::database)?;
+    let conversation = transaction
+        .query_row(
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            params![input.conversation_id],
+            conversation_from_row,
+        )
+        .map_err(AppError::database)?;
+    let turn = transaction
+        .query_row(
+            "SELECT turn_id, conversation_id, sequence, role, content, run_id, created_at FROM conversation_turns WHERE turn_id=?1",
+            params![input.turn_id],
+            turn_from_row,
+        )
+        .map_err(AppError::database)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(InitializedTaskConversation { conversation, turn })
+}
+
 pub fn list_conversations(
     connection: &Connection,
     novel_id: Option<&str>,
+    include_archived: bool,
     limit: i64,
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
-    let mut statement = if novel_id.is_some() {
-        connection.prepare("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE novel_id=?1 AND status <> 'archived' ORDER BY updated_at DESC LIMIT ?2")
+    let archive_filter = if include_archived {
+        ""
     } else {
-        connection.prepare("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE status <> 'archived' ORDER BY updated_at DESC LIMIT ?1")
-    }.map_err(AppError::database)?;
+        " AND archived_at IS NULL AND status <> 'archived'"
+    };
+    let sql = if novel_id.is_some() {
+        format!(
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE novel_id=?1{archive_filter} ORDER BY updated_at DESC LIMIT ?2"
+        )
+    } else {
+        format!(
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE 1=1{archive_filter} ORDER BY updated_at DESC LIMIT ?1"
+        )
+    };
+    let mut statement = connection.prepare(&sql).map_err(AppError::database)?;
     let rows = if let Some(novel_id) = novel_id {
         statement.query_map(
             params![novel_id, limit.clamp(1, 500)],
@@ -434,10 +667,94 @@ pub fn get_conversation(
     connection.query_row("SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1", params![id], conversation_from_row).optional().map_err(AppError::database)
 }
 
+pub fn validate_task_runtime_scope(
+    connection: &Connection,
+    conversation_id: &str,
+    turn_id: &str,
+    novel_id: &str,
+    chapter_id: Option<&str>,
+) -> Result<String, AppError> {
+    let scope_mismatch = || {
+        AppError::new(
+            "TASK_RUNTIME_SCOPE_MISMATCH",
+            "任务运行范围与任务对话不一致",
+            false,
+        )
+    };
+    let authoritative_novel_id = connection
+        .query_row(
+            "SELECT novel_id FROM task_conversations WHERE conversation_id=?1",
+            params![conversation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(&scope_mismatch)?;
+    if authoritative_novel_id != novel_id {
+        return Err(scope_mismatch());
+    }
+    let authoritative_goal = connection
+        .query_row(
+            "SELECT content FROM conversation_turns
+             WHERE turn_id=?1 AND conversation_id=?2 AND role='user'",
+            params![turn_id, conversation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(&scope_mismatch)?;
+    if let Some(chapter_id) = chapter_id {
+        let scoped_chapter: bool = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM chapters
+                    WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL
+                )",
+                params![chapter_id, novel_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if !scoped_chapter {
+            return Err(scope_mismatch());
+        }
+    }
+    Ok(authoritative_goal)
+}
+
 pub fn update_conversation_model(
     connection: &mut Connection,
     input: UpdateConversationModelInput,
 ) -> Result<TaskConversationRecord, AppError> {
+    let current = get_conversation(connection, &input.conversation_id)?
+        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?;
+    if let Some(current_model) = current.default_model.as_ref() {
+        if current_model == &input.default_model {
+            return Ok(current);
+        }
+        return Err(AppError::new(
+            "CONVERSATION_MODEL_LOCKED",
+            "任务模型已在创建时固定，当前会话结束前不能更换",
+            false,
+        ));
+    }
+    let has_facts: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM conversation_turns WHERE conversation_id=?1
+                UNION ALL
+                SELECT 1 FROM task_runs WHERE conversation_id=?1
+            )",
+            params![input.conversation_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if has_facts {
+        return Err(AppError::new(
+            "CONVERSATION_MODEL_LOCKED",
+            "任务模型必须在首个回合前固定",
+            false,
+        ));
+    }
     let model = json_text(&input.default_model)?;
     let changed = connection
         .execute(
@@ -454,6 +771,83 @@ pub fn update_conversation_model(
     }
     get_conversation(connection, &input.conversation_id)?
         .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话更新后无法读取", false))
+}
+
+pub fn rename_conversation(
+    connection: &mut Connection,
+    input: RenameConversationInput,
+) -> Result<TaskConversationRecord, AppError> {
+    let changed = connection
+        .execute(
+            "UPDATE task_conversations SET title=?2, updated_at=?3 WHERE conversation_id=?1",
+            params![input.conversation_id, input.title, input.updated_at],
+        )
+        .map_err(AppError::database)?;
+    if changed == 0 {
+        return Err(AppError::new(
+            "CONVERSATION_NOT_FOUND",
+            "任务对话不存在",
+            false,
+        ));
+    }
+    get_conversation(connection, &input.conversation_id)?
+        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话重命名后无法读取", false))
+}
+
+pub fn set_conversation_archived(
+    connection: &mut Connection,
+    input: SetConversationArchivedInput,
+) -> Result<TaskConversationRecord, AppError> {
+    let transaction = connection.transaction().map_err(AppError::database)?;
+    let current = transaction
+        .query_row(
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            params![input.conversation_id],
+            conversation_from_row,
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?;
+
+    if input.archived {
+        let has_active_run: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_runs WHERE conversation_id=?1 AND status IN ('queued', 'running', 'cancel_requested'))",
+                params![input.conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::database)?;
+        if has_active_run || current.status == "running" {
+            return Err(AppError::new(
+                "CONVERSATION_ACTIVE_RUN",
+                "运行中的任务不能归档，请先停止任务",
+                false,
+            ));
+        }
+        transaction
+            .execute(
+                "UPDATE task_conversations SET archived_at=?2, updated_at=?2 WHERE conversation_id=?1",
+                params![input.conversation_id, input.updated_at],
+            )
+            .map_err(AppError::database)?;
+    } else {
+        transaction
+            .execute(
+                "UPDATE task_conversations SET archived_at=NULL, status=CASE WHEN status='archived' THEN 'idle' ELSE status END, updated_at=?2 WHERE conversation_id=?1",
+                params![input.conversation_id, input.updated_at],
+            )
+            .map_err(AppError::database)?;
+    }
+
+    let updated = transaction
+        .query_row(
+            "SELECT conversation_id, novel_id, title, status, default_model_json, created_at, updated_at, archived_at FROM task_conversations WHERE conversation_id=?1",
+            params![input.conversation_id],
+            conversation_from_row,
+        )
+        .map_err(AppError::database)?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(updated)
 }
 
 pub fn append_turn(
@@ -593,6 +987,38 @@ pub fn create_run(
     }
     let snapshot = json_text(&input.model_snapshot)?;
     let transaction = connection.transaction().map_err(AppError::database)?;
+    let locked_model = transaction
+        .query_row(
+            "SELECT default_model_json FROM task_conversations WHERE conversation_id=?1",
+            params![input.conversation_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| AppError::new("CONVERSATION_NOT_FOUND", "任务对话不存在", false))?
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+    let local_conversational_model = input
+        .model_snapshot
+        .get("providerId")
+        .and_then(Value::as_str)
+        == Some("ans-local")
+        && input
+            .model_snapshot
+            .get("runtime")
+            .and_then(|runtime| runtime.get("adapterProtocol"))
+            .and_then(Value::as_str)
+            == Some("ans_local_conversation_v1");
+    if let Some(locked_model) = locked_model {
+        if !local_conversational_model
+            && model_lock_projection(&locked_model) != model_lock_projection(&input.model_snapshot)
+        {
+            return Err(AppError::new(
+                "TASK_RUN_MODEL_MISMATCH",
+                "运行模型与任务创建时固定的模型不一致",
+                false,
+            ));
+        }
+    }
     let scoped_turn: bool = transaction
         .query_row(
             "SELECT EXISTS(
@@ -677,22 +1103,19 @@ pub fn update_run(
     let run = get_run(&transaction, &input.run_id)?
         .ok_or_else(|| AppError::new("TASK_RUN_NOT_FOUND", "任务运行不存在", false))?;
     if terminal_task_run(&run.status) {
-        transaction
-            .execute(
-                "UPDATE task_conversations SET status=?2, updated_at=?3 WHERE conversation_id=?1",
-                params![
-                    run.conversation_id,
-                    if run.status == "completed" {
-                        "completed"
-                    } else if run.status == "failed" {
-                        "failed"
-                    } else {
-                        "idle"
-                    },
-                    input.updated_at
-                ],
-            )
-            .map_err(AppError::database)?;
+        let fallback_status = if run.status == "completed" {
+            "completed"
+        } else if run.status == "failed" {
+            "failed"
+        } else {
+            "idle"
+        };
+        reconcile_conversation_status(
+            &transaction,
+            &run.conversation_id,
+            fallback_status,
+            &input.updated_at,
+        )?;
     }
     transaction.commit().map_err(AppError::database)?;
     Ok(run)
@@ -964,12 +1387,16 @@ pub fn create_artifact_card(
         }
     }
     transaction.execute("INSERT INTO conversation_artifact_cards (card_id, conversation_id, turn_id, run_id, artifact_id, artifact_type, title, summary, content, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', ?9, ?10)", params![input.card_id, input.conversation_id, input.turn_id, input.run_id, input.artifact_id, input.artifact_type, input.title, input.summary, input.status, input.created_at]).map_err(AppError::database)?;
-    transaction
-        .execute(
-            "UPDATE task_conversations SET updated_at=?2 WHERE conversation_id=?1",
-            params![input.conversation_id, input.created_at],
-        )
-        .map_err(AppError::database)?;
+    reconcile_conversation_status(
+        &transaction,
+        &input.conversation_id,
+        if input.status == "rejected" {
+            "idle"
+        } else {
+            "waiting_user"
+        },
+        &input.created_at,
+    )?;
     let artifact = transaction.query_row("SELECT card_id, conversation_id, turn_id, run_id, artifact_id, artifact_type, title, summary, content, status, created_at FROM conversation_artifact_cards WHERE card_id=?1", params![input.card_id], artifact_from_row).map_err(AppError::database)?;
     transaction.commit().map_err(AppError::database)?;
     Ok(artifact)
@@ -978,6 +1405,14 @@ pub fn create_artifact_card(
 pub fn recover_interrupted_runs(
     connection: &mut Connection,
     input: RecoverRunsInput,
+) -> Result<i64, AppError> {
+    recover_interrupted_runs_excluding(connection, input, &std::collections::HashSet::new())
+}
+
+pub fn recover_interrupted_runs_excluding(
+    connection: &mut Connection,
+    input: RecoverRunsInput,
+    protected_run_ids: &std::collections::HashSet<String>,
 ) -> Result<i64, AppError> {
     let transaction = connection.transaction().map_err(AppError::database)?;
     let active_runs: Vec<(String, String)> = {
@@ -992,7 +1427,9 @@ pub fn recover_interrupted_runs(
             .map_err(AppError::database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(AppError::database)?;
-        rows
+        rows.into_iter()
+            .filter(|(run_id, _)| !protected_run_ids.contains(run_id))
+            .collect()
     };
     let mut conversations = std::collections::BTreeSet::new();
     for (run_id, conversation_id) in &active_runs {
@@ -1014,18 +1451,15 @@ pub fn recover_interrupted_runs(
         conversations.insert(conversation_id);
     }
     for conversation_id in conversations {
-        transaction
-            .execute(
-                "UPDATE task_conversations SET status='failed', updated_at=?2 WHERE conversation_id=?1",
-                params![conversation_id, input.finished_at],
-            )
-            .map_err(AppError::database)?;
+        reconcile_conversation_status(&transaction, conversation_id, "failed", &input.finished_at)?;
     }
     transaction.commit().map_err(AppError::database)?;
     Ok(active_runs.len() as i64)
 }
 
-fn decision_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactDecisionRecord> {
+pub(crate) fn decision_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ArtifactDecisionRecord> {
     Ok(ArtifactDecisionRecord {
         decision_id: row.get(0)?,
         artifact_id: row.get(1)?,
@@ -1062,7 +1496,37 @@ pub fn record_artifact_decision(
     connection: &mut Connection,
     input: RecordArtifactDecisionInput,
 ) -> Result<ArtifactDecisionRecord, AppError> {
-    let existing = connection
+    let transaction = connection.transaction().map_err(AppError::database)?;
+    let exact_candidate_identity: bool = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM conversation_artifact_cards AS card
+                JOIN result_artifacts AS artifact
+                  ON artifact.artifact_id = card.artifact_id
+                WHERE card.card_id = ?1
+                  AND card.conversation_id = ?2
+                  AND card.artifact_id = ?3
+                  AND artifact.content_hash = ?4
+                  AND artifact.processing_status IN ('valid', 'valid_with_warnings')
+            )",
+            params![
+                &input.card_id,
+                &input.conversation_id,
+                &input.artifact_id,
+                &input.artifact_hash
+            ],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)?;
+    if !exact_candidate_identity {
+        return Err(AppError::new(
+            "ARTIFACT_DECISION_SCOPE_MISMATCH",
+            "产物决定与候选卡片、任务或内容哈希不一致",
+            false,
+        ));
+    }
+    let existing = transaction
         .query_row(
             "SELECT decision_id, artifact_id, artifact_hash, card_id, conversation_id, decision, idempotency_key, actor, target_type, target_id, base_revision, apply_transaction_id, conflict_code, created_at
              FROM artifact_decisions
@@ -1073,9 +1537,16 @@ pub fn record_artifact_decision(
         .optional()
         .map_err(AppError::database)?;
     if let Some(existing) = existing {
+        reconcile_conversation_status(
+            &transaction,
+            &existing.conversation_id,
+            decision_fallback_status(&existing),
+            &existing.created_at,
+        )?;
+        transaction.commit().map_err(AppError::database)?;
         return Ok(existing);
     }
-    connection
+    transaction
         .execute(
             "INSERT INTO artifact_decisions (
                 decision_id, artifact_id, artifact_hash, card_id, conversation_id, decision,
@@ -1083,49 +1554,39 @@ pub fn record_artifact_decision(
                 apply_transaction_id, conflict_code, created_at
              ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
             params![
-                input.decision_id,
-                input.artifact_id,
-                input.artifact_hash,
-                input.card_id,
-                input.conversation_id,
-                input.decision,
-                input.idempotency_key,
-                input.actor,
-                input.target_type,
-                input.target_id,
-                input.base_revision,
-                input.apply_transaction_id,
-                input.conflict_code,
-                input.created_at
+                &input.decision_id,
+                &input.artifact_id,
+                &input.artifact_hash,
+                &input.card_id,
+                &input.conversation_id,
+                &input.decision,
+                &input.idempotency_key,
+                &input.actor,
+                &input.target_type,
+                &input.target_id,
+                &input.base_revision,
+                &input.apply_transaction_id,
+                &input.conflict_code,
+                &input.created_at
             ],
         )
         .map_err(AppError::database)?;
-    if input.decision == "confirm"
-        || input.decision == "reject"
-        || input.decision == "request_apply"
-    {
-        let status = if input.conflict_code.is_some() {
-            "failed"
-        } else if input.decision == "reject" {
-            "idle"
-        } else if input.apply_transaction_id.is_some() {
-            "completed"
-        } else {
-            "waiting_user"
-        };
-        let _ = connection.execute(
-            "UPDATE task_conversations SET status=?2, updated_at=?3 WHERE conversation_id=?1",
-            params![input.conversation_id, status, input.created_at],
-        );
-    }
-    connection
+    let decision = transaction
         .query_row(
             "SELECT decision_id, artifact_id, artifact_hash, card_id, conversation_id, decision, idempotency_key, actor, target_type, target_id, base_revision, apply_transaction_id, conflict_code, created_at
              FROM artifact_decisions WHERE decision_id=?1",
             params![input.decision_id],
             decision_from_row,
         )
-        .map_err(AppError::database)
+        .map_err(AppError::database)?;
+    reconcile_conversation_status(
+        &transaction,
+        &decision.conversation_id,
+        decision_fallback_status(&decision),
+        &decision.created_at,
+    )?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(decision)
 }
 
 fn validate_review_decision_scope(
@@ -1252,24 +1713,197 @@ fn complete_review_conversation(
     decision_id: &str,
     completed_at: &str,
 ) -> Result<(), AppError> {
-    let updated = transaction
-        .execute(
-            "UPDATE task_conversations
-             SET status='completed', updated_at=?1
-             WHERE conversation_id=(
-                 SELECT conversation_id FROM artifact_decisions WHERE decision_id=?2
-             ) AND status <> 'archived'",
-            params![completed_at, decision_id],
+    let conversation_id = transaction
+        .query_row(
+            "SELECT conversation_id FROM artifact_decisions WHERE decision_id=?1",
+            params![decision_id],
+            |row| row.get::<_, String>(0),
         )
         .map_err(AppError::database)?;
-    if updated != 1 {
+    reconcile_conversation_status(transaction, &conversation_id, "completed", completed_at)
+}
+
+fn ensure_chapter_summary_follow_up(
+    transaction: &Transaction<'_>,
+    authorization: &ReviewAuthorizationRecord,
+    adopted_draft_id: &str,
+    created_at: &str,
+) -> Result<ChapterSummaryFollowUp, AppError> {
+    let summary_ready = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM chapter_summaries
+                WHERE chapter_id=?1 AND adopted_draft_id=?2 AND enabled=1 AND is_expired=0
+             )",
+            params![authorization.chapter_id, adopted_draft_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(AppError::database)?;
+    if summary_ready {
+        return Ok(ChapterSummaryFollowUp {
+            status: "ready".to_string(),
+            next_action: None,
+            instruction: None,
+            chapter_id: authorization.chapter_id.clone(),
+            adopted_draft_id: adopted_draft_id.to_string(),
+        });
+    }
+
+    let conversation_id = transaction
+        .query_row(
+            "SELECT conversation_id FROM artifact_decisions WHERE decision_id=?1",
+            params![authorization.decision_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(AppError::database)?;
+    let turn_id = format!("summary-generation-{}", authorization.authorization_id);
+    let turn_content = concat!(
+        "总结本章",
+        "\n\n[[ANS_WORKBENCH_TURN:v1;origin=workbench_chapter_summary]]",
+        "\n工作台说明：这是章节正文采用后发起的自动总结回合，不是用户的新消息。"
+    );
+    let existing_turn = transaction
+        .query_row(
+            "SELECT conversation_id,role,content FROM conversation_turns WHERE turn_id=?1",
+            params![&turn_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    if let Some((existing_conversation_id, existing_role, existing_content)) = existing_turn {
+        if existing_conversation_id != conversation_id
+            || existing_role != "user"
+            || existing_content != turn_content
+        {
+            return Err(AppError::new(
+                "CHAPTER_SUMMARY_TURN_IDENTITY_CONFLICT",
+                "章节总结自动回合与既有回合身份不一致",
+                false,
+            ));
+        }
+        return Ok(ChapterSummaryFollowUp {
+            status: "pending_generation".to_string(),
+            next_action: Some("summarize_chapter".to_string()),
+            instruction: Some("总结本章".to_string()),
+            chapter_id: authorization.chapter_id.clone(),
+            adopted_draft_id: adopted_draft_id.to_string(),
+        });
+    }
+    let sequence = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(sequence),-1)+1 FROM conversation_turns WHERE conversation_id=?1",
+            params![conversation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(AppError::database)?;
+    transaction
+        .execute(
+            "INSERT INTO conversation_turns
+             (turn_id,conversation_id,sequence,role,content,run_id,created_at)
+             VALUES (?1,?2,?3,'user',?4,NULL,?5)",
+            params![turn_id, conversation_id, sequence, turn_content, created_at,],
+        )
+        .map_err(AppError::database)?;
+    transaction
+        .execute(
+            "UPDATE task_conversations SET status='idle',updated_at=?2 WHERE conversation_id=?1",
+            params![conversation_id, created_at],
+        )
+        .map_err(AppError::database)?;
+
+    Ok(ChapterSummaryFollowUp {
+        status: "pending_generation".to_string(),
+        next_action: Some("summarize_chapter".to_string()),
+        instruction: Some("总结本章".to_string()),
+        chapter_id: authorization.chapter_id.clone(),
+        adopted_draft_id: adopted_draft_id.to_string(),
+    })
+}
+
+pub fn ensure_chapter_summary_follow_up_for_authorization(
+    connection: &mut Connection,
+    authorization_id: &str,
+) -> Result<ChapterSummaryFollowUp, AppError> {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let transaction = connection.transaction().map_err(AppError::database)?;
+    let authorization = transaction
+        .query_row(
+            "SELECT authorization_id, artifact_id, chapter_id, novel_id, decision_id, status, issued_at, consumed_at, consumed_by_draft_id
+             FROM review_authorizations WHERE authorization_id=?1",
+            params![authorization_id],
+            authorization_from_row,
+        )
+        .optional()
+        .map_err(AppError::database)?
+        .ok_or_else(|| {
+            AppError::new(
+                "REVIEW_AUTHORIZATION_NOT_FOUND",
+                "审阅授权不存在",
+                false,
+            )
+        })?;
+    if authorization.status != "consumed" {
         return Err(AppError::new(
-            "REVIEW_CONVERSATION_COMPLETE_FAILED",
-            "审阅采用成功但任务会话未能收敛为完成状态",
+            "REVIEW_AUTHORIZATION_NOT_CONSUMED",
+            "章节总结只能在审阅授权消费后准备",
             false,
         ));
     }
-    Ok(())
+    let adopted_draft_id = authorization
+        .consumed_by_draft_id
+        .as_deref()
+        .ok_or_else(|| {
+            AppError::new(
+                "REVIEW_ADOPTED_DRAFT_MISSING",
+                "已消费审阅授权缺少采用稿引用",
+                false,
+            )
+        })?;
+    let adoption_matches = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM chapters AS chapter
+                JOIN chapter_drafts AS draft
+                  ON draft.id=chapter.adopted_draft_id
+                 AND draft.chapter_id=chapter.id
+                 AND draft.novel_id=chapter.novel_id
+                WHERE chapter.id=?1
+                  AND chapter.novel_id=?2
+                  AND chapter.adopted_draft_id=?3
+                  AND chapter.deleted_at IS NULL
+                  AND draft.is_adopted=1
+             )",
+            params![
+                &authorization.chapter_id,
+                &authorization.novel_id,
+                adopted_draft_id
+            ],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(AppError::database)?;
+    if !adoption_matches {
+        return Err(AppError::new(
+            "REVIEW_ADOPTION_FACT_MISMATCH",
+            "审阅授权与章节正式采用事实不一致",
+            false,
+        ));
+    }
+
+    let follow_up = ensure_chapter_summary_follow_up(
+        &transaction,
+        &authorization,
+        adopted_draft_id,
+        &created_at,
+    )?;
+    transaction.commit().map_err(AppError::database)?;
+    Ok(follow_up)
 }
 
 pub fn issue_review_authorization(
@@ -1495,11 +2129,21 @@ pub fn adopt_review_authorized_draft(
             && adopted_pointer.as_deref() == Some(input.draft_id.as_str())
             && draft.is_adopted
         {
+            crate::services::memory_service::put_review_adopted_draft_in_transaction(
+                &transaction,
+                &draft,
+                &full_content,
+                &authorization.authorization_id,
+                &now,
+            )?;
             complete_review_conversation(&transaction, &authorization.decision_id, &now)?;
+            let summary_follow_up =
+                ensure_chapter_summary_follow_up(&transaction, &authorization, &draft.id, &now)?;
             transaction.commit().map_err(AppError::database)?;
             return Ok(AdoptReviewAuthorizedDraftResult {
                 authorization,
                 adopted_draft: draft,
+                summary_follow_up,
             });
         }
         return Err(AppError::new(
@@ -1524,6 +2168,14 @@ pub fn adopt_review_authorized_draft(
     )
     .map_err(|error| AppError::new("AUTHORIZED_DRAFT_ADOPT_FAILED", error, false))?;
 
+    crate::services::memory_service::put_review_adopted_draft_in_transaction(
+        &transaction,
+        &adopted_draft,
+        &full_content,
+        &authorization.authorization_id,
+        &now,
+    )?;
+
     let auth_updated = transaction
         .execute(
             "UPDATE review_authorizations
@@ -1542,6 +2194,8 @@ pub fn adopt_review_authorized_draft(
     }
 
     complete_review_conversation(&transaction, &authorization.decision_id, &now)?;
+    let summary_follow_up =
+        ensure_chapter_summary_follow_up(&transaction, &authorization, &adopted_draft.id, &now)?;
 
     let updated_auth = transaction
         .query_row(
@@ -1557,6 +2211,7 @@ pub fn adopt_review_authorized_draft(
     Ok(AdoptReviewAuthorizedDraftResult {
         authorization: updated_auth,
         adopted_draft,
+        summary_follow_up,
     })
 }
 
@@ -1569,7 +2224,7 @@ pub fn get_bundle(
         None => return Ok(None),
     };
     let mut turns = connection.prepare("SELECT turn_id, conversation_id, sequence, role, content, run_id, created_at FROM conversation_turns WHERE conversation_id=?1 ORDER BY sequence").map_err(AppError::database)?.query_map(params![id], turn_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
-    let runs = connection.prepare("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE conversation_id=?1 ORDER BY created_at").map_err(AppError::database)?.query_map(params![id], run_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
+    let runs = connection.prepare("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE conversation_id=?1 ORDER BY created_at, rowid").map_err(AppError::database)?.query_map(params![id], run_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
     let mut tool_events = Vec::new();
     for run in &runs {
         let events = connection.prepare("SELECT event_id, run_id, sequence, tool_name, arguments_summary_json, status, duration_ms, error, result_json, created_at, finished_at, call_id FROM tool_call_events WHERE run_id=?1 ORDER BY sequence").map_err(AppError::database)?.query_map(params![run.run_id], event_from_row).map_err(AppError::database)?.collect::<Result<Vec<_>, _>>().map_err(AppError::database)?;
@@ -1673,6 +2328,119 @@ mod tests {
         content_hash
     }
 
+    fn conversation_status(connection: &Connection, conversation_id: &str) -> String {
+        connection
+            .query_row(
+                "SELECT status FROM task_conversations WHERE conversation_id=?1",
+                params![conversation_id],
+                |row| row.get(0),
+            )
+            .expect("conversation status")
+    }
+
+    #[test]
+    fn task_runtime_scope_binds_conversation_turn_novel_and_chapter() {
+        let mut connection = connection();
+        connection
+            .execute(
+                "INSERT INTO novels (id, title, outline, created_at, updated_at)
+                 VALUES ('novel-other', '其他小说', '', '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                [],
+            )
+            .expect("other novel");
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+                 VALUES ('chapter-owned', 'novel-conversation-test', '本书章节', 1, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'),
+                        ('chapter-other', 'novel-other', '他书章节', 1, 'drafted', 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                [],
+            )
+            .expect("chapters");
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-scope".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "作用域测试".to_string(),
+                default_model: None,
+                created_at: "2026-08-20T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+        append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-scope-user".to_string(),
+                conversation_id: "conversation-scope".to_string(),
+                role: "user".to_string(),
+                content: "读取本章".to_string(),
+                created_at: "2026-08-20T00:00:01Z".to_string(),
+            },
+        )
+        .expect("user turn");
+        append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-scope-assistant".to_string(),
+                conversation_id: "conversation-scope".to_string(),
+                role: "assistant".to_string(),
+                content: "不可作为运行输入".to_string(),
+                created_at: "2026-08-20T00:00:02Z".to_string(),
+            },
+        )
+        .expect("assistant turn");
+
+        let authoritative_goal = validate_task_runtime_scope(
+            &connection,
+            "conversation-scope",
+            "turn-scope-user",
+            "novel-conversation-test",
+            Some("chapter-owned"),
+        )
+        .expect("valid scoped task");
+        assert_eq!(authoritative_goal, "读取本章");
+        let authoritative_goal = validate_task_runtime_scope(
+            &connection,
+            "conversation-scope",
+            "turn-scope-user",
+            "novel-conversation-test",
+            None,
+        )
+        .expect("novel-scoped task without chapter");
+        assert_eq!(authoritative_goal, "读取本章");
+
+        for error in [
+            validate_task_runtime_scope(
+                &connection,
+                "conversation-scope",
+                "turn-scope-user",
+                "novel-other",
+                None,
+            )
+            .expect_err("cross-novel input must fail"),
+            validate_task_runtime_scope(
+                &connection,
+                "conversation-scope",
+                "turn-scope-user",
+                "novel-conversation-test",
+                Some("chapter-other"),
+            )
+            .expect_err("cross-novel chapter must fail"),
+            validate_task_runtime_scope(
+                &connection,
+                "conversation-scope",
+                "turn-scope-assistant",
+                "novel-conversation-test",
+                None,
+            )
+            .expect_err("non-user turn must fail"),
+        ] {
+            assert_eq!(error.code, "TASK_RUNTIME_SCOPE_MISMATCH");
+            assert!(!error.message.contains("novel-other"));
+            assert!(!error.message.contains("chapter-other"));
+        }
+    }
+
     #[test]
     fn conversation_facts_round_trip_and_terminal_event_is_immutable() {
         let mut connection = connection();
@@ -1682,7 +2450,7 @@ mod tests {
                 conversation_id: "conversation-1".to_string(),
                 novel_id: "novel-conversation-test".to_string(),
                 title: "生成下一章".to_string(),
-                default_model: Some(json!({"providerId":"mock","modelId":"Mock"})),
+                default_model: None,
                 created_at: "2026-08-20T00:00:01Z".to_string(),
             },
         )
@@ -1697,6 +2465,7 @@ mod tests {
                     "runtimeMode":"api",
                     "capabilities":["conversation_turn","chapter_generate"],
                     "options":{"temperature":0.4},
+                    "runtime":{"adapterProtocol":"ans_task_session_v2"},
                     "capturedAt":"2026-08-20T00:00:01Z"
                 }),
                 updated_at: "2026-08-20T00:00:01Z".to_string(),
@@ -1711,6 +2480,16 @@ mod tests {
                 .and_then(Value::as_str),
             Some("deepseek-chat")
         );
+        let locked_error = update_conversation_model(
+            &mut connection,
+            UpdateConversationModelInput {
+                conversation_id: conversation.conversation_id.clone(),
+                default_model: json!({"providerId":"mock","modelId":"Mock"}),
+                updated_at: "2026-08-20T00:00:01Z".to_string(),
+            },
+        )
+        .expect_err("frozen model replacement must fail");
+        assert_eq!(locked_error.code, "CONVERSATION_MODEL_LOCKED");
         let turn = append_turn(
             &mut connection,
             AppendTurnInput {
@@ -1722,18 +2501,35 @@ mod tests {
             },
         )
         .expect("turn");
+        let mismatch = create_run(
+            &mut connection,
+            CreateRunInput {
+                run_id: "run-model-mismatch".to_string(),
+                conversation_id: conversation.conversation_id.clone(),
+                turn_id: turn.turn_id.clone(),
+                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                worker_id: "worker-model-mismatch".to_string(),
+                created_at: "2026-08-20T00:00:03Z".to_string(),
+            },
+        )
+        .expect_err("mismatched run model must fail");
+        assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
         let run = create_run(
             &mut connection,
             CreateRunInput {
                 run_id: "run-1".to_string(),
                 conversation_id: conversation.conversation_id.clone(),
                 turn_id: turn.turn_id,
-                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                model_snapshot: conversation.default_model.clone().expect("locked model"),
                 worker_id: "worker-1".to_string(),
                 created_at: "2026-08-20T00:00:03Z".to_string(),
             },
         )
         .expect("run");
+        assert!(run
+            .model_snapshot
+            .pointer("/runtime/toolCallingAttestation")
+            .is_none());
         let event = append_tool_event(
             &mut connection,
             AppendToolEventInput {
@@ -1793,6 +2589,447 @@ mod tests {
         assert_eq!(bundle.runs.len(), 1);
         assert_eq!(bundle.tool_events.len(), 1);
         assert_eq!(bundle.artifacts.len(), 0);
+    }
+
+    #[test]
+    fn candidate_card_atomically_waits_and_terminal_runs_cannot_overwrite_it() {
+        let mut connection = connection();
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+                 VALUES ('chapter-status', 'novel-conversation-test', '状态章节', 1, 'drafted', 0, '2026-08-28T00:00:00Z', '2026-08-28T00:00:00Z')",
+                [],
+            )
+            .expect("status chapter");
+        let artifact_hash = insert_valid_chapter_artifact(
+            &connection,
+            "artifact-status",
+            "novel-conversation-test",
+            "chapter-status",
+            "待确认正文",
+        );
+        assert!(!artifact_hash.is_empty());
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-status".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "候选状态".to_string(),
+                default_model: None,
+                created_at: "2026-08-28T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+        let turn = append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-status-completed".to_string(),
+                conversation_id: "conversation-status".to_string(),
+                role: "user".to_string(),
+                content: "生成候选".to_string(),
+                created_at: "2026-08-28T00:00:01Z".to_string(),
+            },
+        )
+        .expect("turn");
+        let run = create_run(
+            &mut connection,
+            CreateRunInput {
+                run_id: "run-status-completed".to_string(),
+                conversation_id: "conversation-status".to_string(),
+                turn_id: turn.turn_id,
+                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                worker_id: "worker-status".to_string(),
+                created_at: "2026-08-28T00:00:02Z".to_string(),
+            },
+        )
+        .expect("run");
+        update_run(
+            &mut connection,
+            UpdateRunInput {
+                run_id: run.run_id.clone(),
+                status: "running".to_string(),
+                error: None,
+                updated_at: "2026-08-28T00:00:03Z".to_string(),
+                started_at: Some("2026-08-28T00:00:03Z".to_string()),
+                finished_at: None,
+            },
+        )
+        .expect("running");
+        create_artifact_card(
+            &mut connection,
+            CreateArtifactCardInput {
+                card_id: "card-status".to_string(),
+                conversation_id: "conversation-status".to_string(),
+                turn_id: Some("turn-status-completed".to_string()),
+                run_id: Some(run.run_id.clone()),
+                artifact_id: Some("artifact-status".to_string()),
+                artifact_type: "chapter_text".to_string(),
+                title: "章节候选".to_string(),
+                summary: "等待确认".to_string(),
+                content: None,
+                status: "candidate".to_string(),
+                created_at: "2026-08-28T00:00:04Z".to_string(),
+            },
+        )
+        .expect("candidate card");
+        assert_eq!(
+            conversation_status(&connection, "conversation-status"),
+            "waiting_user"
+        );
+
+        update_run(
+            &mut connection,
+            UpdateRunInput {
+                run_id: run.run_id,
+                status: "completed".to_string(),
+                error: None,
+                updated_at: "2026-08-28T00:00:05Z".to_string(),
+                started_at: None,
+                finished_at: Some("2026-08-28T00:00:05Z".to_string()),
+            },
+        )
+        .expect("completed");
+        assert_eq!(
+            conversation_status(&connection, "conversation-status"),
+            "waiting_user"
+        );
+
+        for (suffix, terminal) in [("failed", "failed"), ("cancelled", "cancelled")] {
+            let turn_id = format!("turn-status-{suffix}");
+            append_turn(
+                &mut connection,
+                AppendTurnInput {
+                    turn_id: turn_id.clone(),
+                    conversation_id: "conversation-status".to_string(),
+                    role: "user".to_string(),
+                    content: format!("{suffix} run"),
+                    created_at: format!("2026-08-28T00:01:0{}Z", suffix.len() % 10),
+                },
+            )
+            .expect("terminal turn");
+            let run_id = format!("run-status-{suffix}");
+            create_run(
+                &mut connection,
+                CreateRunInput {
+                    run_id: run_id.clone(),
+                    conversation_id: "conversation-status".to_string(),
+                    turn_id,
+                    model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                    worker_id: "worker-status".to_string(),
+                    created_at: format!("2026-08-28T00:02:0{}Z", suffix.len() % 10),
+                },
+            )
+            .expect("terminal run");
+            update_run(
+                &mut connection,
+                UpdateRunInput {
+                    run_id,
+                    status: terminal.to_string(),
+                    error: (terminal == "failed").then(|| "failed".to_string()),
+                    updated_at: format!("2026-08-28T00:03:0{}Z", suffix.len() % 10),
+                    started_at: None,
+                    finished_at: Some(format!("2026-08-28T00:03:0{}Z", suffix.len() % 10)),
+                },
+            )
+            .expect("terminalize run");
+            assert_eq!(
+                conversation_status(&connection, "conversation-status"),
+                "waiting_user"
+            );
+        }
+
+        let recovery_turn = append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-status-recovery".to_string(),
+                conversation_id: "conversation-status".to_string(),
+                role: "user".to_string(),
+                content: "recovery run".to_string(),
+                created_at: "2026-08-28T00:04:00Z".to_string(),
+            },
+        )
+        .expect("recovery turn");
+        create_run(
+            &mut connection,
+            CreateRunInput {
+                run_id: "run-status-recovery".to_string(),
+                conversation_id: "conversation-status".to_string(),
+                turn_id: recovery_turn.turn_id,
+                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                worker_id: "worker-status".to_string(),
+                created_at: "2026-08-28T00:04:01Z".to_string(),
+            },
+        )
+        .expect("recovery run");
+        recover_interrupted_runs(
+            &mut connection,
+            RecoverRunsInput {
+                finished_at: "2026-08-28T00:04:02Z".to_string(),
+                error: "interrupted".to_string(),
+            },
+        )
+        .expect("recover");
+        assert_eq!(
+            conversation_status(&connection, "conversation-status"),
+            "waiting_user"
+        );
+
+        let _ = insert_valid_chapter_artifact(
+            &connection,
+            "artifact-status-rollback",
+            "novel-conversation-test",
+            "chapter-status",
+            "不应提交的正文",
+        );
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-status-rollback".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "回滚状态".to_string(),
+                default_model: None,
+                created_at: "2026-08-28T00:05:00Z".to_string(),
+            },
+        )
+        .expect("rollback conversation");
+        connection
+            .execute_batch(
+                "CREATE TRIGGER test_block_waiting_user
+                 BEFORE UPDATE OF status ON task_conversations
+                 WHEN NEW.conversation_id='conversation-status-rollback'
+                  AND NEW.status='waiting_user'
+                 BEGIN SELECT RAISE(ABORT, 'blocked waiting state'); END;",
+            )
+            .expect("block waiting status");
+        let blocked = create_artifact_card(
+            &mut connection,
+            CreateArtifactCardInput {
+                card_id: "card-status-rollback".to_string(),
+                conversation_id: "conversation-status-rollback".to_string(),
+                turn_id: None,
+                run_id: None,
+                artifact_id: Some("artifact-status-rollback".to_string()),
+                artifact_type: "chapter_text".to_string(),
+                title: "不应提交".to_string(),
+                summary: "回滚".to_string(),
+                content: None,
+                status: "candidate".to_string(),
+                created_at: "2026-08-28T00:05:01Z".to_string(),
+            },
+        );
+        assert!(blocked.is_err());
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM conversation_artifact_cards WHERE card_id='card-status-rollback'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("rolled back card count"),
+            0
+        );
+        assert_eq!(
+            conversation_status(&connection, "conversation-status-rollback"),
+            "idle"
+        );
+    }
+
+    #[test]
+    fn resolved_candidates_reconcile_without_hiding_other_pending_cards() {
+        let mut connection = connection();
+        connection
+            .execute(
+                "INSERT INTO chapters (id, novel_id, title, order_index, status, word_count, created_at, updated_at)
+                 VALUES ('chapter-resolution', 'novel-conversation-test', '决定章节', 1, 'drafted', 0, '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z')",
+                [],
+            )
+            .expect("resolution chapter");
+        let first_hash = insert_valid_chapter_artifact(
+            &connection,
+            "artifact-resolution-1",
+            "novel-conversation-test",
+            "chapter-resolution",
+            "第一份候选",
+        );
+        let second_hash = insert_valid_chapter_artifact(
+            &connection,
+            "artifact-resolution-2",
+            "novel-conversation-test",
+            "chapter-resolution",
+            "第二份候选",
+        );
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-resolution".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "多候选决定".to_string(),
+                default_model: None,
+                created_at: "2026-08-28T01:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+        for (card_id, artifact_id) in [
+            ("card-resolution-1", "artifact-resolution-1"),
+            ("card-resolution-2", "artifact-resolution-2"),
+        ] {
+            create_artifact_card(
+                &mut connection,
+                CreateArtifactCardInput {
+                    card_id: card_id.to_string(),
+                    conversation_id: "conversation-resolution".to_string(),
+                    turn_id: None,
+                    run_id: None,
+                    artifact_id: Some(artifact_id.to_string()),
+                    artifact_type: "chapter_text".to_string(),
+                    title: "章节候选".to_string(),
+                    summary: "待处理".to_string(),
+                    content: None,
+                    status: "candidate".to_string(),
+                    created_at: "2026-08-28T01:00:01Z".to_string(),
+                },
+            )
+            .expect("candidate");
+        }
+        let mismatch = record_artifact_decision(
+            &mut connection,
+            RecordArtifactDecisionInput {
+                decision_id: "decision-resolution-mismatch".to_string(),
+                artifact_id: "artifact-resolution-1".to_string(),
+                artifact_hash: second_hash.clone(),
+                card_id: "card-resolution-1".to_string(),
+                conversation_id: "conversation-resolution".to_string(),
+                decision: "reject".to_string(),
+                idempotency_key: "card-resolution-1:mismatch".to_string(),
+                actor: "user".to_string(),
+                target_type: "asset".to_string(),
+                target_id: "novel-conversation-test".to_string(),
+                base_revision: None,
+                apply_transaction_id: None,
+                conflict_code: None,
+                created_at: "2026-08-28T01:00:02Z".to_string(),
+            },
+        )
+        .expect_err("mismatched hash cannot resolve candidate");
+        assert_eq!(mismatch.code, "ARTIFACT_DECISION_SCOPE_MISMATCH");
+        assert_eq!(
+            conversation_status(&connection, "conversation-resolution"),
+            "waiting_user"
+        );
+        record_artifact_decision(
+            &mut connection,
+            RecordArtifactDecisionInput {
+                decision_id: "decision-resolution-reject".to_string(),
+                artifact_id: "artifact-resolution-1".to_string(),
+                artifact_hash: first_hash,
+                card_id: "card-resolution-1".to_string(),
+                conversation_id: "conversation-resolution".to_string(),
+                decision: "reject".to_string(),
+                idempotency_key: "card-resolution-1:reject".to_string(),
+                actor: "user".to_string(),
+                target_type: "asset".to_string(),
+                target_id: "novel-conversation-test".to_string(),
+                base_revision: None,
+                apply_transaction_id: None,
+                conflict_code: None,
+                created_at: "2026-08-28T01:00:02Z".to_string(),
+            },
+        )
+        .expect("reject first");
+        assert_eq!(
+            conversation_status(&connection, "conversation-resolution"),
+            "waiting_user"
+        );
+        record_artifact_decision(
+            &mut connection,
+            RecordArtifactDecisionInput {
+                decision_id: "decision-resolution-revise".to_string(),
+                artifact_id: "artifact-resolution-2".to_string(),
+                artifact_hash: second_hash,
+                card_id: "card-resolution-2".to_string(),
+                conversation_id: "conversation-resolution".to_string(),
+                decision: "request_revision".to_string(),
+                idempotency_key: "card-resolution-2:request_revision".to_string(),
+                actor: "user".to_string(),
+                target_type: "asset".to_string(),
+                target_id: "novel-conversation-test".to_string(),
+                base_revision: None,
+                apply_transaction_id: None,
+                conflict_code: None,
+                created_at: "2026-08-28T01:00:03Z".to_string(),
+            },
+        )
+        .expect("request revision second");
+        assert_eq!(
+            conversation_status(&connection, "conversation-resolution"),
+            "idle"
+        );
+    }
+
+    #[test]
+    fn bundle_orders_same_timestamp_runs_by_insertion() {
+        let mut connection = connection();
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-run-order".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "运行顺序".to_string(),
+                default_model: None,
+                created_at: "2026-08-28T02:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+        let turn = append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-run-order".to_string(),
+                conversation_id: "conversation-run-order".to_string(),
+                role: "user".to_string(),
+                content: "重试".to_string(),
+                created_at: "2026-08-28T02:00:01Z".to_string(),
+            },
+        )
+        .expect("turn");
+        for run_id in ["run-order-first", "run-order-second"] {
+            let run = create_run(
+                &mut connection,
+                CreateRunInput {
+                    run_id: run_id.to_string(),
+                    conversation_id: "conversation-run-order".to_string(),
+                    turn_id: turn.turn_id.clone(),
+                    model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                    worker_id: "worker-run-order".to_string(),
+                    created_at: "2026-08-28T02:00:02.000Z".to_string(),
+                },
+            )
+            .expect("run");
+            if run_id == "run-order-first" {
+                update_run(
+                    &mut connection,
+                    UpdateRunInput {
+                        run_id: run.run_id,
+                        status: "failed".to_string(),
+                        error: Some("retry".to_string()),
+                        updated_at: "2026-08-28T02:00:03.000Z".to_string(),
+                        started_at: None,
+                        finished_at: Some("2026-08-28T02:00:03.000Z".to_string()),
+                    },
+                )
+                .expect("terminalize first retry");
+            }
+        }
+        let bundle = get_bundle(&connection, "conversation-run-order")
+            .expect("bundle")
+            .expect("conversation bundle");
+        assert_eq!(
+            bundle
+                .runs
+                .iter()
+                .map(|run| run.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run-order-first", "run-order-second"]
+        );
     }
 
     #[test]
@@ -1875,6 +3112,120 @@ mod tests {
             .expect("idempotent recovery"),
             0
         );
+    }
+
+    #[test]
+    fn recovery_preserves_runs_owned_by_a_live_process_runtime() {
+        let mut connection = connection();
+        for (conversation_id, turn_id, run_id, run_status) in [
+            (
+                "conversation-live-queued",
+                "turn-live-queued",
+                "run-live-queued",
+                "queued",
+            ),
+            (
+                "conversation-live-running",
+                "turn-live-running",
+                "run-live-running",
+                "running",
+            ),
+            (
+                "conversation-live-cancelling",
+                "turn-live-cancelling",
+                "run-live-cancelling",
+                "cancel_requested",
+            ),
+            (
+                "conversation-dead-runtime",
+                "turn-dead-runtime",
+                "run-dead-runtime",
+                "running",
+            ),
+        ] {
+            create_conversation(
+                &mut connection,
+                CreateConversationInput {
+                    conversation_id: conversation_id.to_string(),
+                    novel_id: "novel-conversation-test".to_string(),
+                    title: conversation_id.to_string(),
+                    default_model: None,
+                    created_at: "2026-08-20T01:00:00Z".to_string(),
+                },
+            )
+            .expect("conversation");
+            append_turn(
+                &mut connection,
+                AppendTurnInput {
+                    turn_id: turn_id.to_string(),
+                    conversation_id: conversation_id.to_string(),
+                    role: "user".to_string(),
+                    content: "继续任务".to_string(),
+                    created_at: "2026-08-20T01:00:01Z".to_string(),
+                },
+            )
+            .expect("turn");
+            let run = create_run(
+                &mut connection,
+                CreateRunInput {
+                    run_id: run_id.to_string(),
+                    conversation_id: conversation_id.to_string(),
+                    turn_id: turn_id.to_string(),
+                    model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                    worker_id: format!("worker-{run_id}"),
+                    created_at: "2026-08-20T01:00:02Z".to_string(),
+                },
+            )
+            .expect("run");
+            if run_status != "queued" {
+                update_run(
+                    &mut connection,
+                    UpdateRunInput {
+                        run_id: run.run_id,
+                        status: run_status.to_string(),
+                        error: None,
+                        updated_at: "2026-08-20T01:00:03Z".to_string(),
+                        started_at: (run_status == "running")
+                            .then(|| "2026-08-20T01:00:03Z".to_string()),
+                        finished_at: None,
+                    },
+                )
+                .expect("set persisted active state");
+            }
+        }
+
+        let protected = std::collections::HashSet::from([
+            "run-live-queued".to_string(),
+            "run-live-running".to_string(),
+            "run-live-cancelling".to_string(),
+        ]);
+        let recovered = recover_interrupted_runs_excluding(
+            &mut connection,
+            RecoverRunsInput {
+                finished_at: "2026-08-20T01:01:00Z".to_string(),
+                error: "应用进程已重启，上一轮运行已中断。".to_string(),
+            },
+            &protected,
+        )
+        .expect("scoped recovery");
+
+        assert_eq!(recovered, 1);
+        for (conversation_id, expected_status) in [
+            ("conversation-live-queued", "queued"),
+            ("conversation-live-running", "running"),
+            ("conversation-live-cancelling", "cancel_requested"),
+        ] {
+            let live = get_bundle(&connection, conversation_id)
+                .expect("live bundle")
+                .expect("live conversation");
+            assert_eq!(live.conversation.status, "running");
+            assert_eq!(live.runs[0].status, expected_status);
+        }
+        let interrupted = get_bundle(&connection, "conversation-dead-runtime")
+            .expect("interrupted bundle")
+            .expect("interrupted conversation");
+        assert_eq!(interrupted.conversation.status, "failed");
+        assert_eq!(interrupted.runs[0].status, "failed");
     }
 
     #[test]
@@ -2092,6 +3443,10 @@ mod tests {
         .expect("issue auth");
 
         assert_eq!(auth.status, "issued");
+        assert_eq!(
+            conversation_status(&connection, "conv-adopt-test"),
+            "waiting_user"
+        );
 
         // 3. 校验失败路径必须无副作用
         let missing_authorization = adopt_review_authorized_draft(
@@ -2155,6 +3510,22 @@ mod tests {
         assert_eq!(auth_check.status, "issued");
 
         connection
+            .execute(
+                "INSERT INTO memory_documents (
+                    id, novel_id, source_type, source_id, source_version, source_hash,
+                    adopted_draft_id, chapter_id, status, metadata_json, created_at, updated_at
+                 ) VALUES (
+                    'memory-old-101', 'novel-conversation-test', 'adopted_draft',
+                    'draft-101', 2, ?1, 'draft-101', 'chapter-100', 'active', '{}',
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                params![crate::repositories::large_text_repository::sha256(
+                    "第二版候选正文内容"
+                )],
+            )
+            .expect("insert previous active memory");
+
+        connection
             .execute_batch(
                 "CREATE TRIGGER test_block_authorization_consume
                  BEFORE UPDATE OF status ON review_authorizations
@@ -2194,6 +3565,14 @@ mod tests {
             )
             .expect("rolled back chapter pointer");
         assert_eq!(rolled_back_pointer, None);
+        let rolled_back_total: i64 = connection
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id='novel-conversation-test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("rolled back novel total");
+        assert_eq!(rolled_back_total, 0);
         let rolled_back_conversation_status: String = connection
             .query_row(
                 "SELECT status FROM task_conversations WHERE conversation_id='conv-adopt-test'",
@@ -2202,9 +3581,139 @@ mod tests {
             )
             .expect("rolled back conversation status");
         assert_eq!(rolled_back_conversation_status, "waiting_user");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM memory_documents WHERE id='memory-old-101'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("old memory rollback status"),
+            "active"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM memory_documents WHERE source_id='draft-100'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("new memory rollback count"),
+            0
+        );
         connection
             .execute_batch("DROP TRIGGER test_block_authorization_consume;")
             .expect("remove consume failure trigger");
+
+        connection
+            .execute_batch(
+                "CREATE TRIGGER test_block_authorized_memory_insert
+                 BEFORE INSERT ON memory_documents
+                 WHEN NEW.source_id = 'draft-100'
+                 BEGIN SELECT RAISE(ABORT, 'test memory insert failure'); END;",
+            )
+            .expect("install memory failure trigger");
+        let memory_failure = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        );
+        assert!(memory_failure.is_err());
+        assert_eq!(
+            get_review_authorization(&connection, "auth-adopt-100")
+                .expect("authorization after memory failure")
+                .expect("authorization remains")
+                .status,
+            "issued"
+        );
+        assert!(
+            !crate::repositories::chapter_repository::get_draft_by_id_and_chapter_internal(
+                &connection,
+                "draft-100",
+                "chapter-100",
+            )
+            .expect("draft after memory failure")
+            .is_adopted
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT adopted_draft_id FROM chapters WHERE id='chapter-100'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .expect("chapter pointer after memory failure"),
+            None
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM memory_documents WHERE id='memory-old-101'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("old memory after insertion failure"),
+            "active"
+        );
+        connection
+            .execute_batch("DROP TRIGGER test_block_authorized_memory_insert;")
+            .expect("remove memory failure trigger");
+
+        connection
+            .execute_batch(
+                "CREATE TRIGGER test_block_summary_generation_turn
+                 BEFORE INSERT ON conversation_turns
+                 WHEN NEW.turn_id = 'summary-generation-auth-adopt-100'
+                 BEGIN SELECT RAISE(ABORT, 'test summary turn failure'); END;",
+            )
+            .expect("install summary turn failure trigger");
+        let summary_turn_failure = adopt_review_authorized_draft(
+            &mut connection,
+            AdoptReviewAuthorizedDraftInput {
+                authorization_id: "auth-adopt-100".to_string(),
+                draft_id: "draft-100".to_string(),
+                expected_draft_version: 1,
+                expected_content_hash: crate::repositories::large_text_repository::sha256(
+                    "第一章测试正文内容",
+                ),
+            },
+        );
+        assert!(summary_turn_failure.is_err());
+        assert_eq!(
+            get_review_authorization(&connection, "auth-adopt-100")
+                .expect("authorization after summary turn failure")
+                .expect("authorization remains")
+                .status,
+            "issued"
+        );
+        assert!(
+            !crate::repositories::chapter_repository::get_draft_by_id_and_chapter_internal(
+                &connection,
+                "draft-100",
+                "chapter-100",
+            )
+            .expect("draft after summary turn failure")
+            .is_adopted
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT adopted_draft_id FROM chapters WHERE id='chapter-100'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .expect("chapter pointer after summary turn failure"),
+            None
+        );
+        connection
+            .execute_batch("DROP TRIGGER test_block_summary_generation_turn;")
+            .expect("remove summary turn failure trigger");
 
         // 4. 正常采用事务执行
         let result = adopt_review_authorized_draft(
@@ -2227,6 +3736,15 @@ mod tests {
         );
         assert!(result.adopted_draft.is_adopted);
         assert_eq!(result.adopted_draft.id, "draft-100");
+        assert_eq!(result.summary_follow_up.status, "pending_generation");
+        assert_eq!(
+            result.summary_follow_up.next_action.as_deref(),
+            Some("summarize_chapter")
+        );
+        assert_eq!(
+            result.summary_follow_up.instruction.as_deref(),
+            Some("总结本章")
+        );
 
         // 5. 校验 SQLite 数据库实际状态
         let adopted_draft_in_db =
@@ -2246,14 +3764,118 @@ mod tests {
             )
             .expect("query chapter");
         assert_eq!(chapter_in_db.as_deref(), Some("draft-100"));
-        let completed_conversation_status: String = connection
+        let adopted_total: i64 = connection
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id='novel-conversation-test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query adopted novel total");
+        assert_eq!(adopted_total, 500);
+        let summary_pending_conversation_status: String = connection
             .query_row(
                 "SELECT status FROM task_conversations WHERE conversation_id='conv-adopt-test'",
                 [],
                 |row| row.get(0),
             )
-            .expect("completed conversation status");
-        assert_eq!(completed_conversation_status, "completed");
+            .expect("summary pending conversation status");
+        assert_eq!(summary_pending_conversation_status, "idle");
+        let summary_follow_up_turn: (String, String) = connection
+            .query_row(
+                "SELECT role,content FROM conversation_turns
+                 WHERE turn_id='summary-generation-auth-adopt-100'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("summary follow-up turn");
+        assert_eq!(summary_follow_up_turn.0, "user");
+        assert!(summary_follow_up_turn.1.starts_with("总结本章"));
+        assert!(summary_follow_up_turn
+            .1
+            .contains("origin=workbench_chapter_summary"));
+        let recovered_follow_up =
+            ensure_chapter_summary_follow_up_for_authorization(&mut connection, "auth-adopt-100")
+                .expect("reconcile summary follow-up");
+        assert_eq!(recovered_follow_up.status, "pending_generation");
+        ensure_chapter_summary_follow_up_for_authorization(&mut connection, "auth-adopt-100")
+            .expect("summary follow-up recovery is idempotent");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM conversation_turns
+                     WHERE turn_id='summary-generation-auth-adopt-100'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("recovered summary turn count"),
+            1
+        );
+        let old_memory_status: (String, Option<String>) = connection
+            .query_row(
+                "SELECT status, invalidation_reason
+                 FROM memory_documents WHERE id='memory-old-101'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("old memory invalidated");
+        assert_eq!(old_memory_status.0, "invalidated");
+        assert_eq!(
+            old_memory_status.1.as_deref(),
+            Some("adopted_draft_changed")
+        );
+        let new_memory: (String, String, i64, String) = connection
+            .query_row(
+                "SELECT status, source_hash, source_version, adopted_draft_id
+                 FROM memory_documents
+                 WHERE novel_id='novel-conversation-test'
+                   AND chapter_id='chapter-100'
+                   AND source_id='draft-100'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("new adopted memory document");
+        assert_eq!(new_memory.0, "active");
+        assert_eq!(
+            new_memory.1,
+            crate::repositories::large_text_repository::sha256("第一章测试正文内容")
+        );
+        assert_eq!(new_memory.2, 1);
+        assert_eq!(new_memory.3, "draft-100");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM memory_chunks
+                     WHERE novel_id='novel-conversation-test'
+                       AND chapter_id='chapter-100'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("new adopted memory chunks"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT text FROM memory_chunks
+                     WHERE novel_id='novel-conversation-test'
+                       AND chapter_id='chapter-100'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("new adopted memory text"),
+            "第一章测试正文内容"
+        );
+        let memory_sequence: (Option<i64>, Option<i64>) = connection
+            .query_row(
+                "SELECT chapter_order_index, temporal_start_chapter
+                   FROM memory_chunks
+                  WHERE novel_id='novel-conversation-test'
+                    AND chapter_id='chapter-100'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("new adopted memory sequence");
+        assert_eq!(memory_sequence, (Some(0), Some(0)));
 
         // 6. 重放幂等性
         let replay = adopt_review_authorized_draft(
@@ -2270,6 +3892,49 @@ mod tests {
         .expect("replay success");
         assert_eq!(replay.authorization.status, "consumed");
         assert_eq!(replay.adopted_draft.id, "draft-100");
+        assert_eq!(replay.summary_follow_up.status, "pending_generation");
+        let replayed_total: i64 = connection
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id='novel-conversation-test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query replayed novel total");
+        assert_eq!(replayed_total, 500);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM memory_documents WHERE source_id='draft-100'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("replayed memory document count"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM conversation_turns
+                     WHERE turn_id='summary-generation-auth-adopt-100'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("summary follow-up replay count"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM memory_chunks
+                     WHERE document_id=(
+                         SELECT id FROM memory_documents WHERE source_id='draft-100'
+                     )",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("replayed memory chunk count"),
+            1
+        );
         assert_eq!(
             connection
                 .query_row(
@@ -2298,5 +3963,185 @@ mod tests {
             err_consumed.unwrap_err().code,
             "REVIEW_AUTHORIZATION_CONSUMED"
         );
+    }
+
+    #[test]
+    fn first_user_turn_replaces_default_conversation_title() {
+        let mut connection = connection();
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-auto-title".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "新的创作任务".to_string(),
+                default_model: None,
+                created_at: "2026-08-23T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+
+        append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-auto-title".to_string(),
+                conversation_id: "conversation-auto-title".to_string(),
+                role: "user".to_string(),
+                content: "生成第三章候选正文并保持人物一致".to_string(),
+                created_at: "2026-08-23T00:00:01Z".to_string(),
+            },
+        )
+        .expect("first user turn");
+
+        let updated = get_conversation(&connection, "conversation-auto-title")
+            .expect("read conversation")
+            .expect("conversation exists");
+        assert_eq!(updated.title, "生成第三章候选正文并保持人物一致");
+    }
+
+    #[test]
+    fn conversation_management_renames_archives_restores_and_guards_active_runs() {
+        let mut connection = connection();
+        create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "conversation-management".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "旧标题".to_string(),
+                default_model: None,
+                created_at: "2026-08-24T00:00:00Z".to_string(),
+            },
+        )
+        .expect("conversation");
+
+        let renamed = rename_conversation(
+            &mut connection,
+            RenameConversationInput {
+                conversation_id: "conversation-management".to_string(),
+                title: "新标题".to_string(),
+                updated_at: "2026-08-24T00:00:01Z".to_string(),
+            },
+        )
+        .expect("rename");
+        assert_eq!(renamed.title, "新标题");
+
+        let archived = set_conversation_archived(
+            &mut connection,
+            SetConversationArchivedInput {
+                conversation_id: "conversation-management".to_string(),
+                archived: true,
+                updated_at: "2026-08-24T00:00:02Z".to_string(),
+            },
+        )
+        .expect("archive");
+        assert_eq!(
+            archived.archived_at.as_deref(),
+            Some("2026-08-24T00:00:02Z")
+        );
+        assert!(list_conversations(&connection, None, false, 100)
+            .expect("active list")
+            .is_empty());
+        assert_eq!(
+            list_conversations(&connection, None, true, 100)
+                .expect("all list")
+                .len(),
+            1
+        );
+
+        let restored = set_conversation_archived(
+            &mut connection,
+            SetConversationArchivedInput {
+                conversation_id: "conversation-management".to_string(),
+                archived: false,
+                updated_at: "2026-08-24T00:00:03Z".to_string(),
+            },
+        )
+        .expect("restore");
+        assert!(restored.archived_at.is_none());
+
+        append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "turn-management".to_string(),
+                conversation_id: "conversation-management".to_string(),
+                role: "user".to_string(),
+                content: "继续创作".to_string(),
+                created_at: "2026-08-24T00:00:04Z".to_string(),
+            },
+        )
+        .expect("turn");
+        create_run(
+            &mut connection,
+            CreateRunInput {
+                run_id: "run-management".to_string(),
+                conversation_id: "conversation-management".to_string(),
+                turn_id: "turn-management".to_string(),
+                model_snapshot: json!({"providerId":"mock","modelId":"Mock"}),
+                worker_id: "worker-management".to_string(),
+                created_at: "2026-08-24T00:00:05Z".to_string(),
+            },
+        )
+        .expect("run");
+
+        let archive_error = set_conversation_archived(
+            &mut connection,
+            SetConversationArchivedInput {
+                conversation_id: "conversation-management".to_string(),
+                archived: true,
+                updated_at: "2026-08-24T00:00:06Z".to_string(),
+            },
+        )
+        .expect_err("active run must block archive");
+        assert_eq!(archive_error.code, "CONVERSATION_ACTIVE_RUN");
+    }
+
+    #[test]
+    fn initialized_conversation_commits_task_and_first_goal_as_one_transaction() {
+        let mut connection = connection();
+        let initialized = create_initialized_conversation(
+            &mut connection,
+            CreateInitializedConversationInput {
+                conversation_id: "conversation-initialized".to_string(),
+                turn_id: "turn-initialized".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "生成下一章".to_string(),
+                goal: "生成下一章并延续上一章悬念".to_string(),
+                default_model: json!({"providerId":"mock","modelId":"Mock"}),
+                created_at: "2026-08-24T01:00:00Z".to_string(),
+            },
+        )
+        .expect("initialized conversation");
+        assert_eq!(initialized.conversation.title, "生成下一章");
+        assert_eq!(initialized.turn.sequence, 0);
+        assert_eq!(initialized.turn.content, "生成下一章并延续上一章悬念");
+
+        let failed = create_initialized_conversation(
+            &mut connection,
+            CreateInitializedConversationInput {
+                conversation_id: "conversation-rolled-back".to_string(),
+                turn_id: "turn-rolled-back".to_string(),
+                novel_id: "missing-novel".to_string(),
+                title: "不应保留".to_string(),
+                goal: "这条目标也不应保留".to_string(),
+                default_model: json!({"providerId":"mock","modelId":"Mock"}),
+                created_at: "2026-08-24T01:00:01Z".to_string(),
+            },
+        );
+        assert!(failed.is_err());
+        let leaked_conversations: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM task_conversations WHERE conversation_id='conversation-rolled-back'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("conversation count");
+        let leaked_turns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_turns WHERE turn_id='turn-rolled-back'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("turn count");
+        assert_eq!(leaked_conversations, 0);
+        assert_eq!(leaked_turns, 0);
     }
 }

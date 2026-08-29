@@ -1,5 +1,14 @@
 # AI Novel Studio 第二次全量能力审计：Capability Health
 
+> 历史与当前口径：本文主体保留 2026-08-24 第二次全量审计快照；其中的能力数量、入口和阶段判断不得直接改写为 2026-08-27 的当前事实。v3.6.0 发布候选校正如下，候选状态不代表已经发布。
+
+## 0. v3.6.0 发布候选校正
+
+- 生产写作工作台的旧生成类 AI 面板、独立实验面板和草稿历史入口已经移除；底层草稿表、历史草稿、领域服务与 E2E-only 组件仍可作为审计/回归事实存在。因此第 5.4 节与问答中“隐藏面板”“草稿历史可用”只描述审计当日代码或测试证据，不能解释为当前生产入口。
+- 章节候选已经具备 `ReviewAuthorization + adopt_review_authorized_draft` 的单一 Rust/SQLite 原子采用链路；通用结构化 `request_apply` 仍失败关闭且不产生领域写入。
+- Canonical 1A-A/B/C/D 已完成，但四个只读 identity 仍为 `catalog_only + partial`，模型可见数为 `0`。必须先关闭四项 Facade blocker，再完成独立 exposure；之后才进入 R4 真实 Main Agent Runtime 验证。
+- 本校正不重算 2026-08-24 的 21/37/3/11/3 健康数量，也不授权 exposure、R4、SubAgent、新版本或发布。
+
 ## 1. 结论先行
 
 本次审计没有把“代码存在”“命令已注册”或“单元测试通过”直接当成用户可用。按 [capability_inventory.md](./capability_inventory.md) 的 75 个能力族计数：

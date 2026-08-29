@@ -10,6 +10,7 @@ import {
   type ComponentType,
   type SyntheticEvent,
 } from 'react';
+import { TriangleAlert, X } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterDraft } from '../../types/ai';
 import type { QualityCheckItem, QualityCheckReport } from '../../types/qualityCheck';
@@ -336,21 +337,29 @@ function RightPanel({
         <div className="right-panel-header">
           <span className="right-panel-title">{config.title}</span>
           <button
+            type="button"
             className="right-panel-close"
+            aria-label={`关闭${config.title}`}
+            title="关闭"
             onMouseDown={stopAll}
             onClick={(e) => {
               stopAll(e);
               onClose();
             }}
           >
-            ✕
+            <X aria-hidden="true" size={17} strokeWidth={1.8} />
           </button>
         </div>
         <div className="right-panel-body" onMouseDown={stopAll} onClick={stopAll}>
           {/* v1.0.45: 正文变更后提示旧 AI 输出可能过期 */}
           {toolOutputStale && (
             <div className="panel-stale-warning">
-              <span className="panel-stale-warning-icon">⚠️</span>
+              <TriangleAlert
+                className="panel-stale-warning-icon"
+                aria-hidden="true"
+                size={15}
+                strokeWidth={1.8}
+              />
               <span>正文已修改，当前 AI 输出可能基于旧正文。建议重新生成。</span>
             </div>
           )}

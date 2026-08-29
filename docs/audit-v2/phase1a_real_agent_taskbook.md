@@ -1,12 +1,12 @@
-# Phase 1A-B：真实 Agent Runtime 接入验证任务书（后置）
+# R4：真实 Main Agent Runtime 验证任务书（Canonical exposure 后置）
 
-> **状态：DEFERRED。** 当前阶段先执行 [Phase 1A-A 能力资产化任务书](./phase1a_capability_assetization_taskbook.md)。在 Capability Catalog、首批 facade 和 canonical manifest 通过准入前，不得执行本任务书，也不得将其称为当前下一步。
+> **状态：WAITING_FOR_CANONICAL_EXPOSURE。** v3.6.0 候选已完成 Phase 1A-A/B/C/D（Capability Catalog、Domain Facade、Canonical Projection、portable Manifest/漂移门禁），但四个 Canonical Tool 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再通过独立 exposure 变更；此前不得执行本任务书，也不得把它写成当前已授权下一步。
 
 ## 1. 阶段定位
 
-本任务承接 `Phase 0.5 — Model / Provider Infrastructure Verified`，只验证真实模型是否能在现有 DSH Task Runtime 中自主选择已暴露的领域工具。
+本任务承接 R3 的共享 Manifest/Runtime 门禁和后续独立 exposure，只验证真实模型是否能在 DSH Task Runtime 中自主选择已经正式暴露的 Canonical 只读领域工具。
 
-本任务不是 Context Agent，也不是 Writing SubAgent 实现任务。
+本任务不是 Context Agent，也不是 Writing SubAgent 实现任务，不负责关闭 exposure 前置 blocker。
 
 目标链路：
 
@@ -19,15 +19,16 @@ MCP Domain Gateway / 当前 Tool Projection
   ↓
 Tool Call / Tool Result
   ↓
-ResultArtifact candidate projection
+持久 Tool Event / assistant response
 ```
 
 ## 2. 明确不做
 
+- 不在本任务中修复 `novel.read / structure.read / context.read / memory.search` 的四项 `partial` blocker，也不自行修改 exposure；
 - 不把 `chapter_write` 默认路由切换到 DSH；
 - 不删除或替换现有 `taskRuntimeAdapter`、Workbench Writer 或旧 Registry；
 - 不新增数据库 migration；
-- 不把 `generate_chapter` candidate validator 冒充正文生成器；
+- 不把 legacy `generate_chapter` candidate validator 冒充 Canonical Tool 或正文生成器；
 - 不新增 `invoke_writing_agent`、`adopt_artifact` 假 Tool；
 - 不让模型直接采用正文或修改正式小说事实；
 - 不改变默认 Mock E2E、网络阻断策略或生产凭据配置；
@@ -35,7 +36,7 @@ ResultArtifact candidate projection
 
 ## 3. 实现范围
 
-建议新增独立、显式 opt-in 的 ignored/integration 验证入口，优先复用：
+只有独立 exposure 门禁已通过后，才建议新增显式 opt-in 的 ignored/integration 验证入口，优先复用：
 
 ```text
 src/services/dsh/taskSessionAdapter.ts
@@ -64,16 +65,16 @@ src-tauri/src/services/conversation_service.rs
 
 ## 4. 必须验证的场景
 
-### 4.1 正向：真实模型自主选工具
+### 4.1 正向：真实模型自主选择 Canonical 只读工具
 
 使用自然语言目标（例如“读取当前作品上下文并给出下一步建议”），断言：
 
 1. 真实 DSH Worker 启动并通过 source commit/protocol/health 校验；
-2. 模型产生至少一个只读 Tool Call（如 `novel.read_context`、`chapter.read_outline` 或 `search_memory`）；
-3. 若模型形成候选，后续调用只能是当前 allowlist 内的 candidate validator；
+2. 模型产生至少一个已暴露的 Canonical 只读 Tool Call：`novel.read@1`、`structure.read@1`、`context.read@1` 或 `memory.search@1`；
+3. 实际 `tools/list`、每轮 scoped manifest 和宿主 allowlist 均只包含 exposure 任务正式放行的 identity，legacy alias 必须拒绝；
 4. `tool_call_events` 中存在完整的 queued/running/terminal 状态，调用顺序来自真实事件，不由测试脚本伪造；
-5. 候选以 `ResultArtifact`/Card candidate 投影保存，`novelId/chapterId/contentHash` 正确；
-6. 正式 adopted draft、章节正文指针和正式事实写入数量保持不变。
+5. Tool Result 回到同一 Agent 回合并形成面向用户的安全回复；R4 只读验证不要求生成章节候选或 ResultArtifact；
+6. 正式 adopted draft、章节正文指针、结构化正式事实和 Artifact 数量保持不变。
 
 ### 4.2 负向：范围和协议失败关闭
 
@@ -81,8 +82,8 @@ src-tauri/src/services/conversation_service.rs
 
 - 缺少章节或作品；
 - 跨作品/跨章节参数；
-- 未知 Tool 名称；
-- 缺少 `candidateText` 或非法 candidate schema；
+- 未知 Tool 名称、legacy alias 或未暴露的 Canonical identity；
+- 输入 schema、权限、projection hash 或单次 allowlist 不匹配；
 - Provider/Worker 超时或取消。
 
 每种情况都必须记录安全错误分类，且不产生正式 Artifact、草稿采用或半完成 Tool Event。
@@ -107,37 +108,44 @@ docs/audit-v2/agent_runtime_validation.md
 - conversation/turn/run/session/worker ID 和生命周期；
 - 有序 Tool Call 的名称、版本、scope、状态、耗时、参数 hash/长度、结果 hash/长度；
 - upstream request/tool-call 数量和 token usage（不含请求正文）；
-- Artifact 类型、来源作品/章节、hash、processing status；
-- adopted draft/正式正文指针前后计数；
+- assistant 终态、Tool Result hash/长度和可公开错误分类；
+- ResultArtifact、adopted draft、正式正文指针与结构化正式写入的前后计数；
 - 失败、取消、重试和 secret scan 结果；
-- 明确列出未验证项：`chapter_write through DSH`、`Writing SubAgent`、`adopt_artifact`、Context Agent。
+- 明确列出未验证项：`chapter_write through DSH`、Writing SubAgent、候选 Artifact 生成、通用结构化 Safe Apply、Context Agent。
 
 ## 6. 通过门槛
 
-只有同时满足以下条件，Phase 1A 才能标记 `VERIFIED`：
+只有同时满足以下条件，R4 才能标记 `VERIFIED`：
 
 ```text
 真实 Provider
   + 真实 DSH session/prompt
-  + 模型自主 Tool Call（非 heuristic/fixed steps）
+  + 模型自主 Canonical 只读 Tool Call（非 heuristic/fixed steps）
   + Tool Result 持久化闭环
-  + candidate-only Artifact
-  + 负向 scope/schema/取消证据
+  + scoped manifest / allowlist / permission 证据
+  + 正式事实零写入
+  + 负向 scope/schema/hash/取消证据
   + 凭据零泄露
 ```
 
-否则状态为 `PARTIAL` 或 `BLOCKED`，不得进入 Phase 1B。
+否则状态为 `PARTIAL` 或 `BLOCKED`，不得进入 R5/R6 或 Writing SubAgent 放行。
 
 ## 7. 后续顺序
 
 ```text
-Phase 1A 真实 Main Agent Runtime 验证
+R3 portable Manifest / 宿主门禁（已验证，visible=0）
         ↓
-Phase 1B Writing SubAgent（独立 Prompt/模型/上下文/预算）
+逐项关闭 novel/structure/context/memory 四项 Facade blocker
         ↓
-Workbench chapter_write 真实闭环
+独立 Canonical exposure 变更与 scoped Tool 投影验证
         ↓
-canonical Registry / capability facade 归并
+R4 真实 Main Agent Runtime 验证（本任务书）
         ↓
-Context Agent
+R5 legacy runtime/入口隔离
+        ↓
+R6 Writing SubAgent（独立 Prompt/模型/上下文/预算）
+        ↓
+Workbench chapter_write 真实闭环；其余 SubAgent 按独立任务放行
 ```
+
+Canonical Registry/Projection/Facade 是 R4 的前置条件，不能再排在 Main Agent 或 Writing SubAgent 之后。本任务书只定义后置验证证据，不创建新版本、不授权 exposure/R4 执行，也不授权提交、tag 或发布。

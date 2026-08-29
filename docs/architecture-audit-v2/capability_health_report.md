@@ -1,5 +1,7 @@
 # AI Novel Studio 能力整合版 Health Report
 
+> 历史与当前口径：第 1～13 节保留 2026-08-24 审计及当日增补，不回写历史判断；v3.6.0 发布候选的当前状态以第 14 节为准。候选状态不代表已经合并或发布。
+
 ## 1. 总体健康
 
 | 项目                                          | 数量/判断 |
@@ -197,3 +199,27 @@ Phase 1C Writing SubAgent             NOT RELEASED
 ```
 
 本阶段没有把任何 catalog 条目升级为 `stable`，没有把 Facade 接入 Main Agent，也没有宣称章节写作真实模型闭环完成。详情见 [`domain_facade_validation.md`](./domain_facade_validation.md)。
+
+## 14. v3.6.0 发布候选校正（当前状态）
+
+第 8、11、13 节中的“当前阶段”“下一步”和 `Phase 1A-C NOT STARTED` 是 2026-08-24 当时的审计快照，不再作为当前执行顺序。后续增量已经完成：
+
+```text
+Phase 1A-A Capability Catalog         VERIFIED
+Phase 1A-B Domain Facade              VERIFIED
+Phase 1A-C Canonical Tool Projection  VERIFIED (CATALOG-ONLY / MODEL VISIBLE 0)
+Phase 1A-D Shared Manifest/Gate       VERIFIED (EXECUTION WIRING DISABLED)
+R4 Real Main Agent Runtime            NOT RELEASED
+Writing/Context/Quality SubAgent      NOT RELEASED
+```
+
+四个 Canonical identity 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。下一门禁固定为：
+
+1. `novel.read@1` 统一作品、设定、主角 JSON/表事实源；
+2. `structure.read@1` 补齐 version、active pointer、写后读与 CAS 证据；
+3. `context.read@1` 统一 summary apply 与完整 context bundle 的 adopted-draft/source 协议；
+4. `memory.search@1` 补齐真实 embedding、混合检索、明确降级与重启证据，进程内 Map 不计入。
+
+四项 blocker 关闭后，必须另做独立 exposure 变更并验证 scoped manifest、DSH `tools/list/tools.call`、权限、负例和重启行为；只有 exposure 通过后才进入 R4。不能把 legacy allowlist 改名或与 Canonical manifest 合并后宣称迁移完成。
+
+产品写入边界也必须分开记录：章节 `ReviewAuthorization + adopt_review_authorized_draft` 原子采用已经完成；通用结构化 `request_apply` 在跨领域写入与 append-only 决定同事务迁移前固定失败关闭且不产生领域写入。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已经移除，底层服务、历史草稿和审计事实继续保留。

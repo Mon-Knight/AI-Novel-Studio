@@ -338,6 +338,47 @@ fn is_loopback_url(base_url: &str) -> bool {
             .unwrap_or(false)
 }
 
+fn same_allowlisted_loopback_endpoint(request_base_url: &str, allowed_base_url: &str) -> bool {
+    if !is_loopback_url(allowed_base_url) {
+        return false;
+    }
+    let Ok(mut request) = reqwest::Url::parse(request_base_url.trim()) else {
+        return false;
+    };
+    let Ok(mut allowed) = reqwest::Url::parse(allowed_base_url.trim()) else {
+        return false;
+    };
+    if request.username() != ""
+        || request.password().is_some()
+        || request.query().is_some()
+        || request.fragment().is_some()
+        || allowed.username() != ""
+        || allowed.password().is_some()
+        || allowed.query().is_some()
+        || allowed.fragment().is_some()
+    {
+        return false;
+    }
+    let request_path = request.path().trim_end_matches('/').to_string();
+    let allowed_path = allowed.path().trim_end_matches('/').to_string();
+    request.set_path(&request_path);
+    allowed.set_path(&allowed_path);
+    request == allowed
+}
+
+#[cfg(feature = "e2e")]
+fn real_e2e_loopback_request_allowed(base_url: &str) -> bool {
+    std::env::var("AI_NOVEL_STUDIO_REAL_E2E").as_deref() == Ok("1")
+        && std::env::var("AI_NOVEL_STUDIO_REAL_E2E_BASE_URL")
+            .ok()
+            .is_some_and(|allowed| same_allowlisted_loopback_endpoint(base_url, &allowed))
+}
+
+#[cfg(not(feature = "e2e"))]
+fn real_e2e_loopback_request_allowed(_base_url: &str) -> bool {
+    false
+}
+
 fn http_client_builder(base_url: &str, timeout: Duration) -> reqwest::ClientBuilder {
     let builder = Client::builder().timeout(timeout);
     if is_loopback_url(base_url) {
@@ -500,8 +541,8 @@ pub fn cancel_ai_request(request_id: String) -> bool {
     true
 }
 
-fn ensure_ai_network_allowed(network_blocked: bool) -> Result<(), String> {
-    if network_blocked {
+fn ensure_ai_network_allowed(network_blocked: bool, base_url: &str) -> Result<(), String> {
+    if network_blocked && !real_e2e_loopback_request_allowed(base_url) {
         return Err("AI network requests are disabled in E2E mode".to_string());
     }
 
@@ -567,7 +608,7 @@ fn local_model_smoke_prompt() -> &'static str {
 async fn check_local_chapter_model_availability_internal(
     request: &LocalChapterModelHealthRequest,
 ) -> Result<LocalChapterModelHealthResponse, String> {
-    ensure_ai_network_allowed(crate::runtime::is_network_blocked())?;
+    ensure_ai_network_allowed(crate::runtime::is_network_blocked(), &request.base_url)?;
     if request.base_url.trim().is_empty() || request.model_name.trim().is_empty() {
         return Err("本地模型检查缺少 Base URL 或模型名称。".into());
     }
@@ -723,7 +764,7 @@ async fn execute_ai_chat_completion_stream(
     network_blocked: bool,
     emitter: StreamEmitter,
 ) -> Result<AiChatCompletionResponse, String> {
-    ensure_ai_network_allowed(network_blocked)?;
+    ensure_ai_network_allowed(network_blocked, &request.base_url)?;
     validate_request(&request)?;
     let request_id = request
         .request_id
@@ -1004,7 +1045,7 @@ async fn execute_ai_chat_completion(
     request: AiChatCompletionRequest,
     network_blocked: bool,
 ) -> Result<AiChatCompletionResponse, String> {
-    ensure_ai_network_allowed(network_blocked)?;
+    ensure_ai_network_allowed(network_blocked, &request.base_url)?;
     validate_request(&request)?;
 
     let request_id = request.request_id.clone();
@@ -1491,6 +1532,30 @@ mod tests {
         assert_eq!(error, "AI network requests are disabled in E2E mode");
         assert_listener_has_no_connection(&listener);
         assert_eq!(registry_counts(), (0, 0, 0));
+    }
+
+    #[test]
+    fn real_e2e_allowlist_requires_the_exact_loopback_endpoint() {
+        assert!(same_allowlisted_loopback_endpoint(
+            "http://localhost:12074/v1/",
+            "http://localhost:12074/v1"
+        ));
+        assert!(!same_allowlisted_loopback_endpoint(
+            "http://127.0.0.1:12074/v1",
+            "http://localhost:12074/v1"
+        ));
+        assert!(!same_allowlisted_loopback_endpoint(
+            "http://localhost:12075/v1",
+            "http://localhost:12074/v1"
+        ));
+        assert!(!same_allowlisted_loopback_endpoint(
+            "http://localhost:12074/other",
+            "http://localhost:12074/v1"
+        ));
+        assert!(!same_allowlisted_loopback_endpoint(
+            "https://provider.example/v1",
+            "https://provider.example/v1"
+        ));
     }
 
     #[test]

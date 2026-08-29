@@ -77,31 +77,60 @@ test('production read tools execute against a real isolated browser fixture', as
     description: '用于验证生产 Tool handler 的隔离 fixture',
     genre: '测试',
   });
+  await novelRepository.updateProtagonists(novel.id, {
+    protagonistMode: 'single',
+    protagonists: [
+      {
+        id: `protagonist-${novel.id}`,
+        label: 'primary',
+        name: '林默',
+        gender: '男',
+        identity: '黑市调查员',
+        personality: '谨慎而固执',
+        goal: '查清失踪案',
+        motivation: '保护仍然活着的人',
+        ability: '辨认残留记忆',
+        limitation: '每次使用都会遗忘自己的片段',
+        background: '来自被封锁的旧城区',
+        arc: '从独自承担转向信任同伴',
+        notes: '测试用完整主角资料',
+      },
+    ],
+  });
   const volume = await volumeRepository.create({ novelId: novel.id, title: '第一卷' });
-  const chapter = await chapterRepository.create({
+  const previousChapter = await chapterRepository.create({
     novelId: novel.id,
     volumeId: volume.id,
     title: '第一章',
     outline: '验证读取链路',
     goal: '确认返回真实章节事实',
   });
+  const chapter = await chapterRepository.create({
+    novelId: novel.id,
+    volumeId: volume.id,
+    title: '第二章',
+    outline: '承接第一章',
+    goal: '检索此前已采用事实',
+  });
   putLocalMemoryDocument({
     documentId: `memory-${novel.id}`,
     novelId: novel.id,
     sourceType: 'adopted_draft',
-    sourceId: `draft-${chapter.id}`,
+    sourceId: `draft-${previousChapter.id}`,
     sourceVersion: 1,
     sourceHash: 'a'.repeat(64),
-    adoptedDraftId: `draft-${chapter.id}`,
-    chapterId: chapter.id,
+    adoptedDraftId: `draft-${previousChapter.id}`,
+    chapterId: previousChapter.id,
     metadata: { fixture: true },
     chunks: [
       {
-        id: `chunk-${chapter.id}`,
+        id: `chunk-${previousChapter.id}`,
         ordinal: 0,
         text: '黑市的雨声压住了脚步。',
         tokenCount: 12,
         importance: 0.8,
+        chapterOrderIndex: 0,
+        temporalStartChapter: 0,
         entityKeys: [],
         metadata: { fixture: true },
         contentHash: 'b'.repeat(64),
@@ -117,6 +146,14 @@ test('production read tools execute against a real isolated browser fixture', as
   );
   assert.equal(project.ok, true);
   assert.equal((project.data as { novel?: { id?: string } }).novel?.id, novel.id);
+  assert.equal(
+    (project.data as { protagonistSource?: string }).protagonistSource,
+    'novels.protagonists',
+  );
+  assert.equal(
+    (project.data as { protagonists?: Array<{ name?: string }> }).protagonists?.[0]?.name,
+    '林默',
+  );
 
   const outline = await productionToolRegistry.invoke(
     'chapter.read_outline',
@@ -139,6 +176,10 @@ test('production read tools execute against a real isolated browser fixture', as
   );
   assert.equal(settings.ok, true);
   assert.equal((settings.data as { novelId?: string }).novelId, novel.id);
+  assert.equal(
+    (settings.data as { protagonistSource?: string }).protagonistSource,
+    'novels.protagonists',
+  );
 
   const chapterContext = await productionToolRegistry.invoke(
     'chapter.read_context',
@@ -155,14 +196,14 @@ test('production read tools execute against a real isolated browser fixture', as
   const memory = await productionToolRegistry.invoke(
     'search_memory',
     '1',
-    { novelId: novel.id, query: '黑市' },
+    { novelId: novel.id, query: '黑市', targetChapterId: chapter.id },
     context(novel.id, chapter.id, ['search_memory@1']),
   );
   assert.equal(memory.ok, true);
   assert.equal(memory.source, 'localstorage');
   assert.equal(
     (memory.data as { items?: Array<{ chapterId?: string }> }).items?.[0]?.chapterId,
-    chapter.id,
+    previousChapter.id,
   );
 
   const executableCases: Array<{

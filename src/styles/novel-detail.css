@@ -138,6 +138,23 @@
   gap: var(--spacing-lg);
 }
 
+.detail-focus-target {
+  min-width: 0;
+  scroll-margin-top: var(--spacing-xl);
+  border-radius: var(--radius-md);
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  transition: outline-color var(--transition-fast);
+}
+
+.detail-focus-target:focus {
+  outline: none;
+}
+
+.detail-focus-target.is-focused {
+  outline-color: var(--color-primary);
+}
+
 .detail-card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);

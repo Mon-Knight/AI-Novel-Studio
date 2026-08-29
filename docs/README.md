@@ -18,7 +18,7 @@
 
 | 文档                                                             | 说明                                        | 状态                 |
 | ---------------------------------------------------------------- | ------------------------------------------- | -------------------- |
-| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ v3.5.0 已同步     |
+| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ v3.6.0 候选已同步 |
 | [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                                | ✅ 已有              |
 | [development-rules.md](development-rules.md)                     | 开发规则总览                                | ✅ 已有              |
 | [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口、证据校正与建议演进顺序 | ✅ 2026-07-28 已审计 |
@@ -28,31 +28,32 @@
 
 ## technical/ - 技术文档
 
-| 文档                                                                                                    | 说明                                                       | 状态                 |
-| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------- |
-| [architecture.md](technical/architecture.md)                                                            | 项目架构总览                                               | 🚧 占位，待后续细化  |
-| [database.md](technical/database.md)                                                                    | 数据库设计与迁移                                           | 🚧 占位，待后续细化  |
-| [desktop-build.md](technical/desktop-build.md)                                                          | 桌面端构建指南                                             | 🚧 占位，待后续细化  |
-| [testing.md](technical/testing.md)                                                                      | 测试策略与用例                                             | ✅ v3.6.0 已补充     |
-| [diagnostics.md](technical/diagnostics.md)                                                              | 前端异常、原生 panic、本地脱敏导出与隐私边界               | ✅ v3.0.0 已实现     |
-| [ai-execution-facts.md](architecture/ai-execution-facts.md)                                             | v2.3.0 Task / Snapshot / Artifact 执行事实架构             | ✅ 已冻结并实现      |
-| [provider-execution-pipeline.md](architecture/provider-execution-pipeline.md)                           | v2.3.1 Provider Adapter 与首批入口迁移                     | ✅ 已实现            |
-| [safe-apply.md](architecture/safe-apply.md)                                                             | v2.3.2 Proposal / Plan / TargetLink 单目标安全应用         | ✅ 已实现            |
-| [context-constraint-tool-registry.md](architecture/context-constraint-tool-registry.md)                 | v2.4.0 正式编译协议、预算与工具注册边界                    | ✅ 已实现            |
-| [chapter-readiness-planner-runtime.md](architecture/chapter-readiness-planner-runtime.md)               | v2.5.0 持久 Planner、lease/checkpoint、显式重试与恢复      | ✅ 已实现            |
-| [multi-agent-collaboration.md](architecture/multi-agent-collaboration.md)                               | v3.0.0 全书自主规划、六专家评审、逐章推进与持久事实        | ✅ 已实现            |
-| [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | v3.3.0+ 对话任务工作台、Harness Runtime 映射与只读插件视图 | ✅ v3.5.0 已实现     |
-| [dual-model-creative-runtime.md](architecture/dual-model-creative-runtime.md)                           | Phase 5.1 云端优先、可选本地作家、路由与模型上线门         | 🚧 5.1-B/C 已实现    |
-| [v3.3.0-conversational-workbench-taskbook.md](architecture/v3.3.0-conversational-workbench-taskbook.md) | Codex 接管现有实现并完成真实 Harness Headless 工作台闭环   | 📝 执行任务书        |
-| [desktop-e2e.md](technical/desktop-e2e.md)                                                              | Windows 真实 Tauri E2E、隔离与排障                         | ✅ v2.1.7+ 持续适用  |
-| [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md)                 | Provider 发布门禁、真实 API 尝试与安装包证据               | ✅ 已记录            |
-| [v2.3.2 Safe Apply 验收报告](audit/phase-3/10-v2.3.2-safe-apply-acceptance.md)                          | 安全应用不变量、桌面 E2E 与安装包证据                      | ✅ 已记录            |
-| [v2.4.0 Compiler / Registry 验收报告](audit/phase-3/11-v2.4.0-compiler-tool-registry-acceptance.md)     | 编译确定性、后端失败关闭、真实 API 与安装包证据            | ✅ 已记录            |
-| [v2.5.0 Planner Runtime 验收报告](audit/phase-3/12-v2.5.0-planner-runtime-acceptance.md)                | 持久 DAG、lease、显式重试、恢复与桌面 E2E 证据             | ✅ 已记录            |
-| [v2.3.0 M1 验收报告](audit/phase-3/08-v2.3.0-m1-acceptance.md)                                          | 执行事实层发布门禁与安装包证据                             | ✅ 通过              |
-| [Agent 要求时效审计](audit/agent-requirements-review-2026-08-20.md)                                     | UI、Harness、测试、Skills 与协作规则时效审计               | ✅ 2026-08-20 已同步 |
-| [api-routes.md](technical/api-routes.md)                                                                | API 路由说明                                               | 🚧 占位，待后续细化  |
-| [deployment.md](technical/deployment.md)                                                                | 部署说明                                                   | 🚧 占位，待后续细化  |
+| 文档                                                                                                    | 说明                                                       | 状态                     |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------ |
+| [architecture.md](technical/architecture.md)                                                            | 项目架构总览                                               | 🚧 占位，待后续细化      |
+| [database.md](technical/database.md)                                                                    | 数据库设计与迁移                                           | 🚧 占位，待后续细化      |
+| [desktop-build.md](technical/desktop-build.md)                                                          | 桌面端构建指南                                             | 🚧 占位，待后续细化      |
+| [testing.md](technical/testing.md)                                                                      | 测试策略与用例                                             | ✅ v3.6.0 已补充         |
+| [diagnostics.md](technical/diagnostics.md)                                                              | 前端异常、原生 panic、本地脱敏导出与隐私边界               | ✅ v3.0.0 已实现         |
+| [ai-execution-facts.md](architecture/ai-execution-facts.md)                                             | v2.3.0 Task / Snapshot / Artifact 执行事实架构             | ✅ 已冻结并实现          |
+| [provider-execution-pipeline.md](architecture/provider-execution-pipeline.md)                           | v2.3.1 Provider Adapter 与首批入口迁移                     | ✅ 已实现                |
+| [safe-apply.md](architecture/safe-apply.md)                                                             | v2.3.2 Proposal / Plan / TargetLink 单目标安全应用         | ✅ 已实现                |
+| [context-constraint-tool-registry.md](architecture/context-constraint-tool-registry.md)                 | v2.4.0 正式编译协议、预算与工具注册边界                    | ✅ 已实现                |
+| [chapter-readiness-planner-runtime.md](architecture/chapter-readiness-planner-runtime.md)               | v2.5.0 持久 Planner、lease/checkpoint、显式重试与恢复      | ✅ 已实现                |
+| [multi-agent-collaboration.md](architecture/multi-agent-collaboration.md)                               | v3.0.0 全书自主规划、六专家评审、逐章推进与持久事实        | ✅ 已实现                |
+| [conversational-creative-workbench.md](architecture/conversational-creative-workbench.md)               | v3.3.0+ 对话任务工作台、Harness Runtime 映射与只读插件视图 | ✅ v3.5.0 已实现         |
+| [dual-model-creative-runtime.md](architecture/dual-model-creative-runtime.md)                           | Phase 5.1 云端优先、可选本地作家、路由与模型上线门         | 🚧 5.1-B/C 已实现        |
+| [v3.3.0-conversational-workbench-taskbook.md](architecture/v3.3.0-conversational-workbench-taskbook.md) | Codex 接管现有实现并完成真实 Harness Headless 工作台闭环   | 📝 执行任务书            |
+| [desktop-e2e.md](technical/desktop-e2e.md)                                                              | Windows 真实 Tauri E2E、隔离与排障                         | ✅ v2.1.7+ 持续适用      |
+| [v2.3.1 Provider 管线验收报告](audit/phase-3/09-v2.3.1-provider-pipeline-acceptance.md)                 | Provider 发布门禁、真实 API 尝试与安装包证据               | ✅ 已记录                |
+| [v2.3.2 Safe Apply 验收报告](audit/phase-3/10-v2.3.2-safe-apply-acceptance.md)                          | 安全应用不变量、桌面 E2E 与安装包证据                      | ✅ 已记录                |
+| [v2.4.0 Compiler / Registry 验收报告](audit/phase-3/11-v2.4.0-compiler-tool-registry-acceptance.md)     | 编译确定性、后端失败关闭、真实 API 与安装包证据            | ✅ 已记录                |
+| [v2.5.0 Planner Runtime 验收报告](audit/phase-3/12-v2.5.0-planner-runtime-acceptance.md)                | 持久 DAG、lease、显式重试、恢复与桌面 E2E 证据             | ✅ 已记录                |
+| [真实 UI 对话 6 万字验收报告](audit-v2/real_conversation_ui_acceptance.md)                              | 真实 UI 工程闭环、任务拓扑纠偏与 61,396 字内容审读         | ⚠️ 工程通过 / 内容不通过 |
+| [v2.3.0 M1 验收报告](audit/phase-3/08-v2.3.0-m1-acceptance.md)                                          | 执行事实层发布门禁与安装包证据                             | ✅ 通过                  |
+| [Agent 要求时效审计](audit/agent-requirements-review-2026-08-20.md)                                     | UI、Harness、测试、Skills 与协作规则时效审计               | ✅ 2026-08-20 已同步     |
+| [api-routes.md](technical/api-routes.md)                                                                | API 路由说明                                               | 🚧 占位，待后续细化      |
+| [deployment.md](technical/deployment.md)                                                                | 部署说明                                                   | 🚧 占位，待后续细化      |
 
 ## design/ - 设计文档
 

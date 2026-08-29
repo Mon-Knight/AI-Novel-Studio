@@ -5,6 +5,10 @@ import { taskConversationService } from './taskConversationService';
 import { captureTaskModelSnapshot } from './taskModelSnapshot';
 import { WORKBENCH_TOOLS } from './currentPluginService';
 import { classifyTaskIntent, selectCandidateTool } from './taskGoalRouting';
+import {
+  composeWorkbenchInstruction,
+  derivePersistentTaskConstraints,
+} from './taskConstraintBrief';
 import { workbenchChapterWriter } from './workbenchChapterWriter';
 import { chapterRequiredError, formatWorkbenchFailure } from './workbenchFailure';
 import type { TaskModelSnapshot, TaskRun, ToolCallEvent } from '../../types/conversation';
@@ -41,6 +45,10 @@ export interface TaskRuntimeAdapterDependencies {
 
 const WRITER_TOOLS = new Set(['generate_chapter', 'polish_chapter']);
 
+function isChapterRevisionGoal(goal: string): boolean {
+  return /重新|重写|修改|改写|润色|优化|调整/i.test(goal);
+}
+
 function summarizeArguments(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(args).map(([key, value]) => {
@@ -59,10 +67,78 @@ function summarizeResult(result: ToolResult): unknown {
   if (data && typeof data === 'object' && !Array.isArray(data)) {
     const record = data as Record<string, unknown>;
     if (typeof record.text === 'string') {
-      return { ...record, text: { length: record.text.length } };
+      return { ...result, data: { ...record, text: { length: record.text.length } } };
     }
   }
   return result;
+}
+
+function withWriterContextEvidence(
+  result: ToolResult,
+  written:
+    | {
+        contextHash?: string;
+        continuitySourceHash?: string;
+        continuitySourceChapterId?: string;
+        contextSources?: Array<{
+          type: string;
+          title: string;
+          status: 'used' | 'missing' | 'fallback';
+        }>;
+        targetWordCount?: number;
+        originalWordCount?: number;
+        finalWordCount?: number;
+        lengthRepairCount?: number;
+        integrityRepairCount?: number;
+        integrityRepairAttempts?: Array<{
+          attempt: number;
+          issueCodes: string[];
+          sourceContentHash: string;
+        }>;
+        providerRequestEvidence?: {
+          schemaVersion: 'workbench_provider_request_evidence_v1';
+          hashAlgorithm: 'sha256';
+          messagesSerialization: 'json_stringify_messages_v1';
+          taskId?: string;
+          attemptId?: string;
+          messagesSha256: string;
+          messageCount: number;
+          compiledContextSha256: string;
+          snapshotContextHash: string;
+          snapshotCompiledPromptSha256: string;
+          snapshotRequestSourceSha256: string;
+          includedSnapshotRequestSourceSha256?: string;
+          snapshotRequestSourceStatus:
+            'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
+          providerSourceStatus?: 'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
+          generationSourceStatuses?: Record<
+            string,
+            'included' | 'truncated' | 'omitted_empty' | 'omitted_budget'
+          >;
+        };
+      }
+    | undefined,
+): unknown {
+  const summarized = summarizeResult(result);
+  if (!written) return summarized;
+  return {
+    ...(summarized as Record<string, unknown>),
+    generationContext: {
+      contextHash: written.contextHash,
+      continuitySourceHash: written.continuitySourceHash,
+      continuitySourceChapterId: written.continuitySourceChapterId,
+      sources: written.contextSources,
+      targetWordCount: written.targetWordCount,
+      originalWordCount: written.originalWordCount,
+      finalWordCount: written.finalWordCount,
+      lengthRepairCount: written.lengthRepairCount,
+      integrityRepairCount: written.integrityRepairCount,
+      ...(written.integrityRepairAttempts
+        ? { integrityRepairAttempts: written.integrityRepairAttempts }
+        : {}),
+      providerRequestEvidence: written.providerRequestEvidence,
+    },
+  };
 }
 
 function buildFallbackCandidate(goal: string, context: Record<string, unknown>): string {
@@ -92,8 +168,28 @@ function buildStructuredFallback(
     });
   }
   if (toolName === 'expand_settings' || artifactType === 'setting_candidates') {
+    const directive = goal.trimStart();
     return JSON.stringify({
-      settings: [{ name: '预览设定', description: preview }],
+      settings: directive.startsWith('生成世界与规则设定候选')
+        ? [
+            { name: '预览世界设定', description: preview, category: 'location' },
+            {
+              name: '预览规则设定',
+              description: preview,
+              targetType: 'rule_system',
+              category: 'world_rules',
+            },
+          ]
+        : directive.startsWith('生成规则设定候选')
+          ? [
+              {
+                name: '预览规则设定',
+                description: preview,
+                targetType: 'rule_system',
+                category: 'world_rules',
+              },
+            ]
+          : [{ name: '预览设定', description: preview }],
     });
   }
   if (toolName === 'generate_outline' || artifactType === 'outline') {
@@ -148,7 +244,7 @@ async function publishChapterCandidate(input: {
   });
 }
 
-async function findLatestCandidateText(
+export async function findLatestCandidateText(
   conversationId: string,
   novelId: string,
   chapterId: string,
@@ -156,39 +252,41 @@ async function findLatestCandidateText(
   const conversation = await taskConversationService.get(conversationId);
   if (!conversation) throw new Error('修改来源任务会话不存在。');
   const cards = conversation.artifacts.filter((item) => item.artifactType === 'chapter_text');
-  const latestCard = cards[cards.length - 1];
-  if (!latestCard) return undefined;
-  if (!isTauri()) {
-    if (!latestCard.content) throw new Error('浏览器候选卡片缺少修改来源正文。');
-    try {
-      const payload = JSON.parse(latestCard.content) as {
-        data?: { novelId?: string; chapterId?: string; text?: string };
-      };
-      if (
-        payload.data?.novelId !== novelId ||
-        payload.data?.chapterId !== chapterId ||
-        !payload.data.text?.trim()
-      ) {
-        throw new Error('浏览器候选卡片与当前作品或章节不匹配。');
+  for (let index = cards.length - 1; index >= 0; index -= 1) {
+    const card = cards[index];
+    if (!isTauri()) {
+      if (!card.content) throw new Error('浏览器候选卡片缺少修改来源正文。');
+      let payload: { data?: { novelId?: string; chapterId?: string; text?: string } };
+      try {
+        payload = JSON.parse(card.content) as typeof payload;
+      } catch {
+        throw new Error('浏览器候选卡片无法解析修改来源正文。');
+      }
+      if (payload.data?.novelId !== novelId || payload.data?.chapterId !== chapterId) continue;
+      if (!payload.data.text?.trim()) {
+        throw new Error('浏览器候选卡片修改来源正文为空。');
       }
       return payload.data.text;
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('不匹配')) throw error;
-      throw new Error('浏览器候选卡片无法解析修改来源正文。');
     }
+
+    if (!card.artifactId) throw new Error('上一版章节候选缺少 ResultArtifact 引用。');
+    const artifact = await aiTaskRuntimeService.getArtifact(card.artifactId);
+    if (artifact.artifact.artifactType !== 'chapter_text') {
+      throw new Error('上一版章节候选的 ResultArtifact 类型无效。');
+    }
+    if (
+      artifact.artifact.sourceNovelId !== novelId ||
+      artifact.artifact.sourceChapterId !== chapterId
+    ) {
+      continue;
+    }
+    if (!['valid', 'valid_with_warnings'].includes(artifact.artifact.processingStatus)) {
+      throw new Error('上一版章节候选未通过 ResultArtifact 处理状态校验。');
+    }
+    if (!artifact.rawContent.trim()) throw new Error('上一版章节候选正文为空。');
+    return artifact.rawContent;
   }
-  if (!latestCard.artifactId) throw new Error('上一版章节候选缺少 ResultArtifact 引用。');
-  const artifact = await aiTaskRuntimeService.getArtifact(latestCard.artifactId);
-  if (
-    artifact.artifact.artifactType !== 'chapter_text' ||
-    artifact.artifact.sourceNovelId !== novelId ||
-    artifact.artifact.sourceChapterId !== chapterId ||
-    !['valid', 'valid_with_warnings'].includes(artifact.artifact.processingStatus)
-  ) {
-    throw new Error('上一版章节候选与当前作品或章节不匹配。');
-  }
-  if (!artifact.rawContent.trim()) throw new Error('上一版章节候选正文为空。');
-  return artifact.rawContent;
+  return undefined;
 }
 
 async function execute(
@@ -204,6 +302,7 @@ async function execute(
     input.turnId,
     modelSnapshot,
     workerId,
+    input.chapterId,
   );
   const startedAt = new Date().toISOString();
   let currentRun = await taskConversationService.updateRun(run.runId, 'running', { startedAt });
@@ -237,15 +336,30 @@ async function execute(
     }
     steps.push({
       name: 'search_memory',
-      args: () => ({ novelId: input.novelId, query: input.goal }),
+      args: () => ({
+        novelId: input.novelId,
+        query: input.goal,
+        ...(input.chapterId ? { targetChapterId: input.chapterId } : {}),
+      }),
     });
     const candidateTool = selectCandidateTool(input.goal, input.chapterId);
+    let writerInstruction = input.goal;
+    if (candidateTool && WRITER_TOOLS.has(candidateTool.name)) {
+      const bundle = await taskConversationService.get(input.conversationId);
+      if (!bundle || bundle.conversation.novelId !== input.novelId) {
+        throw new Error('写章任务对话不存在或不属于当前作品。');
+      }
+      writerInstruction = composeWorkbenchInstruction(
+        input.goal,
+        derivePersistentTaskConstraints(bundle.turns, input.turnId),
+      );
+    }
     if (candidateTool) {
       steps.push({
         name: candidateTool.name,
         args: () => ({
           novelId: input.novelId,
-          chapterId: input.chapterId,
+          ...(input.chapterId ? { chapterId: input.chapterId } : {}),
           candidateText: buildStructuredFallback(
             candidateTool.name,
             candidateTool.artifactType,
@@ -276,19 +390,16 @@ async function execute(
       try {
         if (WRITER_TOOLS.has(step.name) && input.chapterId) {
           const isPolishOrRewrite =
-            step.name === 'polish_chapter' || /重新|重写|修改|优化|调整/i.test(input.goal);
+            step.name === 'polish_chapter' || isChapterRevisionGoal(input.goal);
           const prevCandidate = isPolishOrRewrite
             ? await findLatestCandidateText(input.conversationId, input.novelId, input.chapterId)
             : undefined;
-          if (/重新|重写|修改|优化|调整/i.test(input.goal) && !prevCandidate) {
-            throw new Error('当前任务没有可供修改的上一版章节 ResultArtifact。');
-          }
 
           const written = await chapterWriter.generate({
             novelId: input.novelId,
             chapterId: input.chapterId,
-            goal: input.goal,
-            mode: step.name === 'polish_chapter' ? 'polish' : 'generate',
+            goal: writerInstruction,
+            mode: isPolishOrRewrite ? 'polish' : 'generate',
             previousCandidateText: prevCandidate,
             memoryContext: evidence['search_memory'],
             modelSnapshot: currentRun.modelSnapshot ?? run.modelSnapshot,
@@ -302,11 +413,57 @@ async function execute(
           evidence.writer = written;
         }
         const result = await productionToolRegistry.invoke(step.name, '1', args, context);
+        const written = WRITER_TOOLS.has(step.name)
+          ? (evidence.writer as
+              | {
+                  contextHash?: string;
+                  continuitySourceHash?: string;
+                  continuitySourceChapterId?: string;
+                  contextSources?: Array<{
+                    type: string;
+                    title: string;
+                    status: 'used' | 'missing' | 'fallback';
+                  }>;
+                  targetWordCount?: number;
+                  originalWordCount?: number;
+                  finalWordCount?: number;
+                  lengthRepairCount?: number;
+                  integrityRepairCount?: number;
+                  integrityRepairAttempts?: Array<{
+                    attempt: number;
+                    issueCodes: string[];
+                    sourceContentHash: string;
+                  }>;
+                  providerRequestEvidence?: {
+                    schemaVersion: 'workbench_provider_request_evidence_v1';
+                    hashAlgorithm: 'sha256';
+                    messagesSerialization: 'json_stringify_messages_v1';
+                    taskId?: string;
+                    attemptId?: string;
+                    messagesSha256: string;
+                    messageCount: number;
+                    compiledContextSha256: string;
+                    snapshotContextHash: string;
+                    snapshotCompiledPromptSha256: string;
+                    snapshotRequestSourceSha256: string;
+                    includedSnapshotRequestSourceSha256?: string;
+                    snapshotRequestSourceStatus:
+                      'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
+                    providerSourceStatus?:
+                      'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
+                    generationSourceStatuses?: Record<
+                      string,
+                      'included' | 'truncated' | 'omitted_empty' | 'omitted_budget'
+                    >;
+                  };
+                }
+              | undefined)
+          : undefined;
         const completed = await taskConversationService.updateToolEvent(runningEvent, {
           status: result.ok ? 'succeeded' : 'failed',
           durationMs: Math.max(0, Math.round(performance.now() - started)),
           error: result.ok ? undefined : result.error,
-          result: summarizeResult(result),
+          result: withWriterContextEvidence(result, written),
           finishedAt: new Date().toISOString(),
         });
         finalized = true;
@@ -314,9 +471,10 @@ async function execute(
         evidence[step.name] = result.ok ? result.data : { error: result.error };
         if (!result.ok) throw new Error(result.error || '工具 ' + step.name + ' 执行失败');
         if (WRITER_TOOLS.has(step.name) && input.chapterId && result.ok) {
-          const written = evidence.writer as { text?: string; artifactId?: string } | undefined;
+          const writtenCandidate = evidence.writer as
+            { text?: string; artifactId?: string } | undefined;
           const text =
-            written?.text ||
+            writtenCandidate?.text ||
             (result.data && typeof result.data === 'object' && 'text' in result.data
               ? String((result.data as { text?: string }).text ?? '')
               : '');
@@ -327,8 +485,11 @@ async function execute(
               chapterId: input.chapterId,
               runId: run.runId,
               text,
-              artifactId: written?.artifactId,
-              mode: step.name === 'polish_chapter' ? 'polish' : 'generate',
+              artifactId: writtenCandidate?.artifactId,
+              mode:
+                step.name === 'polish_chapter' || isChapterRevisionGoal(input.goal)
+                  ? 'polish'
+                  : 'generate',
             });
             publishedChapter = true;
           }

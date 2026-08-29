@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { BookOpen, ChevronRight, FileText, Plus } from 'lucide-react';
 import type { Chapter } from '../../types/chapter';
 import type { Volume } from '../../types/volume';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -12,14 +13,18 @@ interface VolumeTreeProps {
   chapters: Chapter[];
   activeChapterId: string;
   loading?: boolean;
+  unavailableMessage?: string;
   onSelectChapter: (chapterId: string) => void;
   onCreateVolume: (title: string) => Promise<void>;
-  onCreateChapter: (volumeId: string, title: string) => Promise<void>;
-  onCreateFirstChapter?: (title?: string) => Promise<void>;
+  onCreateChapter: (volumeId: string, title: string, targetWordCount?: number) => Promise<void>;
+  onCreateFirstChapter?: (title?: string, targetWordCount?: number) => Promise<void>;
 }
 
 const CHAPTER_PAGE_SIZE = 80;
 const xsBtnPrimary: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
   padding: '2px 8px',
   fontSize: 11,
   borderRadius: 4,
@@ -29,6 +34,9 @@ const xsBtnPrimary: React.CSSProperties = {
   cursor: 'pointer',
 };
 const xsBtnSecondary: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
   padding: '2px 8px',
   fontSize: 11,
   borderRadius: 4,
@@ -43,6 +51,7 @@ function VolumeTree({
   chapters,
   activeChapterId,
   loading,
+  unavailableMessage,
   onSelectChapter,
   onCreateVolume,
   onCreateChapter,
@@ -53,6 +62,7 @@ function VolumeTree({
   const [newVolumeTitle, setNewVolumeTitle] = useState('');
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [newChapterTitle, setNewChapterTitle] = useState('');
+  const [newChapterTargetWordCount, setNewChapterTargetWordCount] = useState('4000');
   const [newChapterVolumeId, setNewChapterVolumeId] = useState('');
   const [creating, setCreating] = useState(false);
   const [chapterWindowStarts, setChapterWindowStarts] = useState<Record<string, number>>({});
@@ -83,6 +93,14 @@ function VolumeTree({
 
   const handleCreateChapter = useCallback(async () => {
     if (!newChapterTitle.trim() || creating) return;
+    const targetWordCount = Number(newChapterTargetWordCount);
+    if (
+      !Number.isSafeInteger(targetWordCount) ||
+      targetWordCount < 500 ||
+      targetWordCount > 20000
+    ) {
+      return;
+    }
     const volumeId = newChapterVolumeId || volumes[0]?.id;
     if (!volumeId) {
       if (!onCreateFirstChapter) {
@@ -95,7 +113,7 @@ function VolumeTree({
       }
       setCreating(true);
       try {
-        await onCreateFirstChapter(newChapterTitle.trim());
+        await onCreateFirstChapter(newChapterTitle.trim(), targetWordCount);
         setNewChapterTitle('');
         setShowNewChapter(false);
         setNewChapterVolumeId('');
@@ -112,7 +130,7 @@ function VolumeTree({
     }
     setCreating(true);
     try {
-      await onCreateChapter(volumeId, newChapterTitle.trim());
+      await onCreateChapter(volumeId, newChapterTitle.trim(), targetWordCount);
       setNewChapterTitle('');
       setShowNewChapter(false);
       setNewChapterVolumeId('');
@@ -135,6 +153,7 @@ function VolumeTree({
   }, [
     creating,
     newChapterTitle,
+    newChapterTargetWordCount,
     newChapterVolumeId,
     onCreateChapter,
     onCreateFirstChapter,
@@ -147,6 +166,7 @@ function VolumeTree({
         volumes.length === 0 && !volumeId ? '' : volumeId || volumes[0]?.id || '',
       );
       setNewChapterTitle('');
+      setNewChapterTargetWordCount('4000');
       setShowNewChapter(true);
     },
     [volumes],
@@ -183,7 +203,10 @@ function VolumeTree({
 
   const renderHeader = () => (
     <div className="workspace-sidebar-header">
-      <span>📖 卷章目录</span>
+      <span className="workspace-sidebar-heading">
+        <BookOpen aria-hidden="true" size={15} strokeWidth={1.8} />
+        <span>卷章目录</span>
+      </span>
       <div style={{ display: 'flex', gap: 4 }}>
         <button
           style={xsBtnPrimary}
@@ -192,7 +215,8 @@ function VolumeTree({
           disabled={creating}
           title="新建章节（自动创建第一卷）"
         >
-          + 章节
+          <Plus aria-hidden="true" size={13} strokeWidth={2} />
+          <span>章节</span>
         </button>
         <button
           style={xsBtnSecondary}
@@ -204,7 +228,8 @@ function VolumeTree({
           disabled={creating}
           title="新建分卷"
         >
-          + 分卷
+          <Plus aria-hidden="true" size={13} strokeWidth={2} />
+          <span>分卷</span>
         </button>
       </div>
     </div>
@@ -217,6 +242,7 @@ function VolumeTree({
       newVolumeTitle={newVolumeTitle}
       showNewChapter={showNewChapter}
       newChapterTitle={newChapterTitle}
+      newChapterTargetWordCount={newChapterTargetWordCount}
       newChapterVolumeId={newChapterVolumeId}
       creating={creating}
       volumePlaceholder={emptyState ? '例如：第一卷' : '例如：第二卷'}
@@ -226,22 +252,40 @@ function VolumeTree({
       }}
       onVolumeTitleChange={setNewVolumeTitle}
       onChapterTitleChange={setNewChapterTitle}
+      onChapterTargetWordCountChange={setNewChapterTargetWordCount}
       onChapterVolumeChange={setNewChapterVolumeId}
       onCreateVolume={handleCreateVolume}
       onCreateChapter={handleCreateChapter}
     />
   );
 
-  if (loading) {
+  if (loading || unavailableMessage) {
     return (
       <>
         <div className="workspace-sidebar-header">
-          <span>📖 卷章目录</span>
+          <span className="workspace-sidebar-heading">
+            <BookOpen aria-hidden="true" size={15} strokeWidth={1.8} />
+            <span>卷章目录</span>
+          </span>
         </div>
-        <div className="workspace-sidebar-tree">
-          <div style={{ padding: 16, color: 'var(--color-text-muted)', fontSize: 13 }}>
-            加载中...
-          </div>
+        <div
+          className="workspace-sidebar-tree workspace-sidebar-state"
+          data-testid="chapter-list"
+          role={unavailableMessage ? 'alert' : 'status'}
+        >
+          {unavailableMessage ? (
+            <div className="workspace-sidebar-error">{unavailableMessage}</div>
+          ) : (
+            <>
+              <div className="workspace-loading-label">加载中...</div>
+              <div className="workspace-tree-skeleton" aria-hidden="true">
+                <div className="workspace-skeleton-line is-tree-heading" />
+                <div className="workspace-skeleton-line is-tree-item" />
+                <div className="workspace-skeleton-line is-tree-item is-short" />
+                <div className="workspace-skeleton-line is-tree-item" />
+              </div>
+            </>
+          )}
         </div>
       </>
     );
@@ -267,7 +311,8 @@ function VolumeTree({
       {renderHeader()}
       <div className="workspace-sidebar-tree" data-testid="chapter-list">
         <div className="tree-novel-root">
-          <span>📖</span> 作品相关
+          <BookOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span>作品相关</span>
         </div>
         {sortedVolumes.map((volume) => {
           const volumeChapters = chapterIndex.byVolume.get(volume.id) ?? [];
@@ -282,10 +327,17 @@ function VolumeTree({
               data-volume-id={volume.id}
               data-volume-title={volume.title}
             >
-              <div className="tree-volume-header" onClick={() => toggleVolume(volume.id)}>
-                <span className={`tree-arrow ${isExpanded ? 'expanded' : ''}`}>▶</span>
+              <button
+                type="button"
+                className="tree-volume-header"
+                aria-expanded={isExpanded}
+                onClick={() => toggleVolume(volume.id)}
+              >
+                <span className={`tree-arrow ${isExpanded ? 'expanded' : ''}`} aria-hidden="true">
+                  <ChevronRight size={13} strokeWidth={1.8} />
+                </span>
                 <span>{volume.title}</span>
-              </div>
+              </button>
               {isExpanded && volumeChapters.length > 0 && (
                 <ChapterWindowList
                   chapters={volumeChapters}
@@ -304,9 +356,14 @@ function VolumeTree({
                 </div>
               )}
               {isExpanded && (
-                <div className="tree-add-btn" onClick={() => handleOpenNewChapter(volume.id)}>
-                  + 在本卷新建章节
-                </div>
+                <button
+                  type="button"
+                  className="tree-add-btn"
+                  onClick={() => handleOpenNewChapter(volume.id)}
+                >
+                  <Plus aria-hidden="true" size={13} strokeWidth={2} />
+                  <span>在本卷新建章节</span>
+                </button>
               )}
             </div>
           );
@@ -314,7 +371,8 @@ function VolumeTree({
         {orphanChapters.length > 0 && (
           <div className="tree-volume">
             <div className="tree-volume-header" style={{ color: 'var(--color-text-muted)' }}>
-              📄 未分组章节
+              <FileText aria-hidden="true" size={13} strokeWidth={1.8} />
+              <span>未分组章节</span>
             </div>
             <ChapterWindowList
               chapters={orphanChapters}

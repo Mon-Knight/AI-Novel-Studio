@@ -6,7 +6,7 @@ Agent 不应看到 75 个实现能力、18 个漂移的 TS descriptor 或一串 
 
 > 当前 18 个动作只是 [Capability Catalog v1](./capability_registry_v1.md) 的资产化目标，全部处于 `catalog_only`；本文件的映射表不是当前生产 allowlist。任何“已完成 Tool”必须先通过 [Tool 工作性验证报告](./tool_health_validation.md) 的 handler 与负例门禁。
 
-> Phase 1A-C 已为 `novel.read`、`structure.read`、`context.read`、`memory.search` 建立内部 descriptor 与固定 Facade adapter，但没有提升 exposure；模型可见数量仍为 0。详见 [Canonical Tool Projection](./canonical_tool_projection.md)。
+> Phase 1A-C 已为 `novel.read`、`structure.read`、`context.read`、`memory.search` 建立内部 descriptor 与固定 Facade adapter；Phase 1A-D 又建立共享 portable Manifest、TS 宿主门禁和 TS/Rust/DSH hash drift gate，但没有提升 exposure，模型可见数量仍为 0。详见 [Canonical Tool Projection](./canonical_tool_projection.md) 与 [Shared Canonical Manifest](./canonical_manifest_contract.md)。
 
 ```text
 用户功能 → Domain Capability → canonical Tool/SubAgent adapter → Main Agent

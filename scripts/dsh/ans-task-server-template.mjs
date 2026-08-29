@@ -28,6 +28,11 @@ const MAX_ROUTE_LENGTH = 256;
 const MAX_PATH_LENGTH = 4096;
 const MAX_CONTENT_BLOCKS = 16;
 const MAX_PROMPT_CHARS = 2_000_000;
+const MODEL_TOOL_ATTESTATION_PROTOCOL = 'ans_model_tool_attestation_v1';
+const MODEL_TOOL_ATTESTATION_NAME = 'ans_runtime_attest_tool_call_v1';
+const MODEL_TOOL_ATTESTATION_TIMEOUT_MS = 30_000;
+const MODEL_TOOL_ATTESTATION_MAX_TOKENS = 128;
+const MODEL_TOOL_ATTESTATION_TTL_MS = 10 * 60_000;
 
 const INITIALIZE_KEYS = new Set([
   'cwd',
@@ -41,6 +46,7 @@ const INITIALIZE_KEYS = new Set([
 const PROMPT_KEYS = new Set(['sessionId', 'contentBlocks', 'route', 'selection']);
 const SELECTION_KEYS = new Set(['provider', 'model', 'reasoningEffort', 'maxTokens']);
 const CANCEL_KEYS = new Set(['sessionId']);
+const MODEL_TOOL_ATTESTATION_KEYS = new Set(['provider', 'model', 'nonce']);
 const TEXT_BLOCK_KEYS = new Set(['type', 'text']);
 const SENSITIVE_KEYS = new Set([
   'apikey',
@@ -78,6 +84,7 @@ const NOVEL_MCP_TOOL_IDENTITIES = [
     publicNamePrefix: 'mcp__novel__chapter_read_outline_',
   },
   { canonical: 'search_memory', publicName: 'mcp__novel__search_memory' },
+  { canonical: 'get_character_states', publicName: 'mcp__novel__get_character_states' },
   { canonical: 'generate_chapter', publicName: 'mcp__novel__generate_chapter' },
 ];
 const AGENT_SPINE_SERVICES = [
@@ -251,6 +258,27 @@ function parseCancel(params) {
   return { sessionId: parseSessionId(input.sessionId) };
 }
 
+function parseModelToolAttestation(params) {
+  const input = assertObject(
+    params,
+    MODEL_TOOL_ATTESTATION_KEYS,
+    'runtime/attest-model-tools params',
+  );
+  const nonce = requiredString(input.nonce, 'runtime/attest-model-tools.nonce', 200);
+  if (!/^[A-Za-z0-9_-]+$/u.test(nonce)) {
+    throw new TypeError('runtime/attest-model-tools.nonce contains unsupported characters');
+  }
+  return {
+    provider: requiredString(
+      input.provider,
+      'runtime/attest-model-tools.provider',
+      MAX_ROUTE_LENGTH,
+    ),
+    model: requiredString(input.model, 'runtime/attest-model-tools.model', MAX_ROUTE_LENGTH),
+    nonce,
+  };
+}
+
 function assertEmptyParams(params, label) {
   if (params === undefined || params === null) return;
   assertObject(params, new Set(), label);
@@ -325,6 +353,7 @@ class AnsTaskServer {
     this.transportHealthy = true;
     this.sessions = new Map();
     this.activations = new Map();
+    this.modelToolAttestations = new Map();
     this.shutdownTask = undefined;
     this.disposers = [
       ctx.on('session/event', (session, event) => {
@@ -566,6 +595,30 @@ class AnsTaskServer {
     ];
   }
 
+  activeModelToolAttestations() {
+    const active = [];
+    const currentTime = Date.now();
+    for (const [key, attestation] of this.modelToolAttestations) {
+      if (Date.parse(attestation.expiresAt) <= currentTime) {
+        this.modelToolAttestations.delete(key);
+        continue;
+      }
+      active.push({
+        protocol: attestation.protocol,
+        provider: attestation.provider,
+        model: attestation.model,
+        verified: true,
+        cached: attestation.cached,
+        verifiedAt: attestation.verifiedAt,
+        expiresAt: attestation.expiresAt,
+        cacheTtlMs: attestation.cacheTtlMs,
+        finishKind: attestation.finishKind,
+        observedToolCalls: attestation.observedToolCalls,
+      });
+    }
+    return active;
+  }
+
   async health(params) {
     assertEmptyParams(params, 'runtime/health params');
     let persistence = 'ready';
@@ -598,6 +651,7 @@ class AnsTaskServer {
       transport: this.transportHealthy ? 'ready' : 'failed',
       sourceCommit: SOURCE_COMMIT,
       protocol: PROTOCOL,
+      route: this.defaultRoute?.selection,
       liveSessions: this.sessions.size,
       activatingSessions: this.activations.size,
       providers: providerDirectory.providers,
@@ -608,7 +662,139 @@ class AnsTaskServer {
         global: toolDirectory.globalTools,
         sessions: toolDirectory.sessionTools,
       },
+      modelToolAttestations: this.activeModelToolAttestations(),
     };
+  }
+
+  /**
+   * Prove that the exact provider/model route can emit a native tool-call block.
+   * This is a direct one-shot LLM request: it creates no Agent/Session, executes
+   * no tool body, and writes no Harness persistence or ANS domain fact.
+   */
+  async attestModelTools(params) {
+    this.assertReady();
+    const parsed = parseModelToolAttestation(params);
+    const cacheKey = `${parsed.provider}\u0000${parsed.model}`;
+    const cached = this.modelToolAttestations.get(cacheKey);
+    if (cached !== undefined && Date.parse(cached.expiresAt) > Date.now()) {
+      return { ...cached, cached: true };
+    }
+    if (cached !== undefined) this.modelToolAttestations.delete(cacheKey);
+
+    const llm = this.ctx.get('llm');
+    if (llm === undefined || !llm.listProviders().some((entry) => entry.id === parsed.provider)) {
+      return {
+        protocol: MODEL_TOOL_ATTESTATION_PROTOCOL,
+        provider: parsed.provider,
+        model: parsed.model,
+        verified: false,
+        cached: false,
+        failureCode: 'PROVIDER_NOT_LOADED',
+      };
+    }
+
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(
+      () => controller.abort(new Error('model tool attestation timed out')),
+      MODEL_TOOL_ATTESTATION_TIMEOUT_MS,
+    );
+    const toolCalls = [];
+    let finishKind = 'missing';
+    let usage;
+    let failureCode;
+    let providerFailureCode;
+    try {
+      const message = createUserMessage({
+        content: [
+          {
+            type: 'text',
+            text: `Call ${MODEL_TOOL_ATTESTATION_NAME} exactly once with nonce ${parsed.nonce}. Do not answer with text.`,
+          },
+        ],
+        source: { kind: 'user' },
+      });
+      for await (const chunk of llm.stream({
+        provider: parsed.provider,
+        model: parsed.model,
+        reasoningEffort: 'off',
+        messages: [message],
+        system:
+          'This is a capability attestation. Call the single provided function exactly once, copy its nonce exactly, and emit no prose.',
+        tools: [
+          {
+            name: MODEL_TOOL_ATTESTATION_NAME,
+            description:
+              'Side-effect-free capability marker. Its body is never executed by this attestation.',
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['nonce'],
+              properties: {
+                nonce: { type: 'string', enum: [parsed.nonce] },
+              },
+            },
+          },
+        ],
+        temperature: 0,
+        maxTokens: MODEL_TOOL_ATTESTATION_MAX_TOKENS,
+        signal: controller.signal,
+      })) {
+        if (chunk.type === 'block-end' && chunk.block?.type === 'tool-call') {
+          toolCalls.push({ name: chunk.block.name, arguments: chunk.block.arguments });
+        } else if (chunk.type === 'usage') {
+          usage = sanitizeJson(chunk.usage);
+        } else if (chunk.type === 'finish') {
+          finishKind = chunk.reason?.kind ?? 'unknown';
+          if (finishKind === 'error') {
+            failureCode = 'PROVIDER_ERROR';
+            const candidate = chunk.reason?.failure?.code;
+            if (typeof candidate === 'string' && /^[A-Z0-9_]{1,64}$/u.test(candidate)) {
+              providerFailureCode = candidate;
+            }
+          }
+          if (finishKind === 'aborted') failureCode = 'PROBE_ABORTED';
+        }
+      }
+    } catch {
+      failureCode = controller.signal.aborted ? 'PROBE_TIMEOUT' : 'PROBE_INTERNAL_ERROR';
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+
+    let exactCall = false;
+    if (toolCalls.length === 1 && toolCalls[0].name === MODEL_TOOL_ATTESTATION_NAME) {
+      try {
+        const args = JSON.parse(toolCalls[0].arguments);
+        exactCall = isRecord(args) && Object.keys(args).length === 1 && args.nonce === parsed.nonce;
+      } catch {
+        exactCall = false;
+      }
+    }
+    const verified = finishKind === 'tool-calls' && exactCall;
+    const verifiedAt = verified ? new Date() : undefined;
+    const result = {
+      protocol: MODEL_TOOL_ATTESTATION_PROTOCOL,
+      provider: parsed.provider,
+      model: parsed.model,
+      verified,
+      cached: false,
+      finishKind,
+      observedToolCalls: toolCalls.length,
+      ...(usage === undefined ? {} : { usage }),
+      ...(providerFailureCode === undefined ? {} : { providerFailureCode }),
+      ...(verified
+        ? {
+            verifiedAt: verifiedAt.toISOString(),
+            expiresAt: new Date(verifiedAt.getTime() + MODEL_TOOL_ATTESTATION_TTL_MS).toISOString(),
+            cacheTtlMs: MODEL_TOOL_ATTESTATION_TTL_MS,
+          }
+        : {
+            failureCode:
+              failureCode ?? (toolCalls.length === 0 ? 'NO_TOOL_CALL' : 'INVALID_TOOL_CALL'),
+          }),
+    };
+    if (verified) this.modelToolAttestations.set(cacheKey, result);
+    return result;
   }
 
   async getOrActivateSession(sessionId) {
@@ -807,6 +993,8 @@ class AnsTaskServer {
         return this.cancel(params);
       case 'runtime/health':
         return this.health(params);
+      case 'runtime/attest-model-tools':
+        return this.attestModelTools(params);
       case 'shutdown':
         return this.shutdown(params);
       default:

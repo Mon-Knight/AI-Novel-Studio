@@ -375,6 +375,12 @@ export interface ChapterGenerationContext {
   novelOutline?: string;
   masterOutline?: string;
   worldBackground?: string;
+  worldSettingSources?: Array<{
+    id: string;
+    title: string;
+    role: 'primary' | 'supplemental';
+    updatedAt: string;
+  }>;
   ruleSystems?: string;
   protagonist?: string;
   specialAbility?: string;
@@ -403,8 +409,24 @@ export interface ChapterGenerationContext {
   requiredCharacters?: ChapterCharacterContext[];
   requiredCharactersSummary?: string;
   requiredCharacterNames?: string;
+  characterStates?: string;
+  characterStateSources?: Array<{
+    id: string;
+    characterId: string;
+    characterName: string;
+    chapterId?: string;
+    origin: 'character_state' | 'character_current_state';
+  }>;
   chapterEvents?: string;
   chapterSettings?: string;
+  /** Read-time projection from persisted adopted summaries and ContextRecords. */
+  worldStateTimeline?: string;
+  worldStateTimelineSource?: {
+    latestChapterId: string;
+    chapterCount: number;
+    sourceSummaryIds: string[];
+    sourceContextRecordIds: string[];
+  };
   previousContext?: string;
   userInstruction?: string;
   /** 当前草稿正文（重新生成/改写模式时传入） */
@@ -412,4 +434,6 @@ export interface ChapterGenerationContext {
   chapterOutlineSource?: 'active_chapter_outline' | 'chapter_field' | 'draft' | 'empty';
   volumeOutlineSource?: 'active_outline' | 'volume_field' | 'none';
   masterOutlineSource?: 'active_outline' | 'novel_field' | 'novel_description' | 'none';
+  /** Optional context sources that could not be read while this context was built. */
+  contextWarnings?: string[];
 }

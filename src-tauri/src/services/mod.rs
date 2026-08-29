@@ -28,6 +28,7 @@ pub mod project_service;
 pub mod quality_check_service;
 pub mod recovery_service;
 pub mod reference_library_service;
+pub mod structured_artifact_apply_service;
 pub mod style_profile_service;
 pub mod volume_service;
 pub mod world_setting_service;

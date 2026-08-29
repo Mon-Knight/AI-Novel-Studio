@@ -905,6 +905,47 @@ fn deduplicate_rows_by_id(rows: &mut Vec<BackupRow>) {
     });
 }
 
+fn validate_model_snapshot_metadata(
+    table: &str,
+    row: &BackupRow,
+    column: &str,
+    label: &str,
+) -> Result<(), String> {
+    let Some(raw) = row.get(column) else {
+        return Ok(());
+    };
+    if raw.is_null() {
+        return Ok(());
+    }
+    let raw = raw
+        .as_str()
+        .ok_or_else(|| format!("备份中的 {table}.{column} 必须是 JSON 文本"))?;
+    let snapshot = serde_json::from_str::<JsonValue>(raw)
+        .map_err(|error| format!("备份中的 {table}.{column} JSON 无效：{error}"))?;
+    ai_fact_security::validate_metadata(&snapshot, label)
+        .map_err(|error| format!("备份中的 {table}.{column} 无效：{error}"))
+}
+
+fn validate_workbench_model_snapshots(
+    tables: &BTreeMap<String, Vec<BackupRow>>,
+) -> Result<(), String> {
+    for (table, column, label) in [
+        (
+            "task_conversations",
+            "default_model_json",
+            "任务默认模型快照",
+        ),
+        ("task_runs", "model_snapshot_json", "任务运行模型快照"),
+    ] {
+        if let Some(rows) = tables.get(table) {
+            for row in rows {
+                validate_model_snapshot_metadata(table, row, column, label)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn export_project_backup_in_conn(
     conn: &Connection,
     novel_id: &str,
@@ -922,6 +963,7 @@ pub fn export_project_backup_in_conn(
         }
         tables.insert(spec.name.to_string(), rows);
     }
+    validate_workbench_model_snapshots(&tables)?;
 
     // Large-text documents have no novel_id. Include documents explicitly
     // linked by a project record and documents whose target is any exported
@@ -1148,6 +1190,15 @@ fn validate_row(table: &str, row: &BackupRow, columns: &HashSet<String>) -> Resu
     };
     if !valid_workbench_row {
         return Err(format!("备份中的 {table} 记录状态、作用域或 JSON 无效"));
+    }
+    match table {
+        "task_conversations" => {
+            validate_model_snapshot_metadata(table, row, "default_model_json", "任务默认模型快照")?
+        }
+        "task_runs" => {
+            validate_model_snapshot_metadata(table, row, "model_snapshot_json", "任务运行模型快照")?
+        }
+        _ => {}
     }
     for column in row.keys() {
         if !columns.contains(column) {
@@ -3303,16 +3354,18 @@ mod tests {
         use crate::services::{ai_task_service, artifact_service, conversation_service};
 
         let created_at = "2026-08-21T00:00:00Z".to_string();
+        let model_snapshot = serde_json::json!({
+            "providerId":"deepseek",
+            "modelId":"deepseek-chat",
+            "runtime":{"adapterProtocol":"ans_task_session_v1"}
+        });
         conversation_service::create(
             conn,
             conversation_service::CreateConversationInput {
                 conversation_id: "conversation-backup".to_string(),
                 novel_id: novel_id.to_string(),
                 title: "备份任务".to_string(),
-                default_model: Some(serde_json::json!({
-                    "providerId":"deepseek",
-                    "modelId":"deepseek-chat"
-                })),
+                default_model: Some(model_snapshot.clone()),
                 created_at: created_at.clone(),
             },
         )
@@ -3334,11 +3387,7 @@ mod tests {
                 run_id: "run-backup".to_string(),
                 conversation_id: "conversation-backup".to_string(),
                 turn_id: "turn-backup".to_string(),
-                model_snapshot: serde_json::json!({
-                    "providerId":"deepseek",
-                    "modelId":"deepseek-chat",
-                    "runtime":{"adapterProtocol":"ans_task_session_v1"}
-                }),
+                model_snapshot,
                 worker_id: "worker-backup".to_string(),
                 created_at: created_at.clone(),
             },
@@ -3630,6 +3679,117 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM novels", [], |row| row.get(0))
                 .expect("count novels after rejected restore");
             assert_eq!(novel_count, 0, "{table} restore wrote partial data");
+        }
+    }
+
+    #[test]
+    fn project_backup_rejects_workbench_model_credentials_without_partial_restore() {
+        let mut source = test_connection();
+        seed_minimal_backup_project(&source, "novel-source");
+        seed_workbench_artifact_graph(&mut source, "novel-source");
+        let backup = export_project_backup_in_conn(&source, "novel-source")
+            .expect("export safe workbench artifact graph");
+        let malicious_snapshot = serde_json::json!({
+            "providerId":"deepseek-official",
+            "modelId":"deepseek-chat",
+            "apiKey":"test-only-value"
+        })
+        .to_string();
+
+        for (table, column) in [
+            ("task_conversations", "default_model_json"),
+            ("task_runs", "model_snapshot_json"),
+        ] {
+            let mut malicious = backup.clone();
+            malicious
+                .tables
+                .get_mut(table)
+                .and_then(|rows| rows.first_mut())
+                .unwrap_or_else(|| panic!("missing {table} backup row"))
+                .insert(
+                    column.to_string(),
+                    JsonValue::String(malicious_snapshot.clone()),
+                );
+
+            let mut target = test_connection();
+            let error = restore_project_backup_in_conn(&mut target, &malicious)
+                .expect_err("credential-bearing model snapshot must fail closed");
+            assert!(error.contains(table), "unexpected error: {error}");
+            assert!(error.contains(column), "unexpected error: {error}");
+            for target_table in ["novels", "task_conversations", "task_runs"] {
+                let count: i64 = target
+                    .query_row(&format!("SELECT COUNT(*) FROM {target_table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap_or_else(|_| panic!("count {target_table} after rejected restore"));
+                assert_eq!(
+                    count, 0,
+                    "{table} restore wrote partial {target_table} data"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn project_backup_refuses_source_workbench_model_credentials() {
+        let malicious_snapshot = serde_json::json!({
+            "providerId":"deepseek-official",
+            "modelId":"deepseek-chat",
+            "authorization":"Bearer x"
+        })
+        .to_string();
+
+        for (table, column) in [
+            ("task_conversations", "default_model_json"),
+            ("task_runs", "model_snapshot_json"),
+        ] {
+            let mut source = test_connection();
+            seed_minimal_backup_project(&source, "novel-source");
+            seed_workbench_artifact_graph(&mut source, "novel-source");
+            if table == "task_conversations" {
+                source
+                    .execute(
+                        "UPDATE task_conversations SET default_model_json=?1 WHERE conversation_id='conversation-backup'",
+                        params![malicious_snapshot],
+                    )
+                    .expect("corrupt source conversation snapshot");
+            } else {
+                source
+                    .execute(
+                        "INSERT INTO task_runs
+                            (run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, created_at, updated_at)
+                         VALUES ('run-secret-export', 'conversation-backup', 'turn-backup', 'queued', ?1,
+                                 'worker-secret-export', '2026-08-21T00:01:00Z', '2026-08-21T00:01:00Z')",
+                        params![malicious_snapshot],
+                    )
+                    .expect("corrupt source run snapshot");
+            }
+            let before: (i64, i64, i64) = source
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM novels),
+                        (SELECT COUNT(*) FROM task_conversations),
+                        (SELECT COUNT(*) FROM task_runs)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("count source rows before rejected export");
+
+            let error = export_project_backup_in_conn(&source, "novel-source")
+                .expect_err("credential-bearing source snapshot must not be exported");
+            assert!(error.contains(table), "unexpected error: {error}");
+            assert!(error.contains(column), "unexpected error: {error}");
+            let after: (i64, i64, i64) = source
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM novels),
+                        (SELECT COUNT(*) FROM task_conversations),
+                        (SELECT COUNT(*) FROM task_runs)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("count source rows after rejected export");
+            assert_eq!(after, before, "{table} export mutated source data");
         }
     }
 

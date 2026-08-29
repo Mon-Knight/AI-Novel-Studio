@@ -171,13 +171,18 @@ function AiProviderSettingsCard({
                 />
                 {settings.apiKey ? (
                   <div style={{ fontSize: 12, color: 'var(--color-success)', marginTop: 4 }}>
-                    ✅ 本次会话已加载：{aiSettingsService.maskApiKey(settings.apiKey)}
+                    ✅ 本次应用会话已绑定到当前模型：
+                    {aiSettingsService.maskApiKey(settings.apiKey)}
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
                     ⚠️ 未填写 API Key
                   </div>
                 )}
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
+                  Key 仅保留在本机进程内存，不写入项目、数据库、LocalStorage、备份或同步服务；
+                  真实鉴权仅发送到当前 Provider、Base URL 与模型组成的精确 Endpoint。
+                </div>
               </div>
               <div>
                 <label className="panel-field-label">

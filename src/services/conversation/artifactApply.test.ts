@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ResultArtifactBundle } from '../../types/result-artifact';
 import { characterService } from '../characters/characterService';
+import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { draftVersionService } from '../database/draftVersionService';
@@ -68,6 +69,11 @@ test('character and event candidates apply through domain services without writi
   const stored = await characterService.getByNovelId('novel-apply');
   assert.equal(stored.length, 1);
   assert.equal(stored[0].name, '林默');
+  const firstChapterBindings = await chapterCharacterService.getByChapterId('ch-apply');
+  assert.equal(firstChapterBindings.length, 1);
+  assert.equal(firstChapterBindings[0].characterId, stored[0].id);
+  assert.equal(firstChapterBindings[0].roleInChapter, 'supporting');
+  assert.equal(firstChapterBindings[0].mustAppear, true);
 
   const replay = await applyArtifactBundle(
     { novelId: 'novel-apply', chapterId: 'ch-apply' },
@@ -78,6 +84,40 @@ test('character and event candidates apply through domain services without writi
   );
   assert.equal(replay.conflictCode, 'CHARACTER_CANDIDATES_ALREADY_APPLIED');
   assert.equal((await characterService.getByNovelId('novel-apply')).length, 1);
+
+  const existingCharacterNewChapter = await applyArtifactBundle(
+    { novelId: 'novel-apply', chapterId: 'ch-second' },
+    bundle(
+      'character_candidates',
+      JSON.stringify({ characters: [{ name: '林默', roleType: 'supporting' }] }),
+    ),
+  );
+  assert.ok(existingCharacterNewChapter.applyTransactionId);
+  const secondChapterBindings = await chapterCharacterService.getByChapterId('ch-second');
+  assert.equal(secondChapterBindings.length, 1);
+  assert.equal(secondChapterBindings[0].characterId, stored[0].id);
+
+  const protagonistCandidate = await applyArtifactBundle(
+    { novelId: 'novel-apply', chapterId: 'ch-protagonist' },
+    bundle(
+      'character_candidates',
+      JSON.stringify({
+        characters: [
+          {
+            name: '沈砚',
+            roleType: 'protagonist',
+            chapterFunction: '追查异常编号',
+          },
+        ],
+      }),
+    ),
+  );
+  assert.ok(protagonistCandidate.applyTransactionId);
+  const protagonistBindings = await chapterCharacterService.getByChapterId('ch-protagonist');
+  assert.equal(protagonistBindings.length, 1);
+  assert.equal(protagonistBindings[0].roleInChapter, 'main');
+  assert.equal(protagonistBindings[0].mustAppear, true);
+  assert.equal(protagonistBindings[0].note, '追查异常编号');
 
   const events = await applyArtifactBundle(
     { novelId: 'novel-apply', chapterId: 'ch-apply' },
@@ -136,4 +176,35 @@ test('character and event candidates apply through domain services without writi
       ),
     /不能直接写入正式小说事实/,
   );
+
+  const compressedText = '浏览器不能直接应用小说压缩上下文';
+  const compression = await applyArtifactBundle(
+    { novelId: 'novel-apply' },
+    bundle(
+      'generic_json',
+      JSON.stringify({
+        providerId: 'ans.novel-context.extractive-v1',
+        version: '1.1.0',
+        config: { tokenBudget: 4000 },
+        novelId: 'novel-apply',
+        sourceRevision: 'rev-1234abcd-42',
+        compressedText,
+        coverage: {
+          characters: { required: [], present: [], missing: [] },
+          plot: { required: [], present: [], missing: [] },
+          foreshadow: { required: [], present: [], missing: [] },
+          timeline: { required: [], present: [], missing: [] },
+          world: { required: [], present: [], missing: [] },
+          rules: { required: [], present: [], missing: [] },
+          outlines: { required: [], present: [], missing: [] },
+          style: { required: [], present: [], missing: [] },
+          output: { required: [], present: [], missing: [] },
+          tokens: { budget: 4000, used: [...compressedText].length, withinBudget: true },
+        },
+        valid: true,
+      }),
+      { derivationType: 'context_compression' },
+    ),
+  );
+  assert.equal(compression.conflictCode, 'BROWSER_APPLY_UNSUPPORTED');
 });

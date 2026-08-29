@@ -7,6 +7,7 @@ import { qualityCheckService } from '../../../services/quality/qualityCheckServi
 import { formatDateTime } from '../../../utils/date';
 import { formatNumber } from '../../../utils/format';
 import type { QualityCheckReport } from '../../../types/qualityCheck';
+import { CheckCircle2, FileText, History, RotateCcw, X } from 'lucide-react';
 
 interface DraftHistoryPanelProps {
   chapterId: string;
@@ -199,9 +200,18 @@ function DraftHistoryPanel({
         style={{ width: 360 }}
       >
         <div className="right-panel-header">
-          <span className="right-panel-title">📋 草稿历史</span>
-          <button className="right-panel-close" onClick={onClose}>
-            ✕
+          <span className="right-panel-title">
+            <History aria-hidden="true" size={16} strokeWidth={1.8} />
+            <span>草稿历史</span>
+          </span>
+          <button
+            type="button"
+            className="right-panel-close"
+            aria-label="关闭草稿历史"
+            title="关闭"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" size={17} strokeWidth={1.8} />
           </button>
         </div>
         <div className="right-panel-body" data-testid="draft-history">
@@ -226,7 +236,8 @@ function DraftHistoryPanel({
             </div>
           ) : drafts.length === 0 ? (
             <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-              📄 暂无草稿
+              <FileText aria-hidden="true" size={22} strokeWidth={1.5} />
+              <div>暂无草稿</div>
               <br />
               <span style={{ fontSize: 12 }}>使用 AI 生成或手动保存创建草稿版本</span>
             </div>
@@ -263,7 +274,7 @@ function DraftHistoryPanel({
                         <span
                           style={{ color: 'var(--color-success)', fontSize: 12, marginLeft: 6 }}
                         >
-                          ✅ 已采用
+                          <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} /> 已采用
                         </span>
                       )}
                     </span>
@@ -292,7 +303,8 @@ function DraftHistoryPanel({
                       disabled={!!busyDraftId}
                       style={{ fontSize: 12 }}
                     >
-                      📖 恢复
+                      <RotateCcw aria-hidden="true" size={13} strokeWidth={1.8} />
+                      <span>恢复</span>
                     </button>
                     {!draft.isAdopted && (
                       <button
@@ -301,7 +313,8 @@ function DraftHistoryPanel({
                         disabled={!!busyDraftId}
                         style={{ fontSize: 12 }}
                       >
-                        ✅ 采用
+                        <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
+                        <span>采用</span>
                       </button>
                     )}
                     {!draft.isAdopted && (

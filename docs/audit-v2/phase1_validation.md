@@ -14,7 +14,7 @@ Phase 0.5 — Model / Provider Infrastructure Verified
 Workbench → Main Agent → canonical Tool Registry → Writing SubAgent → Artifact
 ```
 
-因此不能把本报告称为“Phase 1 Harness 完成”，也不能据此进入 Context Agent。后续已按顺序完成 Phase 1A-A Capability Catalog、Phase 1A-B Domain Facade 和 Phase 1A-C Canonical Projection 的内部描述/适配器层；这些成果仍不等于模型可见 Registry 或真实 Agent Runtime 放行。
+因此不能把本报告称为“Phase 1 Harness 完成”，也不能据此进入 Context Agent。后续已按顺序完成 Phase 1A-A Capability Catalog、Phase 1A-B Domain Facade、Phase 1A-C Canonical Projection，以及 Phase 1A-D 共享 Manifest/宿主门禁；这些成果仍不等于模型可见 Registry 或真实 Agent Runtime 放行。
 
 ## 1. 复核结论
 
@@ -181,3 +181,11 @@ ArtifactCard confirm-review
 新增 `src/services/capabilities/canonical/`，首批仅投影 `novel.read`、`structure.read`、`context.read`、`memory.search` 四个已有 Facade。投影采用固定函数绑定、严格输入 schema、宿主 scope 复验和稳定 manifest hash；旧 alias、技术 handler 名和无 Facade 能力均不形成隐式执行入口。
 
 所有 descriptor 继续继承 `catalog_only`，`listAgentExposedCapabilities()` 和 Canonical Agent manifest 均为空；现有 `productionToolRegistry`、`WORKBENCH_TOOLS`、Rust/DSH allowlist 与 Main Agent prompt 未被修改。设计与测试证据见 [`canonical_tool_projection.md`](../architecture-audit-v2/canonical_tool_projection.md) 与 [`canonical_tool_projection_validation.md`](../architecture-audit-v2/canonical_tool_projection_validation.md)。
+
+## 2026-08-24 状态增补：Phase 1A-D Shared Manifest / Runtime Gate
+
+新增唯一 portable contract `contracts/agent/canonical-tool-manifest.v1.json`。TypeScript、Rust 与 DSH/Node 使用独立实现复算同一 SHA-256；TypeScript 还将 artifact 与 Capability Catalog、动态 Projection 和固定 binding 做完整漂移校验。
+
+Canonical 宿主执行现要求 exact `name@version`、调用方看到的 projection hash、固定入口 exposure、单次 allowlist、权限、可持久 JSON、输入/输出 schema、timeout/cancellation，并保留 adapter 的第二层 scope/permission 复验。公开入口固定按 Agent 可见集合失败关闭；Windows Tauri/SQLite E2E 仅通过独立 host-validation 入口证明 TS/Rust hash 和四个 versioned identity 一致、零 Canonical model-visible、旧 alias 拒绝及重启持久化。
+
+现有 11 个 legacy DSH Workbench Tool 未被删除或改写。准确结论是：**Phase 1A-D 的共享契约与漂移门禁 VERIFIED；Canonical Agent execution wiring DISABLED。** 详见 [`canonical_manifest_contract.md`](../architecture-audit-v2/canonical_manifest_contract.md) 与 [`canonical_manifest_validation.md`](../architecture-audit-v2/canonical_manifest_validation.md)。

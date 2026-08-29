@@ -9,6 +9,76 @@
   overflow: hidden;
 }
 
+.startup-dialog-overlay {
+  position: fixed;
+  z-index: var(--z-modal);
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-overlay);
+  animation: startup-dialog-fade-in 160ms ease-out both;
+}
+
+.startup-dialog {
+  width: min(100%, 520px);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  box-shadow: 0 18px 48px var(--color-shadow-hover);
+  animation: startup-dialog-enter 180ms ease-out both;
+}
+
+.startup-dialog-title {
+  margin: 0 0 14px;
+  color: var(--color-text-primary);
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0;
+}
+
+.startup-dialog-message,
+.startup-dialog-warning {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.startup-dialog-warning {
+  margin-top: 12px;
+  color: var(--color-warning-text);
+}
+
+.startup-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+@keyframes startup-dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes startup-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-dialog-overlay,
+  .startup-dialog {
+    animation: none;
+  }
+}
+
 /* === 左侧导航栏 === */
 .app-sidebar {
   width: var(--sidebar-width);
@@ -20,6 +90,49 @@
   flex-direction: column;
   z-index: var(--z-sidebar);
   user-select: none;
+  transition:
+    width var(--transition-normal),
+    min-width var(--transition-normal);
+}
+
+/* 创作工作台自身已有项目 / 任务树，全局导航在该路由收敛为固定图标轨。 */
+.app-sidebar.app-sidebar--compact {
+  width: 56px;
+  min-width: 56px;
+}
+
+.app-sidebar--compact .sidebar-brand {
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+.app-sidebar--compact .sidebar-brand-text,
+.app-sidebar--compact .sidebar-nav-section,
+.app-sidebar--compact .sidebar-nav-item .nav-label,
+.app-sidebar--compact .sidebar-footer {
+  display: none;
+}
+
+.app-sidebar--compact .sidebar-nav {
+  overflow-x: hidden;
+  padding: var(--spacing-sm) 0;
+}
+
+.app-sidebar--compact .sidebar-nav-item {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  gap: 0;
+  margin: 2px auto;
+  padding: 0;
+}
+
+.app-sidebar--compact .sidebar-nav-item .nav-icon {
+  width: 20px;
+  height: 20px;
+  line-height: 1;
 }
 
 .sidebar-brand {
@@ -34,12 +147,13 @@
 .sidebar-brand-icon {
   width: 28px;
   height: 28px;
-  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 34%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-sidebar));
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-on-primary);
+  color: var(--color-primary);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
   flex-shrink: 0;
@@ -64,10 +178,11 @@
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .sidebar-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
@@ -76,8 +191,26 @@
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   font-size: var(--font-size-md);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
   text-decoration: none;
+}
+
+.sidebar-nav-item::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-primary);
+  content: '';
+  opacity: 0;
+  transform: translateY(-50%) scaleY(0.55);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .sidebar-nav-item:hover {
@@ -91,14 +224,27 @@
   font-weight: var(--font-weight-medium);
 }
 
+.sidebar-nav-item.active::before {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+}
+
+.sidebar-nav-item:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
 .sidebar-nav-item .nav-icon {
   width: 20px;
   height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--font-size-lg);
   flex-shrink: 0;
+}
+
+.sidebar-nav-item .nav-icon svg {
+  display: block;
 }
 
 .sidebar-nav-item .nav-label {
@@ -171,6 +317,15 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.app-shell--workbench .app-content {
+  overflow: hidden;
+}
+
+/* workbench.css 仍兼容标准 TopBar；根路由隐藏 TopBar 后由壳层恢复全高。 */
+.app-shell--workbench .workbench-page {
+  height: 100%;
 }
 
 /* ================================================================
@@ -326,5 +481,15 @@
   .sidebar-nav-item {
     justify-content: center;
     padding: var(--spacing-sm);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar {
+    transition: none;
+  }
+
+  .sidebar-nav-item::before {
+    transition: none;
   }
 }

@@ -98,6 +98,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   const handleUpdateVolume = async (id: string, input: UpdateVolumeInput) => {
     await volumeRepository.update(id, input);
     await loadData();
+    setShowVolumeForm(false);
     setEditingVolume(null);
     flash('分卷保存成功');
   };
@@ -159,6 +160,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   const handleUpdateChapter = async (id: string, input: UpdateChapterInput) => {
     await chapterRepository.update(id, input);
     await loadData();
+    setShowChapterForm(false);
     setEditingChapter(null);
     flash('章节保存成功');
   };

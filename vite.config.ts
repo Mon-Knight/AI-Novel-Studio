@@ -43,9 +43,21 @@ function resolveVendorChunk(moduleId: string): string | undefined {
 export default defineConfig(async () => ({
   plugins: [react()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [
+      {
+        find: '@/services/tauri/e2eBridge',
+        replacement: path.resolve(
+          __dirname,
+          process.env.VITE_AI_NOVEL_STUDIO_E2E === '1'
+            ? './src/services/tauri/e2eBridge.ts'
+            : './src/services/tauri/e2eBridgeDisabled.ts',
+        ),
+      },
+      {
+        find: '@',
+        replacement: path.resolve(__dirname, './src'),
+      },
+    ],
   },
   clearScreen: false,
   build: {

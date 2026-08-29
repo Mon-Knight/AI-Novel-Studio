@@ -40,20 +40,26 @@ fn secret_key(key: &str) -> bool {
         .filter(|character| character.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "apikey"
-            | "authorization"
-            | "accesstoken"
-            | "refreshtoken"
-            | "password"
-            | "secret"
-            | "clientsecret"
-            | "credential"
-            | "cookie"
-            | "setcookie"
-            | "privatekey"
-    )
+    [
+        "apikey",
+        "authorization",
+        "accesstoken",
+        "refreshtoken",
+        "authtoken",
+        "apitoken",
+        "bearertoken",
+        "sessiontoken",
+        "password",
+        "passphrase",
+        "secret",
+        "credential",
+        "credentials",
+        "cookie",
+        "cookies",
+        "privatekey",
+    ]
+    .iter()
+    .any(|suffix| normalized.ends_with(suffix))
 }
 
 pub fn contains_secret_value(value: &Value) -> bool {
@@ -72,7 +78,14 @@ pub fn contains_secret_text(text: &str) -> bool {
     if lower.contains("bearer ")
         || lower.contains("authorization:")
         || lower.contains("x-api-key")
+        || lower.contains("x_api_key")
+        || lower.contains("xapikey")
+        || lower.contains("openaiapikey")
         || lower.contains("api_key=")
+        || lower.contains("apikey=")
+        || lower.contains("api-key=")
+        || lower.contains("credentials=")
+        || lower.contains("\"credentials\"")
         || lower.contains("-----begin private key-----")
     {
         return true;
@@ -80,6 +93,7 @@ pub fn contains_secret_text(text: &str) -> bool {
     text.split(|character: char| character.is_whitespace() || "\"'=:,;()[]{}".contains(character))
         .any(|token| {
             (token.starts_with("sk-") && token.len() >= 19)
+                || (token.starts_with("agt_") && token.len() >= 20)
                 || (token.starts_with("AKIA") && token.len() == 20)
         })
 }
@@ -393,10 +407,20 @@ mod tests {
 
     #[test]
     fn security02_rejects_secret_keys_and_raw_bearer_values() {
-        assert!(contains_secret_value(
-            &serde_json::json!({"apiKey": "value"})
-        ));
+        for key in [
+            "apiKey",
+            "x-api-key",
+            "xApiKey",
+            "openaiApiKey",
+            "credentials",
+        ] {
+            let mut value = serde_json::Map::new();
+            value.insert(key.to_string(), serde_json::json!("value"));
+            assert!(contains_secret_value(&Value::Object(value)));
+        }
         assert!(contains_secret_text("Authorization: Bearer hidden"));
+        assert!(contains_secret_text("openaiApiKey=hidden"));
+        assert!(contains_secret_text("agt_example_session_credential"));
     }
 
     #[test]

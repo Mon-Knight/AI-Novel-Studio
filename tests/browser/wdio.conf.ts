@@ -69,6 +69,16 @@ export const config = {
     viteServer = await createServer({
       root: workspaceRoot,
       configFile: path.join(workspaceRoot, 'vite.config.ts'),
+      optimizeDeps: {
+        noDiscovery: true,
+        include: [
+          'react',
+          'react-dom',
+          'react-dom/client',
+          'react/jsx-dev-runtime',
+          'react/jsx-runtime',
+        ],
+      },
       server: {
         host,
         port,

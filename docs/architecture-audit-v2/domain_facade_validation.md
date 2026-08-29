@@ -72,7 +72,7 @@ npm run test:e2e -- --spec domain-facade-sqlite
 覆盖证据：
 
 - `projectCapability.readCurrentProject`、`readChapterPosition` 和 `contextCapability.readCurrentStoryContext` 返回 `source=sqlite`、`storageMode=sqlite`；
-- 四个 Canonical adapter 在同一隔离桌面链路直接执行；Project/Structure/Context 返回 SQLite 来源，Memory 保留当前 `runtime/sqlite` 来源语义，旧 alias 被拒绝且 Agent visible count 为 0；
+- 四个 Canonical adapter 通过版本/hash/固定 host-validation 入口/allowlist 门禁在同一隔离桌面链路执行；Project/Structure/Context 返回 SQLite 来源，Memory 保留当前 `runtime/sqlite` 来源语义，旧 alias 被拒绝，TS/Rust manifest attestation 一致且 Canonical Agent visible count 为 0；
 - 作品/卷/章节/设定/主角通过真实 repository 和 Tauri IPC 建立，跨作品章节访问返回 `SCOPE_MISMATCH`；
 - `conversationCapability` 从 SQLite 读回任务、回合和安全运行投影；
 - `artifactCapability` 完成结构化章节候选 → 用户确认 → `ReviewAuthorization` → 草稿版本/hash CAS 采用；授权重放返回 `CONFLICT`；
@@ -102,6 +102,7 @@ Phase 0.5 DSH真实模型基础设施         VERIFIED
 Phase 1A-A Capability Catalog         VERIFIED
 Phase 1A-B Domain Facade              VERIFIED (BROWSER + SQLITE E2E)
 Phase 1A-C Canonical Tool Projection  VERIFIED (CATALOG-ONLY / MODEL VISIBLE 0)
+Phase 1A-D Shared Manifest/Gate       VERIFIED (EXECUTION WIRING DISABLED)
 Phase 1B Main Agent                   NOT RELEASED
 Phase 1C Writing SubAgent             NOT RELEASED
 ```

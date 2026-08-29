@@ -12,7 +12,12 @@ import { outputProfileService } from '../styles/outputProfileService';
 import { characterService } from '../characters/characterService';
 import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
-import { getContextForChapterTask, buildContextPromptSection } from './contextReaderService';
+import { characterStateService } from '../context/characterStateService';
+import {
+  getContextForChapterTask,
+  buildContextPromptSection,
+  type ContextReadResult,
+} from './contextReaderService';
 import {
   masterOutlineService,
   volumeOutlineService,
@@ -23,10 +28,54 @@ import { getCachedChapterOutlineDraft } from './chapterOutlineDraftCache';
 import { buildOutlineChecklistText, extractOutlineKeyPoints } from './outlineKeyPointExtractor';
 import type { ChapterCharacterContext, ChapterGenerationContext } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
+import type { Character, CharacterState } from '../../types/character';
 import type { OutputProfile } from '../../types/output';
+import type { RuleSystem, WorldSetting } from '../../types/setting';
+import type { Volume } from '../../types/volume';
 
 function extractText(summary: string | undefined | null): string | undefined {
   return summary?.trim() || undefined;
+}
+
+export function resolveWorldBackgroundForWriter(
+  worldSettings: readonly Pick<WorldSetting, 'content' | 'isActive'>[],
+  legacyWorldBackground?: string | null,
+): string | undefined {
+  const activeWorld = worldSettings.find(
+    (setting) => setting.isActive && extractText(setting.content),
+  );
+  return extractText(activeWorld?.content) || extractText(legacyWorldBackground);
+}
+
+function ruleForbiddenItems(value?: string): string[] {
+  const normalized = value?.trim();
+  if (!normalized) return [];
+  try {
+    const parsed = JSON.parse(normalized) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
+  } catch {
+    // Legacy records may store a plain-text rule instead of JSON.
+  }
+  return [normalized];
+}
+
+export function formatRuleSystemForWriter(
+  rule: Pick<RuleSystem, 'title' | 'content' | 'forbiddenRules'>,
+): string {
+  const title = rule.title.trim();
+  const content = rule.content.trim();
+  const sections = [`【${title || '未命名规则'}】${content}`];
+  const forbidden = ruleForbiddenItems(rule.forbiddenRules);
+  if (forbidden.length > 0) {
+    sections.push(`禁止规则：\n${forbidden.map((item) => `- ${item}`).join('\n')}`);
+  }
+  return sections.join('\n');
 }
 
 function parseTimestamp(value?: string): number {
@@ -41,16 +90,257 @@ function isSameOrNewer(left?: string, right?: string): boolean {
   return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime >= rightTime;
 }
 
-async function safeLoad<T>(loader: Promise<T>, fallback: T): Promise<T> {
+export type CoreContextSource =
+  'chapter' | 'novel' | 'world_setting' | 'rule_system' | 'protagonist' | 'chapter_outline';
+
+export interface CoreContextSourceReadError extends Error {
+  code: 'GENERATION_CORE_SOURCE_READ_FAILED';
+  source: CoreContextSource;
+}
+
+export async function loadCoreContextSource<T>(
+  source: CoreContextSource,
+  label: string,
+  loader: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await loader();
+  } catch (cause) {
+    const error = new Error(`无法读取${label}，已停止生成。`) as CoreContextSourceReadError & {
+      cause?: unknown;
+    };
+    error.code = 'GENERATION_CORE_SOURCE_READ_FAILED';
+    error.source = source;
+    error.cause = cause;
+    throw error;
+  }
+}
+
+async function safeLoad<T>(
+  loader: Promise<T>,
+  fallback: T,
+  onFailure?: (error: unknown) => void,
+): Promise<T> {
   try {
     return await loader;
-  } catch {
+  } catch (error) {
+    onFailure?.(error);
     return fallback;
   }
 }
 
+export interface ChapterProtagonistRequirementCandidate {
+  name: string;
+  goal?: string;
+  isPrimary?: boolean;
+}
+
+export interface ChapterProtagonistContextSource extends ChapterProtagonistRequirementCandidate {
+  characterId: string;
+  identity?: string;
+  faction?: string;
+  personality?: string;
+  behaviorLimits?: string;
+  forbiddenBehaviors?: string;
+}
+
+function normalizeRequirementText(value?: string): string {
+  return (value ?? '').replace(/[\s，。；、！？,.!?;:："'“”‘’（）()《》【】]+/gu, '');
+}
+
+function protagonistGoalMatchesChapter(goal: string | undefined, chapterText: string): boolean {
+  const normalizedGoal = normalizeRequirementText(goal);
+  if (normalizedGoal.length >= 4 && chapterText.includes(normalizedGoal)) return true;
+  return (goal ?? '')
+    .split(/[\s，。；、！？,.!?;:：]+/u)
+    .map(normalizeRequirementText)
+    .some((fragment) => fragment.length >= 4 && chapterText.includes(fragment));
+}
+
+export function inferRequiredProtagonistNames(input: {
+  chapterTitle?: string;
+  chapterOutline?: string;
+  chapterGoal?: string;
+  protagonists: readonly ChapterProtagonistRequirementCandidate[];
+}): string[] {
+  const protagonists = [
+    ...new Map(
+      input.protagonists
+        .filter((candidate) => candidate.name.trim())
+        .map((candidate) => [candidate.name.trim(), candidate]),
+    ).values(),
+  ];
+  if (protagonists.length === 0) return [];
+  const rawChapterText = [input.chapterTitle, input.chapterOutline, input.chapterGoal]
+    .filter(Boolean)
+    .join('\n');
+  const chapterText = normalizeRequirementText(rawChapterText);
+  if (!chapterText) return [];
+
+  const matched = protagonists.filter((candidate) => {
+    const name = normalizeRequirementText(candidate.name);
+    return (
+      (name.length >= 2 && chapterText.includes(name)) ||
+      protagonistGoalMatchesChapter(candidate.goal, chapterText)
+    );
+  });
+  if (matched.length > 0) return matched.map((candidate) => candidate.name.trim());
+
+  const mentionsDualProtagonists = /(?:双主角|两位主角|二位主角)/u.test(rawChapterText);
+  if (mentionsDualProtagonists) return protagonists.map((candidate) => candidate.name.trim());
+  if (!/(?:主角|主人公|protagonist)/iu.test(rawChapterText)) return [];
+  if (protagonists.length === 1) return [protagonists[0].name.trim()];
+  const primary = protagonists.filter((candidate) => candidate.isPrimary);
+  return primary.length > 0 ? primary.map((candidate) => candidate.name.trim()) : [];
+}
+
+export function reconcileChapterProtagonistRequirements(input: {
+  novelId: string;
+  chapterId: string;
+  contexts: readonly ChapterCharacterContext[];
+  protagonists: readonly ChapterProtagonistContextSource[];
+  requiredNames: ReadonlySet<string>;
+}): ChapterCharacterContext[] {
+  const contexts = input.contexts.map((item) =>
+    item.isProtagonist && input.requiredNames.has(item.name)
+      ? {
+          ...item,
+          roleInChapter: 'main',
+          mustAppear: true,
+          note: '章纲、章节目标或主角目标要求该主角直接行动（旧绑定读取修正）',
+        }
+      : { ...item },
+  );
+  for (const source of input.protagonists) {
+    if (
+      !input.requiredNames.has(source.name) ||
+      contexts.some((item) => item.name === source.name)
+    ) {
+      continue;
+    }
+    contexts.push({
+      id: `inferred:${input.chapterId}:${source.characterId}`,
+      novelId: input.novelId,
+      chapterId: input.chapterId,
+      characterId: source.characterId,
+      name: source.name,
+      roleInChapter: 'main',
+      roleType: 'protagonist',
+      identity: source.identity,
+      faction: source.faction,
+      goal: source.goal,
+      personality: source.personality,
+      behaviorLimits: source.behaviorLimits,
+      forbiddenBehaviors: source.forbiddenBehaviors,
+      note: '根据章纲、章节目标或主角目标推断的直接出场要求',
+      mustAppear: true,
+      isProtagonist: true,
+    });
+  }
+  return contexts;
+}
+
+export function isLegacyConservativeProtagonistBinding(item: ChapterCharacterContext): boolean {
+  return (
+    Boolean(item.isProtagonist) &&
+    item.roleInChapter === 'hidden' &&
+    !item.mustAppear &&
+    item.note?.includes('章纲未明确直接出场；仅保留幕后关联') === true
+  );
+}
+
+export function hasContextPromptMaterial(
+  result: Pick<ContextReadResult, 'chapterSummaries' | 'volumeContexts' | 'manualContexts'>,
+): boolean {
+  return (
+    result.chapterSummaries.length > 0 ||
+    result.volumeContexts.length > 0 ||
+    result.manualContexts.length > 0
+  );
+}
+
+function orderChaptersForStateContinuity(chapters: Chapter[], volumes: Volume[]): Chapter[] {
+  const volumeOrder = new Map(volumes.map((volume) => [volume.id, volume.orderIndex]));
+  return [...chapters].sort(
+    (left, right) =>
+      (volumeOrder.get(left.volumeId ?? '') ?? Number.MAX_SAFE_INTEGER) -
+        (volumeOrder.get(right.volumeId ?? '') ?? Number.MAX_SAFE_INTEGER) ||
+      left.orderIndex - right.orderIndex ||
+      left.chapterNumber - right.chapterNumber ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+function latestStateBeforeChapter(
+  states: CharacterState[],
+  previousChapterIds: ReadonlySet<string>,
+): CharacterState | undefined {
+  return states.find((state) => !state.chapterId || previousChapterIds.has(state.chapterId));
+}
+
+function formatCharacterState(character: Character, state: CharacterState): string {
+  const parts = [`- ${character.name}`, `  当前状态：${state.stateSummary}`];
+  if (state.location) parts.push(`  所在位置：${state.location}`);
+  if (state.healthState) parts.push(`  身体状态：${state.healthState}`);
+  if (state.knowledgeState) parts.push(`  已知信息：${state.knowledgeState}`);
+  if (state.relationshipChanges) parts.push(`  关系变化：${state.relationshipChanges}`);
+  if (state.goalChanges) parts.push(`  目标变化：${state.goalChanges}`);
+  return parts.join('\n');
+}
+
+export function buildCharacterStatePromptContext(input: {
+  histories: Array<{ character: Character; states: CharacterState[] }>;
+  chapters: Chapter[];
+  volumes: Volume[];
+  currentChapterId: string;
+}): {
+  summary?: string;
+  sources: NonNullable<ChapterGenerationContext['characterStateSources']>;
+} {
+  const orderedChapters = orderChaptersForStateContinuity(input.chapters, input.volumes);
+  const currentChapterIndex = orderedChapters.findIndex(
+    (chapter) => chapter.id === input.currentChapterId,
+  );
+  const previousChapterIds = new Set(
+    currentChapterIndex > 0
+      ? orderedChapters.slice(0, currentChapterIndex).map((chapter) => chapter.id)
+      : [],
+  );
+  const sources: NonNullable<ChapterGenerationContext['characterStateSources']> = [];
+  const sections: string[] = [];
+  for (const { character, states } of input.histories) {
+    const state = latestStateBeforeChapter(states, previousChapterIds);
+    if (state) {
+      sections.push(formatCharacterState(character, state));
+      sources.push({
+        id: state.id,
+        characterId: character.id,
+        characterName: character.name,
+        chapterId: state.chapterId,
+        origin: 'character_state',
+      });
+      continue;
+    }
+    const currentState = states.length === 0 ? extractText(character.currentState) : undefined;
+    if (!currentState) continue;
+    sections.push(`- ${character.name}\n  当前状态：${currentState}`);
+    sources.push({
+      id: character.id,
+      characterId: character.id,
+      characterName: character.name,
+      origin: 'character_current_state',
+    });
+  }
+  return { summary: sections.join('\n') || undefined, sources };
+}
+
 function roleLabel(roleInChapter?: string, roleType?: string, isProtagonist?: boolean): string {
-  if (isProtagonist || roleType === 'protagonist') return '主角';
+  if (isProtagonist || roleType === 'protagonist') {
+    if (roleInChapter === 'mentioned') return '主角（仅提及）';
+    if (roleInChapter === 'hidden') return '主角（幕后影响）';
+    return '主角';
+  }
   if (roleInChapter === 'main') return '主要出场';
   if (roleInChapter === 'supporting') return '辅助出场';
   if (roleInChapter === 'mentioned') return '仅提及';
@@ -67,7 +357,15 @@ function buildChapterCharacterSummary(characters: ChapterCharacterContext[]): st
       const parts = [
         `${index + 1}. ${item.name}`,
         `- 角色定位：${roleLabel(item.roleInChapter, item.roleType, item.isProtagonist)}`,
-        `- 本章要求：${item.mustAppear ? '必须直接出场' : '本章出场'}`,
+        `- 本章要求：${
+          item.mustAppear
+            ? '必须直接出场'
+            : item.roleInChapter === 'mentioned'
+              ? '仅提及，不要求直接出场'
+              : item.roleInChapter === 'hidden'
+                ? '仅作幕后影响，不要求直接出场'
+                : '可出场，不设硬性要求'
+        }`,
       ];
       if (item.identity) parts.push(`- 身份/背景：${item.identity}`);
       if (item.faction) parts.push(`- 所属阵营：${item.faction}`);
@@ -98,7 +396,9 @@ export async function buildFreshChapterGenerationContext(params: {
   targetWordCount?: number;
   draftContent?: string;
 }): Promise<ChapterGenerationContext> {
-  const freshChapter = await chapterRepository.getById(params.chapterId);
+  const freshChapter = await loadCoreContextSource('chapter', '当前章节', () =>
+    chapterRepository.getById(params.chapterId),
+  );
   if (!freshChapter) {
     throw new Error('无法读取当前章节最新配置，生成已停止。');
   }
@@ -128,24 +428,46 @@ export async function buildChapterContext(
   outputId?: string,
   draftContent?: string,
 ): Promise<ChapterGenerationContext> {
-  const [novel, worldSettings, ruleSystems, protagonist] = await Promise.all([
-    novelRepository.getById(novelId),
-    settingRepository.getWorldSettings(novelId),
-    settingRepository.getRuleSystems(novelId),
-    protagonistRepository.getByNovelId(novelId),
-  ]);
+  const contextWarnings = new Set<string>();
+  const optionalReadFailed = (label: string) => () => {
+    contextWarnings.add(`${label}读取失败，本轮已按无可用来源降级。`);
+  };
+  const [novel, worldSettings, ruleSystems, protagonist, allCharacters, allChapters, allVolumes] =
+    await Promise.all([
+      loadCoreContextSource('novel', '作品基础信息', () => novelRepository.getById(novelId)),
+      loadCoreContextSource('world_setting', '世界设定', () =>
+        settingRepository.getWorldSettings(novelId),
+      ),
+      loadCoreContextSource('rule_system', '规则设定', () =>
+        settingRepository.getRuleSystems(novelId),
+      ),
+      loadCoreContextSource('protagonist', '主角设定', () =>
+        protagonistRepository.getByNovelId(novelId),
+      ),
+      safeLoad(characterService.getByNovelId(novelId), [], optionalReadFailed('人物资料')),
+      safeLoad(chapterRepository.getByNovelId(novelId), [], optionalReadFailed('卷章顺序')),
+      safeLoad(volumeRepository.getByNovelId(novelId), [], optionalReadFailed('分卷资料')),
+    ]);
 
   const [activeMasterOutline, activeVolumeOutline, activeChapterOutline] = await Promise.all([
-    safeLoad(masterOutlineService.getActive(novelId), null),
+    safeLoad(masterOutlineService.getActive(novelId), null, optionalReadFailed('全书大纲')),
     chapter.volumeId
-      ? safeLoad(volumeOutlineService.getActive(novelId, chapter.volumeId), null)
+      ? safeLoad(
+          volumeOutlineService.getActive(novelId, chapter.volumeId),
+          null,
+          optionalReadFailed('分卷大纲'),
+        )
       : Promise.resolve(null),
     chapter.id
-      ? safeLoad(chapterOutlineService.getActive(novelId, chapter.id), null)
+      ? loadCoreContextSource('chapter_outline', '当前章节大纲', () =>
+          chapterOutlineService.getActive(novelId, chapter.id),
+        )
       : Promise.resolve(null),
   ]);
 
-  const activeWorld = worldSettings.find((w) => w.isActive) || worldSettings[0];
+  const activeSettings = worldSettings.filter((setting) => setting.isActive);
+  const activeWorld = activeSettings.find((setting) => extractText(setting.content));
+  const worldBackground = resolveWorldBackgroundForWriter(worldSettings, novel?.worldBackground);
   const activeRules = ruleSystems.filter((r) => r.isActive);
 
   // 正文生成优先使用“当前采用”的总纲/分卷大纲/章节大纲，字段草稿只作为降级来源。
@@ -168,7 +490,11 @@ export async function buildChapterContext(
   let volumeConflict: string | undefined;
 
   if (chapter.volumeId) {
-    const volume = await volumeRepository.getById(chapter.volumeId);
+    const volume = await safeLoad(
+      volumeRepository.getById(chapter.volumeId),
+      null,
+      optionalReadFailed('当前分卷'),
+    );
     if (volume) {
       volumeTitle = volume.title;
       volumeGoal = extractText(volume.goal);
@@ -217,36 +543,99 @@ export async function buildChapterContext(
   const outlineKeyPoints = extractOutlineKeyPoints(chapterOutline || '');
   const outlineChecklistText = buildOutlineChecklistText(outlineKeyPoints, chapterOutline);
 
+  const protagonistSourcesByName = new Map<string, ChapterProtagonistContextSource>();
+  const formalProtagonists = allCharacters.filter(
+    (character) =>
+      character.isActive !== false &&
+      (character.isProtagonist || character.roleType === 'protagonist'),
+  );
+  for (const character of formalProtagonists) {
+    protagonistSourcesByName.set(character.name, {
+      characterId: character.id,
+      name: character.name,
+      goal: character.goal,
+      identity: character.identity,
+      faction: character.faction,
+      personality: character.personality,
+      behaviorLimits: character.behaviorLimits,
+      forbiddenBehaviors: character.forbiddenBehaviors,
+      isPrimary:
+        character.protagonistKey === 'primary' ||
+        character.protagonistLabel === '主角' ||
+        (formalProtagonists.length === 1 && character.protagonistOrder === 0),
+    });
+  }
+  for (const profile of novel?.protagonists ?? []) {
+    const name = profile.name.trim();
+    if (!name) continue;
+    const existing = protagonistSourcesByName.get(name);
+    protagonistSourcesByName.set(name, {
+      characterId: existing?.characterId || profile.id,
+      name,
+      goal: existing?.goal || profile.goal,
+      identity: existing?.identity || profile.identity,
+      faction: existing?.faction,
+      personality: existing?.personality || profile.personality,
+      behaviorLimits: existing?.behaviorLimits || profile.abilityLimits || profile.limitation,
+      forbiddenBehaviors: existing?.forbiddenBehaviors || profile.forbiddenBehaviors,
+      isPrimary: existing?.isPrimary || profile.label === 'primary',
+    });
+  }
+  if (protagonist?.name.trim()) {
+    const name = protagonist.name.trim();
+    const existing = protagonistSourcesByName.get(name);
+    protagonistSourcesByName.set(name, {
+      characterId: existing?.characterId || protagonist.id,
+      name,
+      goal: existing?.goal || protagonist.goal,
+      identity: existing?.identity || protagonist.identity,
+      faction: existing?.faction,
+      personality: existing?.personality || protagonist.personality,
+      behaviorLimits: existing?.behaviorLimits || protagonist.abilityLimits,
+      forbiddenBehaviors: existing?.forbiddenBehaviors || protagonist.forbiddenBehaviors,
+      isPrimary: existing?.isPrimary ?? true,
+    });
+  }
+  const protagonistSources = [...protagonistSourcesByName.values()];
+  const inferredRequiredProtagonistNames = new Set(
+    inferRequiredProtagonistNames({
+      chapterTitle: chapter.title,
+      chapterOutline,
+      chapterGoal: extractText(chapter.goal),
+      protagonists: protagonistSources,
+    }),
+  );
+
   // 加载风格和输出控制方案
   let styleProfileSummary: string | undefined;
-  let outputProfileSummary: string | undefined;
   let resolvedOutputProfile: OutputProfile | null = null;
   if (styleId || outputId) {
     const [styles, outputs] = await Promise.all([
-      styleId ? styleProfileService.getById(styleId) : Promise.resolve(null),
-      outputId ? outputProfileService.getById(outputId) : Promise.resolve(null),
+      styleId
+        ? safeLoad(styleProfileService.getById(styleId), null, optionalReadFailed('风格方案'))
+        : Promise.resolve(null),
+      outputId
+        ? safeLoad(outputProfileService.getById(outputId), null, optionalReadFailed('输出方案'))
+        : Promise.resolve(null),
     ]);
     if (styles) styleProfileSummary = buildStylePromptProjection(styles);
-    if (outputs) {
-      outputProfileSummary = buildOutputSummary(outputs);
-      resolvedOutputProfile = outputs;
-    }
+    if (outputs) resolvedOutputProfile = outputs;
   }
 
-  // v1.0.25 加载本章设定补充
-  let chapterSettingsSummary: string | undefined;
-  try {
-    const allSettings = await settingRepository.getWorldSettings(novelId);
-    // 取最近的几条激活设定作为本章可用设定
-    const activeSettings = allSettings.filter((s) => s.isActive).slice(-6);
-    if (activeSettings.length > 0) {
-      chapterSettingsSummary = activeSettings
-        .map((s) => `- ${s.title}：${s.content?.slice(0, 300)}`)
-        .join('\n');
-    }
-  } catch {
-    /* 设定加载失败不影响生成 */
-  }
+  // 主世界设定已经单独进入 worldBackground；其余活动设定作为有预算的补充约束。
+  const supplementalWorldSettings = activeSettings
+    .filter((setting) => setting.id !== activeWorld?.id && extractText(setting.content))
+    .sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id),
+    )
+    .slice(0, 6);
+  const chapterSettingsSummary =
+    supplementalWorldSettings.length > 0
+      ? supplementalWorldSettings
+          .map((setting) => `- ${setting.title}：${setting.content?.slice(0, 600)}`)
+          .join('\n')
+      : undefined;
 
   // v0.7.0 加载本章出场角色和事件
   let chapterCharacterSummary: string | undefined;
@@ -257,67 +646,94 @@ export async function buildChapterContext(
   let chapterCharacterContexts: ChapterCharacterContext[] = [];
   let requiredCharacterContexts: ChapterCharacterContext[] = [];
   const protagonistsInChapterNames: string[] = [];
+  const protagonistsReferencedNames: string[] = [];
   const protagonistsNotInChapterNames: string[] = [];
+  const protagonistsWithLegacyUnresolvedBindingNames: string[] = [];
   if (chapter.id) {
     const [chapterChars, chapterEvents] = await Promise.all([
-      chapterCharacterService.getByChapterId(chapter.id),
-      chapterEventService.getByChapterId(chapter.id),
+      safeLoad(
+        chapterCharacterService.getByChapterId(chapter.id),
+        [],
+        optionalReadFailed('本章角色'),
+      ),
+      safeLoad(chapterEventService.getByChapterId(chapter.id), [], optionalReadFailed('本章事件')),
     ]);
-    if (chapterChars.length > 0) {
-      const chars = await characterService.getByNovelId(novelId);
-      chapterCharacterContexts = chapterChars.map((cc) => {
-        const ch = chars.find((c) => c.id === cc.characterId);
-        const isProtagonist = ch?.isProtagonist || ch?.roleType === 'protagonist';
-        if (isProtagonist) {
-          protagonistMustAppear =
-            protagonistMustAppear || cc.mustAppear || cc.roleInChapter === 'main';
-          protagonistsInChapterNames.push(ch?.name || cc.characterName || '未知');
-        }
-        return {
-          id: cc.id,
-          novelId: cc.novelId,
-          chapterId: cc.chapterId,
-          characterId: cc.characterId,
-          name: ch?.name || cc.characterName || '未知',
-          roleInChapter: cc.roleInChapter,
-          roleType: ch?.roleType,
-          identity: ch?.identity,
-          faction: ch?.faction,
-          goal: ch?.goal,
-          personality: ch?.personality,
-          behaviorLimits: ch?.behaviorLimits,
-          forbiddenBehaviors: ch?.forbiddenBehaviors,
-          note: cc.note,
-          mustAppear: cc.mustAppear,
-          isProtagonist,
-        };
-      });
+    chapterCharacterContexts = chapterChars.map((cc) => {
+      const ch = allCharacters.find((candidate) => candidate.id === cc.characterId);
+      const source = protagonistSources.find(
+        (candidate) =>
+          candidate.characterId === cc.characterId || candidate.name === cc.characterName,
+      );
+      const name = ch?.name || cc.characterName || source?.name || '未知';
+      return {
+        id: cc.id,
+        novelId: cc.novelId,
+        chapterId: cc.chapterId,
+        characterId: cc.characterId,
+        name,
+        roleInChapter: cc.roleInChapter,
+        roleType: ch?.roleType || (source ? 'protagonist' : undefined),
+        identity: ch?.identity || source?.identity,
+        faction: ch?.faction || source?.faction,
+        goal: ch?.goal || source?.goal,
+        personality: ch?.personality || source?.personality,
+        behaviorLimits: ch?.behaviorLimits || source?.behaviorLimits,
+        forbiddenBehaviors: ch?.forbiddenBehaviors || source?.forbiddenBehaviors,
+        note: cc.note,
+        mustAppear: cc.mustAppear,
+        isProtagonist: Boolean(ch?.isProtagonist || ch?.roleType === 'protagonist' || source),
+      };
+    });
+
+    chapterCharacterContexts = reconcileChapterProtagonistRequirements({
+      novelId,
+      chapterId: chapter.id,
+      contexts: chapterCharacterContexts,
+      protagonists: protagonistSources,
+      requiredNames: inferredRequiredProtagonistNames,
+    });
+
+    requiredCharacterContexts = chapterCharacterContexts.filter((item) => item.mustAppear);
+    if (chapterCharacterContexts.length > 0 && requiredCharacterContexts.length === 0) {
+      // 兼容旧数据：只把旧式直接出场关系提升为必出场；仅提及/幕后影响保持非强制。
+      chapterCharacterContexts = chapterCharacterContexts.map((item) => ({
+        ...item,
+        mustAppear:
+          item.roleInChapter === 'main' || item.roleInChapter === 'supporting'
+            ? true
+            : item.mustAppear,
+      }));
       requiredCharacterContexts = chapterCharacterContexts.filter((item) => item.mustAppear);
-      if (chapterCharacterContexts.length > 0 && requiredCharacterContexts.length === 0) {
-        // 兼容旧数据：历史 chapter_characters 可能没有 must_appear，默认本章出场角色都必须直接出场。
-        chapterCharacterContexts = chapterCharacterContexts.map((item) => ({
-          ...item,
-          mustAppear: true,
-        }));
-        requiredCharacterContexts = chapterCharacterContexts;
+    }
+    for (const item of chapterCharacterContexts.filter((candidate) => candidate.isProtagonist)) {
+      if (isLegacyConservativeProtagonistBinding(item)) {
+        protagonistsWithLegacyUnresolvedBindingNames.push(item.name);
+        continue;
       }
-      chapterCharacterSummary = buildChapterCharacterSummary(chapterCharacterContexts);
-      requiredCharactersSummary = buildRequiredCharactersSummary(requiredCharacterContexts);
-      requiredCharacterNames =
-        requiredCharacterContexts
-          .map((item) => item.name)
-          .filter(Boolean)
-          .join('、') || undefined;
-      // 找出本章不在出场角色中的主角
-      for (const ch of chars) {
-        if (
-          (ch.isProtagonist || ch.roleType === 'protagonist') &&
-          !protagonistsInChapterNames.includes(ch.name)
-        ) {
-          protagonistsNotInChapterNames.push(ch.name);
-        }
+      const target =
+        item.roleInChapter === 'mentioned' || item.roleInChapter === 'hidden'
+          ? protagonistsReferencedNames
+          : protagonistsInChapterNames;
+      if (!target.includes(item.name)) target.push(item.name);
+    }
+    for (const source of protagonistSources) {
+      if (
+        chapterChars.length > 0 &&
+        !protagonistsInChapterNames.includes(source.name) &&
+        !protagonistsReferencedNames.includes(source.name) &&
+        !protagonistsWithLegacyUnresolvedBindingNames.includes(source.name)
+      ) {
+        protagonistsNotInChapterNames.push(source.name);
       }
     }
+    protagonistMustAppear = requiredCharacterContexts.some((item) => item.isProtagonist);
+    chapterCharacterSummary = buildChapterCharacterSummary(chapterCharacterContexts);
+    requiredCharactersSummary = buildRequiredCharactersSummary(requiredCharacterContexts);
+    requiredCharacterNames =
+      requiredCharacterContexts
+        .map((item) => item.name)
+        .filter(Boolean)
+        .join('、') || undefined;
     if (chapterEvents.length > 0) {
       chapterEventSummary = chapterEvents
         .filter((e) => e.status !== 'forbidden' && e.status !== 'discarded')
@@ -337,8 +753,39 @@ export async function buildChapterContext(
     }
   }
 
+  const relevantCharacters = [
+    ...chapterCharacterContexts.flatMap((item) => {
+      const character = allCharacters.find((candidate) => candidate.id === item.characterId);
+      return character ? [character] : [];
+    }),
+    ...allCharacters.filter(
+      (character) => character.isProtagonist || character.roleType === 'protagonist',
+    ),
+  ].filter(
+    (character, index, characters) =>
+      characters.findIndex((candidate) => candidate.id === character.id) === index,
+  );
+  const characterStateHistories = await Promise.all(
+    relevantCharacters.map(async (character) => ({
+      character,
+      states: await safeLoad(
+        characterStateService.getByCharacterId(character.id),
+        [],
+        optionalReadFailed('人物动态状态'),
+      ),
+    })),
+  );
+  const characterStateContext = buildCharacterStatePromptContext({
+    histories: characterStateHistories,
+    chapters: allChapters,
+    volumes: allVolumes,
+    currentChapterId: chapter.id,
+  });
+
   // v1.7.15 使用统一上下文读取服务，分区注入 Prompt
   let previousContext: string | undefined;
+  let worldStateTimeline: ChapterGenerationContext['worldStateTimeline'];
+  let worldStateTimelineSource: ChapterGenerationContext['worldStateTimelineSource'];
   try {
     const contextResult = await getContextForChapterTask({
       novelId,
@@ -346,11 +793,20 @@ export async function buildChapterContext(
       volumeId: chapter.volumeId,
       taskType: 'chapter_generate',
     });
-    if (contextResult.chapterSummaries.length > 0 || contextResult.volumeContexts.length > 0) {
+    if (hasContextPromptMaterial(contextResult)) {
       previousContext = buildContextPromptSection(contextResult);
     }
+    if (contextResult.worldStateTimeline) {
+      worldStateTimeline = contextResult.worldStateTimeline.content;
+      worldStateTimelineSource = {
+        latestChapterId: contextResult.worldStateTimeline.latestChapterId,
+        chapterCount: contextResult.worldStateTimeline.chapterCount,
+        sourceSummaryIds: contextResult.worldStateTimeline.sourceSummaryIds,
+        sourceContextRecordIds: contextResult.worldStateTimeline.sourceContextRecordIds,
+      };
+    }
   } catch {
-    /* 上下文加载失败不影响生成 */
+    contextWarnings.add('正式上下文与世界状态读取失败，本轮已按无可用来源降级。');
   }
 
   // v1.0.28 构建主角信息摘要
@@ -358,7 +814,7 @@ export async function buildChapterContext(
   let protagonistsSummary: string | undefined;
   let dualProtagonistSummary: string | undefined;
   let protagonistNames: string | undefined;
-  const prots = novel?.protagonists;
+  const prots = novel?.protagonists?.filter((profile) => profile.name.trim().length > 0);
   if (prots && prots.length > 0) {
     protagonistsSummary = prots
       .map((p) => {
@@ -403,13 +859,25 @@ export async function buildChapterContext(
             parts.push('至少有一位主角必须直接出场并推动本章目标。');
           }
         }
+        if (protagonistsReferencedNames.length > 0) {
+          parts.push(
+            `本章仅提及或幕后影响主角：${protagonistsReferencedNames.join('、')}，不要强制其直接出场。`,
+          );
+        }
+        if (protagonistsWithLegacyUnresolvedBindingNames.length > 0) {
+          parts.push(
+            `旧版自动关系不足以判断主角是否直接出场：${protagonistsWithLegacyUnresolvedBindingNames.join('、')}；请以章节大纲和章节目标为准。`,
+          );
+        }
         if (protagonistsNotInChapterNames.length > 0) {
           parts.push(
             `本章不直接出场主角：${protagonistsNotInChapterNames.join('、')}（不直接出场，但其影响/绑定关系/未来伏笔仍可作为隐性推动）。`,
           );
         }
         if (parts.length === 0) {
-          parts.push('本章主角未加入出场角色，不要强制主角直接出场；剧情仍需服务主线和后续发展。');
+          parts.push(
+            '本章尚无明确的主角出场关系；请以章节大纲和章节目标为准，不额外新增或排除主角行动。',
+          );
         }
         return parts.join(' ');
       })()
@@ -429,24 +897,10 @@ export async function buildChapterContext(
     dualProtagonistSummary = relParts.join('\n');
   }
 
-  // v1.0.37: 目标字数优先级：章节单独设置 > 输出控制方案 > 系统默认4000
-  let resolvedTargetWordCount = 4000; // 最终降级默认值
-  let resolvedOutputProfileSummary = outputProfileSummary;
-  if (resolvedOutputProfile) {
-    const outputTarget =
-      resolvedOutputProfile.targetWordCount || resolvedOutputProfile.chapterWordRange?.default;
-    if (outputTarget && outputTarget > 0) {
-      resolvedTargetWordCount = outputTarget;
-    }
-    // 附加字数强调
-    if (resolvedOutputProfileSummary && !resolvedOutputProfileSummary.includes('必须')) {
-      resolvedOutputProfileSummary += `\n本章必须尽量接近目标字数 ${resolvedTargetWordCount} 字，不要默认生成 4000 字。`;
-    }
-  }
-  // 章节单独设置的目标字数优先级最高，覆盖输出控制方案
-  if (chapter.targetWordCount && chapter.targetWordCount > 0) {
-    resolvedTargetWordCount = chapter.targetWordCount;
-  }
+  const outputProfileContext = buildOutputProfileContextForWriter(
+    resolvedOutputProfile,
+    chapter.targetWordCount,
+  );
 
   const generationContext: ChapterGenerationContext = {
     novelTitle: novel?.title || '',
@@ -454,11 +908,27 @@ export async function buildChapterContext(
     novelDescription: extractText(novel?.description),
     novelOutline,
     masterOutline: novelOutline,
-    worldBackground: extractText(activeWorld?.content),
+    worldBackground,
+    worldSettingSources: [
+      ...(activeWorld
+        ? [
+            {
+              id: activeWorld.id,
+              title: activeWorld.title,
+              role: 'primary' as const,
+              updatedAt: activeWorld.updatedAt,
+            },
+          ]
+        : []),
+      ...supplementalWorldSettings.map((setting) => ({
+        id: setting.id,
+        title: setting.title,
+        role: 'supplemental' as const,
+        updatedAt: setting.updatedAt,
+      })),
+    ],
     ruleSystems:
-      activeRules.length > 0
-        ? activeRules.map((r) => `【${r.title}】${r.content}`).join('\n')
-        : undefined,
+      activeRules.length > 0 ? activeRules.map(formatRuleSystemForWriter).join('\n\n') : undefined,
     protagonist: protagonist?.name || prots?.[0]?.name,
     specialAbility: extractText(protagonist?.specialAbility) || prots?.[0]?.specialAbility,
     abilityLimits: extractText(protagonist?.abilityLimits) || prots?.[0]?.abilityLimits,
@@ -479,22 +949,27 @@ export async function buildChapterContext(
     outlineKeyPoints,
     outlineChecklistText,
     chapterGoal: extractText(chapter.goal),
-    targetWordCount: resolvedTargetWordCount,
+    targetWordCount: outputProfileContext.targetWordCount,
     styleProfile: styleProfileSummary,
-    outputProfile: resolvedOutputProfileSummary,
+    outputProfile: outputProfileContext.outputProfile,
     chapterCharacters: chapterCharacterSummary,
     chapterCharacterList: chapterCharacterContexts,
     requiredCharacters: requiredCharacterContexts,
     requiredCharactersSummary,
     requiredCharacterNames,
+    characterStates: characterStateContext.summary,
+    characterStateSources: characterStateContext.sources,
     chapterEvents: chapterEventSummary,
     chapterSettings: chapterSettingsSummary,
+    worldStateTimeline,
+    worldStateTimelineSource,
     previousContext,
     userInstruction: extractText(userInstruction),
     draftContent: extractText(draftContent),
     chapterOutlineSource: resolvedChapterOutlineSource,
     volumeOutlineSource,
     masterOutlineSource,
+    contextWarnings: [...contextWarnings],
   };
 
   if (import.meta.env?.DEV) {
@@ -510,17 +985,91 @@ export async function buildChapterContext(
   return generationContext;
 }
 
-function buildOutputSummary(o: OutputProfile): string {
-  const parts: string[] = [];
-  parts.push(`目标字数：${o.targetWordCount || o.chapterWordRange.default} 字`);
-  if (o.paceLevel)
-    parts.push(
-      `节奏等级：${o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}`,
-    );
-  if (o.battleIntensity) parts.push(`战斗强度：${o.battleIntensity}`);
-  if (o.emotionTendency) parts.push(`情绪倾向：${o.emotionTendency}`);
-  if (o.endingHookRequired) parts.push('结尾必须有钩子');
-  if (o.extraRequirements) parts.push(`额外要求：${o.extraRequirements}`);
-  if (o.forbiddenItems?.length) parts.push(`禁止项：${o.forbiddenItems.join('、')}`);
-  return parts.join('\n');
+const PARAGRAPH_LENGTH_LABELS: Record<OutputProfile['paragraphLength'], string> = {
+  short: '短段落',
+  medium: '中等段落',
+  long: '长段落',
+};
+
+const POV_TYPE_LABELS: Record<OutputProfile['povType'], string> = {
+  first_person: '第一人称',
+  third_person_limited: '第三人称限知',
+  third_person_omniscient: '第三人称全知',
+};
+
+const TENSE_TYPE_LABELS: Record<OutputProfile['tenseType'], string> = {
+  past: '过去时',
+  present: '现在时',
+};
+
+const LEVEL_LABELS = {
+  low: '低',
+  medium: '中等',
+  high: '高',
+  slow: '慢',
+  fast: '快',
+} as const;
+
+function positiveWordCount(value: number | undefined): number | undefined {
+  return value && value > 0 ? value : undefined;
+}
+
+function formatRatio(value: number): string {
+  const percentage = Math.round(value * 10_000) / 100;
+  return `${percentage}%`;
+}
+
+function buildOutputSummary(
+  profile: OutputProfile,
+  targetWordCount: number,
+  chapterTargetOverridesProfile: boolean,
+): string {
+  const minWordCount =
+    positiveWordCount(profile.minWordCount) ?? positiveWordCount(profile.chapterWordRange?.min);
+  const maxWordCount =
+    positiveWordCount(profile.maxWordCount) ?? positiveWordCount(profile.chapterWordRange?.max);
+  const rangeQualifier = chapterTargetOverridesProfile
+    ? '（输出方案参考值；与本章目标冲突时不作为硬限制）'
+    : '';
+  const parts = [
+    `方案名称：${profile.name}`,
+    profile.description?.trim() ? `方案说明：${profile.description.trim()}` : '',
+    `本章生效目标字数：${targetWordCount} 字（必须尽量接近${
+      chapterTargetOverridesProfile ? '；章节单独设置优先' : ''
+    }）`,
+    minWordCount ? `最少字数：${minWordCount} 字${rangeQualifier}` : '',
+    maxWordCount ? `最多字数：${maxWordCount} 字${rangeQualifier}` : '',
+    `段落长度：${PARAGRAPH_LENGTH_LABELS[profile.paragraphLength]}`,
+    `叙事视角：${POV_TYPE_LABELS[profile.povType]}`,
+    `叙事时态：${TENSE_TYPE_LABELS[profile.tenseType]}`,
+    profile.paceLevel ? `节奏等级：${LEVEL_LABELS[profile.paceLevel]}` : '',
+    profile.dialogueRatio !== undefined ? `对话比例：${formatRatio(profile.dialogueRatio)}` : '',
+    profile.descriptionRatio !== undefined
+      ? `描写比例：${formatRatio(profile.descriptionRatio)}`
+      : '',
+    profile.battleIntensity ? `战斗强度：${LEVEL_LABELS[profile.battleIntensity]}` : '',
+    profile.emotionTendency?.trim() ? `情绪倾向：${profile.emotionTendency.trim()}` : '',
+    profile.endingHookRequired ? '结尾必须有钩子' : '结尾钩子：不作硬性要求',
+    profile.extraRequirements?.trim() ? `额外要求：${profile.extraRequirements.trim()}` : '',
+    profile.forbiddenItems?.length ? `禁止项：${profile.forbiddenItems.join('、')}` : '',
+  ];
+  return parts.filter(Boolean).join('\n');
+}
+
+export function buildOutputProfileContextForWriter(
+  profile: OutputProfile | null | undefined,
+  chapterTargetWordCount?: number,
+): Pick<ChapterGenerationContext, 'targetWordCount' | 'outputProfile'> {
+  // 保持既有优先级：章节单独设置 > 输出方案目标/默认值 > 系统默认 4000。
+  const profileTargetWordCount =
+    positiveWordCount(profile?.targetWordCount) ??
+    positiveWordCount(profile?.chapterWordRange?.default);
+  const chapterTarget = positiveWordCount(chapterTargetWordCount);
+  const targetWordCount = chapterTarget ?? profileTargetWordCount ?? 4000;
+  return {
+    targetWordCount,
+    outputProfile: profile
+      ? buildOutputSummary(profile, targetWordCount, chapterTarget !== undefined)
+      : undefined,
+  };
 }

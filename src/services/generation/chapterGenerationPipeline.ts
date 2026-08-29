@@ -51,6 +51,7 @@ import {
   passesChapterQualityGate,
   shouldAttemptExternalQualityRepair,
 } from './qualityGateRunner';
+import type { ChapterCandidateIntegrityIssueCode } from './chapterCandidateIntegrity';
 
 export function buildMockDraft(snapshot: ChapterGenerationSnapshot): string {
   const base = snapshot.compiledContext.baseContext;
@@ -76,6 +77,25 @@ export function buildMockDraft(snapshot: ChapterGenerationSnapshot): string {
   ].join('\n');
 }
 
+const SNAPSHOT_GENERATION_INSTRUCTIONS = [
+  '你是一位专业小说作家。',
+  '以本次冻结的章节资产为事实边界，把章纲当作创作计划，不得擅自增加设定、角色、秘密或事件结果。',
+  '从上一章最终故事状态之后继续推进，保持时间、地点、人物、物件和设备状态可连续。角色只有在冻结前文或本章情节已经呈现获知过程后，才能使用相关信息。',
+  '让章纲核心推进通过场景中的行动、感知、对话、冲突与后果自然发生，内部核验和写作检查不要进入正文。',
+  '若快照指定目标字数，以目标字数的 ±10% 作为软范围收敛，不为凑字数牺牲情节完整性。',
+  '只输出完整小说正文，以合法句末标点结束；不要输出说明、分析、写作标签或 Markdown。',
+];
+
+export function buildSnapshotProviderInstruction(snapshot: ChapterGenerationSnapshot): string {
+  const base = snapshot.compiledContext.baseContext;
+  return [
+    ...SNAPSHOT_GENERATION_INSTRUCTIONS,
+    `章节：${base.chapterTitle || '未命名章节'}`,
+    `目标字数：${base.targetWordCount || snapshot.compiledContext.activeEngineeringState?.chapterCard.targetWordCount || '按冻结输出控制'}`,
+    `context_hash：${snapshot.contextHash}`,
+  ].join('\n');
+}
+
 export function buildSnapshotGenerateRequest(
   snapshot: ChapterGenerationSnapshot,
 ): AiGenerateRequest {
@@ -85,12 +105,7 @@ export function buildSnapshotGenerateRequest(
     messages: [
       {
         role: 'system',
-        content: [
-          '你是一位专业小说作家。',
-          '你必须只依据本次 generation_context_snapshot 生成正文。',
-          '不得引入快照之外的新设定、新角色、新秘密提前揭示或未授权剧情。',
-          '请直接输出小说正文，不要输出说明、分析或 Markdown 标记。',
-        ].join('\n'),
+        content: SNAPSHOT_GENERATION_INSTRUCTIONS.join('\n'),
       },
       {
         role: 'user',
@@ -104,6 +119,205 @@ export function buildSnapshotGenerateRequest(
       },
     ],
     promptTemplateSource: 'generation_context_snapshot',
+  };
+}
+
+export interface ChapterLengthRepairRequestInput {
+  chapterTitle: string;
+  text: string;
+  snapshotCompiledPromptText: string;
+  currentWordCount: number;
+  targetWordCount: number;
+  minimumWordCount: number;
+  maximumWordCount: number;
+  repairAttempt: number;
+  contextHash: string;
+}
+
+function chapterLengthRepairSystemInstructions(input: ChapterLengthRepairRequestInput): string[] {
+  const isExpansion = input.currentWordCount < input.minimumWordCount;
+  const minimumWordIncrease = Math.max(0, input.minimumWordCount - input.currentWordCount);
+  const minimumWordReduction = Math.max(0, input.currentWordCount - input.maximumWordCount);
+  return isExpansion
+    ? [
+        '你是一位小说正文扩写编辑。',
+        '只输出一版完整、连续、可直接替换原稿的小说正文，不要解释、总结、标题、列表或 Markdown。',
+        '严格保留原稿的事件顺序、人物知识边界、时间地点、物件与设备状态、伏笔及章末钩子，不得新增或改写剧情事实。',
+        '只能在原稿已有场景内具体化动作因果、感官细节、人物反应、对话交锋和转场；新增文字要融入对应情节，不得附加新场景、新角色、新线索或后续剧情。',
+        '不得用同义复述、空泛心理、密集短句或尾部续写凑字；章末钩子必须仍是原稿的最后状态。',
+        `最终正文必须收敛到 ${input.minimumWordCount}-${input.maximumWordCount} 字。字数按每个汉字及每个连续英文或数字词计数。`,
+        `本次至少增加 ${minimumWordIncrease} 字；完成保留全部事实与章末状态的完整重写，再自行核对字数。`,
+        input.repairAttempt > 2
+          ? '这是最后一次扩写收敛兜底：必须把充实内容分布到已有情节中，使完整正文落入本次范围。'
+          : input.repairAttempt > 1
+            ? '这是更严格的第二次扩写收敛：继续保留完整结尾，并明显充实现有场景的动作与反应。'
+            : '',
+      ]
+    : [
+        '你是一位小说正文压缩编辑。',
+        '只输出一版完整、连续、可直接替换原稿的小说正文，不要解释、总结、标题、列表或 Markdown。',
+        '严格保留原稿的事件顺序、人物知识边界、时间地点、物件与设备状态、伏笔及章末钩子，不得新增或改写事实。',
+        '优先删除重复解释、同义复述、无推进的停顿观察和过密短单句段，不得通过截断结尾压缩。',
+        `最终正文必须收敛到 ${input.minimumWordCount}-${input.maximumWordCount} 字。字数按每个汉字及每个连续英文或数字词计数。`,
+        `本次至少删除 ${minimumWordReduction} 字；完成保留章末收束与钩子后的完整重写，再自行核对字数。`,
+        input.repairAttempt > 2
+          ? '这是最后一次收敛兜底：即使原稿结尾重要，也必须先压缩中段冗余，使完整正文落入本次范围。'
+          : input.repairAttempt > 1
+            ? '这是更严格的第二次收敛：继续保留完整结尾，并明显压缩中段重复内容。'
+            : '',
+      ];
+}
+
+export function buildChapterLengthRepairProviderInstruction(
+  input: ChapterLengthRepairRequestInput,
+): string {
+  const isExpansion = input.currentWordCount < input.minimumWordCount;
+  return [
+    ...chapterLengthRepairSystemInstructions(input),
+    `${isExpansion ? '扩写' : '压缩'}《${input.chapterTitle || '未命名章节'}》正文。`,
+    `当前字数：${input.currentWordCount}`,
+    `目标字数：${input.targetWordCount}`,
+    `允许范围：${input.minimumWordCount}-${input.maximumWordCount}`,
+    `context_hash：${input.contextHash}`,
+    '冻结章节资产与当前修订稿分别作为独立来源提供；只能调整篇幅与表达。',
+  ].join('\n');
+}
+
+export function buildChapterLengthRepairRequest(
+  input: ChapterLengthRepairRequestInput,
+): AiGenerateRequest {
+  const isExpansion = input.currentWordCount < input.minimumWordCount;
+  const systemInstructions = chapterLengthRepairSystemInstructions(input);
+  return {
+    taskType: 'chapter_generate',
+    messages: [
+      {
+        role: 'system',
+        content: systemInstructions.join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `${isExpansion ? '扩写' : '压缩'}《${input.chapterTitle || '未命名章节'}》正文。`,
+          `当前字数：${input.currentWordCount}`,
+          `目标字数：${input.targetWordCount}`,
+          `允许范围：${input.minimumWordCount}-${input.maximumWordCount}`,
+          `context_hash：${input.contextHash}`,
+          '',
+          '【冻结 generation_context_snapshot】',
+          '以下是初次生成所使用的同一份冻结创作上下文。长度修复只能调整篇幅与表达，仍须遵守其中的世界规则、人物边界、章纲、连续性、风格与输出约束。',
+          input.snapshotCompiledPromptText,
+          '',
+          `【待${isExpansion ? '扩写' : '压缩'}完整正文】`,
+          input.text,
+        ].join('\n'),
+      },
+    ],
+    promptTemplateSource: 'generation_context_snapshot:length_repair',
+  };
+}
+
+export interface ChapterIntegrityRepairRequestInput {
+  chapterTitle: string;
+  text: string;
+  snapshotCompiledPromptText: string;
+  contextHash: string;
+  issueCodes: ChapterCandidateIntegrityIssueCode[];
+  targetWordCount: number;
+  minimumWordCount: number;
+  maximumWordCount: number;
+}
+
+function normalizedIntegrityIssueCodes(
+  input: ChapterIntegrityRepairRequestInput,
+): ChapterCandidateIntegrityIssueCode[] {
+  const issueCodes = [...new Set(input.issueCodes)].sort();
+  if (issueCodes.length === 0) throw new Error('chapter_integrity_repair_issue_codes_required');
+  return issueCodes;
+}
+
+const CONTINUITY_REPAIR_INSTRUCTION =
+  '从上一章最后一个有效故事状态之后开始，以新的动作、反应或后果衔接；删除重复边界句和已完成动作的重演，不得退回更早场景或生成替代分支。';
+const SOURCE_CHAIN_REPAIR_INSTRUCTION =
+  '修正知识来源链：未取得的附件、未连接或不可读的设备、未打开的文件和未查阅的档案都不能提供内容或元数据；人物指代和时间称谓必须与当前场景已知事实一致。只能删除无来源断言，或使用原稿已有事实补足可见的获取动作。';
+const TEMPORAL_SEMANTICS_REPAIR_INSTRUCTION =
+  '只修正无解释地把同一事件同时标为“凌晨”和二十三时的时间语义冲突；23:00-23:59 应称为深夜或夜间。若原稿写的是不同事件、从二十三时延续到次日凌晨的跨日范围，或人物与不同来源故意给出冲突记录，必须明确各自归属并写清矛盾，不得删除该事实或悬疑线索。';
+
+const CHAPTER_INTEGRITY_ISSUE_INSTRUCTIONS = {
+  chapter_opening_rollback: CONTINUITY_REPAIR_INSTRUCTION,
+  chapter_boundary_sentence_repetition: CONTINUITY_REPAIR_INSTRUCTION,
+  chapter_boundary_action_replay: CONTINUITY_REPAIR_INSTRUCTION,
+  chapter_tail_pollution:
+    '清除合法故事结尾之后的元数据、标签、残句、乱码或重复尾巴，不得截断合法故事内容或续写另一版正文。',
+  chapter_meta_reasoning_leakage:
+    '删除模型自我修订、提示词复述、字数核对和输出说明，只保留故事正文。',
+  chapter_authorial_label_leakage:
+    '删除作者侧章节编号、资产名称和创作标签，把必要信息改写为故事世界内自然可知的表达。',
+  chapter_source_chain_break: SOURCE_CHAIN_REPAIR_INSTRUCTION,
+  chapter_dialogue_reference_conflict: SOURCE_CHAIN_REPAIR_INSTRUCTION,
+  chapter_temporal_semantics_conflict: TEMPORAL_SEMANTICS_REPAIR_INSTRUCTION,
+  chapter_audit_voice_leakage:
+    '删除成簇的核验状态和审校式结论；保留情节必需的不确定性，但改由人物行动、感知、对话、冲突或后果呈现。',
+} satisfies Record<ChapterCandidateIntegrityIssueCode, string>;
+
+function chapterIntegrityIssueInstructions(
+  issueCodes: readonly ChapterCandidateIntegrityIssueCode[],
+): string[] {
+  return [...new Set(issueCodes.map((code) => CHAPTER_INTEGRITY_ISSUE_INSTRUCTIONS[code]))];
+}
+
+function chapterIntegrityRepairSystemInstructions(
+  input: ChapterIntegrityRepairRequestInput,
+): string[] {
+  const issueCodes = normalizedIntegrityIssueCodes(input);
+  return [
+    '你是一位小说章节完整性修复编辑。',
+    '只输出一版从第一句到最后一句都完整、连续、可直接替换原稿的小说正文；不要输出补丁、解释、总结、标题、列表或 Markdown。',
+    `只修复本次检测到的问题（${issueCodes.join(', ')}）；原稿中未受影响的内容、事件顺序、因果、伏笔与章末钩子必须保留。`,
+    '严格以冻结章节资产和当前正文为事实边界，不得新增角色、设定、场景、线索、秘密、人物知识、事件结果或后续剧情，也不得提前揭示或擅自解决悬念。',
+    ...chapterIntegrityIssueInstructions(issueCodes),
+    '最终输出必须以一条语义和语法完整的故事叙述句或对话句结束，并带合法的中文句末标点；句末之后不得再有标签、说明、残片或任何非正文内容。',
+    `完整重写后的正文必须保持在 ${input.minimumWordCount}-${input.maximumWordCount} 字允许范围内，目标约 ${input.targetWordCount} 字；不得为凑字数引入新事实。`,
+  ];
+}
+
+function chapterIntegrityRepairRequestLines(input: ChapterIntegrityRepairRequestInput): string[] {
+  return [
+    `完整性修复《${input.chapterTitle || '未命名章节'}》正文。`,
+    `issue_codes：${normalizedIntegrityIssueCodes(input).join(', ')}`,
+    `当前字数：${countTextWords(input.text)}`,
+    `目标字数：${input.targetWordCount}`,
+    `允许范围：${input.minimumWordCount}-${input.maximumWordCount}`,
+    `context_hash：${input.contextHash}`,
+    '冻结 generation_context_snapshot 各资产与当前章节正文已分别作为独立 typed sources 提供；以这些来源为准完成整章重写，不要在 request_context 中重复全文。',
+  ];
+}
+
+export function buildChapterIntegrityRepairProviderInstruction(
+  input: ChapterIntegrityRepairRequestInput,
+): string {
+  return [
+    ...chapterIntegrityRepairSystemInstructions(input),
+    ...chapterIntegrityRepairRequestLines(input),
+  ].join('\n');
+}
+
+export function buildChapterIntegrityRepairRequest(
+  input: ChapterIntegrityRepairRequestInput,
+): AiGenerateRequest {
+  return {
+    taskType: 'chapter_generate',
+    messages: [
+      {
+        role: 'system',
+        content: chapterIntegrityRepairSystemInstructions(input).join('\n'),
+      },
+      {
+        role: 'user',
+        content: chapterIntegrityRepairRequestLines(input).join('\n'),
+      },
+    ],
+    promptTemplateSource: 'generation_context_snapshot:integrity_repair',
   };
 }
 

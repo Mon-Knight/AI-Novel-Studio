@@ -424,6 +424,13 @@ mod tests {
     fn create_chapter_draft_test_schema(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             "
+            CREATE TABLE novels (
+                id TEXT PRIMARY KEY,
+                total_word_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+
             CREATE TABLE chapters (
                 id TEXT PRIMARY KEY,
                 novel_id TEXT NOT NULL,
@@ -506,6 +513,11 @@ mod tests {
         status: &str,
         deleted_at: Option<&str>,
     ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT OR IGNORE INTO novels (id, total_word_count, updated_at)
+             VALUES (?1, 0, 'before')",
+            params![novel_id],
+        )?;
         conn.execute(
             "INSERT INTO chapters (id, novel_id, adopted_draft_id, word_count, status, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, novel_id, adopted_draft_id, word_count, status, "before", deleted_at],
@@ -931,6 +943,7 @@ mod tests {
             "PRAGMA foreign_keys = ON;
              CREATE TABLE novels (
                  id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL,
+                 total_word_count INTEGER NOT NULL DEFAULT 0,
                  updated_at TEXT NOT NULL, deleted_at TEXT
              );
              CREATE TABLE chapters (

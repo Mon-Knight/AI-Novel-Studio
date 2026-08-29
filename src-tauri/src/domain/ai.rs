@@ -280,7 +280,7 @@ pub struct AiTaskRecordsDebugState {
 #[serde(rename_all = "camelCase")]
 pub struct StyleProfileDto {
     pub id: String,
-    pub project_id: String,
+    pub project_id: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub narrative_perspective: Option<String>,

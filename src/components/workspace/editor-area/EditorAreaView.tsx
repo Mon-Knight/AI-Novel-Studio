@@ -1,4 +1,14 @@
 import type { ChapterDraft } from '../../../types/ai';
+import {
+  CheckCircle2,
+  FileText,
+  Lightbulb,
+  ListTree,
+  NotebookPen,
+  Pencil,
+  Save,
+  Target,
+} from 'lucide-react';
 import { ChapterStatusLabels, type Chapter } from '../../../types/chapter';
 import { countTextWords, hashTextContent } from '../../../utils/contentHash';
 import { formatNumber } from '../../../utils/format';
@@ -47,7 +57,9 @@ export default function EditorAreaView({
     return (
       <div className="editor-content">
         <div className="editor-empty">
-          <div className="editor-empty-icon">📝</div>
+          <div className="editor-empty-icon">
+            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.5} />
+          </div>
           <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>选择章节开始写作</div>
           <div className="text-sm text-muted">请从左侧目录树中选择一个章节</div>
         </div>
@@ -65,8 +77,8 @@ export default function EditorAreaView({
         <div
           role="status"
           style={{
-            width: 'min(100%, 1180px)',
-            maxWidth: 1180,
+            width: 'min(100%, 920px)',
+            maxWidth: 920,
             margin: '0 auto 10px',
             padding: '9px 12px',
             color: isLoading ? 'var(--color-text-secondary)' : 'var(--color-error)',
@@ -115,8 +127,8 @@ export default function EditorAreaView({
       {currentDraft && (
         <div
           style={{
-            width: 'min(100%, 1180px)',
-            maxWidth: 1180,
+            width: 'min(100%, 920px)',
+            maxWidth: 920,
             margin: '0 auto 10px',
             padding: '7px 12px',
             background: currentDraft.isAdopted
@@ -132,11 +144,20 @@ export default function EditorAreaView({
               : '1px solid var(--color-border-light)',
           }}
         >
-          <span>📄 草稿 v{currentDraft.versionNo}</span>
+          <span className="editor-meta-item">
+            <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>草稿 v{currentDraft.versionNo}</span>
+          </span>
           <span>来源：{DRAFT_SOURCE_LABELS[currentDraft.source] || currentDraft.source}</span>
           <span>字数：{formatNumber(currentDraft.wordCount)}</span>
           {currentDraft.isAdopted && (
-            <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>✅ 已采用</span>
+            <span
+              className="editor-meta-item"
+              style={{ color: 'var(--color-success)', fontWeight: 600 }}
+            >
+              <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>已采用</span>
+            </span>
           )}
           {document.saveMsg && (
             <span
@@ -162,14 +183,18 @@ export default function EditorAreaView({
                 className="editor-info-label"
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
               >
-                <span>📋 章节大纲</span>
+                <span className="editor-info-label-copy">
+                  <ListTree aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>章节大纲</span>
+                </span>
                 {!outline.isEditingOutline ? (
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={outline.handleStartEditOutline}
                     style={{ fontSize: 11 }}
                   >
-                    ✏️ 编辑
+                    <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+                    <span>编辑</span>
                   </button>
                 ) : (
                   <span style={{ display: 'flex', gap: 4 }}>
@@ -179,7 +204,8 @@ export default function EditorAreaView({
                       disabled={document.saving}
                       style={{ fontSize: 11 }}
                     >
-                      💾 保存
+                      <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+                      <span>保存</span>
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"
@@ -228,7 +254,10 @@ export default function EditorAreaView({
           )}
           {chapter.goal && (
             <div className="editor-info-section">
-              <div className="editor-info-label">🎯 本章目标</div>
+              <div className="editor-info-label editor-info-label-copy">
+                <Target aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>本章目标</span>
+              </div>
               <div className="editor-info-text">{chapter.goal}</div>
             </div>
           )}
@@ -242,13 +271,15 @@ export default function EditorAreaView({
 
       {!chapter.outline && !outline.isEditingOutline && (
         <div className="editor-hint-banner">
-          💡 当前章节还没有大纲，建议补充章节大纲，AI 将根据大纲生成正文。
+          <Lightbulb aria-hidden="true" size={15} strokeWidth={1.8} />
+          <span>当前章节还没有大纲，建议先补充章节目标和剧情节点。</span>
           <button
             className="btn btn-secondary btn-sm"
             onClick={outline.handleStartEditOutline}
             style={{ marginLeft: 8, fontSize: 11 }}
           >
-            ✏️ 手动编写
+            <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+            <span>手动编写</span>
           </button>
         </div>
       )}
@@ -260,7 +291,10 @@ export default function EditorAreaView({
               className="editor-info-label"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
             >
-              <span>📋 编写章节大纲</span>
+              <span className="editor-info-label-copy">
+                <ListTree aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>编写章节大纲</span>
+              </span>
               <span style={{ display: 'flex', gap: 4 }}>
                 <button
                   className="btn btn-primary btn-sm"
@@ -268,7 +302,8 @@ export default function EditorAreaView({
                   disabled={document.saving}
                   style={{ fontSize: 11 }}
                 >
-                  💾 保存
+                  <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+                  <span>保存</span>
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
@@ -352,7 +387,7 @@ export default function EditorAreaView({
             onChange={(event) => document.handleContentChange(event.target.value)}
             onSelect={document.handleSelectionChange}
             placeholder={
-              '在这里输入或粘贴正文内容...\n\n点击右侧 AI 生成面板，AI 将根据章节大纲生成正文。'
+              '在这里输入或粘贴正文内容。\n\n对话中确认的章节候选稿会进入此处供你审阅和修改。'
             }
             spellCheck={false}
           />
@@ -361,7 +396,9 @@ export default function EditorAreaView({
 
       {!document.content && document.effectiveContentState?.status !== 'unavailable' && (
         <div className="editor-empty-state">
-          <div className="editor-empty-icon">✍️</div>
+          <div className="editor-empty-icon">
+            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.5} />
+          </div>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>当前章节还没有正文</div>
           <div
             style={{

@@ -110,7 +110,11 @@ interface StyleProfilesContentProps {
   setOutputForm: Dispatch<SetStateAction<OutputProfileFormValue>>;
   setShowOutputForm: Dispatch<SetStateAction<boolean>>;
   editStyle: (style: StyleProfile) => void;
+  activateStyle: (style: StyleProfile) => Promise<void>;
+  activatingStyleId: string | null;
   deleteStyle: (id: string, name: string) => Promise<void>;
+  makeOutputDefault: (output: OutputProfile) => Promise<void>;
+  defaultingOutputId: string | null;
   deleteOutput: (id: string, name: string) => Promise<void>;
   onBack: () => void;
 }
@@ -136,7 +140,11 @@ export function StyleProfilesContent({
   setOutputForm,
   setShowOutputForm,
   editStyle,
+  activateStyle,
+  activatingStyleId,
   deleteStyle,
+  makeOutputDefault,
+  defaultingOutputId,
   deleteOutput,
   onBack,
 }: StyleProfilesContentProps) {
@@ -271,22 +279,29 @@ export function StyleProfilesContent({
                 border: '1px solid var(--color-border)',
                 borderRadius: 10,
                 padding: 16,
-                background: 'var(--color-bg-card)',
+                background: s.isActive ? 'var(--color-primary-light)' : 'var(--color-bg-card)',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontWeight: 600, fontSize: 15 }}>{s.name}</span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    padding: '1px 8px',
-                    borderRadius: 10,
-                    background: 'var(--color-bg-hover)',
-                    color: 'var(--color-text-secondary)',
-                  }}
-                >
-                  {sourceTypeLabel(s)}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {s.isActive && (
+                    <span style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600 }}>
+                      当前
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '1px 8px',
+                      borderRadius: 10,
+                      background: 'var(--color-bg-hover)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    {sourceTypeLabel(s)}
+                  </span>
+                </div>
               </div>
               <div
                 style={{
@@ -306,6 +321,15 @@ export function StyleProfilesContent({
               </div>
               <StyleSourceTrace profile={s} />
               <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
+                {!s.isActive && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => activateStyle(s)}
+                    disabled={activatingStyleId !== null}
+                  >
+                    {activatingStyleId === s.id ? '切换中...' : '设为当前'}
+                  </button>
+                )}
                 <button className="btn btn-secondary btn-sm" onClick={() => editStyle(s)}>
                   ✏️
                 </button>
@@ -358,6 +382,15 @@ export function StyleProfilesContent({
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
+                {!o.isDefault && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => makeOutputDefault(o)}
+                    disabled={defaultingOutputId !== null}
+                  >
+                    {defaultingOutputId === o.id ? '切换中...' : '设为默认'}
+                  </button>
+                )}
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {

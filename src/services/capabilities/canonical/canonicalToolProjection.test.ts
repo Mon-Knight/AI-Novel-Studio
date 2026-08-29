@@ -12,10 +12,11 @@ import {
   getCanonicalProjectionDiagnostics,
   getCanonicalToolDescriptor,
   getCanonicalToolManifest,
-  invokeCanonicalTool,
   listCanonicalToolsForAgent,
   listCanonicalToolDescriptors,
 } from './canonicalToolProjection';
+import { executeCanonicalToolForHostValidation } from './canonicalToolRuntime';
+import type { CanonicalToolInvocationContext } from './canonicalToolTypes';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -82,6 +83,30 @@ function storageSnapshot(): string {
   }
   values.sort(([left], [right]) => left.localeCompare(right));
   return JSON.stringify(values);
+}
+
+async function invokeForHost(
+  name: string,
+  argumentsJson: unknown,
+  context: CanonicalToolInvocationContext,
+) {
+  const manifest = await getCanonicalToolManifest();
+  return executeCanonicalToolForHostValidation(
+    {
+      name,
+      version: '1',
+      argumentsJson,
+      expectedProjectionHash: manifest.projectionHash,
+    },
+    {
+      invocationId: `test-${name}`,
+      allowedTools: [`${name}@1`],
+      novelId: context.novelId,
+      chapterId: context.chapterId,
+      grantedPermissions: context.grantedPermissions ?? [],
+      signal: context.signal,
+    },
+  );
 }
 
 async function fixture() {
@@ -166,7 +191,7 @@ test('projection contains only fixed low-risk facade candidates', async () => {
     getCanonicalProjectionDiagnostics().map((diagnostic) => diagnostic.included),
     [true, true, true, true],
   );
-  assert.deepEqual(listCanonicalToolsForAgent(), []);
+  assert.deepEqual(await listCanonicalToolsForAgent(), []);
 
   const agentManifest = await getCanonicalAgentManifest();
   assert.deepEqual(agentManifest.tools, []);
@@ -203,7 +228,7 @@ test('canonical adapters execute real facade chains and preserve source/hash con
     grantedPermissions: ['novel.read', 'chapter.read'],
   };
 
-  const project = await invokeCanonicalTool('novel.read', { novelId: novelA.id }, context);
+  const project = await invokeForHost('novel.read', { novelId: novelA.id }, context);
   assert.equal(project.ok, true, project.error?.message);
   assert.equal(project.source, 'localstorage');
   assert.equal(project.storageMode, 'browser_fallback');
@@ -225,7 +250,7 @@ test('canonical adapters execute real facade chains and preserve source/hash con
     [],
   );
 
-  const structure = await invokeCanonicalTool(
+  const structure = await invokeForHost(
     'structure.read',
     { novelId: novelA.id, chapterId: chapter.id },
     context,
@@ -233,7 +258,7 @@ test('canonical adapters execute real facade chains and preserve source/hash con
   assert.equal(structure.ok, true, structure.error?.message);
   assert.equal((structure.data as { chapter: { id: string } }).chapter.id, chapter.id);
 
-  const story = await invokeCanonicalTool(
+  const story = await invokeForHost(
     'context.read',
     { novelId: novelA.id, chapterId: chapter.id, query: 'memory' },
     context,
@@ -241,7 +266,7 @@ test('canonical adapters execute real facade chains and preserve source/hash con
   assert.equal(story.ok, true, story.error?.message);
   assert.equal((story.data as { chapter: { novelId: string } }).chapter.novelId, novelA.id);
 
-  const memory = await invokeCanonicalTool(
+  const memory = await invokeForHost(
     'memory.search',
     { novelId: novelA.id, query: 'Canonical memory' },
     context,
@@ -250,7 +275,7 @@ test('canonical adapters execute real facade chains and preserve source/hash con
   assert.equal((memory.data as { items: unknown[] }).items.length, 1);
   assert.equal(memory.source, 'localstorage');
 
-  const crossScope = await invokeCanonicalTool(
+  const crossScope = await invokeForHost(
     'structure.read',
     {
       novelId: novelB.id,
@@ -276,7 +301,7 @@ test('canonical adapters execute real facade chains and preserve source/hash con
 
 test('canonical adapters reject technical aliases, unknown fields and missing host scope', async () => {
   assert.equal(getCanonicalToolDescriptor('chapter.read_outline'), undefined);
-  const legacy = await invokeCanonicalTool(
+  const legacy = await invokeForHost(
     'chapter.read_outline',
     {
       novelId: 'novel',
@@ -288,7 +313,7 @@ test('canonical adapters reject technical aliases, unknown fields and missing ho
   assert.equal(legacy.ok, false);
   assert.equal(legacy.error?.code, 'NOT_FOUND');
 
-  const unknownField = await invokeCanonicalTool(
+  const unknownField = await invokeForHost(
     'novel.read',
     { novelId: 'novel', repository: 'forbidden' },
     { novelId: 'novel', grantedPermissions: ['novel.read'] },
@@ -296,11 +321,15 @@ test('canonical adapters reject technical aliases, unknown fields and missing ho
   assert.equal(unknownField.ok, false);
   assert.equal(unknownField.error?.code, 'INVALID_ARGUMENT');
 
-  const missingHostScope = await invokeCanonicalTool('novel.read', { novelId: 'novel' }, {});
+  const missingHostScope = await invokeForHost(
+    'novel.read',
+    { novelId: 'novel' },
+    { grantedPermissions: ['novel.read'] },
+  );
   assert.equal(missingHostScope.ok, false);
   assert.equal(missingHostScope.error?.code, 'INVALID_SCOPE');
 
-  const missingPermission = await invokeCanonicalTool(
+  const missingPermission = await invokeForHost(
     'novel.read',
     { novelId: 'novel' },
     { novelId: 'novel', grantedPermissions: [] },

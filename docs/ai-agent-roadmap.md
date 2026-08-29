@@ -3,6 +3,7 @@
 > 文件：`docs/ai-agent-roadmap.md`  
 > 用途：规划 AI Agent 能力的演进路线  
 > 适用：产品规划 + 技术决策
+> 当前版本：v3.6.0 发布候选；本文的“已完成”只表示当前工作树证据，不表示已经合并或发布
 
 ---
 
@@ -126,7 +127,11 @@ Agent 能自主推进创作流程：
 - ✅ 用户显式启动、可暂停 / 继续的进程内逐章候选队列
 - ✅ 跟踪人物成长节点、冲突线程和逐章节奏
 - ✅ 从已采用正文提出章节总结和世界扩展候选
-- ⏳ 跨进程 / 无人值守自动续跑、向量语义 Memory
+- ✅ migration 027 的跨进程调度、lease/checkpoint 与三档自动化策略
+- ✅ migration 026 的 SQLite 长期 Memory、FTS/结构化检索与显式真实向量混合检索
+- ⏳ 自动 embedding Provider、增量向量化、模型/维度重建与固定召回评估
+
+这里必须区分两套同名能力：`memoryService` 访问 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`，是桌面端可备份、可恢复的 SQLite 长期事实；`NovelMemoryManager`/`NovelMemoryStateUpdater` 只保存进程内 `Map`，重启即丢失，属于兼容/实验运行态，不能被当作长期 Memory 或 Agent-ready 证据。
 
 ### 4.3 Creative Collaboration
 
@@ -152,7 +157,7 @@ Phase 4 不重新发明 Planner、Tool Registry、Memory 或 Safe Apply，而是
 → Runtime 调用受约束领域工具
 → 对话内显示调用、错误与恢复
 → 形成不可变产物
-→ 用户确认、审阅与安全应用
+→ 用户确认；章节审阅/原子采用；结构化申请应用（当前失败关闭）
 ```
 
 任务对话是用户可见的执行单元，每个任务拥有独立上下文、模型快照、运行和产物。系统需要允许“生成下一章”与“审计既有章节”等任务并发运行，并继续服从应用级并发、频率、Token 和成本治理。
@@ -178,8 +183,8 @@ AI 面向用户的回复、工具调用、错误和产物共同构成任务对�
 
 - 普通回复不能直接修改小说正式事实。
 - 产物形成后在对话中推送专用卡片。
-- 结构化产物经确认后使用 Safe Apply。
-- 章节候选先由用户确认进入人工审阅，再显式编辑、保存和采用。
+- 章节候选先由用户确认进入人工审阅，再显式编辑、保存和采用；桌面端由一个 Rust/SQLite 事务同时消费 `ReviewAuthorization`、复验草稿版本/hash 并采用正文。
+- 通用结构化产物可以记录确认或申请应用决定，但“领域写入 + `ArtifactDecision`”尚未完成同事务迁移；当前 `request_apply` 固定失败关闭且不产生领域写入。
 - 基线漂移、重复应用和并发写入继续由 revision、CAS 和幂等事务处理。
 
 ### 5.5 DSH 与内部 Runtime 边界
@@ -190,20 +195,43 @@ DSH 可以作为任务 Planner/Executor 的一种实现或 Worker，但不能成
 
 实现方式固定为“ANS 产品层 + 稳定 DSH Adapter + 固定版本 Headless Worker”。当前载体 commit 与较新参考源码必须先做差异审计；工作台实现不得顺带升级 DSH，也不得把 Harness UI、内部 Session 类型或 Cordis 对象变成 ANS 产品契约。
 
-详细设计与分阶段验收见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。对话工作台、确认/Safe Apply、领域候选工具和写作工作台审阅收敛已包含在 v3.5.0。
+详细设计与分阶段验收见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。对话工作台、决定/审阅授权、章节原子采用和写作工作台收敛已落地；旧生成类 AI 面板和草稿历史生产入口已经移除，底层领域服务与历史事实继续保留。通用结构化 Safe Apply 仍按上面的失败关闭边界处理。
+
+### 5.6 v3.6.0 Canonical 准入与 R4 顺序
+
+当前已完成的确定性基础是：
+
+```text
+Phase 1A-A / R0.75  Capability Catalog                VERIFIED
+Phase 1A-B / R1     Domain Facade                     VERIFIED
+Phase 1A-C / R1.5   Canonical Tool Projection         VERIFIED
+Phase 1A-D / R3     Portable Manifest + Drift Gate    VERIFIED
+Canonical model-visible identities                   0
+R4 真实 Main Agent Runtime                            NOT RELEASED
+Writing/Context/Quality SubAgent                      NOT RELEASED
+```
+
+四个只读 Canonical Tool 仍是 `catalog_only + partial`，后续门禁固定为：
+
+1. `novel.read`：统一作品、设定、主角 JSON/表事实源。
+2. `structure.read`：补足 version、active pointer、写后读与 CAS 证据。
+3. `context.read`：统一 summary apply 与完整 context bundle 的 adopted-draft/source 协议。
+4. `memory.search`：补足真实 embedding、混合检索、降级和重启证据；进程内 `NovelMemoryManager` 不计入。
+
+四项 blocker 关闭后，必须另做一次显式、可回滚的 exposure 变更，证明 scoped manifest、DSH `tools/list/tools.call`、权限、负例和重启行为。只有该门禁通过后，才进入 **R4：真实 Main Agent Runtime 验证**。Canonical Registry/Projection 是 R4 的前置条件，不能再排到 Main Agent 或 Writing SubAgent 之后。
 
 ---
 
 ## 6. 关键技术能力演进
 
-| 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                  |
-| ------------ | ---------------- | ---------------- | ---------------------------------------- |
-| Rules        | 静态文档         | 动态检查         | 自动执行                                 |
-| Planning     | 人工拆解         | 固定持久 Planner | 全书创作 Agent 规划已实现                |
-| Memory       | 章节上下文       | 持久摘要与状态   | 结构化跨章节事实已实现；语义向量待建设   |
-| Tool Calling | 无               | 工具注册         | 受约束服务编排已实现；模型自主选择待建设 |
-| Multi-Agent  | 无               | 无               | 全书规划 + 六专家评审已实现              |
-| Verification | 人工             | 自动化           | 持续验证                                 |
+| 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                                        |
+| ------------ | ---------------- | ---------------- | -------------------------------------------------------------- |
+| Rules        | 静态文档         | 动态检查         | 自动执行                                                       |
+| Planning     | 人工拆解         | 固定持久 Planner | 全书创作 Agent 规划已实现                                      |
+| Memory       | 章节上下文       | 持久摘要与状态   | SQLite 长期/混合检索已实现；自动 embedding 与 Agent 准入待建设 |
+| Tool Calling | 无               | 工具注册         | legacy 编排可运行；Canonical 模型可见数为 0，R4 待验证         |
+| Multi-Agent  | 无               | 无               | 全书规划 + 六专家评审已实现                                    |
+| Verification | 人工             | 自动化           | 持续验证                                                       |
 
 ---
 
@@ -220,7 +248,7 @@ DSH 可以作为任务 Planner/Executor 的一种实现或 Worker，但不能成
 
 ### 7.2 Memory 系统
 
-评估方向：
+当前生产事实源固定为 SQLite 混合检索；以下是后续可替换实现的评估方向，不代表已接入：
 
 - 向量数据库（Chroma / Qdrant）
 - 知识图谱（Neo4j）

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 const { installE2eNetworkGuard } = await import('./e2eNetworkGuard.ts');
-const { sanitizeDiagnosticValue, serializeConsoleArguments } =
+const { redactDiagnosticText, sanitizeDiagnosticValue, serializeConsoleArguments } =
   await import('./e2eDiagnosticSanitizer.ts');
 const { isE2eBridgeCommandAllowed } = await import('./e2eBridgePolicy.ts');
 
@@ -11,7 +11,11 @@ test('closed-loop E2E additions expose queries but not adoption mutations', () =
     'get_review_authorization',
     'get_e2e_agent_closed_loop_state',
     'get_task_conversation',
+    'dsh_get_task_runtime_status',
     'get_result_artifact',
+    'get_latest_chapter_generation_snapshot',
+    'get_rule_systems',
+    'list_memory_documents',
   ]) {
     assert.equal(isE2eBridgeCommandAllowed(command), true, command);
   }
@@ -22,9 +26,21 @@ test('closed-loop E2E additions expose queries but not adoption mutations', () =
     'create_task_conversation',
     'delete_chapter_draft',
     'save_chapter_draft',
+    'save_chapter_generation_snapshot',
+    'save_style_profile',
+    'set_active_style_profile',
+    'save_output_profile',
+    'set_default_output_profile',
   ]) {
     assert.equal(isE2eBridgeCommandAllowed(command), false, command);
   }
+});
+
+test('diagnostic redaction does not mistake task model selectors for API keys', () => {
+  assert.equal(
+    redactDiagnosticText('workbench-new-task-model-status'),
+    'workbench-new-task-model-status',
+  );
 });
 
 function createWindow() {

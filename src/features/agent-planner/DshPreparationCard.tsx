@@ -9,6 +9,7 @@ export interface DshPreparationCardProps {
   chapterId?: string;
   /** 用户配置的 Provider Key（runtimeMode === 'api' 时传入；不落盘）。 */
   apiKey?: string;
+  baseUrl?: string;
   modelName?: string;
   /** 测试注入点。 */
   hook?: typeof useDshPreparation;
@@ -128,6 +129,7 @@ export function DshPreparationCard({
   novelId,
   chapterId,
   apiKey,
+  baseUrl,
   modelName,
   hook = useDshPreparation,
 }: DshPreparationCardProps) {
@@ -145,8 +147,8 @@ export function DshPreparationCard({
     summaryError,
     run,
   } = preparation;
-  const dshModel =
-    modelName && modelName.toLowerCase().includes('deepseek') ? modelName : undefined;
+  const dshModel = modelName?.trim() || undefined;
+  const dshBaseUrl = baseUrl?.trim() || undefined;
   const revisionsReady = !revisionsLoading && revisions !== null;
   const dshDisabled = running || !novelId || !chapterId || !apiKey || !revisionsReady;
 
@@ -186,7 +188,13 @@ export function DshPreparationCard({
           type="button"
           data-testid="dsh-run-dsh"
           disabled={dshDisabled}
-          onClick={() => void run('dsh', { apiKey: apiKey ?? '', model: dshModel })}
+          onClick={() =>
+            void run('dsh', {
+              apiKey: apiKey ?? '',
+              baseUrl: dshBaseUrl,
+              model: dshModel,
+            })
+          }
         >
           {planner === 'dsh' && running ? '生成中…' : 'DSH 大脑（真实 API）'}
         </button>
@@ -229,7 +237,7 @@ export function DshPreparationCard({
       )}
       {!apiKey && (
         <div className="agent-plan-card__notice is-warning" data-testid="dsh-no-key">
-          未配置 API Key，DSH 大脑不可用；请先在设置中心配置 DeepSeek Provider。
+          未配置 API Key，DSH 大脑不可用；请先在设置中心配置 Cloud Provider。
         </div>
       )}
       {running && (

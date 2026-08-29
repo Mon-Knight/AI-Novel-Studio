@@ -1,6 +1,7 @@
 import { dbCall, generateId, lsGet, lsSet, nowISO } from '../database/db';
 import { chapterEngineeringService } from '../engineering/chapterEngineeringService';
 import { buildFreshChapterGenerationContext } from '../prompt/contextBuilder';
+import { loadGenerationAssetContext, type GenerationAssetContext } from './generationAssetContext';
 import { hashTextContent } from '../../utils/contentHash';
 import { safeJsonParse, toSafeNumber, toSafeString } from '../../utils/dataGuard';
 import type { ChapterEngineeringState } from '../../types/chapterEngineering';
@@ -15,6 +16,53 @@ import type {
 
 const STORAGE_KEY_PREFIX = 'ai_novel_studio_chapter_generation_snapshots_';
 const SECTION_LIMIT = 8000;
+
+export interface GenerationContextCompilerDependencies {
+  buildBaseContext?: typeof buildFreshChapterGenerationContext;
+  getEngineeringBundle?: typeof chapterEngineeringService.getBundle;
+  loadAssetContext?: (novelId: string, relevanceText: string) => Promise<GenerationAssetContext>;
+}
+
+export interface GenerationCoreAssetsMissingError extends Error {
+  code: 'GENERATION_CORE_ASSETS_MISSING';
+  missingAssets: Array<'chapter_outline' | 'world_setting' | 'rule_system' | 'protagonist'>;
+}
+
+export function assertRequiredCoreAssets(context: CompiledGenerationContext['baseContext']): void {
+  const missingAssets: GenerationCoreAssetsMissingError['missingAssets'] = [];
+  if (!context.chapterOutline?.trim()) missingAssets.push('chapter_outline');
+  if (!context.worldBackground?.trim() && !context.chapterSettings?.trim()) {
+    missingAssets.push('world_setting');
+  }
+  if (!context.ruleSystems?.trim()) missingAssets.push('rule_system');
+  if (!context.protagonist?.trim() && !context.protagonistNames?.trim()) {
+    missingAssets.push('protagonist');
+  }
+  if (missingAssets.length === 0) return;
+  const labels = missingAssets.map((asset) => {
+    if (asset === 'chapter_outline') return '章节大纲';
+    if (asset === 'world_setting') return '世界设定';
+    if (asset === 'rule_system') return '规则体系';
+    return '主角设定';
+  });
+  const error = new Error(
+    `生成所需核心资产不完整：${labels.join('、')}。请先在作品资产中补齐后再生成。`,
+  ) as GenerationCoreAssetsMissingError;
+  error.code = 'GENERATION_CORE_ASSETS_MISSING';
+  error.missingAssets = missingAssets;
+  throw error;
+}
+
+export function limitContinuityText(value: string | undefined, limit = SECTION_LIMIT): string {
+  const text = value?.trim() ?? '';
+  if (limit <= 0) return '';
+  if (!text || text.length <= limit) return text;
+  const marker = `\n\n[已截断中段：原文 ${text.length} 字符]\n\n`;
+  if (marker.length >= limit) return text.slice(-limit);
+  const available = Math.max(0, limit - marker.length);
+  const headLength = Math.floor(available / 4);
+  return `${text.slice(0, headLength)}${marker}${text.slice(-(available - headLength))}`;
+}
 
 interface RawChapterGenerationSnapshot extends Partial<ChapterGenerationSnapshot> {
   novel_id?: string;
@@ -53,10 +101,15 @@ function storageKey(chapterId: string): string {
   return `${STORAGE_KEY_PREFIX}${chapterId}`;
 }
 
-function limitText(value: string | undefined, limit = SECTION_LIMIT): string {
+function limitText(
+  value: string | undefined,
+  limit = SECTION_LIMIT,
+  preserveEnding = false,
+): string {
   const text = value?.trim() ?? '';
   if (!text) return '';
   if (text.length <= limit) return text;
+  if (preserveEnding) return limitContinuityText(text, limit);
   return `${text.slice(0, limit)}\n\n[已截断：原文 ${text.length} 字符]`;
 }
 
@@ -75,8 +128,9 @@ function addSection(
   title: string,
   content: string | undefined,
   sourceTypes: GenerationContextSourceType[],
+  preserveEnding = false,
 ): void {
-  const normalized = limitText(content);
+  const normalized = limitText(content, SECTION_LIMIT, preserveEnding);
   if (!normalized) return;
   sections.push({ key, title, content: normalized, sourceTypes });
 }
@@ -177,6 +231,85 @@ function formatEngineeringState(state: ChapterEngineeringState): string {
   ]);
 }
 
+interface ContinuityConstraintSection {
+  content?: string;
+  sourceTypes: GenerationContextSourceType[];
+}
+
+function buildContinuityConstraintSection(params: {
+  input: CompileGenerationContextInput;
+  baseContext: CompiledGenerationContext['baseContext'];
+  assetContext: GenerationAssetContext;
+}): ContinuityConstraintSection {
+  const { input, baseContext, assetContext } = params;
+  const sourceTypes: GenerationContextSourceType[] = [];
+  const evidence: string[] = [];
+  const addEvidence = (
+    available: boolean,
+    type: GenerationContextSourceType,
+    description: string,
+  ) => {
+    if (!available) return;
+    if (!sourceTypes.includes(type)) sourceTypes.push(type);
+    evidence.push(`- ${description}`);
+  };
+
+  addEvidence(
+    Boolean(input.adoptedPreviousChapter?.content.trim()),
+    'adopted_chapter',
+    '前一章已采用正文：本章开场的最高权威终态。',
+  );
+  addEvidence(
+    Boolean(input.provisionalPreviousChapter?.content.trim()),
+    'provisional_candidate',
+    '前一章队列候选：仅作临时承接，不得覆盖正式采用事实。',
+  );
+  addEvidence(
+    Boolean(baseContext.previousContext?.trim()),
+    'context_record',
+    'ContextRecord：补足已沉淀的事件、伏笔和跨章状态。',
+  );
+  addEvidence(
+    Boolean(baseContext.worldStateTimeline?.trim()),
+    'world_state',
+    '持久化世界状态与时间线：按正式卷章顺序提供已采用章节的动态事实。',
+  );
+  addEvidence(
+    Boolean(input.retrievedMemoryContext?.trim()),
+    'memory_context',
+    '长期 Memory：补足可追踪的远期人物、物件、地点和规则事实。',
+  );
+  addEvidence(
+    Boolean(baseContext.characterStates?.trim()),
+    'character_state',
+    '人物动态状态：约束伤势、能力、关系和当前行动条件。',
+  );
+  addEvidence(
+    assetContext.sources.some((item) => item.type === 'location'),
+    'location',
+    '正式地点资产：约束地点身份、空间关系和已确认环境规则。',
+  );
+
+  if (sourceTypes.length === 0) return { sourceTypes };
+
+  return {
+    sourceTypes,
+    content: [
+      '本分区只供 Writer 承接跨章状态，不要在小说正文中复述规则或输出状态清单。',
+      '',
+      '本轮可用连续性证据：',
+      ...evidence,
+      '',
+      '事实优先级：前章已采用正文的明确终态 > 已确认的世界/人物/地点资产和人物动态状态 > ContextRecord 与长期 Memory > 本章大纲、工程计划和临时候选。低优先级内容不得静默改写高优先级事实；证据不确定时保留不确定性，不得擅自补成精确事实。',
+      '',
+      '只追踪材料中实际出现的连续性维度，不为填表补值。若已有相对时间或期限，沿用同一故事时钟与既定截止点，不因章节切换重新起算；到期后的变化必须在正文中有原因。',
+      '人物移动、关键物件归属或状态、伤势、设备或系统连接状态、人物知识发生变化时，正文必须给出可见的行动、时间经过或既有规则来源。未在材料中出现的维度无需建模。',
+      '',
+      '输出前只做一次静默连续性核对，核对过程不得写入正文。',
+    ].join('\n'),
+  };
+}
+
 function buildPromptText(sections: GenerationContextSection[]): string {
   return sections.map((section) => `## ${section.title}\n${section.content}`).join('\n\n---\n\n');
 }
@@ -188,9 +321,10 @@ function buildPromptSummary(
 ): string {
   const usedCount = sources.filter((item) => item.status === 'used').length;
   const missingCount = sources.filter((item) => item.status === 'missing').length;
-  const titles = sections.map((section) => section.title).join('、');
+  const publicSections = sections.filter((section) => section.key !== 'cross_chapter_continuity');
+  const titles = publicSections.map((section) => section.title).join('、');
   return [
-    `已编译 ${sections.length} 个上下文分区：${titles || '无'}`,
+    `已编译 ${publicSections.length} 个上下文分区：${titles || '无'}`,
     `来源：使用 ${usedCount} 项，缺失 ${missingCount} 项。`,
     warnings.length ? `警告：${warnings.join('；')}` : '警告：无。',
   ].join('\n');
@@ -278,228 +412,410 @@ function toDbInput(snapshot: ChapterGenerationSnapshot): SaveSnapshotDbInput {
   };
 }
 
-export const generationContextCompiler = {
-  async compile(input: CompileGenerationContextInput): Promise<ChapterGenerationSnapshot> {
-    const baseContext = await buildFreshChapterGenerationContext({
-      novelId: input.novelId,
-      volumeId: input.volumeId,
-      chapterId: input.chapterId,
-      userInstruction: input.userInstruction,
-      styleId: input.styleProfileId,
-      outputId: input.outputProfileId,
-    });
-    const engineeringBundle = await chapterEngineeringService.getBundle(input.chapterId);
-    const activeEngineeringState = input.engineeringStateId
-      ? engineeringBundle.states.find((item) => item.id === input.engineeringStateId)
-      : engineeringBundle.activeState;
-    const warnings: string[] = [];
-    if (!activeEngineeringState)
-      warnings.push('未找到 active 章节工程状态，快照仅包含旧式章节上下文。');
+export async function compileGenerationContextSnapshot(
+  input: CompileGenerationContextInput,
+  deps: GenerationContextCompilerDependencies = {},
+): Promise<ChapterGenerationSnapshot> {
+  const buildBaseContext = deps.buildBaseContext ?? buildFreshChapterGenerationContext;
+  const getEngineeringBundle =
+    deps.getEngineeringBundle ??
+    ((chapterId: string) => chapterEngineeringService.getBundle(chapterId));
+  const loadAssetContext = deps.loadAssetContext ?? loadGenerationAssetContext;
+  const baseContext = await buildBaseContext({
+    novelId: input.novelId,
+    volumeId: input.volumeId,
+    chapterId: input.chapterId,
+    userInstruction: input.userInstruction,
+    styleId: input.styleProfileId,
+    outputId: input.outputProfileId,
+  });
+  if (input.requireCoreAssets) assertRequiredCoreAssets(baseContext);
+  const engineeringBundle = await getEngineeringBundle(input.chapterId);
+  const activeEngineeringState = input.engineeringStateId
+    ? engineeringBundle.states.find((item) => item.id === input.engineeringStateId)
+    : engineeringBundle.activeState;
+  const warnings: string[] = [...(baseContext.contextWarnings ?? [])];
+  if (!activeEngineeringState)
+    warnings.push('未找到 active 章节工程状态，快照仅包含旧式章节上下文。');
+  if (!baseContext.styleProfile) warnings.push('未解析到活动风格方案，使用模型默认文风。');
+  if (!baseContext.outputProfile)
+    warnings.push('未解析到默认输出方案，使用章节字数与系统默认输出控制。');
 
-    const sections: GenerationContextSection[] = [];
+  const relevanceText = joinLines([
+    baseContext.chapterOutline,
+    baseContext.chapterGoal,
+    baseContext.chapterEvents,
+    baseContext.chapterCharacters,
+    baseContext.userInstruction,
+    activeEngineeringState ? formatEngineeringState(activeEngineeringState) : '',
+  ]);
+  const assetContext = await loadAssetContext(input.novelId, relevanceText);
+  warnings.push(...assetContext.warnings);
+
+  const sections: GenerationContextSection[] = [];
+  addSection(
+    sections,
+    'novel',
+    '作品与世界',
+    joinLines([
+      baseContext.novelTitle ? `作品：${baseContext.novelTitle}` : '',
+      baseContext.novelGenre ? `类型：${baseContext.novelGenre}` : '',
+      baseContext.novelDescription ? `简介：${baseContext.novelDescription}` : '',
+      baseContext.worldBackground ? `世界设定：\n${baseContext.worldBackground}` : '',
+      baseContext.ruleSystems ? `规则设定：\n${baseContext.ruleSystems}` : '',
+    ]),
+    ['novel', 'world_setting', 'rule_system'],
+  );
+  addSection(sections, 'world_settings', '补充世界设定', baseContext.chapterSettings, [
+    'world_setting',
+  ]);
+  addSection(
+    sections,
+    'world_state_timeline',
+    '持久化世界状态与时间线',
+    baseContext.worldStateTimeline,
+    ['world_state'],
+  );
+  addSection(
+    sections,
+    'protagonist',
+    '主角与角色',
+    joinLines([
+      baseContext.protagonistsSummary,
+      baseContext.dualProtagonistSummary,
+      baseContext.protagonistAppearance,
+      baseContext.chapterCharacters,
+      baseContext.requiredCharactersSummary,
+    ]),
+    ['protagonist', 'chapter_character'],
+  );
+  addSection(sections, 'character_states', '人物动态状态', baseContext.characterStates, [
+    'character_state',
+  ]);
+  addSection(
+    sections,
+    'outline',
+    '大纲与剧情锚点',
+    joinLines([
+      baseContext.masterOutline ? `全书大纲：\n${baseContext.masterOutline}` : '',
+      baseContext.volumeOutline ? `分卷大纲：\n${baseContext.volumeOutline}` : '',
+      baseContext.chapterOutline ? `章节大纲：\n${baseContext.chapterOutline}` : '',
+      baseContext.outlineChecklistText ? `执行清单：\n${baseContext.outlineChecklistText}` : '',
+      baseContext.chapterGoal ? `本章目标：${baseContext.chapterGoal}` : '',
+      baseContext.chapterEvents ? `本章事件：\n${baseContext.chapterEvents}` : '',
+    ]),
+    ['master_outline', 'volume_outline', 'chapter_outline', 'chapter_event'],
+  );
+  addSection(sections, 'story_assets', '相关势力与地点', assetContext.storyAssetText, [
+    'faction',
+    'location',
+  ]);
+  if (activeEngineeringState) {
     addSection(
       sections,
+      'engineering',
+      '章节工程状态',
+      formatEngineeringState(activeEngineeringState),
+      ['chapter_engineering'],
+    );
+  }
+  addSection(sections, 'context_records', '创作上下文包', baseContext.previousContext, [
+    'context_record',
+  ]);
+  addSection(sections, 'memory_context', '检索到的长期记忆事实', input.retrievedMemoryContext, [
+    'memory_context',
+  ]);
+  addSection(sections, 'user_instruction', '本轮用户创作指令', baseContext.userInstruction, [
+    'user_instruction',
+  ]);
+  addSection(
+    sections,
+    'adopted_previous_chapter',
+    '前一章已采用正文（权威连续性基线）',
+    input.adoptedPreviousChapter
+      ? [
+          `来源章节：${input.adoptedPreviousChapter.chapterId}`,
+          `来源草稿：${input.adoptedPreviousChapter.draftId}`,
+          `正文哈希：${input.adoptedPreviousChapter.contentHash}`,
+          '必须承接以下正文的最终场景、时间、人物、物件与系统状态；不得复述或重演已经发生的事件：',
+          input.adoptedPreviousChapter.content,
+        ].join('\n')
+      : undefined,
+    ['adopted_chapter'],
+    true,
+  );
+  addSection(
+    sections,
+    'provisional_previous_chapter',
+    '前一章候选承接（队列临时上下文）',
+    input.provisionalPreviousChapter
+      ? [
+          `来源章节：${input.provisionalPreviousChapter.chapterId}`,
+          `来源草稿：${input.provisionalPreviousChapter.draftId}`,
+          `正文哈希：${input.provisionalPreviousChapter.contentHash}`,
+          '以下内容只用于保持本轮候选连续性，尚未自动写入正式章节事实：',
+          input.provisionalPreviousChapter.content,
+        ].join('\n')
+      : undefined,
+    ['provisional_candidate'],
+    true,
+  );
+  addSection(
+    sections,
+    'style_output',
+    '风格与输出控制',
+    joinLines([
+      baseContext.styleProfile ? `风格方案：\n${baseContext.styleProfile}` : '',
+      baseContext.outputProfile ? `输出方案：\n${baseContext.outputProfile}` : '',
+      baseContext.targetWordCount ? `目标字数：${baseContext.targetWordCount}` : '',
+    ]),
+    ['style_profile', 'output_profile'],
+  );
+  addSection(
+    sections,
+    'reference_materials',
+    '参考资料约束',
+    assetContext.referenceText
+      ? [
+          '研究资料只用于事实与环境约束；灵感方向只用于抽象创作方向。不得复刻参考原句、专有角色或原作情节。',
+          assetContext.referenceText,
+        ].join('\n')
+      : undefined,
+    ['reference_material'],
+  );
+  addSection(sections, 'current_editor', '当前正文修改', input.currentEditorContent, [
+    'current_editor',
+  ]);
+  const continuityConstraintSection = buildContinuityConstraintSection({
+    input,
+    baseContext,
+    assetContext,
+  });
+  addSection(
+    sections,
+    'cross_chapter_continuity',
+    '跨章连续性硬约束（内部）',
+    continuityConstraintSection.content,
+    continuityConstraintSection.sourceTypes,
+  );
+
+  const primaryWorldSource = baseContext.worldSettingSources?.find(
+    (item) => item.role === 'primary',
+  );
+  const supplementalWorldSources =
+    baseContext.worldSettingSources?.filter((item) => item.role === 'supplemental') ?? [];
+  const sources: GenerationContextSource[] = [
+    source(
       'novel',
-      '作品与世界',
-      joinLines([
-        baseContext.novelTitle ? `作品：${baseContext.novelTitle}` : '',
-        baseContext.novelGenre ? `类型：${baseContext.novelGenre}` : '',
-        baseContext.novelDescription ? `简介：${baseContext.novelDescription}` : '',
-        baseContext.worldBackground ? `世界设定：\n${baseContext.worldBackground}` : '',
-        baseContext.ruleSystems ? `规则设定：\n${baseContext.ruleSystems}` : '',
-      ]),
-      ['novel', 'world_setting', 'rule_system'],
-    );
-    addSection(
-      sections,
+      '作品基础信息',
+      baseContext.novelTitle ? 'used' : 'missing',
+      baseContext.novelTitle,
+    ),
+    source(
+      'world_setting',
+      '世界设定',
+      baseContext.worldBackground ? 'used' : 'missing',
+      primaryWorldSource?.title,
+      primaryWorldSource?.id,
+    ),
+    ...supplementalWorldSources.map((item) =>
+      source(
+        'world_setting',
+        `补充世界设定：${item.title}`,
+        'used',
+        `updated_at=${item.updatedAt}`,
+        item.id,
+      ),
+    ),
+    source('rule_system', '规则设定', baseContext.ruleSystems ? 'used' : 'missing'),
+    ...(baseContext.worldStateTimeline
+      ? [
+          source(
+            'world_state',
+            '持久化世界状态与时间线',
+            'used',
+            baseContext.worldStateTimelineSource
+              ? [
+                  `chapters=${baseContext.worldStateTimelineSource.chapterCount}`,
+                  `summaries=${baseContext.worldStateTimelineSource.sourceSummaryIds.length}`,
+                  `context_records=${baseContext.worldStateTimelineSource.sourceContextRecordIds.length}`,
+                ].join(';')
+              : undefined,
+            baseContext.worldStateTimelineSource?.latestChapterId,
+          ),
+        ]
+      : []),
+    source(
       'protagonist',
-      '主角与角色',
-      joinLines([
-        baseContext.protagonistsSummary,
-        baseContext.dualProtagonistSummary,
-        baseContext.protagonistAppearance,
-        baseContext.chapterCharacters,
-        baseContext.requiredCharactersSummary,
-      ]),
-      ['protagonist', 'chapter_character'],
-    );
-    addSection(
-      sections,
-      'outline',
-      '大纲与剧情锚点',
-      joinLines([
-        baseContext.masterOutline ? `全书大纲：\n${baseContext.masterOutline}` : '',
-        baseContext.volumeOutline ? `分卷大纲：\n${baseContext.volumeOutline}` : '',
-        baseContext.chapterOutline ? `章节大纲：\n${baseContext.chapterOutline}` : '',
-        baseContext.outlineChecklistText ? `执行清单：\n${baseContext.outlineChecklistText}` : '',
-        baseContext.chapterGoal ? `本章目标：${baseContext.chapterGoal}` : '',
-        baseContext.chapterEvents ? `本章事件：\n${baseContext.chapterEvents}` : '',
-      ]),
-      ['master_outline', 'volume_outline', 'chapter_outline', 'chapter_event'],
-    );
-    if (activeEngineeringState) {
-      addSection(
-        sections,
-        'engineering',
-        '章节工程状态',
-        formatEngineeringState(activeEngineeringState),
-        ['chapter_engineering'],
-      );
-    }
-    addSection(sections, 'context_records', '创作上下文包', baseContext.previousContext, [
-      'context_record',
-    ]);
-    addSection(sections, 'user_instruction', '本轮用户创作指令', baseContext.userInstruction, [
+      '主角设定',
+      baseContext.protagonist?.trim() || baseContext.protagonistsSummary?.trim()
+        ? 'used'
+        : 'missing',
+    ),
+    source(
+      'master_outline',
+      '全书大纲',
+      baseContext.masterOutline ? 'used' : 'missing',
+      baseContext.masterOutlineSource,
+    ),
+    source(
+      'volume_outline',
+      '分卷大纲',
+      baseContext.volumeOutline ? 'used' : 'missing',
+      baseContext.volumeOutlineSource,
+    ),
+    source(
+      'chapter_outline',
+      '章节大纲',
+      baseContext.chapterOutline ? 'used' : 'missing',
+      baseContext.chapterOutlineSource,
+    ),
+    source(
+      'chapter_engineering',
+      '章节工程 active 状态',
+      activeEngineeringState ? 'used' : 'missing',
+      activeEngineeringState ? `v${activeEngineeringState.draftVersion}` : undefined,
+      activeEngineeringState?.id,
+    ),
+    source(
+      'chapter_character',
+      '本章角色',
+      baseContext.chapterCharacters ? 'used' : 'missing',
+      baseContext.requiredCharacterNames,
+    ),
+    ...(baseContext.characterStateSources?.length
+      ? baseContext.characterStateSources.map((item) =>
+          source(
+            'character_state',
+            `人物状态：${item.characterName}`,
+            'used',
+            item.chapterId
+              ? `来源章节=${item.chapterId};origin=${item.origin}`
+              : `origin=${item.origin}`,
+            item.id,
+          ),
+        )
+      : [
+          source(
+            'character_state',
+            '人物动态状态',
+            baseContext.characterStates ? 'used' : 'missing',
+          ),
+        ]),
+    source('chapter_event', '本章事件', baseContext.chapterEvents ? 'used' : 'missing'),
+    source('context_record', '创作上下文包', baseContext.previousContext ? 'used' : 'missing'),
+    source(
+      'memory_context',
+      '检索到的长期记忆事实',
+      input.retrievedMemoryContext?.trim() ? 'used' : 'missing',
+    ),
+    source(
       'user_instruction',
-    ]);
-    addSection(
-      sections,
-      'provisional_previous_chapter',
-      '前一章候选承接（队列临时上下文）',
-      input.provisionalPreviousChapter
-        ? [
-            `来源章节：${input.provisionalPreviousChapter.chapterId}`,
-            `来源草稿：${input.provisionalPreviousChapter.draftId}`,
-            `正文哈希：${input.provisionalPreviousChapter.contentHash}`,
-            '以下内容只用于保持本轮候选连续性，尚未自动写入正式章节事实：',
-            input.provisionalPreviousChapter.content,
-          ].join('\n')
-        : undefined,
-      ['provisional_candidate'],
-    );
-    addSection(
-      sections,
-      'style_output',
-      '风格与输出控制',
-      joinLines([
-        baseContext.styleProfile ? `风格方案：\n${baseContext.styleProfile}` : '',
-        baseContext.outputProfile ? `输出方案：\n${baseContext.outputProfile}` : '',
-        baseContext.targetWordCount ? `目标字数：${baseContext.targetWordCount}` : '',
-      ]),
-      ['style_profile', 'output_profile'],
-    );
-    addSection(sections, 'current_editor', '当前正文修改', input.currentEditorContent, [
+      '本轮用户创作指令',
+      baseContext.userInstruction ? 'used' : 'missing',
+    ),
+    source(
+      'adopted_chapter',
+      '前一章已采用正文承接',
+      input.adoptedPreviousChapter ? 'used' : 'missing',
+      input.adoptedPreviousChapter?.contentHash,
+      input.adoptedPreviousChapter?.draftId,
+    ),
+    source(
+      'provisional_candidate',
+      '前一章候选承接',
+      input.provisionalPreviousChapter ? 'used' : 'missing',
+      input.provisionalPreviousChapter?.contentHash,
+      input.provisionalPreviousChapter?.draftId,
+    ),
+    source(
+      'style_profile',
+      '风格方案',
+      baseContext.styleProfile ? 'used' : 'fallback',
+      input.styleProfileId,
+      input.styleProfileId,
+    ),
+    source(
+      'output_profile',
+      '输出控制',
+      baseContext.outputProfile ? 'used' : 'fallback',
+      input.outputProfileId,
+      input.outputProfileId,
+    ),
+    ...assetContext.sources,
+    ...(assetContext.sources.some((item) => item.type === 'faction')
+      ? []
+      : [source('faction', '势力资产', 'missing')]),
+    ...(assetContext.sources.some((item) => item.type === 'location')
+      ? []
+      : [source('location', '地点资产', 'missing')]),
+    ...(assetContext.sources.some((item) => item.type === 'reference_material')
+      ? []
+      : [source('reference_material', '参考资料', 'missing')]),
+    source(
       'current_editor',
-    ]);
-
-    const sources: GenerationContextSource[] = [
-      source(
-        'novel',
-        '作品基础信息',
-        baseContext.novelTitle ? 'used' : 'missing',
-        baseContext.novelTitle,
-      ),
-      source('world_setting', '世界设定', baseContext.worldBackground ? 'used' : 'missing'),
-      source('rule_system', '规则设定', baseContext.ruleSystems ? 'used' : 'missing'),
-      source(
-        'master_outline',
-        '全书大纲',
-        baseContext.masterOutline ? 'used' : 'missing',
-        baseContext.masterOutlineSource,
-      ),
-      source(
-        'volume_outline',
-        '分卷大纲',
-        baseContext.volumeOutline ? 'used' : 'missing',
-        baseContext.volumeOutlineSource,
-      ),
-      source(
-        'chapter_outline',
-        '章节大纲',
-        baseContext.chapterOutline ? 'used' : 'missing',
-        baseContext.chapterOutlineSource,
-      ),
-      source(
-        'chapter_engineering',
-        '章节工程 active 状态',
-        activeEngineeringState ? 'used' : 'missing',
-        activeEngineeringState ? `v${activeEngineeringState.draftVersion}` : undefined,
-        activeEngineeringState?.id,
-      ),
-      source(
-        'chapter_character',
-        '本章角色',
-        baseContext.chapterCharacters ? 'used' : 'missing',
-        baseContext.requiredCharacterNames,
-      ),
-      source('chapter_event', '本章事件', baseContext.chapterEvents ? 'used' : 'missing'),
-      source('context_record', '创作上下文包', baseContext.previousContext ? 'used' : 'missing'),
-      source(
-        'user_instruction',
-        '本轮用户创作指令',
-        baseContext.userInstruction ? 'used' : 'missing',
-      ),
-      source(
-        'provisional_candidate',
-        '前一章候选承接',
-        input.provisionalPreviousChapter ? 'used' : 'missing',
-        input.provisionalPreviousChapter?.contentHash,
-        input.provisionalPreviousChapter?.draftId,
-      ),
-      source(
-        'style_profile',
-        '风格方案',
-        baseContext.styleProfile ? 'used' : 'fallback',
-        input.styleProfileId,
-      ),
-      source(
-        'output_profile',
-        '输出控制',
-        baseContext.outputProfile ? 'used' : 'fallback',
-        input.outputProfileId,
-      ),
-      source(
-        'current_editor',
-        '当前正文修改',
-        input.currentEditorContent?.trim() ? 'used' : 'missing',
-      ),
-    ];
-    const compiledAt = nowISO();
-    const compiledContext: CompiledGenerationContext = {
-      chapterId: input.chapterId,
-      novelId: input.novelId,
-      volumeId: input.volumeId,
-      baseContext,
-      activeEngineeringState,
+      '当前正文修改',
+      input.currentEditorContent?.trim() ? 'used' : 'missing',
+    ),
+  ];
+  const compiledAt = nowISO();
+  const compiledContext: CompiledGenerationContext = {
+    chapterId: input.chapterId,
+    novelId: input.novelId,
+    volumeId: input.volumeId,
+    baseContext,
+    activeEngineeringState,
+    sections,
+    sources,
+    warnings,
+    compiledAt,
+  };
+  const compiledPromptText = buildPromptText(sections);
+  const promptSummary = buildPromptSummary(sections, sources, warnings);
+  const contextHash = hashTextContent(
+    stableStringify({
       sections,
       sources,
-      warnings,
-      compiledAt,
-    };
-    const compiledPromptText = buildPromptText(sections);
-    const promptSummary = buildPromptSummary(sections, sources, warnings);
-    const contextHash = hashTextContent(
-      stableStringify({
-        sections,
-        sources,
-        engineeringStateId: activeEngineeringState?.id,
-        styleProfileId: input.styleProfileId,
-        outputProfileId: input.outputProfileId,
-        provisionalPreviousChapter: input.provisionalPreviousChapter
-          ? {
-              chapterId: input.provisionalPreviousChapter.chapterId,
-              draftId: input.provisionalPreviousChapter.draftId,
-              contentHash: input.provisionalPreviousChapter.contentHash,
-            }
-          : undefined,
-      }),
-    );
-
-    return {
-      id: generateId(),
-      novelId: input.novelId,
-      volumeId: input.volumeId,
-      chapterId: input.chapterId,
       engineeringStateId: activeEngineeringState?.id,
       styleProfileId: input.styleProfileId,
       outputProfileId: input.outputProfileId,
-      compiledContext,
-      compiledPromptText,
-      promptSummary,
-      contextHash,
-      sources,
-      createdAt: compiledAt,
-    };
+      adoptedPreviousChapter: input.adoptedPreviousChapter
+        ? {
+            chapterId: input.adoptedPreviousChapter.chapterId,
+            draftId: input.adoptedPreviousChapter.draftId,
+            contentHash: input.adoptedPreviousChapter.contentHash,
+          }
+        : undefined,
+      provisionalPreviousChapter: input.provisionalPreviousChapter
+        ? {
+            chapterId: input.provisionalPreviousChapter.chapterId,
+            draftId: input.provisionalPreviousChapter.draftId,
+            contentHash: input.provisionalPreviousChapter.contentHash,
+          }
+        : undefined,
+    }),
+  );
+
+  return {
+    id: generateId(),
+    novelId: input.novelId,
+    volumeId: input.volumeId,
+    chapterId: input.chapterId,
+    engineeringStateId: activeEngineeringState?.id,
+    styleProfileId: input.styleProfileId,
+    outputProfileId: input.outputProfileId,
+    compiledContext,
+    compiledPromptText,
+    promptSummary,
+    contextHash,
+    sources,
+    createdAt: compiledAt,
+  };
+}
+
+export const generationContextCompiler = {
+  async compile(input: CompileGenerationContextInput): Promise<ChapterGenerationSnapshot> {
+    return compileGenerationContextSnapshot(input);
   },
 
   async compileAndSave(input: CompileGenerationContextInput): Promise<ChapterGenerationSnapshot> {

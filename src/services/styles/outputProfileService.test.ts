@@ -188,3 +188,42 @@ test('remove deletes only the requested profile and is idempotent for missing ID
   assert.equal(storage.getItem(OUTPUT_KEY), beforeMissingRemove);
   assert.deepEqual(await outputProfileService.getById(second.id), second);
 });
+
+test('setDefault keeps one default per scope and rejects cross-scope or missing targets', async () => {
+  const sharedFirst = await outputProfileService.create(profileInput('Shared first'));
+  const sharedSecond = await outputProfileService.create(profileInput('Shared second'));
+  const projectFirst = await outputProfileService.create(profileInput('Project first', 'novel-a'));
+  const projectSecond = await outputProfileService.create(
+    profileInput('Project second', 'novel-a'),
+  );
+
+  await outputProfileService.setDefault(undefined, sharedSecond.id);
+  await outputProfileService.setDefault('novel-a', projectSecond.id);
+
+  let stored = readStoredProfiles();
+  assert.deepEqual(
+    stored.filter((profile) => !profile.novelId && profile.isDefault).map((profile) => profile.id),
+    [sharedSecond.id],
+  );
+  assert.deepEqual(
+    stored
+      .filter((profile) => profile.novelId === 'novel-a' && profile.isDefault)
+      .map((profile) => profile.id),
+    [projectSecond.id],
+  );
+  assert.equal(stored.find((profile) => profile.id === sharedFirst.id)?.isDefault, false);
+  assert.equal(stored.find((profile) => profile.id === projectFirst.id)?.isDefault, false);
+
+  const beforeRejectedSwitch = storage.getItem(OUTPUT_KEY);
+  await assert.rejects(
+    outputProfileService.setDefault('novel-b', projectSecond.id),
+    /不存在或不属于当前作品/,
+  );
+  await assert.rejects(
+    outputProfileService.setDefault(undefined, 'missing-profile'),
+    /不存在或不属于当前作品/,
+  );
+  assert.equal(storage.getItem(OUTPUT_KEY), beforeRejectedSwitch);
+  stored = readStoredProfiles();
+  assert.equal(stored.find((profile) => profile.id === projectSecond.id)?.isDefault, true);
+});

@@ -5,7 +5,8 @@ import type { ChapterDraft } from '../../types/ai';
 
 const vite = await createServer({
   appType: 'custom',
-  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true },
+  server: { middlewareMode: true, hmr: false, watch: null },
 });
 const editorModule = await vite.ssrLoadModule('/src/components/workspace/EditorArea.tsx');
 const resolveEditorDraftContent =

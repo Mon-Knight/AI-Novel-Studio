@@ -23,7 +23,7 @@ async function loadPlugin() {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 }
 
-function createHarness(plugin, { persisted = false } = {}) {
+function createHarness(plugin, { persisted = false, attestationMode = 'valid' } = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const listeners = new Map();
@@ -37,6 +37,7 @@ function createHarness(plugin, { persisted = false } = {}) {
   let followupCount = 0;
   let cancelCount = 0;
   let disposeCount = 0;
+  let llmStreamCount = 0;
   let exitCode;
 
   output.on('data', (chunk) => {
@@ -136,6 +137,7 @@ function createHarness(plugin, { persisted = false } = {}) {
   const novelTools = [
     'mcp__novel__novel_read_context_1e2b3adf9a19',
     'mcp__novel__chapter_read_outline_68634582eb55',
+    'mcp__novel__get_character_states',
     'mcp__novel__generate_chapter',
     'mcp__novel__search_memory',
   ];
@@ -161,6 +163,41 @@ function createHarness(plugin, { persisted = false } = {}) {
         inputModalities: ['text'],
       },
     ],
+    async *stream(options) {
+      llmStreamCount += 1;
+      const tool = options.tools?.[0];
+      const nonce = tool?.parameters?.properties?.nonce?.enum?.[0];
+      if (attestationMode === 'valid') {
+        yield {
+          type: 'block-end',
+          index: 0,
+          block: {
+            type: 'tool-call',
+            id: `attestation-${llmStreamCount}`,
+            name: tool?.name,
+            arguments: JSON.stringify({ nonce }),
+          },
+        };
+        yield { type: 'finish', reason: { kind: 'tool-calls' } };
+        return;
+      }
+      if (attestationMode === 'wrong-nonce') {
+        yield {
+          type: 'block-end',
+          index: 0,
+          block: {
+            type: 'tool-call',
+            id: `attestation-${llmStreamCount}`,
+            name: tool?.name,
+            arguments: JSON.stringify({ nonce: 'wrong' }),
+          },
+        };
+        yield { type: 'finish', reason: { kind: 'tool-calls' } };
+        return;
+      }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: 'no tool call' } };
+      yield { type: 'finish', reason: { kind: 'stop' } };
+    },
   };
   const tools = {
     schemas: () => novelTools.map((name) => ({ name })),
@@ -243,11 +280,93 @@ function createHarness(plugin, { persisted = false } = {}) {
       followupCount,
       cancelCount,
       disposeCount,
+      llmStreamCount,
       exitCode,
       requestConfigs,
     }),
   };
 }
+
+test(
+  'model tool attestation proves a native nonce call without creating a session and caches only success',
+  { skip: carrierUnavailable },
+  async () => {
+    const plugin = await loadPlugin();
+    const harness = createHarness(plugin);
+    await harness.rpc('initialize', initializeParams);
+
+    const first = await harness.rpc('runtime/attest-model-tools', {
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+      nonce: 'nonce_a',
+    });
+    const second = await harness.rpc('runtime/attest-model-tools', {
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+      nonce: 'nonce_b',
+    });
+    const health = await harness.rpc('runtime/health', undefined, { omitParams: true });
+
+    assert.equal(first.protocol, 'ans_model_tool_attestation_v1');
+    assert.equal(first.verified, true);
+    assert.equal(first.cached, false);
+    assert.equal(first.cacheTtlMs, 600_000);
+    assert.equal(Date.parse(first.expiresAt) - Date.parse(first.verifiedAt), 600_000);
+    assert.equal(second.verified, true);
+    assert.equal(second.cached, true);
+    assert.equal(second.finishKind, 'tool-calls');
+    assert.equal(second.observedToolCalls, 1);
+    assert.equal(second.verifiedAt, first.verifiedAt);
+    assert.equal(second.expiresAt, first.expiresAt);
+    assert.equal(second.cacheTtlMs, 600_000);
+    assert.equal(harness.stats().llmStreamCount, 1);
+    assert.equal(harness.stats().createCount, 0);
+    assert.equal(harness.stats().resumeCount, 0);
+    assert.equal(harness.stats().followupCount, 0);
+    assert.deepEqual(health.modelToolAttestations, [
+      {
+        protocol: 'ans_model_tool_attestation_v1',
+        provider: 'deepseek-official',
+        model: 'deepseek-chat',
+        verified: true,
+        cached: false,
+        verifiedAt: first.verifiedAt,
+        expiresAt: first.expiresAt,
+        cacheTtlMs: 600_000,
+        finishKind: 'tool-calls',
+        observedToolCalls: 1,
+      },
+    ]);
+  },
+);
+
+test(
+  'model tool attestation rejects the wrong nonce and does not cache a failed probe',
+  { skip: carrierUnavailable },
+  async () => {
+    const plugin = await loadPlugin();
+    const harness = createHarness(plugin, { attestationMode: 'wrong-nonce' });
+    await harness.rpc('initialize', initializeParams);
+
+    const first = await harness.rpc('runtime/attest-model-tools', {
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+      nonce: 'nonce_a',
+    });
+    const second = await harness.rpc('runtime/attest-model-tools', {
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+      nonce: 'nonce_b',
+    });
+
+    assert.equal(first.verified, false);
+    assert.equal(first.failureCode, 'INVALID_TOOL_CALL');
+    assert.equal(second.verified, false);
+    assert.equal(second.cached, false);
+    assert.equal(harness.stats().llmStreamCount, 2);
+    assert.equal(harness.stats().createCount, 0);
+  },
+);
 
 const initializeParams = {
   cwd: resolve('.'),
@@ -320,6 +439,7 @@ for (const persisted of [false, true]) {
       assert.deepEqual(health.tools.global, [
         'mcp__novel__chapter_read_outline_68634582eb55',
         'mcp__novel__generate_chapter',
+        'mcp__novel__get_character_states',
         'mcp__novel__novel_read_context_1e2b3adf9a19',
         'mcp__novel__search_memory',
       ]);

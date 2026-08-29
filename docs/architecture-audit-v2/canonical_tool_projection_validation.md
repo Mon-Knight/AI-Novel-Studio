@@ -72,3 +72,7 @@ git diff --check
 - Context Agent、Memory Agent、Quality Agent 或多 Agent 已放行。
 
 下一阶段仍应先解决 Registry projection 与宿主执行门禁，不应把本报告解释为 Harness 闭环完成。
+
+## Phase 1A-D 后续验证
+
+共享 portable Manifest、跨语言 hash/drift 和版本化宿主执行门禁已在后续阶段完成，证据见 [`canonical_manifest_validation.md`](./canonical_manifest_validation.md)。Windows SQLite E2E 已比对 TS/Rust attestation；Canonical Agent 可见数仍为 0。该结果只关闭本报告中的 Manifest/宿主门禁缺口，不证明 Main Agent、DSH Canonical Tool 注册或 Writing SubAgent 已放行。

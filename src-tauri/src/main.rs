@@ -194,7 +194,10 @@ fn main() {
         window_state::write_focus_request,
         || {
             db::init_database();
-            runtime::append_e2e_log("startup: database initialized");
+            runtime::append_e2e_log(&format!(
+                "startup: database initialized elapsed_ms={}",
+                startup_at.elapsed().as_millis()
+            ));
             log_workspace_event(WorkspaceLogEvent {
                 level: "info",
                 event: "startup_database_ready",
@@ -321,10 +324,13 @@ fn main() {
             commands::content_transactions::get_location_asset,
             commands::content_transactions::list_location_assets,
             commands::conversations::create_task_conversation,
+            commands::conversations::create_initialized_task_conversation,
             commands::conversations::recover_task_runs,
             commands::conversations::list_task_conversations,
             commands::conversations::get_task_conversation,
             commands::conversations::update_task_conversation_model,
+            commands::conversations::rename_task_conversation,
+            commands::conversations::set_task_conversation_archived,
             commands::conversations::append_conversation_turn,
             commands::conversations::create_task_run,
             commands::conversations::update_task_run,
@@ -333,9 +339,11 @@ fn main() {
             commands::conversations::create_conversation_artifact_card,
             commands::conversations::publish_structured_candidate,
             commands::conversations::record_artifact_decision,
+            commands::conversations::apply_structured_artifact,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,
             commands::conversations::get_review_authorization,
+            commands::conversations::ensure_chapter_summary_follow_up,
             commands::conversations::adopt_review_authorized_draft,
             commands::recovery::get_workspace_recovery_snapshot,
             commands::recovery::upsert_workspace_recovery_snapshot,
@@ -479,6 +487,10 @@ fn main() {
             services::dsh::commands::dsh_list_current_plugins,
         ])
         .setup(move |app| {
+            runtime::append_e2e_log(&format!(
+                "startup: tauri setup ready elapsed_ms={}",
+                startup_at.elapsed().as_millis()
+            ));
             log_workspace_event(WorkspaceLogEvent {
                 level: "info",
                 event: "tauri_setup_ready",

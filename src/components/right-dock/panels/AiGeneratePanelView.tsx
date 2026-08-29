@@ -114,6 +114,7 @@ export function AiGeneratePanelView({
         novelId={novelId}
         chapterId={chapter.id}
         apiKey={settings.runtimeMode === 'api' ? settings.apiKey : undefined}
+        baseUrl={settings.runtimeMode === 'api' ? settings.baseUrl : undefined}
         modelName={settings.modelName}
       />
 

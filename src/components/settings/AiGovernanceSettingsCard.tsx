@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AiSettings } from '../../types/ai';
 import { aiRequestPolicyService } from '../../services/ai/aiRequestPolicyService';
 import { appLogger } from '../../services/observability/appLogger';
+import { DEFAULT_MAX_REQUESTS_PER_MINUTE } from '../../services/ai/aiSettingsStore';
 
 interface AiGovernanceSettingsCardProps {
   settings: AiSettings;
@@ -75,7 +76,7 @@ function AiGovernanceSettingsCard({
             type="number"
             min={1}
             max={120}
-            value={settings.maxRequestsPerMinute ?? 12}
+            value={settings.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE}
             onChange={(event) => onChange({ maxRequestsPerMinute: Number(event.target.value) })}
           />
         </label>

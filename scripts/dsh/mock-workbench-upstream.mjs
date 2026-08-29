@@ -8,7 +8,7 @@
  *
  * Environment:
  *   MOCK_WORKBENCH_PORT        Loopback port; 0/default asks the OS to choose.
- *   MOCK_WORKBENCH_MODE        normal | text-only | tool-error | delay | cancel
+ *   MOCK_WORKBENCH_MODE        normal | text-only | tool-error | delay | cancel | attestation-fail | attestation-delay
  *   MOCK_WORKBENCH_NOVEL_ID    novelId placed in scripted tool arguments.
  *   MOCK_WORKBENCH_CHAPTER_ID  chapterId placed in scripted tool arguments.
  *   MOCK_WORKBENCH_CANDIDATE_TEXT  generate_chapter candidate (never exposed in summaries).
@@ -27,13 +27,37 @@ import { setTimeout as delay } from 'node:timers/promises';
 const HOST = '127.0.0.1';
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_SAFE_NAME_CHARS = 200;
-const MODES = new Set(['normal', 'text-only', 'tool-error', 'delay', 'cancel']);
-const CONTEXT_TOOLS = ['novel.read_context', 'chapter.read_outline', 'search_memory'];
+const MAX_RANDOM_PORT_ATTEMPTS = 32;
+// WHATWG Fetch blocks these ports before a loopback request reaches the mock.
+const FETCH_FORBIDDEN_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
+  103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465,
+  512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993,
+  995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668,
+  6669, 6679, 6697, 10080,
+]);
+const MODES = new Set([
+  'normal',
+  'text-only',
+  'tool-error',
+  'delay',
+  'cancel',
+  'attestation-fail',
+  'attestation-delay',
+]);
+const CONTEXT_TOOLS = [
+  'novel.read_context',
+  'chapter.read_outline',
+  'get_character_states',
+  'search_memory',
+];
 const GENERATE_TOOL = 'generate_chapter';
+const MODEL_TOOL_ATTESTATION_NAME = 'ans_runtime_attest_tool_call_v1';
 
 const TOOL_MARKERS = new Map([
   ['novel.read_context', ['novel_read_context', 'get_metadata']],
   ['chapter.read_outline', ['chapter_read_outline', 'get_chapter_context']],
+  ['get_character_states', ['get_character_states']],
   ['search_memory', ['search_memory']],
   [GENERATE_TOOL, ['generate_chapter']],
 ]);
@@ -84,13 +108,17 @@ function resolveMode(value) {
 function resolveOptions(options = {}) {
   const mode = resolveMode(options.mode ?? process.env.MOCK_WORKBENCH_MODE);
   const defaultDelay = mode === 'cancel' ? 30_000 : mode === 'delay' ? 150 : 0;
+  const port = integerOption(
+    options.port ?? process.env.MOCK_WORKBENCH_PORT ?? 0,
+    'MOCK_WORKBENCH_PORT',
+    { minimum: 0, maximum: 65_535 },
+  );
+  if (port !== 0 && FETCH_FORBIDDEN_PORTS.has(port)) {
+    throw new TypeError(`MOCK_WORKBENCH_PORT ${port} is forbidden by the Fetch standard`);
+  }
   return Object.freeze({
     mode,
-    port: integerOption(
-      options.port ?? process.env.MOCK_WORKBENCH_PORT ?? 0,
-      'MOCK_WORKBENCH_PORT',
-      { minimum: 0, maximum: 65_535 },
-    ),
+    port,
     novelId: nonEmptyOption(
       options.novelId ?? process.env.MOCK_WORKBENCH_NOVEL_ID,
       'MOCK_WORKBENCH_NOVEL_ID',
@@ -112,6 +140,36 @@ function resolveOptions(options = {}) {
       { minimum: 0, maximum: 120_000 },
     ),
   });
+}
+
+function listen(server, port) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, HOST, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+function stopListening(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+async function bindFetchSafePort(server, requestedPort) {
+  for (let attempt = 0; attempt < MAX_RANDOM_PORT_ATTEMPTS; attempt += 1) {
+    await listen(server, requestedPort);
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      await stopListening(server);
+      throw new Error('mock upstream did not bind a TCP port');
+    }
+    if (!FETCH_FORBIDDEN_PORTS.has(address.port)) return address;
+    await stopListening(server);
+  }
+  throw new Error('mock upstream could not allocate a Fetch-compatible random port');
 }
 
 function normalizedToolName(value) {
@@ -195,6 +253,7 @@ function toolArguments(canonical, options, { invalid = false } = {}) {
     case 'novel.read_context':
       return { novelId: options.novelId };
     case 'chapter.read_outline':
+    case 'get_character_states':
       return { novelId: options.novelId, chapterId: options.chapterId };
     case 'search_memory':
       return {
@@ -235,6 +294,36 @@ function createPlan(body, options, sequence) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const { actualNames, byCanonical } = wireTools(body);
   const alreadyCalled = calledTools(messages);
+
+  const attestationTool = (Array.isArray(body.tools) ? body.tools : []).find(
+    (tool) => tool?.type === 'function' && tool?.function?.name === MODEL_TOOL_ATTESTATION_NAME,
+  );
+  if (attestationTool !== undefined) {
+    if (options.mode === 'attestation-fail') {
+      return {
+        kind: 'text',
+        phase: 'attestation-fail',
+        text: 'attestation not verified',
+        advertisedToolNames: actualNames,
+      };
+    }
+    const nonce = attestationTool.function?.parameters?.properties?.nonce?.enum?.[0];
+    if (typeof nonce !== 'string' || nonce.length === 0) {
+      throw new ContractError('attestation tool is missing its exact nonce schema');
+    }
+    return {
+      kind: 'tools',
+      phase: 'model-tool-attestation',
+      calls: [
+        {
+          id: `call_mock_${sequence}_attestation`,
+          name: MODEL_TOOL_ATTESTATION_NAME,
+          arguments: JSON.stringify({ nonce }),
+        },
+      ],
+      advertisedToolNames: actualNames,
+    };
+  }
 
   if (options.mode === 'text-only') {
     return {
@@ -373,7 +462,11 @@ async function streamPlan(response, body, plan, options, summary, signal) {
     ]),
   );
 
-  if (options.mode === 'delay' || options.mode === 'cancel') {
+  if (
+    (plan.phase !== 'model-tool-attestation' &&
+      (options.mode === 'delay' || options.mode === 'cancel')) ||
+    (plan.phase === 'model-tool-attestation' && options.mode === 'attestation-delay')
+  ) {
     await waitForScriptDelay(options, signal);
   }
 
@@ -610,19 +703,7 @@ export async function startMockWorkbenchUpstream(options = {}) {
     response.writeHead(404).end();
   });
 
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(resolved.port, HOST, () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-
-  const address = server.address();
-  if (address === null || typeof address === 'string') {
-    await new Promise((resolve) => server.close(resolve));
-    throw new Error('mock upstream did not bind a TCP port');
-  }
+  const address = await bindFetchSafePort(server, resolved.port);
   const baseUrl = `http://${HOST}:${address.port}`;
   state.baseUrl = baseUrl;
   let closeTask;

@@ -6,6 +6,7 @@ interface VolumeTreeDialogsProps {
   newVolumeTitle: string;
   showNewChapter: boolean;
   newChapterTitle: string;
+  newChapterTargetWordCount: string;
   newChapterVolumeId: string;
   creating: boolean;
   volumePlaceholder: string;
@@ -13,6 +14,7 @@ interface VolumeTreeDialogsProps {
   onCloseChapter: () => void;
   onVolumeTitleChange: (value: string) => void;
   onChapterTitleChange: (value: string) => void;
+  onChapterTargetWordCountChange: (value: string) => void;
   onChapterVolumeChange: (value: string) => void;
   onCreateVolume: () => void;
   onCreateChapter: () => void;
@@ -24,6 +26,7 @@ export function VolumeTreeDialogs({
   newVolumeTitle,
   showNewChapter,
   newChapterTitle,
+  newChapterTargetWordCount,
   newChapterVolumeId,
   creating,
   volumePlaceholder,
@@ -31,6 +34,7 @@ export function VolumeTreeDialogs({
   onCloseChapter,
   onVolumeTitleChange,
   onChapterTitleChange,
+  onChapterTargetWordCountChange,
   onChapterVolumeChange,
   onCreateVolume,
   onCreateChapter,
@@ -125,6 +129,24 @@ export function VolumeTreeDialogs({
                   onKeyDown={(event) => event.key === 'Enter' && onCreateChapter()}
                 />
               </div>
+              <div>
+                <label className="panel-field-label" htmlFor="chapter-target-word-count">
+                  目标字数
+                </label>
+                <input
+                  id="chapter-target-word-count"
+                  type="number"
+                  className="form-input"
+                  data-testid="chapter-target-word-count"
+                  value={newChapterTargetWordCount}
+                  min={500}
+                  max={20000}
+                  step={100}
+                  onChange={(event) => onChapterTargetWordCountChange(event.target.value)}
+                  style={{ width: '100%' }}
+                  disabled={creating}
+                />
+              </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button
                   className="btn btn-secondary btn-sm"
@@ -137,7 +159,12 @@ export function VolumeTreeDialogs({
                   className="btn btn-primary btn-sm"
                   data-testid="chapter-create-submit"
                   onClick={onCreateChapter}
-                  disabled={creating || !newChapterTitle.trim()}
+                  disabled={
+                    creating ||
+                    !newChapterTitle.trim() ||
+                    Number(newChapterTargetWordCount) < 500 ||
+                    Number(newChapterTargetWordCount) > 20000
+                  }
                 >
                   {creating ? '创建中...' : '创建'}
                 </button>

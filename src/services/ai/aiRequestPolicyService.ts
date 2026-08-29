@@ -2,6 +2,7 @@ import type { AiGenerateRequest, AiGenerateResponse, AiSettings } from '../../ty
 import { normalizeAppError } from '../../types/appError';
 import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 import { calculateAiUsageCost, createAiPricingSnapshot } from './aiCost';
+import { DEFAULT_MAX_REQUESTS_PER_MINUTE } from './aiSettingsStore';
 
 const LEDGER_KEY = 'ai_novel_studio_ai_request_ledger_v1';
 const MINUTE_MS = 60_000;
@@ -335,7 +336,7 @@ function pricingPair(settings: AiSettings): {
 
 function desktopPolicyInput(settings: AiSettings) {
   return {
-    maxRequestsPerMinute: settings.maxRequestsPerMinute ?? 12,
+    maxRequestsPerMinute: settings.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE,
     maxConcurrentRequests: settings.maxConcurrentAiRequests ?? 2,
     dailyTokenBudget: settings.dailyTokenBudget,
     dailyCostBudgetUsd: settings.dailyCostBudgetUsd,
@@ -470,7 +471,7 @@ export const aiRequestPolicyService = {
   begin(settings: AiSettings, request: AiGenerateRequest, now = Date.now()): AiRequestPolicyLease {
     requirePricingForCostBudget(settings);
     const ledger = readLedger(now);
-    const maxPerMinute = settings.maxRequestsPerMinute ?? 12;
+    const maxPerMinute = settings.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE;
     const maxConcurrent = settings.maxConcurrentAiRequests ?? 2;
     if (ledger.requestStartedAt.length >= maxPerMinute) {
       throw new AiRequestPolicyError(

@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "@wdio/globals", "mocha"]
+  },
+  "include": [
+    "conversation-60000.spec.ts",
+    "chapter-word-count-contract.test.ts",
+    "chapter-word-count-contract.ts",
+    "wdio.conf.ts",
+    "../../src/vite-env.d.ts",
+    "../../scripts/e2e/real-conversation-acceptance-profile.ts",
+    "../../scripts/e2e/run-real-conversation-acceptance.ts"
+  ]
+}

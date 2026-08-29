@@ -1,8 +1,10 @@
 # AI Novel Studio Phase 1A：能力资产化实施任务书
 
 版本：v3.6.0 / Phase 1A-A（Capability Assetization）  
-状态：**当前执行阶段**  
+状态：**COMPLETED / HISTORICAL TASKBOOK**
 前置阶段：`Phase 0.5 — Model / Provider Infrastructure Verified`
+
+> 当前校正：本任务书保存 Phase 1A-A 的原始执行范围与汇报模板，不再是当前执行阶段。v3.6.0 候选已经完成 1A-A Capability Catalog、1A-B Domain Facade、1A-C Canonical Projection 和 1A-D portable Manifest/宿主门禁；四个 Canonical Tool 仍为 `catalog_only + partial`，模型可见数为 `0`。下一门禁是关闭四项 Facade blocker，再做独立 exposure；通过后才进入 R4 真实 Main Agent Runtime 验证。本文不授权任何后继阶段。
 
 ## 1. 阶段定位
 
@@ -163,3 +165,21 @@ Agent 可见条目：0（本阶段固定）
 ```
 
 只有 G0 清单完整、G1 首批 facade 的真实调用链和负例证据齐全，才能单独启动 Phase 1A-B（canonical Tool Registry 投影）；之后才评估 Main Agent 和 Writing SubAgent。
+
+## 8. 后继状态记录
+
+上面的“下一阶段准入：G1 facade / NOT READY”和 Phase 1A-B 顺序是本任务执行时的历史验收模板。当前后继顺序以 [`phase1a_real_agent_taskbook.md`](./phase1a_real_agent_taskbook.md) 和 Canonical 验证报告为准：
+
+```text
+1A-A/B/C/D 已验证，model visible = 0
+        ↓
+关闭 novel/structure/context/memory 四项 Facade blocker
+        ↓
+独立 Canonical exposure 变更与 scoped Tool 投影验证
+        ↓
+R4 真实 Main Agent Runtime 验证
+        ↓
+后续 legacy 隔离与 Writing SubAgent
+```
+
+该记录不创建新版本、不创建新任务书，也不授权 exposure、R4、提交、tag 或发布。

@@ -24,11 +24,8 @@ import {
   writingCapability,
 } from '../capabilities/domain';
 import type { DomainResult } from '../capabilities/domain';
-import {
-  getCanonicalToolManifest,
-  invokeCanonicalTool,
-  listCanonicalToolsForAgent,
-} from '../capabilities/canonical';
+import { getCanonicalToolManifest, listCanonicalToolsForAgent } from '../capabilities/canonical';
+import { executeCanonicalToolForHostValidation } from '../capabilities/canonical/canonicalToolRuntime';
 
 export interface DomainFacadeSqliteSmokeEvidence {
   storageMode: 'sqlite';
@@ -67,7 +64,11 @@ export interface DomainFacadeSqliteSmokeEvidence {
     };
   };
   canonical: {
+    canonicalization: string;
+    projectionHash: string;
     manifestToolIds: string[];
+    manifestToolIdentities: string[];
+    modelVisibleToolIdentities: string[];
     agentVisibleCount: number;
     project: {
       source: string;
@@ -202,7 +203,7 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
   }
 
   const canonicalManifest = await getCanonicalToolManifest();
-  const canonicalAgentTools = listCanonicalToolsForAgent();
+  const canonicalAgentTools = await listCanonicalToolsForAgent();
   if (
     canonicalManifest.tools.map((tool) => tool.id).join(',') !==
       ['context.read', 'memory.search', 'novel.read', 'structure.read'].join(',') ||
@@ -211,42 +212,49 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
     throw new Error('Canonical projection gate or stable ordering changed unexpectedly.');
   }
   const canonicalContext = {
+    invocationId: `e2e-canonical-${suffix}`,
+    allowedTools: canonicalManifest.tools.map((tool) => `${tool.id}@${tool.version}`),
     novelId: novel.id,
     chapterId: chapter.id,
     grantedPermissions: ['novel.read', 'chapter.read'],
   } as const;
-  const canonicalProjectResult = (await invokeCanonicalTool(
-    'novel.read',
-    { novelId: novel.id },
-    canonicalContext,
-  )) as DomainResult<{ project: typeof projectData.project }>;
+  const runCanonical = (name: string, argumentsJson: unknown) =>
+    executeCanonicalToolForHostValidation(
+      {
+        name,
+        version: '1',
+        argumentsJson,
+        expectedProjectionHash: canonicalManifest.projectionHash,
+      },
+      canonicalContext,
+    );
+  const canonicalProjectResult = (await runCanonical('novel.read', {
+    novelId: novel.id,
+  })) as DomainResult<{ project: typeof projectData.project }>;
   const canonicalProject = requireSqlite<{ project: typeof projectData.project }>(
     'canonical novel.read',
     canonicalProjectResult,
   );
-  const canonicalPositionResult = (await invokeCanonicalTool(
-    'structure.read',
-    { novelId: novel.id, chapterId: chapter.id },
-    canonicalContext,
-  )) as DomainResult<{ chapter: typeof positionData.chapter }>;
+  const canonicalPositionResult = (await runCanonical('structure.read', {
+    novelId: novel.id,
+    chapterId: chapter.id,
+  })) as DomainResult<{ chapter: typeof positionData.chapter }>;
   const canonicalPosition = requireSqlite<{ chapter: typeof positionData.chapter }>(
     'canonical structure.read',
     canonicalPositionResult,
   );
-  const canonicalStoryResult = (await invokeCanonicalTool(
-    'context.read',
-    { novelId: novel.id, chapterId: chapter.id },
-    canonicalContext,
-  )) as DomainResult<{ chapter: typeof contextData.chapter }>;
+  const canonicalStoryResult = (await runCanonical('context.read', {
+    novelId: novel.id,
+    chapterId: chapter.id,
+  })) as DomainResult<{ chapter: typeof contextData.chapter }>;
   const canonicalStory = requireSqlite<{ chapter: typeof contextData.chapter }>(
     'canonical context.read',
     canonicalStoryResult,
   );
-  const canonicalMemoryResult = (await invokeCanonicalTool(
-    'memory.search',
-    { novelId: novel.id, query: 'SQLite canonical memory' },
-    canonicalContext,
-  )) as DomainResult<{ items: unknown[] }>;
+  const canonicalMemoryResult = (await runCanonical('memory.search', {
+    novelId: novel.id,
+    query: 'SQLite canonical memory',
+  })) as DomainResult<{ items: unknown[] }>;
   const canonicalMemory = requireSuccess<{ items: unknown[] }>(
     'canonical memory.search',
     canonicalMemoryResult,
@@ -256,11 +264,10 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
       `canonical memory.search returned an unexpected source: ${canonicalMemoryResult.source}`,
     );
   }
-  const legacyAlias = await invokeCanonicalTool(
-    'chapter.read_outline',
-    { novelId: novel.id, chapterId: chapter.id },
-    canonicalContext,
-  );
+  const legacyAlias = await runCanonical('chapter.read_outline', {
+    novelId: novel.id,
+    chapterId: chapter.id,
+  });
   if (legacyAlias.ok || legacyAlias.error?.code !== 'NOT_FOUND') {
     throw new Error('Canonical projection accepted a legacy technical alias.');
   }
@@ -419,7 +426,11 @@ export async function runDomainFacadeSqliteSmoke(): Promise<DomainFacadeSqliteSm
       },
     },
     canonical: {
+      canonicalization: canonicalManifest.canonicalization,
+      projectionHash: canonicalManifest.projectionHash,
       manifestToolIds: canonicalManifest.tools.map((tool) => tool.id),
+      manifestToolIdentities: canonicalManifest.tools.map((tool) => `${tool.id}@${tool.version}`),
+      modelVisibleToolIdentities: [...canonicalManifest.modelVisibleToolIdentities],
       agentVisibleCount: canonicalAgentTools.length,
       project: {
         source: canonicalProjectResult.source,

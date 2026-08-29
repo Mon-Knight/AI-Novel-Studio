@@ -691,6 +691,20 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml commands::app_update::t
 
 ---
 
+### 2.24 Canonical Manifest 跨语言漂移门禁
+
+```powershell
+npm run test:canonical-manifest
+npm run test:workbench
+npm run test:e2e -- --spec domain-facade-sqlite.spec.ts
+```
+
+`test:canonical-manifest` 由三套独立实现验证同一个 `contracts/agent/canonical-tool-manifest.v1.json`：Node/DSH 复算 portable hash 并检查 legacy 隔离；TypeScript 校验 Catalog、固定 adapter、动态 projection、版本/hash/exposure/allowlist/permission/schema 门禁；Rust 通过 `include_str!` 嵌入并独立复算 hash。Windows E2E 进一步比较 TS/Rust attestation，并验证四个 host-validation read Tool 进入真实 SQLite Facade 链。
+
+当前必须保持 `modelVisibleToolIdentities=[]`。这只表示 Canonical Tool 尚未向 Agent 放行；既有 DSH Workbench legacy allowlist 仍存在，测试不得把两者混写成“DSH 全局 Tool 数为 0”。共享 artifact 不得自动注入 `productionToolRegistry`、`WORKBENCH_TOOLS`、`ANS_ALLOWED_TOOLS`、DSH `tools/list` 或 Main Agent prompt。
+
+---
+
 ## 3. 专项运行时回归
 
 ```powershell

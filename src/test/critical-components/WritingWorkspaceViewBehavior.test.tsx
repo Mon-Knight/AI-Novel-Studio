@@ -1,6 +1,6 @@
 import { forwardRef } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WritingWorkspaceView from '../../pages/WritingWorkspace/WritingWorkspaceView';
 import type { ChapterDraft } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
@@ -89,9 +89,11 @@ vi.mock('../../components/workspace/EditorArea', () => ({
       <button type="button" onClick={() => (props.onRetryContent as () => void)()}>
         editor-retry
       </button>
-      <button type="button" onClick={() => (props.onOpenDraftHistory as () => void)()}>
-        editor-history
-      </button>
+      {typeof props.onOpenDraftHistory === 'function' && (
+        <button type="button" onClick={() => (props.onOpenDraftHistory as () => void)()}>
+          editor-history
+        </button>
+      )}
       <button type="button" onClick={() => (props.onBackToChapters as () => void)()}>
         editor-back
       </button>
@@ -154,90 +156,96 @@ vi.mock('../../components/right-dock/panels/DraftHistoryPanel', () => ({
 }));
 
 vi.mock('../../components/right-dock/RightPanel', () => ({
-  default: (props: Record<string, unknown>) => (
-    <div data-testid="mock-right-panel">
-      <button type="button" onClick={() => void (props.onClose as () => Promise<void>)()}>
-        right-close
-      </button>
-      <button
-        type="button"
-        onClick={() => (props.onGenerated as (draft: ChapterDraft) => void)(fixtureDraft)}
-      >
-        right-generated
-      </button>
-      <button type="button" onClick={() => (props.onAdopted as () => void)()}>
-        right-adopted
-      </button>
-      <button
-        type="button"
-        onClick={() => void (props.onBeforeDocumentChange as () => Promise<boolean>)()}
-      >
-        right-before
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          void (props.onChapterOutlineApplied as (id: string) => Promise<void>)('chapter-1')
-        }
-      >
-        right-outline
-      </button>
-      <button
-        type="button"
-        onClick={() => (props.onChapterGoalDirtyChange as (dirty: boolean) => void)(true)}
-      >
-        right-goal
-      </button>
-      <button type="button" onClick={() => (props.onChapterCharactersChanged as () => void)()}>
-        right-characters
-      </button>
-      <button
-        type="button"
-        onClick={() => (props.onLocateText as (a: number, b: number) => void)(1, 2)}
-      >
-        right-locate
-      </button>
-      <button
-        type="button"
-        onClick={() => (props.onQcChange as (report: null, items: []) => void)(null, [])}
-      >
-        right-quality
-      </button>
-      <button type="button" onClick={() => (props.showAiModal as (title: string) => void)('标题')}>
-        right-show-modal
-      </button>
-      <button
-        type="button"
-        onClick={() => (props.updateAiModal as (stage: string, value: number) => void)('阶段', 50)}
-      >
-        right-update-modal
-      </button>
-      <button type="button" onClick={() => (props.hideAiModal as () => void)()}>
-        right-hide-modal
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          (props.onUpdateToolState as (key: string, patch: Record<string, unknown>) => void)(
-            'check',
-            { loading: true },
-          )
-        }
-      >
-        right-tool-state
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          void (props.onApplyAiText as (value: Record<string, unknown>) => Promise<boolean>)({
-            text: '候选',
-          })
-        }
-      >
-        right-apply-text
-      </button>
-    </div>
-  ),
+  default: (props: Record<string, unknown>) =>
+    props.panelType ? (
+      <div data-testid="mock-right-panel">
+        <button type="button" onClick={() => void (props.onClose as () => Promise<void>)()}>
+          right-close
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.onGenerated as (draft: ChapterDraft) => void)(fixtureDraft)}
+        >
+          right-generated
+        </button>
+        <button type="button" onClick={() => (props.onAdopted as () => void)()}>
+          right-adopted
+        </button>
+        <button
+          type="button"
+          onClick={() => void (props.onBeforeDocumentChange as () => Promise<boolean>)()}
+        >
+          right-before
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            void (props.onChapterOutlineApplied as (id: string) => Promise<void>)('chapter-1')
+          }
+        >
+          right-outline
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.onChapterGoalDirtyChange as (dirty: boolean) => void)(true)}
+        >
+          right-goal
+        </button>
+        <button type="button" onClick={() => (props.onChapterCharactersChanged as () => void)()}>
+          right-characters
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.onLocateText as (a: number, b: number) => void)(1, 2)}
+        >
+          right-locate
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.onQcChange as (report: null, items: []) => void)(null, [])}
+        >
+          right-quality
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.showAiModal as (title: string) => void)('标题')}
+        >
+          right-show-modal
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            (props.updateAiModal as (stage: string, value: number) => void)('阶段', 50)
+          }
+        >
+          right-update-modal
+        </button>
+        <button type="button" onClick={() => (props.hideAiModal as () => void)()}>
+          right-hide-modal
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            (props.onUpdateToolState as (key: string, patch: Record<string, unknown>) => void)(
+              'check',
+              { loading: true },
+            )
+          }
+        >
+          right-tool-state
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            void (props.onApplyAiText as (value: Record<string, unknown>) => Promise<boolean>)({
+              text: '候选',
+            })
+          }
+        >
+          right-apply-text
+        </button>
+      </div>
+    ) : null,
 }));
 
 vi.mock('../../components/chapter-summary/ChapterSummaryDialog', () => ({
@@ -346,7 +354,7 @@ function baseProps(): React.ComponentProps<typeof WritingWorkspaceView> {
       aiModal: { running: false, title: '', stage: '', progress: 0 },
     },
     sidebarState: {
-      activeTool: 'draft-history',
+      activeTool: 'chapter-summary',
       collapsed: false,
       lastActiveTool: 'check',
       toolStates: {},
@@ -459,8 +467,12 @@ beforeEach(() => {
   vi.spyOn(nativeDialog, 'showInfo').mockResolvedValue();
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('WritingWorkspaceView', () => {
-  it('wires editor, tree, history, toolbar and right-panel callbacks', () => {
+  it('wires editor, tree, toolbar and current right-panel callbacks', () => {
     const props = baseProps();
     render(<WritingWorkspaceView {...props} />);
     [
@@ -475,14 +487,9 @@ describe('WritingWorkspaceView', () => {
       'editor-outline',
       'editor-locate',
       'editor-retry',
-      'editor-history',
       'editor-back',
       'toolbar-toggle',
       'toolbar-command',
-      'history-before',
-      'history-load',
-      'history-adopt',
-      'history-close',
       'right-close',
       'right-generated',
       'right-adopted',
@@ -499,7 +506,49 @@ describe('WritingWorkspaceView', () => {
       'right-apply-text',
     ].forEach((name) => fireEvent.click(screen.getByRole('button', { name })));
     fireEvent.click(document.querySelector('.workspace-editor') as HTMLElement);
+    expect(screen.queryByRole('button', { name: 'editor-history' })).toBeNull();
+    expect(screen.queryByTestId('mock-history')).toBeNull();
     expect(mocks.childCalls).toHaveBeenCalled();
+  });
+
+  it('keeps the draft rollback surface behind the E2E build flag', () => {
+    vi.stubEnv('VITE_AI_NOVEL_STUDIO_E2E', '1');
+    const props = baseProps();
+
+    render(
+      <WritingWorkspaceView
+        {...props}
+        sidebarState={{ ...props.sidebarState, activeTool: 'draft-history' }}
+      />,
+    );
+
+    ['editor-history', 'history-before', 'history-load', 'history-adopt', 'history-close'].forEach(
+      (name) => fireEvent.click(screen.getByRole('button', { name })),
+    );
+    expect(screen.getByTestId('mock-history')).not.toBeNull();
+    expect(screen.queryByTestId('mock-right-panel')).toBeNull();
+  });
+
+  it('does not render retired production panels from stale sidebar state', () => {
+    const props = baseProps();
+    const view = render(
+      <WritingWorkspaceView
+        {...props}
+        sidebarState={{ ...props.sidebarState, activeTool: 'draft-history' }}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'editor-history' })).toBeNull();
+    expect(screen.queryByTestId('mock-history')).toBeNull();
+    expect(screen.queryByTestId('mock-right-panel')).toBeNull();
+
+    view.rerender(
+      <WritingWorkspaceView
+        {...props}
+        sidebarState={{ ...props.sidebarState, activeTool: 'ai-generate' }}
+      />,
+    );
+    expect(screen.queryByTestId('mock-right-panel')).toBeNull();
   });
 
   it('renders loading, failures, empty works, blocked content and summary/recovery states', () => {
@@ -511,6 +560,10 @@ describe('WritingWorkspaceView', () => {
       />,
     );
     expect(screen.getByText('正在加载写作工作台...')).not.toBeNull();
+    expect(screen.getByTestId('workspace-document-loading')).not.toBeNull();
+    expect(document.querySelector('.workspace-sidebar')).not.toBeNull();
+    expect(document.querySelector('.workspace-toolbar-skeleton')).not.toBeNull();
+    expect(document.querySelector('.workspace-full-state')).toBeNull();
 
     view.rerender(
       <WritingWorkspaceView
@@ -524,7 +577,7 @@ describe('WritingWorkspaceView', () => {
       />,
     );
     screen.getAllByRole('button', { name: /返回/ }).forEach((button) => fireEvent.click(button));
-    fireEvent.click(screen.getByRole('button', { name: /修复本地数据/ }));
+    fireEvent.click(screen.getByRole('button', { name: /检查本地数据/ }));
 
     view.rerender(
       <WritingWorkspaceView
@@ -606,7 +659,7 @@ describe('WritingWorkspaceView', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /重试/ }));
-    fireEvent.click(screen.getByRole('button', { name: '✕' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭错误' }));
   });
 
   it('keeps dirty editor content when adoption finishes and reloads a clean editor', () => {

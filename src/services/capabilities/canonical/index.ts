@@ -1,9 +1,9 @@
 export * from './canonicalToolTypes';
 export {
-  CANONICAL_TOOL_BINDINGS,
-  getCanonicalToolBinding,
-  isCanonicalToolId,
-} from './canonicalToolAdapters';
+  CANONICAL_TOOL_MANIFEST_CANONICALIZATION,
+  loadCanonicalToolManifest,
+  validateCanonicalToolManifestArtifact,
+} from './canonicalToolManifest';
 export {
   CANONICAL_TOOL_PROJECTION_VERSION,
   canonicalToolProjection,
@@ -11,7 +11,7 @@ export {
   getCanonicalProjectionDiagnostics,
   getCanonicalToolDescriptor,
   getCanonicalToolManifest,
-  invokeCanonicalTool,
   listCanonicalToolsForAgent,
   listCanonicalToolDescriptors,
 } from './canonicalToolProjection';
+export { canonicalToolRuntime, executeCanonicalTool } from './canonicalToolRuntime';

@@ -2,9 +2,15 @@
 
 > **状态**：领域模型与契约已定义（Phase 1）  
 > **适用版本**：v3.5.0+  
-> **核心定位**：面向百万字长篇小说的三层结构化记忆体系，负责长篇创作过程中的世界状态追踪、角色心境演变与场景工作记忆供给。
+> **核心定位**：面向百万字长篇小说的三层结构化记忆契约，负责长篇创作过程中的世界状态追踪、角色心境演变与场景工作记忆供给。本文的 `NovelMemoryManager` 是进程内 Phase 1 实现，不是 SQLite 长期事实源。
 
 ---
+
+## 0. 持久化与权威边界
+
+本文的“长期/中期/短期”描述信息的叙事时间跨度，不表示三类数据已经持久化。`NovelMemoryManager`/`NovelMemoryStateUpdater` 当前使用 TypeScript 进程内 `Map`，进程退出或 `reset` 后数据丢失，只能作为兼容/实验运行态。
+
+桌面端可备份、可恢复的长期 Memory 权威事实由 migration 026 和 `memoryService` 管理，存储在 SQLite 的 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`。进程内 fragment、角色状态和世界快照不能替代采用稿、章节总结、ContextRecord 或 SQLite Memory，也不能作为 Canonical `memory.search` 跨重启稳定或 Agent exposure 已就绪的证据。
 
 ## 1. 架构动机与三层记忆体系
 
@@ -14,7 +20,7 @@
 flowchart TD
     subgraph MemoryHierarchy [三层记忆架构]
         direction TB
-        
+
         subgraph LongTerm [长期记忆 (Long-Term)]
             WorldRules[世界规则 / 力量体系 / 地理设定]
             CoreChars[核心角色底层档案 / 性格特质 / 身世]
@@ -54,14 +60,18 @@ flowchart TD
 ## 2. 领域数据模型契约
 
 ### 2.1 `MemoryFragment`（记忆片段）
+
 记忆片段是三层记忆体系的基本原子单元：
+
 - `tier`: `'long_term' | 'mid_term' | 'short_term'`
 - `type`: `'world_rule' | 'character_profile' | 'character_state' | 'plot_arc' | 'foreshadow' | 'scene_working'`
 - `importance`: 重要度评级（1 ~ 5），作为 Token 预算紧张时的修剪依据；
 - `relatedEntities`: 关联的实体 ID（如角色 ID、地点 ID、派系 ID），用于精准关联检索。
 
 ### 2.2 `CharacterDynamicState`（角色动态状态）
+
 中期记忆核心，记录角色随剧情推进发生的状态演进：
+
 - `currentEmotion`: 即时情绪与心境；
 - `currentGoal`: 当前即时动机；
 - `currentRelationship`: 对其他出场角色的即时好感与态度；
@@ -71,6 +81,7 @@ flowchart TD
 - `stateVersion`: 演进版本号。
 
 ### 2.3 `WorldStateSnapshot`（世界状态快照）
+
 - `timelinePosition`: 剧情纪年与时间线节点；
 - `worldRules`: 当前场景/区域生效的世界规则；
 - `activeEvents`: 正在发生的全局或区域事件；
@@ -78,7 +89,8 @@ flowchart TD
 - `unresolvedMysteries`: 尚未回收的核心伏笔。
 
 ### 2.4 `SceneMemoryContext`（场景组装产物）
-最终由 `NovelMemoryManager.retrieveContext` 输出给 `executionContractCompiler`，由其编码进 Prompt Envelope。
+
+进程内 Phase 1 路径由 `NovelMemoryManager.retrieveContext` 输出给 `executionContractCompiler`，由其编码进 Prompt Envelope。生产 Agent-ready 路径必须经稳定 Facade 读取 SQLite 长期事实，并显式标注检索降级；不得把该进程内输出冒充持久 Memory。
 
 ---
 
@@ -86,12 +98,12 @@ flowchart TD
 
 针对不同模型上下文窗口（4K / 8K / 32K），Memory Layer 采用比例与上限双重配额：
 
-| 记忆层级 | 典型比例 | 4K Context 模型（如本地 Qwen） | 32K Context 模型（如 Gateway） |
-| :--- | :--- | :--- | :--- |
-| **长期记忆 (Long-Term)** | 30% | ~450 Tokens (核心规则 + 人物底色) | ~3,000 Tokens (完整世界体系 + 人物档案) |
-| **中期记忆 (Mid-Term)** | 40% | ~600 Tokens (本卷进展 + 角色动态状态) | ~4,000 Tokens (多角色状态 + 伏笔网) |
-| **短期工作记忆 (Short-Term)** | 30% | ~450 Tokens (前序摘要 + 场景硬约束) | ~2,000 Tokens (多轮场景延续 + 对白残余) |
-| **正文生成与 Prompt 开销** | - | 留足 1024 Tokens 输出与安全裕量 | 留足 4000+ Tokens 输出 |
+| 记忆层级                      | 典型比例 | 4K Context 模型（如本地 Qwen）        | 32K Context 模型（如 Gateway）          |
+| :---------------------------- | :------- | :------------------------------------ | :-------------------------------------- |
+| **长期记忆 (Long-Term)**      | 30%      | ~450 Tokens (核心规则 + 人物底色)     | ~3,000 Tokens (完整世界体系 + 人物档案) |
+| **中期记忆 (Mid-Term)**       | 40%      | ~600 Tokens (本卷进展 + 角色动态状态) | ~4,000 Tokens (多角色状态 + 伏笔网)     |
+| **短期工作记忆 (Short-Term)** | 30%      | ~450 Tokens (前序摘要 + 场景硬约束)   | ~2,000 Tokens (多轮场景延续 + 对白残余) |
+| **正文生成与 Prompt 开销**    | -        | 留足 1024 Tokens 输出与安全裕量       | 留足 4000+ Tokens 输出                  |
 
 ---
 

@@ -8,3 +8,4 @@ description = "AI Novel Studio v3.1.0 — read-only novel domain gateway (MCP st
 [dependencies]
 serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
+sha2 = "0.10"

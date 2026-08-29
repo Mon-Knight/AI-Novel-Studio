@@ -83,9 +83,11 @@ Autonomous 候选会读取已应用的 Scene/Beat，由 Model Router 选择云�
 
 ## API Key 安全
 
-- API Key **仅保存在本地**，不会上传到任何服务器
-- 设置页面 **脱敏显示**（如 `sk-****...****abc`）
-- AI 任务日志 **不保存完整 Key**
+- API Key **仅保留在当前应用进程内存**，应用退出后自动失效
+- Key 按 Provider、Base URL 与模型精确绑定，切换模型不会沿用其他模型的 Key
+- Key 不写入项目、SQLite、LocalStorage、备份、Git 或应用自有同步服务
+- 真实模型调用时，鉴权信息只发送到用户配置且与当前模型匹配的 Provider Endpoint
+- 设置页面 **始终脱敏显示**，AI 任务日志与模型快照 **不保存完整 Key**
 
 ## 模型参数
 

@@ -25,6 +25,8 @@ if (typeof globalThis.localStorage === 'undefined') {
 
 import { novelRepository } from '../database/novelRepository';
 import { chapterRepository } from '../database/chapterRepository';
+import { protagonistRepository } from '../database/protagonistRepository';
+import { settingRepository } from '../database/settingRepository';
 import { draftVersionService } from '../database/draftVersionService';
 import { taskConversationService } from './taskConversationService';
 import { artifactDecisionService } from './artifactDecisionService';
@@ -67,6 +69,13 @@ const testRuntime = createTaskRuntimeAdapter({
   },
 });
 
+test('模型选择快照不把 tool-calling 或 attestation 当作未经验证的事实', () => {
+  const snapshot = captureTaskModelSnapshot('deepseek-official', 'deepseek-chat');
+
+  assert.deepEqual(snapshot.capabilities, ['conversation_turn', 'chapter_generate']);
+  assert.equal(snapshot.runtime?.toolCallingAttestation, undefined);
+});
+
 test('1. modelSnapshot 必填，缺失直接报错', async () => {
   const novel = await novelRepository.create({ title: '参数校验作品' });
   const chapter = await chapterRepository.create({ novelId: novel.id, title: '第1章' });
@@ -86,20 +95,44 @@ test('1. modelSnapshot 必填，缺失直接报错', async () => {
 
 test('2. 捕获实际传给执行服务的 settings，断言快照 settings 在全局设置变更后未漂移', async () => {
   const novel = await novelRepository.create({ title: '快照隔离测试书' });
-  const chapter = await chapterRepository.create({ novelId: novel.id, title: '第1章' });
+  const chapter = await chapterRepository.create({
+    novelId: novel.id,
+    title: '第1章',
+    outline: '主角进入封锁区，确认不能公开真实身份的长期约束。',
+  });
+  await Promise.all([
+    settingRepository.saveWorldSetting(null, {
+      novelId: novel.id,
+      title: '封锁区世界设定',
+      content: '封锁区实行身份分级制度，公开真实身份会触发追捕。',
+      isActive: true,
+    }),
+    settingRepository.saveRuleSystem(null, {
+      novelId: novel.id,
+      title: '身份保密规则',
+      content: '调查员不得主动公开真实身份，否则会立即触发追捕。',
+      isActive: true,
+    }),
+    protagonistRepository.save(null, {
+      novelId: novel.id,
+      name: '林舟',
+      identity: '隐藏身份的调查员',
+    }),
+  ]);
 
   let capturedSettings: AiSettings | undefined;
   let capturedPrompt = '';
+  const snapshotProse = `【测试生成正文】\n\n${'林舟沿着封锁区继续调查，并始终隐藏真实身份。'.repeat(165)}`;
   const customWriter = createWorkbenchChapterWriter({
     executeGeneration: async (params) => {
       capturedSettings = params.settings;
       capturedPrompt = params.request.messages.map((message) => message.content).join('\n');
       return {
         persistence: 'ephemeral_browser',
-        text: '【测试生成正文】\n\n快照测试通过。',
+        text: snapshotProse,
         taskId: 'task-snapshot-obs',
         provider: {
-          text: '【测试生成正文】\n\n快照测试通过。',
+          text: snapshotProse,
           providerId: 'mock',
           modelId: 'Mock-Model-A',
           durationMs: 1,
@@ -115,11 +148,11 @@ test('2. 捕获实际传给执行服务的 settings，断言快照 settings 在�
             rawContentRefId: 'ref-1',
             sourceNovelId: novel.id,
             contentHash: 'hash-snapshot-obs',
-            contentLength: 20,
+            contentLength: snapshotProse.length,
             processingStatus: 'valid',
             createdAt: new Date().toISOString(),
           },
-          rawContent: '【测试生成正文】\n\n快照测试通过。',
+          rawContent: snapshotProse,
           structuredPayloadJson: null,
           issues: [],
         },

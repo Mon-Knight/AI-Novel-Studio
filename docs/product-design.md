@@ -7,7 +7,7 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛。
+> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；当前工作树为 v3.6.0 发布候选，不代表已经合并或发布。
 
 ---
 
@@ -226,7 +226,7 @@ AI Novel Studio 是 Windows 桌面软件，应优先保证本地可用。
 
 基础数据应保存在本地 SQLite 中。
 
-API Key、作品数据、草稿、风格方案等不应默认上传到云端。
+API Key 不进入项目数据或应用自有云同步，仅在当前应用进程内按模型身份保存；真实模型鉴权只发送到用户明确配置的 Provider Endpoint。作品数据、草稿、风格方案等不应默认上传到云端。
 
 后续可以扩展云同步，但不是早期版本重点。
 
@@ -1230,6 +1230,11 @@ prompts/
 
 必须：
 
+- Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模型精确绑定
+- 切换模型时不沿用已加载 Key，任务运行按冻结模型身份解析且错配失败关闭
+- 不写入 SQLite、LocalStorage、项目备份或应用自有同步服务
+- 真实鉴权只发送到用户配置且与当前模型匹配的 Provider Endpoint
+
 - 使用本地配置
 - `.env.local` 加入 `.gitignore`
 - 设置页只显示脱敏后的 Key
@@ -1311,9 +1316,9 @@ v0.1.0 完成后，应满足：
 
 ## 21.3 用户确认与章节审阅
 
-- 结构化候选在对话中确认后，通过领域事务和 Safe Apply 写入。
+- 结构化候选可以在对话中确认并申请应用，但当前通用 `request_apply` 在原子迁移完成前固定失败关闭且不写入领域事实。
 - 审计报告只提供结论与后续任务入口，本身不写入小说事实。
-- 章节正文采用双阶段流程：对话中确认进入审阅，再由人工审阅/编辑器显式编辑、保存和采用。
+- 章节正文采用双阶段流程：对话中确认进入审阅，再由人工审阅/编辑器显式编辑、保存和采用；桌面端由单一 Rust/SQLite 事务复验并消费 `ReviewAuthorization`、采用草稿并收敛任务状态。
 - 未确认的 AI 候选不能进入章节采用路径；打开审阅不等于保存或采用。
 
 ## 21.4 既有页面调整
@@ -1322,7 +1327,7 @@ v0.1.0 完成后，应满足：
 - “小说作品”保留，负责项目创建、人工管理以及打开工作台或作品详情。
 - 作品详情中的“待确认产物”删除，只显示正式采用的数据和必要的人工管理能力。
 - 原写作工作台保留并收敛为章节审阅/编辑器：默认只读，允许显式进入人工编辑、保存和采用。
-- 草稿版本查看入口删除；可以由对话任务替代的 AI 面板只在功能等价、迁移验证和回退路径完成后分阶段删除。
+- 草稿版本查看、旧生成类 AI 面板和独立实验面板的生产入口已经删除；底层领域服务、历史草稿和审计事实继续保留。
 - 底层 Planner、Tool Registry、Result Artifact、Safe Apply、Memory、Multi-Agent 和 DSH 能力优先转为任务工具，不随旧 UI 一起删除。
 
 ## 21.5 当前插件只读展示
@@ -1330,6 +1335,10 @@ v0.1.0 完成后，应满足：
 产品提供类似 Harness 的“当前插件”查看入口，按功能插件、模型插件和其他插件展示 Runtime 实际加载的插件。列表显示名称、分类、版本、说明和加载状态；详情只读展示功能插件提供的工具/能力、模型插件提供的 Provider/模型，以及其他插件的运行时职责。
 
 该入口只解释“当前软件加载了哪些插件以及各自提供什么能力”。它直接读取 Runtime Registry，不维护前端静态名单，也不提供安装、卸载、启停、配置、更新、权限、市场或项目绑定功能。任务中的实际工具调用仍在对应对话内显示，不新增独立工具或执行面板。
+
+## 21.6 v3.6.0 Canonical 准入边界
+
+Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成，但 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 仍全部为 `catalog_only + partial`，模型可见数为 `0`。下一步必须先关闭四项 Facade blocker，再通过独立 exposure 变更；只有该门禁通过后才进入 R4 真实 Main Agent Runtime 验证。本文不授权 exposure、R4、Writing SubAgent 或新版本开发。
 
 完整的布局、工具状态、产物协议、并发规则、数据边界和分阶段路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
 

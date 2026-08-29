@@ -4,8 +4,9 @@
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
 > 当前版本：v3.6.0（智能体创作平台与长篇小说记忆层）
+> 当前工作树状态：发布候选；尚不等同于已经合并、打 tag 或发布
 
-> 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，并在 v3.5.0 收口发布。
+> 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，v3.5.0 完成工作台与旧 UI 收敛，v3.6.0 候选继续收敛 Canonical 能力契约。候选状态不等同于已经合并、打 tag 或发布。
 
 ---
 
@@ -439,7 +440,7 @@ v1.7.20 写作台启动、布局与质量检测链路修复 ✅
 10. migration 024 持久化自主计划、检查点和逐章状态；项目备份 schema 5 同时包含 Multi-Agent 事实和自主计划，schema 2/3/4 保持兼容。
 11. 所有创作 Agent、专家与主编 Prompt 独立保存在 `prompts/`，代码只负责组装上下文和验证结构化返回。
 
-当前已支持用户显式启动、可暂停 / 继续的进程内逐章候选队列。明确不在本版本处理：候选自动采用、跨进程 / 无人值守自动续跑、向量语义 Memory、模型自主 Tool Calling 或世界候选自动采纳。
+v3.0.0 初始单一目标已支持用户显式启动、可暂停 / 继续的进程内逐章候选队列；该目标当时明确不处理候选自动采用、跨进程 / 无人值守自动续跑、向量语义 Memory、模型自主 Tool Calling 或世界候选自动采纳。后续集成收口新增的 Scheduler 与 SQLite 混合语义 Memory 以本节后面的现状表为准。
 
 ### v2.5.0 历史版本目标
 
@@ -491,15 +492,20 @@ v3.0.0 P0 取消 / 请求 owner / 流式安全预览 / 成本硬预算 ✅
 v3.0.0 参考资料 / 分层风格 / 混合语义 Memory ✅
 v3.0.0 migration 027 持久后台调度 / 三档无人值守策略 ✅
 v3.0.0 migration 028 多目标事务 / 跨章节批处理 / 势力与地点正式资产 ✅
+v3.6.0 Phase 1A-A/B/C/D Catalog / Facade / Projection / Manifest ✅
+v3.6.0 Canonical Agent exposure：0（未放行）
+R4 真实 Main Agent Runtime：NOT RELEASED
 ```
 
 v3.0.0 默认边界仍是“Agent 自动规划和生成候选，正式副作用由用户审核”。只有用户显式选择 `full_auto` 且冻结预算、专家阈值、lease/CAS 和采用前目标复验全部通过时，调度器才可正式采用；夜间草稿和质量门禁策略不越过确认边界。多目标事务同样要求冻结候选与显式批准集合。
 
+这里的“混合语义 Memory”专指 migration 026 建立的 SQLite 长期事实：`memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`。`NovelMemoryManager` 与 `NovelMemoryStateUpdater` 使用进程内 `Map`，重启即丢失，只是兼容/实验运行态，不能作为长期 Memory、重启恢复或 Canonical `memory.search` 已稳定放行的证据。
+
 ---
 
-## 7. v3.3.0+ 对话式并发创作工作台路线（v3.5.0 已收口，待合入 main 发布）
+## 7. v3.3.0+ 对话式并发创作工作台路线（v3.6.0 当前发布候选）
 
-v3.3.0、v3.4.0 与 v3.5.0 已在同一实施分支落地；GitHub `main`、发布 tag 与安装包仍以合入后的发布流程为准。
+v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已在当前实施分支落地；v3.6.0 候选正在校准 Agent 能力契约。GitHub `main`、发布 tag 与 Release 仍以合入后的发布流程为准。
 
 ### v3.3.0：工作台最小闭环 ✅
 
@@ -519,13 +525,14 @@ v3.3.0、v3.4.0 与 v3.5.0 已在同一实施分支落地；GitHub `main`、发�
 
 **版本边界：** 不在 v3.3.0 同时删除旧 AI 面板，不扩展所有领域任务，不建设通用软件工程 Agent；当前插件只读显示不扩展为安装、卸载、启停、配置、更新或插件市场；不完整 Fork 或嵌入 Harness UI，也不在本版本顺带升级固定 DSH commit。
 
-### v3.4.0：确认、应用与章节审阅闭环 ✅
+### v3.4.0：确认、应用与章节审阅闭环（章节链路完成；通用结构化应用未开放）
 
 **单一版本目标：让对话产物通过可审计决定进入正式小说事实。**
 
-- 结构化产物确认、拒绝、修订与幂等 Safe Apply；
+- 产物确认、拒绝、修订与 append-only 决定事实已落地；
+- 章节候选通过 `ReviewAuthorization` 进入审阅，并由单一 Rust/SQLite 事务消费授权、复验草稿版本/hash、采用正文和收敛任务状态；
+- 通用结构化 `request_apply` 尚未完成“领域写入 + `ArtifactDecision`”同事务迁移，当前桌面端固定返回 `STRUCTURED_APPLY_ATOMIC_UNAVAILABLE`，浏览器返回 `BROWSER_APPLY_UNSUPPORTED`，且不执行领域写入；
 - 基线 revision 漂移和同目标并发冲突提示；
-- 章节候选“确认进入审阅 → 显式编辑/保存 → 显式采用”；
 - 审计报告转后续修复任务；
 - 任务恢复、失败重试、Provider 与预算反馈；
 - 等价验证完成后，移除导航和作品详情中的重复“待确认”入口。
@@ -545,7 +552,15 @@ v3.3.0、v3.4.0 与 v3.5.0 已在同一实施分支落地；GitHub `main`、发�
 
 **版本边界：** 底层领域服务、审计事实和历史草稿不因 UI 删减而自动删除。
 
-详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。这三条版本目标已在当前工作树完成；后续版本仍需单独任务书确认。
+### v3.6.0：Canonical 只读契约与准入状态（当前发布候选）
+
+- Phase 1A-A Capability Catalog、1A-B Domain Facade、1A-C Canonical Projection、1A-D 共享 portable Manifest/跨语言漂移门禁均已完成；
+- `novel.read / structure.read / context.read / memory.search` 仍全部是 `catalog_only + partial`，`modelVisibleToolIdentities=[]`，公开 Agent 执行入口失败关闭；
+- 下一门禁是分别关闭四项 Facade blocker：作品设定/主角/JSON 与表事实源、结构 version/active/CAS、summary/context bundle 来源协议、Memory embedding/混合检索证据；
+- 四项 blocker 关闭后，必须以独立 exposure 变更和回归证据放行只读 Tool，不能把 legacy DSH allowlist 改名冒充迁移；
+- exposure 门禁通过后才进入 **R4：真实 Main Agent Runtime 验证**；Writing SubAgent 与其他 SubAgent 继续后置。
+
+详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档只记录 v3.6.0 候选的真实状态，不授权新版本、R4 执行、提交、tag 或发布。
 
 ---
 

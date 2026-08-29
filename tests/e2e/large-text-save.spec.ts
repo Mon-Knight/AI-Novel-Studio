@@ -250,6 +250,9 @@ describe('large-text chapter safety', () => {
 
     await clickTestId('content-unavailable-history');
     await waitForTestIdAttribute('draft-history-item', 'data-draft-id', draftId);
+    expect(await browser.$('[data-testid="chapter-editor"]').isExisting()).toBe(false);
+    expect(await browser.$('textarea').isExisting()).toBe(false);
+    expect((await browser.$('body').getText()).includes(stateBeforeCorruption.preview)).toBe(false);
 
     const stateAfterFailedLoad = await bridgeCall<LargeTextDraftState>(
       'get_e2e_large_text_draft_state',

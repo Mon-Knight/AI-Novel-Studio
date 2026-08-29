@@ -12,6 +12,7 @@ afterEach(async () => {
 const actualNames = Object.freeze({
   'novel.read_context': 'mcp__novel__novel_read_context_111111111111',
   'chapter.read_outline': 'mcp__novel__chapter_read_outline_222222222222',
+  get_character_states: 'mcp__novel__get_character_states',
   search_memory: 'mcp__novel__search_memory_333333333333',
   generate_chapter: 'mcp__novel__generate_chapter_444444444444',
 });
@@ -105,6 +106,13 @@ function toolResults(calls) {
   }));
 }
 
+test('explicit Fetch-forbidden ports fail before the mock starts', async () => {
+  await assert.rejects(
+    startMockWorkbenchUpstream({ port: 10080 }),
+    /MOCK_WORKBENCH_PORT 10080 is forbidden by the Fetch standard/u,
+  );
+});
+
 test('normal mode derives three Workbench phases from actual wire tool names', async () => {
   const server = await start();
   const initial = [{ role: 'user', content: 'private prompt must not be recorded' }];
@@ -117,6 +125,7 @@ test('normal mode derives three Workbench phases from actual wire tool names', a
     [
       actualNames['novel.read_context'],
       actualNames['chapter.read_outline'],
+      actualNames.get_character_states,
       actualNames.search_memory,
     ],
   );

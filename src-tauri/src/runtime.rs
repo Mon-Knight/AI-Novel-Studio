@@ -82,6 +82,17 @@ pub struct E2eDiagnosticsCounts {
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct E2eCanonicalManifestAttestation {
+    pub contract_version: String,
+    pub projection_version: String,
+    pub canonicalization: String,
+    pub projection_hash: String,
+    pub tool_identities: Vec<String>,
+    pub model_visible_tool_identities: Vec<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct E2eDiagnostics {
     pub enabled: bool,
     pub process_id: u32,
@@ -94,6 +105,7 @@ pub struct E2eDiagnostics {
     pub schema_ready: bool,
     pub migration_count: i64,
     pub latest_migration_id: Option<String>,
+    pub canonical_manifest: E2eCanonicalManifestAttestation,
     pub counts: E2eDiagnosticsCounts,
 }
 
@@ -502,6 +514,10 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         None
     };
 
+    let canonical_manifest =
+        crate::services::dsh::canonical_manifest::canonical_manifest_attestation()
+            .map_err(|error| format!("canonical manifest attestation failed: {}", error.message))?;
+
     Ok(E2eDiagnostics {
         enabled: true,
         process_id: std::process::id(),
@@ -514,6 +530,14 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         schema_ready,
         migration_count,
         latest_migration_id,
+        canonical_manifest: E2eCanonicalManifestAttestation {
+            contract_version: canonical_manifest.contract_version,
+            projection_version: canonical_manifest.projection_version,
+            canonicalization: canonical_manifest.canonicalization,
+            projection_hash: canonical_manifest.projection_hash,
+            tool_identities: canonical_manifest.tool_identities,
+            model_visible_tool_identities: canonical_manifest.model_visible_tool_identities,
+        },
         counts,
     })
 }

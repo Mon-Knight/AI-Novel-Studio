@@ -1,6 +1,7 @@
 use crate::errors::AppError;
 use crate::repositories::conversation_repository as repository;
 use crate::repositories::large_text_repository;
+use crate::services::ai_fact_security;
 use crate::services::ai_task_service::{self, ClaimAiTaskAttemptInput, CreateAiTaskInput};
 use crate::services::artifact_service;
 use rusqlite::Connection;
@@ -9,11 +10,13 @@ use serde_json::{json, Value};
 
 pub use repository::{
     AdoptReviewAuthorizedDraftInput, AdoptReviewAuthorizedDraftResult, AppendToolEventInput,
-    AppendTurnInput, ArtifactDecisionRecord, ConsumeReviewAuthorizationInput,
-    ConversationArtifactCardRecord, ConversationTurnRecord, CreateArtifactCardInput,
-    CreateConversationInput, CreateRunInput, RecordArtifactDecisionInput, RecoverRunsInput,
-    ReviewAuthorizationRecord, TaskConversationBundle, TaskConversationRecord, TaskRunRecord,
-    ToolCallEventRecord, UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
+    AppendTurnInput, ArtifactDecisionRecord, ChapterSummaryFollowUp,
+    ConsumeReviewAuthorizationInput, ConversationArtifactCardRecord, ConversationTurnRecord,
+    CreateArtifactCardInput, CreateConversationInput, CreateInitializedConversationInput,
+    CreateRunInput, InitializedTaskConversation, RecordArtifactDecisionInput, RecoverRunsInput,
+    RenameConversationInput, ReviewAuthorizationRecord, SetConversationArchivedInput,
+    TaskConversationBundle, TaskConversationRecord, TaskRunRecord, ToolCallEventRecord,
+    UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
 };
 
 fn required(value: &str, field: &str) -> Result<(), AppError> {
@@ -25,6 +28,17 @@ fn required(value: &str, field: &str) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+fn validate_model_snapshot(value: &Value, label: &str) -> Result<(), AppError> {
+    if !value.is_object() {
+        return Err(AppError::new(
+            "CONVERSATION_INPUT_INVALID",
+            format!("{label}无效"),
+            false,
+        ));
+    }
+    ai_fact_security::validate_metadata(value, label)
 }
 
 pub fn create(
@@ -41,15 +55,40 @@ pub fn create(
             false,
         ));
     }
+    if let Some(default_model) = input.default_model.as_ref() {
+        validate_model_snapshot(default_model, "默认模型快照")?;
+    }
     repository::create_conversation(connection, input)
+}
+
+pub fn create_initialized(
+    connection: &mut Connection,
+    input: CreateInitializedConversationInput,
+) -> Result<InitializedTaskConversation, AppError> {
+    required(&input.conversation_id, "conversationId")?;
+    required(&input.turn_id, "turnId")?;
+    required(&input.novel_id, "novelId")?;
+    required(&input.title, "title")?;
+    required(&input.goal, "goal")?;
+    required(&input.created_at, "createdAt")?;
+    if input.title.chars().count() > 160 {
+        return Err(AppError::new(
+            "CONVERSATION_INPUT_INVALID",
+            "任务标题过长",
+            false,
+        ));
+    }
+    validate_model_snapshot(&input.default_model, "初始模型快照")?;
+    repository::create_initialized_conversation(connection, input)
 }
 
 pub fn list(
     connection: &Connection,
     novel_id: Option<&str>,
+    include_archived: bool,
     limit: i64,
 ) -> Result<Vec<TaskConversationRecord>, AppError> {
-    repository::list_conversations(connection, novel_id, limit)
+    repository::list_conversations(connection, novel_id, include_archived, limit)
 }
 
 pub fn get(
@@ -60,13 +99,62 @@ pub fn get(
     repository::get_bundle(connection, conversation_id)
 }
 
+pub fn validate_task_runtime_scope(
+    connection: &Connection,
+    conversation_id: &str,
+    turn_id: &str,
+    novel_id: &str,
+    chapter_id: Option<&str>,
+) -> Result<String, AppError> {
+    required(conversation_id, "conversationId")?;
+    required(turn_id, "turnId")?;
+    required(novel_id, "novelId")?;
+    if let Some(chapter_id) = chapter_id {
+        required(chapter_id, "chapterId")?;
+    }
+    repository::validate_task_runtime_scope(
+        connection,
+        conversation_id,
+        turn_id,
+        novel_id,
+        chapter_id,
+    )
+}
+
 pub fn update_model(
     connection: &mut Connection,
     input: UpdateConversationModelInput,
 ) -> Result<TaskConversationRecord, AppError> {
     required(&input.conversation_id, "conversationId")?;
     required(&input.updated_at, "updatedAt")?;
+    validate_model_snapshot(&input.default_model, "默认模型快照")?;
     repository::update_conversation_model(connection, input)
+}
+
+pub fn rename(
+    connection: &mut Connection,
+    input: RenameConversationInput,
+) -> Result<TaskConversationRecord, AppError> {
+    required(&input.conversation_id, "conversationId")?;
+    required(&input.title, "title")?;
+    required(&input.updated_at, "updatedAt")?;
+    if input.title.chars().count() > 160 {
+        return Err(AppError::new(
+            "CONVERSATION_INPUT_INVALID",
+            "任务标题过长",
+            false,
+        ));
+    }
+    repository::rename_conversation(connection, input)
+}
+
+pub fn set_archived(
+    connection: &mut Connection,
+    input: SetConversationArchivedInput,
+) -> Result<TaskConversationRecord, AppError> {
+    required(&input.conversation_id, "conversationId")?;
+    required(&input.updated_at, "updatedAt")?;
+    repository::set_conversation_archived(connection, input)
 }
 
 pub fn append_turn(
@@ -117,6 +205,7 @@ pub fn create_run(
     required(&input.conversation_id, "conversationId")?;
     required(&input.turn_id, "turnId")?;
     required(&input.worker_id, "workerId")?;
+    validate_model_snapshot(&input.model_snapshot, "运行模型快照")?;
     repository::create_run(connection, input)
 }
 
@@ -327,7 +416,9 @@ pub fn publish_structured_candidate(
             display_content: Some(input.summary.clone()),
             structured_payload_json: Some(input.structured_payload_json),
             parent_artifact_id: None,
-            derivation_type: input.derivation_type.clone(),
+            // Workbench-published candidates are root artifacts. The derivation hint is
+            // already frozen in the AI task target metadata above.
+            derivation_type: None,
         },
     )?;
     create_artifact_card(
@@ -355,6 +446,16 @@ pub fn recover_interrupted_runs(
     required(&input.finished_at, "finishedAt")?;
     required(&input.error, "error")?;
     repository::recover_interrupted_runs(connection, input)
+}
+
+pub fn recover_interrupted_runs_excluding(
+    connection: &mut Connection,
+    input: RecoverRunsInput,
+    protected_run_ids: &std::collections::HashSet<String>,
+) -> Result<i64, AppError> {
+    required(&input.finished_at, "finishedAt")?;
+    required(&input.error, "error")?;
+    repository::recover_interrupted_runs_excluding(connection, input, protected_run_ids)
 }
 
 pub fn record_artifact_decision(
@@ -422,6 +523,14 @@ pub fn get_review_authorization(
     repository::get_review_authorization(connection, authorization_id)
 }
 
+pub fn ensure_chapter_summary_follow_up(
+    connection: &mut Connection,
+    authorization_id: &str,
+) -> Result<ChapterSummaryFollowUp, AppError> {
+    required(authorization_id, "authorizationId")?;
+    repository::ensure_chapter_summary_follow_up_for_authorization(connection, authorization_id)
+}
+
 pub fn adopt_review_authorized_draft(
     connection: &mut Connection,
     input: AdoptReviewAuthorizedDraftInput,
@@ -437,4 +546,48 @@ pub fn adopt_review_authorized_draft(
         ));
     }
     repository::adopt_review_authorized_draft(connection, input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_model_snapshot;
+    use crate::errors::codes;
+    use serde_json::json;
+
+    #[test]
+    fn model_snapshot_rejects_nested_credentials() {
+        for key in [
+            "apiKey",
+            "x-api-key",
+            "xApiKey",
+            "openaiApiKey",
+            "credentials",
+        ] {
+            let mut snapshot = json!({
+                "providerId": "deepseek-official",
+                "modelId": "deepseek-chat",
+                "options": {}
+            });
+            snapshot["options"][key] = json!("must-not-persist");
+            let error = validate_model_snapshot(&snapshot, "运行模型快照")
+                .expect_err("credential-shaped model snapshots must fail closed");
+
+            assert_eq!(error.code, codes::AI_TASK_SECRET_DETECTED);
+        }
+    }
+
+    #[test]
+    fn model_snapshot_accepts_credential_free_runtime_evidence() {
+        validate_model_snapshot(
+            &json!({
+                "providerId": "deepseek-official",
+                "modelId": "deepseek-chat",
+                "baseUrl": "https://api.deepseek.com/v1",
+                "options": { "maxTokens": 4000 },
+                "runtime": { "evidenceHash": "sha256-safe" }
+            }),
+            "运行模型快照",
+        )
+        .expect("credential-free model snapshots should remain valid");
+    }
 }

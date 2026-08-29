@@ -215,7 +215,7 @@ describe('VolumeTree', () => {
       target: { value: '  第一章  ' },
     });
     fireEvent.keyDown(screen.getByTestId('chapter-title-input'), { key: 'Enter' });
-    await waitFor(() => expect(createFirst).toHaveBeenCalledWith('第一章'));
+    await waitFor(() => expect(createFirst).toHaveBeenCalledWith('第一章', 4000));
 
     fireEvent.click(screen.getByTestId('volume-create'));
     fireEvent.change(screen.getByTestId('volume-title-input'), { target: { value: '  第一卷  ' } });
@@ -242,24 +242,32 @@ describe('VolumeTree', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByTestId('chapter-item')[0]);
+    const firstChapterItem = screen.getAllByTestId('chapter-item')[0];
+    expect(firstChapterItem.tagName).toBe('BUTTON');
+    expect(firstChapterItem.getAttribute('aria-current')).toBe('page');
+    fireEvent.click(firstChapterItem);
     expect(onSelectChapter).toHaveBeenCalled();
     const nextWindow = screen.getAllByRole('button', { name: '下一批' });
     fireEvent.click(nextWindow[0]);
     fireEvent.click(nextWindow[1]);
 
     const headers = document.querySelectorAll<HTMLElement>('.tree-volume-header');
+    expect(headers[0].tagName).toBe('BUTTON');
+    expect(headers[0].getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(headers[0]);
     fireEvent.click(headers[0]);
-    fireEvent.click(screen.getAllByText('+ 在本卷新建章节')[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '在本卷新建章节' })[0]);
     fireEvent.change(screen.getByTestId('chapter-volume-select'), {
       target: { value: 'volume-2' },
     });
     fireEvent.change(screen.getByTestId('chapter-title-input'), {
       target: { value: '  新章节  ' },
     });
+    fireEvent.change(screen.getByTestId('chapter-target-word-count'), {
+      target: { value: '4300' },
+    });
     fireEvent.click(screen.getByTestId('chapter-create-submit'));
-    await waitFor(() => expect(onCreateChapter).toHaveBeenCalledWith('volume-2', '新章节'));
+    await waitFor(() => expect(onCreateChapter).toHaveBeenCalledWith('volume-2', '新章节', 4300));
     expect(screen.getAllByText('暂无章节').length).toBeGreaterThan(0);
   });
 

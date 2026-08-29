@@ -54,3 +54,9 @@ Model-visible tools: 0
 ## 下一阶段准入条件
 
 只有在四个 Facade 的 partial blockers、TS/Rust/DSH manifest drift、权限/重启/负例证据收口后，才能把某个 descriptor 的 `exposure` 从 `catalog_only` 提升为 `stable`。提升必须是独立变更，并同时增加模型可见 schema、宿主权限门禁和真实桌面回归证据。
+
+## Phase 1A-D 增补
+
+TS/Rust/DSH 的 portable contract 与漂移门禁现已收口到 [`canonical_manifest_contract.md`](./canonical_manifest_contract.md) 所述共享 artifact。Canonical 执行入口已要求版本、projection hash、固定入口 exposure、单次 allowlist、权限、输入/输出 schema、timeout 和双层 scope 复验。
+
+该增补没有改变本文件的 exposure 结论：四项仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。现有 legacy Workbench/DSH Registry 未被共享 artifact 替换。

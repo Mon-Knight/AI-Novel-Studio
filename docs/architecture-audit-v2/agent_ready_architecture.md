@@ -212,11 +212,13 @@ Recovery facts
 - 旧 `generate_*` validator 改为内部实现名。
 - UI 仍使用现有 Card/Authorization。
 
-### R3：Manifest/Runtime 统一（资产化通过后）
+### R3：Manifest/Runtime 统一（portable contract 已完成，执行迁移未开始）
 
-- 删除手写 `WORKBENCH_TOOLS`/allowlist 漂移（以生成投影替代）。
-- 做 TS/Rust/DSH schema hash gate。
-- 对外真实模型 smoke（固定 DSH preparation 已完成；`chapter_write`/Writing SubAgent 仍待单独验证）。
+- 已建立 `contracts/agent/canonical-tool-manifest.v1.json`，TS、Rust 与 DSH/Node 独立复算同一 hash，并在 Windows SQLite E2E 比对 TS/Rust attestation。
+- 已建立版本/hash/固定入口 exposure/单次 allowlist/权限/schema/timeout 的 TS 宿主执行门禁；公开入口固定按 Agent 可见集合失败关闭，测试与 E2E 只能通过独立 host-validation 证据入口执行。
+- `modelVisibleToolIdentities=[]`；手写 `WORKBENCH_TOOLS`、Rust DSH allowlist 与 gateway `tools/list/call` 保持 legacy 隔离，尚未由 Canonical 投影替代。
+- 设计与证据见 [`canonical_manifest_contract.md`](./canonical_manifest_contract.md) 和 [`canonical_manifest_validation.md`](./canonical_manifest_validation.md)。
+- 对外真实模型 smoke（固定 DSH preparation 已完成；Canonical read tools、`chapter_write`/Writing SubAgent 仍待独立放行验证）。
 
 ### R4：真实 Main Agent Runtime 验证
 
@@ -248,7 +250,7 @@ Recovery facts
 8. legacy 入口不再出现在默认 UI、prompt 或 manifest。
 9. `structure.read` 的 version/active pointer、`context.propose_summary` 的 adopted-draft/FK 绑定、`draft.read` 的 SQLite 单写规则均有正向与负向证据。
 
-当前放行结论：**NOT READY**。Capability Catalog、Domain Facade 与 Canonical Projection 描述层已建立，但 TS/Rust/DSH 单一 manifest、模型可见权限门禁、Main Agent 与 Writing SubAgent 仍未放行。
+当前放行结论：**NOT READY**。Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 和宿主执行门禁已建立，但 Canonical 模型可见集合仍为空，legacy runtime 尚未迁移，Main Agent 与 Writing SubAgent 仍未放行。
 
 本轮已完成的修复只覆盖确定性宿主边界：事务级作品清理、SQLite 基础数据诊断、资产统计、summary adopted-draft 校验和 outline active scope。它们仍需要真实 Windows/Tauri 入口回归；修复本身不等于 Context Agent 准入。
 
@@ -266,4 +268,4 @@ Recovery facts
 | Main Agent 看到多少核心能力？ | 目标为 18 个 canonical action，按任务 scope 通常只投影其中 6～12 个。                                                                    |
 | 是否存在历史架构阻碍？        | 有：三处已确认 BROKEN 入口，加上 outline active/version、summary bundle/FK、draft 多事实源、Registry 漂移和固定 orchestration 证据不足。 |
 
-因此当前不能直接进入 Context Agent 扩展；必须先完成 M0 事实冻结和 M1 facade 的入口级验证。
+因此当前不能直接进入 Context Agent 扩展；下一门禁是逐项关闭四个只读 Facade 的 `partial` blocker，并以独立 exposure 变更验证 Canonical read-only Tool 的模型可见投影，不能把 legacy DSH allowlist 直接改名后视为迁移完成。

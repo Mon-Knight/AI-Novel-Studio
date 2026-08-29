@@ -10,7 +10,9 @@ import {
   getAiSettings,
   maskAiApiKey,
   normalizeAiSettings,
+  resolveSessionModelApiKey,
   saveAiSettings,
+  type SessionModelCredentialIdentity,
 } from './aiSettingsStore';
 
 export function validateApiSettings(settings: AiSettings): void {
@@ -41,6 +43,10 @@ export const aiSettingsService = {
 
   maskApiKey(key: string): string {
     return maskAiApiKey(key);
+  },
+
+  resolveSessionApiKey(identity: SessionModelCredentialIdentity): string {
+    return resolveSessionModelApiKey(identity);
   },
 
   async testConnection(

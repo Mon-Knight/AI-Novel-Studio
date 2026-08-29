@@ -40,6 +40,11 @@ function localSaveAll(items: OutputProfile[]): void {
   lsSet(OUTPUT_KEY, items);
 }
 
+function normalizeNovelId(novelId?: string): string | undefined {
+  const normalized = novelId?.trim();
+  return normalized ? normalized : undefined;
+}
+
 function fromDto(dto: OutputProfileDto): OutputProfile {
   return {
     id: dto.id,
@@ -271,17 +276,24 @@ export const outputProfileService = {
     localSaveAll(localGetAll().filter((o) => o.id !== id));
   },
 
-  async setDefault(novelId: string, id: string): Promise<void> {
+  async setDefault(novelId: string | undefined, id: string): Promise<void> {
+    const owner = normalizeNovelId(novelId);
     if (getDbMode() === 'tauri') {
       await dbCall<null>('set_default_output_profile', {
-        input: { novelId, outputProfileId: id },
+        input: { novelId: owner ?? null, outputProfileId: id },
       });
       return;
     }
+    const profiles = localGetAll();
+    const target = profiles.find((profile) => profile.id === id);
+    if (!target || normalizeNovelId(target.novelId) !== owner) {
+      throw new Error('输出控制方案不存在或不属于当前作品');
+    }
     localSaveAll(
-      localGetAll().map((profile) => ({
+      profiles.map((profile) => ({
         ...profile,
-        isDefault: profile.novelId === novelId ? profile.id === id : profile.isDefault,
+        isDefault:
+          normalizeNovelId(profile.novelId) === owner ? profile.id === id : profile.isDefault,
       })),
     );
   },

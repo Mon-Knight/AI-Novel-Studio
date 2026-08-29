@@ -152,7 +152,7 @@ AI Agent **绝对不得**：
 
 ### 7.2 当前版本
 
-当前版本为 v3.5.0；机器可读版本以 `package.json`、`src-tauri/Cargo.toml` 和版本同步检查为准。
+当前版本为 v3.6.0；机器可读版本以 `package.json`、`src-tauri/Cargo.toml` 和版本同步检查为准。
 
 ### 7.3 发布流程
 

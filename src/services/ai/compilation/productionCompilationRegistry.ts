@@ -32,6 +32,7 @@ import {
   compileAiExecutionContract,
   type AiTaskCompilationDefinition,
 } from './executionContractCompiler';
+import { CHAPTER_GENERATION_ALLOWED_SOURCE_TYPES } from './chapterGenerationSourcePolicy';
 
 function autonomousUserPrompt(marker: string) {
   return (taskInput: Record<string, unknown>) => {
@@ -281,7 +282,7 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
     expectedArtifactType: 'chapter_text',
     expectedArtifactSchemaVersion: 1,
     promptTemplateId: 'chapter/generation_execution',
-    promptTemplateVersion: '1',
+    promptTemplateVersion: '3',
     promptTemplateBody: chapterGenerationExecutionTemplate,
     userPrompt: chapterGenerationUserPrompt,
     responseSchema: 'chapter_text_v1',
@@ -292,7 +293,7 @@ const definitions: Partial<Record<AiTaskType, AiTaskCompilationDefinition>> = {
       requireExplicitApplyConfirmation: true,
       mustFollowCompiledContext: true,
     },
-    allowedSourceTypes: ['request_context'],
+    allowedSourceTypes: [...CHAPTER_GENERATION_ALLOWED_SOURCE_TYPES],
     requiredSourceTypes: ['request_context'],
     allowedTools: [],
     modelContextTokens: 64_000,

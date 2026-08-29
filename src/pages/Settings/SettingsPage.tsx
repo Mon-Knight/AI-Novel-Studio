@@ -31,7 +31,12 @@ interface SettingsNavTab {
 
 const SETTINGS_TABS: SettingsNavTab[] = [
   { key: 'general', label: '常规与外观', icon: '🎨', description: '主题、更新与基本偏好' },
-  { key: 'ai_models', label: 'AI 模型配置', icon: '🤖', description: 'Cloud / Local / Gateway 模型' },
+  {
+    key: 'ai_models',
+    label: 'AI 模型配置',
+    icon: '🤖',
+    description: 'Cloud / Local / Gateway 模型',
+  },
   { key: 'governance', label: '网关与流控', icon: '🛡️', description: '预算限制与安全合规' },
   { key: 'data', label: '数据与存储', icon: '💾', description: '数据库、备份与数据修复' },
   { key: 'diagnostics', label: '诊断与关于', icon: '🔍', description: '系统诊断与软件信息' },
@@ -173,6 +178,26 @@ function SettingsPage() {
               ? 'openai_compatible'
               : next.provider;
       }
+      const modelIdentityChanged =
+        next.provider !== s.provider ||
+        next.baseUrl !== s.baseUrl ||
+        next.modelName !== s.modelName;
+      if (modelIdentityChanged) {
+        const currentSessionKey = aiSettingsService.resolveSessionApiKey({
+          scope: 'provider',
+          providerId: s.provider,
+          baseUrl: s.baseUrl,
+          modelId: s.modelName,
+        });
+        if (s.apiKey === currentSessionKey) {
+          next.apiKey = aiSettingsService.resolveSessionApiKey({
+            scope: 'provider',
+            providerId: next.provider,
+            baseUrl: next.baseUrl,
+            modelId: next.modelName,
+          });
+        }
+      }
       return next;
     });
   };
@@ -186,7 +211,7 @@ function SettingsPage() {
         height: '100%',
         width: '100%',
         overflow: 'hidden',
-        background: 'var(--color-bg, #ffffff)',
+        background: 'var(--color-bg-app, #ffffff)',
       }}
     >
       {/* 1. 左侧分类导航栏 */}
@@ -243,7 +268,9 @@ function SettingsPage() {
                     fontSize: 13,
                     fontWeight: isActive ? 600 : 400,
                     background: isActive ? 'var(--color-primary-light, #e0e7ff)' : 'transparent',
-                    color: isActive ? 'var(--color-primary, #4338ca)' : 'var(--color-text-secondary, #475569)',
+                    color: isActive
+                      ? 'var(--color-primary, #4338ca)'
+                      : 'var(--color-text-secondary, #475569)',
                     transition: 'all 0.15s ease',
                   }}
                 >
@@ -295,10 +322,7 @@ function SettingsPage() {
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
                 🤖 AI 模型服务与运行时
               </div>
-              <AiRuntimeOverviewCard
-                settings={settings}
-                localHealthResult={localHealthResult}
-              />
+              <AiRuntimeOverviewCard settings={settings} localHealthResult={localHealthResult} />
               <AiProviderSettingsCard
                 settings={settings}
                 message={message}
@@ -316,11 +340,7 @@ function SettingsPage() {
                 healthChecking={localHealthChecking}
                 onCheckHealth={handleCheckLocalHealth}
               />
-              <AiGatewaySettingsCard
-                settings={settings}
-                onChange={update}
-                onSave={handleSave}
-              />
+              <AiGatewaySettingsCard settings={settings} onChange={update} onSave={handleSave} />
             </div>
           )}
 

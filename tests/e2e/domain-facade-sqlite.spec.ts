@@ -42,7 +42,11 @@ interface DomainFacadeSqliteSmokeEvidence {
     crossScope: { ok: false; code?: string };
   };
   canonical: {
+    canonicalization: string;
+    projectionHash: string;
     manifestToolIds: string[];
+    manifestToolIdentities: string[];
+    modelVisibleToolIdentities: string[];
     agentVisibleCount: number;
     project: {
       source: string;
@@ -105,6 +109,9 @@ describe('Domain Facade SQLite production chain', () => {
       'novel.read',
       'structure.read',
     ]);
+    expect(evidence.canonical.canonicalization).toBe('ans_canonical_json_v1');
+    expect(evidence.canonical.projectionHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(evidence.canonical.modelVisibleToolIdentities).toEqual([]);
     expect(evidence.canonical.agentVisibleCount).toBe(0);
     expect(evidence.canonical.project).toMatchObject({
       source: 'sqlite',
@@ -131,11 +138,27 @@ describe('Domain Facade SQLite production chain', () => {
     expect(evidence.artifact.replayCode).toBe('CONFLICT');
     expect(evidence.guards.writingWithoutSnapshotCode).toBe('MODEL_SNAPSHOT_REQUIRED');
 
-    const beforeDiagnostics = await bridgeCall<Record<string, unknown>>('get_e2e_diagnostics');
+    const beforeDiagnostics = await bridgeCall<{
+      enabled: boolean;
+      schemaReady: boolean;
+      integrityCheck: string;
+      canonicalManifest: {
+        canonicalization: string;
+        projectionHash: string;
+        toolIdentities: string[];
+        modelVisibleToolIdentities: string[];
+      };
+    }>('get_e2e_diagnostics');
     expect(beforeDiagnostics).toMatchObject({
       enabled: true,
       schemaReady: true,
       integrityCheck: 'ok',
+    });
+    expect(beforeDiagnostics.canonicalManifest).toMatchObject({
+      canonicalization: evidence.canonical.canonicalization,
+      projectionHash: evidence.canonical.projectionHash,
+      toolIdentities: evidence.canonical.manifestToolIdentities,
+      modelVisibleToolIdentities: evidence.canonical.modelVisibleToolIdentities,
     });
 
     await browser.reloadSession();

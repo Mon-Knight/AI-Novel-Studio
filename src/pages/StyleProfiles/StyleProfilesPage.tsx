@@ -14,6 +14,10 @@ import { StyleProfilesContent } from './StyleProfilesContent';
 import { StyleProfileDialogs } from './StyleProfileDialogs';
 import type { StyleProfilesTab } from './styleProfilesPageTypes';
 
+function belongsToSameScope(left?: string, right?: string): boolean {
+  return (left ?? '').trim() === (right ?? '').trim();
+}
+
 function StyleProfilesPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<StyleProfilesTab>('styles');
@@ -21,6 +25,8 @@ function StyleProfilesPage() {
   const [outputs, setOutputs] = useState<OutputProfile[]>([]);
   const [assets, setAssets] = useState<ImportedAsset[]>([]);
   const [msg, setMsg] = useState('');
+  const [activatingStyleId, setActivatingStyleId] = useState<string | null>(null);
+  const [defaultingOutputId, setDefaultingOutputId] = useState<string | null>(null);
 
   const [showStyleForm, setShowStyleForm] = useState(false);
   const [editingStyle, setEditingStyle] = useState<StyleProfile | null>(null);
@@ -136,6 +142,30 @@ function StyleProfilesPage() {
     }
   };
 
+  const activateStyle = async (style: StyleProfile) => {
+    setActivatingStyleId(style.id);
+    try {
+      await styleProfileService.setActive(style.novelId ?? '', style.id);
+      setStyles((current) =>
+        current.map((item) =>
+          belongsToSameScope(item.novelId, style.novelId)
+            ? { ...item, isActive: item.id === style.id }
+            : item,
+        ),
+      );
+      try {
+        setStyles(await styleProfileService.getAll());
+      } catch {
+        // The write already succeeded; keep the locally refreshed state visible.
+      }
+      flash(`已将「${style.name}」设为当前风格`);
+    } catch (error: unknown) {
+      flash(describeUnknownError(error, '切换当前风格失败'));
+    } finally {
+      setActivatingStyleId(null);
+    }
+  };
+
   const saveOutput = async () => {
     if (!outputForm.name.trim()) return flash('请输入方案名称');
     if (editingOutput) {
@@ -162,6 +192,30 @@ function StyleProfilesPage() {
       flash('已删除');
     } catch (error: unknown) {
       flash(describeUnknownError(error, '删除输出方案失败'));
+    }
+  };
+
+  const makeOutputDefault = async (output: OutputProfile) => {
+    setDefaultingOutputId(output.id);
+    try {
+      await outputProfileService.setDefault(output.novelId, output.id);
+      setOutputs((current) =>
+        current.map((item) =>
+          belongsToSameScope(item.novelId, output.novelId)
+            ? { ...item, isDefault: item.id === output.id }
+            : item,
+        ),
+      );
+      try {
+        setOutputs(await outputProfileService.getAll());
+      } catch {
+        // The write already succeeded; keep the locally refreshed state visible.
+      }
+      flash(`已将「${output.name}」设为默认输出方案`);
+    } catch (error: unknown) {
+      flash(describeUnknownError(error, '切换默认输出方案失败'));
+    } finally {
+      setDefaultingOutputId(null);
     }
   };
 
@@ -262,7 +316,11 @@ function StyleProfilesPage() {
         setOutputForm={setOutputForm}
         setShowOutputForm={setShowOutputForm}
         editStyle={editStyle}
+        activateStyle={activateStyle}
+        activatingStyleId={activatingStyleId}
         deleteStyle={deleteStyle}
+        makeOutputDefault={makeOutputDefault}
+        defaultingOutputId={defaultingOutputId}
         deleteOutput={deleteOutput}
         onBack={() => navigate('/')}
       />

@@ -3,18 +3,84 @@ import { lsGet, lsSet } from '../database/db';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
+const REAL_PROVIDER_E2E_ENABLED =
+  E2E_ENABLED && import.meta.env?.VITE_AI_NOVEL_STUDIO_REAL_E2E === '1';
 
-interface SessionCredentials {
-  providerApiKey: string;
-  localChapterModelApiKey: string;
-  gatewayApiKey: string;
+export const DEFAULT_MAX_REQUESTS_PER_MINUTE = 60;
+
+export type SessionModelCredentialScope = 'provider' | 'local_chapter_model' | 'gateway';
+
+export interface SessionModelCredentialIdentity {
+  scope: SessionModelCredentialScope;
+  providerId: string;
+  baseUrl: string;
+  modelId: string;
 }
 
-let sessionCredentials: SessionCredentials = {
-  providerApiKey: '',
-  localChapterModelApiKey: 'local-no-key-required',
-  gatewayApiKey: '',
-};
+const sessionModelCredentials = new Map<string, string>();
+
+function canonicalProviderId(providerId: string): string {
+  const normalized = providerId.trim().toLowerCase();
+  return normalized === 'deepseek' || normalized === 'deepseek-official'
+    ? 'deepseek-official'
+    : normalized;
+}
+
+function normalizedBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, '');
+}
+
+function credentialIdentityKey(identity: SessionModelCredentialIdentity): string | undefined {
+  const providerId = canonicalProviderId(identity.providerId);
+  const baseUrl = normalizedBaseUrl(identity.baseUrl);
+  const modelId = identity.modelId.trim();
+  if (!providerId || providerId === 'mock' || !baseUrl || !modelId) return undefined;
+  return JSON.stringify([identity.scope, providerId, baseUrl, modelId]);
+}
+
+function rememberSessionModelApiKey(
+  identity: SessionModelCredentialIdentity,
+  apiKey: string,
+): void {
+  const key = credentialIdentityKey(identity);
+  if (!key) return;
+  if (apiKey.trim()) sessionModelCredentials.set(key, apiKey);
+  else sessionModelCredentials.delete(key);
+}
+
+export function resolveSessionModelApiKey(identity: SessionModelCredentialIdentity): string {
+  const key = credentialIdentityKey(identity);
+  return key ? (sessionModelCredentials.get(key) ?? '') : '';
+}
+
+function providerCredentialIdentity(settings: AiSettings): SessionModelCredentialIdentity {
+  return {
+    scope: 'provider',
+    providerId: settings.provider,
+    baseUrl: settings.baseUrl,
+    modelId: settings.modelName,
+  };
+}
+
+function localCredentialIdentity(
+  settings: LocalChapterModelSettings,
+): SessionModelCredentialIdentity {
+  return {
+    scope: 'local_chapter_model',
+    providerId: settings.providerId,
+    baseUrl: settings.baseUrl,
+    modelId: settings.modelName,
+  };
+}
+
+function gatewayCredentialIdentity(settings: GatewayModelConfig): SessionModelCredentialIdentity {
+  return {
+    scope: 'gateway',
+    providerId: settings.providerId,
+    baseUrl: settings.baseUrl,
+    modelId: settings.modelName,
+  };
+}
 
 export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings {
   return {
@@ -62,18 +128,13 @@ const defaultSettings: AiSettings = {
   temperature: 0.7,
   maxTokens: 8000,
   timeoutSeconds: 120,
-  maxRequestsPerMinute: 12,
+  maxRequestsPerMinute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
   maxConcurrentAiRequests: 2,
   budgetWarningPercent: 80,
   mockMode: true,
 };
 
-function normalizeNumber(
-  val: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
+function normalizeNumber(val: unknown, fallback: number, min: number, max: number): number {
   if (val === null || val === undefined || val === '') return fallback;
   const n = Number(val);
   if (!Number.isFinite(n)) return fallback;
@@ -94,11 +155,7 @@ function normalizeOptionalBudget(val: unknown, max: number): number | undefined 
   return Math.min(n, max);
 }
 
-function normalizeOptionalInteger(
-  val: unknown,
-  min: number,
-  max: number,
-): number | undefined {
+function normalizeOptionalInteger(val: unknown, min: number, max: number): number | undefined {
   if (val === null || val === undefined || val === '') return undefined;
   const n = Number(val);
   if (!Number.isFinite(n)) return undefined;
@@ -150,9 +207,7 @@ function normalizeGatewaySettings(
     contextTokens: Math.round(
       normalizeNumber(stored.contextTokens, defaults.contextTokens ?? 32000, 1024, 200000),
     ),
-    maxTokens: Math.round(
-      normalizeNumber(stored.maxTokens, defaults.maxTokens ?? 4000, 1, 32000),
-    ),
+    maxTokens: Math.round(normalizeNumber(stored.maxTokens, defaults.maxTokens ?? 4000, 1, 32000)),
     temperature: normalizeNumber(stored.temperature, defaults.temperature ?? 0.7, 0, 2),
     topP: normalizeNumber(stored.topP, defaults.topP ?? 0.8, 0, 1),
     topK: Math.round(normalizeNumber(stored.topK, defaults.topK ?? 20, 0, 4096)),
@@ -187,7 +242,7 @@ export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
   merged.inputPricePerMillionTokens = normalizeOptionalPrice(merged.inputPricePerMillionTokens);
   merged.outputPricePerMillionTokens = normalizeOptionalPrice(merged.outputPricePerMillionTokens);
   merged.maxRequestsPerMinute = Math.round(
-    normalizeNumber(merged.maxRequestsPerMinute, 12, 1, 120),
+    normalizeNumber(merged.maxRequestsPerMinute, DEFAULT_MAX_REQUESTS_PER_MINUTE, 1, 120),
   );
   merged.maxConcurrentAiRequests = Math.round(
     normalizeNumber(merged.maxConcurrentAiRequests, 2, 1, 8),
@@ -306,21 +361,27 @@ function withoutCredentials(settings: AiSettings): Record<string, unknown> {
 }
 
 function withSessionCredentials(settings: AiSettings): AiSettings {
-  const gatewayWithKey = (settings.gateway ?? settings.remoteWriter)
+  const gateway = settings.gateway ?? settings.remoteWriter;
+  const gatewayWithKey = gateway
     ? {
-        ...(settings.gateway ?? settings.remoteWriter)!,
-        apiKey: sessionCredentials.gatewayApiKey,
+        ...gateway,
+        apiKey: resolveSessionModelApiKey(gatewayCredentialIdentity(gateway)),
       }
     : undefined;
 
   return {
     ...settings,
-    apiKey: sessionCredentials.providerApiKey,
+    apiKey:
+      settings.runtimeMode === 'api'
+        ? resolveSessionModelApiKey(providerCredentialIdentity(settings))
+        : '',
     ...(settings.localChapterModel
       ? {
           localChapterModel: {
             ...settings.localChapterModel,
-            apiKey: sessionCredentials.localChapterModelApiKey,
+            apiKey:
+              resolveSessionModelApiKey(localCredentialIdentity(settings.localChapterModel)) ||
+              'local-no-key-required',
           },
         }
       : {}),
@@ -334,36 +395,49 @@ function withSessionCredentials(settings: AiSettings): AiSettings {
 }
 
 export function getAiSettings(): AiSettings {
-  if (E2E_ENABLED) return { ...defaultSettings };
+  if (E2E_ENABLED && !REAL_PROVIDER_E2E_ENABLED) return { ...defaultSettings };
   const stored = lsGet<Partial<AiSettings>>(AI_SETTINGS_KEY);
   if (!stored) return withSessionCredentials({ ...defaultSettings });
+
+  const normalized = normalizeAiSettings(stored);
 
   const hasLegacyProviderKey = Object.prototype.hasOwnProperty.call(stored, 'apiKey');
   const hasLegacyLocalKey = Object.prototype.hasOwnProperty.call(
     stored.localChapterModel ?? {},
     'apiKey',
   );
-  const hasLegacyGatewayKey = Object.prototype.hasOwnProperty.call(
-    stored.gateway ?? {},
-    'apiKey',
-  );
+  const hasLegacyGatewayKey = Object.prototype.hasOwnProperty.call(stored.gateway ?? {}, 'apiKey');
   const hasLegacyRemoteKey = Object.prototype.hasOwnProperty.call(
     stored.remoteWriter ?? {},
     'apiKey',
   );
   if (hasLegacyProviderKey && typeof stored.apiKey === 'string') {
-    sessionCredentials.providerApiKey = stored.apiKey;
+    rememberSessionModelApiKey(providerCredentialIdentity(normalized), stored.apiKey);
   }
-  if (hasLegacyLocalKey && typeof stored.localChapterModel?.apiKey === 'string') {
-    sessionCredentials.localChapterModelApiKey = stored.localChapterModel.apiKey;
+  if (
+    hasLegacyLocalKey &&
+    normalized.localChapterModel &&
+    typeof stored.localChapterModel?.apiKey === 'string'
+  ) {
+    rememberSessionModelApiKey(
+      localCredentialIdentity(normalized.localChapterModel),
+      stored.localChapterModel.apiKey,
+    );
   }
-  if (hasLegacyGatewayKey && typeof stored.gateway?.apiKey === 'string') {
-    sessionCredentials.gatewayApiKey = stored.gateway.apiKey;
-  } else if (hasLegacyRemoteKey && typeof stored.remoteWriter?.apiKey === 'string') {
-    sessionCredentials.gatewayApiKey = stored.remoteWriter.apiKey;
+  const normalizedGateway = normalized.gateway ?? normalized.remoteWriter;
+  if (normalizedGateway && hasLegacyGatewayKey && typeof stored.gateway?.apiKey === 'string') {
+    rememberSessionModelApiKey(gatewayCredentialIdentity(normalizedGateway), stored.gateway.apiKey);
+  } else if (
+    normalizedGateway &&
+    hasLegacyRemoteKey &&
+    typeof stored.remoteWriter?.apiKey === 'string'
+  ) {
+    rememberSessionModelApiKey(
+      gatewayCredentialIdentity(normalizedGateway),
+      stored.remoteWriter.apiKey,
+    );
   }
 
-  const normalized = normalizeAiSettings(stored);
   if (hasLegacyProviderKey || hasLegacyLocalKey || hasLegacyGatewayKey || hasLegacyRemoteKey) {
     lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
   }
@@ -372,19 +446,24 @@ export function getAiSettings(): AiSettings {
 
 export function saveAiSettings(settings: AiSettings): void {
   const normalized = normalizeAiSettings(settings);
-  sessionCredentials = {
-    providerApiKey: normalized.apiKey,
-    localChapterModelApiKey:
-      normalized.localChapterModel?.apiKey ?? sessionCredentials.localChapterModelApiKey,
-    gatewayApiKey:
-      normalized.gateway?.apiKey ??
-      normalized.remoteWriter?.apiKey ??
-      sessionCredentials.gatewayApiKey,
-  };
+  if (normalized.runtimeMode === 'api') {
+    rememberSessionModelApiKey(providerCredentialIdentity(normalized), normalized.apiKey);
+  }
+  if (normalized.localChapterModel) {
+    rememberSessionModelApiKey(
+      localCredentialIdentity(normalized.localChapterModel),
+      normalized.localChapterModel.apiKey,
+    );
+  }
+  const gateway = normalized.gateway ?? normalized.remoteWriter;
+  if (gateway) {
+    rememberSessionModelApiKey(gatewayCredentialIdentity(gateway), gateway.apiKey);
+  }
   lsSet(AI_SETTINGS_KEY, withoutCredentials(normalized));
 }
 
 export function maskAiApiKey(key: string): string {
-  if (!key || key.length < 8) return key;
+  if (!key) return '';
+  if (key.length < 8) return '****';
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
