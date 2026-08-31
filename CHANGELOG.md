@@ -25,6 +25,7 @@
 
 ### 修复
 
+- **正文快速保存状态投影稳定化**：正文保存通过全部 guard 后立即把 `saving` 原子发布到工作台状态栏与右侧保存控件，再进入本地持久化；避免快速浏览器把子编辑器的开始态与完成态合并为 `editing → saved`，不增加固定等待，也不改变草稿事务或失败保留语义。
 - **桌面闭环 E2E 修订契约修复**：修订候选触发 `chapter_opening_rollback` 完整性修复后不再要求全文包含初版正文；继续验证初版与修订产物的 ID、哈希、章节范围、Run/Card 归属、授权、采用及重启后的持久化来源链。
 - **浏览器大纲保存断言稳定化**：Browser E2E 在章节大纲保存反馈可见后继续等待 `data-save-state="saved"` 稳定终态，避免把正常的短暂 `saving` 过程误报为保存失败；生产保存行为与状态契约保持不变。
 - **Windows 发布门禁固定 DSH 与 Gateway 构建顺序**：Windows 桌面 CI 与签名 Release workflow 先检出固定 DSH 提交、构建 host libraries 并导出 `DSH_CHECKOUT`，随后清理缓存中的 `novel-domain-gateway` 并从当前源码锁定重建，再运行串行 Rust 全测；本地发布矩阵、PR 模板和 docs-sync 失败关闭夹具同步同一顺序，避免旧 `target` 缓存或未准备载体被误报为 9 项产品回归。

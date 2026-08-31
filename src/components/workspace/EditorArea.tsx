@@ -39,6 +39,7 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     onDraftChange: props.onDraftChange,
     onEditorContentChange: props.onEditorContentChange,
     onDraftSaved: props.onDraftSaved,
+    onActionStateChange,
     applyTextRequest: props.applyTextRequest,
     onApplyTextConsumed: props.onApplyTextConsumed,
     onApplyTextRejected: props.onApplyTextRejected,

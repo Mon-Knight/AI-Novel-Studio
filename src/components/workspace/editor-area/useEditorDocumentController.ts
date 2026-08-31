@@ -34,6 +34,7 @@ interface UseEditorDocumentControllerOptions {
   onDraftChange?: EditorAreaProps['onDraftChange'];
   onEditorContentChange?: EditorAreaProps['onEditorContentChange'];
   onDraftSaved?: EditorAreaProps['onDraftSaved'];
+  onActionStateChange?: EditorAreaProps['onActionStateChange'];
   applyTextRequest?: AiTextApplyRequest | null;
   onApplyTextConsumed?: EditorAreaProps['onApplyTextConsumed'];
   onApplyTextRejected?: EditorAreaProps['onApplyTextRejected'];
@@ -68,6 +69,7 @@ export function useEditorDocumentController({
   onDraftChange,
   onEditorContentChange,
   onDraftSaved,
+  onActionStateChange,
   applyTextRequest,
   onApplyTextConsumed,
   onApplyTextRejected,
@@ -283,6 +285,12 @@ export function useEditorDocumentController({
     setSaving(true);
     setSaveState('saving');
     setSaveMsg('保存中');
+    onActionStateChange?.({
+      saving: true,
+      adopting: false,
+      saveState: 'saving',
+      saveMessage: '保存中',
+    });
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     const requestDraftId = currentDraft?.id;
@@ -361,6 +369,7 @@ export function useEditorDocumentController({
     emitContentSnapshot,
     isDirty,
     novelId,
+    onActionStateChange,
     onDraftSaved,
     reviewLocked,
   ]);

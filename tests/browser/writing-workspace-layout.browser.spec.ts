@@ -248,12 +248,17 @@ describe('writing workspace layout', () => {
         states: [] as string[],
         loadingEvents: 0,
         modalSeen: false,
+        toolbarBusySeen: false,
+        toolbarSavingLabelSeen: false,
         observer: null as MutationObserver | null,
         listener: null as EventListener | null,
       };
       const record = () => {
         if (status?.dataset.saveState) probe.states.push(status.dataset.saveState);
         if (document.querySelector('.loading-modal-card')) probe.modalSeen = true;
+        const saveButton = document.querySelector<HTMLElement>('[data-testid="chapter-save"]');
+        if (saveButton?.getAttribute('aria-busy') === 'true') probe.toolbarBusySeen = true;
+        if (saveButton?.textContent?.includes('保存中')) probe.toolbarSavingLabelSeen = true;
       };
       const listener = () => {
         probe.loadingEvents += 1;
@@ -304,6 +309,8 @@ describe('writing workspace layout', () => {
           states: string[];
           loadingEvents: number;
           modalSeen: boolean;
+          toolbarBusySeen: boolean;
+          toolbarSavingLabelSeen: boolean;
           observer: MutationObserver | null;
           listener: EventListener | null;
         };
@@ -318,12 +325,18 @@ describe('writing workspace layout', () => {
         states: probe?.states ?? [],
         loadingEvents: probe?.loadingEvents ?? -1,
         modalSeen: probe?.modalSeen ?? true,
+        toolbarBusySeen: probe?.toolbarBusySeen ?? false,
+        toolbarSavingLabelSeen: probe?.toolbarSavingLabelSeen ?? false,
         modalPresent: Boolean(document.querySelector('.loading-modal-card')),
         label: document.querySelector('[data-testid="document-save-status"]')?.textContent ?? '',
       };
     });
-    expect(bodySave.states).toContain('saving');
-    expect(bodySave.states).toContain('saved');
+    const savingIndex = bodySave.states.indexOf('saving');
+    const savedIndex = bodySave.states.lastIndexOf('saved');
+    expect(savingIndex).toBeGreaterThanOrEqual(0);
+    expect(savedIndex).toBeGreaterThan(savingIndex);
+    expect(bodySave.toolbarBusySeen).toBe(true);
+    expect(bodySave.toolbarSavingLabelSeen).toBe(true);
     expect(bodySave.loadingEvents).toBe(0);
     expect(bodySave.modalSeen).toBe(false);
     expect(bodySave.modalPresent).toBe(false);
