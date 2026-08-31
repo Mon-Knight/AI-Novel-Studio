@@ -293,6 +293,17 @@ test('natural rule-setting goals stay on the setting candidate route', () => {
   }
 });
 
+test('repeated courtesy prefixes stay linear and preserve dedicated routes', () => {
+  const repeatedCourtesy = '请帮我'.repeat(512);
+
+  assert.equal(
+    selectCandidateTool(`${repeatedCourtesy}生成本章大纲`, 'ch-1')?.name,
+    'generate_outline',
+  );
+  assert.equal(selectCandidateTool(`${repeatedCourtesy}生成规则候选`)?.name, 'expand_settings');
+  assert.equal(selectCandidateTool(`${repeatedCourtesy}无匹配动作`, 'ch-1'), undefined);
+});
+
 test('natural whole-book planning goals use story planning without a chapter target', () => {
   const goals = ['规划全书', '生成整本故事规划', '完善全书大纲'];
 
