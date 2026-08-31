@@ -115,6 +115,7 @@ test('production registry exposes executable read/verification/candidate contrac
   for (const relative of [
     'src-tauri/src/services/ai_task_service.rs',
     'src-tauri/src/services/agent_plan_service.rs',
+    'tests/e2e/chapter-readiness-planner.spec.ts',
   ]) {
     const source = readFileSync(join(process.cwd(), relative), 'utf8');
     assert.equal(

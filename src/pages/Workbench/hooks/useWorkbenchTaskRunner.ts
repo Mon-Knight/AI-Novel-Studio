@@ -80,6 +80,7 @@ const CORE_ASSET_ARTIFACT_TYPE: Record<ChapterCoreAsset, string> = {
 };
 
 interface AssetDecisionSettlementInput {
+  conversationId: string;
   artifactId: string;
   decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply';
   applied: boolean;
@@ -643,22 +644,28 @@ export function useWorkbenchTaskRunner(input: {
           finishedAt: new Date().toISOString(),
         });
         runTerminal = true;
+        const requestScopeIsSelected = () =>
+          selectedConversationIdRef.current === request.conversationId &&
+          selectedNovelRef.current === request.novelId;
 
         if (request.intent.target === 'asset') {
           let selectedChapterId: string | undefined;
-          if (result.applied) {
+          if (result.applied && requestScopeIsSelected()) {
             const refreshed = await reloadChapters(request.novelId);
             selectedChapterId = refreshed?.chapterId;
-            if (selectedChapterId) await selectChapter(selectedChapterId);
+            if (selectedChapterId && requestScopeIsSelected()) {
+              await selectChapter(selectedChapterId);
+            }
           }
           await settleAssetCandidateDecisionRef.current({
+            conversationId: request.conversationId,
             artifactId: result.artifact.artifactId!,
             decision: result.decision.decision,
             applied: result.applied,
             selectedChapterId,
           });
         }
-        if (result.adopted) {
+        if (result.adopted && requestScopeIsSelected()) {
           await reloadChapters(request.novelId);
         }
         if (selectedNovelRef.current === request.novelId) {
@@ -1191,12 +1198,11 @@ export function useWorkbenchTaskRunner(input: {
   );
 
   const refreshChapterAssetReadiness = useCallback(
-    async (selectedChapterId?: string, appliedArtifactId?: string) => {
-      const conversationId = assetRecovery?.conversationId;
-      if (!conversationId) return;
+    async (conversationId: string, selectedChapterId?: string, appliedArtifactId?: string) => {
+      const current = chapterAssetRecoveryStore.get(conversationId);
       const appliedAsset =
-        appliedArtifactId && assetRecovery.orchestration.candidateArtifactId === appliedArtifactId
-          ? assetRecovery.orchestration.asset
+        appliedArtifactId && current?.orchestration.candidateArtifactId === appliedArtifactId
+          ? current.orchestration.asset
           : undefined;
       const errorOperation = beginComposerErrorOperation(conversationId);
       commitComposerErrorOperation(errorOperation, '');
@@ -1204,7 +1210,9 @@ export function useWorkbenchTaskRunner(input: {
         const refreshed = await refreshAssetRecovery(conversationId);
         if (appliedAsset && refreshed?.missingAssets[0] === appliedAsset) {
           updateAssetOrchestration(conversationId, (orchestration) =>
-            orchestration.asset === appliedAsset
+            orchestration.asset === appliedAsset &&
+            orchestration.phase === 'awaiting_apply' &&
+            orchestration.candidateArtifactId === appliedArtifactId
               ? {
                   ...orchestration,
                   phase: 'failed',
@@ -1214,7 +1222,12 @@ export function useWorkbenchTaskRunner(input: {
               : orchestration,
           );
         }
-        if (refreshed?.chapterId && refreshed.chapterId !== (selectedChapterId ?? chapterId)) {
+        if (
+          refreshed?.chapterId &&
+          refreshed.chapterId !== (selectedChapterId ?? selectedChapterIdRef.current) &&
+          selectedConversationIdRef.current === conversationId &&
+          selectedNovelRef.current === refreshed.novelId
+        ) {
           await selectChapter(refreshed.chapterId);
         }
       } catch (error) {
@@ -1223,26 +1236,29 @@ export function useWorkbenchTaskRunner(input: {
     },
     [
       beginComposerErrorOperation,
-      assetRecovery?.conversationId,
-      assetRecovery?.orchestration.asset,
-      assetRecovery?.orchestration.candidateArtifactId,
-      chapterId,
       refreshAssetRecovery,
       selectChapter,
       commitComposerErrorOperation,
+      selectedNovelRef,
       updateAssetOrchestration,
     ],
   );
 
   const settleAssetCandidateDecision = useCallback(
     async (input: AssetDecisionSettlementInput) => {
-      const current = assetRecovery;
+      const current = chapterAssetRecoveryStore.get(input.conversationId);
       if (!current || current.orchestration.candidateArtifactId !== input.artifactId) {
-        if (input.applied) await refreshChapterAssetReadiness(input.selectedChapterId);
+        if (input.applied) {
+          await refreshChapterAssetReadiness(input.conversationId, input.selectedChapterId);
+        }
         return;
       }
       if (input.applied) {
-        await refreshChapterAssetReadiness(input.selectedChapterId, input.artifactId);
+        await refreshChapterAssetReadiness(
+          input.conversationId,
+          input.selectedChapterId,
+          input.artifactId,
+        );
         return;
       }
       if (
@@ -1252,7 +1268,8 @@ export function useWorkbenchTaskRunner(input: {
       ) {
         return;
       }
-      updateAssetOrchestration(current.conversationId, (orchestration) =>
+      updateAssetOrchestration(input.conversationId, (orchestration) =>
+        orchestration.phase === 'awaiting_apply' &&
         orchestration.candidateArtifactId === input.artifactId
           ? {
               ...orchestration,
@@ -1268,7 +1285,7 @@ export function useWorkbenchTaskRunner(input: {
           : orchestration,
       );
     },
-    [assetRecovery, refreshChapterAssetReadiness, updateAssetOrchestration],
+    [refreshChapterAssetReadiness, updateAssetOrchestration],
   );
   settleAssetCandidateDecisionRef.current = settleAssetCandidateDecision;
 
@@ -1497,6 +1514,7 @@ export function useWorkbenchTaskRunner(input: {
     const latestDecision = decisions[decisions.length - 1] ?? candidate.latestDecision;
     if (!latestDecision) return;
     await settleAssetCandidateDecision({
+      conversationId: current.conversationId,
       artifactId: candidate.artifactId,
       decision: latestDecision.decision,
       applied: Boolean(latestDecision.applyTransactionId && !latestDecision.conflictCode),

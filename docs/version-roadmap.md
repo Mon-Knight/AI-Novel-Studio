@@ -4,9 +4,9 @@
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
 > 当前版本：v3.6.0（智能体创作平台与长篇小说记忆层）
-> 当前工作树状态：发布候选；尚不等同于已经合并、打 tag 或发布
+> 当前状态：v3.6.0 版本基线
 
-> 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，v3.5.0 完成工作台与旧 UI 收敛，v3.6.0 候选继续收敛 Canonical 能力契约。候选状态不等同于已经合并、打 tag 或发布。
+> 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，v3.5.0 完成工作台与旧 UI 收敛，v3.6.0 继续收敛 Canonical 能力契约。
 
 ---
 
@@ -503,9 +503,9 @@ v3.0.0 默认边界仍是“Agent 自动规划和生成候选，正式副作用�
 
 ---
 
-## 7. v3.3.0+ 对话式并发创作工作台路线（v3.6.0 当前发布候选）
+## 7. v3.3.0+ 对话式并发创作工作台路线（v3.6.0 当前版本）
 
-v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已在当前实施分支落地；v3.6.0 候选正在校准 Agent 能力契约。GitHub `main`、发布 tag 与 Release 仍以合入后的发布流程为准。
+v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6.0 版本基线完成 Agent 能力契约校准，同时保留后续放行门禁。
 
 ### v3.3.0：工作台最小闭环 ✅
 
@@ -552,7 +552,7 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已在当前实施�
 
 **版本边界：** 底层领域服务、审计事实和历史草稿不因 UI 删减而自动删除。
 
-### v3.6.0：Canonical 只读契约与准入状态（当前发布候选）
+### v3.6.0：Canonical 只读契约与准入状态（当前版本）
 
 - Phase 1A-A Capability Catalog、1A-B Domain Facade、1A-C Canonical Projection、1A-D 共享 portable Manifest/跨语言漂移门禁均已完成；
 - `novel.read / structure.read / context.read / memory.search` 仍全部是 `catalog_only + partial`，`modelVisibleToolIdentities=[]`，公开 Agent 执行入口失败关闭；
@@ -560,7 +560,7 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已在当前实施�
 - 四项 blocker 关闭后，必须以独立 exposure 变更和回归证据放行只读 Tool，不能把 legacy DSH allowlist 改名冒充迁移；
 - exposure 门禁通过后才进入 **R4：真实 Main Agent Runtime 验证**；Writing SubAgent 与其他 SubAgent 继续后置。
 
-详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档只记录 v3.6.0 候选的真实状态，不授权新版本、R4 执行、提交、tag 或发布。
+详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 的真实能力边界，不授权后续版本或 R4 执行。
 
 ---
 

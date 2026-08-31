@@ -2,7 +2,7 @@
 
 > 文件：`docs/agent-runtime.md`  
 > 版本：v3.6.0
-> 当前工作树：发布候选；本文的当前状态不代表已经合并、打 tag 或发布
+> 当前状态：v3.6.0 版本基线
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---
@@ -237,7 +237,7 @@ Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少�
 
 完整设计与版本路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。任务对话、决定/审阅授权、章节原子采用、领域候选工具、上下文压缩候选和写作工作台审阅收敛已落地；旧生成类 AI 面板、独立实验面板和草稿历史生产入口已经移除。通用结构化 Safe Apply 仍按失败关闭边界处理。
 
-v3.6.0 候选已经完成 Canonical 1A-A/B/C/D 的 Catalog、Domain Facade、Projection、共享 Manifest 与宿主门禁，但四个只读 identity 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再以独立 exposure 变更验证 scoped manifest、权限、负例和重启行为；只有 exposure 通过后才进入 R4 真实 Main Agent Runtime 验证。
+v3.6.0 已经完成 Canonical 1A-A/B/C/D 的 Catalog、Domain Facade、Projection、共享 Manifest 与宿主门禁，但四个只读 identity 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再以独立 exposure 变更验证 scoped manifest、权限、负例和重启行为；只有 exposure 通过后才进入 R4 真实 Main Agent Runtime 验证。
 
 ---
 

@@ -7,7 +7,7 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 候选的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。当前完整项目备份 schema 为 11。小说继续是领域数据最高级对象。
+> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。当前完整项目备份 schema 为 11。小说继续是领域数据最高级对象。
 
 ---
 
@@ -3094,7 +3094,7 @@ Workbench（UI 聚合，不是领域父实体）
 
 DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection 是运行时即时视图；DSH 事件只有在经过 ANS Adapter 转换并满足既有身份、顺序和终态不变量后，才形成 `TaskRun`、`ToolCallEvent` 或消息事实。
 
-## 40.9 v3.6.0 候选的决定与采用边界
+## 40.9 v3.6.0 的决定与采用边界
 
 - migration 036 已建立 append-only `artifact_decisions` 与 `review_authorizations`。
 - 章节候选确认进入审阅后，桌面端 `adopt_review_authorized_draft` 在同一个 Rust/SQLite 事务中复验授权、作品/章节、草稿版本与全文 hash，采用草稿、消费授权并收敛任务状态；重复调用只能按同一采用事实幂等读回。

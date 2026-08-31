@@ -3,6 +3,10 @@ import test from 'node:test';
 import type { ChapterGenerationContext } from '../../types/ai';
 import { selectCandidateTool } from './taskGoalRouting';
 import {
+  seedE2eChapterCoreAssets,
+  type E2eChapterCoreAssetSeedInput,
+} from '../tauri/e2eChapterCoreAssetFixture';
+import {
   buildCoreAssetGenerationGoal,
   chapterAssetRecoveryStore,
   inspectChapterAssetReadiness,
@@ -27,6 +31,72 @@ function context(
 ): ChapterGenerationContext {
   return values as ChapterGenerationContext;
 }
+
+const e2eCoreAssetFixture: E2eChapterCoreAssetSeedInput = {
+  novelId: 'novel-1',
+  worldSetting: { title: '世界', content: '稳定且可执行的世界背景。' },
+  ruleSystem: { title: '规则', content: '能力使用必须承担代价。' },
+  protagonist: {
+    name: '主角',
+    identity: '调查员',
+    personality: '谨慎',
+    goal: '完成调查',
+  },
+  chapters: [
+    {
+      chapterId: 'chapter-1',
+      title: '第一章',
+      outline: '发现线索并作出选择。',
+      targetWordCount: 600,
+    },
+    {
+      chapterId: 'chapter-2',
+      title: '第二章',
+      outline: '追踪线索并面对阻力。',
+      targetWordCount: 650,
+    },
+  ],
+};
+
+test('E2E core-asset fixture is unavailable outside the Tauri test runtime', async () => {
+  await assert.rejects(
+    seedE2eChapterCoreAssets(e2eCoreAssetFixture, { isDesktop: () => false }),
+    /requires the Tauri runtime/,
+  );
+});
+
+test('E2E core-asset fixture validates every chapter scope before mutating SQLite', async () => {
+  let mutationCount = 0;
+  await assert.rejects(
+    seedE2eChapterCoreAssets(e2eCoreAssetFixture, {
+      isDesktop: () => true,
+      getNovel: async () => ({ id: 'novel-1' }) as never,
+      getChapter: async (chapterId) =>
+        ({
+          id: chapterId,
+          novelId: chapterId === 'chapter-2' ? 'novel-other' : 'novel-1',
+        }) as never,
+      updateChapter: async () => {
+        mutationCount += 1;
+        return null;
+      },
+      saveWorldSetting: async () => {
+        mutationCount += 1;
+        return { id: 'world-1' } as never;
+      },
+      saveRuleSystem: async () => {
+        mutationCount += 1;
+        return { id: 'rule-1' } as never;
+      },
+      saveProtagonist: async () => {
+        mutationCount += 1;
+        return { id: 'protagonist-1' } as never;
+      },
+    }),
+    /does not belong to the requested novel/,
+  );
+  assert.equal(mutationCount, 0);
+});
 
 test('chapter readiness reports the exact writer core assets in a stable user-facing order', async () => {
   const result = await inspectChapterAssetReadiness(

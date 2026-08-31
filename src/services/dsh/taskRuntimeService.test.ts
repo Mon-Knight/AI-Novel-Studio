@@ -7,6 +7,7 @@ import {
   hasUsableDshTaskCredential,
   hasUsableDshTaskCredentialAsync,
   resolveDshTaskApiKey,
+  resolveDshTaskApiKeyAsync,
 } from './taskRuntimeService';
 
 const values = new Map<string, string>();
@@ -71,6 +72,42 @@ test('DSH permits an unkeyed loopback model without weakening public endpoint ch
   assert.equal(resolveDshTaskApiKey(loopbackSnapshot), '');
   assert.equal(hasUsableDshTaskCredential(loopbackSnapshot), true);
   assert.equal(hasUsableDshTaskCredential({ ...snapshot, modelId: 'unregistered-model' }), false);
+});
+
+test('mock DSH snapshots never resolve session or native credentials', async () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let nativeVaultCalls = 0;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __TAURI_IPC__: () => {
+        nativeVaultCalls += 1;
+        throw new Error('mock runtime must not query the native credential vault');
+      },
+    },
+  });
+
+  try {
+    saveAiSettings(settings);
+    const sessionBoundMockSnapshot: TaskModelSnapshot = {
+      ...snapshot,
+      runtimeMode: 'mock',
+    };
+    const nativeOnlyMockSnapshot: TaskModelSnapshot = {
+      ...sessionBoundMockSnapshot,
+      providerId: 'deepseek-official',
+      modelId: 'uncached-native-vault-probe',
+      baseUrl: 'https://api.deepseek.com/v1',
+    };
+
+    assert.equal(resolveDshTaskApiKey(sessionBoundMockSnapshot), '');
+    assert.equal(await resolveDshTaskApiKeyAsync(sessionBoundMockSnapshot), '');
+    assert.equal(await resolveDshTaskApiKeyAsync(nativeOnlyMockSnapshot), '');
+    assert.equal(nativeVaultCalls, 0);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
 });
 
 test('async DSH credential readiness resolves the same frozen identity used after renderer restore', async () => {

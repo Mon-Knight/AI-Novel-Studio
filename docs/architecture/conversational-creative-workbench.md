@@ -1,6 +1,6 @@
 # 对话式并发创作工作台设计
 
-> 状态：v3.6.0 发布候选；对话工作台、决定/审阅授权、章节原子采用、五类桌面结构化原子应用与旧 UI 收敛已实现；未列入白名单的结构化类型及浏览器回退仍失败关闭
+> 状态：v3.6.0 当前版本；对话工作台、决定/审阅授权、章节原子采用、五类桌面结构化原子应用与旧 UI 收敛已实现；未列入白名单的结构化类型及浏览器回退仍失败关闭
 > 适用版本：v3.3.0 及后续版本  
 > 当前版本：v3.6.0
 > Harness 架构分析快照：[`deepseek-ai/deepseek-harness@141eb6f`](https://github.com/deepseek-ai/deepseek-harness/tree/141eb6fef83422698aef7a981029e843e8161534)（2026-08-20，仅作设计参考）  
@@ -40,7 +40,7 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 
 当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影及发送前精确目录重验、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。目录重验只证明条目来自当前 Runtime 投影；进入桌面 DSH 的模型任务会在创建 Run 前另行执行可取消的原生 tool-call nonce 探针，只有精确 `provider/model` 证明通过才冻结证据并继续。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
 
-结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。v3.6.0 候选还完成了 Canonical 1A-A/B/C/D 的 Catalog、Facade、Projection、共享 Manifest 和漂移门禁，但四项均为 `catalog_only + partial`，模型可见数为 `0`。
+结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。v3.6.0 还完成了 Canonical 1A-A/B/C/D 的 Catalog、Facade、Projection、共享 Manifest 和漂移门禁，但四项均为 `catalog_only + partial`，模型可见数为 `0`。
 
 ---
 
@@ -552,7 +552,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 
 ---
 
-## 13. v3.6.0 候选现状与剩余差距
+## 13. v3.6.0 现状与剩余差距
 
 工作台交互目标已经落地：应用默认进入任务工作台，任务/回合/运行/工具事件/产物卡片可持久化，模型快照与任务隔离存在，工具/错误/产物在对话内展示，当前插件来自 Runtime Registry；同一 user Turn 的多次 Run 逐次保留，未决候选可靠投影为等待用户，任务切换不会串用草稿、错误或压缩候选。写作工作台已收敛为章节审阅/编辑器，旧 AI 面板和草稿历史生产入口已移除。
 
@@ -597,7 +597,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 - 旧写作工作台的生成类 AI 面板、独立实验面板和草稿历史入口已删除；
 - 原写作工作台稳定收敛为人工审阅/编辑器。
 
-### 14.4 v3.6.0：Canonical 准入（当前发布候选）
+### 14.4 v3.6.0：Canonical 准入（当前版本）
 
 - 1A-A Catalog、1A-B Facade、1A-C Projection、1A-D portable Manifest/漂移门禁已验证；
 - 四个 Canonical read Tool 仍为 `catalog_only + partial`，模型可见数为 `0`；

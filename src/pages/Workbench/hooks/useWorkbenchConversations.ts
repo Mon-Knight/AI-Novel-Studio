@@ -91,6 +91,7 @@ export function useWorkbenchConversations() {
   }, []);
 
   const refreshBundle = useCallback(async (conversationId: string) => {
+    if (!conversationId || selectedConversationRef.current !== conversationId) return;
     const requestId = ++bundleRequestRef.current;
     const replacingConversation = bundleRef.current?.conversation.conversationId !== conversationId;
     if (replacingConversation) setBundleLoading(true);
@@ -514,6 +515,7 @@ export function useWorkbenchConversations() {
     selectedNovel,
     selectedChapter,
     selectedNovelRef,
+    selectedConversationRef,
     selectProject,
     selectTask,
     loadConversations,

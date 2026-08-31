@@ -137,6 +137,7 @@ function projectChapters(chapters: readonly Chapter[], currentChapterId?: string
     status: chapter.status,
     targetWordCount: chapter.targetWordCount,
     wordCount: chapter.wordCount,
+    adoptedDraftId: chapter.adoptedDraftId,
   }));
 }
 

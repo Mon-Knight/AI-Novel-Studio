@@ -15,6 +15,7 @@ import {
   findTestIdByAttribute,
   navigateHash,
   openWorkspace,
+  seedChapterCoreAssetsForE2e,
   waitForTestId,
   waitForTestIdAttribute,
 } from './helpers';
@@ -33,6 +34,7 @@ interface ChapterRecord {
   id: string;
   novelId: string;
   title: string;
+  status: string;
   adoptedDraftId?: string;
 }
 
@@ -81,14 +83,27 @@ interface TaskConversationBundle {
     novelId: string;
     status: string;
   };
-  turns: Array<{ turnId: string; conversationId: string; role: string; runId?: string }>;
-  runs: Array<{ runId: string; conversationId: string; status: string }>;
+  turns: Array<{
+    turnId: string;
+    conversationId: string;
+    sequence: number;
+    role: string;
+    content?: string;
+    runId?: string;
+  }>;
+  runs: Array<{
+    runId: string;
+    conversationId: string;
+    turnId: string;
+    status: string;
+  }>;
   toolEvents: Array<{ runId: string; toolName: string; status: string; error?: string }>;
   artifacts: Array<{
     cardId: string;
     conversationId: string;
     runId?: string;
     artifactId?: string;
+    artifactType: string;
     status: string;
   }>;
   decisions: Array<{
@@ -111,6 +126,7 @@ interface ClosedLoopRoundEvidence {
   conversationId: string;
   generateRunId: string;
   revisionRunId: string;
+  summaryTurnId: string;
   initialArtifactId: string;
   revisedArtifactId: string;
   decisionId: string;
@@ -143,6 +159,7 @@ function assertChapterArtifact(
 describe('Agent production closed loop & restart verification', () => {
   it('executes 5-round multi-novel generation, revision, review authorization, adoption & survives restart', async () => {
     const roundEvidence: ClosedLoopRoundEvidence[] = [];
+    const seenConversationIds = new Set<string>();
 
     await waitForTestId('app-shell');
     await browser.execute(() => {
@@ -159,6 +176,52 @@ describe('Agent production closed loop & restart verification', () => {
     const chapterA1Id = await createChapterThroughUi('第一章 苍穹惊变', volumeAId);
     const chapterA2Id = await createChapterThroughUi('第二章 试剑石前', volumeAId);
     const chapterA3Id = await createChapterThroughUi('第三章 风云际会', volumeAId);
+    const readinessA = await seedChapterCoreAssetsForE2e({
+      novelId: projectAId,
+      worldSetting: {
+        title: '仙门演武世界',
+        content: '宗门以演武、试剑和长老议事维持秩序，天地异象会留下可追踪的影响。',
+      },
+      ruleSystem: {
+        title: '修行与宗门规则',
+        content: '修行能力必须付出体力与心神代价，公开比试受宗门戒律约束。',
+        forbiddenRules: '不得无代价突破既定境界，不得抹除已经发生的公开事件。',
+      },
+      protagonist: {
+        name: '沈砚',
+        identity: '初入宗门的年轻弟子',
+        personality: '沉静、克制，在压力下先观察再行动',
+        goal: '查清自身异象与宗门暗流的关系',
+      },
+      chapters: [
+        {
+          chapterId: chapterA1Id,
+          title: '第一章 苍穹惊变',
+          outline: '演武场冲突升级，风雨与天象同时异变，主角被迫显露异常。',
+          targetWordCount: 600,
+        },
+        {
+          chapterId: chapterA2Id,
+          title: '第二章 试剑石前',
+          outline: '众弟子聚集试剑石前，嘲讽与期待交错，主角平静接受测试。',
+          targetWordCount: 600,
+        },
+        {
+          chapterId: chapterA3Id,
+          title: '第三章 风云际会',
+          outline: '剑芒触发宗门警戒，长老现身探查，明暗势力开始关注主角。',
+          targetWordCount: 600,
+        },
+      ],
+    });
+    expect(readinessA.storageMode).toBe('sqlite');
+    expect(readinessA.novelId).toBe(projectAId);
+    expect(readinessA.chapterOutlineIds).toHaveLength(3);
+    expect(readinessA.readiness).toEqual([
+      { chapterId: chapterA1Id, ready: true, missingAssets: [] },
+      { chapterId: chapterA2Id, ready: true, missingAssets: [] },
+      { chapterId: chapterA3Id, ready: true, missingAssets: [] },
+    ]);
 
     // 作品 B：包含 2 个独立章节 B1, B2
     await navigateHash('#/novels');
@@ -167,6 +230,45 @@ describe('Agent production closed loop & restart verification', () => {
     const volumeBId = await createVolumeThroughUi('第一卷 星渊起航');
     const chapterB1Id = await createChapterThroughUi('第一章 深空跃迁', volumeBId);
     const chapterB2Id = await createChapterThroughUi('第二章 引擎危机', volumeBId);
+    const readinessB = await seedChapterCoreAssetsForE2e({
+      novelId: projectBId,
+      worldSetting: {
+        title: '星际航行环境',
+        content: '远航舰在深空依赖跃迁与冷却系统，舱内资源和通信均受严格限制。',
+      },
+      ruleSystem: {
+        title: '舰船工程规则',
+        content: '跃迁、供能和散热遵守守恒约束，任何抢修都需要承担时间与辐射风险。',
+        forbiddenRules: '不得凭空恢复设备，不得忽略真空、微重力和辐射造成的后果。',
+      },
+      protagonist: {
+        name: '林序',
+        identity: '远航舰动力工程师',
+        personality: '理性、坚韧，危机中优先保护同伴',
+        goal: '修复跃迁系统并带领舰队抵达安全航道',
+      },
+      chapters: [
+        {
+          chapterId: chapterB1Id,
+          title: '第一章 深空跃迁',
+          outline: '跃迁引擎过载，主控舱连续告警，主角判断故障正在向动力舱蔓延。',
+          targetWordCount: 600,
+        },
+        {
+          chapterId: chapterB2Id,
+          title: '第二章 引擎危机',
+          outline: '主角进入微重力动力舱，冒着辐射风险焊接并恢复冷却回路。',
+          targetWordCount: 600,
+        },
+      ],
+    });
+    expect(readinessB.storageMode).toBe('sqlite');
+    expect(readinessB.novelId).toBe(projectBId);
+    expect(readinessB.chapterOutlineIds).toHaveLength(2);
+    expect(readinessB.readiness).toEqual([
+      { chapterId: chapterB1Id, ready: true, missingAssets: [] },
+      { chapterId: chapterB2Id, ready: true, missingAssets: [] },
+    ]);
 
     const chapterTasks = [
       {
@@ -247,8 +349,19 @@ describe('Agent production closed loop & restart verification', () => {
       await createAndStart.click();
 
       const taskHeader = await waitForTestId('workbench-task-header');
-      const conversationId = (await taskHeader.getAttribute('data-conversation-id'))!;
+      await browser.waitUntil(
+        async () => {
+          const candidateId = (await taskHeader.getAttribute('data-conversation-id'))?.trim();
+          return Boolean(candidateId && !seenConversationIds.has(candidateId));
+        },
+        {
+          timeout: 30000,
+          timeoutMsg: `Round ${task.round} 未切换到新建任务会话`,
+        },
+      );
+      const conversationId = (await taskHeader.getAttribute('data-conversation-id'))!.trim();
       expect(conversationId).toBeTruthy();
+      seenConversationIds.add(conversationId);
 
       // 切换/绑定目标章节
       const chapterSelect = await waitForTestId('workbench-chapter-select');
@@ -258,10 +371,16 @@ describe('Agent production closed loop & restart verification', () => {
       // --- 第 1 步：等待原子创建启动的首版生成 ---
       await browser.waitUntil(
         async () => {
-          const cards = await browser.$$('[data-testid="workbench-artifact-card"]');
-          return cards.length >= 1;
+          const candidate = await bridgeCall<TaskConversationBundle | null>(
+            'get_task_conversation',
+            { conversationId },
+          );
+          return (
+            candidate?.conversation.status === 'waiting_user' &&
+            candidate.artifacts.filter((card) => card.artifactType === 'chapter_text').length === 1
+          );
         },
-        { timeout: 60000, timeoutMsg: '未能生成第一版章节候选卡片' },
+        { timeout: 60000, timeoutMsg: '未能持久化第一版章节候选卡片' },
       );
       await waitForTestIdAttribute(
         'workbench-conversation-status',
@@ -270,14 +389,19 @@ describe('Agent production closed loop & restart verification', () => {
         60000,
       );
 
-      const genCards = (await browser.$$(
-        '[data-testid="workbench-artifact-card"]',
-      )) as unknown as Array<WebdriverIO.Element>;
-      expect(genCards.length).toBeGreaterThanOrEqual(1);
-
-      const firstCard = genCards[genCards.length - 1];
-      const initialArtifactId = (await firstCard.getAttribute('data-artifact-id'))?.trim();
+      const initialBundle = await bridgeCall<TaskConversationBundle | null>(
+        'get_task_conversation',
+        { conversationId },
+      );
+      const initialArtifactId = initialBundle?.artifacts.find(
+        (card) => card.artifactType === 'chapter_text',
+      )?.artifactId;
       expect(initialArtifactId).toBeTruthy();
+      const firstCard = await findTestIdByAttribute(
+        'workbench-artifact-card',
+        'data-artifact-id',
+        initialArtifactId!,
+      );
 
       // --- 第 2 步：显式要求修改初版，再生成第二版 ---
       const reviseButton = await firstCard.$('[data-testid="workbench-artifact-revise"]');
@@ -298,10 +422,16 @@ describe('Agent production closed loop & restart verification', () => {
 
       await browser.waitUntil(
         async () => {
-          const cards = await browser.$$('[data-testid="workbench-artifact-card"]');
-          return cards.length >= 2;
+          const candidate = await bridgeCall<TaskConversationBundle | null>(
+            'get_task_conversation',
+            { conversationId },
+          );
+          return (
+            candidate?.conversation.status === 'waiting_user' &&
+            candidate.artifacts.filter((card) => card.artifactType === 'chapter_text').length === 2
+          );
         },
-        { timeout: 60000, timeoutMsg: '未能生成修改后的第二版章节候选卡片' },
+        { timeout: 60000, timeoutMsg: '未能持久化修改后的第二版章节候选卡片' },
       );
       await waitForTestIdAttribute(
         'workbench-conversation-status',
@@ -310,15 +440,20 @@ describe('Agent production closed loop & restart verification', () => {
         60000,
       );
 
-      const revCards = (await browser.$$(
-        '[data-testid="workbench-artifact-card"]',
-      )) as unknown as Array<WebdriverIO.Element>;
-      expect(revCards.length).toBeGreaterThanOrEqual(2);
-
-      const latestCard = revCards[revCards.length - 1];
-      const revisedArtifactId = (await latestCard.getAttribute('data-artifact-id'))?.trim();
+      const revisedBundle = await bridgeCall<TaskConversationBundle | null>(
+        'get_task_conversation',
+        { conversationId },
+      );
+      const revisedArtifactId = revisedBundle?.artifacts.find(
+        (card) => card.artifactType === 'chapter_text' && card.artifactId !== initialArtifactId,
+      )?.artifactId;
       expect(revisedArtifactId).toBeTruthy();
       expect(revisedArtifactId).not.toBe(initialArtifactId);
+      const latestCard = await findTestIdByAttribute(
+        'workbench-artifact-card',
+        'data-artifact-id',
+        revisedArtifactId!,
+      );
 
       const initialArtifact = await bridgeCall<ResultArtifactBundle>('get_result_artifact', {
         input: { artifactId: initialArtifactId },
@@ -343,16 +478,25 @@ describe('Agent production closed loop & restart verification', () => {
         'get_task_conversation',
         { conversationId },
       );
-      expect(activeBundle?.runs).toHaveLength(2);
-      const generateRunId = activeBundle?.artifacts.find(
+      const activeChapterTextCards = activeBundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_text',
+      );
+      expect(activeChapterTextCards).toHaveLength(2);
+      const generateRunId = activeChapterTextCards?.find(
         (card) => card.artifactId === initialArtifactId,
       )?.runId;
-      const revisionRunId = activeBundle?.artifacts.find(
+      const revisionRunId = activeChapterTextCards?.find(
         (card) => card.artifactId === revisedArtifactId,
       )?.runId;
       expect(generateRunId).toBeTruthy();
       expect(revisionRunId).toBeTruthy();
       expect(generateRunId).not.toBe(revisionRunId);
+      const activeChapterTextRunIds = new Set([generateRunId, revisionRunId]);
+      const activeChapterTextRuns = activeBundle?.runs.filter((run) =>
+        activeChapterTextRunIds.has(run.runId),
+      );
+      expect(activeChapterTextRuns).toHaveLength(2);
+      expect(activeChapterTextRuns?.every((run) => run.status === 'completed')).toBe(true);
 
       // --- 第 3 步：强制确认进入审阅 ---
       const confirmButton = await latestCard.$('[data-testid="workbench-artifact-confirm-review"]');
@@ -429,11 +573,30 @@ describe('Agent production closed loop & restart verification', () => {
         { timeout: 30000, timeoutMsg: '草稿采用未变为已采用状态' },
       );
 
-      const completedBundle = await bridgeCall<TaskConversationBundle | null>(
+      const summaryTurnId = `summary-generation-${authorizationId}`;
+      const pendingSummaryBundle = await bridgeCall<TaskConversationBundle | null>(
         'get_task_conversation',
         { conversationId },
       );
-      expect(completedBundle?.conversation.status).toBe('completed');
+      expect(pendingSummaryBundle?.conversation.status).toBe('idle');
+      const pendingSummaryTurns = pendingSummaryBundle?.turns.filter(
+        (turn) => turn.turnId === summaryTurnId,
+      );
+      expect(pendingSummaryTurns).toHaveLength(1);
+      expect(pendingSummaryTurns?.[0].role).toBe('user');
+      expect(pendingSummaryTurns?.[0].content).toContain('总结本章');
+      expect(pendingSummaryBundle?.runs.filter((run) => run.turnId === summaryTurnId)).toHaveLength(
+        0,
+      );
+      expect(
+        pendingSummaryBundle?.artifacts.filter((card) => card.artifactType === 'chapter_summary'),
+      ).toHaveLength(0);
+      const adoptedChapterTextCards = pendingSummaryBundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_text',
+      );
+      expect(adoptedChapterTextCards?.map((card) => card.artifactId).sort()).toEqual(
+        [initialArtifactId, revisedArtifactId].sort(),
+      );
 
       // --- 第 8 步：核实数据库与授权状态 ---
       const chaptersInDb = await bridgeCall<ChapterRecord[]>('get_chapters_by_novel_id', {
@@ -472,6 +635,93 @@ describe('Agent production closed loop & restart verification', () => {
       expect(adoptedDraft?.content).toBe(modifiedText);
       expect(adoptedDraft?.versionNo).toBeGreaterThan(0);
 
+      // --- 第 9 步：返回创作工作台，验证 Mock 总结在创建 Run 前显式失败 ---
+      await navigateHash('#/');
+      await waitForTestId('creative-workbench');
+      const summaryProjectRow = await findTestIdByAttribute(
+        'workbench-project',
+        'data-novel-id',
+        task.novelId,
+      );
+      await summaryProjectRow.click();
+      const summaryTaskRow = await findTestIdByAttribute(
+        'workbench-task',
+        'data-conversation-id',
+        conversationId,
+      );
+      await summaryTaskRow.click();
+      await waitForTestIdAttribute('workbench-task-header', 'data-conversation-id', conversationId);
+
+      const summaryChapterSelect = await waitForTestId('workbench-chapter-select');
+      if ((await summaryChapterSelect.getValue()) !== task.chapterId) {
+        await summaryChapterSelect.selectByAttribute('value', task.chapterId);
+      }
+      expect(await summaryChapterSelect.getValue()).toBe(task.chapterId);
+
+      const summaryFailureSelector =
+        '[data-testid="workbench-summary-orchestration"][data-phase="failed"]';
+      const composerFailureSelector = '[data-testid="workbench-composer-error"]';
+      await browser.waitUntil(
+        async () => {
+          const orchestration = await browser.$(summaryFailureSelector);
+          if (await orchestration.isExisting()) return true;
+          const composerFailure = await browser.$(composerFailureSelector);
+          return (
+            (await composerFailure.isExisting()) &&
+            (await composerFailure.getText()).includes('冻结模型快照 runtimeMode 必须是 api')
+          );
+        },
+        {
+          timeout: 30000,
+          interval: 200,
+          timeoutMsg: `Round ${task.round} 未显式呈现 Mock 总结的 pre-Run 失败`,
+        },
+      );
+      const failureSignals: string[] = [];
+      const summaryFailure = await browser.$(summaryFailureSelector);
+      if (await summaryFailure.isExisting()) failureSignals.push(await summaryFailure.getText());
+      const composerFailure = await browser.$(composerFailureSelector);
+      if (await composerFailure.isExisting()) failureSignals.push(await composerFailure.getText());
+      expect(failureSignals.join('\n')).toMatch(
+        /章节总结启动失败，请重试|冻结模型快照 runtimeMode 必须是 api/,
+      );
+
+      const finalBundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+        conversationId,
+      });
+      expect(finalBundle?.conversation.status).toBe('idle');
+      const finalSummaryTurns = finalBundle?.turns.filter((turn) => turn.turnId === summaryTurnId);
+      expect(finalSummaryTurns).toHaveLength(1);
+      expect(finalSummaryTurns?.[0].role).toBe('user');
+      expect(finalSummaryTurns?.[0].content).toContain('总结本章');
+      expect(finalBundle?.runs.map((run) => run.runId).sort()).toEqual(
+        [generateRunId, revisionRunId].sort(),
+      );
+      expect(finalBundle?.runs.filter((run) => run.turnId === summaryTurnId)).toHaveLength(0);
+      const finalChapterTextCards = finalBundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_text',
+      );
+      expect(finalChapterTextCards?.map((card) => card.artifactId).sort()).toEqual(
+        [initialArtifactId, revisedArtifactId].sort(),
+      );
+      expect(
+        finalBundle?.artifacts.filter((card) => card.artifactType === 'chapter_summary'),
+      ).toHaveLength(0);
+      expect(finalBundle?.artifacts).toHaveLength(2);
+      expect(finalBundle?.decisions).toHaveLength(2);
+
+      const formalSummary = await bridgeCall<unknown | null>('get_chapter_summary', {
+        chapterId: task.chapterId,
+      });
+      expect(formalSummary).toBeNull();
+
+      const chaptersAfterFailure = await bridgeCall<ChapterRecord[]>('get_chapters_by_novel_id', {
+        novelId: task.novelId,
+      });
+      expect(chaptersAfterFailure.find((chapter) => chapter.id === task.chapterId)?.status).toBe(
+        'adopted',
+      );
+
       roundEvidence.push({
         round: task.round,
         novelKey: task.novelKey,
@@ -481,6 +731,7 @@ describe('Agent production closed loop & restart verification', () => {
         conversationId,
         generateRunId: generateRunId!,
         revisionRunId: revisionRunId!,
+        summaryTurnId,
         initialArtifactId: initialArtifactId!,
         revisedArtifactId: revisedArtifactId!,
         decisionId: authRecord!.decisionId,
@@ -508,6 +759,44 @@ describe('Agent production closed loop & restart verification', () => {
 
     await browser.reloadSession();
     await waitForTestId('app-shell');
+    await waitForTestId('creative-workbench');
+
+    const restartTarget = roundEvidence[roundEvidence.length - 1];
+    const restartProjectRow = await findTestIdByAttribute(
+      'workbench-project',
+      'data-novel-id',
+      restartTarget.novelId,
+    );
+    await restartProjectRow.click();
+    const restartTaskRow = await findTestIdByAttribute(
+      'workbench-task',
+      'data-conversation-id',
+      restartTarget.conversationId,
+    );
+    await restartTaskRow.click();
+    await waitForTestIdAttribute(
+      'workbench-task-header',
+      'data-conversation-id',
+      restartTarget.conversationId,
+    );
+    await browser.waitUntil(
+      async () => {
+        const orchestration = await browser.$(
+          '[data-testid="workbench-summary-orchestration"][data-phase="failed"]',
+        );
+        if (await orchestration.isExisting()) return true;
+        const composerFailure = await browser.$('[data-testid="workbench-composer-error"]');
+        return (
+          (await composerFailure.isExisting()) &&
+          (await composerFailure.getText()).includes('冻结模型快照 runtimeMode 必须是 api')
+        );
+      },
+      {
+        timeout: 30000,
+        interval: 200,
+        timeoutMsg: '应用重启后未恢复 Mock 总结的 pre-Run 失败状态',
+      },
+    );
 
     const afterState = await bridgeCall<E2eAgentClosedLoopState>('get_e2e_agent_closed_loop_state');
     const afterPid = afterState.processId;
@@ -541,7 +830,7 @@ describe('Agent production closed loop & restart verification', () => {
       expect(bundle).toBeTruthy();
       expect(bundle?.conversation.conversationId).toBe(evidence.conversationId);
       expect(bundle?.conversation.novelId).toBe(evidence.novelId);
-      expect(bundle?.conversation.status).toBe('completed');
+      expect(bundle?.conversation.status).toBe('idle');
       expect(bundle?.runs.map((run) => run.runId).sort()).toEqual(
         [evidence.generateRunId, evidence.revisionRunId].sort(),
       );
@@ -549,6 +838,13 @@ describe('Agent production closed loop & restart verification', () => {
       expect(bundle?.turns.every((turn) => turn.conversationId === evidence.conversationId)).toBe(
         true,
       );
+      const persistedSummaryTurns = bundle?.turns.filter(
+        (turn) => turn.turnId === evidence.summaryTurnId,
+      );
+      expect(persistedSummaryTurns).toHaveLength(1);
+      expect(persistedSummaryTurns?.[0].role).toBe('user');
+      expect(persistedSummaryTurns?.[0].content).toContain('总结本章');
+      expect(bundle?.runs.filter((run) => run.turnId === evidence.summaryTurnId)).toHaveLength(0);
       expect(bundle?.toolEvents.length).toBeGreaterThan(0);
       expect(
         bundle?.toolEvents.every(
@@ -558,9 +854,26 @@ describe('Agent production closed loop & restart verification', () => {
             !event.error,
         ),
       ).toBe(true);
-      expect(bundle?.artifacts.map((card) => card.artifactId).sort()).toEqual(
+      const persistedChapterTextCards = bundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_text',
+      );
+      expect(persistedChapterTextCards?.map((card) => card.artifactId).sort()).toEqual(
         [evidence.initialArtifactId, evidence.revisedArtifactId].sort(),
       );
+      const persistedChapterTextRunIds = new Set(
+        persistedChapterTextCards?.map((card) => card.runId).filter(Boolean),
+      );
+      expect(
+        bundle?.runs
+          .filter((run) => persistedChapterTextRunIds.has(run.runId))
+          .map((run) => run.runId)
+          .sort(),
+      ).toEqual([evidence.generateRunId, evidence.revisionRunId].sort());
+      const persistedSummaryCards = bundle?.artifacts.filter(
+        (card) => card.artifactType === 'chapter_summary',
+      );
+      expect(persistedSummaryCards).toHaveLength(0);
+      expect(bundle?.artifacts).toHaveLength(2);
       expect(
         bundle?.artifacts.every((card) => card.conversationId === evidence.conversationId),
       ).toBe(true);
@@ -615,9 +928,9 @@ describe('Agent production closed loop & restart verification', () => {
       const chapters = await bridgeCall<ChapterRecord[]>('get_chapters_by_novel_id', {
         novelId: evidence.novelId,
       });
-      expect(chapters.find((chapter) => chapter.id === evidence.chapterId)?.adoptedDraftId).toBe(
-        evidence.adoptedDraftId,
-      );
+      const persistedChapter = chapters.find((chapter) => chapter.id === evidence.chapterId);
+      expect(persistedChapter?.adoptedDraftId).toBe(evidence.adoptedDraftId);
+      expect(persistedChapter?.status).toBe('adopted');
       const drafts = await bridgeCall<DraftSummary[]>('get_drafts_by_chapter_id', {
         chapterId: evidence.chapterId,
       });
@@ -635,6 +948,11 @@ describe('Agent production closed loop & restart verification', () => {
       expect(adoptedDraft?.source).toBe('user_edited');
       expect(adoptedDraft?.isAdopted).toBe(true);
       expect(sha256(adoptedDraft!.content)).toBe(evidence.adoptedContentHash);
+
+      const persistedSummary = await bridgeCall<unknown | null>('get_chapter_summary', {
+        chapterId: evidence.chapterId,
+      });
+      expect(persistedSummary).toBeNull();
 
       persistedTurns += bundle!.turns.length;
       persistedRuns += bundle!.runs.length;

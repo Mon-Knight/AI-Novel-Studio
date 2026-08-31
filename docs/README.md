@@ -18,7 +18,7 @@
 
 | 文档                                                             | 说明                                        | 状态                 |
 | ---------------------------------------------------------------- | ------------------------------------------- | -------------------- |
-| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ v3.6.0 候选已同步 |
+| [version-roadmap.md](version-roadmap.md)                         | 当前权威版本路线图                          | ✅ v3.6.0 已同步     |
 | [module-boundaries.md](module-boundaries.md)                     | 模块边界定义                                | ✅ 已有              |
 | [development-rules.md](development-rules.md)                     | 开发规则总览                                | ✅ 已有              |
 | [feature-gap-analysis-v3.0.0.md](feature-gap-analysis-v3.0.0.md) | v3.0.0 九类功能缺口、证据校正与建议演进顺序 | ✅ 2026-07-28 已审计 |

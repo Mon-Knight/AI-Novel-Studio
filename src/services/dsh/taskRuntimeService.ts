@@ -66,6 +66,7 @@ export interface DshTaskRuntimeStatus {
 const active = new Set<string>();
 
 export function resolveDshTaskApiKey(modelSnapshot: TaskModelSnapshot): string {
+  if (modelSnapshot.runtimeMode !== 'api') return '';
   const snapshotBaseUrl = modelSnapshot.baseUrl ?? '';
   const apiKey = resolveSessionModelApiKey({
     scope: 'provider',
@@ -106,6 +107,7 @@ export async function hasUsableDshTaskCredentialAsync(
 }
 
 export async function resolveDshTaskApiKeyAsync(modelSnapshot: TaskModelSnapshot): Promise<string> {
+  if (modelSnapshot.runtimeMode !== 'api') return '';
   const snapshotBaseUrl = modelSnapshot.baseUrl ?? '';
   const apiKey = await resolveSessionModelApiKeyAsync({
     scope: 'provider',

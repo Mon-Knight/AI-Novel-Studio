@@ -20,6 +20,8 @@ export const REQUIRED_VENDOR_CHUNKS = Object.freeze([
 export const PRODUCTION_FORBIDDEN_MARKERS = Object.freeze([
   'runDomainFacadeSqliteSmoke',
   'e2eDomainFacadeProbe',
+  'seedChapterCoreAssets',
+  'e2eChapterCoreAssetFixture',
 ]);
 
 const DEFAULT_DIST_DIR = 'dist';

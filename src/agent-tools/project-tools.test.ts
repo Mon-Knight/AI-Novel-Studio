@@ -88,6 +88,7 @@ function chapterFixture(): Chapter {
     currentWords: 0,
     targetWordCount: 4_000,
     targetWords: 4_000,
+    adoptedDraftId: 'draft-one',
     drafts: [
       {
         id: 'draft-one',
@@ -262,6 +263,7 @@ test('readProjectContext projects authored assets for a short user instruction',
   assert.equal(data.generationProfiles?.output?.targetWordCount, 4_000);
   assert.match(data.generationAssets?.storyAssets ?? '', /记忆交易所/);
   assert.match(data.generationAssets?.referenceMaterials ?? '', /回忆并不等同于事实/);
+  assert.equal(data.chapters?.[0]?.adoptedDraftId, 'draft-one');
   assert.equal('drafts' in (data.chapters?.[0] ?? {}), false);
   assert.doesNotMatch(JSON.stringify(data), /历史正文不应被/);
 });

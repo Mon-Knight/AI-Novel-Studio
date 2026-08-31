@@ -7,7 +7,7 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；当前工作树为 v3.6.0 发布候选，不代表已经合并或发布。
+> 文档演进说明：第 1～20 节记录产品从 v0.x 延续到 v3.2.1 的基础设计。v3.3.0 及后续版本的主交互演进为“工作台 → 小说项目 → 任务对话”，以第 21 节和 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md) 为准。v3.5.0 已完成工作台、确认/审阅与写作工作台 AI 面板收敛；v3.6.0 是当前版本基线。
 
 ---
 

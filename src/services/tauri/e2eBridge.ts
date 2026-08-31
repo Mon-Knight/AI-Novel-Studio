@@ -13,6 +13,7 @@ import {
   type E2eNetworkGuard,
 } from './e2eNetworkGuard';
 import { isE2eBridgeCommandAllowed } from './e2eBridgePolicy';
+import type { E2eChapterCoreAssetSeedInput } from './e2eChapterCoreAssetFixture';
 
 type E2eLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -26,6 +27,11 @@ interface E2eBridge {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
   /** E2E-only direct exercise of the real Domain Facade + SQLite chain. */
   runDomainFacadeSqliteSmoke: (options: { allowMutation: true }) => Promise<unknown>;
+  /** E2E-only fixture that satisfies the real Workbench core-asset readiness gate. */
+  seedChapterCoreAssets: (options: {
+    allowMutation: true;
+    input: E2eChapterCoreAssetSeedInput;
+  }) => Promise<unknown>;
   getDiagnostics: () => Promise<unknown>;
   getConsoleLogs: () => E2eConsoleEntry[];
   getUnhandledErrors: () => string[];
@@ -54,6 +60,23 @@ function record(level: E2eLogLevel, args: unknown[]): void {
 function getNetworkAttempts(): E2eNetworkAttempts {
   if (!networkGuard) throw new Error('E2E network guard is unavailable');
   return networkGuard.getAttempts();
+}
+
+async function requireHealthyE2eMutationFixture(name: string): Promise<void> {
+  if (import.meta.env.VITE_AI_NOVEL_STUDIO_E2E !== '1') {
+    throw new Error(`${name} is disabled.`);
+  }
+  const diagnostics = await invoke('get_e2e_diagnostics');
+  if (
+    !diagnostics ||
+    typeof diagnostics !== 'object' ||
+    (diagnostics as { enabled?: unknown }).enabled !== true ||
+    (diagnostics as { schemaReady?: unknown }).schemaReady !== true ||
+    (diagnostics as { integrityCheck?: unknown }).integrityCheck !== 'ok' ||
+    (diagnostics as { networkBlocked?: unknown }).networkBlocked !== true
+  ) {
+    throw new Error(`${name} requires healthy isolated desktop diagnostics.`);
+  }
 }
 
 function installCapture(): void {
@@ -91,25 +114,20 @@ function createBridge(): E2eBridge {
     async runDomainFacadeSqliteSmoke(options) {
       // Keep the probe branch compile-time gated so normal production builds
       // do not ship the E2E fixture module as a reachable chunk.
-      if (import.meta.env.VITE_AI_NOVEL_STUDIO_E2E !== '1') {
-        throw new Error('Domain Facade E2E probe is disabled.');
-      }
       if (!options || options.allowMutation !== true) {
         throw new Error('Domain Facade E2E probe requires explicit allowMutation=true.');
       }
-      const diagnostics = await invoke('get_e2e_diagnostics');
-      if (
-        !diagnostics ||
-        typeof diagnostics !== 'object' ||
-        (diagnostics as { enabled?: unknown }).enabled !== true ||
-        (diagnostics as { schemaReady?: unknown }).schemaReady !== true ||
-        (diagnostics as { integrityCheck?: unknown }).integrityCheck !== 'ok' ||
-        (diagnostics as { networkBlocked?: unknown }).networkBlocked !== true
-      ) {
-        throw new Error('Domain Facade E2E probe requires healthy isolated desktop diagnostics.');
-      }
+      await requireHealthyE2eMutationFixture('Domain Facade E2E probe');
       const { runDomainFacadeSqliteSmoke } = await import('./e2eDomainFacadeProbe');
       return runDomainFacadeSqliteSmoke();
+    },
+    async seedChapterCoreAssets(options) {
+      if (!options || options.allowMutation !== true) {
+        throw new Error('Core-asset E2E fixture requires explicit allowMutation=true.');
+      }
+      await requireHealthyE2eMutationFixture('Core-asset E2E fixture');
+      const { seedE2eChapterCoreAssets } = await import('./e2eChapterCoreAssetFixture');
+      return seedE2eChapterCoreAssets(options.input);
     },
     async getDiagnostics() {
       const backend = await invoke('get_e2e_diagnostics');

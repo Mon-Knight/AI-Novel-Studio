@@ -2252,6 +2252,199 @@ test('Workbench releases an applied candidate that did not satisfy the same read
   assert.match(screen.getByTestId('workbench-asset-readiness').textContent ?? '', /仍未补齐/);
 });
 
+test('Workbench keeps the selected project intact when an old asset apply settles late', async () => {
+  useBrowserMockModel();
+  const secondNovel: Novel = {
+    ...mockNovel,
+    id: 'novel-late-target',
+    title: '雾海纪事',
+    currentChapterId: 'chapter-late-target',
+  };
+  const secondChapter: Chapter = {
+    ...mockChapter,
+    id: 'chapter-late-target',
+    novelId: secondNovel.id,
+    title: '雾港来信',
+  };
+  const secondConversation: TaskConversation = {
+    ...mockConversation,
+    conversationId: 'conv-late-target',
+    novelId: secondNovel.id,
+    title: '追查雾港来信',
+  };
+  const preparationTurn: ConversationTurn = {
+    turnId: 'turn-world-late',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: encodeWorkbenchTurnContent(
+      '生成世界与规则设定候选。创意依据：生成本章正文',
+      'workbench_asset_preparation',
+    ),
+    createdAt: '2026-08-20T00:00:01.000Z',
+  };
+  const artifact: TaskConversationBundle['artifacts'][number] = {
+    cardId: 'card-world-late',
+    conversationId: mockConversation.conversationId,
+    turnId: preparationTurn.turnId,
+    runId: 'run-world-late',
+    artifactId: 'artifact-world-late',
+    artifactType: 'setting_candidates',
+    title: '世界设定候选',
+    summary: '等待确认应用',
+    status: 'candidate',
+    createdAt: '2026-08-20T00:00:02.000Z',
+    artifactEvidence: {
+      sourceNovelId: mockNovel.id,
+      processingStatus: 'valid',
+      validationIssues: [],
+    },
+  };
+  const firstBundle: TaskConversationBundle = {
+    ...mockBundle,
+    turns: [...mockBundle.turns, preparationTurn],
+    runs: [
+      ...mockBundle.runs,
+      {
+        ...mockBundle.runs[0],
+        runId: artifact.runId!,
+        turnId: preparationTurn.turnId,
+      },
+    ],
+    artifacts: [artifact],
+  };
+  const secondBundle: TaskConversationBundle = {
+    ...mockBundle,
+    conversation: secondConversation,
+    turns: [
+      {
+        turnId: 'turn-late-target',
+        conversationId: secondConversation.conversationId,
+        sequence: 1,
+        role: 'assistant',
+        content: '第二项目对话已就绪',
+        createdAt: '2026-08-20T00:00:05.000Z',
+      },
+    ],
+    runs: [],
+    toolEvents: [],
+    artifacts: [],
+  };
+  let releaseApply!: () => void;
+  const applyGate = new Promise<void>((resolve) => {
+    releaseApply = resolve;
+  });
+  let resolveSecondBundle!: (bundle: TaskConversationBundle) => void;
+  const secondBundleGate = new Promise<TaskConversationBundle>((resolve) => {
+    resolveSecondBundle = resolve;
+  });
+  let applyCalls = 0;
+
+  chapterAssetRecoveryStore.set({
+    conversationId: mockConversation.conversationId,
+    novelId: mockNovel.id,
+    chapterId: mockChapter.id,
+    originalGoal: '生成本章正文',
+    missingAssets: ['world_setting'],
+    modelSnapshot: mockBundle.runs[0].modelSnapshot,
+    orchestration: {
+      phase: 'awaiting_apply',
+      asset: 'world_setting',
+      preparationTurnId: preparationTurn.turnId,
+      preparationRunId: artifact.runId,
+      candidateArtifactId: artifact.artifactId,
+      updatedAt: '2026-08-20T00:00:03.000Z',
+    },
+    createdAt: '2026-08-20T00:00:00.000Z',
+    checkedAt: '2026-08-20T00:00:03.000Z',
+  });
+  novelRepository.getAll = async () => [mockNovel, secondNovel];
+  chapterRepository.getByNovelId = async (novelId) =>
+    novelId === secondNovel.id ? [secondChapter] : [mockChapter];
+  taskConversationService.list = async () => [mockConversation, secondConversation];
+  taskConversationService.get = async (conversationId) =>
+    conversationId === secondConversation.conversationId ? secondBundleGate : firstBundle;
+  chapterAssetReadinessService.inspect = async () => ({
+    ready: false,
+    missingAssets: ['world_setting'],
+  });
+  artifactDecisionService.applyStructured = async (input) => {
+    applyCalls += 1;
+    await applyGate;
+    return {
+      decision: {
+        decisionId: 'decision-world-late',
+        artifactId: input.artifactId,
+        artifactHash: 'hash-world-late',
+        cardId: input.cardId,
+        conversationId: input.conversationId,
+        decision: 'request_apply',
+        idempotencyKey: `${input.cardId}:request_apply:atomic-v1`,
+        actor: 'user',
+        targetType: input.targetType,
+        targetId: input.targetId,
+        applyTransactionId: 'apply-world-late',
+        createdAt: '2026-08-20T00:00:04.000Z',
+      },
+    };
+  };
+
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  const apply = await screen.findByTestId('workbench-artifact-apply');
+  fireEvent.click(apply);
+  await waitFor(() => assert.equal(applyCalls, 1));
+
+  const secondProject = screen
+    .getAllByTestId('workbench-project')
+    .find((item) => item.dataset.novelId === secondNovel.id);
+  assert.ok(secondProject);
+  fireEvent.click(secondProject);
+  await waitFor(() => {
+    assert.equal(
+      screen.getByTestId('workbench-task-header').dataset.conversationId,
+      secondConversation.conversationId,
+    );
+    assert.equal(
+      (screen.getByTestId('workbench-chapter-select') as HTMLSelectElement).value,
+      secondChapter.id,
+    );
+  });
+
+  await act(async () => {
+    releaseApply();
+    await applyGate;
+  });
+  await waitFor(() => {
+    assert.equal(
+      chapterAssetRecoveryStore.get(mockConversation.conversationId)?.orchestration.phase,
+      'failed',
+    );
+  });
+  assert.equal(
+    (screen.getByTestId('workbench-chapter-select') as HTMLSelectElement).value,
+    secondChapter.id,
+  );
+  assert.equal(chapterAssetRecoveryStore.get(secondConversation.conversationId), null);
+
+  await act(async () => {
+    resolveSecondBundle(secondBundle);
+    await secondBundleGate;
+  });
+  await waitFor(() => assert.ok(screen.getByText('第二项目对话已就绪')));
+  assert.equal(
+    screen.getByTestId('workbench-task-header').dataset.conversationId,
+    secondConversation.conversationId,
+  );
+  assert.equal(
+    (screen.getByTestId('workbench-chapter-select') as HTMLSelectElement).value,
+    secondChapter.id,
+  );
+});
+
 test('Workbench rechecks a blocked goal only after a structured candidate reports atomic apply', async () => {
   useBrowserMockModel();
   let worldApplied = false;

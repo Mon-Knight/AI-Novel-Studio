@@ -271,6 +271,66 @@ function renderRunner(
   });
 }
 
+interface ScopedRunnerInput {
+  selectedNovelId: string;
+  selectedConversationId: string;
+  chapterId: string | undefined;
+  chapters: Chapter[];
+  bundle: TaskConversationBundle;
+}
+
+function renderScopedRunner(
+  initialScope: ScopedRunnerInput,
+  callbacks: {
+    reloadChapters: (
+      novelId: string,
+    ) => Promise<{ chapters: Chapter[]; chapterId: string | undefined } | null>;
+    selectChapter: (chapterId: string) => Promise<void>;
+  },
+) {
+  const refreshBundle = async () => undefined;
+  const loadConversations = async () => undefined;
+  const refreshPlugins = async () => [
+    {
+      id: 'model:browser-fallback:Mock',
+      name: 'Mock',
+      category: 'model' as const,
+      version: 'catalog',
+      description: 'test model',
+      status: 'loaded' as const,
+      availability: 'available' as const,
+      initialization: 'initialized' as const,
+      health: 'healthy' as const,
+      source: 'browser-fallback',
+      capabilities: [],
+    },
+  ];
+  return renderHook(
+    ({ scope }: { scope: ScopedRunnerInput }) => {
+      const selectedNovelRef = useRef(scope.selectedNovelId);
+      selectedNovelRef.current = scope.selectedNovelId;
+      const [conversations, setConversations] = useState([scope.bundle.conversation]);
+      return useWorkbenchTaskRunner({
+        selectedNovelId: scope.selectedNovelId,
+        selectedConversationId: scope.selectedConversationId,
+        chapterId: scope.chapterId,
+        chapters: scope.chapters,
+        bundle: scope.bundle,
+        conversations,
+        setConversations,
+        selectedModel: MODEL,
+        selectedNovelRef,
+        selectChapter: callbacks.selectChapter,
+        reloadChapters: callbacks.reloadChapters,
+        refreshBundle,
+        loadConversations,
+        refreshPlugins,
+      });
+    },
+    { initialProps: { scope: initialScope } },
+  );
+}
+
 async function submit(runner: ReturnType<typeof renderRunner>, command: string): Promise<void> {
   await act(async () => runner.result.current.setDraft(command));
   await waitFor(() => assert.equal(runner.result.current.draft, command));
@@ -314,6 +374,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   chapterAssetRecoveryStore.remove('conversation-1');
+  chapterAssetRecoveryStore.remove('conversation-2');
   taskConversationService.get = original.getConversation;
   taskConversationService.appendTurn = original.appendTurn;
   taskConversationService.createRun = original.createRun;
@@ -487,6 +548,109 @@ test('asset decision command uses a fresh bundle and an ans-local run before ref
   assert.equal(liveBundle.runs[0].status, 'completed');
   assert.deepEqual(reloadedNovelIds, ['novel-1']);
   assert.equal(runner.result.current.assetRecovery?.orchestration.phase, 'failed');
+});
+
+test('late conversational asset apply settles its original recovery without reloading a newly selected novel', async () => {
+  const candidate = artifact('setting_candidates', 'world-late-conversation');
+  liveBundle = bundleWith([candidate]);
+  installConversationStore();
+  chapterAssetRecoveryStore.set({
+    conversationId: 'conversation-1',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    originalGoal: '继续写',
+    missingAssets: ['world_setting'],
+    modelSnapshot: MODEL,
+    orchestration: {
+      phase: 'awaiting_apply',
+      asset: 'world_setting',
+      candidateArtifactId: candidate.artifactId,
+      updatedAt: '2026-08-31T00:00:01.000Z',
+    },
+    createdAt: '2026-08-31T00:00:00.000Z',
+    checkedAt: '2026-08-31T00:00:01.000Z',
+  });
+  chapterAssetReadinessService.inspect = async () => ({
+    ready: false,
+    missingAssets: ['world_setting'],
+  });
+  const applyGate = deferred<void>();
+  let applyCalls = 0;
+  artifactDecisionService.applyStructured = async () => {
+    applyCalls += 1;
+    await applyGate.promise;
+    return { decision: decision(candidate, 'request_apply', 'transaction-world-late') };
+  };
+
+  const secondChapter: Chapter = {
+    ...CHAPTER,
+    id: 'chapter-2',
+    novelId: 'novel-2',
+    title: '另一部作品的第一章',
+  };
+  const secondBundle = bundleWith([]);
+  secondBundle.conversation = {
+    ...secondBundle.conversation,
+    conversationId: 'conversation-2',
+    novelId: 'novel-2',
+    title: '另一部作品的任务',
+  };
+  const reloads: string[] = [];
+  const selections: string[] = [];
+  const runner = renderScopedRunner(
+    {
+      selectedNovelId: 'novel-1',
+      selectedConversationId: 'conversation-1',
+      chapterId: CHAPTER.id,
+      chapters: [CHAPTER],
+      bundle: liveBundle,
+    },
+    {
+      reloadChapters: async (novelId) => {
+        reloads.push(novelId);
+        return { chapters: [CHAPTER], chapterId: CHAPTER.id };
+      },
+      selectChapter: async (chapterId) => {
+        selections.push(chapterId);
+      },
+    },
+  );
+  await waitFor(() =>
+    assert.equal(runner.result.current.assetRecovery?.orchestration.phase, 'awaiting_apply'),
+  );
+  await act(async () => runner.result.current.setDraft('应用当前资产候选'));
+  await waitFor(() => assert.equal(runner.result.current.draft, '应用当前资产候选'));
+
+  let sendPromise = Promise.resolve();
+  act(() => {
+    sendPromise = runner.result.current.sendMessage();
+  });
+  await waitFor(() => assert.equal(applyCalls, 1));
+  act(() => {
+    runner.rerender({
+      scope: {
+        selectedNovelId: 'novel-2',
+        selectedConversationId: 'conversation-2',
+        chapterId: secondChapter.id,
+        chapters: [secondChapter],
+        bundle: secondBundle,
+      },
+    });
+  });
+
+  await act(async () => {
+    applyGate.resolve();
+    await sendPromise;
+  });
+  await waitFor(() =>
+    assert.equal(chapterAssetRecoveryStore.get('conversation-1')?.orchestration.phase, 'failed'),
+  );
+
+  assert.deepEqual(reloads, []);
+  assert.deepEqual(selections, []);
+  assert.equal(chapterAssetRecoveryStore.get('conversation-2'), null);
+  assert.equal(liveBundle.runs[0]?.status, 'completed');
+  assert.match(liveBundle.turns[1]?.content ?? '', /创作资产候选已应用/);
 });
 
 test('generic retry restores a failed automatic asset turn to its pending apply state', async () => {
@@ -672,6 +836,148 @@ test('chapter adoption command stays on the ans-local run while preserving the g
   assert.deepEqual(providerGoals, []);
   assert.equal(liveBundle.runs[0].modelSnapshot.providerId, 'ans-local');
   assert.equal(liveBundle.runs[0].status, 'completed');
+  assert.match(liveBundle.turns[1]?.content ?? '', /已采用为正式正文/);
+});
+
+test('late conversational chapter adoption does not reload or select chapters in a newly selected novel', async () => {
+  const content = '第一章\n\n雨停以后，旧信封出现在门槛上。';
+  const contentHash = await computeContentSha256(content);
+  const candidate = artifact('chapter_text', 'chapter-late-conversation', {
+    sourceChapterId: 'chapter-1',
+  });
+  liveBundle = bundleWith([candidate]);
+  installConversationStore();
+  const authorization: ReviewAuthorization = {
+    authorizationId: 'authorization-late-conversation',
+    artifactId: candidate.artifactId!,
+    chapterId: 'chapter-1',
+    novelId: 'novel-1',
+    decisionId: 'decision-chapter-late-conversation',
+    status: 'issued',
+    issuedAt: '2026-08-31T00:00:02.000Z',
+  };
+  const resultArtifact: ResultArtifactBundle = {
+    artifact: {
+      artifactId: candidate.artifactId!,
+      taskId: 'task-late-conversation',
+      attemptId: 'attempt-late-conversation',
+      sourceInputSnapshotId: 'snapshot-late-conversation',
+      artifactType: 'chapter_text',
+      schemaVersion: 1,
+      rawContentRefId: 'raw-late-conversation',
+      sourceNovelId: 'novel-1',
+      sourceChapterId: 'chapter-1',
+      contentHash,
+      contentLength: Array.from(content).length,
+      processingStatus: 'valid',
+      createdAt: '2026-08-31T00:00:01.000Z',
+    },
+    rawContent: content,
+    issues: [],
+  };
+  const draft: ChapterDraft = {
+    id: 'draft-late-conversation',
+    novelId: 'novel-1',
+    chapterId: 'chapter-1',
+    content,
+    source: 'ai_generated',
+    versionNo: 1,
+    wordCount: 16,
+    isAdopted: false,
+    createdAt: '2026-08-31T00:00:03.000Z',
+    updatedAt: '2026-08-31T00:00:03.000Z',
+  };
+  const adoptionGate = deferred<void>();
+  let adoptionCalls = 0;
+  aiTaskRuntimeService.getArtifact = async () => resultArtifact;
+  artifactDecisionService.record = async () => ({
+    decision: decision(candidate, 'confirm'),
+    authorization,
+  });
+  draftVersionService.create = async () => draft;
+  artifactDecisionService.adoptReviewAuthorizedDraft = async () => {
+    adoptionCalls += 1;
+    await adoptionGate.promise;
+    const consumedAuthorization: ReviewAuthorization = {
+      ...authorization,
+      status: 'consumed',
+      consumedByDraftId: draft.id,
+    };
+    return {
+      authorization: consumedAuthorization,
+      adoptedDraft: { ...draft, isAdopted: true },
+      summaryFollowUp: {
+        status: 'pending_generation',
+        nextAction: 'summarize_chapter',
+        instruction: '总结本章',
+        chapterId: 'chapter-1',
+        adoptedDraftId: draft.id,
+      },
+    };
+  };
+
+  const secondChapter: Chapter = {
+    ...CHAPTER,
+    id: 'chapter-2',
+    novelId: 'novel-2',
+    title: '另一部作品的第一章',
+  };
+  const secondBundle = bundleWith([]);
+  secondBundle.conversation = {
+    ...secondBundle.conversation,
+    conversationId: 'conversation-2',
+    novelId: 'novel-2',
+    title: '另一部作品的任务',
+  };
+  const reloads: string[] = [];
+  const selections: string[] = [];
+  const runner = renderScopedRunner(
+    {
+      selectedNovelId: 'novel-1',
+      selectedConversationId: 'conversation-1',
+      chapterId: CHAPTER.id,
+      chapters: [CHAPTER],
+      bundle: liveBundle,
+    },
+    {
+      reloadChapters: async (novelId) => {
+        reloads.push(novelId);
+        return { chapters: [CHAPTER], chapterId: CHAPTER.id };
+      },
+      selectChapter: async (chapterId) => {
+        selections.push(chapterId);
+      },
+    },
+  );
+  await act(async () => runner.result.current.setDraft('采用本章正文候选'));
+  await waitFor(() => assert.equal(runner.result.current.draft, '采用本章正文候选'));
+
+  let sendPromise = Promise.resolve();
+  act(() => {
+    sendPromise = runner.result.current.sendMessage();
+  });
+  await waitFor(() => assert.equal(adoptionCalls, 1));
+  act(() => {
+    runner.rerender({
+      scope: {
+        selectedNovelId: 'novel-2',
+        selectedConversationId: 'conversation-2',
+        chapterId: secondChapter.id,
+        chapters: [secondChapter],
+        bundle: secondBundle,
+      },
+    });
+  });
+
+  await act(async () => {
+    adoptionGate.resolve();
+    await sendPromise;
+  });
+
+  assert.deepEqual(reloads, []);
+  assert.deepEqual(selections, []);
+  assert.equal(adoptionCalls, 1);
+  assert.equal(liveBundle.runs[0]?.status, 'completed');
   assert.match(liveBundle.turns[1]?.content ?? '', /已采用为正式正文/);
 });
 
