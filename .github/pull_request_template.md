@@ -27,6 +27,8 @@ npm run test:component-size
 npm run build
 npm run test:bundle-size
 cargo fmt --all -- --check --manifest-path src-tauri/Cargo.toml
+cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
+cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway
 cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 ```
 

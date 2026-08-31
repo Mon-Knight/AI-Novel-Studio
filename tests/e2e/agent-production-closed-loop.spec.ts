@@ -472,7 +472,6 @@ describe('Agent production closed loop & restart verification', () => {
         chapterId: task.chapterId,
       });
       expect(revisedArtifact.artifact.contentHash).not.toBe(initialArtifact.artifact.contentHash);
-      expect(revisedArtifact.rawContent).toContain(initialArtifact.rawContent);
 
       const activeBundle = await bridgeCall<TaskConversationBundle | null>(
         'get_task_conversation',

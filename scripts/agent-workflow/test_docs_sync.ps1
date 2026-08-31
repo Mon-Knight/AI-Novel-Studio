@@ -14,6 +14,12 @@ $CurrentMajor = [int]($CurrentVersion.Split('.')[0])
 $StaleMajor = if ($CurrentMajor -eq 1) { 99 } else { 1 }
 $StaleVersion = "$StaleMajor.0.0"
 $SameMajorStaleVersion = if ($CurrentVersion -ceq "$CurrentMajor.999.999") { "$CurrentMajor.999.998" } else { "$CurrentMajor.999.999" }
+$GatewayCleanCommand = "cargo clean --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway"
+$GatewayBuildCommand = "cargo build --locked --manifest-path src-tauri/Cargo.toml -p novel-domain-gateway"
+$SerialRustCommand = "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1"
+$VerificationGatewayClean = 'Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")'
+$VerificationGatewayBuild = 'Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")'
+$VerificationSerialRust = 'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")'
 $RepositoryReadme = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $RepositoryRoot "README.md")
 $CurrentStageMatch = [regex]::Match($RepositoryReadme, '(?m)^\*\*阶段：(?<stage>[^*\r\n]+)\*\*\r?$')
 if (-not $CurrentStageMatch.Success) {
@@ -147,6 +153,30 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseWithoutGatewayClean = $releaseWorkflow.Replace($GatewayCleanCommand, "gateway clean command removed")
+    if ($releaseWithoutGatewayClean -ceq $releaseWorkflow) {
+        throw "Unable to remove the release gateway clean command fixture."
+    }
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWithoutGatewayClean -Encoding UTF8
+    Assert-CheckResult "release without gateway clean" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseWithoutGatewayBuild = $releaseWorkflow.Replace($GatewayBuildCommand, "gateway build command removed")
+    if ($releaseWithoutGatewayBuild -ceq $releaseWorkflow) {
+        throw "Unable to remove the release gateway build command fixture."
+    }
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWithoutGatewayBuild -Encoding UTF8
+    Assert-CheckResult "release without gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Run Rust tests" "Build current novel-domain gateway"
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
+    Assert-CheckResult "release tests before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
     $releaseParallelRust = $releaseWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
     Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseParallelRust -Encoding UTF8
     Assert-CheckResult "release Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
@@ -175,6 +205,30 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
 
     $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWithoutGatewayClean = $desktopWorkflow.Replace($GatewayCleanCommand, "gateway clean command removed")
+    if ($desktopWithoutGatewayClean -ceq $desktopWorkflow) {
+        throw "Unable to remove the desktop gateway clean command fixture."
+    }
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWithoutGatewayClean -Encoding UTF8
+    Assert-CheckResult "desktop workflow without gateway clean" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWithoutGatewayBuild = $desktopWorkflow.Replace($GatewayBuildCommand, "gateway build command removed")
+    if ($desktopWithoutGatewayBuild -ceq $desktopWorkflow) {
+        throw "Unable to remove the desktop gateway build command fixture."
+    }
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWithoutGatewayBuild -Encoding UTF8
+    Assert-CheckResult "desktop workflow without gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWorkflow = Move-WorkflowStepBefore $desktopWorkflow "Run Rust tests" "Build current novel-domain gateway"
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflow -Encoding UTF8
+    Assert-CheckResult "desktop tests before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
     $desktopParallelRust = $desktopWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
     Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopParallelRust -Encoding UTF8
     Assert-CheckResult "desktop Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
@@ -196,11 +250,69 @@ try {
     Assert-CheckResult "local verification without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture "scripts/agent-workflow/verify_project.ps1"
 
+    $verificationScript = Get-Content -Raw -Encoding UTF8 -LiteralPath $verificationScriptPath
+    $verificationWithoutGatewayClean = $verificationScript.Replace($VerificationGatewayClean, "gateway clean verification removed")
+    if ($verificationWithoutGatewayClean -ceq $verificationScript) {
+        throw "Unable to remove the local gateway clean command fixture."
+    }
+    Set-Content -LiteralPath $verificationScriptPath -Value $verificationWithoutGatewayClean -Encoding UTF8
+    Assert-CheckResult "local verification without gateway clean" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture "scripts/agent-workflow/verify_project.ps1"
+
+    $verificationScript = Get-Content -Raw -Encoding UTF8 -LiteralPath $verificationScriptPath
+    $verificationWithoutGatewayBuild = $verificationScript.Replace($VerificationGatewayBuild, "gateway build verification removed")
+    if ($verificationWithoutGatewayBuild -ceq $verificationScript) {
+        throw "Unable to remove the local gateway build command fixture."
+    }
+    Set-Content -LiteralPath $verificationScriptPath -Value $verificationWithoutGatewayBuild -Encoding UTF8
+    Assert-CheckResult "local verification without gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture "scripts/agent-workflow/verify_project.ps1"
+
+    $verificationScript = Get-Content -Raw -Encoding UTF8 -LiteralPath $verificationScriptPath
+    $verificationWrongGatewayOrder = $verificationScript.Replace($VerificationGatewayBuild, "verification gateway build placeholder")
+    $verificationWrongGatewayOrder = $verificationWrongGatewayOrder.Replace($VerificationSerialRust, $VerificationGatewayBuild)
+    $verificationWrongGatewayOrder = $verificationWrongGatewayOrder.Replace("verification gateway build placeholder", $VerificationSerialRust)
+    if ($verificationWrongGatewayOrder -ceq $verificationScript) {
+        throw "Unable to reverse the local gateway build and Rust test fixture."
+    }
+    Set-Content -LiteralPath $verificationScriptPath -Value $verificationWrongGatewayOrder -Encoding UTF8
+    Assert-CheckResult "local verification tests before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture "scripts/agent-workflow/verify_project.ps1"
+
     $pullRequestTemplatePath = Join-Path $FixtureRoot ".github/pull_request_template.md"
     $pullRequestTemplate = Get-Content -Raw -Encoding UTF8 -LiteralPath $pullRequestTemplatePath
     $pullRequestTemplateParallelRust = $pullRequestTemplate.Replace('-- --test-threads=1', '')
     Set-Content -LiteralPath $pullRequestTemplatePath -Value $pullRequestTemplateParallelRust -Encoding UTF8
     Assert-CheckResult "PR template without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/pull_request_template.md"
+
+    $pullRequestTemplate = Get-Content -Raw -Encoding UTF8 -LiteralPath $pullRequestTemplatePath
+    $pullRequestTemplateWithoutGatewayClean = $pullRequestTemplate.Replace($GatewayCleanCommand, "gateway clean command removed")
+    if ($pullRequestTemplateWithoutGatewayClean -ceq $pullRequestTemplate) {
+        throw "Unable to remove the PR template gateway clean command fixture."
+    }
+    Set-Content -LiteralPath $pullRequestTemplatePath -Value $pullRequestTemplateWithoutGatewayClean -Encoding UTF8
+    Assert-CheckResult "PR template without gateway clean" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/pull_request_template.md"
+
+    $pullRequestTemplate = Get-Content -Raw -Encoding UTF8 -LiteralPath $pullRequestTemplatePath
+    $pullRequestTemplateWithoutGatewayBuild = $pullRequestTemplate.Replace($GatewayBuildCommand, "gateway build command removed")
+    if ($pullRequestTemplateWithoutGatewayBuild -ceq $pullRequestTemplate) {
+        throw "Unable to remove the PR template gateway build command fixture."
+    }
+    Set-Content -LiteralPath $pullRequestTemplatePath -Value $pullRequestTemplateWithoutGatewayBuild -Encoding UTF8
+    Assert-CheckResult "PR template without gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/pull_request_template.md"
+
+    $pullRequestTemplate = Get-Content -Raw -Encoding UTF8 -LiteralPath $pullRequestTemplatePath
+    $pullRequestTemplateWrongGatewayOrder = $pullRequestTemplate.Replace($GatewayBuildCommand, "PR gateway build placeholder")
+    $pullRequestTemplateWrongGatewayOrder = $pullRequestTemplateWrongGatewayOrder.Replace($SerialRustCommand, $GatewayBuildCommand)
+    $pullRequestTemplateWrongGatewayOrder = $pullRequestTemplateWrongGatewayOrder.Replace("PR gateway build placeholder", $SerialRustCommand)
+    if ($pullRequestTemplateWrongGatewayOrder -ceq $pullRequestTemplate) {
+        throw "Unable to reverse the PR template gateway build and Rust test fixture."
+    }
+    Set-Content -LiteralPath $pullRequestTemplatePath -Value $pullRequestTemplateWrongGatewayOrder -Encoding UTF8
+    Assert-CheckResult "PR template tests before gateway build" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/pull_request_template.md"
 
     $fastCiWorkflowPath = Join-Path $FixtureRoot ".github/workflows/ci.yml"
