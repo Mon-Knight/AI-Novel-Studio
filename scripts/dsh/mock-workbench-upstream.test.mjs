@@ -208,6 +208,16 @@ test('text-only and tool-error modes remain deterministic', async () => {
   assert.match(finalRaw, /工具调用按预期失败/u);
 });
 
+test('delayed-text mode delays a read-only response without calling candidate tools', async () => {
+  const server = await start({ mode: 'delayed-text', delayMs: 30 });
+  const startedAt = Date.now();
+  const raw = await (await chat(server, [{ role: 'user', content: 'read only' }])).text();
+
+  assert.ok(Date.now() - startedAt >= 20);
+  assert.equal(finishReason(parseSse(raw)), 'stop');
+  assert.equal(toolCalls(parseSse(raw)).length, 0);
+});
+
 test('missing required actual tools fails loud without inventing a tool name', async () => {
   const server = await start();
   const body = requestBody([{ role: 'user', content: 'missing tool' }]);

@@ -1,14 +1,18 @@
+export const CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES = [
+  'chapter_opening_rollback',
+  'chapter_boundary_sentence_repetition',
+  'chapter_boundary_action_replay',
+  'chapter_tail_pollution',
+  'chapter_meta_reasoning_leakage',
+  'chapter_authorial_label_leakage',
+  'chapter_source_chain_break',
+  'chapter_dialogue_reference_conflict',
+  'chapter_temporal_semantics_conflict',
+  'chapter_audit_voice_leakage',
+] as const;
+
 export type ChapterCandidateIntegrityIssueCode =
-  | 'chapter_opening_rollback'
-  | 'chapter_boundary_sentence_repetition'
-  | 'chapter_boundary_action_replay'
-  | 'chapter_tail_pollution'
-  | 'chapter_meta_reasoning_leakage'
-  | 'chapter_authorial_label_leakage'
-  | 'chapter_source_chain_break'
-  | 'chapter_dialogue_reference_conflict'
-  | 'chapter_temporal_semantics_conflict'
-  | 'chapter_audit_voice_leakage';
+  (typeof CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES)[number];
 
 export interface ChapterCandidateIntegrityIssue {
   code: ChapterCandidateIntegrityIssueCode;
@@ -70,6 +74,16 @@ const AUDIT_EDITORIAL =
   /(?:(?:这|这点|这一点|上述(?:事实|信息|记录|线索)?)(?:仍|也)?(?:只能|不足以|并不能).{0,8}(?:说明|证明|确认)|(?:因此|据此|由此)(?:仍|也)?(?:不能|无法|尚不能|可以|可).{0,8}(?:证明|确认|断定|认定|排除)|(?:现阶段|目前)(?:仍|也)?(?:只能|无法|不能|尚不能))/gu;
 const AUDIT_DISCLAIMER =
   /(?:(?:这|那|它|上述(?:事实|信息|记录|线索)?)(?:仍|也)?(?:不是|并非|不等同于)(?:证据|结论|确认|事实)|(?:没有|并未|不会|不愿|不能).{0,12}(?:下结论|得出结论|写成(?:结论|事实)|当(?:成|作)(?:证据|事实|结论)|理解成(?:事实|确认))|(?:只是|仅是)(?:判断|推测|假设|方向))/gu;
+const AUDIT_SIGNAL_PATTERNS = [
+  ['uncertainty', AUDIT_UNCERTAINTY],
+  ['status', AUDIT_STATUS],
+  ['editorial', AUDIT_EDITORIAL],
+  ['disclaimer', AUDIT_DISCLAIMER],
+] as const;
+const LOCAL_AUDIT_MIN_SIGNAL_SENTENCES = 4;
+const LOCAL_AUDIT_MIN_STRONG_SENTENCES = 2;
+const CHAPTER_AUDIT_MIN_SIGNAL_SENTENCES = 5;
+const CHAPTER_AUDIT_MIN_STRONG_SENTENCES = 4;
 const AUTHORIAL_CHAPTER_LABEL =
   /(?:(?:本|上|上一|前|前一|下|下一)章|第[0-9一二三四五六七八九十百零〇两]+章)(?:中|里|内|的)?(?:新闻(?:照片|配图)|照片|那(?:张|组|段|个)|这(?:张|组|段|个)|线索|情节|剧情|事件|开头|结尾|末尾|正文|内容|出现|提到|发生)/u;
 const DEVICE_DIRECTORY_UNREADABLE =
@@ -517,34 +531,62 @@ function hasChineseInternalConstraints(window: string): boolean {
   );
 }
 
-function hasAuditVoiceLeakage(window: string): boolean {
-  const uncertaintyCount = matchCount(window, AUDIT_UNCERTAINTY);
-  const statusCount = matchCount(window, AUDIT_STATUS);
-  const editorialCount = matchCount(window, AUDIT_EDITORIAL);
-  const disclaimerCount = matchCount(window, AUDIT_DISCLAIMER);
-  const activeSignalKinds = [uncertaintyCount, statusCount, editorialCount, disclaimerCount].filter(
-    (count) => count > 0,
+type AuditSignalKind = (typeof AUDIT_SIGNAL_PATTERNS)[number][0];
+
+interface AuditSentenceSignal {
+  kinds: Set<AuditSignalKind>;
+}
+
+function auditSentenceSignals(value: string): AuditSentenceSignal[] {
+  return value
+    .split(SENTENCE_SEPARATOR)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .flatMap((sentence) => {
+      const kinds = new Set<AuditSignalKind>();
+      for (const [kind, pattern] of AUDIT_SIGNAL_PATTERNS) {
+        if (matchCount(sentence, pattern) > 0) kinds.add(kind);
+      }
+      return kinds.size > 0 ? [{ kinds }] : [];
+    });
+}
+
+function auditSignalStats(value: string): {
+  activeSignalKinds: number;
+  signalSentenceCount: number;
+  strongSentenceCount: number;
+} {
+  const signals = auditSentenceSignals(value);
+  const activeKinds = new Set(signals.flatMap(({ kinds }) => [...kinds]));
+  const strongSentenceCount = signals.filter(
+    ({ kinds }) => kinds.has('uncertainty') || kinds.has('editorial') || kinds.has('disclaimer'),
   ).length;
+
+  return {
+    activeSignalKinds: activeKinds.size,
+    signalSentenceCount: signals.length,
+    strongSentenceCount,
+  };
+}
+
+function hasAuditVoiceLeakage(window: string): boolean {
+  const { activeSignalKinds, signalSentenceCount, strongSentenceCount } = auditSignalStats(window);
 
   return (
     activeSignalKinds >= 2 &&
-    uncertaintyCount + statusCount + editorialCount + disclaimerCount >= 6 &&
-    uncertaintyCount + editorialCount + disclaimerCount >= 2
+    signalSentenceCount >= LOCAL_AUDIT_MIN_SIGNAL_SENTENCES &&
+    strongSentenceCount >= LOCAL_AUDIT_MIN_STRONG_SENTENCES
   );
 }
 
 function hasChapterWideAuditVoiceLeakage(candidateText: string): boolean {
-  const uncertaintyCount = matchCount(candidateText, AUDIT_UNCERTAINTY);
-  const statusCount = matchCount(candidateText, AUDIT_STATUS);
-  const editorialCount = matchCount(candidateText, AUDIT_EDITORIAL);
-  const disclaimerCount = matchCount(candidateText, AUDIT_DISCLAIMER);
-  const explicitAuditCount = uncertaintyCount + statusCount + editorialCount + disclaimerCount;
+  const { signalSentenceCount, strongSentenceCount } = auditSignalStats(candidateText);
   const significantLength = Math.max(1, significantText(candidateText).length);
 
   return (
-    explicitAuditCount >= 5 &&
-    uncertaintyCount + editorialCount + disclaimerCount >= 4 &&
-    (explicitAuditCount * 1_000) / significantLength >= 1.25
+    signalSentenceCount >= CHAPTER_AUDIT_MIN_SIGNAL_SENTENCES &&
+    strongSentenceCount >= CHAPTER_AUDIT_MIN_STRONG_SENTENCES &&
+    (signalSentenceCount * 1_000) / significantLength >= 1.25
   );
 }
 
@@ -559,9 +601,10 @@ function hasMetaReasoningLeakage(candidateText: string): boolean {
 }
 
 function hasClusteredAuditVoiceLeakage(candidateText: string): boolean {
+  const narrativeText = boundaryNarration(candidateText);
   return (
-    localizedWindows(candidateText).some(hasAuditVoiceLeakage) ||
-    hasChapterWideAuditVoiceLeakage(candidateText)
+    localizedWindows(narrativeText).some(hasAuditVoiceLeakage) ||
+    hasChapterWideAuditVoiceLeakage(narrativeText)
   );
 }
 

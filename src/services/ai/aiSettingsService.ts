@@ -11,7 +11,9 @@ import {
   maskAiApiKey,
   normalizeAiSettings,
   resolveSessionModelApiKey,
+  restoreSessionModelCredentialsFromNative,
   saveAiSettings,
+  syncSessionModelCredentialsToNative,
   type SessionModelCredentialIdentity,
 } from './aiSettingsStore';
 
@@ -38,6 +40,7 @@ export const aiSettingsService = {
       requireLoopbackAiBaseUrl(normalized.localChapterModel.baseUrl);
     }
     await aiRequestPolicyService.configureGlobalPolicy(normalized);
+    await syncSessionModelCredentialsToNative(normalized);
     saveAiSettings(normalized);
   },
 
@@ -47,6 +50,10 @@ export const aiSettingsService = {
 
   resolveSessionApiKey(identity: SessionModelCredentialIdentity): string {
     return resolveSessionModelApiKey(identity);
+  },
+
+  async restoreSessionCredentials(): Promise<void> {
+    await restoreSessionModelCredentialsFromNative();
   },
 
   async testConnection(

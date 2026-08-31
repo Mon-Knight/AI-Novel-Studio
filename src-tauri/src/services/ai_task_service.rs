@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const PRODUCTION_TOOL_REGISTRY_HASH: &str =
-    "6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579";
+    "82672d8347a8143a716e590014b9cf61fc576c0556c8683027d51528243c5192";
 const BOOK_WORD_GOAL_CONTRACT_VERSION: &str = "ans_book_word_goal_v1";
 const BOOK_WORD_GOAL_PARSER_VERSION: &str = "zh_book_words_v1";
 const MAX_BOOK_TARGET_WORDS: i64 = 10_000_000;

@@ -236,7 +236,7 @@ function DraftHistoryPanel({
             </div>
           ) : drafts.length === 0 ? (
             <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-              <FileText aria-hidden="true" size={22} strokeWidth={1.5} />
+              <FileText aria-hidden="true" size={22} strokeWidth={1.8} />
               <div>暂无草稿</div>
               <br />
               <span style={{ fontSize: 12 }}>使用 AI 生成或手动保存创建草稿版本</span>

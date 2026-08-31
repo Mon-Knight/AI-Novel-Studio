@@ -1,6 +1,5 @@
 import { memo, useState } from 'react';
 import {
-  Brain,
   CheckCircle2,
   ChevronRight,
   CircleAlert,
@@ -18,12 +17,71 @@ import {
 } from './workbenchContextReceiptModel';
 import { TOOL_LABELS, statusLabel } from './workbenchHelpers';
 
+export { MemoryInspectorCard } from './WorkbenchMemoryInspectorCard';
+
 function ToolStatusIcon({ status }: { status: ToolCallEvent['status'] }) {
-  const props = { 'aria-hidden': true as const, size: 14, strokeWidth: 1.9 };
-  if (status === 'succeeded') return <CheckCircle2 {...props} />;
-  if (status === 'failed') return <CircleAlert {...props} />;
-  if (status === 'running') return <LoaderCircle {...props} />;
-  return <CircleDashed {...props} />;
+  if (status === 'succeeded')
+    return <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />;
+  if (status === 'failed') return <CircleAlert aria-hidden="true" size={14} strokeWidth={1.8} />;
+  if (status === 'running') return <LoaderCircle aria-hidden="true" size={14} strokeWidth={1.8} />;
+  return <CircleDashed aria-hidden="true" size={14} strokeWidth={1.8} />;
+}
+
+const WRITER_PROGRESS_LABELS: Record<string, string> = {
+  compiling_context: '整理创作上下文',
+  generating_draft: '生成章节初稿',
+  repairing_length: '收敛章节长度',
+  repairing_integrity: '修复正文完整性',
+  validating_candidate: '校验章节候选',
+};
+
+function formatProgressNumber(value: number): string {
+  return value.toLocaleString('zh-CN');
+}
+
+function resolveWriterProgressLabel(event: ToolCallEvent): string | undefined {
+  if (
+    event.status !== 'running' ||
+    !['generate_chapter', 'polish_chapter'].includes(event.toolName)
+  ) {
+    return undefined;
+  }
+  if (!event.result || typeof event.result !== 'object' || Array.isArray(event.result)) {
+    return undefined;
+  }
+  const progress = event.result as Record<string, unknown>;
+  const phase =
+    typeof progress.phase === 'string' ? WRITER_PROGRESS_LABELS[progress.phase] : undefined;
+  if (!phase) return undefined;
+
+  const parts = [phase];
+  if (
+    typeof progress.repairAttempt === 'number' &&
+    Number.isSafeInteger(progress.repairAttempt) &&
+    typeof progress.repairMaximumAttempts === 'number' &&
+    Number.isSafeInteger(progress.repairMaximumAttempts)
+  ) {
+    parts.push(`${progress.repairAttempt}/${progress.repairMaximumAttempts}`);
+  }
+  if (
+    typeof progress.currentWordCount === 'number' &&
+    Number.isSafeInteger(progress.currentWordCount)
+  ) {
+    parts.push(`${formatProgressNumber(progress.currentWordCount)} 字`);
+  }
+  const range = progress.acceptedWordRange;
+  if (range && typeof range === 'object' && !Array.isArray(range)) {
+    const { minimum, maximum } = range as Record<string, unknown>;
+    if (
+      typeof minimum === 'number' &&
+      Number.isSafeInteger(minimum) &&
+      typeof maximum === 'number' &&
+      Number.isSafeInteger(maximum)
+    ) {
+      parts.push(`允许 ${formatProgressNumber(minimum)}-${formatProgressNumber(maximum)} 字`);
+    }
+  }
+  return parts.join(' · ');
 }
 
 /**
@@ -38,6 +96,7 @@ export const ToolEventRow = memo(function ToolEventRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const semanticName = TOOL_LABELS[event.toolName] ?? '运行时事件';
+  const writerProgressLabel = resolveWriterProgressLabel(event);
   const visibleArguments = hideContextReceiptInternals(event.argumentsSummary);
   const hasArguments = visibleArguments !== undefined;
   const contextReceipt = resolveToolContextReceipt(event, runEvents);
@@ -51,8 +110,12 @@ export const ToolEventRow = memo(function ToolEventRow({
       </span>
       <span className="workbench-tool-label">{semanticName}</span>
       <span className="workbench-tool-name">{event.toolName}</span>
-      <span className="workbench-tool-status">
-        {event.status === 'succeeded' ? '已完成' : statusLabel(event.status)}
+      <span
+        className={`workbench-tool-status${writerProgressLabel ? ' has-progress' : ''}`}
+        data-testid={writerProgressLabel ? 'workbench-writer-progress' : undefined}
+      >
+        {writerProgressLabel ??
+          (event.status === 'succeeded' ? '已完成' : statusLabel(event.status))}
       </span>
       {event.durationMs !== undefined && (
         <span className="workbench-tool-duration">{event.durationMs} ms</span>
@@ -139,6 +202,8 @@ const STRUCTURED_APPLY_TYPES = new Set([
   'chapter_summary',
 ]);
 
+const READ_ONLY_REPORT_TYPES = new Set(['quality_report', 'style_analysis']);
+
 function isApplicableContextCompression(artifact: ConversationArtifactCard): boolean {
   if (artifact.artifactType !== 'generic_json') return false;
   if (artifact.artifactEvidence?.derivationType === 'context_compression') return true;
@@ -146,6 +211,15 @@ function isApplicableContextCompression(artifact: ConversationArtifactCard): boo
   try {
     const candidate = JSON.parse(artifact.content) as unknown;
     return isContextCompressionCandidate(candidate) && candidate.valid;
+  } catch {
+    return false;
+  }
+}
+
+function isDeterministicContextCompression(artifact: ConversationArtifactCard): boolean {
+  if (artifact.artifactType !== 'generic_json' || !artifact.content) return false;
+  try {
+    return isContextCompressionCandidate(JSON.parse(artifact.content) as unknown);
   } catch {
     return false;
   }
@@ -167,11 +241,13 @@ export const ArtifactCard = memo(function ArtifactCard({
   onDecide,
   onReload,
   busy = false,
+  newlyArrived = false,
 }: {
   artifact: ConversationArtifactCard;
   onDecide?: (decision: 'confirm' | 'reject' | 'request_revision' | 'request_apply') => void;
   onReload?: () => void;
   busy?: boolean;
+  newlyArrived?: boolean;
 }) {
   const [contentExpanded, setContentExpanded] = useState(false);
   const decision = artifact.latestDecision?.decision;
@@ -183,6 +259,8 @@ export const ArtifactCard = memo(function ArtifactCard({
   ).length;
   const isInvalid = evidence?.processingStatus === 'invalid';
   const isChapter = artifact.artifactType === 'chapter_text';
+  const isReadOnlyReport = READ_ONLY_REPORT_TYPES.has(artifact.artifactType);
+  const isDeterministicCompression = isDeterministicContextCompression(artifact);
   const supportsStructuredApply =
     STRUCTURED_APPLY_TYPES.has(artifact.artifactType) || isApplicableContextCompression(artifact);
   const structuredApplyAvailable = !artifact.artifactId?.startsWith('browser-');
@@ -197,7 +275,9 @@ export const ArtifactCard = memo(function ArtifactCard({
       : artifact.latestDecision?.applyTransactionId
         ? '已应用'
         : decision === 'confirm'
-          ? '已确认'
+          ? isReadOnlyReport
+            ? '已阅'
+            : '已确认'
           : decision === 'reject'
             ? '已拒绝'
             : decision === 'request_revision'
@@ -225,24 +305,38 @@ export const ArtifactCard = memo(function ArtifactCard({
   const applyUnavailable = canApply && !structuredApplyAvailable;
   return (
     <article
-      className={`workbench-artifact-card ${isChapter ? 'is-chapter' : ''}`}
+      className={`workbench-artifact-card ${isChapter ? 'is-chapter' : ''} ${
+        newlyArrived ? 'is-newly-arrived' : ''
+      }`.trim()}
       data-testid="workbench-artifact-card"
       data-card-id={artifact.cardId}
       data-artifact-id={artifact.artifactId}
       data-run-id={artifact.runId}
       data-status={artifact.status}
       data-decision={decision ?? ''}
+      data-newly-arrived={newlyArrived ? 'true' : undefined}
+      data-derivation-mode={isDeterministicCompression ? 'deterministic-local' : undefined}
     >
       <div className="workbench-artifact-heading">
         <div>
           <div className="workbench-eyebrow">
-            {ARTIFACT_LABELS[artifact.artifactType] ?? '创作候选'}
+            {isDeterministicCompression
+              ? '确定性小说上下文压缩'
+              : (ARTIFACT_LABELS[artifact.artifactType] ?? '创作候选')}
           </div>
           <h3>{artifact.title}</h3>
         </div>
         <span className="workbench-artifact-status">{projectedStatus}</span>
       </div>
       {!isInvalid && <p>{artifact.summary}</p>}
+      {isDeterministicCompression && (
+        <p
+          className="workbench-artifact-derivation-note"
+          data-testid="workbench-artifact-derivation"
+        >
+          本地确定性提取 · 不使用当前任务的冻结模型
+        </p>
+      )}
       {evidence && (
         <div
           className="workbench-artifact-evidence"
@@ -341,6 +435,21 @@ export const ArtifactCard = memo(function ArtifactCard({
             >
               {isInvalid ? '结构与来源未通过' : applyUnavailable ? '仅桌面端可应用' : '应用到作品'}
             </button>
+          ) : isReadOnlyReport ? (
+            <button
+              className="btn btn-secondary btn-sm"
+              data-testid="workbench-artifact-acknowledge"
+              data-decision-kind="confirm"
+              disabled={busy || isInvalid}
+              title={
+                isInvalid
+                  ? '报告结构与来源校验未通过，不能标记已阅'
+                  : '仅记录报告已阅，不应用到小说正式事实'
+              }
+              onClick={() => onDecide?.('confirm')}
+            >
+              标记已阅
+            </button>
           ) : null}
           <button
             className="btn btn-secondary btn-sm"
@@ -361,78 +470,5 @@ export const ArtifactCard = memo(function ArtifactCard({
         </div>
       )}
     </article>
-  );
-});
-
-export const MemoryInspectorCard = memo(function MemoryInspectorCard({
-  sceneName,
-  povName,
-  versionNumber = 1,
-  longTermCount = 0,
-  midTermCount = 0,
-  shortTermCount = 0,
-  retrievedCount = 0,
-}: {
-  sceneName?: string;
-  povName?: string;
-  versionNumber?: number;
-  longTermCount?: number;
-  midTermCount?: number;
-  shortTermCount?: number;
-  retrievedCount?: number;
-}) {
-  const totalMemories = longTermCount + midTermCount + shortTermCount + retrievedCount;
-  if (totalMemories === 0 && !povName && !sceneName) {
-    return (
-      <div
-        className="workbench-memory-inspector-empty"
-        data-testid="workbench-memory-empty"
-        style={{
-          padding: 16,
-          textAlign: 'center',
-          color: 'var(--color-text-muted, #64748b)',
-          fontSize: 13,
-        }}
-      >
-        No memory context available
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="workbench-memory-inspector-card"
-      data-testid="workbench-memory-inspector-card"
-      style={{
-        border: '1px solid var(--color-border-light, #e2e8f0)',
-        borderRadius: 8,
-        padding: 12,
-        background: 'var(--color-bg-card, #ffffff)',
-        fontSize: 12,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-        <strong className="workbench-memory-title">
-          <Brain aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>Memory Context · v{versionNumber}</span>
-        </strong>
-        <span style={{ color: 'var(--color-text-muted, #64748b)' }}>{sceneName || '当前分镜'}</span>
-      </div>
-      <div style={{ color: 'var(--color-text-secondary, #475569)', marginBottom: 4 }}>
-        POV: {povName || '默认全知'} · 召回碎片: {retrievedCount} 条
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          fontSize: 11,
-          color: 'var(--color-text-muted, #64748b)',
-        }}
-      >
-        <span>长期: {longTermCount}</span>
-        <span>中期: {midTermCount}</span>
-        <span>短期: {shortTermCount}</span>
-      </div>
-    </div>
   );
 });

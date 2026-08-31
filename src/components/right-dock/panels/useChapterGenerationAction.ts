@@ -207,7 +207,7 @@ export function useChapterGenerationAction({
     if (preflightWarnings.length > 0) {
       const ok = await confirmInfo({
         title: '生成前提示',
-        message: `⚠️ ${preflightWarnings.join('\n')}\n\n本次生成将尽量使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n建议先在大纲面板中补充或保存章节大纲。\n\n是否仍然继续生成？`,
+        message: `${preflightWarnings.join('\n')}\n\n本次生成将尽量使用分卷大纲、总纲和本章目标，但生成内容仍可能偏离规划。\n\n建议先在大纲面板中补充或保存章节大纲。\n\n是否仍然继续生成？`,
         testId: 'generation-preflight',
       });
       if (!ok) return;

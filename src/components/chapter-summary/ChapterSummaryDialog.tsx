@@ -2,6 +2,20 @@
  * AI Novel Studio - 章节总结确认弹窗组件
  */
 import { useState } from 'react';
+import {
+  Archive,
+  CheckCircle2,
+  ClipboardList,
+  FileText,
+  Link2,
+  LoaderCircle,
+  RefreshCw,
+  Sparkles,
+  UserRound,
+  X,
+  XCircle,
+  Zap,
+} from 'lucide-react';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
 
 interface ChapterSummaryDialogProps {
@@ -49,25 +63,35 @@ function ChapterSummaryDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="right-panel-header">
-          <span className="right-panel-title">📝 章节总结确认 —— {chapterTitle}</span>
-          <button className="right-panel-close" onClick={onClose}>
-            ✕
+          <span className="right-panel-title">
+            <FileText aria-hidden="true" size={17} strokeWidth={1.8} />
+            章节总结确认 —— {chapterTitle}
+          </span>
+          <button className="right-panel-close" onClick={onClose} aria-label="关闭章节总结">
+            <X aria-hidden="true" size={17} strokeWidth={1.8} />
           </button>
         </div>
         <div className="right-panel-body" style={{ maxHeight: '80vh', overflowY: 'auto' }}>
           {loading && (
             <div style={{ padding: 16, textAlign: 'center', color: 'var(--color-text-muted)' }}>
-              ⏳ AI 正在生成章节总结……
+              <LoaderCircle
+                className="is-spinning"
+                aria-hidden="true"
+                size={16}
+                strokeWidth={1.8}
+              />{' '}
+              AI 正在生成章节总结……
             </div>
           )}
           {error && (
             <div
               style={{ padding: 12, color: 'var(--color-error)', fontSize: 13, marginBottom: 8 }}
             >
-              ❌ {error}
+              <XCircle aria-hidden="true" size={15} strokeWidth={1.8} /> {error}
               <div style={{ marginTop: 8 }}>
                 <button className="btn btn-secondary btn-sm" onClick={onRegenerate}>
-                  🔄 重试
+                  <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+                  重试
                 </button>
               </div>
             </div>
@@ -77,7 +101,10 @@ function ChapterSummaryDialog({
             <>
               {/* 章节摘要 */}
               <div className="panel-section">
-                <div className="panel-section-title">📋 章节摘要</div>
+                <div className="panel-section-title">
+                  <ClipboardList aria-hidden="true" size={14} strokeWidth={1.8} />
+                  章节摘要
+                </div>
                 <textarea
                   className="input"
                   value={summary}
@@ -89,7 +116,10 @@ function ChapterSummaryDialog({
 
               {/* 关键事件 */}
               <div className="panel-section">
-                <div className="panel-section-title">⚡ 关键事件（每行一个）</div>
+                <div className="panel-section-title">
+                  <Zap aria-hidden="true" size={14} strokeWidth={1.8} />
+                  关键事件（每行一个）
+                </div>
                 <textarea
                   className="input"
                   value={keyEvents}
@@ -101,7 +131,10 @@ function ChapterSummaryDialog({
 
               {/* 角色变化 */}
               <div className="panel-section">
-                <div className="panel-section-title">👤 角色变化</div>
+                <div className="panel-section-title">
+                  <UserRound aria-hidden="true" size={14} strokeWidth={1.8} />
+                  角色变化
+                </div>
                 {result.characterChanges.map((cc, i) => (
                   <div
                     key={i}
@@ -125,7 +158,10 @@ function ChapterSummaryDialog({
 
               {/* 伏笔 */}
               <div className="panel-section">
-                <div className="panel-section-title">🔮 新增伏笔（每行一个）</div>
+                <div className="panel-section-title">
+                  <Sparkles aria-hidden="true" size={14} strokeWidth={1.8} />
+                  新增伏笔（每行一个）
+                </div>
                 <textarea
                   className="input"
                   value={newForeshadows}
@@ -135,7 +171,10 @@ function ChapterSummaryDialog({
                 />
               </div>
               <div className="panel-section">
-                <div className="panel-section-title">✅ 已回收伏笔（每行一个）</div>
+                <div className="panel-section-title">
+                  <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                  已回收伏笔（每行一个）
+                </div>
                 <textarea
                   className="input"
                   value={resolvedForeshadows}
@@ -147,7 +186,10 @@ function ChapterSummaryDialog({
 
               {/* 下一章衔接 */}
               <div className="panel-section">
-                <div className="panel-section-title">🔗 下一章衔接建议</div>
+                <div className="panel-section-title">
+                  <Link2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                  下一章衔接建议
+                </div>
                 <textarea
                   className="input"
                   value={nextHints}
@@ -160,7 +202,8 @@ function ChapterSummaryDialog({
               {/* 将生成的上下文记录 */}
               <div className="panel-section">
                 <div className="panel-section-title">
-                  📦 将生成的上下文记录（{result.contextRecords.length} 条）
+                  <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
+                  将生成的上下文记录（{result.contextRecords.length} 条）
                 </div>
                 {result.contextRecords.map((cr, i) => (
                   <div
@@ -194,14 +237,16 @@ function ChapterSummaryDialog({
                   取消
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={onRegenerate}>
-                  🔄 重新生成
+                  <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+                  重新生成
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={() => onConfirm(buildEdited())}
                   style={{ flex: 1 }}
                 >
-                  ✅ 确认保存总结
+                  <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                  确认保存总结
                 </button>
               </div>
             </>

@@ -2,6 +2,7 @@
  * AI Novel Studio - 作品详情页导出卡片
  */
 import { useState } from 'react';
+import { Download, FileJson, FileText } from 'lucide-react';
 import { exportService } from '../../services/export/exportService';
 import { describeUnknownError } from '../../utils/errorMessage';
 
@@ -30,7 +31,7 @@ function ExportCard({ novelId }: ExportCardProps) {
   return (
     <div className="detail-card">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <span style={{ fontSize: 18 }}>📥</span>
+        <Download aria-hidden="true" size={18} strokeWidth={1.8} />
         <span style={{ fontSize: 16, fontWeight: 600 }}>导出作品</span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -38,19 +39,22 @@ function ExportCard({ novelId }: ExportCardProps) {
           className="btn btn-secondary btn-sm"
           onClick={() => handleExport(() => exportService.exportNovelToTxt(novelId))}
         >
-          📄 导出整本 TXT
+          <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
+          导出整本 TXT
         </button>
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => handleExport(() => exportService.exportNovelToMarkdown(novelId))}
         >
-          📝 导出整本 Markdown
+          <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
+          导出整本 Markdown
         </button>
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => handleExport(() => exportService.exportNovelBackupJson(novelId))}
         >
-          💾 备份完整 JSON
+          <FileJson aria-hidden="true" size={14} strokeWidth={1.8} />
+          备份完整 JSON
         </button>
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>

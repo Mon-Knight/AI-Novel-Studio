@@ -419,7 +419,7 @@ function reconcileLocalConversationStatus(
 
 export const taskConversationService = {
   async recoverInterruptedRuns(
-    error = '应用重新启动，上一轮运行已中断，请重新发送任务。',
+    error = '工作台已重新加载，上一轮运行已中断。请重试本回合。',
     activeRuntimeRunIds: readonly string[] = [],
   ): Promise<number> {
     const finishedAt = nowISO();

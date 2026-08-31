@@ -1,3 +1,4 @@
+import { ArrowLeft } from 'lucide-react';
 import type { AutonomousPlanStatus } from '../../types/autonomousCreation';
 import { STATUS_LABELS } from './autonomousPlanningPresentation';
 
@@ -22,7 +23,7 @@ export function AutonomousPlanningHeader({
         title="返回作品详情"
         onClick={onBack}
       >
-        ←
+        <ArrowLeft aria-hidden="true" size={18} strokeWidth={1.8} />
       </button>
       <div className="autonomous-heading">
         <h1>自主创作规划</h1>

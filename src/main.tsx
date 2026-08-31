@@ -9,6 +9,7 @@ import { describeUnknownError } from './utils/errorMessage';
 import { initializeTheme } from './store/themeStore';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
 import { startupCoordinator } from './services/startup/startupCoordinator';
+import { restoreSessionModelCredentialsFromNative } from './services/ai/aiSettingsStore';
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
@@ -125,6 +126,9 @@ function bootstrapApplication() {
   // Establish recovery gates synchronously, while every recovery task itself
   // remains asynchronous and does not delay the first React render.
   void startupCoordinator.start();
+  void restoreSessionModelCredentialsFromNative().catch(() => {
+    appLogger.warn('[SESSION_CREDENTIAL_RESTORE_FAILED]');
+  });
   const router = createAppRouter();
   markStartup('react-before-render');
   ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -29,7 +29,12 @@ export function WorkbenchModelRecoveryNotice({
       role={unavailable ? 'alert' : 'status'}
       aria-busy={refreshing}
     >
-      <CircleAlert className="workbench-readiness-icon" aria-hidden="true" size={15} />
+      <CircleAlert
+        className="workbench-readiness-icon"
+        aria-hidden="true"
+        size={15}
+        strokeWidth={1.8}
+      />
       <span className="workbench-readiness-copy">{message}</span>
       {unavailable && (
         <div className="workbench-recovery-actions">
@@ -42,7 +47,7 @@ export function WorkbenchModelRecoveryNotice({
             disabled={refreshing}
             onClick={onRetry}
           >
-            <RefreshCw aria-hidden="true" size={13} />
+            <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
             <span>重试</span>
           </button>
           <button
@@ -51,7 +56,7 @@ export function WorkbenchModelRecoveryNotice({
             data-testid={`${testId}-settings`}
             onClick={onOpenSettings}
           >
-            <Settings aria-hidden="true" size={13} />
+            <Settings aria-hidden="true" size={13} strokeWidth={1.8} />
             <span>模型设置</span>
           </button>
         </div>

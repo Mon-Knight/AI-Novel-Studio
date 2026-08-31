@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
+import { Bot, FileText } from 'lucide-react';
 import type { OutputProfile } from '../../types/output';
 import type { StyleAnalyzeResult, StyleProfile } from '../../types/style';
 import type { OutputProfileFormValue, StyleProfileFormValue } from './styleProfilesPageTypes';
@@ -250,7 +251,10 @@ export function StyleProfileDialogs({
             onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: 640 }}
           >
-            <div className="modal-title">📄 TXT 风格分析</div>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
+              TXT 风格分析
+            </div>
             <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
               粘贴参考文本，AI 分析抽象风格。不会复制原文。
             </div>
@@ -303,7 +307,8 @@ export function StyleProfileDialogs({
                 </button>
               )}
               <button className="btn btn-primary" onClick={handleAnalyze} disabled={analyzing}>
-                {analyzing ? '分析中...' : '🤖 分析'}
+                {!analyzing && <Bot aria-hidden="true" size={16} strokeWidth={1.8} />}
+                {analyzing ? '分析中...' : '分析'}
               </button>
             </div>
           </div>

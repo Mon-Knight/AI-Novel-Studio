@@ -1,4 +1,5 @@
 import type { DualProtagonistRelation } from '../../types/novel';
+import { Link2 } from 'lucide-react';
 import { NARRATIVE_WEIGHT_LABELS, RELATION_TYPE_LABELS } from './protagonistPresentation';
 
 interface DualProtagonistRelationFieldsProps {
@@ -22,9 +23,18 @@ export default function DualProtagonistRelationFields({
       }}
     >
       <div
-        style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--color-primary)' }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 14,
+          fontWeight: 600,
+          marginBottom: 10,
+          color: 'var(--color-primary)',
+        }}
       >
-        🔗 双主角关系
+        <Link2 aria-hidden="true" size={14} strokeWidth={1.8} />
+        双主角关系
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div>

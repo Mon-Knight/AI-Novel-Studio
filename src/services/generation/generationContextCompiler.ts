@@ -128,9 +128,11 @@ function addSection(
   title: string,
   content: string | undefined,
   sourceTypes: GenerationContextSourceType[],
-  preserveEnding = false,
+  options: { preserveEnding?: boolean; preserveFullContent?: boolean } = {},
 ): void {
-  const normalized = limitText(content, SECTION_LIMIT, preserveEnding);
+  const normalized = options.preserveFullContent
+    ? (content?.trim() ?? '')
+    : limitText(content, SECTION_LIMIT, options.preserveEnding);
   if (!normalized) return;
   sections.push({ key, title, content: normalized, sourceTypes });
 }
@@ -465,6 +467,7 @@ export async function compileGenerationContextSnapshot(
       baseContext.ruleSystems ? `规则设定：\n${baseContext.ruleSystems}` : '',
     ]),
     ['novel', 'world_setting', 'rule_system'],
+    { preserveFullContent: true },
   );
   addSection(sections, 'world_settings', '补充世界设定', baseContext.chapterSettings, [
     'world_setting',
@@ -488,6 +491,7 @@ export async function compileGenerationContextSnapshot(
       baseContext.requiredCharactersSummary,
     ]),
     ['protagonist', 'chapter_character'],
+    { preserveFullContent: true },
   );
   addSection(sections, 'character_states', '人物动态状态', baseContext.characterStates, [
     'character_state',
@@ -505,6 +509,7 @@ export async function compileGenerationContextSnapshot(
       baseContext.chapterEvents ? `本章事件：\n${baseContext.chapterEvents}` : '',
     ]),
     ['master_outline', 'volume_outline', 'chapter_outline', 'chapter_event'],
+    { preserveFullContent: true },
   );
   addSection(sections, 'story_assets', '相关势力与地点', assetContext.storyAssetText, [
     'faction',
@@ -542,7 +547,7 @@ export async function compileGenerationContextSnapshot(
         ].join('\n')
       : undefined,
     ['adopted_chapter'],
-    true,
+    { preserveEnding: true },
   );
   addSection(
     sections,
@@ -558,7 +563,7 @@ export async function compileGenerationContextSnapshot(
         ].join('\n')
       : undefined,
     ['provisional_candidate'],
-    true,
+    { preserveEnding: true },
   );
   addSection(
     sections,

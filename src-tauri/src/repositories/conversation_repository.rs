@@ -91,6 +91,13 @@ pub struct TaskConversationBundle {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskTurnRunProjection {
+    pub turn: ConversationTurnRecord,
+    pub runs: Vec<TaskRunRecord>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializedTaskConversation {
     pub conversation: TaskConversationRecord,
     pub turn: ConversationTurnRecord,
@@ -328,11 +335,62 @@ fn json_text(value: &Value) -> Result<String, AppError> {
 }
 
 fn model_lock_projection(value: &Value) -> Value {
-    let mut projected = value.clone();
-    if let Some(runtime) = projected.get_mut("runtime").and_then(Value::as_object_mut) {
-        runtime.remove("toolCallingAttestation");
+    let provider_id = value
+        .get("providerId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(|provider| match provider {
+            "deepseek" | "deepseek-official" => "deepseek-official",
+            _ => provider,
+        });
+    let mut projected = serde_json::json!({
+        "providerId": provider_id.map(Value::from).unwrap_or(Value::Null),
+        "modelId": value.get("modelId").and_then(Value::as_str).map(str::trim).map(Value::from).unwrap_or(Value::Null),
+        "runtimeMode": value.get("runtimeMode").and_then(Value::as_str).map(str::trim).map(Value::from).unwrap_or(Value::Null),
+    });
+    if let Some(base_url) = value
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        projected["baseUrl"] = Value::String(base_url.trim_end_matches('/').to_string());
     }
     projected
+}
+
+fn model_lock_matches(locked: &Value, candidate: &Value) -> bool {
+    let locked = model_lock_projection(locked);
+    let candidate = model_lock_projection(candidate);
+    for key in ["providerId", "modelId", "runtimeMode"] {
+        if locked.get(key) != candidate.get(key) {
+            return false;
+        }
+    }
+
+    match (locked.get("baseUrl"), candidate.get("baseUrl")) {
+        (Some(locked_base_url), Some(candidate_base_url)) => locked_base_url == candidate_base_url,
+        (Some(_), None) => false,
+        // Pre-baseUrl task snapshots can be hydrated only after their provider/model
+        // identity matches the current settings. New snapshots remain endpoint-strict.
+        (None, _) => true,
+    }
+}
+
+fn upgrade_legacy_model_lock_endpoint(locked: &Value, candidate: &Value) -> Option<Value> {
+    let locked_projection = model_lock_projection(locked);
+    if locked_projection.get("baseUrl").is_some() {
+        return None;
+    }
+    let candidate_base_url = model_lock_projection(candidate)
+        .get("baseUrl")
+        .and_then(Value::as_str)?
+        .to_string();
+    let mut upgraded = locked.clone();
+    upgraded
+        .as_object_mut()?
+        .insert("baseUrl".to_string(), Value::String(candidate_base_url));
+    Some(upgraded)
 }
 
 fn task_run_transition_allowed(from: &str, to: &str) -> bool {
@@ -1009,14 +1067,25 @@ pub fn create_run(
             .and_then(Value::as_str)
             == Some("ans_local_conversation_v1");
     if let Some(locked_model) = locked_model {
-        if !local_conversational_model
-            && model_lock_projection(&locked_model) != model_lock_projection(&input.model_snapshot)
+        if !local_conversational_model && !model_lock_matches(&locked_model, &input.model_snapshot)
         {
             return Err(AppError::new(
                 "TASK_RUN_MODEL_MISMATCH",
                 "运行模型与任务创建时固定的模型不一致",
                 false,
             ));
+        }
+        if !local_conversational_model {
+            if let Some(upgraded) =
+                upgrade_legacy_model_lock_endpoint(&locked_model, &input.model_snapshot)
+            {
+                transaction
+                    .execute(
+                        "UPDATE task_conversations SET default_model_json=?2 WHERE conversation_id=?1",
+                        params![input.conversation_id, json_text(&upgraded)?],
+                    )
+                    .map_err(AppError::database)?;
+            }
         }
     }
     let scoped_turn: bool = transaction
@@ -1050,6 +1119,40 @@ pub fn create_run(
 
 pub fn get_run(connection: &Connection, id: &str) -> Result<Option<TaskRunRecord>, AppError> {
     connection.query_row("SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id, error, created_at, updated_at, started_at, finished_at FROM task_runs WHERE run_id=?1", params![id], run_from_row).optional().map_err(AppError::database)
+}
+
+pub fn get_turn_run_projection(
+    connection: &Connection,
+    conversation_id: &str,
+    turn_id: &str,
+) -> Result<Option<TaskTurnRunProjection>, AppError> {
+    let turn = connection
+        .query_row(
+            "SELECT turn_id, conversation_id, sequence, role, content, run_id, created_at
+             FROM conversation_turns
+             WHERE conversation_id=?1 AND turn_id=?2",
+            params![conversation_id, turn_id],
+            turn_from_row,
+        )
+        .optional()
+        .map_err(AppError::database)?;
+    let Some(turn) = turn else {
+        return Ok(None);
+    };
+    let runs = connection
+        .prepare(
+            "SELECT run_id, conversation_id, turn_id, status, model_snapshot_json, worker_id,
+                    error, created_at, updated_at, started_at, finished_at
+             FROM task_runs
+             WHERE conversation_id=?1 AND turn_id=?2
+             ORDER BY created_at, rowid",
+        )
+        .map_err(AppError::database)?
+        .query_map(params![conversation_id, turn_id], run_from_row)
+        .map_err(AppError::database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::database)?;
+    Ok(Some(TaskTurnRunProjection { turn, runs }))
 }
 
 pub fn update_run(
@@ -2264,6 +2367,129 @@ mod tests {
         connection
     }
 
+    #[test]
+    fn legacy_model_lock_accepts_hydrated_endpoint_but_new_locks_remain_strict() {
+        let legacy = json!({
+            "providerId": "deepseek",
+            "modelId": "deepseek-chat",
+            "runtimeMode": "api"
+        });
+        let hydrated = json!({
+            "providerId": "deepseek-official",
+            "modelId": "deepseek-chat",
+            "runtimeMode": "api",
+            "baseUrl": "https://api.deepseek.com/v1/"
+        });
+        assert!(model_lock_matches(&legacy, &hydrated));
+        let upgraded = upgrade_legacy_model_lock_endpoint(&legacy, &hydrated)
+            .expect("legacy endpoint upgrade");
+        assert_eq!(
+            upgraded.get("baseUrl").and_then(Value::as_str),
+            Some("https://api.deepseek.com/v1")
+        );
+
+        let endpoint_locked = json!({
+            "providerId": "deepseek-official",
+            "modelId": "deepseek-chat",
+            "runtimeMode": "api",
+            "baseUrl": "https://api.deepseek.com/v1"
+        });
+        let different_endpoint = json!({
+            "providerId": "deepseek-official",
+            "modelId": "deepseek-chat",
+            "runtimeMode": "api",
+            "baseUrl": "https://provider.invalid/v1"
+        });
+        assert!(!model_lock_matches(&endpoint_locked, &different_endpoint));
+        assert!(
+            upgrade_legacy_model_lock_endpoint(&endpoint_locked, &different_endpoint).is_none()
+        );
+        assert!(!model_lock_matches(
+            &legacy,
+            &json!({
+                "providerId": "deepseek-official",
+                "modelId": "different-model",
+                "runtimeMode": "api",
+                "baseUrl": "https://api.deepseek.com/v1"
+            })
+        ));
+        assert!(!model_lock_matches(&endpoint_locked, &legacy));
+
+        let mut connection = connection();
+        let conversation = create_conversation(
+            &mut connection,
+            CreateConversationInput {
+                conversation_id: "legacy-model-lock".to_string(),
+                novel_id: "novel-conversation-test".to_string(),
+                title: "旧任务".to_string(),
+                default_model: Some(legacy),
+                created_at: "2026-08-20T00:00:01Z".to_string(),
+            },
+        )
+        .expect("legacy conversation");
+        let first_turn = append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "legacy-turn-1".to_string(),
+                conversation_id: conversation.conversation_id.clone(),
+                role: "user".to_string(),
+                content: "继续".to_string(),
+                created_at: "2026-08-20T00:00:02Z".to_string(),
+            },
+        )
+        .expect("legacy turn");
+        create_run(
+            &mut connection,
+            CreateRunInput {
+                run_id: "legacy-run-1".to_string(),
+                conversation_id: conversation.conversation_id.clone(),
+                turn_id: first_turn.turn_id,
+                model_snapshot: hydrated,
+                worker_id: "legacy-worker-1".to_string(),
+                created_at: "2026-08-20T00:00:03Z".to_string(),
+            },
+        )
+        .expect("hydrated legacy run");
+        let stored_model: String = connection
+            .query_row(
+                "SELECT default_model_json FROM task_conversations WHERE conversation_id=?1",
+                params![conversation.conversation_id],
+                |row| row.get(0),
+            )
+            .expect("stored upgraded lock");
+        assert_eq!(
+            serde_json::from_str::<Value>(&stored_model)
+                .expect("stored model json")
+                .get("baseUrl")
+                .and_then(Value::as_str),
+            Some("https://api.deepseek.com/v1")
+        );
+        let second_turn = append_turn(
+            &mut connection,
+            AppendTurnInput {
+                turn_id: "legacy-turn-2".to_string(),
+                conversation_id: conversation.conversation_id.clone(),
+                role: "user".to_string(),
+                content: "再继续".to_string(),
+                created_at: "2026-08-20T00:00:04Z".to_string(),
+            },
+        )
+        .expect("second legacy turn");
+        let mismatch = create_run(
+            &mut connection,
+            CreateRunInput {
+                run_id: "legacy-run-2".to_string(),
+                conversation_id: conversation.conversation_id,
+                turn_id: second_turn.turn_id,
+                model_snapshot: different_endpoint,
+                worker_id: "legacy-worker-2".to_string(),
+                created_at: "2026-08-20T00:00:05Z".to_string(),
+            },
+        )
+        .expect_err("upgraded legacy endpoint must remain locked");
+        assert_eq!(mismatch.code, "TASK_RUN_MODEL_MISMATCH");
+    }
+
     fn insert_valid_chapter_artifact(
         connection: &Connection,
         artifact_id: &str,
@@ -3030,6 +3256,34 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["run-order-first", "run-order-second"]
         );
+        let projection =
+            get_turn_run_projection(&connection, "conversation-run-order", "turn-run-order")
+                .expect("turn run projection")
+                .expect("existing turn projection");
+        assert_eq!(projection.turn.turn_id, "turn-run-order");
+        assert_eq!(projection.turn.content, "重试");
+        assert_eq!(
+            projection
+                .runs
+                .iter()
+                .map(|run| run.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run-order-first", "run-order-second"]
+        );
+        assert!(get_turn_run_projection(
+            &connection,
+            "conversation-run-order",
+            "missing-turn-run-order",
+        )
+        .expect("missing projection query")
+        .is_none());
+        assert!(get_turn_run_projection(
+            &connection,
+            "missing-conversation-run-order",
+            "turn-run-order",
+        )
+        .expect("cross-conversation projection query")
+        .is_none());
     }
 
     #[test]

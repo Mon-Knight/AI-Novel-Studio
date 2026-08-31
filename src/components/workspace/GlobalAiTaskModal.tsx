@@ -2,7 +2,7 @@
  * AI Novel Studio - 全局 AI 任务弹窗
  * v1.7.19: 居中 overlay，显示 loading/spinner/阶段/进度条
  */
-import { useState, useEffect } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import type { AiTaskModalState } from '../../types/workspaceSafety';
 export type { AiTaskModalState } from '../../types/workspaceSafety';
 
@@ -10,18 +10,7 @@ interface GlobalAiTaskModalProps {
   state: AiTaskModalState;
 }
 
-/** 简单的旋转 spinner 字符帧 */
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
 function GlobalAiTaskModal({ state }: GlobalAiTaskModalProps) {
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    if (!state.running) return;
-    const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
-    return () => clearInterval(timer);
-  }, [state.running]);
-
   if (!state.running) return null;
 
   return (
@@ -50,17 +39,17 @@ function GlobalAiTaskModal({ state }: GlobalAiTaskModalProps) {
           textAlign: 'center',
         }}
       >
-        {/* Spinner */}
-        <div
+        <LoaderCircle
+          aria-hidden="true"
+          className="workspace-spinning-icon"
+          size={40}
+          strokeWidth={1.8}
           style={{
-            fontSize: 40,
+            display: 'block',
             color: 'var(--color-secondary-accent)',
-            marginBottom: 16,
-            lineHeight: 1,
+            margin: '0 auto 16px',
           }}
-        >
-          {SPINNER_FRAMES[frame]}
-        </div>
+        />
 
         {/* Title */}
         <div

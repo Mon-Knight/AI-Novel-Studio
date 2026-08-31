@@ -85,16 +85,16 @@ test('style analysis can be stopped and an in-flight request is aborted on unmou
       screen.getByPlaceholderText('在此粘贴需要分析的参考文本（建议 500-20000 字）...'),
       { target: { value: '风格分析取消测试文本，需要验证结果不会在停止后回写。' } },
     );
-    fireEvent.click(screen.getByRole('button', { name: '🔍 开始风格分析' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始风格分析' }));
 
     const firstStop = await screen.findByRole('button', { name: '停止分析' });
     assert.equal(controllers.length, 1);
     fireEvent.click(firstStop);
     assert.equal(controllers[0].signal.aborted, true);
     assert.ok(await screen.findByText('风格分析已停止'));
-    assert.equal(screen.queryByText('📊 分析结果'), null);
+    assert.equal(screen.queryByText('分析结果'), null);
 
-    fireEvent.click(screen.getByRole('button', { name: '🔍 开始风格分析' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始风格分析' }));
     await screen.findByRole('button', { name: '停止分析' });
     assert.equal(controllers.length, 2);
     view.unmount();

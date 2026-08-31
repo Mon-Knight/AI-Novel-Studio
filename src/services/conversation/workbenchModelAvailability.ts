@@ -1,3 +1,4 @@
+import { isLoopbackAiBaseUrl } from '../ai/realAiClient';
 import type { CurrentPluginProjection } from './currentPluginService';
 
 export interface WorkbenchModelSelection {
@@ -18,6 +19,7 @@ export interface WorkbenchModelAvailability {
   status: WorkbenchModelDirectoryStatus;
   options: WorkbenchModelOption[];
   selectedOption?: WorkbenchModelOption;
+  fallbackOption?: WorkbenchModelOption;
   canSend: boolean;
   message: string;
 }
@@ -27,6 +29,7 @@ interface WorkbenchModelAvailabilityInput {
   selectedModel: WorkbenchModelSelection;
   refreshing: boolean;
   refreshError?: string;
+  allowLocalFallback?: boolean;
 }
 
 const MODEL_PREFIX = 'model:';
@@ -45,6 +48,14 @@ export class WorkbenchModelUnavailableError extends Error {
 
 export function workbenchModelKey(model: WorkbenchModelSelection): string {
   return `${model.providerId.trim()}:${model.modelId.trim()}`;
+}
+
+export function isLocalLikeWorkbenchModel(
+  model: WorkbenchModelSelection & { baseUrl?: string },
+): boolean {
+  const providerId = model.providerId.trim().toLowerCase();
+  if (providerId.includes('local') || providerId === 'local_llama_cpp') return true;
+  return Boolean(model.baseUrl && isLoopbackAiBaseUrl(model.baseUrl));
 }
 
 function optionFromPlugin(plugin: CurrentPluginProjection): WorkbenchModelOption | undefined {
@@ -122,6 +133,7 @@ export function getWorkbenchModelAvailability({
   selectedModel,
   refreshing,
   refreshError,
+  allowLocalFallback = false,
 }: WorkbenchModelAvailabilityInput): WorkbenchModelAvailability {
   const options = listAvailableWorkbenchModels(plugins);
   const selectedKey = workbenchModelKey(selectedModel);
@@ -165,6 +177,21 @@ export function getWorkbenchModelAvailability({
   }
 
   if (!selectedOption) {
+    const cloudFallback =
+      allowLocalFallback && isLocalLikeWorkbenchModel(selectedModel)
+        ? options.find(
+            (option) => !isLocalLikeWorkbenchModel(option) && option.providerId !== 'mock',
+          )
+        : undefined;
+    if (cloudFallback) {
+      return {
+        status: 'available',
+        options,
+        fallbackOption: cloudFallback,
+        canSend: true,
+        message: '本地模型当前不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
+      };
+    }
     return {
       status: 'unavailable',
       options,

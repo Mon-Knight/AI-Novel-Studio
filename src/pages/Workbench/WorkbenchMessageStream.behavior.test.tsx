@@ -17,7 +17,7 @@ Object.defineProperties(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true, writable: true },
 });
 
-const { cleanup, fireEvent, render, screen } = await import('@testing-library/react');
+const { act, cleanup, fireEvent, render, screen } = await import('@testing-library/react');
 const { WorkbenchMessageStream } = await import('./WorkbenchMessageStream');
 
 let nextFrameId = 1;
@@ -107,8 +107,8 @@ function longConversationBundle(turnCount = 24): TaskConversationBundle {
   return bundle;
 }
 
-function renderStream(bundle: TaskConversationBundle) {
-  return render(
+function streamElement(bundle: TaskConversationBundle) {
+  return (
     <WorkbenchMessageStream
       bundle={bundle}
       compressionCandidate={null}
@@ -126,8 +126,12 @@ function renderStream(bundle: TaskConversationBundle) {
       onRefreshAssetReadiness={() => undefined}
       onResumeChapterGoal={() => undefined}
       onDismissAssetReadiness={() => undefined}
-    />,
+    />
   );
+}
+
+function renderStream(bundle: TaskConversationBundle) {
+  return render(streamElement(bundle));
 }
 
 function flushAnimationFrames(): void {
@@ -270,6 +274,81 @@ test('only the explicit latest-progress action scrolls smoothly and honors reduc
   assert.deepEqual(calls[calls.length - 1], { top: 900, behavior: 'auto' });
 });
 
+test('closely spaced artifact arrivals keep an independent full feedback window', () => {
+  const originalSetTimeout = window.setTimeout.bind(window);
+  const originalClearTimeout = window.clearTimeout.bind(window);
+  const arrivalTimers = new Map<number, () => void>();
+  let nextTimerId = 10_000;
+  window.setTimeout = ((handler: TimerHandler, timeout?: number) => {
+    if (timeout === 220 && typeof handler === 'function') {
+      const timerId = nextTimerId++;
+      arrivalTimers.set(timerId, () => handler());
+      return timerId;
+    }
+    return originalSetTimeout(handler, timeout);
+  }) as typeof window.setTimeout;
+  window.clearTimeout = ((timerId?: number) => {
+    if (typeof timerId === 'number' && arrivalTimers.delete(timerId)) return;
+    originalClearTimeout(timerId);
+  }) as typeof window.clearTimeout;
+
+  try {
+    const initial = bundleWithContent('产物到达基线');
+    const view = renderStream(initial);
+    const first = bundleWithContent('第一张产物到达');
+    first.artifacts = [
+      {
+        cardId: 'arrival-card-1',
+        conversationId: first.conversation.conversationId,
+        artifactId: 'arrival-artifact-1',
+        artifactType: 'quality_report',
+        title: '第一张核对结果',
+        summary: '第一张产物摘要',
+        status: 'candidate',
+        createdAt: '2026-08-29T01:01:00.000Z',
+      },
+    ];
+    view.rerender(streamElement(first));
+    const firstCard = document.querySelector<HTMLElement>('[data-card-id="arrival-card-1"]');
+    assert.equal(firstCard?.dataset.newlyArrived, 'true');
+    assert.equal(arrivalTimers.size, 1);
+
+    const second = bundleWithContent('第二张产物紧接着到达');
+    second.artifacts = [
+      ...first.artifacts,
+      {
+        cardId: 'arrival-card-2',
+        conversationId: second.conversation.conversationId,
+        artifactId: 'arrival-artifact-2',
+        artifactType: 'style_analysis',
+        title: '第二张风格结果',
+        summary: '第二张产物摘要',
+        status: 'candidate',
+        createdAt: '2026-08-29T01:01:00.100Z',
+      },
+    ];
+    view.rerender(streamElement(second));
+    const secondCard = document.querySelector<HTMLElement>('[data-card-id="arrival-card-2"]');
+    assert.equal(firstCard?.dataset.newlyArrived, 'true');
+    assert.equal(secondCard?.dataset.newlyArrived, 'true');
+    assert.equal(arrivalTimers.size, 2);
+
+    const [firstTimerId, secondTimerId] = [...arrivalTimers.keys()];
+    assert.ok(firstTimerId !== undefined && secondTimerId !== undefined);
+    act(() => arrivalTimers.get(firstTimerId)?.());
+    arrivalTimers.delete(firstTimerId);
+    assert.equal(firstCard?.dataset.newlyArrived, undefined);
+    assert.equal(secondCard?.dataset.newlyArrived, 'true');
+
+    act(() => arrivalTimers.get(secondTimerId)?.());
+    arrivalTimers.delete(secondTimerId);
+    assert.equal(secondCard?.dataset.newlyArrived, undefined);
+  } finally {
+    window.setTimeout = originalSetTimeout;
+    window.clearTimeout = originalClearTimeout;
+  }
+});
+
 test('long conversations mount only the latest history window and restore older records on demand', () => {
   renderStream(longConversationBundle());
   const list = screen.getByTestId('workbench-message-list');
@@ -298,6 +377,29 @@ test('long conversations mount only the latest history window and restore older 
   assert.equal(screen.getAllByTestId('workbench-turn').length, 8);
   assert.equal(screen.queryByText('历史回合 1'), null);
   assert.ok(screen.getByText('历史回合 24'));
+});
+
+test('latest activity expands history when its run belongs to an earlier creative turn', () => {
+  const bundle = longConversationBundle(12);
+  bundle.runs.push({
+    ...bundle.runs[0],
+    runId: 'run-restored-original-goal',
+    status: 'completed',
+    updatedAt: '2026-08-29T02:00:00.000Z',
+    finishedAt: '2026-08-29T02:00:00.000Z',
+  });
+
+  renderStream(bundle);
+
+  const list = screen.getByTestId('workbench-message-list');
+  assert.equal(list.getAttribute('data-visible-turn-count'), '12');
+  assert.ok(screen.getByText('历史回合 1'));
+  assert.ok(
+    document.querySelector(
+      '[data-testid="workbench-run"][data-run-id="run-restored-original-goal"]',
+    ),
+  );
+  assert.ok(screen.getByTestId('workbench-collapse-history'));
 });
 
 test('large tool and artifact payloads mount only after their disclosure is opened', () => {

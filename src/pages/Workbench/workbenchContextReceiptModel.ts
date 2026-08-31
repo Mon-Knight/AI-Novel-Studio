@@ -12,6 +12,7 @@ export interface ContextSourceReceiptItem {
   type: string;
   title: string;
   status: ContextSourceStatus;
+  providerStatus?: SnapshotRequestSourceStatus;
   group: ContextSourceGroup;
   count: number;
   detail?: string;
@@ -172,13 +173,17 @@ function sourceDefinition(type: string): ContextSourceDefinition {
 function compareSources(left: ContextSourceReceiptItem, right: ContextSourceReceiptItem): number {
   const leftOrder = sourceDefinition(left.type).order;
   const rightOrder = sourceDefinition(right.type).order;
-  return leftOrder - rightOrder || left.status.localeCompare(right.status);
+  return (
+    leftOrder - rightOrder ||
+    left.status.localeCompare(right.status) ||
+    (left.providerStatus ?? '').localeCompare(right.providerStatus ?? '')
+  );
 }
 
 function mergeSources(items: ContextSourceReceiptItem[]): ContextSourceReceiptItem[] {
   const merged = new Map<string, ContextSourceReceiptItem>();
   for (const item of items) {
-    const key = `${item.group}:${item.type}:${item.status}`;
+    const key = `${item.group}:${item.type}:${item.status}:${item.providerStatus ?? ''}`;
     const existing = merged.get(key);
     if (!existing) {
       merged.set(key, item);
@@ -277,14 +282,22 @@ function explicitSourceBatches(result: unknown): ExplicitSourceBatch[] {
   return batches;
 }
 
+function sourceProviderStatus(
+  status: ContextSourceStatus,
+  batch: ExplicitSourceBatch,
+  sourceType: string,
+): SnapshotRequestSourceStatus | undefined {
+  if (status !== 'used' || !batch.requiresProviderEvidence) return undefined;
+  return batch.generationSourceStatuses?.[sourceType] ?? batch.snapshotRequestSourceStatus;
+}
+
 function projectSnapshotSourceStatus(
   status: ContextSourceStatus,
   batch: ExplicitSourceBatch,
   sourceType: string,
 ): ContextSourceStatus {
-  if (status !== 'used' || !batch.requiresProviderEvidence) return status;
-  const providerStatus = batch.generationSourceStatuses?.[sourceType];
-  const effectiveStatus = providerStatus ?? batch.snapshotRequestSourceStatus;
+  const effectiveStatus = sourceProviderStatus(status, batch, sourceType);
+  if (!effectiveStatus) return status;
   if (effectiveStatus === 'included') return 'used';
   if (effectiveStatus === 'truncated') return 'truncated';
   if (effectiveStatus === 'omitted_empty' || effectiveStatus === 'omitted_budget') {
@@ -326,6 +339,7 @@ function readExplicitSources(result: unknown): {
       if (!normalizedStatus) continue;
       const rawType = normalizeSourceType(item.type);
       if (!rawType) continue;
+      const providerStatus = sourceProviderStatus(normalizedStatus, batch, rawType);
       const status = projectSnapshotSourceStatus(normalizedStatus, batch, rawType);
       const sourceIdentity =
         typeof item.sourceId === 'string'
@@ -333,7 +347,7 @@ function readExplicitSources(result: unknown): {
           : typeof item.title === 'string'
             ? item.title
             : '';
-      const seenKey = `${status}:${rawType}:${sourceIdentity}`;
+      const seenKey = `${status}:${providerStatus ?? ''}:${rawType}:${sourceIdentity}`;
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
       const type = CONTEXT_SOURCE_DEFINITIONS[rawType] ? rawType : 'other';
@@ -342,6 +356,7 @@ function readExplicitSources(result: unknown): {
         type,
         title: definition.title,
         status,
+        ...(providerStatus ? { providerStatus } : {}),
         group: definition.group,
         count: 1,
         detail: readSafeDetail(item),
@@ -451,6 +466,12 @@ function sanitizedFieldName(key: string): string {
   return key.replace(/[-_]/gu, '').toLowerCase();
 }
 
+function isNarrativeTextField(field: string): boolean {
+  return ['summary', 'excerpt', 'goal', 'instruction', 'background'].some(
+    (name) => field === name || field.endsWith(name),
+  );
+}
+
 function sanitizeToolDetailValue(value: unknown, key = '', depth = 0): unknown {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
   const field = sanitizedFieldName(key);
@@ -474,6 +495,7 @@ function sanitizeToolDetailValue(value: unknown, key = '', depth = 0): unknown {
       field.endsWith('text') ||
       field.includes('transcript') ||
       field.includes('prompt') ||
+      isNarrativeTextField(field) ||
       field === 'messages' ||
       field === 'raw' ||
       field === 'body'
@@ -488,6 +510,7 @@ function sanitizeToolDetailValue(value: unknown, key = '', depth = 0): unknown {
   if (
     field.includes('transcript') ||
     field.includes('prompt') ||
+    isNarrativeTextField(field) ||
     field === 'messages' ||
     field === 'raw' ||
     field === 'body'

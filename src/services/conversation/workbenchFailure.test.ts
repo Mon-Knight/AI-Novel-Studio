@@ -75,3 +75,37 @@ test('classifies unsafe retry targets as persisted data failures', () => {
     assert.doesNotMatch(failure.hint, /换模型/);
   }
 });
+
+test('classifies normalized transient Provider failures as retryable service problems', () => {
+  for (const message of [
+    'AI 调用失败：模型服务错误（502），请稍后重试。',
+    'AI 调用失败：请求过于频繁或额度不足（429 Rate Limit），请稍后重试或检查账户额度。',
+    'AI 调用失败：模型服务当前过载（overloaded_error），请稍后重试。',
+    'generate_chapter: HTTP_503 Service Unavailable',
+  ]) {
+    const failure = classifyWorkbenchFailure(new Error(message));
+    assert.equal(failure.layer, 'service', message);
+    assert.equal(failure.code, 'WORKBENCH_PROVIDER_TRANSIENT', message);
+    assert.match(failure.hint, /重试本回合/);
+    assert.doesNotMatch(failure.hint, /换模型/);
+  }
+
+  for (const code of [
+    'AI_PROVIDER_TIMEOUT',
+    'AI_PROVIDER_RATE_LIMITED',
+    'AI_PROVIDER_SERVER_ERROR',
+    'AI_PROVIDER_NETWORK_ERROR',
+  ]) {
+    const failure = classifyWorkbenchFailure(
+      Object.assign(new Error('Provider 暂时不可用。'), { code, retryable: true }),
+    );
+    assert.equal(failure.layer, 'service', code);
+    assert.equal(failure.code, code);
+    assert.match(failure.hint, /固定的模型/);
+  }
+
+  assert.equal(
+    classifyWorkbenchFailure(new Error('AI 调用失败：请求参数不合法（400 Bad Request）。')).layer,
+    'model',
+  );
+});

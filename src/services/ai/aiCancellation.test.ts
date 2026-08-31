@@ -332,6 +332,97 @@ test('Tauri cancellation settles when the original request finishes before a sta
   await assert.rejects(result, (error: unknown) => cancellationModule.isAiRequestCancelled(error));
 });
 
+test('Tauri timeout cancels a stalled invoke and remains a retryable timeout', async () => {
+  const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+  mockIPC((command, args) => {
+    calls.push({ command, args });
+    const policyResult = handlePolicyIpc(command, args);
+    if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
+    if (command === 'ai_chat_completion') return new Promise(() => {});
+    if (command === 'cancel_ai_request') return true;
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  await assert.rejects(
+    createRealClient(0.01).generate(request, { requestId: 'request-timeout-stalled-ipc' }),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes('请求超时（0.01 秒）') &&
+      !cancellationModule.isAiRequestCancelled(error),
+  );
+
+  const cancelCalls = calls.filter((call) => call.command === 'cancel_ai_request');
+  const settlement = calls.find((call) => call.command === 'settle_ai_request');
+  assert.equal(cancelCalls.length, 1);
+  assert.equal(cancelCalls[0]?.args.requestId, 'request-timeout-stalled-ipc');
+  assert.equal((settlement?.args.input as { outcome?: string } | undefined)?.outcome, 'failed');
+});
+
+test('Tauri timeout does not inherit a stalled cancellation IPC', async () => {
+  const calls: string[] = [];
+  mockIPC((command, args) => {
+    const policyResult = handlePolicyIpc(command, args);
+    if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
+    calls.push(command);
+    if (command === 'ai_chat_completion') return new Promise(() => {});
+    if (command === 'cancel_ai_request') return new Promise<boolean>(() => {});
+    throw new Error(`Unexpected command: ${command}`);
+  });
+
+  const result = createRealClient(0.01).generate(request, {
+    requestId: 'request-timeout-stalled-cancel-ipc',
+  });
+  const outcome = await Promise.race([
+    result.then(
+      () => ({ kind: 'resolved' as const }),
+      (error: unknown) => ({ kind: 'rejected' as const, error }),
+    ),
+    new Promise<{ kind: 'test-timeout' }>((resolve) =>
+      setTimeout(() => resolve({ kind: 'test-timeout' }), 250),
+    ),
+  ]);
+
+  assert.notEqual(outcome.kind, 'test-timeout');
+  assert.equal(outcome.kind, 'rejected');
+  if (outcome.kind === 'rejected') {
+    assert.ok(outcome.error instanceof Error);
+    assert.match(outcome.error.message, /请求超时（0\.01 秒）/);
+    assert.equal(cancellationModule.isAiRequestCancelled(outcome.error), false);
+  }
+  assert.equal(calls.filter((command) => command === 'cancel_ai_request').length, 1);
+});
+
+test('Tauri timeout does not wait for the original invoke when cancellation is unavailable', async () => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
+
+  try {
+    mockIPC((command, args) => {
+      const policyResult = handlePolicyIpc(command, args);
+      if (policyResult !== POLICY_IPC_UNHANDLED) return policyResult;
+      if (command === 'ai_chat_completion') return new Promise(() => {});
+      if (command === 'cancel_ai_request') return false;
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await assert.rejects(
+      createRealClient(0.01).generate(request, {
+        requestId: 'request-timeout-cancel-unavailable',
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        /请求超时（0\.01 秒）/.test(error.message) &&
+        !cancellationModule.isAiRequestCancelled(error),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /could not be confirmed/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test('provider failure remains primary when conservative policy settlement also fails', async () => {
   const providerFailure = new Error('primary provider failure');
   const settlementFailure = new Error('secondary settlement failure');
@@ -359,6 +450,35 @@ test('provider failure remains primary when conservative policy settlement also 
   }
 });
 
+test('provider failure is not held open by a stalled policy settlement', async () => {
+  const providerFailure = new Error('primary provider timeout');
+  const capturedErrors: string[] = [];
+  const originalConsoleError = console.error;
+  const originalSetTimeout = globalThis.setTimeout;
+  console.error = (...args: unknown[]) => capturedErrors.push(args.map(String).join(' '));
+  globalThis.setTimeout = ((handler: () => void, timeout?: number) =>
+    originalSetTimeout(handler, Math.min(timeout ?? 0, 10))) as typeof globalThis.setTimeout;
+
+  try {
+    mockIPC((command, args) => {
+      if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+      if (command === 'ai_chat_completion') throw providerFailure;
+      if (command === 'settle_ai_request') return new Promise(() => {});
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await assert.rejects(
+      createRealClient().generate(request, { requestId: 'provider-failure-stalled-settlement' }),
+      (error: unknown) => error === providerFailure,
+    );
+    assert.equal(capturedErrors.length, 1);
+    assert.match(capturedErrors[0], /AI_REQUEST_POLICY_SETTLEMENT_FAILED_AFTER_PROVIDER_FAILURE/);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    console.error = originalConsoleError;
+  }
+});
+
 test('successful provider output is withheld when policy settlement fails closed', async () => {
   const settlementFailure = new Error('settlement unavailable');
   mockIPC((command, args) => {
@@ -376,6 +496,28 @@ test('successful provider output is withheld when policy settlement fails closed
       (error as { code?: string }).code === 'UNKNOWN_ERROR' &&
       (error as { message?: string }).message === settlementFailure.message,
   );
+});
+
+test('successful provider output is withheld when policy settlement stalls', async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((handler: () => void, timeout?: number) =>
+    originalSetTimeout(handler, Math.min(timeout ?? 0, 10))) as typeof globalThis.setTimeout;
+
+  try {
+    mockIPC((command, args) => {
+      if (command === 'reserve_ai_request') return handlePolicyIpc(command, args);
+      if (command === 'ai_chat_completion') return { text: 'provider success' };
+      if (command === 'settle_ai_request') return new Promise(() => {});
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    await assert.rejects(
+      createRealClient().generate(request, { requestId: 'provider-success-stalled-settlement' }),
+      /AI_REQUEST_POLICY_SETTLEMENT_TIMEOUT/,
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
 });
 
 test('browser caller cancellation is distinct from request timeout', async () => {

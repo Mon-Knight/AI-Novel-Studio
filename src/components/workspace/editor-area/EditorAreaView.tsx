@@ -4,6 +4,7 @@ import {
   FileText,
   Lightbulb,
   ListTree,
+  LoaderCircle,
   NotebookPen,
   Pencil,
   Save,
@@ -58,7 +59,7 @@ export default function EditorAreaView({
       <div className="editor-content">
         <div className="editor-empty">
           <div className="editor-empty-icon">
-            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.5} />
+            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
           </div>
           <div style={{ fontSize: 18, fontWeight: 500, marginBottom: 8 }}>选择章节开始写作</div>
           <div className="text-sm text-muted">请从左侧目录树中选择一个章节</div>
@@ -161,13 +162,11 @@ export default function EditorAreaView({
           )}
           {document.saveMsg && (
             <span
-              style={{
-                color:
-                  document.saveMsg.startsWith('❌') || document.saveMsg.includes('失败')
-                    ? 'var(--color-error)'
-                    : 'var(--color-success)',
-                fontWeight: 600,
-              }}
+              className={`editor-save-feedback is-${document.saveState}`}
+              data-testid="editor-save-feedback"
+              data-save-state={document.saveState}
+              aria-live="polite"
+              role={document.saveState === 'error' ? 'alert' : 'status'}
             >
               {document.saveMsg}
             </span>
@@ -201,15 +200,26 @@ export default function EditorAreaView({
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={outline.handleSaveOutline}
-                      disabled={document.saving}
+                      disabled={outline.saving}
+                      aria-busy={outline.saving || undefined}
                       style={{ fontSize: 11 }}
                     >
-                      <Save aria-hidden="true" size={13} strokeWidth={1.8} />
-                      <span>保存</span>
+                      {outline.saving ? (
+                        <LoaderCircle
+                          className="workspace-spinning-icon"
+                          aria-hidden="true"
+                          size={13}
+                          strokeWidth={1.8}
+                        />
+                      ) : (
+                        <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+                      )}
+                      <span>{outline.saving ? '保存中' : '保存'}</span>
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={outline.handleCancelEditOutline}
+                      disabled={outline.saving}
                       style={{ fontSize: 11 }}
                     >
                       取消
@@ -239,13 +249,11 @@ export default function EditorAreaView({
               )}
               {outline.outlineSaveMsg && (
                 <div
-                  style={{
-                    fontSize: 11,
-                    marginTop: 4,
-                    color: outline.outlineSaveMsg.startsWith('✅')
-                      ? 'var(--color-success)'
-                      : 'var(--color-error)',
-                  }}
+                  className={`editor-outline-save-feedback is-${outline.outlineSaveState}`}
+                  data-testid="outline-save-feedback"
+                  data-save-state={outline.outlineSaveState}
+                  aria-live="polite"
+                  role={outline.outlineSaveState === 'error' ? 'alert' : 'status'}
                 >
                   {outline.outlineSaveMsg}
                 </div>
@@ -299,15 +307,26 @@ export default function EditorAreaView({
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={outline.handleSaveOutline}
-                  disabled={document.saving}
+                  disabled={outline.saving}
+                  aria-busy={outline.saving || undefined}
                   style={{ fontSize: 11 }}
                 >
-                  <Save aria-hidden="true" size={13} strokeWidth={1.8} />
-                  <span>保存</span>
+                  {outline.saving ? (
+                    <LoaderCircle
+                      className="workspace-spinning-icon"
+                      aria-hidden="true"
+                      size={13}
+                      strokeWidth={1.8}
+                    />
+                  ) : (
+                    <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+                  )}
+                  <span>{outline.saving ? '保存中' : '保存'}</span>
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={outline.handleCancelEditOutline}
+                  disabled={outline.saving}
                   style={{ fontSize: 11 }}
                 >
                   取消
@@ -332,13 +351,11 @@ export default function EditorAreaView({
             />
             {outline.outlineSaveMsg && (
               <div
-                style={{
-                  fontSize: 11,
-                  marginTop: 4,
-                  color: outline.outlineSaveMsg.startsWith('✅')
-                    ? 'var(--color-success)'
-                    : 'var(--color-error)',
-                }}
+                className={`editor-outline-save-feedback is-${outline.outlineSaveState}`}
+                data-testid="outline-save-feedback"
+                data-save-state={outline.outlineSaveState}
+                aria-live="polite"
+                role={outline.outlineSaveState === 'error' ? 'alert' : 'status'}
               >
                 {outline.outlineSaveMsg}
               </div>
@@ -397,7 +414,7 @@ export default function EditorAreaView({
       {!document.content && document.effectiveContentState?.status !== 'unavailable' && (
         <div className="editor-empty-state">
           <div className="editor-empty-icon">
-            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.5} />
+            <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
           </div>
           <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 8 }}>当前章节还没有正文</div>
           <div

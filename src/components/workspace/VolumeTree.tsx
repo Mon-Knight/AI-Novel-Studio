@@ -215,7 +215,7 @@ function VolumeTree({
           disabled={creating}
           title="新建章节（自动创建第一卷）"
         >
-          <Plus aria-hidden="true" size={13} strokeWidth={2} />
+          <Plus aria-hidden="true" size={13} strokeWidth={1.8} />
           <span>章节</span>
         </button>
         <button
@@ -228,7 +228,7 @@ function VolumeTree({
           disabled={creating}
           title="新建分卷"
         >
-          <Plus aria-hidden="true" size={13} strokeWidth={2} />
+          <Plus aria-hidden="true" size={13} strokeWidth={1.8} />
           <span>分卷</span>
         </button>
       </div>
@@ -338,32 +338,33 @@ function VolumeTree({
                 </span>
                 <span>{volume.title}</span>
               </button>
-              {isExpanded && volumeChapters.length > 0 && (
-                <ChapterWindowList
-                  chapters={volumeChapters}
-                  activeChapterId={activeChapterId}
-                  start={chapterWindowStarts[volume.id] ?? 0}
-                  windowSize={CHAPTER_PAGE_SIZE}
-                  onStartChange={(start) =>
-                    setChapterWindowStarts((current) => ({ ...current, [volume.id]: start }))
-                  }
-                  onSelectChapter={onSelectChapter}
-                />
-              )}
-              {isExpanded && volumeChapters.length === 0 && (
-                <div className="text-muted" style={{ padding: '4px 44px', fontSize: 11 }}>
-                  暂无章节
-                </div>
-              )}
               {isExpanded && (
-                <button
-                  type="button"
-                  className="tree-add-btn"
-                  onClick={() => handleOpenNewChapter(volume.id)}
-                >
-                  <Plus aria-hidden="true" size={13} strokeWidth={2} />
-                  <span>在本卷新建章节</span>
-                </button>
+                <div className="tree-volume-children">
+                  {volumeChapters.length > 0 ? (
+                    <ChapterWindowList
+                      chapters={volumeChapters}
+                      activeChapterId={activeChapterId}
+                      start={chapterWindowStarts[volume.id] ?? 0}
+                      windowSize={CHAPTER_PAGE_SIZE}
+                      onStartChange={(start) =>
+                        setChapterWindowStarts((current) => ({ ...current, [volume.id]: start }))
+                      }
+                      onSelectChapter={onSelectChapter}
+                    />
+                  ) : (
+                    <div className="text-muted" style={{ padding: '4px 44px', fontSize: 11 }}>
+                      暂无章节
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="tree-add-btn"
+                    onClick={() => handleOpenNewChapter(volume.id)}
+                  >
+                    <Plus aria-hidden="true" size={13} strokeWidth={1.8} />
+                    <span>在本卷新建章节</span>
+                  </button>
+                </div>
               )}
             </div>
           );

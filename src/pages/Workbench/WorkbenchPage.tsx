@@ -109,6 +109,7 @@ export function WorkbenchPage() {
     commitComposerErrorOperation,
     runningConversationIds,
     targetConflict,
+    selectedConversationPreparing,
     selectedConversationRunning,
     selectedConversationArchived,
     chapterSummaryOrchestration,
@@ -137,6 +138,7 @@ export function WorkbenchPage() {
     selectedModel,
     selectedNovelRef,
     selectChapter,
+    reloadChapters,
     refreshBundle,
     loadConversations,
     refreshPlugins,
@@ -233,6 +235,7 @@ export function WorkbenchPage() {
       draft={visibleDraft}
       composerError={composerError}
       conflictMessage={targetConflict?.message}
+      selectedConversationPreparing={selectedConversationPreparing}
       selectedConversationRunning={selectedConversationRunning}
       selectedConversationArchived={selectedConversationArchived}
       hasTask={Boolean(selectedConversation)}
@@ -301,10 +304,11 @@ export function WorkbenchPage() {
     const scopedChapterId = scopedChapter?.id;
     newTaskSubmissionRef.current = true;
     setTaskCreatorError('');
+    let taskModel = newTaskModel;
     try {
       if (!conversationalGoal) {
         try {
-          await validateModelForSend(newTaskModel);
+          taskModel = await validateModelForSend(taskModel, { allowLocalFallback: true });
         } catch (error) {
           setTaskCreatorError(
             error instanceof WorkbenchModelUnavailableError
@@ -316,7 +320,7 @@ export function WorkbenchPage() {
       }
 
       await selectChapter(scopedChapterId ?? '');
-      const initialized = await createTask(goal, newTaskModel);
+      const initialized = await createTask(goal, taskModel);
       if (!initialized) return;
       setStartupDraft('');
       setTaskCreatorOpen(false);
@@ -326,7 +330,7 @@ export function WorkbenchPage() {
         chapterId: scopedChapterId,
         turnId: initialized.turn.turnId,
         goal,
-        modelSnapshot: newTaskModel,
+        modelSnapshot: taskModel,
       });
     } catch (error) {
       setTaskCreatorError(error instanceof Error ? error.message : '新建创作任务失败，请重试。');
@@ -452,7 +456,6 @@ export function WorkbenchPage() {
           </>
         )}
       </main>
-
       {showPlugins && (
         <PanelErrorBoundary panelTitle="当前插件">
           <PluginPanel
@@ -463,7 +466,6 @@ export function WorkbenchPage() {
           />
         </PanelErrorBoundary>
       )}
-
       {taskCreatorOpen && selectedNovel && (
         <WorkbenchTaskCreator
           novelTitle={selectedNovel.title}

@@ -1,10 +1,11 @@
+import { Info } from 'lucide-react';
 import { APP_VERSION, APP_PLATFORM_LABEL } from '../../constants/version';
 
 export default function AboutSettingsCard() {
   return (
     <div className="detail-card" data-testid="settings-about-card" style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <span style={{ fontSize: 18 }}>ℹ️</span>
+        <Info aria-hidden="true" size={18} strokeWidth={1.8} />
         <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
       </div>
       <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>

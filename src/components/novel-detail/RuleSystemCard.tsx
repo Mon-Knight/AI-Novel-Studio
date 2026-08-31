@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Pencil, Plus, Save, Scale, Trash2 } from 'lucide-react';
 import type { RuleSystem } from '../../types/setting';
 import { confirmDanger } from '../../utils/nativeDialog';
 
@@ -106,12 +107,13 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>⚖️</span>
+          <Scale aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 600 }}>规则体系</span>
         </div>
         {!editingId && !isNew && (
           <button className="btn btn-secondary btn-sm" onClick={startNew}>
-            + 新增规则
+            <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+            新增规则
           </button>
         )}
       </div>
@@ -167,15 +169,20 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
                 )}
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => startEdit(rs)}>
-                  ✏️
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => startEdit(rs)}
+                  aria-label={`编辑规则 ${rs.title}`}
+                >
+                  <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleDelete(rs.id)}
+                  aria-label={`删除规则 ${rs.title}`}
                   style={{ color: 'var(--color-error)' }}
                 >
-                  🗑️
+                  <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
                 </button>
               </div>
             </div>
@@ -322,7 +329,14 @@ function RuleEditForm({
             取消
           </button>
           <button className="btn btn-primary btn-sm" onClick={onSave} disabled={saving}>
-            {saving ? '保存中...' : '💾 保存'}
+            {saving ? (
+              '保存中...'
+            ) : (
+              <>
+                <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+                保存
+              </>
+            )}
           </button>
         </div>
       </div>

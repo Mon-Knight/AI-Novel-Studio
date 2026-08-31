@@ -153,7 +153,7 @@ export function validateWorkflow(workflow: AgentWorkflow): {
       for (const depId of task.dependsOn) {
         const depTask = tasks.find((t) => t.id === depId);
         if (depTask?.dependsOn?.includes(task.id)) {
-          errors.push(`检测到直接循环依赖: "${task.id}" ↔ "${depId}"`);
+          errors.push(`检测到直接循环依赖: "${task.id}" 与 "${depId}" 互相依赖`);
         }
       }
     }

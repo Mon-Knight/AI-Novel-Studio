@@ -50,6 +50,22 @@ interface EnsurePersistedChapterGoalTurnInput {
   goal: string;
 }
 
+interface ResolvePreflightAssetPreparationRetryTurnInput {
+  conversationId: string;
+  asset: ChapterCoreAsset;
+  goal: string;
+  orchestration: Pick<ChapterAssetOrchestration, 'errorCode' | 'preparationTurnId'>;
+}
+
+export class PreflightAssetPreparationTurnError extends Error {
+  readonly code = 'MODEL_TOOL_CALLING_NOT_VERIFIED';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'PreflightAssetPreparationTurnError';
+  }
+}
+
 function orderedTurns(bundle: TaskConversationBundle): ConversationTurn[] {
   return bundle.turns
     .map((turn, index) => ({ turn, index }))
@@ -78,6 +94,58 @@ function humanGoal(turn: ConversationTurn): string | null {
 
 function hasRun(bundle: TaskConversationBundle, turn: ConversationTurn): boolean {
   return Boolean(turn.runId || bundle.runs.some((run) => run.turnId === turn.turnId));
+}
+
+export async function resolvePreflightAssetPreparationRetryTurn(
+  input: ResolvePreflightAssetPreparationRetryTurnInput,
+  deps: RecoveryPersistenceDependencies = {},
+): Promise<ConversationTurn | undefined> {
+  const preparationTurnId = input.orchestration.preparationTurnId?.trim();
+  if (input.orchestration.errorCode !== 'MODEL_TOOL_CALLING_NOT_VERIFIED') {
+    return undefined;
+  }
+  if (!preparationTurnId) {
+    throw new PreflightAssetPreparationTurnError(
+      '无法复用自动准备回合：预检失败记录缺少原准备回合身份。',
+    );
+  }
+
+  const getConversation = deps.getConversation ?? taskConversationService.get;
+  const bundle = await getConversation(input.conversationId);
+  if (!bundle || bundle.conversation.conversationId !== input.conversationId) {
+    throw new PreflightAssetPreparationTurnError('无法复用自动准备回合：任务对话身份不匹配。');
+  }
+  const matchingTurns = bundle.turns.filter((turn) => turn.turnId === preparationTurnId);
+  if (matchingTurns.length !== 1) {
+    throw new PreflightAssetPreparationTurnError(
+      '无法复用自动准备回合：原准备回合不存在或身份不唯一。',
+    );
+  }
+
+  const turn = matchingTurns[0];
+  const decoded = decodeWorkbenchTurnContent(turn.content);
+  if (
+    turn.conversationId !== input.conversationId ||
+    turn.role !== 'user' ||
+    decoded.origin !== 'workbench_asset_preparation'
+  ) {
+    throw new PreflightAssetPreparationTurnError('无法复用自动准备回合：原准备回合身份不匹配。');
+  }
+
+  const expectedGoal = input.goal.trim();
+  if (
+    !expectedGoal ||
+    decoded.content.trim() !== expectedGoal ||
+    resolvePreparationAsset(turn) !== input.asset
+  ) {
+    throw new PreflightAssetPreparationTurnError(
+      '无法复用自动准备回合：准备资产或创作目标不匹配。',
+    );
+  }
+  if (hasRun(bundle, turn)) {
+    throw new PreflightAssetPreparationTurnError('无法复用自动准备回合：该回合已经存在运行记录。');
+  }
+  return turn;
 }
 
 export function findLatestRecoverableChapterGoal(

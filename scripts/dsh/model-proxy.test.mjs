@@ -328,6 +328,95 @@ test('real-E2E capture persists correlated hash-only automatic asset request evi
   }
 });
 
+test('real-E2E capture classifies automatic chapter-summary requests without retaining content', async () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ans-summary-evidence-'));
+  const evidenceDirectory = path.join(temporaryRoot, 'requests');
+  fs.mkdirSync(evidenceDirectory);
+  const summaryBodyCanary = '本章正文只用于确认总结请求不会写入证据文件';
+  const summaryMarker = '[[ANS_WORKBENCH_TURN:v1;origin=workbench_chapter_summary]]';
+  const fixture = await startFixture({
+    environment: {
+      AI_NOVEL_STUDIO_REAL_E2E: '1',
+      AI_NOVEL_STUDIO_REAL_E2E_PROVIDER_EVIDENCE_DIR: evidenceDirectory,
+      AI_NOVEL_STUDIO_REAL_E2E_PREPARED_FIXTURE_CANARIES_JSON: JSON.stringify([
+        { id: 'prepared_fixture', value: '预置资产探针' },
+      ]),
+    },
+    upstreamResponse: async (_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end('data: {"choices":[]}\n\ndata: [DONE]\n\n');
+    },
+  });
+  try {
+    for (const [requestIndex, messageCount] of [2, 5, 7].entries()) {
+      const messages = [
+        { role: 'system', content: '只生成章节总结候选。' },
+        {
+          role: 'user',
+          content: ['总结本章', summaryMarker, summaryBodyCanary].join('\n'),
+        },
+      ];
+      while (messages.length < messageCount) {
+        messages.push({
+          role: messages.length % 2 === 0 ? 'assistant' : 'tool',
+          content: `summary-step-${messages.length}`,
+        });
+      }
+      const body = JSON.stringify({ model: 'fixture-model', stream: true, messages });
+      const response = await fetch(`${fixture.url}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      assert.equal(response.status, 200);
+      await response.arrayBuffer();
+
+      const evidencePath = path.join(
+        evidenceDirectory,
+        `${sha256(`integration:${requestIndex + 1}`)}.json`,
+      );
+      await waitFor(() => fs.existsSync(evidencePath));
+      const evidenceText = fs.readFileSync(evidencePath, 'utf8');
+      const evidence = JSON.parse(evidenceText);
+      assert.equal(evidence.classification, 'automatic_chapter_summary');
+      assert.equal(evidence.turnOrigin, 'workbench_chapter_summary');
+      assert.equal(evidence.messageCount, messageCount);
+      assert.equal(evidence.assetKind, null);
+      assert.equal(evidence.rawMessageContentPersisted, false);
+      assert.equal(evidenceText.includes(summaryMarker), false);
+      assert.equal(evidenceText.includes(summaryBodyCanary), false);
+    }
+
+    const unmarkedBody = JSON.stringify({
+      model: 'fixture-model',
+      stream: true,
+      messages: [
+        { role: 'system', content: '只生成章节总结候选。' },
+        { role: 'user', content: '总结本章' },
+      ],
+    });
+    const unmarkedResponse = await fetch(`${fixture.url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: unmarkedBody,
+    });
+    assert.equal(unmarkedResponse.status, 200);
+    await unmarkedResponse.arrayBuffer();
+    const unmarkedEvidencePath = path.join(evidenceDirectory, `${sha256('integration:4')}.json`);
+    await waitFor(() => fs.existsSync(unmarkedEvidencePath));
+    const unmarkedEvidence = JSON.parse(fs.readFileSync(unmarkedEvidencePath, 'utf8'));
+    assert.equal(unmarkedEvidence.classification, 'other');
+    assert.equal(unmarkedEvidence.turnOrigin, null);
+  } finally {
+    await fixture.stop();
+    for (const name of fs.readdirSync(evidenceDirectory)) {
+      fs.rmSync(path.join(evidenceDirectory, name), { force: true });
+    }
+    fs.rmdirSync(evidenceDirectory);
+    fs.rmdirSync(temporaryRoot);
+  }
+});
+
 test('governed proxy settles successful usage with the measured token pair', async () => {
   const fixture = await startFixture({
     upstreamResponse: async (_request, response) => {

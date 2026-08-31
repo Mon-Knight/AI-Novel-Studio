@@ -8,7 +8,7 @@
  *
  * Environment:
  *   MOCK_WORKBENCH_PORT        Loopback port; 0/default asks the OS to choose.
- *   MOCK_WORKBENCH_MODE        normal | text-only | tool-error | delay | cancel | attestation-fail | attestation-delay
+ *   MOCK_WORKBENCH_MODE        normal | text-only | delayed-text | tool-error | delay | cancel | attestation-fail | attestation-delay
  *   MOCK_WORKBENCH_NOVEL_ID    novelId placed in scripted tool arguments.
  *   MOCK_WORKBENCH_CHAPTER_ID  chapterId placed in scripted tool arguments.
  *   MOCK_WORKBENCH_CANDIDATE_TEXT  generate_chapter candidate (never exposed in summaries).
@@ -39,6 +39,7 @@ const FETCH_FORBIDDEN_PORTS = new Set([
 const MODES = new Set([
   'normal',
   'text-only',
+  'delayed-text',
   'tool-error',
   'delay',
   'cancel',
@@ -325,7 +326,7 @@ function createPlan(body, options, sequence) {
     };
   }
 
-  if (options.mode === 'text-only') {
+  if (options.mode === 'text-only' || options.mode === 'delayed-text') {
     return {
       kind: 'text',
       phase: 'text-only',
@@ -464,7 +465,7 @@ async function streamPlan(response, body, plan, options, summary, signal) {
 
   if (
     (plan.phase !== 'model-tool-attestation' &&
-      (options.mode === 'delay' || options.mode === 'cancel')) ||
+      (options.mode === 'delay' || options.mode === 'cancel' || options.mode === 'delayed-text')) ||
     (plan.phase === 'model-tool-attestation' && options.mode === 'attestation-delay')
   ) {
     await waitForScriptDelay(options, signal);

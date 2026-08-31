@@ -49,7 +49,7 @@ export function formatAgentContextSummary(input: ContextSummaryInput): string {
       lines.push('  (未获取到作品数据)');
     }
   } else {
-    lines.push('  ⚠ 缺失: 未提供作品信息');
+    lines.push('  缺失: 未提供作品信息');
   }
 
   // ---- 章节信息 ----
@@ -81,7 +81,7 @@ export function formatAgentContextSummary(input: ContextSummaryInput): string {
       }
     }
   } else {
-    lines.push('  ⚠ 缺失: 未提供章节信息');
+    lines.push('  缺失: 未提供章节信息');
   }
 
   // ---- 风格信息 ----
@@ -100,10 +100,10 @@ export function formatAgentContextSummary(input: ContextSummaryInput): string {
         lines.push(`  描写比例: ${st.descriptionRatio}%`);
       }
     } else {
-      lines.push('  ⚠ 未配置风格方案');
+      lines.push('  未配置风格方案');
     }
   } else {
-    lines.push('  ⚠ 缺失: 未提供风格信息');
+    lines.push('  缺失: 未提供风格信息');
   }
 
   // ---- 输出控制 ----
@@ -120,7 +120,7 @@ export function formatAgentContextSummary(input: ContextSummaryInput): string {
       if (ap.povType) lines.push(`  视角: ${ap.povType}`);
       if (ap.tenseType) lines.push(`  时态: ${ap.tenseType}`);
     } else {
-      lines.push('  ⚠ 未配置输出控制方案');
+      lines.push('  未配置输出控制方案');
     }
   } else {
     lines.push('  (未提供输出控制信息)');
@@ -130,7 +130,7 @@ export function formatAgentContextSummary(input: ContextSummaryInput): string {
   if (input.warnings && input.warnings.length > 0) {
     lines.push('\n--- 警告 ---');
     for (const w of input.warnings) {
-      lines.push(`  ⚠ ${w}`);
+      lines.push(`  ${w}`);
     }
   }
 
@@ -149,7 +149,7 @@ export function formatAgentContextSummary(input: ContextSummaryInput): string {
   const total = checks.length;
   lines.push(`  就绪项: ${ready}/${total}`);
   for (const c of checks) {
-    lines.push(`  ${c.ok ? '✓' : '✗'} ${c.label}`);
+    lines.push(`  ${c.ok ? '[通过]' : '[缺失]'} ${c.label}`);
   }
   if (ready === total) {
     lines.push('\n  状态: 上下文准备就绪，可以开始生成');

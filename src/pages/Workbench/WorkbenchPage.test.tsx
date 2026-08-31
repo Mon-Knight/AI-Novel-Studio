@@ -530,6 +530,85 @@ test('Workbench re-subscribes to native projections and refreshes a recovered ru
   });
 });
 
+test('Workbench preserves an explicit next-chapter selection across a stale terminal bundle refresh', async () => {
+  type ProjectionListener = Parameters<typeof taskSessionAdapter.subscribeToRuntimeProjections>[0];
+  const nextChapter: Chapter = {
+    ...mockChapter,
+    id: 'chapter-002',
+    title: '第二章：暗潮初现',
+    chapterNumber: 2,
+    orderIndex: 1,
+    sortOrder: 1,
+    status: 'outline_ready',
+  };
+  const staleTerminalBundle: TaskConversationBundle = {
+    ...mockBundle,
+    conversation: { ...mockBundle.conversation, status: 'completed' },
+    toolEvents: [
+      {
+        ...mockBundle.toolEvents[0],
+        argumentsSummary: { novelId: mockNovel.id, chapterId: mockChapter.id },
+      },
+    ],
+  };
+  let projectionListener: ProjectionListener | undefined;
+  let holdNextBundleRead = false;
+  let bundleReadStarted = false;
+  let releaseBundleRead: () => void = () => undefined;
+
+  chapterRepository.getByNovelId = async () => [mockChapter, nextChapter];
+  novelRepository.update = async (_novelId, input) => ({
+    ...mockNovel,
+    currentChapterId: input.currentChapterId,
+  });
+  taskConversationService.get = async () => {
+    if (holdNextBundleRead) {
+      bundleReadStarted = true;
+      await new Promise<void>((resolve) => {
+        releaseBundleRead = resolve;
+      });
+      holdNextBundleRead = false;
+    }
+    return staleTerminalBundle;
+  };
+  taskSessionAdapter.subscribeToRuntimeProjections = async (listener) => {
+    projectionListener = listener;
+    return () => undefined;
+  };
+
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => assert.ok(projectionListener));
+  const chapterSelect = await screen.findByTestId('workbench-chapter-select');
+  fireEvent.change(chapterSelect, { target: { value: nextChapter.id } });
+  await waitFor(() => {
+    assert.equal((chapterSelect as HTMLSelectElement).value, nextChapter.id);
+  });
+
+  holdNextBundleRead = true;
+  await act(async () => {
+    projectionListener?.({
+      conversationId: mockConversation.conversationId,
+      runId: staleTerminalBundle.runs[0].runId,
+      kind: 'terminal',
+      occurredAt: '2026-08-29T02:12:00.000Z',
+    });
+    await Promise.resolve();
+  });
+  await waitFor(() => assert.equal(bundleReadStarted, true));
+  await act(async () => {
+    releaseBundleRead();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  assert.equal((chapterSelect as HTMLSelectElement).value, nextChapter.id);
+});
+
 test('Workbench surfaces a rejected cancellation instead of silently ignoring it', async () => {
   taskSessionAdapter.listRunningConversationIds = async () => [mockConversation.conversationId];
 
@@ -1364,9 +1443,9 @@ test('Workbench bounds pre-run automatic summary recovery and exposes a manual r
   chapterRepository.getByNovelId = async () => [adoptedChapter];
   taskConversationService.get = async () => summaryBundle;
   taskConversationService.isPersistent = () => true;
-  let startCount = 0;
-  taskSessionAdapter.startTurn = async () => {
-    startCount += 1;
+  const startInputs: Array<Parameters<typeof taskSessionAdapter.startTurn>[0]> = [];
+  taskSessionAdapter.startTurn = async (input) => {
+    startInputs.push(input);
     throw new Error('MODEL_TOOL_ATTESTATION_TEMPORARY_FAILURE');
   };
 
@@ -1376,13 +1455,24 @@ test('Workbench bounds pre-run automatic summary recovery and exposes a manual r
     </MemoryRouter>,
   );
 
-  await waitFor(() => assert.equal(startCount, 2));
+  await waitFor(() => assert.equal(startInputs.length, 2));
   const retry = await screen.findByRole('button', { name: '重试章节总结' });
   await new Promise((resolve) => window.setTimeout(resolve, 20));
-  assert.equal(startCount, 2);
+  assert.equal(startInputs.length, 2);
 
   fireEvent.click(retry);
-  await waitFor(() => assert.ok(startCount > 2));
+  await waitFor(() => assert.equal(startInputs.length, 4));
+  await screen.findByRole('button', { name: '重试章节总结' });
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(startInputs.length, 4);
+  assert.equal(summaryBundle.runs.filter((run) => run.turnId === summaryTurnId).length, 0);
+  assert.equal(summaryBundle.artifacts.filter((card) => card.turnId === summaryTurnId).length, 0);
+  for (const input of startInputs) {
+    assert.equal(input.turnId, summaryTurnId);
+    assert.equal(input.chapterId, adoptedChapter.id);
+    assert.deepEqual(input.modelSnapshot, fixedModel);
+  }
 });
 
 test('Workbench automatically sequences missing assets while keeping every apply decision manual', async () => {
@@ -1511,6 +1601,19 @@ test('Workbench automatically sequences missing assets while keeping every apply
   fireEvent.click(send);
 
   await waitFor(() => assert.ok(screen.getByTestId('workbench-asset-readiness')));
+  assert.equal(
+    screen.getByTestId('workbench-asset-readiness').dataset.contextStage,
+    'automatic-preparation',
+  );
+  assert.match(screen.getByTestId('workbench-asset-readiness').textContent ?? '', /系统自动准备/);
+  assert.match(
+    screen.getByTestId('workbench-asset-readiness').textContent ?? '',
+    /你的原始创作要求/,
+  );
+  assert.match(
+    screen.getByTestId('workbench-asset-readiness').textContent ?? '',
+    /不需要你补写详细提示词/,
+  );
   await waitFor(() => assert.equal(startedGoals.length, 1));
   assert.equal(composer.value, sparseGoal);
   assert.ok(screen.getByTestId('workbench-missing-asset-world_setting'));
@@ -1784,33 +1887,57 @@ test('Workbench releases an awaiting state whose persisted candidate is missing'
 
 test('Workbench keeps a failed automatic preparation idle until explicit retry', async () => {
   useBrowserMockModel();
-  let startedRuns = 0;
+  const originalGoal = '生成本章正文';
+  const preparationGoal = buildCoreAssetGenerationGoal('world_setting', originalGoal);
+  const preparationTurn: ConversationTurn = {
+    turnId: 'turn-world-preflight',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: encodeWorkbenchTurnContent(preparationGoal, 'workbench_asset_preparation'),
+    createdAt: '2026-08-20T00:00:02.000Z',
+  };
+  let appendedTurns = 0;
+  const startedInputs: Parameters<typeof taskSessionAdapter.startTurn>[0][] = [];
   chapterAssetRecoveryStore.set({
     conversationId: mockConversation.conversationId,
     novelId: mockNovel.id,
     chapterId: mockChapter.id,
-    originalGoal: '生成本章正文',
+    originalGoal,
     missingAssets: ['world_setting'],
     modelSnapshot: mockBundle.runs[0].modelSnapshot,
     orchestration: {
       phase: 'failed',
       asset: 'world_setting',
-      error: 'Provider 暂时不可用',
+      preparationTurnId: preparationTurn.turnId,
+      errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED',
+      error: '所选模型未通过当前 Runtime 的工具调用能力验证。',
       updatedAt: '2026-08-20T00:00:03.000Z',
     },
     createdAt: '2026-08-20T00:00:00.000Z',
     checkedAt: '2026-08-20T00:00:03.000Z',
   });
-  taskConversationService.appendTurn = async (conversationId, role, content) => ({
-    turnId: 'turn-world-retry',
-    conversationId,
-    sequence: 2,
-    role,
-    content,
-    createdAt: '2026-08-20T00:00:04.000Z',
+  chapterAssetReadinessService.inspect = async () => ({
+    ready: false,
+    missingAssets: ['world_setting'],
   });
+  taskConversationService.get = async () => ({
+    ...mockBundle,
+    turns: [...mockBundle.turns, preparationTurn],
+  });
+  taskConversationService.appendTurn = async (conversationId, role, content) => {
+    appendedTurns += 1;
+    return {
+      turnId: 'turn-world-duplicate',
+      conversationId,
+      sequence: 3,
+      role,
+      content,
+      createdAt: '2026-08-20T00:00:04.000Z',
+    };
+  };
   taskSessionAdapter.startTurn = async (input) => {
-    startedRuns += 1;
+    startedInputs.push(input);
     return {
       ...mockBundle.runs[0],
       runId: 'run-world-retry',
@@ -1826,10 +1953,101 @@ test('Workbench keeps a failed automatic preparation idle until explicit retry',
     </MemoryRouter>,
   );
   const retry = await screen.findByTestId('workbench-generate-asset-world_setting');
+  assert.equal(
+    screen.getByTestId('workbench-asset-readiness').dataset.orchestrationErrorCode,
+    'MODEL_TOOL_CALLING_NOT_VERIFIED',
+  );
   assert.match(retry.textContent ?? '', /重试/);
-  assert.equal(startedRuns, 0);
+  assert.equal(startedInputs.length, 0);
   fireEvent.click(retry);
-  await waitFor(() => assert.equal(startedRuns, 1));
+  await waitFor(() => assert.equal(startedInputs.length, 1));
+  assert.equal(startedInputs[0]?.turnId, preparationTurn.turnId);
+  assert.deepEqual(startedInputs[0]?.modelSnapshot, mockBundle.runs[0].modelSnapshot);
+  assert.equal(appendedTurns, 0);
+});
+
+test('Workbench rejects same-turn preflight retry when the persisted preparation goal mismatches', async () => {
+  useBrowserMockModel();
+  const originalGoal = '生成本章正文';
+  const preparationTurn: ConversationTurn = {
+    turnId: 'turn-world-preflight-mismatch',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: encodeWorkbenchTurnContent(
+      buildCoreAssetGenerationGoal('protagonist', originalGoal),
+      'workbench_asset_preparation',
+    ),
+    createdAt: '2026-08-20T00:00:02.000Z',
+  };
+  let appendedTurns = 0;
+  let startedRuns = 0;
+  let conversationReads = 0;
+  chapterAssetRecoveryStore.set({
+    conversationId: mockConversation.conversationId,
+    novelId: mockNovel.id,
+    chapterId: mockChapter.id,
+    originalGoal,
+    missingAssets: ['world_setting'],
+    modelSnapshot: mockBundle.runs[0].modelSnapshot,
+    orchestration: {
+      phase: 'failed',
+      asset: 'world_setting',
+      preparationTurnId: preparationTurn.turnId,
+      errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED',
+      error: '所选模型未通过当前 Runtime 的工具调用能力验证。',
+      updatedAt: '2026-08-20T00:00:03.000Z',
+    },
+    createdAt: '2026-08-20T00:00:00.000Z',
+    checkedAt: '2026-08-20T00:00:03.000Z',
+  });
+  chapterAssetReadinessService.inspect = async () => ({
+    ready: false,
+    missingAssets: ['world_setting'],
+  });
+  taskConversationService.get = async () => {
+    conversationReads += 1;
+    return {
+      ...mockBundle,
+      turns: [...mockBundle.turns, preparationTurn],
+    };
+  };
+  taskConversationService.appendTurn = async (...args) => {
+    appendedTurns += 1;
+    return originalAppendConversationTurn(...args);
+  };
+  taskSessionAdapter.startTurn = async (...args) => {
+    startedRuns += 1;
+    return originalStartTurn(...args);
+  };
+
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+  const retry = await screen.findByTestId('workbench-generate-asset-world_setting');
+  fireEvent.click(retry);
+
+  await waitFor(() => {
+    const readiness = screen.getByTestId('workbench-asset-readiness');
+    assert.equal(readiness.dataset.orchestrationPhase, 'failed');
+    assert.equal(readiness.dataset.orchestrationErrorCode, 'MODEL_TOOL_CALLING_NOT_VERIFIED');
+    assert.match(readiness.textContent ?? '', /创作目标不匹配/);
+  });
+  assert.equal(appendedTurns, 0);
+  assert.equal(startedRuns, 0);
+
+  const readsBeforeSecondRetry = conversationReads;
+  fireEvent.click(retry);
+  await waitFor(() => assert.ok(conversationReads > readsBeforeSecondRetry));
+  await waitFor(() => {
+    const readiness = screen.getByTestId('workbench-asset-readiness');
+    assert.equal(readiness.dataset.orchestrationPhase, 'failed');
+    assert.match(readiness.textContent ?? '', /创作目标不匹配/);
+  });
+  assert.equal(appendedTurns, 0);
+  assert.equal(startedRuns, 0);
 });
 
 test('Workbench turns a rejected preparation candidate into explicit retry', async () => {
@@ -2546,6 +2764,267 @@ test('asset recovery ignores a slower readiness result after a newer settle', as
   assert.deepEqual(hook.result.current.recovery?.missingAssets, []);
 });
 
+test('asset recovery does not resurrect a stale persisted-bundle recovery after readiness clears it', async () => {
+  const goal = '继续写';
+  const sourceTurn: ConversationTurn = {
+    turnId: 'turn-stale-persisted-recovery',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: goal,
+    createdAt: '2026-08-20T00:00:03.000Z',
+  };
+  const persistedBundle: TaskConversationBundle = {
+    ...mockBundle,
+    turns: [...mockBundle.turns, sourceTurn],
+  };
+  let resolvePersistedInspection!: (
+    value: Awaited<ReturnType<typeof chapterAssetReadinessService.inspect>>,
+  ) => void;
+  let inspectionCount = 0;
+  chapterAssetReadinessService.inspect = async () => {
+    inspectionCount += 1;
+    if (inspectionCount === 1) {
+      return new Promise((resolve) => {
+        resolvePersistedInspection = resolve;
+      });
+    }
+    return { ready: true, missingAssets: [], chapterId: mockChapter.id };
+  };
+
+  const hook = renderHook(() =>
+    useWorkbenchChapterAssetRecovery(
+      mockConversation.conversationId,
+      mockChapter.id,
+      persistedBundle,
+    ),
+  );
+  await waitFor(() => assert.equal(inspectionCount, 1));
+
+  await act(async () => {
+    const ready = await hook.result.current.ensureReady({
+      conversationId: mockConversation.conversationId,
+      novelId: mockNovel.id,
+      chapterId: mockChapter.id,
+      goal,
+      sourceTurnId: sourceTurn.turnId,
+      modelSnapshot: mockBundle.runs[0].modelSnapshot,
+    });
+    assert.equal(ready, true);
+  });
+  assert.equal(hook.result.current.recovery, null);
+  assert.equal(chapterAssetRecoveryStore.get(mockConversation.conversationId), null);
+
+  await act(async () => {
+    resolvePersistedInspection({
+      ready: false,
+      missingAssets: ['world_setting'],
+      chapterId: mockChapter.id,
+    });
+    await Promise.resolve();
+  });
+
+  await waitFor(() => assert.equal(inspectionCount, 2));
+  assert.equal(hook.result.current.recovery, null);
+  assert.equal(chapterAssetRecoveryStore.get(mockConversation.conversationId), null);
+});
+
+test('asset recovery does not hydrate the same stale persisted bundle again after it was cleared', async () => {
+  const goal = '继续写';
+  const sourceTurn: ConversationTurn = {
+    turnId: 'turn-stale-persisted-rerender',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: goal,
+    createdAt: '2026-08-20T00:00:03.000Z',
+  };
+  const persistedBundle: TaskConversationBundle = {
+    ...mockBundle,
+    turns: [...mockBundle.turns, sourceTurn],
+  };
+  let inspectionCount = 0;
+  chapterAssetReadinessService.inspect = async () => {
+    inspectionCount += 1;
+    return { ready: true, missingAssets: [], chapterId: mockChapter.id };
+  };
+
+  const hook = renderHook(
+    ({ bundle }: { bundle: TaskConversationBundle }) =>
+      useWorkbenchChapterAssetRecovery(mockConversation.conversationId, mockChapter.id, bundle),
+    { initialProps: { bundle: persistedBundle } },
+  );
+  await waitFor(() => {
+    assert.equal(inspectionCount, 1);
+    assert.equal(hook.result.current.recovery?.orchestration.phase, 'resuming');
+  });
+
+  act(() => hook.result.current.clearRecovery(mockConversation.conversationId));
+  assert.equal(hook.result.current.recovery, null);
+  hook.rerender({
+    bundle: {
+      ...persistedBundle,
+      conversation: { ...persistedBundle.conversation },
+      turns: [...persistedBundle.turns],
+    },
+  });
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  assert.equal(inspectionCount, 1);
+  assert.equal(hook.result.current.recovery, null);
+  assert.equal(chapterAssetRecoveryStore.get(mockConversation.conversationId), null);
+});
+
+test('Workbench automatic chapter recovery does not create a second run for its source turn', async () => {
+  useBrowserMockModel();
+  const sourceTurn: ConversationTurn = {
+    turnId: 'turn-already-ran-before-resume',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: '继续写',
+    createdAt: '2026-08-20T00:00:03.000Z',
+  };
+  const existingRun = {
+    ...mockBundle.runs[0],
+    runId: 'run-already-completed-before-resume',
+    turnId: sourceTurn.turnId,
+    chapterId: mockChapter.id,
+    createdAt: '2026-08-20T00:00:04.000Z',
+    updatedAt: '2026-08-20T00:00:05.000Z',
+  };
+  const persistedBundle: TaskConversationBundle = {
+    ...mockBundle,
+    conversation: {
+      ...mockConversation,
+      defaultModel: mockBundle.runs[0].modelSnapshot,
+    },
+    turns: [...mockBundle.turns, sourceTurn],
+    runs: [...mockBundle.runs, existingRun],
+  };
+  taskConversationService.get = async () => persistedBundle;
+  let startCount = 0;
+  taskSessionAdapter.startTurn = async (...args) => {
+    startCount += 1;
+    return originalStartTurn(...args);
+  };
+  chapterAssetRecoveryStore.set({
+    conversationId: mockConversation.conversationId,
+    novelId: mockNovel.id,
+    chapterId: mockChapter.id,
+    originalGoal: '继续写',
+    missingAssets: [],
+    sourceTurnId: sourceTurn.turnId,
+    modelSnapshot: mockBundle.runs[0].modelSnapshot,
+    orchestration: {
+      phase: 'resuming',
+      updatedAt: '2026-08-20T00:00:06.000Z',
+    },
+    createdAt: sourceTurn.createdAt,
+    checkedAt: '2026-08-20T00:00:06.000Z',
+  });
+
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() =>
+    assert.equal(chapterAssetRecoveryStore.get(mockConversation.conversationId), null),
+  );
+  assert.equal(startCount, 0);
+  assert.equal(persistedBundle.runs.length, 2);
+});
+
+test('Workbench explicit failed chapter recovery retries its source turn even when a failed run exists', async () => {
+  useBrowserMockModel();
+  const sourceTurn: ConversationTurn = {
+    turnId: 'turn-failed-before-explicit-resume',
+    conversationId: mockConversation.conversationId,
+    sequence: 2,
+    role: 'user',
+    content: '继续写',
+    createdAt: '2026-08-20T00:00:03.000Z',
+  };
+  const failedRun = {
+    ...mockBundle.runs[0],
+    runId: 'run-failed-before-explicit-resume',
+    turnId: sourceTurn.turnId,
+    chapterId: mockChapter.id,
+    status: 'failed' as const,
+    error: '上一次正文生成失败',
+    createdAt: '2026-08-20T00:00:04.000Z',
+    updatedAt: '2026-08-20T00:00:05.000Z',
+    finishedAt: '2026-08-20T00:00:05.000Z',
+  };
+  const persistedBundle: TaskConversationBundle = {
+    ...mockBundle,
+    conversation: {
+      ...mockConversation,
+      defaultModel: mockBundle.runs[0].modelSnapshot,
+    },
+    turns: [...mockBundle.turns, sourceTurn],
+    runs: [...mockBundle.runs, failedRun],
+  };
+  taskConversationService.get = async () => persistedBundle;
+  let appendCount = 0;
+  taskConversationService.appendTurn = async (...args) => {
+    appendCount += 1;
+    return originalAppendConversationTurn(...args);
+  };
+  const startedInputs: Parameters<typeof taskSessionAdapter.startTurn>[0][] = [];
+  taskSessionAdapter.startTurn = async (input) => {
+    startedInputs.push(input);
+    return {
+      ...failedRun,
+      runId: 'run-explicit-resume-retry',
+      status: 'completed',
+      error: undefined,
+      updatedAt: '2026-08-20T00:00:07.000Z',
+      finishedAt: '2026-08-20T00:00:07.000Z',
+    };
+  };
+  chapterAssetRecoveryStore.set({
+    conversationId: mockConversation.conversationId,
+    novelId: mockNovel.id,
+    chapterId: mockChapter.id,
+    originalGoal: '继续写',
+    missingAssets: [],
+    sourceTurnId: sourceTurn.turnId,
+    modelSnapshot: mockBundle.runs[0].modelSnapshot,
+    orchestration: {
+      phase: 'failed',
+      error: failedRun.error,
+      updatedAt: '2026-08-20T00:00:06.000Z',
+    },
+    createdAt: sourceTurn.createdAt,
+    checkedAt: '2026-08-20T00:00:06.000Z',
+  });
+
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  const resume = await screen.findByTestId('workbench-resume-chapter-goal');
+  assert.equal(
+    screen.getByTestId('workbench-asset-readiness').getAttribute('data-orchestration-phase'),
+    'failed',
+  );
+  fireEvent.click(resume);
+
+  await waitFor(() => assert.equal(startedInputs.length, 1));
+  assert.equal(startedInputs[0]?.turnId, sourceTurn.turnId);
+  assert.equal(startedInputs[0]?.goal, '继续写');
+  assert.deepEqual(startedInputs[0]?.modelSnapshot, mockBundle.runs[0].modelSnapshot);
+  assert.equal(appendCount, 0);
+});
+
 test('asset recovery keeps an explicit refresh current when its persisted bundle rerenders', async () => {
   chapterAssetRecoveryStore.set({
     conversationId: mockConversation.conversationId,
@@ -2903,6 +3382,98 @@ test('Workbench keeps tool execution details inline in the conversation', async 
   assert.equal(screen.queryByTestId('agent-trace-canvas'), null);
 });
 
+test('Workbench retries a renderer-recovered Writer run on its original turn and frozen model', async () => {
+  const originalGoal = '继续写';
+  const frozenModel = {
+    ...mockBundle.runs[0].modelSnapshot,
+    capabilities: ['conversation_turn', 'chapter_generation'],
+    options: { maxTokens: 12_000, temperature: 0.72 },
+    capturedAt: '2026-08-30T04:00:00.000Z',
+  };
+  const interruptedRun = {
+    ...mockBundle.runs[0],
+    runId: 'run-renderer-recovered',
+    chapterId: mockChapter.id,
+    status: 'failed' as const,
+    modelSnapshot: frozenModel,
+    error: '工作台已重新加载，上一轮运行已中断。请重试本回合。',
+    finishedAt: '2026-08-30T04:02:00.000Z',
+    updatedAt: '2026-08-30T04:02:00.000Z',
+  };
+  let currentBundle: TaskConversationBundle = {
+    ...mockBundle,
+    conversation: { ...mockBundle.conversation, status: 'failed' },
+    turns: [{ ...mockBundle.turns[0], content: originalGoal }],
+    runs: [interruptedRun],
+    toolEvents: [
+      {
+        ...mockBundle.toolEvents[0],
+        runId: interruptedRun.runId,
+        status: 'cancelled',
+        error: '应用重新启动，工具调用未完成。',
+      },
+    ],
+  };
+  let appendedTurnCount = 0;
+  let startedTurnCount = 0;
+  let startedInput: Parameters<typeof taskSessionAdapter.startTurn>[0] | undefined;
+  taskConversationService.get = async () => currentBundle;
+  taskConversationService.appendTurn = async (...args) => {
+    appendedTurnCount += 1;
+    return originalAppendConversationTurn(...args);
+  };
+  taskSessionAdapter.startTurn = async (input) => {
+    startedTurnCount += 1;
+    startedInput = input;
+    const retryRun = {
+      ...interruptedRun,
+      runId: 'run-renderer-retry',
+      workerId: 'worker-renderer-retry',
+      status: 'completed' as const,
+      error: undefined,
+      startedAt: '2026-08-30T04:03:00.000Z',
+      finishedAt: '2026-08-30T04:04:00.000Z',
+      createdAt: '2026-08-30T04:03:00.000Z',
+      updatedAt: '2026-08-30T04:04:00.000Z',
+      modelSnapshot: input.modelSnapshot!,
+    };
+    currentBundle = {
+      ...currentBundle,
+      conversation: { ...currentBundle.conversation, status: 'completed' },
+      runs: [...currentBundle.runs, retryRun],
+    };
+    return retryRun;
+  };
+
+  render(
+    <MemoryRouter>
+      <WorkbenchPage />
+    </MemoryRouter>,
+  );
+
+  const recoveryError = await screen.findByTestId('workbench-run-error');
+  assert.equal(recoveryError.textContent, '工作台已重新加载，上一轮运行已中断。请重试本回合。');
+  const retryButton = (await screen.findByTestId('workbench-retry-turn')) as HTMLButtonElement;
+  assert.equal(retryButton.disabled, false);
+  assert.equal(retryButton.textContent, '重试此回合');
+  fireEvent.click(retryButton);
+  fireEvent.click(retryButton);
+
+  await waitFor(() => assert.equal(startedTurnCount, 1));
+  assert.equal(appendedTurnCount, 0);
+  assert.equal(startedInput?.turnId, mockBundle.turns[0].turnId);
+  assert.equal(startedInput?.goal, originalGoal);
+  assert.equal(startedInput?.chapterId, mockChapter.id);
+  assert.deepEqual(startedInput?.modelSnapshot, frozenModel);
+  assert.equal(currentBundle.turns.length, 1);
+  assert.equal(currentBundle.runs[0]?.status, 'failed');
+  assert.equal(currentBundle.runs[0]?.error, '工作台已重新加载，上一轮运行已中断。请重试本回合。');
+  assert.equal(
+    currentBundle.runs.filter((run) => run.turnId === mockBundle.turns[0].turnId).length,
+    2,
+  );
+});
+
 test('retrying an older failed run creates a new run on the original user turn', async () => {
   const firstGoal = '先审计第一章人物线';
   const latestGoal = '再检查第二章伏笔';
@@ -3142,6 +3713,8 @@ test('WorkbenchPage switches projects and task bundles as one selection', async 
   await waitFor(() => {
     assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-001');
   });
+  const firstNovelReadsBeforeSwitch = firstNovelChapterReads;
+  assert.ok(firstNovelReadsBeforeSwitch > 0);
   const secondProject = screen
     .getAllByTestId('workbench-project')
     .find((item) => item.dataset.novelId === secondNovel.id);
@@ -3153,7 +3726,7 @@ test('WorkbenchPage switches projects and task bundles as one selection', async 
     assert.equal(header.dataset.conversationId, 'conv-002');
     assert.match(header.textContent ?? '', /推进雾港冲突/);
   });
-  assert.equal(firstNovelChapterReads, 1);
+  assert.equal(firstNovelChapterReads, firstNovelReadsBeforeSwitch);
 });
 
 test('WorkbenchPage does not inherit another task model when a legacy task has no default', async () => {
@@ -3534,12 +4107,13 @@ test('WorkbenchPage isolates compression candidate, busy state, and late failure
   });
   fireEvent.click(firstTask);
   await waitFor(() => {
+    assert.equal(screen.getByTestId('workbench-task-header').dataset.conversationId, 'conv-001');
     assert.match(
       screen.getByTestId('workbench-composer-error').textContent ?? '',
       /第一任务压缩迟到失败/,
     );
+    assert.ok(screen.getByTestId('workbench-compression-card'));
   });
-  assert.ok(screen.getByTestId('workbench-compression-card'));
   assert.equal(
     (screen.getByTestId('workbench-compress-context') as HTMLButtonElement).disabled,
     false,

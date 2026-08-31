@@ -1,37 +1,14 @@
-import type { QualityIssueFilter, QualityIssueStatus } from '../../../types/qualityCheck';
+import { BarChart3, CheckCircle2, ClipboardList, RotateCcw, TriangleAlert } from 'lucide-react';
+import type { QualityIssueFilter } from '../../../types/qualityCheck';
 import {
   QualityIssueFilterLabels,
   QualityIssueSeverityColors,
   QualityIssueSeverityLabels,
-  QualityIssueStatusLabels,
-  QualityIssueTypeLabels,
 } from '../../../types/qualityCheck';
 import type { CheckPanelViewProps } from './CheckPanelView';
+import { CheckPanelIssueCard } from './CheckPanelIssueCard';
 
 const FILTER_OPTIONS: QualityIssueFilter[] = ['all', 'pending', 'resolved', 'ignored'];
-
-function statusStyle(status: QualityIssueStatus) {
-  switch (status) {
-    case 'resolved':
-      return {
-        background: 'color-mix(in srgb, var(--color-success) 13%, transparent)',
-        color: 'var(--color-success)',
-        border: '1px solid color-mix(in srgb, var(--color-success) 25%, transparent)',
-      };
-    case 'ignored':
-      return {
-        background: 'color-mix(in srgb, var(--color-text-muted) 13%, transparent)',
-        color: 'var(--color-text-muted)',
-        border: '1px solid color-mix(in srgb, var(--color-text-muted) 25%, transparent)',
-      };
-    default:
-      return {
-        background: 'color-mix(in srgb, var(--color-warning) 13%, transparent)',
-        color: 'var(--color-warning-text)',
-        border: '1px solid color-mix(in srgb, var(--color-warning) 25%, transparent)',
-      };
-  }
-}
 
 export function CheckPanelResultSections({
   activeReport,
@@ -117,7 +94,13 @@ export function CheckPanelResultSections({
           data-report-id={activeReport.id}
           data-draft-id={activeReport.draftId}
         >
-          <div className="panel-section-title">📊 检查结果</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <BarChart3 size={14} strokeWidth={1.8} aria-hidden="true" />
+            检查结果
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <div
               style={{
@@ -162,6 +145,9 @@ export function CheckPanelResultSections({
               fontWeight: 600,
               fontSize: 13,
               marginBottom: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
               color: fixComparison.isBetter
                 ? 'var(--color-success)'
                 : fixComparison.isWorse
@@ -169,11 +155,22 @@ export function CheckPanelResultSections({
                   : 'var(--color-warning-text)',
             }}
           >
-            {fixComparison.isBetter
-              ? '✅ 修复成功（已自动采用）'
-              : fixComparison.isWorse
-                ? '⚠️ 修复效果不佳（保留原版）'
-                : '📊 修复效果一般（保留原版）'}
+            {fixComparison.isBetter ? (
+              <>
+                <CheckCircle2 size={14} strokeWidth={1.8} aria-hidden="true" />
+                修复成功（已自动采用）
+              </>
+            ) : fixComparison.isWorse ? (
+              <>
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                修复效果不佳（保留原版）
+              </>
+            ) : (
+              <>
+                <BarChart3 size={14} strokeWidth={1.8} aria-hidden="true" />
+                修复效果一般（保留原版）
+              </>
+            )}
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.8 }}>
             <div>
@@ -218,16 +215,32 @@ export function CheckPanelResultSections({
             <button
               className="btn btn-sm btn-secondary"
               onClick={onRevertFix}
-              style={{ flex: 1, fontSize: 11 }}
+              style={{
+                flex: 1,
+                fontSize: 11,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
             >
-              ↩️ 回退原版本
+              <RotateCcw size={13} strokeWidth={1.8} aria-hidden="true" />
+              回退原版本
             </button>
             <button
               className="btn btn-sm btn-primary"
               onClick={onConfirmFix}
-              style={{ flex: 1, fontSize: 11 }}
+              style={{
+                flex: 1,
+                fontSize: 11,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
             >
-              ✅ 确认采用
+              <CheckCircle2 size={13} strokeWidth={1.8} aria-hidden="true" />
+              确认采用
             </button>
           </div>
         </div>
@@ -235,7 +248,13 @@ export function CheckPanelResultSections({
 
       {activeItems.length > 0 && (
         <div className="panel-section">
-          <div className="panel-section-title">📋 问题统计</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <ClipboardList size={14} strokeWidth={1.8} aria-hidden="true" />
+            问题统计
+          </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 12 }}>
             <span style={{ color: 'var(--color-text-muted)' }}>总问题：{statistics.total}</span>
             <span style={{ color: 'var(--color-warning-text)' }}>待处理：{statistics.pending}</span>
@@ -304,131 +323,13 @@ export function CheckPanelResultSections({
       )}
 
       {filteredItems.map((item) => (
-        <div
+        <CheckPanelIssueCard
           key={item.id}
-          className="panel-section"
-          data-testid="quality-issue"
-          data-issue-id={item.id}
-          data-issue-key={item.issueKey}
-          data-status={item.status}
-          style={{
-            borderLeft: `3px solid ${QualityIssueSeverityColors[item.severity]}`,
-            opacity: item.status === 'resolved' || item.status === 'ignored' ? 0.65 : 1,
-            paddingLeft: 10,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              gap: 6,
-              flexWrap: 'wrap',
-              marginBottom: 4,
-              alignItems: 'center',
-            }}
-          >
-            <span
-              style={{
-                fontSize: 10,
-                padding: '1px 6px',
-                borderRadius: 3,
-                background: QualityIssueSeverityColors[item.severity] + '20',
-                color: QualityIssueSeverityColors[item.severity],
-                fontWeight: 500,
-              }}
-            >
-              {QualityIssueSeverityLabels[item.severity]}
-            </span>
-            <span
-              style={{
-                fontSize: 10,
-                padding: '1px 6px',
-                borderRadius: 3,
-                background: 'var(--color-bg-primary)',
-                color: 'var(--color-text-muted)',
-              }}
-            >
-              {item.category || QualityIssueTypeLabels[item.issueType]}
-            </span>
-            <span
-              style={{
-                fontSize: 10,
-                padding: '1px 6px',
-                borderRadius: 3,
-                ...statusStyle(item.status),
-              }}
-            >
-              {QualityIssueStatusLabels[item.status]}
-            </span>
-          </div>
-
-          <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 3 }}>{item.title}</div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-            {item.description}
-          </div>
-
-          {(item.quote || item.evidence) && (
-            <div
-              style={{
-                fontSize: 11,
-                fontStyle: 'italic',
-                color: 'var(--color-text-muted)',
-                marginTop: 4,
-                padding: '4px 6px',
-                background: 'var(--color-bg-primary)',
-                borderRadius: 3,
-              }}
-            >
-              📝 {item.quote || item.evidence}
-            </div>
-          )}
-
-          {item.suggestion && (
-            <div style={{ fontSize: 11, color: 'var(--color-primary)', marginTop: 3 }}>
-              💡 {item.suggestion}
-            </div>
-          )}
-
-          <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-sm btn-secondary"
-              onClick={() => onLocate(item)}
-              title="定位到正文对应位置"
-            >
-              📍 定位
-            </button>
-
-            {!viewingHistory && item.status === 'pending' && (
-              <>
-                <button
-                  className="btn btn-sm btn-primary"
-                  data-testid="quality-issue-resolve"
-                  data-issue-id={item.id}
-                  onClick={() => onStatusChange(item.id, 'resolved')}
-                >
-                  ✅ 标记已处理
-                </button>
-                <button
-                  className="btn btn-sm btn-secondary"
-                  data-testid="quality-issue-ignore"
-                  data-issue-id={item.id}
-                  onClick={() => onStatusChange(item.id, 'ignored')}
-                >
-                  🚫 忽略
-                </button>
-              </>
-            )}
-            {!viewingHistory && (item.status === 'resolved' || item.status === 'ignored') && (
-              <button
-                className="btn btn-sm btn-secondary"
-                data-testid="quality-issue-reopen"
-                data-issue-id={item.id}
-                onClick={() => onStatusChange(item.id, 'pending')}
-              >
-                ↩️ 重新打开
-              </button>
-            )}
-          </div>
-        </div>
+          item={item}
+          viewingHistory={viewingHistory}
+          onLocate={onLocate}
+          onStatusChange={onStatusChange}
+        />
       ))}
 
       {!activeReport && !loading && (

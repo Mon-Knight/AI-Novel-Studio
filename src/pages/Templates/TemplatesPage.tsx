@@ -2,6 +2,7 @@
  * AI Novel Studio - 模板中心页面 (v1.0.27 增强版)
  */
 import { useState, useEffect, useRef } from 'react';
+import { ClipboardList, Plus, Upload, X } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import { confirmDanger } from '../../utils/nativeDialog';
 import {
@@ -208,8 +209,19 @@ function TemplatesPage() {
       style={{ padding: 32, maxWidth: 900, margin: '0 auto', height: '100%', overflowY: 'auto' }}
     >
       <BackButton label="返回工作台" to="/" />
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>
-        📋 模板中心
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 22,
+          fontWeight: 700,
+          marginBottom: 8,
+          marginTop: 12,
+        }}
+      >
+        <ClipboardList aria-hidden="true" size={22} strokeWidth={1.8} />
+        模板中心
       </div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
         提供内置创作模板，并支持上传和管理自定义模板
@@ -246,10 +258,21 @@ function TemplatesPage() {
             setShowForm(!showForm);
           }}
         >
-          {showForm ? '✕ 取消' : '➕ 新建模板'}
+          {showForm ? (
+            <>
+              <X aria-hidden="true" size={15} strokeWidth={1.8} />
+              取消
+            </>
+          ) : (
+            <>
+              <Plus aria-hidden="true" size={15} strokeWidth={1.8} />
+              新建模板
+            </>
+          )}
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
-          📤 上传模板
+          <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
+          上传模板
         </button>
         <input
           ref={fileInputRef}

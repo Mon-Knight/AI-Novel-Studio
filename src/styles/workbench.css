@@ -811,8 +811,7 @@
   animation: none;
 }
 
-.workbench-turn.is-history .workbench-tool-event,
-.workbench-turn.is-history .workbench-artifact-card {
+.workbench-turn.is-history .workbench-tool-event {
   animation: none;
 }
 
@@ -1294,7 +1293,6 @@ div.workbench-tool-event,
 
 .workbench-tool-event.is-running .workbench-tool-icon {
   color: var(--color-primary);
-  animation: workbench-running-fade 1s ease-in-out infinite;
 }
 
 .workbench-tool-event.is-running .workbench-tool-icon svg {
@@ -1328,8 +1326,16 @@ div.workbench-tool-event,
 }
 
 .workbench-tool-status {
+  max-width: min(360px, 30vw);
+  overflow: hidden;
   color: var(--color-text-muted);
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workbench-tool-status.has-progress {
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .workbench-tool-duration {
@@ -1412,7 +1418,10 @@ div.workbench-tool-event,
   border-radius: 8px;
   background: color-mix(in srgb, var(--color-bg-primary) 92%, var(--color-bg-secondary));
   box-shadow: 0 1px 2px rgb(0 0 0 / 3%);
-  animation: workbench-item-enter 180ms ease-out both;
+}
+
+.workbench-artifact-card.is-newly-arrived {
+  animation: workbench-artifact-arrive var(--motion-panel) var(--ease-standard) both;
 }
 
 .workbench-message-scroll > .workbench-artifact-card.is-compression {
@@ -1436,6 +1445,13 @@ div.workbench-tool-event,
   margin: 8px 0;
   color: var(--color-text-secondary);
   font-size: 12px;
+}
+
+.workbench-artifact-card p.workbench-artifact-derivation-note {
+  margin-top: -2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .workbench-artifact-evidence {
@@ -1841,6 +1857,20 @@ div.workbench-tool-event,
   transform: rotate(180deg);
 }
 
+.workbench-asset-scope-core {
+  padding-left: 6px;
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.workbench-asset-scope-core.is-complete {
+  color: var(--color-success-text);
+}
+
 .workbench-asset-scope-count {
   display: inline-grid;
   min-width: 17px;
@@ -1890,6 +1920,13 @@ div.workbench-tool-event,
 .workbench-asset-scope-error {
   color: var(--color-text-muted);
   font-size: 10px;
+}
+
+.workbench-asset-scope-disclaimer {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .workbench-asset-scope-error {
@@ -2458,16 +2495,6 @@ div.workbench-tool-event,
   }
 }
 
-@keyframes workbench-running-fade {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
 @keyframes workbench-spin {
   to {
     transform: rotate(360deg);
@@ -2482,6 +2509,17 @@ div.workbench-tool-event,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes workbench-artifact-arrive {
+  from {
+    border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+    background-color: color-mix(in srgb, var(--color-primary) 9%, var(--color-bg-primary));
+  }
+  to {
+    border-color: var(--color-border);
+    background-color: color-mix(in srgb, var(--color-bg-primary) 92%, var(--color-bg-secondary));
   }
 }
 
@@ -2660,7 +2698,7 @@ div.workbench-tool-event,
   .workbench-readiness-icon,
   .workbench-turn,
   .workbench-tool-event,
-  .workbench-artifact-card,
+  .workbench-artifact-card.is-newly-arrived,
   .workbench-plugin-panel,
   .workbench-latest-button,
   .workbench-skeleton-line {

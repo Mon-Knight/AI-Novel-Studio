@@ -37,13 +37,50 @@ function extractText(summary: string | undefined | null): string | undefined {
   return summary?.trim() || undefined;
 }
 
+function parseTimestamp(value?: string): number {
+  if (!value) return NaN;
+  const normalized = value.replace(/\.(\d{3})\d+/, '.$1');
+  return Date.parse(normalized);
+}
+
+type WorldSettingSelectionCandidate = Pick<WorldSetting, 'content' | 'isActive'> &
+  Partial<Pick<WorldSetting, 'id' | 'createdAt' | 'updatedAt'>>;
+
+function worldSettingRecency(setting: WorldSettingSelectionCandidate): [number, number] {
+  const updatedAt = parseTimestamp(setting.updatedAt);
+  const createdAt = parseTimestamp(setting.createdAt);
+  return [
+    Number.isFinite(updatedAt) ? updatedAt : Number.NEGATIVE_INFINITY,
+    Number.isFinite(createdAt) ? createdAt : Number.NEGATIVE_INFINITY,
+  ];
+}
+
+export function selectPrimaryWorldSettingForWriter<T extends WorldSettingSelectionCandidate>(
+  worldSettings: readonly T[],
+): T | undefined {
+  return worldSettings
+    .filter((setting) => setting.isActive && extractText(setting.content))
+    .reduce<T | undefined>((selected, candidate) => {
+      if (!selected) return candidate;
+      const [candidateUpdatedAt, candidateCreatedAt] = worldSettingRecency(candidate);
+      const [selectedUpdatedAt, selectedCreatedAt] = worldSettingRecency(selected);
+      if (candidateUpdatedAt !== selectedUpdatedAt) {
+        return candidateUpdatedAt > selectedUpdatedAt ? candidate : selected;
+      }
+      if (candidateCreatedAt !== selectedCreatedAt) {
+        return candidateCreatedAt > selectedCreatedAt ? candidate : selected;
+      }
+      return candidate.id && selected.id && candidate.id.localeCompare(selected.id) > 0
+        ? candidate
+        : selected;
+    }, undefined);
+}
+
 export function resolveWorldBackgroundForWriter(
-  worldSettings: readonly Pick<WorldSetting, 'content' | 'isActive'>[],
+  worldSettings: readonly WorldSettingSelectionCandidate[],
   legacyWorldBackground?: string | null,
 ): string | undefined {
-  const activeWorld = worldSettings.find(
-    (setting) => setting.isActive && extractText(setting.content),
-  );
+  const activeWorld = selectPrimaryWorldSettingForWriter(worldSettings);
   return extractText(activeWorld?.content) || extractText(legacyWorldBackground);
 }
 
@@ -76,12 +113,6 @@ export function formatRuleSystemForWriter(
     sections.push(`禁止规则：\n${forbidden.map((item) => `- ${item}`).join('\n')}`);
   }
   return sections.join('\n');
-}
-
-function parseTimestamp(value?: string): number {
-  if (!value) return NaN;
-  const normalized = value.replace(/\.(\d{3})\d+/, '.$1');
-  return Date.parse(normalized);
 }
 
 function isSameOrNewer(left?: string, right?: string): boolean {
@@ -466,7 +497,7 @@ export async function buildChapterContext(
   ]);
 
   const activeSettings = worldSettings.filter((setting) => setting.isActive);
-  const activeWorld = activeSettings.find((setting) => extractText(setting.content));
+  const activeWorld = selectPrimaryWorldSettingForWriter(worldSettings);
   const worldBackground = resolveWorldBackgroundForWriter(worldSettings, novel?.worldBackground);
   const activeRules = ruleSystems.filter((r) => r.isActive);
 

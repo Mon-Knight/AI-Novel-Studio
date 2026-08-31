@@ -97,6 +97,17 @@ vi.mock('../../components/workspace/EditorArea', () => ({
       <button type="button" onClick={() => (props.onBackToChapters as () => void)()}>
         editor-back
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          (props.onActionStateChange as (value: Record<string, boolean>) => void)({
+            saving: true,
+            adopting: false,
+          })
+        }
+      >
+        editor-saving
+      </button>
     </div>
   )),
 }));
@@ -110,7 +121,16 @@ vi.mock('../../components/workspace/GlobalAiTaskModal', () => ({
 
 vi.mock('../../components/right-dock/RightToolbar', () => ({
   default: (props: Record<string, unknown>) => (
-    <div data-testid="mock-toolbar">
+    <div
+      data-testid="mock-toolbar"
+      data-review-locked={String(props.reviewLocked)}
+      data-document-dirty={String(props.documentDirty)}
+      data-document-saving={String(props.documentSaving)}
+      data-document-adopting={String(props.documentAdopting)}
+      data-has-current-draft={String(props.hasCurrentDraft)}
+      data-current-draft-adopted={String(props.currentDraftAdopted)}
+      data-has-review-candidate={String(props.hasReviewCandidate)}
+    >
       <button
         type="button"
         onClick={() => void (props.onTogglePanel as (panel: string) => Promise<void>)('check')}
@@ -673,5 +693,32 @@ describe('WritingWorkspaceView', () => {
     view.rerender(<WritingWorkspaceView {...dirty} />);
     fireEvent.click(screen.getByRole('button', { name: 'right-adopted' }));
     expect(nativeDialog.showInfo).toHaveBeenCalled();
+  });
+
+  it('projects review, draft and controller action state into the command toolbar', () => {
+    const props = baseProps();
+    props.reviewLocked = true;
+    props.session.currentDraft = { ...fixtureDraft, isAdopted: true };
+    props.chapterLoader.reviewCandidate = {
+      authorizationId: 'auth-1',
+      artifactId: 'artifact-1',
+      content: '候选正文',
+      contentHash: 'candidate-hash',
+      novelId: 'novel-1',
+      chapterId: 'chapter-1',
+    };
+    render(<WritingWorkspaceView {...props} />);
+
+    const toolbar = screen.getByTestId('mock-toolbar');
+    expect(toolbar.dataset.reviewLocked).toBe('true');
+    expect(toolbar.dataset.documentDirty).toBe('false');
+    expect(toolbar.dataset.hasCurrentDraft).toBe('true');
+    expect(toolbar.dataset.currentDraftAdopted).toBe('true');
+    expect(toolbar.dataset.hasReviewCandidate).toBe('true');
+    expect(toolbar.dataset.documentSaving).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'editor-saving' }));
+    expect(screen.getByTestId('mock-toolbar').dataset.documentSaving).toBe('true');
+    expect(screen.getByTestId('mock-toolbar').dataset.documentAdopting).toBe('false');
   });
 });

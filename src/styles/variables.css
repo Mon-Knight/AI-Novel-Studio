@@ -117,10 +117,20 @@
   --right-toolbar-width: 48px;
   --right-panel-width: 340px;
 
-  /* === 过渡 === */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.25s ease;
-  --transition-slow: 0.35s ease;
+  /* === 动效 === */
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-panel: 220ms;
+  --motion-emphasis: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Compatibility aliases for existing component styles. */
+  --transition-fast: var(--motion-fast) var(--ease-standard);
+  --transition-normal: var(--motion-normal) var(--ease-standard);
+  --transition-slow: var(--motion-emphasis) var(--ease-standard);
 
   /* === Z-index === */
   --z-sidebar: 100;

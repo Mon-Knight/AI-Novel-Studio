@@ -1,3 +1,13 @@
+import {
+  Bot,
+  BookOpenText,
+  CheckCircle2,
+  Clipboard,
+  FileText,
+  ListTree,
+  LoaderCircle,
+  TriangleAlert,
+} from 'lucide-react';
 import type { AiSettings } from '../../../types/ai';
 import type { Chapter } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
@@ -80,14 +90,29 @@ export function OutlinePanelView({
   return (
     <div>
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
@@ -95,22 +120,62 @@ export function OutlinePanelView({
       </div>
 
       <div className="panel-section">
-        <div className="panel-section-title">🤖 AI 大纲生成</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 大纲生成
+        </div>
         <button
           className="btn btn-primary btn-sm"
           onClick={onGenerateNovelOutline}
           disabled={loading}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading && genMode === 'novel' ? '⏳ 生成中...' : '📖 生成作品总大纲'}
+          {loading && genMode === 'novel' ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <BookOpenText size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成作品总大纲
+            </>
+          )}
         </button>
         <button
           className="btn btn-primary btn-sm"
           onClick={onGenerateVolumeOutline}
           disabled={loading || !volume}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading && genMode === 'volume' ? '⏳ 生成中...' : '📋 生成本卷大纲'}
+          {loading && genMode === 'volume' ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <ListTree size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成本卷大纲
+            </>
+          )}
         </button>
         {!volume && chapter && (
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
@@ -121,9 +186,26 @@ export function OutlinePanelView({
           className="btn btn-primary btn-sm"
           onClick={onGenerateChapterOutlines}
           disabled={loading || !chapter}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading && genMode === 'chapter' ? '⏳ 生成中...' : '📝 生成章节大纲'}
+          {loading && genMode === 'chapter' ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成章节大纲
+            </>
+          )}
         </button>
         {!chapter && (
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
@@ -157,7 +239,13 @@ export function OutlinePanelView({
           className="panel-section"
           style={{ border: '1px solid var(--color-primary-light)', borderRadius: 6, padding: 10 }}
         >
-          <div className="panel-section-title">📖 作品总大纲（可编辑）</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <BookOpenText size={14} strokeWidth={1.8} aria-hidden="true" />
+            作品总大纲（可编辑）
+          </div>
           <textarea
             className="input"
             value={novelOutline}
@@ -172,8 +260,13 @@ export function OutlinePanelView({
             }}
           />
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={onAdoptNovelOutline}>
-              📋 复制大纲
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={onAdoptNovelOutline}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Clipboard size={14} strokeWidth={1.8} aria-hidden="true" />
+              复制大纲
             </button>
           </div>
         </div>
@@ -183,7 +276,13 @@ export function OutlinePanelView({
 
       {chapterOutlines.length > 0 && (
         <div className="panel-section">
-          <div className="panel-section-title">📝 AI 章节大纲候选（{chapterOutlines.length}）</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+            AI 章节大纲候选（{chapterOutlines.length}）
+          </div>
           {chapterOutlines.map((candidate, index) => (
             <div
               key={index}
@@ -241,7 +340,8 @@ export function OutlinePanelView({
                     onClick={() => onAdoptChapterOutline(candidate)}
                     disabled={loading || !(candidate.rawText || candidate.outline)?.trim()}
                   >
-                    ✅ 应用到当前章节
+                    <CheckCircle2 size={14} strokeWidth={1.8} aria-hidden="true" />
+                    应用到当前章节
                   </button>
                 </div>
               )}
@@ -298,7 +398,13 @@ function VolumeOutlineResult({ outline }: { outline: VolumeOutlineCandidate }) {
       className="panel-section"
       style={{ border: '1px solid var(--color-primary-light)', borderRadius: 6, padding: 10 }}
     >
-      <div className="panel-section-title">📋 分卷大纲</div>
+      <div
+        className="panel-section-title"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        <ListTree size={14} strokeWidth={1.8} aria-hidden="true" />
+        分卷大纲
+      </div>
       <div className="panel-field">
         <div className="panel-field-label">标题</div>
         <div className="panel-field-value">{outline.title}</div>

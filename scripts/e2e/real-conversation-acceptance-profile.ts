@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES } from '../../src/services/generation/chapterCandidateIntegrity.ts';
 import { countTextWords } from '../../src/utils/contentHash.ts';
 import { isRealAcceptanceLengthControlEvidenceConsistent } from './real-conversation-chapter-word-count-contract.ts';
 
@@ -54,14 +55,45 @@ export const REAL_ACCEPTANCE_GATE_CHAPTER_LIMIT = 4;
 export const REAL_ACCEPTANCE_PREPARED_FULL_CHAPTER_COUNT = 15;
 export const REAL_ACCEPTANCE_MAX_RETRYABLE_RUN_RETRIES = 2;
 export const REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS = REAL_ACCEPTANCE_MAX_RETRYABLE_RUN_RETRIES + 1;
+export const REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE =
+  'MODEL_TOOL_CALLING_NOT_VERIFIED' as const;
 export const REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_RECOVERY_ERROR_CODES = [
   'DSH_REQUIRED_CONTEXT_READ_MISSING',
   'DSH_REQUIRED_CANDIDATE_TOOL_MISSING',
 ] as const;
+export const REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR =
+  'DSH_SUMMARY_STREAM_CLOSED_AFTER_VERIFIED_TOOL_ATTESTATION: DSH 回合以错误结束: STREAM_CLOSED | probe responseStats status=200 toolNames=ans_runtime_attest_tool_call_v1 finish=tool_calls done=true | probe done status=200' as const;
 export const REAL_ACCEPTANCE_EVIDENCE_SCHEMA_VERSION =
-  'real_conversation_acceptance_evidence_v4' as const;
+  'real_conversation_acceptance_evidence_v6' as const;
 export const REAL_ACCEPTANCE_CANDIDATE_INTEGRITY_CONTRACT_VERSION =
   'chapter_candidate_integrity_v4' as const;
+
+export interface RealConversationDecisionTurn {
+  turnId: string;
+  role: string;
+  content?: string;
+  createdAt: string;
+}
+
+export function findRealConversationLocalDecisionReply(
+  turns: readonly RealConversationDecisionTurn[],
+  decisionTurnId: string,
+  runFinishedAt: string | undefined,
+): RealConversationDecisionTurn | undefined {
+  const decisionTurnIndex = turns.findIndex((turn) => turn.turnId === decisionTurnId);
+  const finishedAtMs = runFinishedAt ? Date.parse(runFinishedAt) : Number.NaN;
+  if (decisionTurnIndex < 0 || !Number.isFinite(finishedAtMs)) return undefined;
+
+  return turns.slice(decisionTurnIndex + 1).find((turn) => {
+    const createdAtMs = Date.parse(turn.createdAt);
+    return (
+      turn.role === 'assistant' &&
+      Boolean(turn.content?.trim()) &&
+      Number.isFinite(createdAtMs) &&
+      createdAtMs <= finishedAtMs
+    );
+  });
+}
 
 export const REAL_ACCEPTANCE_FAILURE_STAGES = [
   'setup',
@@ -80,9 +112,18 @@ export type RealConversationAcceptanceFailureStage =
   (typeof REAL_ACCEPTANCE_FAILURE_STAGES)[number];
 
 export function isAutomaticSummaryProtocolRecoveryError(error?: string): boolean {
-  return REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_RECOVERY_ERROR_CODES.some(
-    (code) => error === code || error?.startsWith(`${code}:`) === true,
+  return (
+    error === REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR ||
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_RECOVERY_ERROR_CODES.some(
+      (code) => error === code || error?.startsWith(`${code}:`) === true,
+    )
   );
+}
+
+export function isRetryableAutomaticAssetPreflightFailure(
+  errorCode: unknown,
+): errorCode is typeof REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE {
+  return errorCode === REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE;
 }
 
 export type RealConversationAcceptanceEvidenceOutcome =
@@ -220,10 +261,50 @@ export interface RealConversationAutomaticAssetPreparationEvidence {
   toolName: 'expand_settings' | 'generate_characters' | 'generate_outline';
   toolAttemptCount: number;
   failedToolAttemptCount: number;
+  retryCount: number;
+  attempts: Array<{
+    attempt: number;
+    runId: string;
+    status: 'completed' | 'failed' | 'cancelled';
+    error: string;
+  }>;
   applyTransactionId: string;
   conflictCode: '';
   postRunProjectionEvidence: RealConversationAutomaticAssetPostRunProjectionEvidence;
   actualProviderRequestEvidence: RealConversationAutomaticAssetProviderRequestEvidence;
+}
+
+export interface RealConversationAutomaticAssetPreflightRetryEvidence {
+  chapter: number;
+  asset: RealConversationSparseAssetKind;
+  goalSha256: string;
+  turnId: string;
+  turnOrigin: 'workbench_asset_preparation';
+  model: { providerId: string; modelId: string };
+  retryAttempt: 1 | 2;
+  errorCode: typeof REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE;
+  runId: null;
+}
+
+export interface RealConversationSummaryStartRecoveryEvidence {
+  attempt: 1;
+  turnId: string;
+  trigger: 'workbench-retry-summary-start';
+  observedPhase: 'failed';
+  runCountBefore: 0;
+  runtimeActiveBefore: false;
+  model: { providerId: string; modelId: string };
+  outcome: 'requested' | 'run_started' | 'exhausted';
+  firstPersistedRunId: string | null;
+}
+
+export interface RealConversationAutomaticSummaryExecutionEvidence {
+  sessionId: string;
+  messageCounts: number[];
+  providerUsage: {
+    unit: 'tokens';
+    input: number;
+  };
 }
 
 export interface CurrentRealConversationPassingEvidence {
@@ -240,6 +321,7 @@ export interface CurrentRealConversationPassingEvidence {
   userTurnCount: number;
   automaticAssetPreparationTurnCount: number;
   automaticAssetPreparations?: RealConversationAutomaticAssetPreparationEvidence[];
+  automaticAssetPreflightRetries: RealConversationAutomaticAssetPreflightRetryEvidence[];
   automaticChapterSummaryTurnCount: number;
   runCount: number;
   artifactCount: number;
@@ -252,6 +334,7 @@ export interface CurrentRealConversationPassingEvidence {
   chapterWordCountSum: number;
   novelWordCount: number;
   storyPlanApplyEvidence?: RealConversationStoryPlanApplyEvidence | null;
+  analysisMaterial: unknown;
   chapters: Array<{
     chapter: number;
     status: 'passed';
@@ -277,6 +360,16 @@ export interface CurrentRealConversationPassingEvidence {
     summaryArtifactId: string;
     summaryApplyTransactionId: string;
     summaryId: string;
+    summaryStartRetryCount: number;
+    summaryStartRecoveries: RealConversationSummaryStartRecoveryEvidence[];
+    summaryRetryCount: number;
+    summaryAttempts: Array<{
+      attempt: number;
+      runId: string;
+      status: 'completed' | 'failed' | 'cancelled';
+      error: string;
+    }>;
+    summaryExecutionEvidence: RealConversationAutomaticSummaryExecutionEvidence;
     contextRecordCount: number;
     memorySourceTypes: string[];
     snapshotSourceTypes: string[];
@@ -299,6 +392,79 @@ export interface CurrentRealConversationPassingEvidence {
     };
     artifactCandidateIntegrityCheck: RealConversationArtifactCandidateIntegrityCheck;
   }>;
+}
+
+function assertRealConversationAnalysisMaterial(
+  material: unknown,
+  chapters: readonly unknown[],
+): void {
+  if (!isRecord(material) || material.schemaVersion !== 'real_conversation_analysis_material_v1') {
+    throw new Error('Passing evidence does not retain current manuscript analysis material.');
+  }
+  const formalAssets = isRecord(material.formalAssets) ? material.formalAssets : undefined;
+  const worldSettings = Array.isArray(formalAssets?.worldSettings)
+    ? formalAssets.worldSettings
+    : [];
+  const ruleSystems = Array.isArray(formalAssets?.ruleSystems) ? formalAssets.ruleSystems : [];
+  const protagonists = Array.isArray(formalAssets?.protagonists) ? formalAssets.protagonists : [];
+  const primaryWorldSettingId =
+    typeof formalAssets?.primaryWorldSettingId === 'string'
+      ? formalAssets.primaryWorldSettingId
+      : '';
+  const validTextAsset = (asset: unknown) =>
+    isRecord(asset) &&
+    typeof asset.id === 'string' &&
+    Boolean(asset.id.trim()) &&
+    typeof asset.title === 'string' &&
+    Boolean(asset.title.trim()) &&
+    typeof asset.content === 'string' &&
+    Boolean(asset.content.trim());
+  if (
+    worldSettings.length === 0 ||
+    ruleSystems.length === 0 ||
+    protagonists.length === 0 ||
+    worldSettings.some((asset) => !validTextAsset(asset)) ||
+    ruleSystems.some((asset) => !validTextAsset(asset)) ||
+    protagonists.some(
+      (profile) => !isRecord(profile) || typeof profile.name !== 'string' || !profile.name.trim(),
+    ) ||
+    !primaryWorldSettingId ||
+    !worldSettings.some((asset) => isRecord(asset) && asset.id === primaryWorldSettingId)
+  ) {
+    throw new Error('Passing evidence analysis material has incomplete formal story assets.');
+  }
+
+  const analysisChapters = Array.isArray(material.chapters) ? material.chapters : [];
+  if (
+    analysisChapters.length !== chapters.length ||
+    analysisChapters.some((row, index) => {
+      const source = chapters[index];
+      if (!isRecord(row) || !isRecord(source) || row.chapterId !== source.chapterId) return true;
+      const summary = isRecord(row.summary) ? row.summary : undefined;
+      const contexts = Array.isArray(row.contextRecords) ? row.contextRecords : [];
+      return (
+        row.chapter !== index + 1 ||
+        !summary ||
+        typeof summary.id !== 'string' ||
+        !summary.id.trim() ||
+        typeof summary.summary !== 'string' ||
+        !summary.summary.trim() ||
+        contexts.length === 0 ||
+        contexts.some(
+          (context) =>
+            !isRecord(context) ||
+            typeof context.id !== 'string' ||
+            !context.id.trim() ||
+            typeof context.contextType !== 'string' ||
+            !context.contextType.trim() ||
+            typeof context.content !== 'string' ||
+            !context.content.trim(),
+        )
+      );
+    })
+  ) {
+    throw new Error('Passing evidence analysis material is incomplete for one or more chapters.');
+  }
 }
 
 export function assertCurrentRealConversationPassingEvidence(
@@ -438,6 +604,7 @@ export function assertCurrentRealConversationPassingEvidence(
 
   let chapterWordTotal = 0;
   let previousAdoptedHash = '';
+  const summarySessionIds: string[] = [];
   value.chapters.forEach((chapter, index) => {
     if (!isRecord(chapter) || chapter.status !== 'passed') {
       throw new Error(`Chapter ${index + 1} is not recorded as passed evidence.`);
@@ -550,6 +717,100 @@ export function assertCurrentRealConversationPassingEvidence(
         `Chapter ${index + 1} does not retain summary, Context, and Memory evidence.`,
       );
     }
+    const summaryAttempts = Array.isArray(chapter.summaryAttempts) ? chapter.summaryAttempts : [];
+    const summaryStartRecoveries = Array.isArray(chapter.summaryStartRecoveries)
+      ? chapter.summaryStartRecoveries
+      : [];
+    const invalidSummaryAttempts = summaryAttempts.some(
+      (attempt, attemptIndex) =>
+        !isRecord(attempt) ||
+        attempt.attempt !== attemptIndex + 1 ||
+        typeof attempt.runId !== 'string' ||
+        !attempt.runId.trim() ||
+        !['completed', 'failed', 'cancelled'].includes(String(attempt.status)) ||
+        typeof attempt.error !== 'string',
+    );
+    const invalidSummaryStartRecovery = summaryStartRecoveries.some((recovery, recoveryIndex) => {
+      if (!isRecord(recovery)) return true;
+      const recoveryModel = isRecord(recovery.model) ? recovery.model : undefined;
+      return (
+        recoveryIndex !== 0 ||
+        recovery.attempt !== 1 ||
+        recovery.turnId !== chapter.summaryTurnId ||
+        recovery.trigger !== 'workbench-retry-summary-start' ||
+        recovery.observedPhase !== 'failed' ||
+        recovery.runCountBefore !== 0 ||
+        recovery.runtimeActiveBefore !== false ||
+        recovery.outcome !== 'run_started' ||
+        typeof recovery.firstPersistedRunId !== 'string' ||
+        !recovery.firstPersistedRunId.trim() ||
+        !summaryAttempts.some(
+          (attempt) => isRecord(attempt) && attempt.runId === recovery.firstPersistedRunId,
+        ) ||
+        !recoveryModel ||
+        recoveryModel.providerId !== chapterModel?.providerId ||
+        recoveryModel.modelId !== chapterModel?.modelId
+      );
+    });
+    if (
+      !Array.isArray(chapter.summaryAttempts) ||
+      summaryAttempts.length === 0 ||
+      invalidSummaryAttempts ||
+      summaryAttempts.at(-1)?.runId !== chapter.summaryRunId ||
+      summaryAttempts.at(-1)?.status !== 'completed' ||
+      typeof chapter.summaryRetryCount !== 'number' ||
+      !Number.isSafeInteger(chapter.summaryRetryCount) ||
+      chapter.summaryRetryCount !== summaryAttempts.length - 1 ||
+      !Array.isArray(chapter.summaryStartRecoveries) ||
+      summaryStartRecoveries.length > 1 ||
+      typeof chapter.summaryStartRetryCount !== 'number' ||
+      !Number.isSafeInteger(chapter.summaryStartRetryCount) ||
+      chapter.summaryStartRetryCount !== summaryStartRecoveries.length ||
+      invalidSummaryStartRecovery
+    ) {
+      throw new Error(
+        `Chapter ${index + 1} does not retain one bounded, durable automatic-summary start recovery ledger.`,
+      );
+    }
+    const summaryExecutionEvidence = isRecord(chapter.summaryExecutionEvidence)
+      ? chapter.summaryExecutionEvidence
+      : undefined;
+    const messageCounts = Array.isArray(summaryExecutionEvidence?.messageCounts)
+      ? summaryExecutionEvidence.messageCounts
+      : [];
+    const providerUsage = isRecord(summaryExecutionEvidence?.providerUsage)
+      ? summaryExecutionEvidence.providerUsage
+      : undefined;
+    const uniqueMessageCounts = [
+      ...new Set(
+        messageCounts.filter(
+          (count): count is number => typeof count === 'number' && Number.isSafeInteger(count),
+        ),
+      ),
+    ].sort((left, right) => left - right);
+    if (
+      !summaryExecutionEvidence ||
+      typeof summaryExecutionEvidence.sessionId !== 'string' ||
+      !/^session-summary-[0-9a-f]{32}$/.test(summaryExecutionEvidence.sessionId) ||
+      !Array.isArray(summaryExecutionEvidence.messageCounts) ||
+      messageCounts.length < 3 ||
+      messageCounts.some(
+        (count) =>
+          typeof count !== 'number' || !Number.isSafeInteger(count) || ![2, 5, 7].includes(count),
+      ) ||
+      uniqueMessageCounts.length !== 3 ||
+      uniqueMessageCounts.some((count, countIndex) => count !== [2, 5, 7][countIndex]) ||
+      !providerUsage ||
+      providerUsage.unit !== 'tokens' ||
+      typeof providerUsage.input !== 'number' ||
+      !Number.isSafeInteger(providerUsage.input) ||
+      providerUsage.input <= 0
+    ) {
+      throw new Error(
+        `Chapter ${index + 1} does not prove a fresh automatic-summary Session with reset 2/5/7 Provider input and positive token usage.`,
+      );
+    }
+    summarySessionIds.push(summaryExecutionEvidence.sessionId);
     const integrityRepairAttempts = Array.isArray(chapter.integrityRepairAttempts)
       ? chapter.integrityRepairAttempts
       : [];
@@ -666,6 +927,10 @@ export function assertCurrentRealConversationPassingEvidence(
       );
     }
   });
+  if (new Set(summarySessionIds).size !== summarySessionIds.length) {
+    throw new Error('Automatic chapter summaries reused a DSH Session across chapters.');
+  }
+  assertRealConversationAnalysisMaterial(value.analysisMaterial, value.chapters);
   if (
     value.totalWordCount !== chapterWordTotal ||
     value.independentWordCount !== chapterWordTotal ||
@@ -682,9 +947,15 @@ function assertSparseAutomaticAssetProviderEvidence(value: Record<string, unknow
   const preparations = Array.isArray(value.automaticAssetPreparations)
     ? value.automaticAssetPreparations
     : [];
+  if (!Array.isArray(value.automaticAssetPreflightRetries)) {
+    throw new Error(
+      'Sparse-idea automatic asset evidence must explicitly report its preflight retries.',
+    );
+  }
+  const preflightRetries = value.automaticAssetPreflightRetries;
   const preparationCount = value.automaticAssetPreparationTurnCount;
   const expectedCanaryIds = REAL_ACCEPTANCE_PREPARED_FIXTURE_CANARIES.map((canary) => canary.id);
-  const automaticTurnIds = preparations.map((preparation) =>
+  const preparationTurnIds = preparations.map((preparation) =>
     isRecord(preparation) && typeof preparation.turnId === 'string' ? preparation.turnId : '',
   );
   const creativeTurnIds = new Set(
@@ -692,15 +963,72 @@ function assertSparseAutomaticAssetProviderEvidence(value: Record<string, unknow
       isRecord(turn) && typeof turn.turnId === 'string' ? turn.turnId : '',
     ),
   );
+  const topLevelModel = isRecord(value.model) ? value.model : undefined;
+  const retryAttemptsByAsset = new Map<string, number[]>();
+  for (const retry of preflightRetries) {
+    if (!isRecord(retry)) continue;
+    const key = `${String(retry.chapter)}:${String(retry.asset)}`;
+    const attempts = retryAttemptsByAsset.get(key) ?? [];
+    if (typeof retry.retryAttempt === 'number') attempts.push(retry.retryAttempt);
+    retryAttemptsByAsset.set(key, attempts);
+  }
+  const invalidRetryAttemptSequence = [...retryAttemptsByAsset.values()].some(
+    (attempts) =>
+      attempts.length > 2 ||
+      new Set(attempts).size !== attempts.length ||
+      attempts.some((attempt, index) => attempt !== index + 1),
+  );
+  const invalidPreflightRetry = preflightRetries.some((retry) => {
+    if (!isRecord(retry)) return true;
+    const matchingPreparations = preparations.filter(
+      (preparation) =>
+        isRecord(preparation) &&
+        preparation.chapter === retry.chapter &&
+        preparation.asset === retry.asset,
+    );
+    const model = isRecord(retry.model) ? retry.model : undefined;
+    return (
+      typeof retry.chapter !== 'number' ||
+      !Number.isSafeInteger(retry.chapter) ||
+      retry.chapter <= 0 ||
+      typeof retry.turnId !== 'string' ||
+      !retry.turnId.trim() ||
+      retry.turnOrigin !== 'workbench_asset_preparation' ||
+      !safeSha256(retry.goalSha256) ||
+      matchingPreparations.length !== 1 ||
+      !isRecord(matchingPreparations[0]) ||
+      retry.turnId !== matchingPreparations[0].turnId ||
+      matchingPreparations[0].goalSha256 !== retry.goalSha256 ||
+      !model ||
+      !topLevelModel ||
+      model.providerId !== topLevelModel.providerId ||
+      model.modelId !== topLevelModel.modelId ||
+      (retry.retryAttempt !== 1 && retry.retryAttempt !== 2) ||
+      !isRetryableAutomaticAssetPreflightFailure(retry.errorCode) ||
+      retry.runId !== null
+    );
+  });
+  if (
+    typeof preparationCount !== 'number' ||
+    !Number.isSafeInteger(preparationCount) ||
+    preparationCount !== preparations.length
+  ) {
+    throw new Error(
+      'Sparse-idea automatic asset turn count must equal successful preparations because preflight retries reuse the same turn.',
+    );
+  }
+  if (invalidRetryAttemptSequence || invalidPreflightRetry) {
+    throw new Error(
+      'Sparse-idea automatic asset preflight retry evidence is not bounded to two exact no-Run-at-failure model-attestation failures on the same asset turn, goal, and model.',
+    );
+  }
   const sparseIdeaHash = createHash('sha256')
     .update(REAL_ACCEPTANCE_SPARSE_IDEA, 'utf8')
     .digest('hex');
   if (
-    typeof preparationCount !== 'number' ||
-    preparations.length !== preparationCount ||
     preparations.length < 3 ||
-    new Set(automaticTurnIds).size !== preparations.length ||
-    automaticTurnIds.some((turnId) => !turnId || creativeTurnIds.has(turnId)) ||
+    new Set(preparationTurnIds).size !== preparations.length ||
+    preparationTurnIds.some((turnId) => !turnId || creativeTurnIds.has(turnId)) ||
     !preparations.some(
       (preparation) => isRecord(preparation) && preparation.asset === 'world_setting',
     ) ||
@@ -709,6 +1037,32 @@ function assertSparseAutomaticAssetProviderEvidence(value: Record<string, unknow
       const goal = typeof preparation.goal === 'string' ? preparation.goal : '';
       const projection = preparation.postRunProjectionEvidence;
       const provider = preparation.actualProviderRequestEvidence;
+      const attempts = Array.isArray(preparation.attempts) ? preparation.attempts : [];
+      const finalAttempt = attempts.at(-1);
+      const invalidAttempts =
+        attempts.length < 1 ||
+        attempts.length > REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS ||
+        preparation.retryCount !== attempts.length - 1 ||
+        attempts.some(
+          (attempt, index) =>
+            !isRecord(attempt) ||
+            attempt.attempt !== index + 1 ||
+            typeof attempt.runId !== 'string' ||
+            !attempt.runId.trim() ||
+            (attempt.status !== 'completed' &&
+              attempt.status !== 'failed' &&
+              attempt.status !== 'cancelled') ||
+            typeof attempt.error !== 'string' ||
+            (index < attempts.length - 1 &&
+              (attempt.status !== 'failed' ||
+                !isRetryableRealAcceptanceRunFailure(attempt.error))) ||
+            (index === attempts.length - 1 &&
+              (attempt.status !== 'completed' || attempt.error !== '')),
+        ) ||
+        !isRecord(finalAttempt) ||
+        (isRecord(finalAttempt) && finalAttempt.runId !== preparation.runId) ||
+        new Set(attempts.map((attempt) => (isRecord(attempt) ? String(attempt.runId) : '')))
+          .size !== attempts.length;
       if (!isRecord(projection) || !isRecord(provider)) return true;
       const brief = provider.creativeBrief;
       const configuredCanaryIds = Array.isArray(provider.configuredPreparedFixtureCanaryIds)
@@ -723,6 +1077,7 @@ function assertSparseAutomaticAssetProviderEvidence(value: Record<string, unknow
         !preparation.turnId.trim() ||
         typeof preparation.runId !== 'string' ||
         !preparation.runId.trim() ||
+        invalidAttempts ||
         !goal ||
         safeSha256(preparation.goalSha256) !==
           createHash('sha256').update(goal, 'utf8').digest('hex') ||
@@ -1376,18 +1731,49 @@ export function assertSecretAbsent(
 }
 
 export function isTransientRealAcceptanceProviderFailure(error: string): boolean {
-  return /\b(?:http(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:408|429|5\d\d)\b/i.test(error);
+  return (
+    /\b(?:http(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:408|429|5\d\d)\b/i.test(error) ||
+    /(?:^|[^A-Z0-9_])HTTP_(?:408|429|5\d\d)(?:$|[^A-Z0-9_])/i.test(error) ||
+    /(?:模型服务错误[（(]\s*5\d\d\s*[）)]|请求过于频繁或额度不足[（(]\s*429\b|模型服务当前过载[（(]\s*overloaded_error\s*[）)])/i.test(
+      error,
+    )
+  );
 }
 
+const AI_PROVIDER_TIMEOUT_CODE_PATTERN = /(?:^|[^A-Z0-9_])AI_PROVIDER_TIMEOUT(?:$|[^A-Z0-9_])/;
+const AI_PROVIDER_RETRYABLE_TRANSPORT_CODE_PATTERN =
+  /(?:^|[^A-Z0-9_])(?:AI_PROVIDER_CONNECT_FAILED|AI_PROVIDER_TRANSPORT_INTERRUPTED)(?:$|[^A-Z0-9_])/;
+const AI_PROVIDER_TIMEOUT_MESSAGE_PATTERN =
+  /(?:^|[\s：:\]】])请求超时(?:（\s*\d+(?:\.\d+)?\s*秒\s*）)?(?=$|[\s，,。.!！?？；;])/;
+const RETRYABLE_RENDERER_RECOVERY_ERRORS = new Set([
+  '应用重新启动，上一轮运行已中断，请重新发送任务。',
+  '工作台已重新加载，上一轮运行已中断。请重试本回合。',
+]);
+
 export function isRetryableRealAcceptanceRunFailure(error: string): boolean {
+  const integrityFailure = error.match(
+    /章节候选在\s*\d+\s*次完整性修复后仍未通过：([^。]+)。请重试本回合/,
+  );
+  const integrityIssueCodes = integrityFailure?.[1]
+    ?.split(',')
+    .map((code) => code.trim())
+    .filter(Boolean);
+  const retryableIntegrityFailure = Boolean(
+    integrityIssueCodes?.length &&
+    integrityIssueCodes.every((code) =>
+      (CHAPTER_CANDIDATE_INTEGRITY_ISSUE_CODES as readonly string[]).includes(code),
+    ),
+  );
   return (
     isTransientRealAcceptanceProviderFailure(error) ||
+    AI_PROVIDER_TIMEOUT_CODE_PATTERN.test(error) ||
+    AI_PROVIDER_RETRYABLE_TRANSPORT_CODE_PATTERN.test(error) ||
+    AI_PROVIDER_TIMEOUT_MESSAGE_PATTERN.test(error) ||
+    RETRYABLE_RENDERER_RECOVERY_ERRORS.has(error.trim()) ||
     /章节候选在\s*\d+\s*次长度收敛后仍为\s*\d+\s*字，(?:超过允许上限\s*\d+\s*字|未落入允许范围\s*\d+\s*-\s*\d+\s*字)。请重试本回合/.test(
       error,
     ) ||
-    /章节候选在\s*\d+\s*次完整性修复后仍未通过：(?:chapter_opening_rollback|chapter_tail_pollution|chapter_meta_reasoning_leakage)(?:,\s*(?:chapter_opening_rollback|chapter_tail_pollution|chapter_meta_reasoning_leakage))*。请重试本回合/.test(
-      error,
-    )
+    retryableIntegrityFailure
   );
 }
 

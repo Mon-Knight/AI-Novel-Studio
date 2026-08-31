@@ -83,6 +83,17 @@ pub fn get_task_conversation(
 }
 
 #[tauri::command]
+pub fn get_task_turn_run_projection(
+    conversation_id: String,
+    turn_id: String,
+) -> Result<Option<service::TaskTurnRunProjection>, AppError> {
+    let connection = get_connection()
+        .lock()
+        .map_err(|_| AppError::poisoned_lock())?;
+    service::get_turn_run_projection(&connection, &conversation_id, &turn_id)
+}
+
+#[tauri::command]
 pub fn update_task_conversation_model(
     input: service::UpdateConversationModelInput,
 ) -> Result<service::TaskConversationRecord, AppError> {

@@ -156,6 +156,35 @@ test('fails closed while the directory refreshes, fails, or misses the selection
   assert.equal(missing.canSend, false);
   assert.match(missing.message, /未进入/);
 
+  const localFallback = getWorkbenchModelAvailability({
+    plugins: [
+      plugin({ id: 'model:deepseek-official:deepseek-chat', name: 'DeepSeek Chat' }),
+      plugin({
+        id: 'model:local_llama_cpp:qwen-local',
+        name: 'Local Qwen',
+        health: 'failed',
+      }),
+    ],
+    selectedModel: { providerId: 'local_llama_cpp', modelId: 'qwen-local' },
+    refreshing: false,
+    allowLocalFallback: true,
+  });
+  assert.equal(localFallback.canSend, true);
+  assert.equal(localFallback.selectedOption, undefined);
+  assert.equal(localFallback.fallbackOption?.key, 'deepseek-official:deepseek-chat');
+  assert.match(localFallback.message, /本地模型当前不可用/);
+
+  const fixedTaskModel = getWorkbenchModelAvailability({
+    plugins: localFallback.options.map((option) =>
+      plugin({ id: `model:${option.key}`, name: option.name }),
+    ),
+    selectedModel: { providerId: 'local_llama_cpp', modelId: 'qwen-local' },
+    refreshing: false,
+  });
+  assert.equal(fixedTaskModel.canSend, false);
+  assert.equal(fixedTaskModel.fallbackOption, undefined);
+  assert.match(fixedTaskModel.message, /未进入/);
+
   const available = getWorkbenchModelAvailability({
     plugins,
     selectedModel,

@@ -76,15 +76,15 @@ export function buildValidationWarningText(
   const outlineStatus = getOutlineValidationStatus(validation.outlineCompliance.score);
   if (outlineStatus === '未通过') {
     messages.push(
-      `⚠️ 生成正文未充分遵循章节大纲（${validation.outlineCompliance.score} 分）。建议重新生成或按大纲修正后再确认采用。`,
+      `生成正文未充分遵循章节大纲（${validation.outlineCompliance.score} 分）。建议重新生成或按大纲修正后再确认采用。`,
     );
   } else if (outlineStatus === '警告') {
     messages.push(
-      `⚠️ 生成正文只部分遵循章节大纲（${validation.outlineCompliance.score} 分）。建议检查缺失关键点。`,
+      `生成正文只部分遵循章节大纲（${validation.outlineCompliance.score} 分）。建议检查缺失关键点。`,
     );
   }
   if (validation.missingRequiredNames.length > 0) {
-    messages.push(`⚠️ 生成正文缺少必须出场角色：${validation.missingRequiredNames.join('、')}。`);
+    messages.push(`生成正文缺少必须出场角色：${validation.missingRequiredNames.join('、')}。`);
   }
   return messages.join('\n') || undefined;
 }

@@ -38,6 +38,8 @@ interface BridgeShape {
   clearDiagnostics?: () => unknown;
 }
 
+export const E2E_BRIDGE_CALL_TIMEOUT_MS = 15_000;
+
 export async function runDomainFacadeSqliteSmoke<T>(): Promise<T> {
   const response = await browser.executeAsync((done) => {
     const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: BridgeShape })
@@ -82,7 +84,7 @@ export async function callMockGate(method: MockGateMethod): Promise<MockAiGateSt
 
 export async function bridgeCall<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const response = await browser.executeAsync(
-    (name, input, done) => {
+    (name, input, timeoutMs, done) => {
       const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: BridgeShape })
         .__AI_NOVEL_STUDIO_E2E__;
       if (!bridge?.invoke)
@@ -95,7 +97,7 @@ export async function bridgeCall<T>(command: string, args?: Record<string, unkno
       };
       const timer = window.setTimeout(
         () => finish({ ok: false, error: `timeout invoking ${name}` }),
-        15000,
+        timeoutMs,
       );
       Promise.resolve(bridge.invoke(name, input))
         .then((value) => {
@@ -109,6 +111,7 @@ export async function bridgeCall<T>(command: string, args?: Record<string, unkno
     },
     command,
     args ?? {},
+    E2E_BRIDGE_CALL_TIMEOUT_MS,
   );
   const result = response as { ok: boolean; value?: T; error?: string };
   if (!result.ok)

@@ -15,6 +15,38 @@ test('Writer prefers authored active world setting over the legacy novel field',
   );
 });
 
+test('Writer selects the most recently updated active world setting', () => {
+  assert.equal(
+    resolveWorldBackgroundForWriter(
+      [
+        {
+          id: 'world-old',
+          content: '旧世界仍处于活动状态',
+          isActive: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+        {
+          id: 'world-inactive',
+          content: '更新但已停用的世界',
+          isActive: false,
+          createdAt: '2026-01-03T00:00:00.000Z',
+          updatedAt: '2026-01-05T00:00:00.000Z',
+        },
+        {
+          id: 'world-latest',
+          content: '最近应用的正式世界',
+          isActive: true,
+          createdAt: '2026-01-03T00:00:00.000Z',
+          updatedAt: '2026-01-04T00:00:00.000Z',
+        },
+      ],
+      '旧版世界背景',
+    ),
+    '最近应用的正式世界',
+  );
+});
+
 test('Writer falls back to the legacy novel world background when no active setting exists', () => {
   assert.equal(
     resolveWorldBackgroundForWriter(

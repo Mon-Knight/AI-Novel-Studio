@@ -2,6 +2,7 @@
  * AI Novel Studio - 全局错误边界
  */
 import { Component, type ReactNode } from 'react';
+import { ArrowLeft, CircleAlert, Wrench } from 'lucide-react';
 import { novelRepository } from '../../services/database/novelRepository';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { appLogger } from '../../services/observability/appLogger';
@@ -44,7 +45,12 @@ class ErrorBoundary extends Component<Props, State> {
             justifyContent: 'center',
           }}
         >
-          <div style={{ fontSize: 48, marginBottom: 16 }}>💥</div>
+          <CircleAlert
+            aria-hidden="true"
+            size={48}
+            strokeWidth={1.8}
+            style={{ marginBottom: 16, color: 'var(--color-error)' }}
+          />
           <h2 style={{ color: 'var(--color-error)', marginBottom: 8 }}>页面渲染出错</h2>
           <p
             style={{
@@ -82,7 +88,8 @@ class ErrorBoundary extends Component<Props, State> {
                 window.location.hash = '#/';
               }}
             >
-              ← 返回首页
+              <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+              返回首页
             </button>
             <button
               className="btn btn-warning btn-sm"
@@ -104,7 +111,8 @@ class ErrorBoundary extends Component<Props, State> {
                 }
               }}
             >
-              🔧 修复本地数据
+              <Wrench aria-hidden="true" size={15} strokeWidth={1.8} />
+              修复本地数据
             </button>
             <button
               className="btn btn-outline btn-sm"

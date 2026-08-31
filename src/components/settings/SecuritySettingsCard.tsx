@@ -1,3 +1,5 @@
+import { TriangleAlert } from 'lucide-react';
+
 export default function SecuritySettingsCard() {
   return (
     <div
@@ -11,7 +13,7 @@ export default function SecuritySettingsCard() {
     >
       <div style={{ fontSize: 14, color: 'var(--color-error-text)', lineHeight: 1.8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <span>⚠️</span>
+          <TriangleAlert aria-hidden="true" size={18} strokeWidth={1.8} />
           <strong>安全与合规提醒</strong>
         </div>
         <ul style={{ paddingLeft: 18, marginTop: 4, fontSize: 13 }}>

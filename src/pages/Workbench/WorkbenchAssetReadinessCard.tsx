@@ -27,7 +27,6 @@ export function WorkbenchAssetReadinessCard({
   onDismiss,
 }: WorkbenchAssetReadinessCardProps) {
   const ready = recovery.missingAssets.length === 0;
-  const preparingStructure = recovery.missingAssets.includes('story_plan') || !recovery.chapterId;
   const actionsDisabled = busy || running;
   const phase = recovery.orchestration.phase;
   const canGenerate = phase === 'queued' || phase === 'failed';
@@ -49,18 +48,22 @@ export function WorkbenchAssetReadinessCard({
       data-ready={ready ? 'true' : 'false'}
       data-chapter-id={recovery.chapterId ?? ''}
       data-orchestration-phase={phase}
+      data-orchestration-asset={recovery.orchestration.asset ?? ''}
+      data-orchestration-error-code={recovery.orchestration.errorCode ?? ''}
+      data-orchestration-updated-at={recovery.orchestration.updatedAt}
+      data-preparation-turn-id={recovery.orchestration.preparationTurnId ?? ''}
+      data-source-turn-id={recovery.sourceTurnId ?? ''}
+      data-context-stage="automatic-preparation"
     >
       <div className="workbench-asset-readiness__header">
         <div>
-          <div className="workbench-eyebrow">
-            {preparingStructure ? '长篇创作准备' : '正文生成前准备'}
-          </div>
+          <div className="workbench-eyebrow">系统自动准备</div>
           <h3>{ready ? '写章前置资产已就绪' : `还需补充 ${recovery.missingAssets.length} 项`}</h3>
         </div>
         <span className="workbench-asset-readiness__status">
           {ready ? (
             <>
-              <CircleCheck aria-hidden="true" size={14} strokeWidth={1.9} />
+              <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />
               {phaseLabel}
             </>
           ) : (
@@ -70,9 +73,15 @@ export function WorkbenchAssetReadinessCard({
       </div>
 
       <div className="workbench-asset-readiness__goal">
-        <span>待恢复目标</span>
+        <span>你的原始创作要求</span>
         <p>{recovery.originalGoal}</p>
       </div>
+
+      {!ready && (
+        <p className="workbench-asset-readiness__note">
+          系统会依据这条简短要求准备正式创作资产，不需要你补写详细提示词。
+        </p>
+      )}
 
       {!ready && (
         <div className="workbench-asset-readiness__items">
@@ -113,7 +122,7 @@ export function WorkbenchAssetReadinessCard({
                     title={isCurrent ? undefined : '请先完成前一项创作资产'}
                     onClick={() => onGenerate(asset)}
                   >
-                    <Sparkles aria-hidden="true" size={13} strokeWidth={1.9} />
+                    <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
                     {phase === 'failed' && isCurrent
                       ? descriptor.generateLabel.replace('生成', '重试')
                       : descriptor.generateLabel}
@@ -126,7 +135,7 @@ export function WorkbenchAssetReadinessCard({
                     title={isCurrent ? undefined : '请先完成前一项创作资产'}
                     onClick={() => onEdit(asset)}
                   >
-                    <PencilLine aria-hidden="true" size={13} strokeWidth={1.9} />
+                    <PencilLine aria-hidden="true" size={13} strokeWidth={1.8} />
                     {descriptor.editLabel}
                   </button>
                 </div>
@@ -155,7 +164,7 @@ export function WorkbenchAssetReadinessCard({
             disabled={actionsDisabled}
             onClick={onResume}
           >
-            <Play aria-hidden="true" size={13} fill="currentColor" strokeWidth={1.8} />
+            <Play aria-hidden="true" size={13} strokeWidth={1.8} />
             继续生成正文
           </button>
         ) : (

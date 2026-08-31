@@ -2,6 +2,7 @@
 // 遵循桌面写作风格：复用 agent-plan-card 样式族，浅色克制，无后台管理感。
 
 import type { ChapterPreparationProposal } from '../../types/chapterPreparation';
+import { CheckCircle2, CircleHelp, TriangleAlert } from 'lucide-react';
 import { useDshPreparation } from './useDshPreparation';
 
 export interface DshPreparationCardProps {
@@ -33,7 +34,8 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
               data-testid="dsh-coercion-mark"
               style={{ color: 'var(--color-warning)', marginLeft: 8 }}
             >
-              ⚠ planner 枚举已归一（原始：{coercion.original}）
+              <TriangleAlert aria-hidden="true" size={13} strokeWidth={1.8} />
+              planner 枚举已归一（原始：{coercion.original}）
             </span>
           ) : null}
         </div>
@@ -50,7 +52,7 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
         <ul className="agent-plan-steps" style={{ marginTop: 4 }}>
           {proposal.chapterGoals.map((goal) => (
             <li key={goal} className="agent-plan-step agent-plan-step--completed">
-              <span aria-hidden="true">✓</span>
+              <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
               <span>{goal}</span>
             </li>
           ))}
@@ -104,7 +106,10 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
           <div style={{ fontWeight: 600, fontSize: 12 }}>未决问题</div>
           <div style={{ fontSize: 12, lineHeight: 1.6 }}>
             {proposal.unresolvedQuestions.map((question) => (
-              <div key={question}>？ {question}</div>
+              <div key={question} style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                <CircleHelp aria-hidden="true" size={13} strokeWidth={1.8} />
+                {question}
+              </div>
             ))}
           </div>
         </div>

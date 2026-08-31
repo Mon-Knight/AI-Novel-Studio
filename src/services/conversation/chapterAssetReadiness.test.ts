@@ -86,6 +86,7 @@ test('a project without chapters requests formal world and protagonist assets fi
       getWorldSettings: async () => [],
       getRuleSystems: async () => [],
       getProtagonist: async () => null,
+      getNovel: async () => null,
     },
   );
 
@@ -113,6 +114,7 @@ test('world-and-rules recovery does not leave a duplicate rule step after its bu
     getWorldSettings: async () => states[stateIndex].worldSettings,
     getRuleSystems: async () => states[stateIndex].ruleSystems,
     getProtagonist: async () => null,
+    getNovel: async () => null,
   };
 
   assert.deepEqual(await inspectChapterAssetReadiness({ novelId: 'novel-1' }, dependencies), {
@@ -138,6 +140,7 @@ test('a chapterless project requires formal rules before creating the story plan
       ],
       getRuleSystems: async () => [],
       getProtagonist: async () => ({ name: '林默' }) as never,
+      getNovel: async () => null,
     },
   );
 
@@ -157,6 +160,27 @@ test('a chapterless project requests a story plan after formal prerequisites exi
         { isActive: true, content: '时间倒流必须付出等量记忆。' } as never,
       ],
       getProtagonist: async () => ({ name: '林默' }) as never,
+      getNovel: async () => null,
+    },
+  );
+
+  assert.deepEqual(result, { ready: false, missingAssets: ['story_plan'] });
+});
+
+test('a chapterless project recognizes protagonists stored on the modern novel aggregate', async () => {
+  const result = await inspectChapterAssetReadiness(
+    { novelId: 'novel-1' },
+    {
+      listChapters: async () => [],
+      listVolumes: async () => [],
+      getWorldSettings: async () => [
+        { isActive: true, content: '永夜城依靠中央钟楼维持时间流动。' } as never,
+      ],
+      getRuleSystems: async () => [
+        { isActive: true, content: '时间倒流必须付出等量记忆。' } as never,
+      ],
+      getProtagonist: async () => null,
+      getNovel: async () => ({ protagonists: [{ name: '林默' }] }) as never,
     },
   );
 

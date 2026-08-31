@@ -1,4 +1,5 @@
 import type { Chapter } from '../../../types/chapter';
+import { Pencil, Save } from 'lucide-react';
 import { ChapterStatusLabels } from '../../../types/chapter';
 import { formatNumber } from '../../../utils/format';
 
@@ -67,7 +68,8 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
               onClick={onStartEdit}
               style={{ fontSize: 11 }}
             >
-              ✏️ 编辑
+              <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+              编辑
             </button>
           ) : (
             <span style={{ display: 'flex', gap: 4 }}>
@@ -76,7 +78,8 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
                 onClick={onSaveOutline}
                 style={{ fontSize: 11 }}
               >
-                💾 保存
+                <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+                保存
               </button>
               <button
                 className="btn btn-secondary btn-sm"
@@ -124,7 +127,8 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
               onClick={onStartEdit}
               style={{ fontSize: 11, marginLeft: 8 }}
             >
-              ✏️ 手动编写
+              <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+              手动编写
             </button>
           </div>
         )}
@@ -142,7 +146,8 @@ export function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
             disabled={!goalDirty}
             style={{ fontSize: 11 }}
           >
-            💾 保存本章目标
+            <Save aria-hidden="true" size={13} strokeWidth={1.8} />
+            保存本章目标
           </button>
         </div>
         <textarea
@@ -184,10 +189,10 @@ function SaveMessage({ value }: { value: string }) {
       style={{
         fontSize: 11,
         marginTop: 4,
-        color: value.startsWith('✅')
-          ? 'var(--color-success)'
-          : value.startsWith('❌')
-            ? 'var(--color-error)'
+        color: value.includes('失败')
+          ? 'var(--color-error)'
+          : value.includes('已保存')
+            ? 'var(--color-success)'
             : 'var(--color-text-muted)',
       }}
     >

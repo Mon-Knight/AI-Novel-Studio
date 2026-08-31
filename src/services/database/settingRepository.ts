@@ -24,12 +24,28 @@ function saveLocalRuleSystems(items: RuleSystem[]): void {
   lsSet(RULE_SYSTEMS_KEY, items);
 }
 
+function timestampValue(value: string): number {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function orderWorldSettings(items: readonly WorldSetting[]): WorldSetting[] {
+  return [...items].sort(
+    (left, right) =>
+      Number(right.isActive) - Number(left.isActive) ||
+      timestampValue(right.updatedAt) - timestampValue(left.updatedAt) ||
+      timestampValue(right.createdAt) - timestampValue(left.createdAt) ||
+      right.id.localeCompare(left.id),
+  );
+}
+
 export const settingRepository = {
   // ========== 世界设定 ==========
   async getWorldSettings(novelId: string): Promise<WorldSetting[]> {
-    return dbCall<WorldSetting[]>('get_world_settings', { novelId }, () =>
+    const items = await dbCall<WorldSetting[]>('get_world_settings', { novelId }, () =>
       getLocalWorldSettings().filter((s) => s.novelId === novelId),
     );
+    return orderWorldSettings(items);
   },
 
   async saveWorldSetting(id: string | null, input: SaveWorldSettingInput): Promise<WorldSetting> {

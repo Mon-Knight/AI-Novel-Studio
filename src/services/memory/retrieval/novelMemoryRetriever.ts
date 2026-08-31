@@ -39,7 +39,9 @@ export class NovelMemoryRetriever {
     const scoredFragments = store.fragments
       .map((fragment) => {
         let score = fragment.importance * 10;
-        const matchesEntity = fragment.relatedEntities.some((id) => relevantEntityIds.has(id.trim()));
+        const matchesEntity = fragment.relatedEntities.some((id) =>
+          relevantEntityIds.has(id.trim()),
+        );
         if (matchesEntity) score += 30;
         // 如果是世界规则且重要度 >= 4，即使未显式声明实体也赋予高基础分
         if (fragment.type === 'world_rule' && fragment.importance >= 4) score += 20;
@@ -223,7 +225,7 @@ export function formatSceneMemoryForCompilation(context: SceneMemoryContext): st
   if (context.constraints.length > 0) {
     const lines: string[] = ['### 【场景写作硬约束】'];
     for (const c of context.constraints) {
-      lines.push(`- ⚠️ ${c}`);
+      lines.push(`- ${c}`);
     }
     sections.push(lines.join('\n'));
   }

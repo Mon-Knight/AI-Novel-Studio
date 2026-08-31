@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CircleAlert, LoaderCircle, NotebookPen, RefreshCw, Square, X } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
@@ -6,7 +6,7 @@ import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPa
 import RightPanel from '../../components/right-dock/RightPanel';
 import RightToolbar from '../../components/right-dock/RightToolbar';
 import { ChapterReadinessPlanCard } from '../../features/agent-planner/ChapterReadinessPlanCard';
-import EditorArea from '../../components/workspace/EditorArea';
+import EditorArea, { type EditorActionState } from '../../components/workspace/EditorArea';
 import GlobalAiTaskModal from '../../components/workspace/GlobalAiTaskModal';
 import RecoveryDialog from '../../components/workspace/RecoveryDialog';
 import StatusBar from '../../components/workspace/StatusBar';
@@ -81,11 +81,26 @@ export default function WritingWorkspaceView({
     ? null
     : activePanel;
   const [readinessOpen, setReadinessOpen] = useState(false);
+  const [editorActionState, setEditorActionState] = useState<EditorActionState>({
+    saving: false,
+    adopting: false,
+    saveState: 'idle',
+    saveMessage: '',
+  });
   const activeChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === activeChapterId),
     [activeChapterId, chapters],
   );
   const activeDraft = currentDraft?.chapterId === activeChapterId ? currentDraft : null;
+  const activeReviewCandidate = reviewCandidate ?? chapterLoader.reviewCandidate;
+  useEffect(() => {
+    setEditorActionState({
+      saving: false,
+      adopting: false,
+      saveState: 'idle',
+      saveMessage: '',
+    });
+  }, [activeChapterId]);
   const activeContentState = chapterLoader.contentLoadError ?? activeDraft?.contentState;
   const contentAvailable = activeContentState?.status !== 'unavailable';
   const activeQcReport = qcReport?.chapterId === activeChapterId ? qcReport : null;
@@ -135,10 +150,7 @@ export default function WritingWorkspaceView({
   }, [loadChapterDraft, refs.activeChapterId, refs.editorSnapshot]);
 
   return (
-    <div
-      className={`workspace-page${!isChapterDocumentBlocked && visibleActivePanel && visibleActivePanel !== 'draft-history' ? ' has-right-panel' : ''}`}
-      data-summary-exists={summary.exists ? 'true' : 'false'}
-    >
+    <div className="workspace-page" data-summary-exists={summary.exists ? 'true' : 'false'}>
       <div className="workspace-sidebar">
         <div className={`workspace-novel-title${pageLoading ? ' is-loading' : ''}`}>
           {novel?.title || (pageLoading ? '正在载入作品' : '未选择作品')}
@@ -210,7 +222,7 @@ export default function WritingWorkspaceView({
           <div data-testid="workspace-empty-state" className="workspace-empty-state">
             <div className="workspace-empty-content">
               <div className="workspace-empty-icon">
-                <NotebookPen aria-hidden="true" size={36} strokeWidth={1.5} />
+                <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
               </div>
               <div className="workspace-empty-title">当前作品还没有章节</div>
               <div className="workspace-empty-copy">你可以在左侧目录先创建分卷，再创建第一章。</div>
@@ -267,10 +279,11 @@ export default function WritingWorkspaceView({
                 onBackToChapters={() => navigate(`/novels/${novelId}`)}
                 reviewLocked={reviewLocked}
                 onUnlockReview={onUnlockReview}
-                reviewCandidate={reviewCandidate ?? chapterLoader.reviewCandidate}
+                reviewCandidate={activeReviewCandidate}
                 reviewAuthorizationId={reviewAuthorizationId}
                 reviewArtifactId={reviewArtifactId}
                 onBeforeAdopt={onBeforeAdopt}
+                onActionStateChange={setEditorActionState}
               />
             </PanelErrorBoundary>
             <StatusBar
@@ -280,6 +293,8 @@ export default function WritingWorkspaceView({
               draftVersion={activeDraft ? `v${activeDraft.versionNo}` : 'v0 占位'}
               contentAvailable={contentAvailable}
               recoverySaveStatus={recoverySaveStatus}
+              documentSaveState={editorActionState.saveState}
+              documentSaveMessage={editorActionState.saveMessage}
             />
           </>
         )}
@@ -295,6 +310,13 @@ export default function WritingWorkspaceView({
           onToggleReadiness={() => setReadinessOpen((open) => !open)}
           readinessOpen={readinessOpen}
           documentAvailable={contentAvailable}
+          reviewLocked={reviewLocked}
+          documentDirty={isDirty}
+          documentSaving={editorActionState.saving}
+          documentAdopting={editorActionState.adopting}
+          hasCurrentDraft={Boolean(activeDraft)}
+          currentDraftAdopted={Boolean(activeDraft?.isAdopted)}
+          hasReviewCandidate={Boolean(activeReviewCandidate)}
         />
       ) : null}
 
@@ -401,7 +423,12 @@ export default function WritingWorkspaceView({
           <div className="right-panel workspace-summary-panel">
             <div className="right-panel-header">
               <span className="right-panel-title">
-                <LoaderCircle className="workspace-spinning-icon" aria-hidden="true" size={16} />
+                <LoaderCircle
+                  className="workspace-spinning-icon"
+                  aria-hidden="true"
+                  size={16}
+                  strokeWidth={1.8}
+                />
                 <span>生成章节总结</span>
               </span>
               <button
@@ -410,7 +437,7 @@ export default function WritingWorkspaceView({
                 aria-label="停止生成"
                 title="停止生成"
               >
-                <Square aria-hidden="true" size={13} fill="currentColor" />
+                <Square aria-hidden="true" size={13} strokeWidth={1.8} />
               </button>
             </div>
             <div className="right-panel-body">
@@ -431,7 +458,7 @@ export default function WritingWorkspaceView({
           <div className="right-panel workspace-summary-panel">
             <div className="right-panel-header">
               <span className="right-panel-title">
-                <CircleAlert aria-hidden="true" size={16} />
+                <CircleAlert aria-hidden="true" size={16} strokeWidth={1.8} />
                 <span>总结失败</span>
               </span>
               <button
@@ -440,14 +467,14 @@ export default function WritingWorkspaceView({
                 aria-label="关闭错误"
                 title="关闭"
               >
-                <X aria-hidden="true" size={16} />
+                <X aria-hidden="true" size={17} strokeWidth={1.8} />
               </button>
             </div>
             <div className="right-panel-body">
               <div className="workspace-summary-error">{summary.error}</div>
               <div className="workspace-summary-actions">
                 <button className="btn btn-primary btn-sm" onClick={summary.regenerate}>
-                  <RefreshCw aria-hidden="true" size={14} />
+                  <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
                   <span>重试</span>
                 </button>
               </div>

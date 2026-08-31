@@ -12,6 +12,12 @@ const pluginLifecycleLabel = {
   failed: '失败',
 } as const;
 
+const pluginStatusLabel: Record<CurrentPluginProjection['status'], string> = {
+  loaded: '已加载',
+  failed: '失败',
+  unavailable: '不可用',
+};
+
 export const PluginPanel = memo(function PluginPanel({
   plugins,
   loading = false,
@@ -105,7 +111,7 @@ export const PluginPanel = memo(function PluginPanel({
                   <div className="workbench-plugin-row-top">
                     <strong>{plugin.name}</strong>
                     <span className={`workbench-plugin-state is-${plugin.status}`}>
-                      {plugin.status}
+                      {pluginStatusLabel[plugin.status]}
                     </span>
                   </div>
                   <div className="workbench-plugin-meta">

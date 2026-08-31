@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Brain, CheckCircle2, ClipboardCheck, TriangleAlert } from 'lucide-react';
 import type { AgentDecisionTrace, AgentQualityReview } from '../../types/agentHarness';
 
 export interface DecisionTraceProps {
@@ -40,7 +41,7 @@ export const DecisionTraceCard = memo(function DecisionTraceCard({
             color: '#4338ca',
           }}
         >
-          <span>🧠</span>
+          <Brain aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>Agent Decision (第 {trace.turn} 轮)</span>
         </div>
         {typeof trace.confidenceScore === 'number' && (
@@ -141,7 +142,7 @@ export const QualityReviewCard = memo(function QualityReviewCard({
             color: '#c2410c',
           }}
         >
-          <span>📝</span>
+          <ClipboardCheck aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>Quality Review 质量审查</span>
         </div>
         <span
@@ -156,7 +157,16 @@ export const QualityReviewCard = memo(function QualityReviewCard({
             border: `1px solid ${review.passed ? '#86efac' : '#fca5a5'}`,
           }}
         >
-          最终: {review.overallScore}/100 {review.passed ? '✓ 达标' : '⚠️ 需重写'}
+          最终: {review.overallScore}/100{' '}
+          {review.passed ? (
+            <>
+              <CheckCircle2 aria-hidden="true" size={12} strokeWidth={1.8} /> 达标
+            </>
+          ) : (
+            <>
+              <TriangleAlert aria-hidden="true" size={12} strokeWidth={1.8} /> 需重写
+            </>
+          )}
         </span>
       </div>
 

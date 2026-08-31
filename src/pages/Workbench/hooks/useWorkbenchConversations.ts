@@ -109,7 +109,9 @@ export function useWorkbenchConversations() {
       bundleRef.current = next;
       setBundle(next);
       setSelectedModel(next.conversation.defaultModel ?? captureTaskModelSnapshot());
-      const targetChapterId = resolveConversationTargetChapter(next);
+      const targetChapterId =
+        taskChapterSelectionRef.current.get(conversationId) ??
+        resolveConversationTargetChapter(next);
       if (targetChapterId) {
         taskChapterSelectionRef.current.set(conversationId, targetChapterId);
         setChapterId(targetChapterId);

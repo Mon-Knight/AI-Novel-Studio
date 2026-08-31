@@ -16,6 +16,16 @@ const RETRY_TARGET_FAILURES = new Set([
   'WORKBENCH_RETRY_TARGET_CONFLICT',
   'WORKBENCH_RETRY_TARGET_INVALID',
 ]);
+const TRANSIENT_PROVIDER_FAILURE_PATTERN =
+  /(?:\bHTTP[_\s:=]*(?:408|429|5\d\d)\b|模型服务错误[（(]\s*5\d\d\s*[）)]|请求过于频繁或额度不足[（(]\s*429\b|模型服务当前过载[（(]\s*overloaded_error\s*[）)])/i;
+const RETRYABLE_PROVIDER_FAILURE_CODES = new Set([
+  'AI_PROVIDER_TIMEOUT',
+  'AI_PROVIDER_RATE_LIMITED',
+  'AI_PROVIDER_SERVER_ERROR',
+  'AI_PROVIDER_NETWORK_ERROR',
+  'AI_PROVIDER_CONNECT_FAILED',
+  'AI_PROVIDER_TRANSPORT_INTERRUPTED',
+]);
 
 export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
   const code =
@@ -101,6 +111,14 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
       code: code || 'MODEL_TOOL_CALLING_NOT_VERIFIED',
       message: '所选模型未通过当前 Runtime 的工具调用能力验证。',
       hint: '可重试验证，或在模型设置中选择支持原生工具调用的模型后再发送。',
+    };
+  }
+  if (RETRYABLE_PROVIDER_FAILURE_CODES.has(code) || TRANSIENT_PROVIDER_FAILURE_PATTERN.test(text)) {
+    return {
+      layer: 'service',
+      code: code || 'WORKBENCH_PROVIDER_TRANSIENT',
+      message: message.trim() || '模型服务暂时不可用。',
+      hint: '请稍后重试本回合；任务会继续使用已经固定的模型。',
     };
   }
   if (

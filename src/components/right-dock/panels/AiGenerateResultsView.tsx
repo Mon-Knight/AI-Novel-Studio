@@ -1,3 +1,4 @@
+import { Bot, CheckCircle2, LoaderCircle, TriangleAlert } from 'lucide-react';
 import type { ChapterDraft, ChapterGenerationContext, OutlineKeyPoint } from '../../../types/ai';
 import type { Chapter } from '../../../types/chapter';
 import type { DraftResultMetadata } from '../../../types/workspaceSafety';
@@ -192,8 +193,23 @@ export function AiGenerateResultsView({
           {(validationState.outlineCompliance.score < 80 ||
             validationState.missingRequiredNames.length > 0) && (
             <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>
-                ⚠️ 正文已生成，但大纲遵循度较低。建议重新生成或按大纲修正后再确认采用。
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--color-warning)',
+                  marginBottom: 8,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert
+                  size={14}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                  style={{ flexShrink: 0, marginTop: 2 }}
+                />
+                正文已生成，但大纲遵循度较低。建议重新生成或按大纲修正后再确认采用。
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <button
@@ -309,12 +325,19 @@ export function AiGenerateResultsView({
           onClick={() => onGenerate()}
           disabled={generating || revising}
           data-testid="ai-generate-submit"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
-          {generating
-            ? revising
-              ? '⏳ 正在修正...'
-              : '⏳ 正在生成...'
-            : `🤖 ${genMode === 'rewrite' ? '重新生成' : '生成本章'}`}
+          {generating ? (
+            <>
+              <LoaderCircle size={15} strokeWidth={1.8} aria-hidden="true" />
+              {revising ? '正在修正...' : '正在生成...'}
+            </>
+          ) : (
+            <>
+              <Bot size={15} strokeWidth={1.8} aria-hidden="true" />
+              {genMode === 'rewrite' ? '重新生成' : '生成本章'}
+            </>
+          )}
         </button>
         <button
           className="panel-btn panel-btn-secondary"
@@ -325,8 +348,19 @@ export function AiGenerateResultsView({
           data-novel-id={latestGeneratedTarget?.novelId ?? novelId ?? ''}
           data-chapter-id={latestGeneratedTarget?.chapterId ?? chapter.id}
           data-apply-mode="adopt"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
-          {adopting ? '⏳ 采用中...' : '✅ 确认采用'}
+          {adopting ? (
+            <>
+              <LoaderCircle size={15} strokeWidth={1.8} aria-hidden="true" />
+              采用中...
+            </>
+          ) : (
+            <>
+              <CheckCircle2 size={15} strokeWidth={1.8} aria-hidden="true" />
+              确认采用
+            </>
+          )}
         </button>
         <div
           style={{

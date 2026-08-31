@@ -16,6 +16,7 @@ mod project_backup;
 mod repositories;
 mod runtime;
 mod services;
+mod session_credentials;
 mod system_accent;
 mod window_state;
 
@@ -223,7 +224,10 @@ fn main() {
     let focus_watch_dir = app_data_dir.clone();
 
     tauri::Builder::default()
+        .manage(session_credentials::SessionCredentialVault::default())
         .invoke_handler(generate_app_handler![
+            session_credentials::set_session_model_credential,
+            session_credentials::resolve_session_model_credential,
             commands::get_all_novels,
             commands::app_update::get_app_update_capabilities,
             commands::app_update::check_app_update,
@@ -328,6 +332,7 @@ fn main() {
             commands::conversations::recover_task_runs,
             commands::conversations::list_task_conversations,
             commands::conversations::get_task_conversation,
+            commands::conversations::get_task_turn_run_projection,
             commands::conversations::update_task_conversation_model,
             commands::conversations::rename_task_conversation,
             commands::conversations::set_task_conversation_archived,

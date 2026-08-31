@@ -3,7 +3,11 @@ import test from 'node:test';
 import type { AiSettings } from '../../types/ai';
 import type { TaskModelSnapshot } from '../../types/conversation';
 import { saveAiSettings } from '../ai/aiSettingsStore';
-import { hasUsableDshTaskCredential, resolveDshTaskApiKey } from './taskRuntimeService';
+import {
+  hasUsableDshTaskCredential,
+  hasUsableDshTaskCredentialAsync,
+  resolveDshTaskApiKey,
+} from './taskRuntimeService';
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
@@ -67,4 +71,14 @@ test('DSH permits an unkeyed loopback model without weakening public endpoint ch
   assert.equal(resolveDshTaskApiKey(loopbackSnapshot), '');
   assert.equal(hasUsableDshTaskCredential(loopbackSnapshot), true);
   assert.equal(hasUsableDshTaskCredential({ ...snapshot, modelId: 'unregistered-model' }), false);
+});
+
+test('async DSH credential readiness resolves the same frozen identity used after renderer restore', async () => {
+  saveAiSettings(settings);
+
+  assert.equal(await hasUsableDshTaskCredentialAsync(snapshot), true);
+  assert.equal(
+    await hasUsableDshTaskCredentialAsync({ ...snapshot, modelId: 'unregistered-model' }),
+    false,
+  );
 });

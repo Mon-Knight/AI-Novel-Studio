@@ -21,6 +21,7 @@ import {
   createWorkbenchChapterWriter,
   findPreviousChapterForContinuity,
   resolveChapterWordRange,
+  type WorkbenchChapterWriterProgress,
   type WorkbenchChapterWriterDependencies,
 } from './workbenchChapterWriter';
 import type { Chapter } from '../../types/chapter';
@@ -454,6 +455,7 @@ test('writer routes pollution introduced by length repair through integrity repa
   const pollutedLengthRepair = `${'乙'.repeat(96)}。经典三级`;
   const integrityRepaired = `${'丙'.repeat(99)}。`;
   const calls: ChapterGenerationExecutionInput[] = [];
+  const progress: WorkbenchChapterWriterProgress[] = [];
   const writer = createTestWorkbenchChapterWriter({
     getSettings: () => baseSettings,
     loadAdoptedPreviousChapter: noPreviousAdoptedChapter,
@@ -496,6 +498,9 @@ test('writer routes pollution introduced by length repair through integrity repa
     goal: '生成本章正文',
     mode: 'generate',
     modelSnapshot: frozenModel,
+    onProgress: (nextProgress) => {
+      progress.push(nextProgress);
+    },
   });
 
   assert.deepEqual(
@@ -510,6 +515,30 @@ test('writer routes pollution introduced by length repair through integrity repa
   assert.equal(result.text, integrityRepaired);
   assert.equal(result.lengthRepairCount, 1);
   assert.equal(result.integrityRepairCount, 1);
+  assert.deepEqual(
+    progress.map((item) => item.phase),
+    [
+      'compiling_context',
+      'generating_draft',
+      'repairing_length',
+      'repairing_integrity',
+      'validating_candidate',
+    ],
+  );
+  assert.deepEqual(progress[2]?.acceptedWordRange, { minimum: 80, maximum: 115 });
+  assert.equal(progress[2]?.repairAttempt, 1);
+  assert.equal(progress[2]?.repairMaximumAttempts, 3);
+  assert.equal(progress[2]?.currentWordCount, 150);
+  assert.deepEqual(progress[3]?.acceptedWordRange, { minimum: 80, maximum: 115 });
+  assert.equal(progress[3]?.repairAttempt, 1);
+  assert.equal(progress[3]?.repairMaximumAttempts, 2);
+  assert.equal(progress[3]?.currentWordCount, 100);
+  assert.equal(progress[4]?.currentWordCount, 99);
+  assert.ok(progress.every((item) => !Number.isNaN(Date.parse(item.timestamp))));
+  assert.doesNotMatch(
+    JSON.stringify(progress),
+    /生成本章正文|compiled prompt|甲{10}|乙{10}|丙{10}|apiKey|messages/i,
+  );
 });
 
 test('writer never reuses initial request evidence when the final repair has no evidence', async () => {

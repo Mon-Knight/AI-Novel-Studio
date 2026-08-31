@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { ChapterDraft } from '../../types/ai';
+import type { Chapter } from '../../types/chapter';
+import type { ChapterSummary } from '../../types/chapterSummary';
 import type { ChapterCharacter } from '../../types/character';
 import type { ChapterEvent } from '../../types/chapterEvent';
+import type { ContextRecord } from '../../types/context';
+import type { MemoryDocumentPage } from '../../types/memory';
 import type { Novel } from '../../types/novel';
 import type { OutputProfile } from '../../types/output';
 import type { Protagonist } from '../../types/protagonist';
@@ -9,6 +14,7 @@ import type { ReferenceWork } from '../../types/reference';
 import type { RuleSystem, WorldSetting } from '../../types/setting';
 import type { StyleProfile } from '../../types/style';
 import type { ChapterOutline, MasterOutline, VolumeOutline } from '../../types/outline';
+import type { Volume } from '../../types/volume';
 import {
   loadWorkbenchAssetScope,
   type WorkbenchAssetScopeDependencies,
@@ -108,6 +114,149 @@ function dependencies(
         { id: 'reference-1', purpose: 'research', sourceStatus: 'available' },
         { id: 'reference-2', purpose: 'style', sourceStatus: 'available' },
       ] as ReferenceWork[],
+    getChapters: async () =>
+      [
+        {
+          id: 'chapter-0',
+          novelId: 'novel-1',
+          volumeId: 'volume-1',
+          title: '雾门初现',
+          chapterNumber: 1,
+          orderIndex: 0,
+          sortOrder: 0,
+          status: 'summarized',
+          adoptedDraftId: 'draft-adopted-1',
+          wordCount: 3200,
+          currentWords: 3200,
+          targetWords: 3000,
+          drafts: [],
+          createdAt: '2026-08-28T00:00:00.000Z',
+          updatedAt: now,
+        },
+        {
+          id: 'chapter-1',
+          novelId: 'novel-1',
+          volumeId: 'volume-1',
+          title: '雨夜失踪',
+          chapterNumber: 2,
+          orderIndex: 1,
+          sortOrder: 1,
+          status: 'outline_ready',
+          wordCount: 0,
+          currentWords: 0,
+          targetWords: 3000,
+          drafts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ] as Chapter[],
+    getVolumes: async () =>
+      [
+        {
+          id: 'volume-1',
+          novelId: 'novel-1',
+          title: '第一卷 雾门',
+          orderIndex: 0,
+          volumeNumber: 1,
+          sortOrder: 0,
+          status: 'writing',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ] as Volume[],
+    getAdoptedDraftByChapterId: async () =>
+      ({
+        id: 'draft-adopted-1',
+        novelId: 'novel-1',
+        chapterId: 'chapter-0',
+        content: '前章正式正文不应出现在预检面板。',
+        source: 'ai_generated',
+        versionNo: 2,
+        wordCount: 3200,
+        isAdopted: true,
+        createdAt: '2026-08-28T00:00:00.000Z',
+        updatedAt: now,
+      }) as ChapterDraft,
+    getContextRecords: async () =>
+      [
+        {
+          id: 'context-global-1',
+          novelId: 'novel-1',
+          contextType: 'foreshadow',
+          title: '雾门伏笔',
+          content: '全局 Context 正文不应出现在预检面板。',
+          contentHash: 'a'.repeat(64),
+          importance: 5,
+          isActive: true,
+          isExpired: false,
+          createdAt: '2026-08-28T01:00:00.000Z',
+          updatedAt: now,
+        },
+        {
+          id: 'context-prev-1',
+          novelId: 'novel-1',
+          chapterId: 'chapter-0',
+          contextType: 'plot_progress',
+          title: '前章剧情进度',
+          content: '前章 Context 正文不应出现在预检面板。',
+          contentHash: 'b'.repeat(64),
+          importance: 4,
+          isActive: true,
+          isExpired: false,
+          createdAt: '2026-08-28T02:00:00.000Z',
+          updatedAt: now,
+        },
+      ] as ContextRecord[],
+    getChapterSummaries: async () =>
+      [
+        {
+          id: 'summary-prev-1',
+          novelId: 'novel-1',
+          chapterId: 'chapter-0',
+          volumeId: 'volume-1',
+          adoptedDraftId: 'draft-adopted-1',
+          summary: '前章总结正文不应出现在预检面板。',
+          enabled: true,
+          isExpired: false,
+          createdAt: '2026-08-28T03:00:00.000Z',
+          updatedAt: now,
+        },
+      ] as ChapterSummary[],
+    getMemoryDocuments: async () =>
+      ({
+        total: 3,
+        offset: 0,
+        limit: 50,
+        items: [
+          {
+            id: 'memory-draft-1',
+            novelId: 'novel-1',
+            sourceType: 'adopted_draft',
+            sourceId: 'draft-adopted-1',
+            sourceVersion: 2,
+            sourceHash: 'c'.repeat(64),
+            adoptedDraftId: 'draft-adopted-1',
+            chapterId: 'chapter-0',
+            status: 'active',
+            metadataJson: '{}',
+            createdAt: '2026-08-28T04:00:00.000Z',
+            updatedAt: now,
+          },
+          {
+            id: 'memory-summary-1',
+            novelId: 'novel-1',
+            sourceType: 'chapter_summary',
+            sourceId: 'summary-prev-1',
+            sourceVersion: 1,
+            sourceHash: 'd'.repeat(64),
+            chapterId: 'chapter-0',
+            status: 'active',
+            metadataJson: '{}',
+            createdAt: '2026-08-28T05:00:00.000Z',
+            updatedAt: now,
+          },
+        ],
+      }) as MemoryDocumentPage,
     ...overrides,
   };
 }
@@ -143,36 +292,41 @@ test('workbench asset scope mirrors the selected production assets before a chap
       {
         key: 'adopted_chapter',
         label: '前章采用稿',
-        status: 'automatic',
-        value: '生成前核验正式采用状态',
+        status: 'ready',
+        value: '《雾门初现》· v2 · 3,200 字',
       },
       {
         key: 'context_record',
         label: 'Context',
-        status: 'automatic',
-        value: '按目标章节读取正式记录',
+        status: 'ready',
+        value: '前章总结 1 条 · 正式记录 2 条',
       },
       {
         key: 'memory_context',
         label: 'Memory',
-        status: 'automatic',
-        value: '按本轮指令检索',
+        status: 'ready',
+        value: '活动文档 3 条 · 本轮按指令检索',
       },
       {
         key: 'world_state',
         label: '世界状态',
-        status: 'automatic',
-        value: '由已采用总结与 Context 投影',
+        status: 'ready',
+        value: '覆盖前序 1 章 · 总结 1 / Context 1',
       },
     ],
   );
-  assert.equal(
+  assert.deepEqual(
     summary.items
       .filter((item) =>
         ['adopted_chapter', 'context_record', 'memory_context', 'world_state'].includes(item.key),
       )
-      .every((item) => item.evidence === undefined),
-    true,
+      .map((item) => item.evidence?.source),
+    [
+      '紧邻前章正式采用稿',
+      '章节总结 + 正式 ContextRecord',
+      'SQLite Memory 活动文档索引',
+      '已采用章节总结 + 正式 ContextRecord 投影',
+    ],
   );
   assert.equal(
     summary.items.some((item) => String(item.key) === 'runtime_continuity'),
@@ -222,6 +376,101 @@ test('workbench asset scope mirrors the selected production assets before a chap
   assert.doesNotMatch(serialized, /同一人无法连续两夜/u);
   assert.doesNotMatch(serialized, /追查雾门背后的失踪链条/u);
   assert.doesNotMatch(serialized, /主角在雨夜发现第一条反常线索/u);
+  assert.doesNotMatch(serialized, /前章正式正文不应出现在预检面板/u);
+  assert.doesNotMatch(serialized, /全局 Context 正文不应出现在预检面板/u);
+  assert.doesNotMatch(serialized, /前章 Context 正文不应出现在预检面板/u);
+  assert.doesNotMatch(serialized, /前章总结正文不应出现在预检面板/u);
+  assert.doesNotMatch(serialized, /c{64}|d{64}/u);
+});
+
+test('workbench asset scope displays the same latest active world selected by Writer', async () => {
+  const summary = await loadWorkbenchAssetScope(
+    { novelId: 'novel-1' },
+    dependencies({
+      getWorldSettings: async () => [
+        {
+          id: 'world-old',
+          novelId: 'novel-1',
+          title: '旧世界',
+          content: '旧世界内容',
+          isActive: true,
+          createdAt: '2026-08-01T00:00:00.000Z',
+          updatedAt: '2026-08-02T00:00:00.000Z',
+        },
+        {
+          id: 'world-latest',
+          novelId: 'novel-1',
+          title: '最新世界',
+          content: '最新世界内容',
+          isActive: true,
+          createdAt: '2026-08-03T00:00:00.000Z',
+          updatedAt: '2026-08-04T00:00:00.000Z',
+        },
+      ],
+      getVolumeOutline: async () => null,
+      getChapterOutline: async () => null,
+      getChapterCharacters: async () => [],
+      getChapterEvents: async () => [],
+    }),
+  );
+
+  const world = summary.items.find((item) => item.key === 'world');
+  assert.equal(world?.value, '最新世界');
+  assert.deepEqual(
+    { source: world?.evidence?.source, revision: world?.evidence?.revision },
+    { source: '正式世界设定', revision: '更新 2026-08-04' },
+  );
+});
+
+test('workbench asset scope reports precise first-chapter continuity absence', async () => {
+  const summary = await loadWorkbenchAssetScope(
+    { novelId: 'novel-1', volumeId: 'volume-1', chapterId: 'chapter-1' },
+    dependencies({
+      getChapters: async () =>
+        [
+          {
+            id: 'chapter-1',
+            novelId: 'novel-1',
+            volumeId: 'volume-1',
+            title: '雨夜失踪',
+            chapterNumber: 1,
+            orderIndex: 0,
+            sortOrder: 0,
+            status: 'outline_ready',
+            wordCount: 0,
+            currentWords: 0,
+            targetWords: 3000,
+            drafts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ] as Chapter[],
+      getContextRecords: async () => [],
+      getChapterSummaries: async () => [],
+      getMemoryDocuments: async () => ({ total: 0, offset: 0, limit: 50, items: [] }),
+      getAdoptedDraftByChapterId: async () => {
+        throw new Error('首章不应读取前章草稿');
+      },
+    }),
+  );
+
+  const adopted = summary.items.find((item) => item.key === 'adopted_chapter');
+  const context = summary.items.find((item) => item.key === 'context_record');
+  const memory = summary.items.find((item) => item.key === 'memory_context');
+  const worldState = summary.items.find((item) => item.key === 'world_state');
+  assert.deepEqual(
+    [adopted?.value, context?.value, memory?.value, worldState?.value],
+    [
+      '首章，无前章采用稿',
+      '目标章前无可用正式 Context',
+      'SQLite Memory 暂无活动文档',
+      '首章，无前序世界状态',
+    ],
+  );
+  assert.equal(adopted?.evidence?.revision, '首章，无前序来源');
+  assert.equal(context?.evidence?.revision, '0 条候选来源');
+  assert.equal(memory?.evidence?.revision, '0 条活动文档');
+  assert.equal(worldState?.evidence?.revision, '首章，无前序来源');
 });
 
 test('workbench asset scope distinguishes legacy fallbacks, missing required assets, and optional gaps', async () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Bot, Compass, FileSearch, Gauge, TriangleAlert, X } from 'lucide-react';
 import type { Chapter } from '../../../types/chapter';
 import type { RouteDecision } from '../../../types/modelRuntime';
 import { ROUTE_DECISION_TASK_INPUT_KEY } from '../../../types/modelRuntime';
@@ -95,12 +96,12 @@ export default function GenerationTracePanel({
 
   const hasTrace = Boolean(
     trace &&
-      (trace.taskType ||
-        trace.routeDecision ||
-        trace.providerId ||
-        trace.modelId ||
-        trace.compilationHash ||
-        trace.memoryVersion),
+    (trace.taskType ||
+      trace.routeDecision ||
+      trace.providerId ||
+      trace.modelId ||
+      trace.compilationHash ||
+      trace.memoryVersion),
   );
 
   const fallbackReason =
@@ -124,7 +125,7 @@ export default function GenerationTracePanel({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 16 }}>🧭</span>
+          <Compass size={18} strokeWidth={1.8} aria-hidden="true" />
           <strong style={{ fontSize: 14 }}>Generation Trace</strong>
         </div>
         {onClose && (
@@ -132,6 +133,8 @@ export default function GenerationTracePanel({
             type="button"
             className="right-panel-close"
             onClick={onClose}
+            aria-label="关闭生成追踪"
+            title="关闭生成追踪"
             style={{
               background: 'none',
               border: 'none',
@@ -140,15 +143,12 @@ export default function GenerationTracePanel({
               color: 'var(--color-text-muted, #64748b)',
             }}
           >
-            ✕
+            <X size={17} strokeWidth={1.8} aria-hidden="true" />
           </button>
         )}
       </div>
 
-      <div
-        className="right-panel-body"
-        style={{ flex: 1, overflowY: 'auto', padding: '16px' }}
-      >
+      <div className="right-panel-body" style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
         {!hasTrace ? (
           <div
             className="generation-trace-empty"
@@ -176,12 +176,19 @@ export default function GenerationTracePanel({
             >
               <div style={{ marginBottom: 6 }}>
                 <span style={{ color: 'var(--color-text-muted, #64748b)' }}>当前任务: </span>
-                <strong data-testid="trace-task-type">{trace?.taskType || 'chapter_scene_generate'}</strong>
+                <strong data-testid="trace-task-type">
+                  {trace?.taskType || 'chapter_scene_generate'}
+                </strong>
               </div>
               {trace?.operationId && (
                 <div style={{ marginBottom: 6 }}>
                   <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Operation ID: </span>
-                  <span style={{ fontFamily: 'monospace', color: 'var(--color-text-secondary, #475569)' }}>
+                  <span
+                    style={{
+                      fontFamily: 'monospace',
+                      color: 'var(--color-text-secondary, #475569)',
+                    }}
+                  >
                     {trace.operationId}
                   </span>
                 </div>
@@ -189,7 +196,9 @@ export default function GenerationTracePanel({
               {trace?.executedAt && (
                 <div>
                   <span style={{ color: 'var(--color-text-muted, #64748b)' }}>执行时间: </span>
-                  <span style={{ color: 'var(--color-text-secondary, #475569)' }}>{trace.executedAt}</span>
+                  <span style={{ color: 'var(--color-text-secondary, #475569)' }}>
+                    {trace.executedAt}
+                  </span>
                 </div>
               )}
             </div>
@@ -210,7 +219,7 @@ export default function GenerationTracePanel({
                   gap: 6,
                 }}
               >
-                <span>⚠️</span>
+                <TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" />
                 <div>
                   <strong>触发 Fallback 回退: </strong>
                   <span>{fallbackReason}</span>
@@ -229,17 +238,31 @@ export default function GenerationTracePanel({
                 fontSize: 12,
               }}
             >
-              <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                🤖 模型与路由决策 (Model Route)
+              <h4
+                style={{
+                  fontSize: 13,
+                  marginBottom: 8,
+                  color: 'var(--color-text-primary, #1e293b)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+                模型与路由决策 (Model Route)
               </h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <div>
                   <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Provider: </span>
-                  <strong data-testid="trace-provider-id">{trace?.providerId || trace?.routeDecision?.selected.providerId || 'mock'}</strong>
+                  <strong data-testid="trace-provider-id">
+                    {trace?.providerId || trace?.routeDecision?.selected.providerId || 'mock'}
+                  </strong>
                 </div>
                 <div>
                   <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Model Name: </span>
-                  <strong data-testid="trace-model-id">{trace?.modelId || trace?.routeDecision?.selected.modelId || 'default'}</strong>
+                  <strong data-testid="trace-model-id">
+                    {trace?.modelId || trace?.routeDecision?.selected.modelId || 'default'}
+                  </strong>
                 </div>
                 <div>
                   <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Route Kind: </span>
@@ -263,23 +286,39 @@ export default function GenerationTracePanel({
                 fontSize: 12,
               }}
             >
-              <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                📜 上下文与契约审计 (Audit & Provenance)
+              <h4
+                style={{
+                  fontSize: 13,
+                  marginBottom: 8,
+                  color: 'var(--color-text-primary, #1e293b)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <FileSearch size={14} strokeWidth={1.8} aria-hidden="true" />
+                上下文与契约审计 (Audit & Provenance)
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div>
-                  <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Memory Version: </span>
+                  <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
+                    Memory Version:{' '}
+                  </span>
                   <strong data-testid="trace-memory-version">v{trace?.memoryVersion ?? 1}</strong>
                 </div>
                 <div>
-                  <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Prompt Template: </span>
+                  <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
+                    Prompt Template:{' '}
+                  </span>
                   <span data-testid="trace-prompt-template">
                     {trace?.promptTemplate || 'chapter/scene_generation_local'}
                   </span>
                 </div>
                 {trace?.compilationHash && (
                   <div>
-                    <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Compilation Hash: </span>
+                    <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
+                      Compilation Hash:{' '}
+                    </span>
                     <div
                       data-testid="trace-compilation-hash"
                       style={{
@@ -311,8 +350,18 @@ export default function GenerationTracePanel({
                   fontSize: 12,
                 }}
               >
-                <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                  ⚡ 性能与消耗 (Performance & Usage)
+                <h4
+                  style={{
+                    fontSize: 13,
+                    marginBottom: 8,
+                    color: 'var(--color-text-primary, #1e293b)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Gauge size={14} strokeWidth={1.8} aria-hidden="true" />
+                  性能与消耗 (Performance & Usage)
                 </h4>
                 <div style={{ display: 'flex', gap: 16 }}>
                   {trace.durationMs !== undefined && (
@@ -323,8 +372,12 @@ export default function GenerationTracePanel({
                   )}
                   {trace.tokenUsage?.totalTokens !== undefined && (
                     <div>
-                      <span style={{ color: 'var(--color-text-muted, #64748b)' }}>Token 总消耗: </span>
-                      <strong data-testid="trace-token-usage">{trace.tokenUsage.totalTokens}</strong>
+                      <span style={{ color: 'var(--color-text-muted, #64748b)' }}>
+                        Token 总消耗:{' '}
+                      </span>
+                      <strong data-testid="trace-token-usage">
+                        {trace.tokenUsage.totalTokens}
+                      </strong>
                     </div>
                   )}
                 </div>

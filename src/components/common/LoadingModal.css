@@ -11,7 +11,7 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 80px;
-  animation: loadingModalFadeIn 0.15s ease;
+  animation: loadingModalFadeIn var(--motion-fast, 120ms) var(--ease-enter, ease-out);
 }
 
 .loading-modal-card {
@@ -29,7 +29,7 @@
   max-width: 420px;
   width: auto;
   text-align: center;
-  animation: loadingModalSlideIn 0.15s ease;
+  animation: loadingModalSlideIn var(--motion-fast, 120ms) var(--ease-enter, ease-out);
 }
 
 @keyframes loadingModalFadeIn {
@@ -59,12 +59,9 @@
 
 /* 旋转动画 */
 .loading-modal-spinner {
-  width: 40px;
-  height: 40px;
+  display: block;
   margin: 0 auto;
-  border: 3px solid var(--color-border-light, #f0f0f5);
-  border-top-color: var(--color-primary, #4a7cf7);
-  border-radius: 50%;
+  color: var(--color-primary, #4a7cf7);
   animation: loadingModalSpin 0.8s linear infinite;
 }
 
@@ -120,7 +117,7 @@
   height: 100%;
   background: var(--color-primary, #4a7cf7);
   border-radius: var(--radius-full, 9999px);
-  transition: width 0.3s ease;
+  transition: width var(--motion-emphasis, 260ms) var(--ease-standard, ease);
 }
 
 /* 不确定进度条动画 */
@@ -170,7 +167,7 @@
   border-radius: var(--radius-md, 8px);
   font-size: var(--font-size-sm, 12px);
   font-weight: var(--font-weight-medium, 500);
-  transition: background var(--transition-fast, 0.15s ease);
+  transition: background-color var(--transition-fast, 120ms ease);
   border: 1px solid transparent;
 }
 
@@ -201,4 +198,31 @@
 
 .loading-modal-btn-close:hover {
   background: var(--color-border-light, #f0f0f5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-modal-overlay,
+  .loading-modal-card,
+  .loading-modal-spinner,
+  .loading-modal-progress-indeterminate {
+    animation: none;
+  }
+
+  .loading-modal-progress-indeterminate {
+    transform: none;
+  }
+
+  .loading-modal-card {
+    transform: translateX(-50%);
+  }
+
+  .loading-modal-progress-indeterminate {
+    width: 100%;
+    opacity: 0.72;
+  }
+
+  .loading-modal-progress-bar,
+  .loading-modal-btn {
+    transition: none;
+  }
 }

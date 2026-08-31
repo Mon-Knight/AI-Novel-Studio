@@ -1,3 +1,4 @@
+import { Clipboard, FileUp, FolderOpen, PenLine, Plus, Save, Tag, Trash2 } from 'lucide-react';
 import {
   TemplateTypeLabels,
   type TemplateType,
@@ -26,7 +27,14 @@ export function TemplateEditorForm(props: TemplateEditorFormProps) {
   return (
     <div className="detail-card" style={{ marginBottom: 16, borderColor: 'var(--color-primary)' }}>
       <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12 }}>
-        {props.editing ? '✏️ 编辑模板' : '➕ 新建模板'}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {props.editing ? (
+            <PenLine aria-hidden="true" size={16} strokeWidth={1.8} />
+          ) : (
+            <Plus aria-hidden="true" size={16} strokeWidth={1.8} />
+          )}
+          {props.editing ? '编辑模板' : '新建模板'}
+        </span>
       </div>
       <div className="panel-field" style={{ marginBottom: 8 }}>
         <div className="panel-field-label">模板名称</div>
@@ -86,7 +94,8 @@ export function TemplateEditorForm(props: TemplateEditorFormProps) {
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-primary btn-sm" onClick={props.onSave} disabled={props.saving}>
-          {props.saving ? '保存中...' : '💾 保存模板'}
+          {!props.saving && <Save aria-hidden="true" size={15} strokeWidth={1.8} />}
+          {props.saving ? '保存中...' : '保存模板'}
         </button>
         <button className="btn btn-secondary btn-sm" onClick={props.onCancel}>
           取消
@@ -109,7 +118,10 @@ export function UserTemplateList(props: UserTemplateListProps) {
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
-        📁 我的模板（{props.templates.length}）
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <FolderOpen aria-hidden="true" size={16} strokeWidth={1.8} />
+          我的模板（{props.templates.length}）
+        </span>
       </div>
       {props.templates.length === 0 ? (
         <div
@@ -144,7 +156,14 @@ export function UserTemplateList(props: UserTemplateListProps) {
                   {TemplateTypeLabels[template.type]}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
-                  {template.source === 'user_imported' ? '📤 导入' : '✏️ 自建'}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    {template.source === 'user_imported' ? (
+                      <FileUp aria-hidden="true" size={12} strokeWidth={1.8} />
+                    ) : (
+                      <PenLine aria-hidden="true" size={12} strokeWidth={1.8} />
+                    )}
+                    {template.source === 'user_imported' ? '导入' : '自建'}
+                  </span>
                 </span>
               </div>
               <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{template.name}</div>
@@ -197,7 +216,8 @@ export function UserTemplateList(props: UserTemplateListProps) {
                     props.onUse(template.content, template.name);
                   }}
                 >
-                  📋 使用
+                  <Clipboard aria-hidden="true" size={15} strokeWidth={1.8} />
+                  使用
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
@@ -207,7 +227,8 @@ export function UserTemplateList(props: UserTemplateListProps) {
                     props.onEdit(template);
                   }}
                 >
-                  ✏️ 编辑
+                  <PenLine aria-hidden="true" size={15} strokeWidth={1.8} />
+                  编辑
                 </button>
                 <button
                   className="btn btn-text btn-sm"
@@ -218,7 +239,7 @@ export function UserTemplateList(props: UserTemplateListProps) {
                   }}
                   aria-label={`删除模板 ${template.name}`}
                 >
-                  🗑️
+                  <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
                 </button>
               </div>
             </div>
@@ -243,7 +264,19 @@ export function BuiltInTemplateList(props: BuiltInTemplateListProps) {
   );
   return (
     <div>
-      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>🏷️ 系统内置模板</div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          fontSize: 15,
+          fontWeight: 600,
+          marginBottom: 10,
+        }}
+      >
+        <Tag aria-hidden="true" size={16} strokeWidth={1.8} />
+        系统内置模板
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         {templates.map((template) => (
           <div
@@ -308,7 +341,8 @@ export function BuiltInTemplateList(props: BuiltInTemplateListProps) {
               }}
               style={{ width: '100%' }}
             >
-              📋 使用模板
+              <Clipboard aria-hidden="true" size={15} strokeWidth={1.8} />
+              使用模板
             </button>
           </div>
         ))}

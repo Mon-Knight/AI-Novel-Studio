@@ -101,7 +101,7 @@ function fullEvidence() {
   const totalWordCount = chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0);
   const instructionHash = sha256(FIRST_INSTRUCTION);
   return {
-    evidenceSchemaVersion: 'real_conversation_acceptance_evidence_v4',
+    evidenceSchemaVersion: 'real_conversation_acceptance_evidence_v6',
     candidateIntegrityContractVersion: 'chapter_candidate_integrity_v4',
     status: 'passed',
     failureStage: null,
@@ -128,11 +128,43 @@ function fullEvidence() {
       rootTargetWordCount: 6_000,
       chapterTargetWordCountSum: 6_000,
     },
+    analysisMaterial: {
+      schemaVersion: 'real_conversation_analysis_material_v1',
+      formalAssets: {
+        primaryWorldSettingId: 'world-1',
+        worldSettings: [{ id: 'world-1', title: '雾港', content: '雾港的旧钟记录每次退潮时刻。' }],
+        ruleSystems: [
+          { id: 'rule-1', title: '潮汐规则', content: '只有退潮后才能进入旧港档案室。' },
+        ],
+        protagonists: [{ name: '沈岚', identity: '档案修复师' }],
+      },
+      chapters: chapters.map((chapter) => ({
+        chapter: chapter.chapter,
+        chapterId: chapter.chapterId,
+        summary: {
+          id: chapter.summaryId,
+          summary: `第 ${chapter.chapter} 章线索继续推进。`,
+          protagonistStateChange: JSON.stringify(`沈岚完成第 ${chapter.chapter} 次调查。`),
+          newItemsOrAbilities: JSON.stringify([`线索物件 ${chapter.chapter}`]),
+          newForeshadows: JSON.stringify([`伏笔 ${chapter.chapter}`]),
+          resolvedForeshadows: JSON.stringify([]),
+        },
+        contextRecords: [
+          {
+            id: `context-${chapter.chapter}`,
+            contextType: 'chapter_summary',
+            title: `第 ${chapter.chapter} 章摘要`,
+            content: `第 ${chapter.chapter} 章的正式上下文。`,
+            importance: 5,
+          },
+        ],
+      })),
+    },
     chapters,
   };
 }
 
-test('accepts complete Full v4 evidence and allows omitted optional Provider sources', () => {
+test('accepts complete Full v6 evidence and allows omitted optional Provider sources', () => {
   const report = analyze(fullEvidence(), 'real-conversation-evidence.json');
 
   assert.equal(report.evidenceSummary.fullBookEvidence, true);
@@ -146,11 +178,16 @@ test('accepts complete Full v4 evidence and allows omitted optional Provider sou
   );
   assert.equal(coverage.get('source_hash_chain'), 'verified');
   assert.equal(coverage.get('timeline'), 'heuristic_candidate');
-  assert.equal(coverage.get('world_rules'), 'unavailable_from_v4');
+  assert.equal(coverage.get('world_rules'), 'heuristic_candidate');
+  assert.equal(coverage.get('character_state'), 'structured_summary_candidate');
+  assert.equal(coverage.get('object_lifecycle'), 'structured_summary_candidate');
+  assert.equal(coverage.get('foreshadowing'), 'structured_summary_candidate');
+  assert.equal(report.semanticEvidence.formalAssets.primaryWorldSettingId, 'world-1');
+  assert.equal(report.semanticEvidence.chapterStateTimeline.length, 2);
   assert.ok(report.limitations.some((item) => item.code === 'provider_payload_opaque'));
 });
 
-test('uses the prepared-assets v4 critical-source contract without sparse-plan checks', () => {
+test('uses the prepared-assets v6 critical-source contract without sparse-plan checks', () => {
   const evidence = fullEvidence();
   evidence.scenario = 'prepared-assets';
   evidence.userInstructions[0] = '生成本章正文';
@@ -178,12 +215,12 @@ test('uses the prepared-assets v4 critical-source contract without sparse-plan c
   );
 });
 
-test('rejects evidence that is not a complete passing v4 Full run', async (context) => {
+test('rejects evidence that is not a complete passing v6 Full run', async (context) => {
   const cases = [
     {
       name: 'evidence schema',
       mutate: (evidence) => {
-        evidence.evidenceSchemaVersion = 'real_conversation_acceptance_evidence_v3';
+        evidence.evidenceSchemaVersion = 'real_conversation_acceptance_evidence_v5';
       },
       error: /EVIDENCE_FINAL_SCHEMA_UNSUPPORTED/,
     },

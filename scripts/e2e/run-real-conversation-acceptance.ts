@@ -32,6 +32,10 @@ import {
   waitForDriverExitReport,
   type DriverExitReport,
 } from './driver-liveness-guard.ts';
+import {
+  resolveRealAcceptanceTauriDriver,
+  retainSafeRealAcceptanceDiagnostics,
+} from './real-conversation-runner-support.ts';
 
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
 const realWdioConfig = path.join(workspaceRoot, 'tests', 'real-acceptance', 'wdio.conf.ts');
@@ -92,9 +96,10 @@ async function main(): Promise<void> {
     const driverPort = process.env[REAL_ACCEPTANCE_ENV.driverPort]
       ? validatePort(Number(process.env[REAL_ACCEPTANCE_ENV.driverPort]))
       : await findAvailableDriverPort();
-    const driver =
-      process.env[REAL_ACCEPTANCE_ENV.driver]?.trim() ||
-      (process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
+    const driver = resolveRealAcceptanceTauriDriver({
+      workspaceRoot,
+      explicit: process.env[REAL_ACCEPTANCE_ENV.driver],
+    });
     const nativeDriver = resolveNativeDriver();
 
     const chapterScope =
@@ -106,6 +111,9 @@ async function main(): Promise<void> {
     console.log(
       `[REAL ACCEPTANCE] starting ${profile.mode}/${profile.scenario} profile (${chapterScope}, model=${profile.model})`,
     );
+    console.log(
+      `[REAL ACCEPTANCE] tauri-driver ${driver.version} (${driver.source}); version contract verified.`,
+    );
     activeFailureStage = 'test_execution';
     const result = await runWdio({
       profile,
@@ -116,7 +124,7 @@ async function main(): Promise<void> {
       providerEvidenceDirectory,
       application,
       driverPort,
-      driver,
+      driver: driver.executable,
       nativeDriver,
     });
 
@@ -153,6 +161,11 @@ async function main(): Promise<void> {
     }
     console.log(`[REAL ACCEPTANCE] passed; sanitized evidence: ${evidencePath}`);
   } catch (error) {
+    try {
+      await retainAndAuditSafeDiagnostics(profile, dataDirectory, evidenceDirectory);
+    } catch {
+      console.error('[REAL ACCEPTANCE] safe native diagnostics could not be retained.');
+    }
     const evidencePath = path.join(evidenceDirectory, 'real-conversation-evidence.json');
     if (!fs.existsSync(evidencePath)) {
       fs.writeFileSync(
@@ -167,6 +180,7 @@ async function main(): Promise<void> {
             model: { providerId: 'openai_compatible', modelId: profile.model },
             scenario: profile.scenario,
             preseededFormalStoryAssets: profile.scenario === 'prepared-assets',
+            automaticAssetPreflightRetries: [],
             plannedChapterCount:
               profile.scenario === 'prepared-assets'
                 ? preparedRealConversationChapterCount(profile)
@@ -520,6 +534,7 @@ async function sanitizeAndAuditArtifacts(
   evidenceDirectory: string,
   dataDirectory: string,
 ): Promise<void> {
+  await retainAndAuditSafeDiagnostics(profile, dataDirectory, evidenceDirectory);
   const issues = [
     ...(await sanitizeArtifactDirectory(transientArtifacts)),
     ...(await sanitizeArtifactDirectory(evidenceDirectory)),
@@ -542,6 +557,29 @@ async function sanitizeAndAuditArtifacts(
     if (fs.existsSync(databaseFile)) {
       assertSecretAbsent(fs.readFileSync(databaseFile), profile.apiKey, 'isolated SQLite data');
     }
+  }
+}
+
+async function retainAndAuditSafeDiagnostics(
+  profile: RealConversationAcceptanceProfile,
+  dataDirectory: string,
+  evidenceDirectory: string,
+): Promise<void> {
+  const retained = retainSafeRealAcceptanceDiagnostics({ dataDirectory, evidenceDirectory });
+  if (!retained.directory || retained.files.length === 0) return;
+  try {
+    const issues = await sanitizeArtifactDirectory(retained.directory);
+    if (issues.length > 0) throw new Error('Retained native diagnostics could not be sanitized.');
+    for (const file of retained.files) {
+      assertSecretAbsent(
+        fs.readFileSync(file),
+        profile.apiKey,
+        `retained diagnostic ${path.basename(file)}`,
+      );
+    }
+  } catch (error) {
+    for (const file of retained.files) fs.rmSync(file, { force: true });
+    throw error;
   }
 }
 

@@ -48,7 +48,7 @@ const RULE_SYSTEM_LIMIT: usize = 8;
 const VOLUME_OUTLINE_LIMIT: usize = 8;
 const VOLUME_LIMIT: usize = 24;
 const CHAPTER_LIMIT: usize = 160;
-const STYLE_PROFILE_LIMIT: usize = 4;
+const STYLE_PROFILE_LIMIT: usize = 1;
 const PROTAGONIST_LIMIT: usize = 8;
 const CHARACTER_LIMIT: usize = 64;
 const CHARACTER_STATE_LIMIT: usize = 48;
@@ -2180,7 +2180,7 @@ fn get_metadata(
                 "SELECT id, title, content, structured_json, created_at, updated_at
                  FROM world_settings
                  WHERE novel_id = ?1 AND is_active = 1
-                 ORDER BY created_at ASC, id ASC",
+                 ORDER BY updated_at DESC, created_at DESC, id DESC",
             )
             .map_err(|error| error.to_string())?;
         let rows = statement
@@ -2409,7 +2409,18 @@ fn get_metadata(
                         sentence_style, dialogue_ratio, description_ratio, psychological_ratio,
                         battle_style, battle_intensity, emotion_tendency, chapter_ending,
                         forbidden_styles, style_summary, raw_config_json, is_active
-                 FROM style_profiles WHERE novel_id = ?1 AND is_active = 1",
+                 FROM style_profiles
+                 WHERE is_active = 1
+                   AND (novel_id = ?1 OR novel_id IS NULL)
+                 ORDER BY CASE
+                              WHEN novel_id = ?1 THEN 0
+                              WHEN source_type = 'system_default'
+                               AND name = '默认小说风格' THEN 1
+                              ELSE 2
+                          END,
+                          updated_at DESC,
+                          id ASC
+                 LIMIT 1",
             )
             .map_err(|error| error.to_string())?;
         let rows = statement
@@ -2449,7 +2460,13 @@ fn get_metadata(
                         pace_level, dialogue_ratio, description_ratio, battle_intensity,
                         emotion_tendency, ending_hook_required, extra_requirements,
                         forbidden_items, is_default
-                 FROM output_profiles WHERE novel_id = ?1 AND is_default = 1",
+                 FROM output_profiles
+                 WHERE is_default = 1
+                   AND (novel_id = ?1 OR novel_id IS NULL)
+                 ORDER BY CASE WHEN novel_id = ?1 THEN 0 ELSE 1 END,
+                          updated_at DESC,
+                          id ASC
+                 LIMIT 1",
             )
             .map_err(|error| error.to_string())?;
         let rows = statement
@@ -3574,8 +3591,9 @@ mod tests {
                 );
                 CREATE TABLE style_profiles (
                     id TEXT PRIMARY KEY,
-                    novel_id TEXT NOT NULL,
+                    novel_id TEXT,
                     name TEXT NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT 'manual',
                     description TEXT,
                     narrative_perspective TEXT,
                     tone TEXT,
@@ -3596,7 +3614,7 @@ mod tests {
                 );
                 CREATE TABLE output_profiles (
                     id TEXT PRIMARY KEY,
-                    novel_id TEXT NOT NULL,
+                    novel_id TEXT,
                     name TEXT NOT NULL,
                     target_word_count INTEGER,
                     min_word_count INTEGER,
@@ -5175,6 +5193,110 @@ mod tests {
     }
 
     #[test]
+    fn read_context_resolves_generation_profiles_with_scoped_fallbacks() {
+        let connection = fixture_connection();
+        connection
+            .execute_batch(
+                "INSERT INTO style_profiles (
+                    id, novel_id, name, source_type, is_active, updated_at
+                 ) VALUES
+                    ('global-style-specialized', NULL, '快节奏战斗风', 'system_default', 1,
+                     '2026-08-31T00:00:00Z'),
+                    ('global-style-default', NULL, '默认小说风格', 'system_default', 1,
+                     '2026-08-20T00:00:00Z'),
+                    ('project-style-z', 'novel-1', '作品风格 Z', 'manual', 1,
+                     '2026-08-30T00:00:00Z'),
+                    ('project-style-a', 'novel-1', '作品风格 A', 'manual', 1,
+                     '2026-08-30T00:00:00Z'),
+                    ('foreign-style', 'novel-2', '其他作品风格', 'manual', 1,
+                     '2026-09-01T00:00:00Z');
+                 INSERT INTO output_profiles (
+                    id, novel_id, name, is_default, updated_at
+                 ) VALUES
+                    ('global-output-z', NULL, '全局输出 Z', 1, '2026-08-30T00:00:00Z'),
+                    ('global-output-a', NULL, '全局输出 A', 1, '2026-08-30T00:00:00Z'),
+                    ('project-output-z', 'novel-1', '作品输出 Z', 1,
+                     '2026-08-31T00:00:00Z'),
+                    ('project-output-a', 'novel-1', '作品输出 A', 1,
+                     '2026-08-31T00:00:00Z'),
+                    ('foreign-output', 'novel-2', '其他作品输出', 1,
+                     '2026-09-01T00:00:00Z');",
+            )
+            .expect("install generation profile fixtures");
+
+        let project_result = call_tool(
+            &connection,
+            "novel.read_context",
+            &json!({"novelId": "novel-1"}),
+        )
+        .expect("project generation profiles should be readable");
+        assert_eq!(
+            project_result["data"]["styleProfiles"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            project_result["data"]["styleProfiles"][0]["id"],
+            "project-style-a"
+        );
+        assert_eq!(
+            project_result["data"]["outputProfiles"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            project_result["data"]["outputProfiles"][0]["id"],
+            "project-output-a"
+        );
+        assert_eq!(
+            project_result["data"]["projectionLimits"]["styleProfiles"],
+            1
+        );
+
+        connection
+            .execute_batch(
+                "UPDATE style_profiles SET is_active = 0 WHERE novel_id = 'novel-1';
+                 UPDATE output_profiles SET is_default = 0 WHERE novel_id = 'novel-1';",
+            )
+            .expect("disable project generation profiles");
+        let global_result = call_tool(
+            &connection,
+            "novel.read_context",
+            &json!({"novelId": "novel-1"}),
+        )
+        .expect("global generation profiles should be used as fallback");
+        assert_eq!(
+            global_result["data"]["styleProfiles"][0]["id"],
+            "global-style-default"
+        );
+        assert_eq!(
+            global_result["data"]["outputProfiles"][0]["id"],
+            "global-output-a"
+        );
+
+        connection
+            .execute(
+                "UPDATE style_profiles SET is_active = 0 WHERE id = 'global-style-default'",
+                [],
+            )
+            .expect("disable built-in global default");
+        let remaining_global_result = call_tool(
+            &connection,
+            "novel.read_context",
+            &json!({"novelId": "novel-1"}),
+        )
+        .expect("remaining active global style should be used");
+        assert_eq!(
+            remaining_global_result["data"]["styleProfiles"][0]["id"],
+            "global-style-specialized"
+        );
+    }
+
+    #[test]
     fn read_context_orders_chapters_by_full_book_sequence() {
         let connection = fixture_connection();
         install_cross_volume_context_fixture(&connection);
@@ -5529,7 +5651,7 @@ mod tests {
     }
 
     #[test]
-    fn read_context_orders_world_settings_and_labels_primary_role() {
+    fn read_context_uses_latest_active_world_as_primary_with_stable_ordering() {
         let connection = fixture_connection();
         connection
             .execute_batch(
@@ -5543,12 +5665,14 @@ mod tests {
                      '2026-07-01T00:00:00Z', '2026-08-29T00:00:00Z'),
                     ('world-inactive', 'novel-1', '停用旧设定', '不应进入上下文', '{}', 0,
                      '2026-07-02T00:00:00Z', '2026-08-29T00:00:00Z'),
-                    ('world-b', 'novel-1', '同刻后序', '第二条正式设定', '{}', 1,
+                    ('world-a', 'novel-1', '同刻先序', '同刻第一条正式设定', '{}', 1,
+                     '2026-08-02T00:00:00Z', '2026-08-29T00:00:00Z'),
+                    ('world-b', 'novel-1', '同刻后序', '主世界正式设定', '{}', 1,
+                     '2026-08-02T00:00:00Z', '2026-08-29T00:00:00Z'),
+                    ('world-c', 'novel-1', '较早创建', '第三条正式设定', '{}', 1,
                      '2026-08-01T00:00:00Z', '2026-08-29T00:00:00Z'),
-                    ('world-c', 'novel-1', '稍后创建', '第三条正式设定', '{}', 1,
-                     '2026-08-02T00:00:00Z', '2026-08-02T00:00:00Z'),
-                    ('world-a', 'novel-1', '同刻先序', '主世界正式设定', '{}', 1,
-                     '2026-08-01T00:00:00Z', '2026-08-28T00:00:00Z');",
+                    ('world-d', 'novel-1', '较早更新', '第四条正式设定', '{}', 1,
+                     '2026-08-03T00:00:00Z', '2026-08-28T00:00:00Z');",
             )
             .expect("prepare multi-world fixture");
 
@@ -5565,13 +5689,14 @@ mod tests {
             .iter()
             .filter_map(|world| world["id"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["world-a", "world-b", "world-c"]);
-        assert_eq!(worlds.len(), 3);
+        assert_eq!(ids, vec!["world-b", "world-a", "world-c", "world-d"]);
+        assert_eq!(worlds.len(), 4);
         assert_eq!(worlds[0]["role"], "primary");
         assert_eq!(worlds[0]["isActive"], true);
         assert_eq!(worlds[0]["novelId"], "novel-1");
         assert_eq!(worlds[1]["role"], "supplemental");
         assert_eq!(worlds[2]["role"], "supplemental");
+        assert_eq!(worlds[3]["role"], "supplemental");
         assert_eq!(worlds[0]["content"], "主世界正式设定");
     }
 

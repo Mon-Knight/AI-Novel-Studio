@@ -21,7 +21,7 @@ pub fn find_world_settings_by_novel(
     novel_id: &str,
 ) -> Result<Vec<WorldSettingDto>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, novel_id, title, content, structured_json, is_active, created_at, updated_at FROM world_settings WHERE novel_id = ?1 ORDER BY created_at ASC")
+        .prepare("SELECT id, novel_id, title, content, structured_json, is_active, created_at, updated_at FROM world_settings WHERE novel_id = ?1 ORDER BY is_active DESC, updated_at DESC, created_at DESC, id DESC")
         .map_err(|e| e.to_string())?;
 
     let items = stmt

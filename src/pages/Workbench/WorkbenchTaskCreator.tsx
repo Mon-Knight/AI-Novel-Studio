@@ -68,6 +68,7 @@ export function WorkbenchTaskCreator({
     selectedModel,
     refreshing: pluginsLoading,
     refreshError: pluginsError,
+    allowLocalFallback: true,
   });
   const modelBlocksSubmit = !modelAvailability.canSend && !conversationalGoal;
   const modelDirectoryMessage =
@@ -260,6 +261,7 @@ export function WorkbenchTaskCreator({
               <LoaderCircle
                 className="workbench-readiness-icon is-spinning"
                 aria-hidden="true"
+                strokeWidth={1.8}
                 size={15}
               />
               <span className="workbench-readiness-copy">
@@ -269,7 +271,12 @@ export function WorkbenchTaskCreator({
           )}
           {contextFailed && (
             <div className="workbench-readiness-hint is-warning" role="status">
-              <CircleAlert className="workbench-readiness-icon" aria-hidden="true" size={15} />
+              <CircleAlert
+                className="workbench-readiness-icon"
+                aria-hidden="true"
+                size={15}
+                strokeWidth={1.8}
+              />
               <span className="workbench-readiness-copy">
                 旧版上下文未能安全整理；创作任务已暂停，请重新启动应用后重试。
               </span>

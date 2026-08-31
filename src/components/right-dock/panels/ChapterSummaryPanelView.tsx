@@ -15,7 +15,6 @@ import {
   FolderOpen,
   Lightbulb,
   Link2,
-  LoaderCircle,
   Pause,
   Pin,
   RefreshCw,
@@ -24,6 +23,7 @@ import {
   TriangleAlert,
   Zap,
 } from 'lucide-react';
+import { PanelLoaderIcon } from './PanelLoaderIcon';
 
 interface ChapterSummaryPanelViewProps {
   aiSettings: AiSettings;
@@ -135,7 +135,7 @@ export function ChapterSummaryPanelView({
           >
             {genLoading ? (
               <>
-                <LoaderCircle className="workspace-spinning-icon" aria-hidden="true" size={14} />
+                <PanelLoaderIcon />
                 <span>AI 正在分析正文...</span>
               </>
             ) : (
@@ -252,7 +252,7 @@ export function ChapterSummaryPanelView({
             >
               {genLoading ? (
                 <>
-                  <LoaderCircle className="workspace-spinning-icon" aria-hidden="true" size={14} />
+                  <PanelLoaderIcon />
                   <span>保存中...</span>
                 </>
               ) : (
@@ -444,7 +444,7 @@ export function ChapterSummaryPanelView({
             >
               {genLoading ? (
                 <>
-                  <LoaderCircle className="workspace-spinning-icon" aria-hidden="true" size={14} />
+                  <PanelLoaderIcon />
                   <span>生成中...</span>
                 </>
               ) : (

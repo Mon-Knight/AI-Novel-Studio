@@ -367,7 +367,7 @@ describe('AiGeneratePanelView', () => {
     const wordInput = screen.getByRole('spinbutton');
     fireEvent.change(wordInput, { target: { value: '3000' } });
     fireEvent.blur(wordInput);
-    fireEvent.click(screen.getByRole('button', { name: '✓ 已保存' }));
+    fireEvent.click(screen.getByRole('button', { name: '已保存' }));
     fireEvent.click(screen.getByRole('button', { name: '生成新稿' }));
     fireEvent.click(screen.getByRole('button', { name: '重新生成' }));
     const selects = screen.getAllByRole('combobox');

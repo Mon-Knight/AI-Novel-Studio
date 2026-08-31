@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Stethoscope } from 'lucide-react';
 import { save } from '@tauri-apps/api/dialog';
 import { writeTextFile } from '@tauri-apps/api/fs';
 import { appLogger } from '../../services/observability/appLogger';
@@ -109,7 +110,7 @@ function DiagnosticsSettingsCard() {
   return (
     <section className="detail-card" style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span aria-hidden="true">🩺</span>
+        <Stethoscope aria-hidden="true" size={18} strokeWidth={1.8} />
         <strong>诊断与崩溃报告</strong>
       </div>
       <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--color-text-secondary)' }}>

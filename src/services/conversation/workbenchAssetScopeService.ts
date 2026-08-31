@@ -1,3 +1,8 @@
+import type { Chapter } from '../../types/chapter';
+import type { ChapterSummary } from '../../types/chapterSummary';
+import type { ContextRecord } from '../../types/context';
+import type { ChapterDraft } from '../../types/ai';
+import type { MemoryDocumentPage } from '../../types/memory';
 import type { Novel } from '../../types/novel';
 import type { Protagonist } from '../../types/protagonist';
 import type { ReferenceWork } from '../../types/reference';
@@ -7,17 +12,28 @@ import type { OutputProfile } from '../../types/output';
 import type { ChapterCharacter } from '../../types/character';
 import type { ChapterEvent } from '../../types/chapterEvent';
 import type { ChapterOutline, MasterOutline, VolumeOutline } from '../../types/outline';
+import type { Volume } from '../../types/volume';
 import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
+import { chapterSummaryService } from '../context/chapterSummaryService';
+import { contextRecordService, isContextCompressionRecord } from '../context/contextRecordService';
+import { buildPersistedWorldStateTimeline } from '../context/worldStateTimeline';
+import { chapterRepository } from '../database/chapterRepository';
+import { draftVersionService } from '../database/draftVersionService';
 import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { settingRepository } from '../database/settingRepository';
+import { volumeRepository } from '../database/volumeRepository';
+import { memoryService } from '../memory/memoryService';
 import {
   chapterOutlineService,
   masterOutlineService,
   volumeOutlineService,
 } from '../outlines/outlineService';
-import { resolveWorldBackgroundForWriter } from '../prompt/contextBuilder';
+import {
+  resolveWorldBackgroundForWriter,
+  selectPrimaryWorldSettingForWriter,
+} from '../prompt/contextBuilder';
 import { referenceLibraryService } from '../references/referenceLibraryService';
 import {
   resolveGenerationProfiles,
@@ -26,6 +42,7 @@ import {
 import { outputProfileService } from '../styles/outputProfileService';
 import { styleProfileService } from '../styles/styleProfileService';
 import { computeContentSha256 } from '../../utils/contentIntegrity';
+import { findPreviousChapterForContinuity } from './workbenchChapterWriter';
 
 export type WorkbenchAssetScopeGroup = 'foundation' | 'structure' | 'controls' | 'continuity';
 
@@ -92,6 +109,12 @@ export interface WorkbenchAssetScopeDependencies {
   getChapterEvents: (chapterId: string) => Promise<ChapterEvent[]>;
   getGenerationProfiles: (novelId: string) => Promise<GenerationProfiles>;
   getReferences: (novelId: string) => Promise<ReferenceWork[]>;
+  getChapters: (novelId: string) => Promise<Chapter[]>;
+  getVolumes: (novelId: string) => Promise<Volume[]>;
+  getAdoptedDraftByChapterId: (chapterId: string) => Promise<ChapterDraft | null>;
+  getContextRecords: (novelId: string) => Promise<ContextRecord[]>;
+  getChapterSummaries: (novelId: string) => Promise<ChapterSummary[]>;
+  getMemoryDocuments: (novelId: string) => Promise<MemoryDocumentPage>;
 }
 
 interface LoadResult<T> {
@@ -130,6 +153,13 @@ const defaultDependencies: WorkbenchAssetScopeDependencies = {
     return { resolution, style, output };
   },
   getReferences: (novelId) => referenceLibraryService.listWorks(novelId),
+  getChapters: (novelId) => chapterRepository.getByNovelId(novelId),
+  getVolumes: (novelId) => volumeRepository.getByNovelId(novelId),
+  getAdoptedDraftByChapterId: (chapterId) => draftVersionService.getAdoptedByChapterId(chapterId),
+  getContextRecords: (novelId) => contextRecordService.getByNovelId(novelId),
+  getChapterSummaries: (novelId) => chapterSummaryService.getByNovelId(novelId),
+  getMemoryDocuments: (novelId) =>
+    memoryService.listDocuments({ novelId, status: 'active', limit: 50 }),
 };
 
 function unavailableItem(
@@ -199,6 +229,112 @@ async function assetEvidence(
   };
 }
 
+function formatCount(value: number): string {
+  return value.toLocaleString('zh-CN');
+}
+
+function orderChaptersForContextPreview(chapters: Chapter[], volumes: Volume[]): Chapter[] {
+  const volumeOrder = new Map(volumes.map((volume) => [volume.id, volume.orderIndex]));
+  return [...chapters].sort(
+    (left, right) =>
+      (volumeOrder.get(left.volumeId ?? '') ?? Number.MAX_SAFE_INTEGER) -
+        (volumeOrder.get(right.volumeId ?? '') ?? Number.MAX_SAFE_INTEGER) ||
+      left.orderIndex - right.orderIndex ||
+      left.chapterNumber - right.chapterNumber ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+function selectContextPreview(input: {
+  targetChapterId: string;
+  chapters: Chapter[];
+  volumes: Volume[];
+  records: ContextRecord[];
+  summaries: ChapterSummary[];
+}): { chapterSummaries: ChapterSummary[]; contextRecords: ContextRecord[] } {
+  const orderedChapters = orderChaptersForContextPreview(input.chapters, input.volumes);
+  const targetIndex = orderedChapters.findIndex((chapter) => chapter.id === input.targetChapterId);
+  if (targetIndex < 0) return { chapterSummaries: [], contextRecords: [] };
+
+  const previousChapter = targetIndex > 0 ? orderedChapters[targetIndex - 1] : undefined;
+  const previousSummary = previousChapter
+    ? input.summaries
+        .filter(
+          (summary) =>
+            summary.chapterId === previousChapter.id && summary.enabled && !summary.isExpired,
+        )
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
+        )[0]
+    : undefined;
+
+  const priorChapterIds = new Set(
+    orderedChapters.slice(0, Math.max(0, targetIndex)).map((chapter) => chapter.id),
+  );
+  const orderedVolumes = [...input.volumes].sort(
+    (left, right) =>
+      left.orderIndex - right.orderIndex ||
+      left.volumeNumber - right.volumeNumber ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id),
+  );
+  const targetChapter = orderedChapters[targetIndex];
+  const targetVolumeIndex = targetChapter.volumeId
+    ? orderedVolumes.findIndex((volume) => volume.id === targetChapter.volumeId)
+    : -1;
+  const previousVolumeId =
+    targetVolumeIndex > 0 ? orderedVolumes[targetVolumeIndex - 1]?.id : undefined;
+
+  const volumeContexts = previousVolumeId
+    ? input.records.filter(
+        (record) =>
+          record.contextType === 'volume_summary' &&
+          record.volumeId === previousVolumeId &&
+          record.isActive &&
+          !record.isExpired,
+      )
+    : [];
+  const eligibleManual = input.records.filter(
+    (record) =>
+      record.isActive &&
+      !record.isExpired &&
+      record.contextType !== 'chapter_summary' &&
+      record.contextType !== 'volume_summary' &&
+      (!record.chapterId || priorChapterIds.has(record.chapterId)),
+  );
+  const compression = eligibleManual
+    .filter(isContextCompressionRecord)
+    .sort(
+      (left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+    )[0];
+  const manualContexts = (
+    compression
+      ? [
+          compression,
+          ...eligibleManual.filter(
+            (record) =>
+              !isContextCompressionRecord(record) &&
+              record.updatedAt.localeCompare(compression.createdAt) > 0,
+          ),
+        ]
+      : eligibleManual
+  ).slice(0, 10);
+
+  const seen = new Set<string>();
+  const contextRecords = [...volumeContexts, ...manualContexts].filter((record) => {
+    if (seen.has(record.id)) return false;
+    seen.add(record.id);
+    return true;
+  });
+  return {
+    chapterSummaries: previousSummary ? [previousSummary] : [],
+    contextRecords,
+  };
+}
+
 export async function loadWorkbenchAssetScope(
   input: { novelId: string; chapterId?: string; volumeId?: string },
   dependencies: WorkbenchAssetScopeDependencies = defaultDependencies,
@@ -223,6 +359,11 @@ export async function loadWorkbenchAssetScope(
     events,
     profiles,
     references,
+    chapters,
+    volumes,
+    contextRecords,
+    chapterSummaries,
+    memoryDocuments,
   ] = await Promise.all([
     capture(dependencies.getNovel(novelId), null),
     capture(dependencies.getWorldSettings(novelId), []),
@@ -243,10 +384,33 @@ export async function loadWorkbenchAssetScope(
       output: null,
     }),
     capture(dependencies.getReferences(novelId), []),
+    chapterId
+      ? capture(dependencies.getChapters(novelId), [])
+      : Promise.resolve({ value: [], failed: false }),
+    chapterId
+      ? capture(dependencies.getVolumes(novelId), [])
+      : Promise.resolve({ value: [], failed: false }),
+    chapterId
+      ? capture(dependencies.getContextRecords(novelId), [])
+      : Promise.resolve({ value: [], failed: false }),
+    chapterId
+      ? capture(dependencies.getChapterSummaries(novelId), [])
+      : Promise.resolve({ value: [], failed: false }),
+    chapterId
+      ? capture(dependencies.getMemoryDocuments(novelId), {
+          total: 0,
+          offset: 0,
+          limit: 50,
+          items: [],
+        })
+      : Promise.resolve({
+          value: { total: 0, offset: 0, limit: 50, items: [] },
+          failed: false,
+        }),
   ]);
 
   const items: WorkbenchAssetScopeItem[] = [];
-  const activeWorld = worlds.value.find((item) => item.isActive && item.content.trim());
+  const activeWorld = selectPrimaryWorldSettingForWriter(worlds.value);
   const resolvedWorld = resolveWorldBackgroundForWriter(worlds.value, novel.value?.worldBackground);
   items.push(
     worlds.failed || novel.failed
@@ -590,40 +754,242 @@ export async function loadWorkbenchAssetScope(
   );
 
   if (chapterId) {
-    items.push(
-      {
+    const continuityStructureFailed = chapters.failed || volumes.failed;
+    const targetChapter = chapters.value.find((item) => item.id === chapterId);
+    const previousChapter = continuityStructureFailed
+      ? undefined
+      : findPreviousChapterForContinuity(chapters.value, volumes.value, chapterId);
+    const adoptedDraft = previousChapter
+      ? await capture(dependencies.getAdoptedDraftByChapterId(previousChapter.id), null)
+      : { value: null, failed: false };
+
+    let adoptedChapterItem: WorkbenchAssetScopeItem;
+    if (continuityStructureFailed || adoptedDraft.failed) {
+      adoptedChapterItem = unavailableItem('adopted_chapter', 'continuity', '前章采用稿', false);
+    } else if (!targetChapter) {
+      adoptedChapterItem = {
         key: 'adopted_chapter',
         group: 'continuity',
         label: '前章采用稿',
-        value: '生成前核验正式采用状态',
-        status: 'automatic',
+        value: '目标章节不在正式卷章结构中',
+        status: 'missing',
         required: false,
-      },
-      {
-        key: 'context_record',
+        evidence: await assetEvidence(
+          '正式卷章顺序',
+          { targetChapterId: chapterId },
+          '目标章未找到',
+        ),
+      };
+    } else if (!previousChapter) {
+      adoptedChapterItem = {
+        key: 'adopted_chapter',
         group: 'continuity',
-        label: 'Context',
-        value: '按目标章节读取正式记录',
+        label: '前章采用稿',
+        value: '首章，无前章采用稿',
         status: 'automatic',
         required: false,
-      },
-      {
-        key: 'memory_context',
+        evidence: await assetEvidence(
+          '正式卷章顺序',
+          { targetChapterId: chapterId, orderIndex: targetChapter.orderIndex },
+          '首章，无前序来源',
+        ),
+      };
+    } else if (!adoptedDraft.value?.isAdopted) {
+      adoptedChapterItem = {
+        key: 'adopted_chapter',
         group: 'continuity',
-        label: 'Memory',
-        value: '按本轮指令检索',
-        status: 'automatic',
+        label: '前章采用稿',
+        value: `《${previousChapter.title}》尚无正式采用稿`,
+        status: 'missing',
         required: false,
-      },
-      {
-        key: 'world_state',
+        evidence: await assetEvidence(
+          '紧邻前章正式采用状态',
+          {
+            chapterId: previousChapter.id,
+            adoptedDraftId: previousChapter.adoptedDraftId,
+            status: previousChapter.status,
+          },
+          `未采用${safeUpdatedAt(previousChapter.updatedAt) ? ` · ${safeUpdatedAt(previousChapter.updatedAt)}` : ''}`,
+        ),
+      };
+    } else {
+      const draft = adoptedDraft.value;
+      const contentFingerprint =
+        draft.contentState?.status === 'ready'
+          ? compactSha256(draft.contentState.contentHash)
+          : draft.content.trim()
+            ? compactSha256(await computeContentSha256(draft.content))
+            : await fingerprint({
+                draftId: draft.id,
+                versionNo: draft.versionNo,
+                wordCount: draft.wordCount,
+                updatedAt: draft.updatedAt,
+              });
+      adoptedChapterItem = {
+        key: 'adopted_chapter',
         group: 'continuity',
-        label: '世界状态',
-        value: '由已采用总结与 Context 投影',
-        status: 'automatic',
+        label: '前章采用稿',
+        value: `《${previousChapter.title}》· v${draft.versionNo} · ${formatCount(draft.wordCount)} 字`,
+        status: 'ready',
         required: false,
-      },
-    );
+        evidence: {
+          source: '紧邻前章正式采用稿',
+          revision: [safeVersion(draft.versionNo), safeUpdatedAt(draft.updatedAt)]
+            .filter(Boolean)
+            .join(' · '),
+          ...(contentFingerprint ? { fingerprint: contentFingerprint } : {}),
+        },
+      };
+    }
+
+    const contextPreview =
+      continuityStructureFailed || contextRecords.failed || chapterSummaries.failed
+        ? undefined
+        : selectContextPreview({
+            targetChapterId: chapterId,
+            chapters: chapters.value,
+            volumes: volumes.value,
+            records: contextRecords.value,
+            summaries: chapterSummaries.value,
+          });
+    const contextCount = contextPreview
+      ? contextPreview.chapterSummaries.length + contextPreview.contextRecords.length
+      : 0;
+    const contextItem: WorkbenchAssetScopeItem = !contextPreview
+      ? unavailableItem('context_record', 'continuity', 'Context', false)
+      : {
+          key: 'context_record',
+          group: 'continuity',
+          label: 'Context',
+          value:
+            contextCount > 0
+              ? `前章总结 ${formatCount(contextPreview.chapterSummaries.length)} 条 · 正式记录 ${formatCount(contextPreview.contextRecords.length)} 条`
+              : '目标章前无可用正式 Context',
+          status: contextCount > 0 ? 'ready' : 'missing',
+          required: false,
+          evidence: await assetEvidence(
+            '章节总结 + 正式 ContextRecord',
+            {
+              summaryIds: contextPreview.chapterSummaries.map((summary) => summary.id),
+              contextRecords: contextPreview.contextRecords.map((record) => ({
+                id: record.id,
+                contentHash: record.contentHash,
+                draftVersion: record.draftVersion,
+              })),
+            },
+            [
+              `${formatCount(contextCount)} 条候选来源`,
+              latestUpdatedAt([
+                ...contextPreview.chapterSummaries.map((summary) => summary.updatedAt),
+                ...contextPreview.contextRecords.map((record) => record.updatedAt),
+              ]),
+            ]
+              .filter(Boolean)
+              .join(' · '),
+          ),
+        };
+
+    const memoryItem: WorkbenchAssetScopeItem = memoryDocuments.failed
+      ? unavailableItem('memory_context', 'continuity', 'Memory', false)
+      : {
+          key: 'memory_context',
+          group: 'continuity',
+          label: 'Memory',
+          value:
+            memoryDocuments.value.total > 0
+              ? `活动文档 ${formatCount(memoryDocuments.value.total)} 条 · 本轮按指令检索`
+              : 'SQLite Memory 暂无活动文档',
+          status: memoryDocuments.value.total > 0 ? 'ready' : 'missing',
+          required: false,
+          evidence: await assetEvidence(
+            'SQLite Memory 活动文档索引',
+            {
+              total: memoryDocuments.value.total,
+              documents: memoryDocuments.value.items.map((document) => ({
+                id: document.id,
+                sourceType: document.sourceType,
+                sourceId: document.sourceId,
+                sourceVersion: document.sourceVersion,
+                sourceHash: document.sourceHash,
+              })),
+            },
+            [
+              `${formatCount(memoryDocuments.value.total)} 条活动文档`,
+              latestUpdatedAt(memoryDocuments.value.items.map((document) => document.updatedAt)),
+            ]
+              .filter(Boolean)
+              .join(' · '),
+          ),
+        };
+
+    const orderedChapters = orderChaptersForContextPreview(chapters.value, volumes.value);
+    const targetChapterIndex = orderedChapters.findIndex((item) => item.id === chapterId);
+    const worldStateTimeline =
+      continuityStructureFailed || contextRecords.failed || chapterSummaries.failed
+        ? undefined
+        : buildPersistedWorldStateTimeline({
+            orderedChapters,
+            volumes: volumes.value,
+            targetChapterId: chapterId,
+            summaries: chapterSummaries.value,
+            contextRecords: contextRecords.value,
+          });
+    const worldStateReadFailed =
+      continuityStructureFailed || contextRecords.failed || chapterSummaries.failed;
+    const sourceSummaryIds = new Set(worldStateTimeline?.sourceSummaryIds ?? []);
+    const sourceContextRecordIds = new Set(worldStateTimeline?.sourceContextRecordIds ?? []);
+    const worldStateItem: WorkbenchAssetScopeItem = worldStateReadFailed
+      ? unavailableItem('world_state', 'continuity', '世界状态', false)
+      : worldStateTimeline
+        ? {
+            key: 'world_state',
+            group: 'continuity',
+            label: '世界状态',
+            value: `覆盖前序 ${formatCount(worldStateTimeline.chapterCount)} 章 · 总结 ${formatCount(worldStateTimeline.sourceSummaryIds.length)} / Context ${formatCount(worldStateTimeline.sourceContextRecordIds.length)}`,
+            status: 'ready',
+            required: false,
+            evidence: await assetEvidence(
+              '已采用章节总结 + 正式 ContextRecord 投影',
+              {
+                latestChapterId: worldStateTimeline.latestChapterId,
+                sourceSummaryIds: worldStateTimeline.sourceSummaryIds,
+                sourceContextRecordIds: worldStateTimeline.sourceContextRecordIds,
+              },
+              [
+                `最近章节 ${worldStateTimeline.latestChapterId}`,
+                latestUpdatedAt([
+                  ...chapterSummaries.value
+                    .filter((summary) => sourceSummaryIds.has(summary.id))
+                    .map((summary) => summary.updatedAt),
+                  ...contextRecords.value
+                    .filter((record) => sourceContextRecordIds.has(record.id))
+                    .map((record) => record.updatedAt),
+                ]),
+              ]
+                .filter(Boolean)
+                .join(' · '),
+            ),
+          }
+        : {
+            key: 'world_state',
+            group: 'continuity',
+            label: '世界状态',
+            value:
+              targetChapterIndex === 0
+                ? '首章，无前序世界状态'
+                : targetChapterIndex < 0
+                  ? '目标章节不在正式卷章结构中'
+                  : '前序章节尚无可投影的正式状态',
+            status: targetChapterIndex === 0 ? 'automatic' : 'missing',
+            required: false,
+            evidence: await assetEvidence(
+              '已采用章节总结 + 正式 ContextRecord 投影',
+              { targetChapterId: chapterId, targetChapterIndex },
+              targetChapterIndex === 0 ? '首章，无前序来源' : '0 个状态来源',
+            ),
+          };
+
+    items.push(adoptedChapterItem, contextItem, memoryItem, worldStateItem);
   }
 
   return {

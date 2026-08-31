@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Trash2 } from 'lucide-react';
 import { formatDateTime } from '../../utils/date';
 import { formatTokenCount } from '../../utils/format';
 import type { AiTaskRecord } from '../../types/ai';
@@ -151,14 +152,14 @@ function AiTaskRecordCard({
             {canDelete && (
               <button
                 className="btn btn-text btn-sm"
-                style={{ color: 'var(--color-error)', fontSize: 16 }}
+                style={{ color: 'var(--color-error)' }}
                 onClick={(event) => {
                   event.stopPropagation();
                   onDelete(task);
                 }}
                 title="删除此记录"
               >
-                🗑️
+                <Trash2 aria-hidden="true" size={16} strokeWidth={1.8} />
               </button>
             )}
           </div>

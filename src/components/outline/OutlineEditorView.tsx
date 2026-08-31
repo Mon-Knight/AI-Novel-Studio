@@ -1,4 +1,17 @@
 import type { OutlineGenerationContext } from '../../types/outline';
+import {
+  Bot,
+  CheckCircle2,
+  Circle,
+  ClipboardList,
+  FilePlus2,
+  Globe2,
+  LoaderCircle,
+  Save,
+  TriangleAlert,
+  UserRound,
+  Zap,
+} from 'lucide-react';
 
 interface OutlineVersionSummary {
   id: string;
@@ -46,7 +59,8 @@ export function OutlineEditorView({
   if (loading) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-muted)' }}>
-        ⏳ 加载中……
+        <LoaderCircle className="is-spinning" aria-hidden="true" size={16} strokeWidth={1.8} />{' '}
+        加载中……
       </div>
     );
   }
@@ -62,10 +76,23 @@ export function OutlineEditorView({
           padding: '0 4px',
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 15, marginRight: 8 }}>📋 {typeLabel}</span>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontWeight: 600,
+            fontSize: 15,
+            marginRight: 8,
+          }}
+        >
+          <ClipboardList aria-hidden="true" size={16} strokeWidth={1.8} />
+          {typeLabel}
+        </span>
 
         <button className="btn btn-primary btn-sm" onClick={onAiGenerate}>
-          🤖 AI 生成
+          <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
+          AI 生成
         </button>
         <button
           className="btn btn-sm"
@@ -75,19 +102,23 @@ export function OutlineEditorView({
           }}
           onClick={() => onSave(false)}
         >
-          💾 保存{isDirty ? ' *' : ''}
+          <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+          保存{isDirty ? ' *' : ''}
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => onSave(true)}>
-          📑 保存为新版本
+          <FilePlus2 aria-hidden="true" size={14} strokeWidth={1.8} />
+          保存为新版本
         </button>
         {currentId && (
           <button className="btn btn-secondary btn-sm" onClick={onSetActive}>
-            ✅ 设为采用版本
+            <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
+            设为采用版本
           </button>
         )}
         {context && (
           <button className="btn btn-secondary btn-sm" onClick={onToggleContext}>
-            📊 上下文
+            <ClipboardList aria-hidden="true" size={14} strokeWidth={1.8} />
+            上下文
           </button>
         )}
 
@@ -111,20 +142,48 @@ export function OutlineEditorView({
             lineHeight: 1.6,
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>📊 生成上下文摘要</div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: 600,
+              marginBottom: 4,
+            }}
+          >
+            <ClipboardList aria-hidden="true" size={13} strokeWidth={1.8} />
+            生成上下文摘要
+          </div>
           {context.protagonistName && (
-            <div>
-              👤 主角：{context.protagonistName} · {context.protagonistIdentity}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <UserRound aria-hidden="true" size={12} strokeWidth={1.8} />
+              主角：{context.protagonistName} · {context.protagonistIdentity}
             </div>
           )}
-          {context.protagonistAbility && <div>⚡ 能力：{context.protagonistAbility}</div>}
-          {context.worldBackground && <div>🌍 世界：{context.worldBackground.slice(0, 150)}……</div>}
+          {context.protagonistAbility && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Zap aria-hidden="true" size={12} strokeWidth={1.8} />
+              能力：{context.protagonistAbility}
+            </div>
+          )}
+          {context.worldBackground && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Globe2 aria-hidden="true" size={12} strokeWidth={1.8} />
+              世界：{context.worldBackground.slice(0, 150)}……
+            </div>
+          )}
           {context.activeMasterOutline && (
-            <div>📋 总纲：{context.activeMasterOutline.slice(0, 150)}……</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <ClipboardList aria-hidden="true" size={12} strokeWidth={1.8} />
+              总纲：{context.activeMasterOutline.slice(0, 150)}……
+            </div>
           )}
           <div style={{ marginTop: 4, color: 'var(--color-text-muted)' }}>
-            {!context.protagonistName && '⚠️ 缺少主角设定 '}
-            {!context.worldBackground && '⚠️ 缺少世界背景 '}
+            {(!context.protagonistName || !context.worldBackground) && (
+              <TriangleAlert aria-hidden="true" size={12} strokeWidth={1.8} />
+            )}
+            {!context.protagonistName && '缺少主角设定 '}
+            {!context.worldBackground && '缺少世界背景 '}
           </div>
         </div>
       )}
@@ -182,7 +241,9 @@ export function OutlineEditorView({
                 title={version.isActive ? '当前采用版本' : `版本 ${version.version}`}
               >
                 v{version.version}
-                {version.isActive ? ' ★' : ''}
+                {version.isActive && (
+                  <CheckCircle2 aria-label="当前采用版本" size={11} strokeWidth={1.8} />
+                )}
               </span>
             ))}
           </div>
@@ -192,7 +253,19 @@ export function OutlineEditorView({
       <div style={{ fontSize: 11, color: 'var(--color-text-muted)', display: 'flex', gap: 16 }}>
         <span>字数：{content.length}</span>
         <span>版本：v{currentVersion}</span>
-        {isDirty && <span style={{ color: 'var(--color-warning)' }}>● 未保存</span>}
+        {isDirty && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              color: 'var(--color-warning)',
+            }}
+          >
+            <Circle aria-hidden="true" size={7} strokeWidth={1.8} />
+            未保存
+          </span>
+        )}
       </div>
     </div>
   );

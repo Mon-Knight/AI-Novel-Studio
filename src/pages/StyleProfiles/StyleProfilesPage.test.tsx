@@ -210,7 +210,7 @@ test('a custom output profile can be made default without weakening default dele
   const previousDefaultCard = getCardByTitle('默认章节');
   const customCard = getCardByTitle('自定义长章');
   assert.ok(within(previousDefaultCard).getByText('默认'));
-  assert.equal(within(previousDefaultCard).queryByRole('button', { name: /🗑/ }), null);
+  assert.equal(within(previousDefaultCard).queryByRole('button', { name: /删除输出方案/ }), null);
 
   fireEvent.click(within(customCard).getByRole('button', { name: '设为默认' }));
 
@@ -219,8 +219,8 @@ test('a custom output profile can be made default without weakening default dele
   );
   assert.ok(await within(customCard).findByText('默认'));
   assert.equal(within(customCard).queryByRole('button', { name: '设为默认' }), null);
-  assert.equal(within(customCard).queryByRole('button', { name: /🗑/ }), null);
-  assert.ok(within(previousDefaultCard).getByRole('button', { name: /🗑/ }));
+  assert.equal(within(customCard).queryByRole('button', { name: /删除输出方案/ }), null);
+  assert.ok(within(previousDefaultCard).getByRole('button', { name: /删除输出方案/ }));
   assert.ok(screen.getByText('已将「自定义长章」设为默认输出方案'));
 });
 
@@ -370,7 +370,7 @@ test('creating a style submits normalized ratios and refreshes the visible list'
 
   renderPage();
   await screen.findByText('夜色叙事');
-  fireEvent.click(screen.getByRole('button', { name: '+ 新建风格' }));
+  fireEvent.click(screen.getByRole('button', { name: '新建风格' }));
 
   const dialog = getOpenDialog();
   assert.ok(within(dialog).getByText('新建风格方案'));
@@ -412,7 +412,9 @@ test('style deletion is denied on cancel and performed only after confirmation',
 
   renderPage();
   await screen.findByText('夜色叙事');
-  const deleteButton = within(getCardByTitle('夜色叙事')).getByRole('button', { name: /🗑/ });
+  const deleteButton = within(getCardByTitle('夜色叙事')).getByRole('button', {
+    name: /删除风格/,
+  });
 
   fireEvent.click(deleteButton);
   await waitFor(() => assert.equal(prompts.length, 1));
@@ -447,7 +449,9 @@ test('output deletion is denied on cancel and performed only after confirmation'
   const outputTab = await screen.findByRole('button', { name: /输出控制\s*\(1\)/ });
   fireEvent.click(outputTab);
   await screen.findByText('冲突章节');
-  const deleteButton = within(getCardByTitle('冲突章节')).getByRole('button', { name: /🗑/ });
+  const deleteButton = within(getCardByTitle('冲突章节')).getByRole('button', {
+    name: /删除输出方案/,
+  });
 
   fireEvent.click(deleteButton);
   await waitFor(() => assert.equal(prompts.length, 1));
@@ -472,7 +476,7 @@ test('a failed deletion keeps the style visible and shows the service error', as
 
   renderPage();
   await screen.findByText('夜色叙事');
-  fireEvent.click(within(getCardByTitle('夜色叙事')).getByRole('button', { name: /🗑/ }));
+  fireEvent.click(within(getCardByTitle('夜色叙事')).getByRole('button', { name: /删除风格/ }));
 
   assert.ok(await screen.findByText('SQLite 写入失败，请稍后重试'));
   assert.ok(screen.getByText('夜色叙事'));
@@ -483,7 +487,7 @@ test('TXT analysis exposes validation feedback before attempting an AI request',
   fireEvent.click(screen.getByRole('button', { name: /TXT分析/ }));
 
   const dialog = getOpenDialog();
-  assert.ok(within(dialog).getByText('📄 TXT 风格分析'));
+  assert.ok(within(dialog).getByText('TXT 风格分析'));
   fireEvent.click(within(dialog).getByRole('button', { name: /分析$/ }));
 
   assert.ok(await within(dialog).findByText('请输入参考文本'));

@@ -15,6 +15,21 @@ import {
 
 export type TaskTemplate = WorkbenchTaskTemplate;
 
+const CORE_ASSET_TOTAL = 4;
+const AVAILABLE_CORE_ASSET_STATUSES = new Set(['ready', 'fallback']);
+
+function resolveCoreAssetReadyCount(
+  summary: WorkbenchAssetScopeSummary | null,
+  hasChapter: boolean,
+): number | null {
+  if (!summary) return null;
+  const keys = ['world', 'rules', 'protagonist', hasChapter ? 'chapter_outline' : 'master_outline'];
+  return keys.reduce((count, key) => {
+    const item = summary.items.find((candidate) => candidate.key === key);
+    return count + (item && AVAILABLE_CORE_ASSET_STATUSES.has(item.status) ? 1 : 0);
+  }, 0);
+}
+
 interface WorkbenchComposerProps {
   templates: TaskTemplate[];
   plugins: CurrentPluginProjection[];
@@ -24,6 +39,7 @@ interface WorkbenchComposerProps {
   draft: string;
   composerError: string;
   conflictMessage?: string;
+  selectedConversationPreparing: boolean;
   selectedConversationRunning: boolean;
   selectedConversationArchived: boolean;
   hasTask: boolean;
@@ -53,6 +69,7 @@ export function WorkbenchComposer({
   draft,
   composerError,
   conflictMessage,
+  selectedConversationPreparing,
   selectedConversationRunning,
   selectedConversationArchived,
   hasTask,
@@ -73,10 +90,16 @@ export function WorkbenchComposer({
   onOpenAssetScopePath,
 }: WorkbenchComposerProps) {
   const [assetScopeOpen, setAssetScopeOpen] = useState(false);
-  const composerDisabled = selectedConversationArchived;
-  const executionLocked = selectedConversationRunning || selectedConversationArchived;
-  const templatesDisabled =
-    selectedConversationRunning || selectedConversationArchived || chaptersLoading;
+  const composerState = selectedConversationRunning
+    ? 'running'
+    : selectedConversationPreparing
+      ? 'preparing'
+      : selectedConversationArchived
+        ? 'archived'
+        : 'idle';
+  const composerDisabled = composerState === 'archived';
+  const executionLocked = composerState !== 'idle';
+  const templatesDisabled = executionLocked || chaptersLoading;
   const modelAvailability = getWorkbenchModelAvailability({
     plugins,
     selectedModel,
@@ -95,9 +118,14 @@ export function WorkbenchComposer({
     modelAvailability.status === 'available' || !modelAvailability.message
       ? modelAvailability.message
       : `${modelAvailability.message} 本地能力问答仍可发送。`;
+  const coreAssetReadyCount = resolveCoreAssetReadyCount(assetScope, hasChapter);
+  const coreAssetSummary = `核心 ${coreAssetReadyCount ?? '--'}/${CORE_ASSET_TOTAL}`;
 
   return (
-    <footer className="workbench-composer agent-console-composer">
+    <footer
+      className="workbench-composer agent-console-composer"
+      data-composer-state={composerState}
+    >
       <div className="workbench-template-row" data-testid="workbench-task-templates">
         {templates.map((template) => (
           <button
@@ -130,6 +158,7 @@ export function WorkbenchComposer({
             <LoaderCircle
               className="workbench-readiness-icon is-spinning"
               aria-hidden="true"
+              strokeWidth={1.8}
               size={15}
             />
             <span className="workbench-readiness-copy">
@@ -143,15 +172,25 @@ export function WorkbenchComposer({
             data-testid="workbench-context-warning"
             role="status"
           >
-            <CircleAlert className="workbench-readiness-icon" aria-hidden="true" size={15} />
+            <CircleAlert
+              className="workbench-readiness-icon"
+              aria-hidden="true"
+              size={15}
+              strokeWidth={1.8}
+            />
             <span className="workbench-readiness-copy">
               旧版上下文未能安全整理；创作执行已暂停，请重新启动应用后重试。
             </span>
           </div>
         )}
-        {selectedConversationArchived && (
+        {composerState === 'archived' && (
           <div className="workbench-readiness-hint" role="status">
-            <CircleAlert className="workbench-readiness-icon" aria-hidden="true" size={15} />
+            <CircleAlert
+              className="workbench-readiness-icon"
+              aria-hidden="true"
+              size={15}
+              strokeWidth={1.8}
+            />
             <span className="workbench-readiness-copy">
               此任务已归档；恢复任务后才能继续发送目标。
             </span>
@@ -222,12 +261,22 @@ export function WorkbenchComposer({
             data-testid="workbench-asset-scope-toggle"
             aria-expanded={assetScopeOpen}
             aria-controls="workbench-asset-scope-panel"
-            title="查看可用创作上下文"
+            title={`查看可用创作上下文，${coreAssetSummary}`}
             disabled={!assetScope && !assetScopeLoading && !assetScopeError}
             onClick={() => setAssetScopeOpen((open) => !open)}
           >
             <Database aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>创作上下文</span>
+            <span
+              className={`workbench-asset-scope-core ${
+                coreAssetReadyCount === CORE_ASSET_TOTAL ? 'is-complete' : ''
+              }`.trim()}
+              data-testid="workbench-core-asset-summary"
+              data-core-ready={coreAssetReadyCount ?? ''}
+              data-core-total={CORE_ASSET_TOTAL}
+            >
+              {coreAssetSummary}
+            </span>
             {assetScope && assetScope.requiredMissingCount > 0 && (
               <span className="workbench-asset-scope-count">{assetScope.requiredMissingCount}</span>
             )}
@@ -244,7 +293,15 @@ export function WorkbenchComposer({
             locked
           />
 
-          {!taskReady ? (
+          {composerState === 'preparing' ? (
+            <span
+              className="workbench-composer-note"
+              data-testid="workbench-task-preparing"
+              role="status"
+            >
+              正在准备任务
+            </span>
+          ) : !taskReady ? (
             <span className="workbench-composer-note" data-testid="workbench-task-pending">
               {hasTask ? '任务恢复中，草稿会保留' : '请先新建创作任务'}
             </span>
@@ -252,7 +309,7 @@ export function WorkbenchComposer({
             chaptersLoading && <span className="workbench-composer-note">正在读取章节…</span>
           )}
 
-          {selectedConversationRunning ? (
+          {composerState === 'running' ? (
             <button
               type="button"
               className="workbench-send-button is-stop"
@@ -261,7 +318,7 @@ export function WorkbenchComposer({
               title="停止当前任务"
               onClick={onCancel}
             >
-              <Square aria-hidden="true" size={13} fill="currentColor" strokeWidth={1.8} />
+              <Square aria-hidden="true" size={13} strokeWidth={1.8} />
             </button>
           ) : (
             <button
@@ -273,7 +330,7 @@ export function WorkbenchComposer({
               onClick={onSend}
               disabled={executionLocked || !canSendDraft}
             >
-              <ArrowUp aria-hidden="true" size={17} strokeWidth={2} />
+              <ArrowUp aria-hidden="true" size={17} strokeWidth={1.8} />
             </button>
           )}
         </div>

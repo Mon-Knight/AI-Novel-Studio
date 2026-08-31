@@ -27,6 +27,8 @@ const REAL_E2E_PROVIDER_EVIDENCE_ENV = {
 };
 const CREATIVE_BRIEF_MARKER = '[[ANS_CREATIVE_BRIEF:v1]]';
 const AUTOMATIC_ASSET_TURN_MARKER = '[[ANS_WORKBENCH_TURN:v1;origin=workbench_asset_preparation]]';
+const AUTOMATIC_CHAPTER_SUMMARY_TURN_MARKER =
+  '[[ANS_WORKBENCH_TURN:v1;origin=workbench_chapter_summary]]';
 const PROVIDER_EVIDENCE_SCHEMA_VERSION = 'real_conversation_provider_request_evidence_v1';
 const PROVIDER_EVIDENCE_HASH_ALGORITHM = 'sha256';
 const PROVIDER_EVIDENCE_MESSAGE_SERIALIZATION = 'json_stringify_messages_v1';
@@ -314,9 +316,11 @@ function writeRealE2eProviderEvidence(providerRequestId, body, parsed) {
   const latestUserMessage = latestUserMessageText(messages);
   const assetKind = automaticAssetKind(latestUserMessage);
   const creativeBrief = parseCreativeBrief(latestUserMessage);
-  const turnOrigin = latestUserMessage.includes(AUTOMATIC_ASSET_TURN_MARKER)
-    ? 'workbench_asset_preparation'
-    : null;
+  const turnOrigin = latestUserMessage.includes(AUTOMATIC_CHAPTER_SUMMARY_TURN_MARKER)
+    ? 'workbench_chapter_summary'
+    : latestUserMessage.includes(AUTOMATIC_ASSET_TURN_MARKER)
+      ? 'workbench_asset_preparation'
+      : null;
   const configuredCanaryIds = REAL_E2E_PROVIDER_EVIDENCE.canaries.map((canary) => canary.id);
   const matchedCanaryIds = REAL_E2E_PROVIDER_EVIDENCE.canaries
     .filter((canary) => messageStrings.some((value) => value.includes(canary.value)))
@@ -336,9 +340,11 @@ function writeRealE2eProviderEvidence(providerRequestId, body, parsed) {
     latestUserMessageSha256: sha256(latestUserMessage),
     latestUserMessageLength: latestUserMessage.length,
     classification:
-      assetKind && creativeBrief.status === 'valid' && turnOrigin
-        ? 'automatic_asset_preparation'
-        : 'other',
+      turnOrigin === 'workbench_chapter_summary'
+        ? 'automatic_chapter_summary'
+        : assetKind && creativeBrief.status === 'valid' && turnOrigin
+          ? 'automatic_asset_preparation'
+          : 'other',
     turnOrigin,
     assetKind,
     creativeBriefParseStatus: creativeBrief.status,

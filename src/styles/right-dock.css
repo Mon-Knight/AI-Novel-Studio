@@ -126,20 +126,33 @@
   display: flex;
   flex-direction: column;
   z-index: var(--z-right-panel);
-  animation: panelSlideIn 0.2s ease;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity var(--motion-panel) var(--ease-enter),
+    transform var(--motion-panel) var(--ease-enter);
   /* v1.0.24: 恢复面板内部交互 */
   pointer-events: auto;
 }
 
-@keyframes panelSlideIn {
-  from {
+.right-panel.is-open {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+@starting-style {
+  .right-panel.is-open {
     opacity: 0;
     transform: translateX(8px);
   }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+}
+
+.right-panel.is-closed {
+  opacity: 0;
+  transform: translateX(8px);
+  transition-timing-function: var(--ease-exit);
+  pointer-events: none;
 }
 
 .right-panel-header {
@@ -152,6 +165,9 @@
 }
 
 .right-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
@@ -166,7 +182,9 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   font-size: 18px;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .right-panel-close:hover {
@@ -186,6 +204,9 @@
 }
 
 .panel-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
@@ -263,7 +284,11 @@
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   text-align: center;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
   margin-bottom: var(--spacing-sm);
 }
 
@@ -367,7 +392,7 @@
   height: 100%;
   border-radius: inherit;
   background: var(--color-primary);
-  transition: width 160ms ease;
+  transition: width var(--motion-normal) var(--ease-standard);
 }
 
 .agent-plan-steps {
@@ -540,7 +565,9 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .engineering-tab:hover {
@@ -855,7 +882,7 @@
   color: var(--color-error-text);
   font-size: var(--font-size-xs);
   line-height: 1.5;
-  animation: panelErrorShake 0.3s ease;
+  animation: panelErrorShake var(--motion-emphasis) var(--ease-standard);
 }
 
 .panel-error-icon {
@@ -917,25 +944,6 @@
   }
   100% {
     background-position: -200% 0;
-  }
-}
-
-/* --- 加载指示器 --- */
-.panel-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-border-light);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: panelSpin 0.6s linear infinite;
-  vertical-align: middle;
-  margin-right: 6px;
-}
-
-@keyframes panelSpin {
-  to {
-    transform: rotate(360deg);
   }
 }
 
@@ -1094,20 +1102,6 @@
 
   .right-panel-title {
     font-size: 15px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .right-panel,
-  .panel-error,
-  .panel-loading-bar,
-  .panel-spinner {
-    animation: none;
-  }
-
-  .right-toolbar-btn,
-  .right-toolbar-btn::before {
-    transition: none;
   }
 }
 
@@ -1422,7 +1416,7 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
   margin-bottom: var(--spacing-sm);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast);
 }
 
 .character-item:hover {
@@ -1517,7 +1511,10 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
   margin-bottom: var(--spacing-sm);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
@@ -1531,4 +1528,34 @@
   border-color: var(--color-primary);
   background: var(--color-primary-light);
   color: var(--color-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-error,
+  .panel-loading-bar {
+    animation: none;
+  }
+
+  .right-panel,
+  .right-toolbar-btn,
+  .right-toolbar-btn::before,
+  .right-panel-close,
+  .panel-btn,
+  .agent-plan-progress__track > span,
+  .engineering-tab,
+  .character-item,
+  .event-item,
+  .polish-option {
+    transition: none;
+  }
+
+  .right-panel,
+  .right-panel.is-open,
+  .right-panel.is-closed {
+    transform: none;
+  }
+
+  .panel-loading-bar {
+    background-position: 0 0;
+  }
 }

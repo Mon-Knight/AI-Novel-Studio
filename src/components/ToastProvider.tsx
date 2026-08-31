@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { X } from 'lucide-react';
 import { registerToastListener, type ToastItem } from '../utils/toast';
 import './Toast.css';
 
@@ -82,11 +83,13 @@ function ToastProvider({ children }: { children: React.ReactNode }) {
                 <div className="toast-message">{toast.message}</div>
               </div>
               <button
+                type="button"
                 className="toast-close"
                 onClick={() => dismissToast(toast.id)}
                 aria-label="关闭"
+                title="关闭"
               >
-                ×
+                <X aria-hidden="true" size={16} strokeWidth={1.8} />
               </button>
             </div>
           ))}

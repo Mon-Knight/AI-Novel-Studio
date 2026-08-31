@@ -10,9 +10,11 @@ import {
   buildRealConversationInstructions,
   createRealConversationStoryPlanApplyEvidence,
   environmentWithoutRealCredential,
+  findRealConversationLocalDecisionReply,
   findRealConversationFixtureLeaks,
   isAutomaticSummaryProtocolRecoveryError,
   isRealConversationAcceptanceFailureStage,
+  isRetryableAutomaticAssetPreflightFailure,
   isRetryableRealAcceptanceRunFailure,
   isTransientRealAcceptanceProviderFailure,
   parseRealConversationStoryPlan,
@@ -23,6 +25,8 @@ import {
   recordRealConversationStoryPlanApplyFailure,
   recordRealConversationStoryPlanApplySuccess,
   REAL_ACCEPTANCE_CANDIDATE_INTEGRITY_CONTRACT_VERSION,
+  REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE,
+  REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR,
   REAL_ACCEPTANCE_BUILT_IN_OUTPUT_PROFILE,
   REAL_ACCEPTANCE_BUILT_IN_STYLE_PROFILE,
   REAL_ACCEPTANCE_EVIDENCE_SCHEMA_VERSION,
@@ -40,6 +44,7 @@ import {
   shouldPreseedRealAcceptanceStoryAssets,
   type RealConversationAcceptanceEvidenceOutcome,
   type RealConversationAcceptanceFailureStage,
+  type RealConversationAutomaticAssetPreflightRetryEvidence,
 } from './real-conversation-acceptance-profile.ts';
 
 const validEnvironment = (): NodeJS.ProcessEnv => ({
@@ -47,6 +52,64 @@ const validEnvironment = (): NodeJS.ProcessEnv => ({
   [REAL_ACCEPTANCE_ENV.baseUrl]: 'http://localhost:12074/v1',
   [REAL_ACCEPTANCE_ENV.model]: 'acceptance-model',
   [REAL_ACCEPTANCE_ENV.apiKey]: 'acceptance-credential-value',
+});
+
+test('attributes a local decision reply across an atomic automatic-summary follow-up', () => {
+  const reply = findRealConversationLocalDecisionReply(
+    [
+      {
+        turnId: 'decision-turn',
+        role: 'user',
+        content: '采用本章正文候选',
+        createdAt: '2026-08-31T00:00:00.000Z',
+      },
+      {
+        turnId: 'summary-follow-up',
+        role: 'user',
+        content: '总结本章',
+        createdAt: '2026-08-31T00:00:00.010Z',
+      },
+      {
+        turnId: 'decision-reply',
+        role: 'assistant',
+        content: '本章候选已采用为正式正文，系统正在准备章节总结。',
+        createdAt: '2026-08-31T00:00:00.020Z',
+      },
+      {
+        turnId: 'provider-reply',
+        role: 'assistant',
+        content: '章节总结候选已生成。',
+        createdAt: '2026-08-31T00:00:01.000Z',
+      },
+    ],
+    'decision-turn',
+    '2026-08-31T00:00:00.030Z',
+  );
+
+  assert.equal(reply?.turnId, 'decision-reply');
+});
+
+test('does not attribute a provider reply created after the local decision completed', () => {
+  const reply = findRealConversationLocalDecisionReply(
+    [
+      {
+        turnId: 'decision-turn',
+        role: 'user',
+        content: '采用本章正文候选',
+        createdAt: '2026-08-31T00:00:00.000Z',
+      },
+      {
+        turnId: 'provider-reply',
+        role: 'assistant',
+        content: '章节总结候选已生成。',
+        createdAt: '2026-08-31T00:00:01.000Z',
+      },
+    ],
+    'decision-turn',
+    '2026-08-31T00:00:00.030Z',
+  );
+
+  assert.equal(reply, undefined);
 });
 
 function automaticAssetPreparationEvidence(
@@ -99,6 +162,15 @@ function automaticAssetPreparationEvidence(
     toolName: toolNames[asset],
     toolAttemptCount: 1,
     failedToolAttemptCount: 0,
+    retryCount: 0,
+    attempts: [
+      {
+        attempt: 1,
+        runId: `automatic-run-${index}`,
+        status: 'completed' as const,
+        error: '',
+      },
+    ],
     applyTransactionId: `automatic-apply-${index}`,
     conflictCode: '' as const,
     postRunProjectionEvidence: {
@@ -155,6 +227,24 @@ function automaticAssetPreparationEvidence(
   };
 }
 
+function automaticAssetPreflightRetryEvidence(
+  preparation: ReturnType<typeof automaticAssetPreparationEvidence>,
+  _index: number,
+  retryAttempt: 1 | 2,
+): RealConversationAutomaticAssetPreflightRetryEvidence {
+  return {
+    chapter: preparation.chapter,
+    asset: preparation.asset,
+    goalSha256: preparation.goalSha256,
+    turnId: preparation.turnId,
+    turnOrigin: 'workbench_asset_preparation',
+    model: { providerId: 'openai_compatible', modelId: 'acceptance-model' },
+    retryAttempt,
+    errorCode: REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE,
+    runId: null,
+  };
+}
+
 const currentPassingEvidence = () => {
   const candidateHash = 'a'.repeat(64);
   const providerHash = 'b'.repeat(64);
@@ -189,6 +279,7 @@ const currentPassingEvidence = () => {
       automaticAssetPreparationEvidence('protagonist', 2),
       automaticAssetPreparationEvidence('story_plan', 3),
     ],
+    automaticAssetPreflightRetries: [] as RealConversationAutomaticAssetPreflightRetryEvidence[],
     automaticChapterSummaryTurnCount: 1,
     runCount: 5,
     artifactCount: 5,
@@ -213,6 +304,31 @@ const currentPassingEvidence = () => {
       applyResult: 'applied' as const,
       applyTransactionId: 'apply-story-plan-1',
       applyErrorCode: null,
+    },
+    analysisMaterial: {
+      schemaVersion: 'real_conversation_analysis_material_v1',
+      formalAssets: {
+        primaryWorldSettingId: 'world-1',
+        worldSettings: [{ id: 'world-1', title: '潮港', content: '潮汐决定旧港开放时间。' }],
+        ruleSystems: [{ id: 'rule-1', title: '潮汐规则', content: '退潮后才能进入旧港。' }],
+        protagonists: [{ name: '沈岚', identity: '档案修复师' }],
+      },
+      chapters: [
+        {
+          chapter: 1,
+          chapterId: 'chapter-1',
+          summary: { id: 'summary-1', summary: '沈岚在旧港发现时间记录矛盾。' },
+          contextRecords: [
+            {
+              id: 'context-1',
+              contextType: 'chapter_summary',
+              title: '第一章摘要',
+              content: '沈岚发现潮汐记录异常。',
+              importance: 5,
+            },
+          ],
+        },
+      ],
     },
     chapters: [
       {
@@ -240,6 +356,22 @@ const currentPassingEvidence = () => {
         summaryArtifactId: 'summary-artifact-1',
         summaryApplyTransactionId: 'summary-apply-1',
         summaryId: 'summary-1',
+        summaryStartRetryCount: 0,
+        summaryStartRecoveries: [],
+        summaryRetryCount: 0,
+        summaryAttempts: [
+          {
+            attempt: 1,
+            runId: 'summary-run-1',
+            status: 'completed' as const,
+            error: '',
+          },
+        ],
+        summaryExecutionEvidence: {
+          sessionId: `session-summary-${'1'.repeat(32)}`,
+          messageCounts: [2, 5, 5, 7],
+          providerUsage: { unit: 'tokens' as const, input: 1_024 },
+        },
         contextRecordCount: 3,
         memorySourceTypes: ['adopted_draft', 'chapter_summary', 'context_record'],
         snapshotSourceTypes: [
@@ -291,6 +423,93 @@ const currentPassingEvidence = () => {
   };
 };
 
+const currentTwoChapterPassingEvidence = () => {
+  const evidence = currentPassingEvidence();
+  const firstChapter = evidence.chapters[0]!;
+  const secondChapter = structuredClone(firstChapter);
+  const adoptedContent = '汐'.repeat(800);
+  const adoptedHash = createHash('sha256').update(adoptedContent, 'utf8').digest('hex');
+  const candidateHash = 'c'.repeat(64);
+  Object.assign(secondChapter, {
+    chapter: 2,
+    chapterId: 'chapter-2',
+    chapterTitle: '第二章 旧钟',
+    chapterOutline: '主角沿着时间记录追查旧钟。',
+    chapterGoal: '推进核心悬念。',
+    artifactId: 'artifact-2',
+    candidateHash,
+    adoptedHash,
+    adoptedContent,
+    continuitySourceHash: firstChapter.adoptedHash,
+    summaryTurnId: 'summary-turn-2',
+    summaryRunId: 'summary-run-2',
+    summaryArtifactId: 'summary-artifact-2',
+    summaryApplyTransactionId: 'summary-apply-2',
+    summaryId: 'summary-2',
+    summaryAttempts: [
+      { attempt: 1, runId: 'summary-run-2', status: 'completed' as const, error: '' },
+    ],
+    summaryExecutionEvidence: {
+      sessionId: `session-summary-${'2'.repeat(32)}`,
+      messageCounts: [2, 5, 7],
+      providerUsage: { unit: 'tokens' as const, input: 1_080 },
+    },
+  });
+  Object.assign(secondChapter.artifactCandidateIntegrityCheck, {
+    artifactId: 'artifact-2',
+    artifactContentSha256: candidateHash,
+  });
+  Object.assign(secondChapter.providerRequestEvidence, {
+    taskId: 'provider-task-2',
+    attemptId: 'provider-attempt-2',
+  });
+  secondChapter.snapshotSourceTypes.push('adopted_chapter');
+  Object.assign(secondChapter.providerRequestEvidence.generationSourceStatuses, {
+    adopted_chapter: 'included',
+  });
+  evidence.chapters.push(secondChapter);
+  evidence.analysisMaterial.chapters.push({
+    chapter: 2,
+    chapterId: 'chapter-2',
+    summary: { id: 'summary-2', summary: '沈岚沿时间记录追查旧钟。' },
+    contextRecords: [
+      {
+        id: 'context-2',
+        contextType: 'chapter_summary',
+        title: '第二章摘要',
+        content: '沈岚发现旧钟记录异常。',
+        importance: 5,
+      },
+    ],
+  });
+  const continuationInstruction = '继续写';
+  Reflect.set(evidence, 'userInstructions', [REAL_ACCEPTANCE_SPARSE_IDEA, continuationInstruction]);
+  Reflect.set(evidence, 'creativeUserTurns', [
+    ...evidence.creativeUserTurns,
+    {
+      sequence: 2,
+      turnId: 'turn-2',
+      source: 'user',
+      classification: 'continuation_instruction',
+      contentSha256: createHash('sha256').update(continuationInstruction, 'utf8').digest('hex'),
+      contentLength: continuationInstruction.length,
+    },
+  ]);
+  for (const [key, value] of [
+    ['userTurnCount', 2],
+    ['automaticChapterSummaryTurnCount', 2],
+    ['chapterCount', 2],
+    ['completedChapterCount', 2],
+    ['totalWordCount', 1_600],
+    ['independentWordCount', 1_600],
+    ['chapterWordCountSum', 1_600],
+    ['novelWordCount', 1_600],
+  ] as const) {
+    Reflect.set(evidence, key, value);
+  }
+  return evidence;
+};
+
 test('real conversation acceptance defaults to the sparse-idea loopback gate', () => {
   const profile = readRealConversationAcceptanceProfile(validEnvironment());
 
@@ -306,6 +525,86 @@ test('current passing evidence accepts an explicit zero repair count and persist
 
   assert.doesNotThrow(() => assertCurrentRealConversationPassingEvidence(evidence));
   assert.equal(evidence.chapters[0]?.integrityRepairCount, 0);
+  assert.deepEqual(evidence.automaticAssetPreflightRetries, []);
+});
+
+test('passing evidence requires isolated automatic-summary Sessions and reset Provider input', () => {
+  const passing = currentTwoChapterPassingEvidence();
+  assert.doesNotThrow(() => assertCurrentRealConversationPassingEvidence(passing));
+
+  const legacySchema = currentPassingEvidence();
+  (legacySchema as { evidenceSchemaVersion: string }).evidenceSchemaVersion =
+    'real_conversation_acceptance_evidence_v5';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(legacySchema),
+    /evidence schema is not real_conversation_acceptance_evidence_v6/i,
+  );
+
+  const missingExecutionEvidence = currentPassingEvidence();
+  delete (
+    missingExecutionEvidence.chapters[0] as {
+      summaryExecutionEvidence?: unknown;
+    }
+  ).summaryExecutionEvidence;
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(missingExecutionEvidence),
+    /fresh automatic-summary Session/i,
+  );
+
+  const reusedSession = currentTwoChapterPassingEvidence();
+  reusedSession.chapters[1]!.summaryExecutionEvidence.sessionId =
+    reusedSession.chapters[0]!.summaryExecutionEvidence.sessionId;
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(reusedSession),
+    /reused a DSH Session across chapters/i,
+  );
+
+  for (const messageCounts of [
+    [2, 5],
+    [2, 5, 8],
+    [23, 30, 37],
+  ]) {
+    const invalidCounts = currentPassingEvidence();
+    invalidCounts.chapters[0]!.summaryExecutionEvidence.messageCounts = messageCounts;
+    assert.throws(
+      () => assertCurrentRealConversationPassingEvidence(invalidCounts),
+      /reset 2\/5\/7 Provider input/i,
+    );
+  }
+
+  for (const input of [0, 1.5]) {
+    const invalidUsage = currentPassingEvidence();
+    invalidUsage.chapters[0]!.summaryExecutionEvidence.providerUsage.input = input;
+    assert.throws(
+      () => assertCurrentRealConversationPassingEvidence(invalidUsage),
+      /positive token usage/i,
+    );
+  }
+
+  const ordinarySession = currentPassingEvidence();
+  ordinarySession.chapters[0]!.summaryExecutionEvidence.sessionId = 'session-task-ordinary';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(ordinarySession),
+    /fresh automatic-summary Session/i,
+  );
+});
+
+test('automatic asset preflight retries only the exact model attestation code', () => {
+  assert.equal(
+    isRetryableAutomaticAssetPreflightFailure(
+      REAL_ACCEPTANCE_AUTOMATIC_ASSET_PREFLIGHT_RETRY_ERROR_CODE,
+    ),
+    true,
+  );
+  for (const errorCode of [
+    'MODEL_TOOL_CALLING_NOT_VERIFIED: PROBE_TRANSPORT_FAILED',
+    'model_tool_calling_not_verified',
+    'WORKBENCH_SERVICE_FAILED',
+    '',
+    undefined,
+  ]) {
+    assert.equal(isRetryableAutomaticAssetPreflightFailure(errorCode), false, String(errorCode));
+  }
 });
 
 test('sparse passing evidence distinguishes creative turns and actual Provider asset requests', () => {
@@ -346,6 +645,150 @@ test('sparse passing evidence distinguishes creative turns and actual Provider a
   assert.throws(
     () => assertCurrentRealConversationPassingEvidence(fixtureLeak),
     /prepared fixture injection/i,
+  );
+});
+
+test('sparse passing evidence accounts for bounded same-turn automatic asset preflight retries', () => {
+  const evidenceWithRetry = () => {
+    const evidence = currentPassingEvidence();
+    const preparation = evidence.automaticAssetPreparations[0]!;
+    const retry = automaticAssetPreflightRetryEvidence(preparation, 1, 1);
+    evidence.automaticAssetPreflightRetries = [retry];
+    return { evidence, preparation, retry };
+  };
+
+  const passing = evidenceWithRetry();
+  assert.doesNotThrow(() => assertCurrentRealConversationPassingEvidence(passing.evidence));
+
+  const withoutExplicitRetryLedger = currentPassingEvidence();
+  delete (withoutExplicitRetryLedger as { automaticAssetPreflightRetries?: unknown })
+    .automaticAssetPreflightRetries;
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(withoutExplicitRetryLedger),
+    /explicitly report its preflight retries/i,
+  );
+
+  const countMismatch = evidenceWithRetry();
+  countMismatch.evidence.automaticAssetPreparationTurnCount += 1;
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(countMismatch.evidence),
+    /turn count must equal successful preparations because preflight retries reuse the same turn/i,
+  );
+
+  const tooManyRetries = evidenceWithRetry();
+  tooManyRetries.evidence.automaticAssetPreflightRetries = [
+    tooManyRetries.retry,
+    automaticAssetPreflightRetryEvidence(tooManyRetries.preparation, 2, 2),
+    automaticAssetPreflightRetryEvidence(tooManyRetries.preparation, 3, 2),
+  ];
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(tooManyRetries.evidence),
+    /bounded to two exact no-Run-at-failure model-attestation failures/i,
+  );
+
+  const changedTurn = evidenceWithRetry();
+  changedTurn.retry.turnId = 'different-automatic-turn';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(changedTurn.evidence),
+    /preflight retry evidence/i,
+  );
+
+  const changedModel = evidenceWithRetry();
+  changedModel.retry.model.modelId = 'different-model';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(changedModel.evidence),
+    /preflight retry evidence/i,
+  );
+
+  const changedGoal = evidenceWithRetry();
+  changedGoal.retry.goalSha256 = 'f'.repeat(64);
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(changedGoal.evidence),
+    /preflight retry evidence/i,
+  );
+
+  const inexactError = evidenceWithRetry();
+  (inexactError.retry as { errorCode: string }).errorCode =
+    'MODEL_TOOL_CALLING_NOT_VERIFIED: PROBE_TRANSPORT_FAILED';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(inexactError.evidence),
+    /preflight retry evidence/i,
+  );
+
+  const runWasCreated = evidenceWithRetry();
+  (runWasCreated.retry as { runId: string | null }).runId = 'unexpected-run';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(runWasCreated.evidence),
+    /no-Run-at-failure model-attestation failures/i,
+  );
+});
+
+test('sparse passing evidence bounds persistent asset retries to transient Provider failures', () => {
+  const withRetry = () => {
+    const evidence = currentPassingEvidence();
+    const preparation = evidence.automaticAssetPreparations[0]!;
+    preparation.runId = 'automatic-run-1-retry';
+    preparation.retryCount = 1;
+    preparation.attempts = [
+      {
+        attempt: 1,
+        runId: 'automatic-run-1',
+        status: 'failed' as const,
+        error: 'DSH 回合以错误结束: HTTP_408',
+      },
+      {
+        attempt: 2,
+        runId: preparation.runId,
+        status: 'completed' as const,
+        error: '',
+      },
+    ];
+    return { evidence, preparation };
+  };
+
+  const passing = withRetry();
+  assert.doesNotThrow(() => assertCurrentRealConversationPassingEvidence(passing.evidence));
+
+  const nonTransient = withRetry();
+  nonTransient.preparation.attempts[0]!.error = 'HTTP_400 invalid request';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(nonTransient.evidence),
+    /actual Provider request/i,
+  );
+
+  const wrongFinalRun = withRetry();
+  wrongFinalRun.preparation.runId = 'another-run';
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(wrongFinalRun.evidence),
+    /actual Provider request/i,
+  );
+
+  const beyondBudget = withRetry();
+  beyondBudget.preparation.retryCount = 3;
+  beyondBudget.preparation.attempts = [
+    ...beyondBudget.preparation.attempts.slice(0, 1),
+    {
+      attempt: 2,
+      runId: 'automatic-run-1-retry-2',
+      status: 'failed' as const,
+      error: 'HTTP status: 503',
+    },
+    {
+      attempt: 3,
+      runId: 'automatic-run-1-retry-3',
+      status: 'failed' as const,
+      error: 'HTTP status: 503',
+    },
+    {
+      attempt: 4,
+      runId: beyondBudget.preparation.runId,
+      status: 'completed' as const,
+      error: '',
+    },
+  ];
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(beyondBudget.evidence),
+    /actual Provider request/i,
   );
 });
 
@@ -505,6 +948,34 @@ test('legacy or incomplete passing evidence cannot satisfy the current evidence 
   assert.throws(
     () => assertCurrentRealConversationPassingEvidence(missingSummaryMemory),
     /summary, Context, and Memory/i,
+  );
+
+  const withoutSummaryStartLedger = currentPassingEvidence();
+  delete (withoutSummaryStartLedger.chapters[0] as { summaryStartRecoveries?: unknown })
+    .summaryStartRecoveries;
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(withoutSummaryStartLedger),
+    /automatic-summary start recovery ledger/i,
+  );
+
+  const exhaustedSummaryStartRecovery = currentPassingEvidence();
+  exhaustedSummaryStartRecovery.chapters[0]!.summaryStartRetryCount = 1;
+  exhaustedSummaryStartRecovery.chapters[0]!.summaryStartRecoveries = [
+    {
+      attempt: 1,
+      turnId: 'summary-turn-1',
+      trigger: 'workbench-retry-summary-start',
+      observedPhase: 'failed',
+      runCountBefore: 0,
+      runtimeActiveBefore: false,
+      model: { providerId: 'openai_compatible', modelId: 'acceptance-model' },
+      outcome: 'exhausted',
+      firstPersistedRunId: null,
+    },
+  ];
+  assert.throws(
+    () => assertCurrentRealConversationPassingEvidence(exhaustedSummaryStartRecovery),
+    /automatic-summary start recovery ledger/i,
   );
 
   const uncheckedArtifact = currentPassingEvidence();
@@ -1080,19 +1551,89 @@ test('credential is removed from child environments and rejected from evidence',
 test('real acceptance only retries explicit transient HTTP provider failures', () => {
   for (const message of [
     'upstream returned HTTP 408',
+    'DSH 回合以错误结束: HTTP_408',
     'HTTP status: 429',
     'provider status code=500',
     'generate_chapter: HTTP 503 Service Unavailable',
+    '【model】AI 调用失败：模型服务错误（502），请稍后重试。',
+    'AI 调用失败：请求过于频繁或额度不足（429 Rate Limit），请稍后重试或检查账户额度。',
+    'AI 调用失败：模型服务当前过载（overloaded_error），请稍后重试。',
   ]) {
     assert.equal(isTransientRealAcceptanceProviderFailure(message), true, message);
   }
   for (const message of [
     'HTTP 400 invalid request',
     'HTTP 401 unauthorized',
+    'DSH 回合以错误结束: HTTP_404',
+    'NOT_HTTP_408',
     'artifact validation failed',
     'chapter timed out without an HTTP status',
+    'AI 调用失败：请求参数不合法（400 Bad Request）。',
+    'AI 调用失败：模型服务错误（5020），请稍后重试。',
   ]) {
     assert.equal(isTransientRealAcceptanceProviderFailure(message), false, message);
+  }
+});
+
+test('real acceptance retries only explicit Provider timeout failures', () => {
+  for (const message of [
+    'AI_PROVIDER_TIMEOUT',
+    'provider failed with code=AI_PROVIDER_TIMEOUT',
+    '【service】AI 调用失败：请求超时（600 秒），请检查网络或增加超时时间。',
+    '请求超时，请稍后重试。',
+  ]) {
+    assert.equal(isRetryableRealAcceptanceRunFailure(message), true, message);
+  }
+  for (const message of [
+    'AI_PROVIDER_TIMEOUT_EXTRA',
+    'NOT_AI_PROVIDER_TIMEOUT',
+    '章节等待超时，请检查任务状态。',
+    '操作超时',
+    '请求超时配置无效',
+    'HTTP 400 request timeout setting is invalid',
+  ]) {
+    assert.equal(isRetryableRealAcceptanceRunFailure(message), false, message);
+  }
+});
+
+test('real acceptance retries only explicit safe Provider transport codes', () => {
+  for (const message of [
+    'AI_PROVIDER_CONNECT_FAILED',
+    'provider failed with code=AI_PROVIDER_CONNECT_FAILED',
+    '【service】AI_PROVIDER_TRANSPORT_INTERRUPTED: AI 调用失败：与模型服务的传输在完成前中断，请重试。',
+  ]) {
+    assert.equal(isRetryableRealAcceptanceRunFailure(message), true, message);
+  }
+  for (const message of [
+    'AI_PROVIDER_CONNECT_FAILED_EXTRA',
+    'NOT_AI_PROVIDER_TRANSPORT_INTERRUPTED',
+    'AI_PROVIDER_REQUEST_BUILD_FAILED',
+    'AI_PROVIDER_REDIRECT_FAILED',
+    'AI_PROVIDER_RESPONSE_DECODE_FAILED',
+    'AI_PROVIDER_RESPONSE_BODY_FAILED',
+    'AI_PROVIDER_REQUEST_FAILED',
+    'AI 调用失败：网络请求失败。',
+    'AI 调用失败：模型服务响应读取失败，请重试。',
+  ]) {
+    assert.equal(isRetryableRealAcceptanceRunFailure(message), false, message);
+  }
+  assert.equal(REAL_ACCEPTANCE_MAX_RETRYABLE_RUN_RETRIES, 2);
+});
+
+test('real acceptance retries only the exact legacy and current renderer recovery errors', () => {
+  for (const message of [
+    '应用重新启动，上一轮运行已中断，请重新发送任务。',
+    '工作台已重新加载，上一轮运行已中断。请重试本回合。',
+  ]) {
+    assert.equal(isRetryableRealAcceptanceRunFailure(message), true, message);
+  }
+  for (const message of [
+    '应用重新启动，上一轮运行已中断。',
+    '工作台已重新加载，其他运行已中断。请重试本回合。',
+    '上一轮运行已中断。请重试本回合。',
+    '工作台已重新加载，上一轮运行已中断。请重新发送任务。',
+  ]) {
+    assert.equal(isRetryableRealAcceptanceRunFailure(message), false, message);
   }
 });
 
@@ -1131,6 +1672,18 @@ test('real acceptance retries only explicit bounded Writer integrity failures', 
     ),
     true,
   );
+  assert.equal(
+    isRetryableRealAcceptanceRunFailure(
+      '【model】章节候选在 2 次完整性修复后仍未通过：chapter_audit_voice_leakage。请重试本回合。',
+    ),
+    true,
+  );
+  assert.equal(
+    isRetryableRealAcceptanceRunFailure(
+      '章节候选在 2 次完整性修复后仍未通过：chapter_boundary_action_replay, chapter_source_chain_break, chapter_temporal_semantics_conflict。请重试本回合。',
+    ),
+    true,
+  );
   for (const message of [
     '章节连续性有问题，请重试',
     '章节候选在 2 次完整性修复后仍未通过：unknown_issue。请重试本回合。',
@@ -1161,12 +1714,13 @@ test('retryable-run budget exposes two retries and exactly three total attempts'
   assert.equal(REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS, REAL_ACCEPTANCE_MAX_RETRYABLE_RUN_RETRIES + 1);
 });
 
-test('automatic chapter summary recovery accepts only the two exact protocol errors', () => {
+test('automatic chapter summary recovery accepts only exact protocol or verified-probe errors', () => {
   for (const error of [
     'DSH_REQUIRED_CONTEXT_READ_MISSING',
     'DSH_REQUIRED_CONTEXT_READ_MISSING: get_character_states',
     'DSH_REQUIRED_CANDIDATE_TOOL_MISSING',
     'DSH_REQUIRED_CANDIDATE_TOOL_MISSING: summarize_chapter',
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR,
   ]) {
     assert.equal(isAutomaticSummaryProtocolRecoveryError(error), true);
   }
@@ -1176,6 +1730,29 @@ test('automatic chapter summary recovery accepts only the two exact protocol err
     'DSH_REQUIRED_CONTEXT_READ_MISSING_EXTRA',
     'prefix DSH_REQUIRED_CANDIDATE_TOOL_MISSING: summarize_chapter',
     'DSH_CANDIDATE_TOOL_COUNT_INVALID',
+    'DSH 回合以错误结束: STREAM_CLOSED',
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR.replace(
+      'status=200',
+      'status=500',
+    ),
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR.replace(
+      'ans_runtime_attest_tool_call_v1',
+      'summarize_chapter',
+    ),
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR.replace(
+      'finish=tool_calls',
+      'finish=stop',
+    ),
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR.replace(
+      'done=true',
+      'done=false',
+    ),
+    REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR.replace(
+      'probe done status=200',
+      'probe done status=500',
+    ),
+    `prefix ${REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR}`,
+    `${REAL_ACCEPTANCE_AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_ERROR}: extra`,
   ]) {
     assert.equal(isAutomaticSummaryProtocolRecoveryError(error), false);
   }

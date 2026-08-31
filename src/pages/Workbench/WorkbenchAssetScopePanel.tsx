@@ -23,7 +23,7 @@ const GROUPS: Array<{ id: WorkbenchAssetScopeGroup; label: string }> = [
 const STATUS_LABELS: Record<WorkbenchAssetScopeStatus, string> = {
   ready: '可用',
   fallback: '回退可用',
-  automatic: '运行时读取',
+  automatic: '生成时核验',
   missing: '未准备',
   unavailable: '读取失败',
 };
@@ -103,11 +103,12 @@ export function WorkbenchAssetScopePanel({
       id="workbench-asset-scope-panel"
       className="workbench-asset-scope-panel"
       data-testid="workbench-asset-scope-panel"
-      aria-label="可用创作上下文"
+      data-context-stage="preflight-preview"
+      aria-label="生成前资产状态"
     >
       <header className="workbench-asset-scope-header">
         <div>
-          <strong>可用创作上下文</strong>
+          <strong>生成前资产状态</strong>
           {summary && (
             <span>
               {summary.requiredMissingCount > 0
@@ -132,6 +133,10 @@ export function WorkbenchAssetScopePanel({
           />
         </button>
       </header>
+
+      <p className="workbench-asset-scope-disclaimer">
+        这里是发送前预览，不代表本轮已经冻结或注入；运行后请以对话中的上下文回执为准。
+      </p>
 
       {error && (
         <div className="workbench-asset-scope-error" role="alert">

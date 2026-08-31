@@ -1,3 +1,14 @@
+import {
+  Bot,
+  CheckCircle2,
+  Crown,
+  Library,
+  LoaderCircle,
+  Plus,
+  Sparkles,
+  TriangleAlert,
+  UsersRound,
+} from 'lucide-react';
 import type { AiSettings } from '../../../types/ai';
 import type { Chapter } from '../../../types/chapter';
 import type {
@@ -7,6 +18,7 @@ import type {
   ChapterCharacterRole,
 } from '../../../types/character';
 import { CharacterRoleLabels, ChapterCharacterRoleLabels } from '../../../types/character';
+import { CharactersProtagonistSection } from './CharactersProtagonistSection';
 
 interface CharactersPanelViewProps {
   aiSettings: AiSettings;
@@ -58,157 +70,95 @@ export function CharactersPanelView({
   return (
     <div>
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
         )}
         {syncing && (
-          <div style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
-            ⏳ 正在同步主角信息...
+          <div
+            style={{
+              color: 'var(--color-text-muted)',
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+            正在同步主角信息...
           </div>
         )}
         {protagonists.length > 0 && !syncing && (
-          <div style={{ color: 'var(--color-primary)', marginTop: 4 }}>
-            ⭐ 已同步主角：{protagonists.map((protagonist) => protagonist.name).join('、')}
+          <div
+            style={{
+              color: 'var(--color-primary)',
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Crown size={14} strokeWidth={1.8} aria-hidden="true" />
+            已同步主角：{protagonists.map((protagonist) => protagonist.name).join('、')}
           </div>
         )}
         {protagonists.length === 0 && !syncing && (
-          <div style={{ color: 'var(--color-warning)', marginTop: 4 }}>
-            ⚠️ 未检测到主角信息，请先在作品详情中完善主角设定
+          <div
+            style={{
+              color: 'var(--color-warning)',
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+            未检测到主角信息，请先在作品详情中完善主角设定
           </div>
         )}
         {notice && <div style={{ color: 'var(--color-success)', marginTop: 4 }}>{notice}</div>}
         {error && <div style={{ color: 'var(--color-error)', marginTop: 4 }}>{error}</div>}
       </div>
 
-      <div className="panel-section">
-        <div className="panel-section-title">
-          ⭐ 主角快捷项{protagonists.length > 1 ? `（${protagonists.length}）` : ''}
-        </div>
-        {protagonists.length > 0 ? (
-          protagonists.map((protagonist) => {
-            const chapterCharacter = chapterChars.find(
-              (item) => item.characterId === protagonist.id,
-            );
-            return (
-              <div
-                key={protagonist.id}
-                className="character-item"
-                style={{
-                  borderColor: 'var(--color-primary)',
-                  borderWidth: 1,
-                  background: 'color-mix(in srgb, var(--color-primary) 4%, transparent)',
-                }}
-              >
-                <div
-                  className="character-avatar"
-                  style={{
-                    background: 'var(--color-primary)',
-                    color: 'var(--color-on-primary)',
-                    fontWeight: 'bold',
-                  }}
-                >
-                  ⭐
-                </div>
-                <div className="character-info" style={{ flex: 1 }}>
-                  <div className="character-name">
-                    {protagonist.name}
-                    <span
-                      style={{
-                        color: 'var(--color-primary)',
-                        fontSize: 11,
-                        marginLeft: 4,
-                        fontWeight: 'bold',
-                      }}
-                    >
-                      {protagonist.protagonistLabel || '主角'}
-                    </span>
-                  </div>
-                  <div className="character-role">
-                    {protagonist.identity || '作品主角'}
-                    {chapterCharacter?.mustAppear
-                      ? ' · 本章必须出场'
-                      : chapterCharacter
-                        ? ' · 本章出场'
-                        : ' · 本章不出场'}
-                  </div>
-                  {protagonist.goal && (
-                    <div
-                      style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}
-                    >
-                      目标：{protagonist.goal}
-                    </div>
-                  )}
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      fontSize: 12,
-                      marginTop: 6,
-                      color: 'var(--color-text-secondary)',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!chapterCharacter}
-                      disabled={!chapter?.id || actionBusy}
-                      onChange={(event) =>
-                        onSetProtagonistAppearance(protagonist, event.target.checked)
-                      }
-                    />
-                    {protagonist.name}本章出场
-                  </label>
-                </div>
-                <button
-                  className="btn btn-sm"
-                  style={{
-                    background: chapterCharacter ? 'var(--color-bg-hover)' : 'var(--color-primary)',
-                    color: chapterCharacter
-                      ? 'var(--color-text-secondary)'
-                      : 'var(--color-on-primary)',
-                    border: 'none',
-                    whiteSpace: 'nowrap',
-                  }}
-                  onClick={() => onSetProtagonistAppearance(protagonist, !chapterCharacter)}
-                  disabled={!chapter?.id || actionBusy}
-                  title={
-                    !chapter?.id
-                      ? '请先选择章节'
-                      : chapterCharacter
-                        ? `设置${protagonist.name}本章不出场`
-                        : `将${protagonist.name}加入本章`
-                  }
-                >
-                  {chapterCharacter ? '本章不出场' : '加入本章'}
-                </button>
-              </div>
-            );
-          })
-        ) : (
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--color-warning)',
-              padding: '8px 0',
-              lineHeight: 1.6,
-            }}
-          >
-            尚未设置主角，请先在作品详情中完善主角信息。
-          </div>
-        )}
-      </div>
+      <CharactersProtagonistSection
+        chapter={chapter}
+        protagonists={protagonists}
+        chapterChars={chapterChars}
+        actionBusy={actionBusy}
+        onSetAppearance={onSetProtagonistAppearance}
+      />
 
       <div className="panel-section">
-        <div className="panel-section-title">📌 本章出场角色</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <UsersRound size={14} strokeWidth={1.8} aria-hidden="true" />
+          本章出场角色
+        </div>
         {chapterChars.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', padding: '8px 0' }}>
             尚未添加本章出场角色
@@ -237,9 +187,11 @@ export function CharactersPanelView({
                     : undefined
                 }
               >
-                {isProtagonist
-                  ? '⭐'
-                  : (character?.name || chapterCharacter.characterName || '?')[0]}
+                {isProtagonist ? (
+                  <Crown size={16} strokeWidth={1.8} aria-hidden="true" />
+                ) : (
+                  (character?.name || chapterCharacter.characterName || '?')[0]
+                )}
               </div>
               <div className="character-info">
                 <div className="character-name">
@@ -269,7 +221,13 @@ export function CharactersPanelView({
       </div>
 
       <div className="panel-section">
-        <div className="panel-section-title">📚 角色库（{characters.length}）</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Library size={14} strokeWidth={1.8} aria-hidden="true" />
+          角色库（{characters.length}）
+        </div>
         {availableChars.length === 0 && characters.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', padding: '8px 0' }}>
             暂无角色，可 AI 生成候选
@@ -308,7 +266,11 @@ export function CharactersPanelView({
                     : undefined
                 }
               >
-                {isProtagonist ? '⭐' : character.name[0]}
+                {isProtagonist ? (
+                  <Crown size={16} strokeWidth={1.8} aria-hidden="true" />
+                ) : (
+                  character.name[0]
+                )}
               </div>
               <div className="character-info" style={{ flex: 1 }}>
                 <div className="character-name">
@@ -361,8 +323,11 @@ export function CharactersPanelView({
                         color: 'var(--color-on-primary)',
                         border: 'none',
                         whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
                       }
-                    : { whiteSpace: 'nowrap' }
+                    : { whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }
                 }
                 onClick={() =>
                   onAddToChapter(
@@ -376,7 +341,17 @@ export function CharactersPanelView({
                   !chapter?.id ? '请先选择章节' : isProtagonist ? '将主角加入本章' : '加入本章'
                 }
               >
-                {isProtagonist ? '⭐ 加入本章' : '➕ 添加'}
+                {isProtagonist ? (
+                  <>
+                    <Crown size={13} strokeWidth={1.8} aria-hidden="true" />
+                    加入本章
+                  </>
+                ) : (
+                  <>
+                    <Plus size={13} strokeWidth={1.8} aria-hidden="true" />
+                    添加
+                  </>
+                )}
               </button>
             </div>
           );
@@ -384,7 +359,13 @@ export function CharactersPanelView({
       </div>
 
       <div className="panel-section">
-        <div className="panel-section-title">🤖 AI 推荐候选角色</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 推荐候选角色
+        </div>
         {loading ? (
           <button
             className="btn btn-secondary btn-sm"
@@ -398,9 +379,17 @@ export function CharactersPanelView({
             className="btn btn-primary btn-sm"
             onClick={onGenerateCandidates}
             disabled={!chapter}
-            style={{ marginBottom: 8, width: '100%' }}
+            style={{
+              marginBottom: 8,
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
           >
-            ✨ 生成本章候选角色
+            <Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
+            生成本章候选角色
           </button>
         )}
         {candidates.map((candidate, index) => (
@@ -452,7 +441,8 @@ export function CharactersPanelView({
                 onClick={() => onConfirmCandidate(candidate)}
                 disabled={characters.some((character) => character.name === candidate.name)}
               >
-                ✅ 确认入库
+                <CheckCircle2 size={13} strokeWidth={1.8} aria-hidden="true" />
+                确认入库
               </button>
             )}
           </div>
@@ -462,8 +452,23 @@ export function CharactersPanelView({
             点击上方按钮，AI 将根据章节大纲推荐适合本章出场的角色
           </div>
         )}
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 8 }}>
-          ⚠️ AI 候选角色需确认后才加入角色库，不会自动入库。已有主角不会被重复推荐。
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--color-text-muted)',
+            marginTop: 8,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 5,
+          }}
+        >
+          <TriangleAlert
+            size={13}
+            strokeWidth={1.8}
+            aria-hidden="true"
+            style={{ flexShrink: 0, marginTop: 1 }}
+          />
+          AI 候选角色需确认后才加入角色库，不会自动入库。已有主角不会被重复推荐。
         </div>
       </div>
     </div>

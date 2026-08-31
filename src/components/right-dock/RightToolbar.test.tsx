@@ -113,4 +113,97 @@ describe('RightToolbar', () => {
       false,
     );
   });
+
+  it('gates review commands until editing and reflects persisted draft state', () => {
+    const onRunCommand = vi.fn();
+    const view = render(
+      <RightToolbar
+        activePanel={null}
+        onTogglePanel={vi.fn()}
+        onRunCommand={onRunCommand}
+        onToggleReadiness={vi.fn()}
+        reviewLocked
+        documentDirty
+        hasCurrentDraft
+      />,
+    );
+
+    ['保存', '排版', '采用'].forEach((label) => {
+      expect(
+        (
+          screen.getByRole('button', {
+            name: `${label}，当前为只读审阅，请先进入编辑`,
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true);
+    });
+
+    view.rerender(
+      <RightToolbar
+        activePanel={null}
+        onTogglePanel={vi.fn()}
+        onRunCommand={onRunCommand}
+        onToggleReadiness={vi.fn()}
+        documentDirty={false}
+        hasCurrentDraft
+        currentDraftAdopted
+      />,
+    );
+    expect(
+      (screen.getByRole('button', { name: '保存，没有未保存修改' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: '采用，当前正文已采用' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    view.rerender(
+      <RightToolbar
+        activePanel={null}
+        onTogglePanel={vi.fn()}
+        onRunCommand={onRunCommand}
+        onToggleReadiness={vi.fn()}
+        documentDirty
+        hasCurrentDraft
+        currentDraftAdopted
+      />,
+    );
+    fireEvent.click(screen.getByTestId('chapter-save'));
+    fireEvent.click(screen.getByTestId('chapter-adopt'));
+    expect(onRunCommand).toHaveBeenCalledWith('save');
+    expect(onRunCommand).toHaveBeenCalledWith('adopt-current');
+  });
+
+  it('shows saving and adopting states while disabling competing commands', () => {
+    const view = render(
+      <RightToolbar
+        activePanel={null}
+        onTogglePanel={vi.fn()}
+        onRunCommand={vi.fn()}
+        onToggleReadiness={vi.fn()}
+        documentDirty
+        documentSaving
+      />,
+    );
+
+    const saving = screen.getByRole('button', { name: '保存中，正在保存正文' });
+    expect((saving as HTMLButtonElement).disabled).toBe(true);
+    expect(saving.getAttribute('aria-busy')).toBe('true');
+    expect(
+      (screen.getByRole('button', { name: '排版，正在保存正文' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    view.rerender(
+      <RightToolbar
+        activePanel={null}
+        onTogglePanel={vi.fn()}
+        onRunCommand={vi.fn()}
+        onToggleReadiness={vi.fn()}
+        documentDirty
+        documentAdopting
+      />,
+    );
+    const adopting = screen.getByRole('button', { name: '采用中，正在采用正文' });
+    expect((adopting as HTMLButtonElement).disabled).toBe(true);
+    expect(adopting.getAttribute('aria-busy')).toBe('true');
+  });
 });

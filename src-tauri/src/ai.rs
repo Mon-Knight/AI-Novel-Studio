@@ -19,10 +19,21 @@ const AI_REQUEST_ID_RECENTLY_SETTLED: &str = "AI_REQUEST_ID_RECENTLY_SETTLED";
 const AI_REQUEST_CAPACITY_EXCEEDED: &str = "AI_REQUEST_CAPACITY_EXCEEDED";
 const AI_REQUEST_RUNTIME_FAILED: &str = "AI_REQUEST_RUNTIME_FAILED";
 const AI_REQUEST_REGISTRY_LOST: &str = "AI_REQUEST_REGISTRY_LOST";
+const AI_PROVIDER_TIMEOUT: &str = "AI_PROVIDER_TIMEOUT";
+const AI_PROVIDER_CONNECT_FAILED: &str = "AI_PROVIDER_CONNECT_FAILED";
+const AI_PROVIDER_TRANSPORT_INTERRUPTED: &str = "AI_PROVIDER_TRANSPORT_INTERRUPTED";
+const AI_PROVIDER_CLIENT_BUILD_FAILED: &str = "AI_PROVIDER_CLIENT_BUILD_FAILED";
+const AI_PROVIDER_REQUEST_BUILD_FAILED: &str = "AI_PROVIDER_REQUEST_BUILD_FAILED";
+const AI_PROVIDER_REDIRECT_FAILED: &str = "AI_PROVIDER_REDIRECT_FAILED";
+const AI_PROVIDER_RESPONSE_DECODE_FAILED: &str = "AI_PROVIDER_RESPONSE_DECODE_FAILED";
+const AI_PROVIDER_RESPONSE_BODY_FAILED: &str = "AI_PROVIDER_RESPONSE_BODY_FAILED";
+const AI_PROVIDER_REQUEST_FAILED: &str = "AI_PROVIDER_REQUEST_FAILED";
 const MAX_ACTIVE_AI_REQUESTS: usize = 64;
 const MAX_PENDING_CANCELLATIONS: usize = 128;
 const MAX_RECENTLY_SETTLED_REQUESTS: usize = 128;
-const REQUEST_STATE_TTL: Duration = Duration::from_secs(30);
+const MAX_AI_REQUEST_TIMEOUT_SECONDS: u64 = 1_800;
+const PENDING_CANCELLATION_TTL: Duration = Duration::from_secs(MAX_AI_REQUEST_TIMEOUT_SECONDS + 60);
+const RECENTLY_SETTLED_REQUEST_TTL: Duration = Duration::from_secs(30);
 const MAX_REQUEST_ID_BYTES: usize = 128;
 const MAX_SSE_FRAME_BYTES: usize = 2_000_000;
 const AI_STREAM_EVENT_NAME: &str = "ai-stream-event";
@@ -51,10 +62,10 @@ struct AiRequestRegistry {
 impl AiRequestRegistry {
     fn prune_expired(&mut self, now: Instant) {
         self.pending_cancellations.retain(|_, recorded_at| {
-            now.saturating_duration_since(*recorded_at) < REQUEST_STATE_TTL
+            now.saturating_duration_since(*recorded_at) < PENDING_CANCELLATION_TTL
         });
         self.recently_settled.retain(|_, recorded_at| {
-            now.saturating_duration_since(*recorded_at) < REQUEST_STATE_TTL
+            now.saturating_duration_since(*recorded_at) < RECENTLY_SETTLED_REQUEST_TTL
         });
     }
 
@@ -124,6 +135,14 @@ struct ActiveRequestRegistration {
 }
 
 impl ActiveRequestRegistration {
+    fn is_cancellation_requested(&self) -> bool {
+        self.cancellation_requested.load(Ordering::Acquire)
+    }
+
+    fn cancellation_flag(&self) -> Arc<AtomicBool> {
+        self.cancellation_requested.clone()
+    }
+
     fn attach_abort(&self, abort: AbortCallback) -> Result<(), String> {
         let attach_result = {
             let mut registry = lock_request_registry();
@@ -450,7 +469,7 @@ fn validate_request(request: &AiChatCompletionRequest) -> Result<(), String> {
         return Err("max_tokens 配置不合法，请检查设置中心的最大输出 Token。".into());
     }
     let timeout_seconds = request.timeout_seconds.unwrap_or(120);
-    if timeout_seconds == 0 || timeout_seconds > 1800 {
+    if timeout_seconds == 0 || timeout_seconds > MAX_AI_REQUEST_TIMEOUT_SECONDS {
         return Err("timeoutSeconds 配置不合法，请检查设置中心的超时时间。".into());
     }
     if request.messages.is_empty() {
@@ -511,6 +530,37 @@ fn verify_request_policy_lease(request: &AiChatCompletionRequest) -> Result<(), 
         .map_err(|error| error.code)
 }
 
+fn reserve_and_verify_governed_request<F>(
+    request: &AiChatCompletionRequest,
+    verify_policy: F,
+) -> Result<ActiveRequestRegistration, String>
+where
+    F: FnOnce(&AiChatCompletionRequest) -> Result<(), String>,
+{
+    let request_id = request
+        .request_id
+        .as_deref()
+        .ok_or_else(|| crate::errors::codes::AI_REQUEST_POLICY_LEASE_REQUIRED.to_string())?;
+    validate_request_id(request_id)?;
+
+    // Register before policy verification because SQLite lease validation may wait on a lock.
+    // This lets a frontend watchdog cancel the command even while that validation is blocked.
+    let mut registration = reserve_request(request_id.to_string())?;
+    let policy_result = verify_policy(request);
+    if let Err(error) = policy_result {
+        if registration.finish() {
+            return Err(AI_REQUEST_CANCELLED.to_string());
+        }
+        return Err(error);
+    }
+    if registration.is_cancellation_requested() {
+        registration.finish();
+        return Err(AI_REQUEST_CANCELLED.to_string());
+    }
+
+    Ok(registration)
+}
+
 #[tauri::command]
 pub fn cancel_ai_request(request_id: String) -> bool {
     if validate_request_id(&request_id).is_err() {
@@ -549,6 +599,61 @@ fn ensure_ai_network_allowed(network_blocked: bool, base_url: &str) -> Result<()
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum AiProviderIoPhase {
+    RequestDispatch,
+    ResponseBody,
+}
+
+fn safe_provider_io_error(
+    error: &reqwest::Error,
+    phase: AiProviderIoPhase,
+    timeout_seconds: u64,
+) -> String {
+    if error.is_timeout() {
+        return format!(
+            "{AI_PROVIDER_TIMEOUT}: AI 调用失败：请求超时（{timeout_seconds} 秒），请检查网络或增加超时时间。"
+        );
+    }
+    if error.is_builder() {
+        return format!(
+            "{AI_PROVIDER_REQUEST_BUILD_FAILED}: AI 调用失败：无法构造模型请求，请检查 API Base URL 和请求设置。"
+        );
+    }
+    if error.is_redirect() {
+        return format!(
+            "{AI_PROVIDER_REDIRECT_FAILED}: AI 调用失败：模型服务重定向失败，请检查 API Base URL。"
+        );
+    }
+    if error.is_connect() {
+        return format!(
+            "{AI_PROVIDER_CONNECT_FAILED}: AI 调用失败：无法连接模型服务，请检查 API Base URL、网络连接或代理设置。"
+        );
+    }
+    if error.is_request()
+        || error.is_body()
+        || (matches!(phase, AiProviderIoPhase::ResponseBody) && error.is_decode())
+    {
+        return format!(
+            "{AI_PROVIDER_TRANSPORT_INTERRUPTED}: AI 调用失败：与模型服务的传输在完成前中断，请重试。"
+        );
+    }
+    if error.is_decode() {
+        return format!(
+            "{AI_PROVIDER_RESPONSE_DECODE_FAILED}: AI 调用失败：模型服务响应解码失败，请检查兼容接口。"
+        );
+    }
+
+    match phase {
+        AiProviderIoPhase::RequestDispatch => format!(
+            "{AI_PROVIDER_REQUEST_FAILED}: AI 调用失败：模型请求未能发送，请检查接口配置。"
+        ),
+        AiProviderIoPhase::ResponseBody => format!(
+            "{AI_PROVIDER_RESPONSE_BODY_FAILED}: AI 调用失败：模型服务响应读取失败，请检查兼容接口。"
+        ),
+    }
+}
+
 fn user_error_from_status(status: reqwest::StatusCode, body: &str, model_name: &str) -> String {
     match status.as_u16() {
         400 => "AI 调用失败：请求参数不合法（400 Bad Request）。请检查模型名称、max_tokens 和提示词格式。".into(),
@@ -578,8 +683,13 @@ fn user_error_from_status(status: reqwest::StatusCode, body: &str, model_name: &
 pub async fn ai_chat_completion(
     request: AiChatCompletionRequest,
 ) -> Result<AiChatCompletionResponse, String> {
-    verify_request_policy_lease(&request)?;
-    execute_ai_chat_completion(request, crate::runtime::is_network_blocked()).await
+    let registration = reserve_and_verify_governed_request(&request, verify_request_policy_lease)?;
+    execute_registered_ai_chat_completion(
+        request,
+        crate::runtime::is_network_blocked(),
+        registration,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -587,13 +697,19 @@ pub async fn ai_chat_completion_stream(
     window: tauri::Window,
     request: AiChatCompletionRequest,
 ) -> Result<AiChatCompletionResponse, String> {
-    verify_request_policy_lease(&request)?;
+    let registration = reserve_and_verify_governed_request(&request, verify_request_policy_lease)?;
     let emitter: StreamEmitter = Arc::new(move |event| {
         window
             .emit(AI_STREAM_EVENT_NAME, event)
             .map_err(|_| "AI_STREAM_EVENT_EMIT_FAILED".to_string())
     });
-    execute_ai_chat_completion_stream(request, crate::runtime::is_network_blocked(), emitter).await
+    execute_registered_ai_chat_completion_stream(
+        request,
+        crate::runtime::is_network_blocked(),
+        emitter,
+        registration,
+    )
+    .await
 }
 
 fn local_model_root_url(base_url: &str) -> String {
@@ -759,6 +875,7 @@ pub async fn check_local_chapter_model(
     })
 }
 
+#[cfg(test)]
 async fn execute_ai_chat_completion_stream(
     request: AiChatCompletionRequest,
     network_blocked: bool,
@@ -772,9 +889,31 @@ async fn execute_ai_chat_completion_stream(
         .ok_or_else(|| AI_REQUEST_ID_INVALID.to_string())?;
     validate_request_id(&request_id)?;
 
-    let mut registration = reserve_request(request_id.clone())?;
+    let registration = reserve_request(request_id)?;
+    execute_registered_ai_chat_completion_stream(request, network_blocked, emitter, registration)
+        .await
+}
+
+async fn execute_registered_ai_chat_completion_stream(
+    request: AiChatCompletionRequest,
+    network_blocked: bool,
+    emitter: StreamEmitter,
+    mut registration: ActiveRequestRegistration,
+) -> Result<AiChatCompletionResponse, String> {
+    ensure_ai_network_allowed(network_blocked, &request.base_url)?;
+    validate_request(&request)?;
+    if registration.is_cancellation_requested() {
+        registration.finish();
+        return Err(AI_REQUEST_CANCELLED.to_string());
+    }
+
+    let request_id = registration.request_id.clone();
+    let cancellation_requested = registration.cancellation_flag();
     let task = tauri::async_runtime::spawn(perform_ai_chat_completion_stream(
-        request, request_id, emitter,
+        request,
+        request_id,
+        emitter,
+        cancellation_requested,
     ));
     let abort_handle = task.inner().abort_handle();
     let abort: AbortCallback = Arc::new(move || abort_handle.abort());
@@ -943,6 +1082,7 @@ async fn perform_ai_chat_completion_stream(
     request: AiChatCompletionRequest,
     request_id: String,
     emitter: StreamEmitter,
+    cancellation_requested: Arc<AtomicBool>,
 ) -> Result<AiChatCompletionResponse, String> {
     let url = build_chat_completions_url(&request.base_url);
     let timeout_seconds = request.timeout_seconds.unwrap_or(120);
@@ -951,7 +1091,11 @@ async fn perform_ai_chat_completion_stream(
         http_client_builder(&request.base_url, Duration::from_secs(timeout_seconds));
     let client = client_builder
         .build()
-        .map_err(|_| "AI 调用失败：HTTP 客户端初始化失败。".to_string())?;
+        .map_err(|_| {
+            format!(
+                "{AI_PROVIDER_CLIENT_BUILD_FAILED}: AI 调用失败：HTTP 客户端初始化失败，请检查本地网络配置。"
+            )
+        })?;
     let mut body = json!({
         "model": request.model_name,
         "messages": request.messages,
@@ -960,6 +1104,9 @@ async fn perform_ai_chat_completion_stream(
         "stream": true,
     });
     add_optional_sampling_parameters(&mut body, &request);
+    if cancellation_requested.load(Ordering::Acquire) {
+        return Err(AI_REQUEST_CANCELLED.to_string());
+    }
     let mut response = client
         .post(url)
         .bearer_auth(request.api_key.trim())
@@ -968,16 +1115,7 @@ async fn perform_ai_chat_completion_stream(
         .send()
         .await
         .map_err(|error| {
-            if error.is_timeout() {
-                format!(
-                    "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
-                    timeout_seconds
-                )
-            } else if error.is_connect() {
-                "AI 调用失败：网络连接失败，请检查 API Base URL、网络连接或代理设置。".to_string()
-            } else {
-                "AI 调用失败：网络请求失败。".to_string()
-            }
+            safe_provider_io_error(&error, AiProviderIoPhase::RequestDispatch, timeout_seconds)
         })?;
     let status = response.status();
     if !status.is_success() {
@@ -992,14 +1130,7 @@ async fn perform_ai_chat_completion_stream(
     let mut decoder = OpenAiSseDecoder::default();
     let mut aggregate = StreamAggregate::default();
     while let Some(chunk) = response.chunk().await.map_err(|error| {
-        if error.is_timeout() {
-            format!(
-                "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
-                timeout_seconds
-            )
-        } else {
-            AI_STREAM_INTERRUPTED.to_string()
-        }
+        safe_provider_io_error(&error, AiProviderIoPhase::ResponseBody, timeout_seconds)
     })? {
         for payload in decoder.push(&chunk)? {
             consume_stream_payload(
@@ -1041,6 +1172,7 @@ async fn perform_ai_chat_completion_stream(
     })
 }
 
+#[cfg(test)]
 async fn execute_ai_chat_completion(
     request: AiChatCompletionRequest,
     network_blocked: bool,
@@ -1054,8 +1186,27 @@ async fn execute_ai_chat_completion(
     };
     validate_request_id(&request_id)?;
 
-    let mut registration = reserve_request(request_id)?;
-    let task = tauri::async_runtime::spawn(perform_ai_chat_completion(request));
+    let registration = reserve_request(request_id)?;
+    execute_registered_ai_chat_completion(request, network_blocked, registration).await
+}
+
+async fn execute_registered_ai_chat_completion(
+    request: AiChatCompletionRequest,
+    network_blocked: bool,
+    mut registration: ActiveRequestRegistration,
+) -> Result<AiChatCompletionResponse, String> {
+    ensure_ai_network_allowed(network_blocked, &request.base_url)?;
+    validate_request(&request)?;
+    if registration.is_cancellation_requested() {
+        registration.finish();
+        return Err(AI_REQUEST_CANCELLED.to_string());
+    }
+
+    let cancellation_requested = registration.cancellation_flag();
+    let task = tauri::async_runtime::spawn(perform_ai_chat_completion_cancellable(
+        request,
+        Some(cancellation_requested),
+    ));
     let abort_handle = task.inner().abort_handle();
     let abort: AbortCallback = Arc::new(move || abort_handle.abort());
     registration.attach_abort(abort)?;
@@ -1071,8 +1222,16 @@ async fn execute_ai_chat_completion(
     }
 }
 
+#[cfg(test)]
 async fn perform_ai_chat_completion(
     request: AiChatCompletionRequest,
+) -> Result<AiChatCompletionResponse, String> {
+    perform_ai_chat_completion_cancellable(request, None).await
+}
+
+async fn perform_ai_chat_completion_cancellable(
+    request: AiChatCompletionRequest,
+    cancellation_requested: Option<Arc<AtomicBool>>,
 ) -> Result<AiChatCompletionResponse, String> {
     let url = build_chat_completions_url(&request.base_url);
     let timeout_seconds = request.timeout_seconds.unwrap_or(120);
@@ -1081,7 +1240,11 @@ async fn perform_ai_chat_completion(
         http_client_builder(&request.base_url, Duration::from_secs(timeout_seconds));
     let client = client_builder
         .build()
-        .map_err(|_| "AI 调用失败：HTTP 客户端初始化失败。".to_string())?;
+        .map_err(|_| {
+            format!(
+                "{AI_PROVIDER_CLIENT_BUILD_FAILED}: AI 调用失败：HTTP 客户端初始化失败，请检查本地网络配置。"
+            )
+        })?;
 
     #[cfg(debug_assertions)]
     {
@@ -1119,6 +1282,13 @@ async fn perform_ai_chat_completion(
     });
     add_optional_sampling_parameters(&mut body, &request);
 
+    if cancellation_requested
+        .as_ref()
+        .is_some_and(|requested| requested.load(Ordering::Acquire))
+    {
+        return Err(AI_REQUEST_CANCELLED.to_string());
+    }
+
     let response = client
         .post(url)
         .bearer_auth(request.api_key.trim())
@@ -1126,30 +1296,13 @@ async fn perform_ai_chat_completion(
         .json(&body)
         .send()
         .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                format!(
-                    "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
-                    timeout_seconds
-                )
-            } else if e.is_connect() {
-                "AI 调用失败：网络连接失败，请检查 API Base URL、网络连接或代理设置。".to_string()
-            } else {
-                "AI 调用失败：网络请求失败。".to_string()
-            }
+        .map_err(|error| {
+            safe_provider_io_error(&error, AiProviderIoPhase::RequestDispatch, timeout_seconds)
         })?;
 
     let status = response.status();
     let text_body = response.text().await.map_err(|error| {
-        if error.is_timeout() {
-            format!(
-                "AI 调用失败：请求超时（{} 秒），请检查网络或增加超时时间。",
-                timeout_seconds
-            )
-        } else {
-            "AI 调用失败：上游服务在响应完成前中断连接，请重试；长响应建议缩小单次输出。"
-                .to_string()
-        }
+        safe_provider_io_error(&error, AiProviderIoPhase::ResponseBody, timeout_seconds)
     })?;
 
     if !status.is_success() {
@@ -1277,15 +1430,54 @@ mod tests {
 
     #[test]
     fn provider_command_rejects_missing_global_policy_lease_before_dispatch() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
         let request = test_request(
             "https://provider.invalid/v1".to_string(),
             Some("policy-proof-required"),
             1,
         );
         assert_eq!(
-            verify_request_policy_lease(&request),
+            tauri::async_runtime::block_on(ai_chat_completion(request)).map(|_| ()),
             Err(crate::errors::codes::AI_REQUEST_POLICY_LEASE_REQUIRED.to_string())
         );
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn cancellation_during_policy_verification_is_observed_before_dispatch() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let request_id = "cancel-during-policy";
+        let request = test_request("http://127.0.0.1:1/v1".to_string(), Some(request_id), 1);
+        let (verification_started_tx, verification_started_rx) = mpsc::channel();
+        let (release_verification_tx, release_verification_rx) = mpsc::channel();
+
+        let verifier_thread = thread::spawn(move || {
+            reserve_and_verify_governed_request(&request, |_| {
+                verification_started_tx.send(()).unwrap();
+                release_verification_rx.recv().unwrap();
+                Ok(())
+            })
+            .map(|_| ())
+        });
+
+        verification_started_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("policy verifier did not start");
+        assert_eq!(registry_counts(), (1, 0, 0));
+        assert!(cancel_ai_request(request_id.to_string()));
+        release_verification_tx.send(()).unwrap();
+
+        assert_eq!(
+            verifier_thread.join().expect("verifier thread panicked"),
+            Err(AI_REQUEST_CANCELLED.to_string())
+        );
+        assert_eq!(registry_counts(), (0, 0, 1));
     }
 
     #[test]
@@ -1505,6 +1697,40 @@ mod tests {
         (format!("http://{}", address), server_thread)
     }
 
+    fn spawn_disconnecting_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback server");
+        let address = listener.local_addr().expect("read loopback address");
+        let server_thread = thread::spawn(move || {
+            let mut stream =
+                accept_with_timeout(&listener, Duration::from_secs(5)).expect("accept request");
+            read_http_request(&mut stream).expect("read request");
+        });
+        (format!("http://{}", address), server_thread)
+    }
+
+    fn spawn_redirect_loop_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback server");
+        let address = listener.local_addr().expect("read loopback address");
+        let base_url = format!("http://{}", address);
+        let redirect_url = format!("{base_url}/v1/chat/completions");
+        let server_thread = thread::spawn(move || {
+            for _ in 0..16 {
+                let Ok(mut stream) = accept_with_timeout(&listener, Duration::from_secs(1)) else {
+                    break;
+                };
+                read_http_request(&mut stream).expect("read redirect request");
+                let response = format!(
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: {redirect_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write redirect response");
+                stream.flush().expect("flush redirect response");
+            }
+        });
+        (base_url, server_thread)
+    }
+
     fn assert_listener_has_no_connection(listener: &TcpListener) {
         listener.set_nonblocking(true).unwrap();
         match listener.accept() {
@@ -1659,6 +1885,31 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_after_policy_before_network_dispatch_is_rechecked() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let request_id = "cancel-before-network";
+        let request = test_request(base_url, Some(request_id), 1);
+        let registration = reserve_request(request_id.to_string()).unwrap();
+
+        assert!(cancel_ai_request(request_id.to_string()));
+        let error = tauri::async_runtime::block_on(execute_registered_ai_chat_completion(
+            request,
+            false,
+            registration,
+        ))
+        .unwrap_err();
+
+        assert_eq!(error, AI_REQUEST_CANCELLED);
+        assert_listener_has_no_connection(&listener);
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
     fn normal_response_is_returned_and_registry_is_cleaned() {
         let _serial = TEST_SERIAL
             .lock()
@@ -1781,6 +2032,92 @@ mod tests {
     }
 
     #[test]
+    fn request_builder_failure_has_a_stable_non_retryable_code_without_sensitive_details() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let mut request = test_request(
+            "not-a-valid-url-sensitive-endpoint".to_string(),
+            Some("request-builder-failure"),
+            1,
+        );
+        request.api_key = "sensitive-api-key-marker".to_string();
+        request.messages[0].content = "sensitive-prompt-marker".to_string();
+
+        let error =
+            tauri::async_runtime::block_on(execute_ai_chat_completion(request, false)).unwrap_err();
+
+        assert!(error.starts_with(AI_PROVIDER_REQUEST_BUILD_FAILED));
+        assert!(!error.contains("sensitive-endpoint"));
+        assert!(!error.contains("sensitive-api-key-marker"));
+        assert!(!error.contains("sensitive-prompt-marker"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn connection_refusal_has_a_stable_retryable_code() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let base_url = "http://127.0.0.1:0".to_string();
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion(
+            test_request(base_url, Some("connect-failure"), 3),
+            false,
+        ))
+        .unwrap_err();
+
+        assert!(
+            error.starts_with(AI_PROVIDER_CONNECT_FAILED),
+            "unexpected safe error category: {error}"
+        );
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn request_transport_interruption_has_a_stable_retryable_code() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let (base_url, server_thread) = spawn_disconnecting_server();
+        let mut request = test_request(base_url, Some("request-transport-interrupted"), 3);
+        request.api_key = "sensitive-transport-key-marker".to_string();
+
+        let error =
+            tauri::async_runtime::block_on(execute_ai_chat_completion(request, false)).unwrap_err();
+
+        server_thread.join().unwrap();
+        assert!(
+            error.starts_with(AI_PROVIDER_TRANSPORT_INTERRUPTED),
+            "unexpected safe error category: {error}"
+        );
+        assert!(!error.contains("sensitive-transport-key-marker"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn redirect_loop_has_a_stable_non_retryable_code() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let (base_url, server_thread) = spawn_redirect_loop_server();
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion(
+            test_request(base_url, Some("redirect-failure"), 3),
+            false,
+        ))
+        .unwrap_err();
+
+        server_thread.join().unwrap();
+        assert!(error.starts_with(AI_PROVIDER_REDIRECT_FAILED));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
     fn malformed_success_response_does_not_expose_provider_body() {
         let _serial = TEST_SERIAL
             .lock()
@@ -1842,6 +2179,7 @@ mod tests {
         .unwrap_err();
 
         server_thread.join().unwrap();
+        assert!(error.starts_with(AI_PROVIDER_TIMEOUT));
         assert!(error.contains("请求超时（1 秒）"));
         assert!(!error.contains("读取响应失败"));
         assert_eq!(registry_counts(), (0, 0, 1));
@@ -1862,8 +2200,35 @@ mod tests {
         .unwrap_err();
 
         server_thread.join().unwrap();
-        assert!(error.contains("上游服务在响应完成前中断连接"));
+        assert!(
+            error.starts_with(AI_PROVIDER_TRANSPORT_INTERRUPTED),
+            "unexpected safe error category: {error}"
+        );
         assert!(!error.contains("Bearer"));
+        assert_eq!(registry_counts(), (0, 0, 1));
+    }
+
+    #[test]
+    fn streaming_body_interruption_uses_the_same_stable_transport_code() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let (base_url, server_thread) = spawn_truncated_response_server();
+        let emitter: StreamEmitter = Arc::new(|_| Ok(()));
+
+        let error = tauri::async_runtime::block_on(execute_ai_chat_completion_stream(
+            test_request(base_url, Some("stream-transport-interrupted"), 3),
+            false,
+            emitter,
+        ))
+        .unwrap_err();
+
+        server_thread.join().unwrap();
+        assert!(
+            error.starts_with(AI_PROVIDER_TRANSPORT_INTERRUPTED),
+            "unexpected safe error category: {error}"
+        );
         assert_eq!(registry_counts(), (0, 0, 1));
     }
 
@@ -1888,6 +2253,7 @@ mod tests {
             .expect("request task panicked")
             .unwrap_err();
 
+        assert!(error.starts_with(AI_PROVIDER_TIMEOUT));
         assert!(error.contains("请求超时"));
         assert_ne!(error, AI_REQUEST_CANCELLED);
         assert!(server
@@ -1939,6 +2305,24 @@ mod tests {
         }
 
         assert_eq!(registry_counts(), (0, MAX_PENDING_CANCELLATIONS, 0));
+    }
+
+    #[test]
+    fn pending_cancellation_outlives_maximum_provider_watchdog() {
+        let _serial = TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_registry();
+        let recorded_at = Instant::now();
+        let request_id = "watchdog-pending-cancel";
+        let mut registry = lock_request_registry();
+        registry.record_pending_cancellation(request_id.to_string(), recorded_at);
+
+        registry.prune_expired(recorded_at + Duration::from_secs(MAX_AI_REQUEST_TIMEOUT_SECONDS));
+        assert!(registry.pending_cancellations.contains_key(request_id));
+
+        registry.prune_expired(recorded_at + PENDING_CANCELLATION_TTL);
+        assert!(!registry.pending_cancellations.contains_key(request_id));
     }
 
     #[test]

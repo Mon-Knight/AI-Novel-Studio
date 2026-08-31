@@ -1,4 +1,5 @@
 import type { Volume } from '../../types/volume';
+import { BookOpenText, FileText } from 'lucide-react';
 
 interface VolumeTreeDialogsProps {
   volumes: Volume[];
@@ -48,7 +49,10 @@ export function VolumeTreeDialogs({
             style={{ maxWidth: 360 }}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="modal-title">📖 新建分卷</div>
+            <div className="modal-title">
+              <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
+              新建分卷
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
                 <label className="panel-field-label">分卷名称</label>
@@ -88,7 +92,10 @@ export function VolumeTreeDialogs({
             style={{ maxWidth: 360 }}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="modal-title">📝 新建章节</div>
+            <div className="modal-title">
+              <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
+              新建章节
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {volumes.length > 0 && (
                 <div>

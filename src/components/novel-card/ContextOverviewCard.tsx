@@ -2,6 +2,7 @@
  * AI Novel Studio - 作品详情页上下文概览卡片
  */
 import { useState, useEffect, useCallback } from 'react';
+import { Archive } from 'lucide-react';
 import { chapterSummaryService } from '../../services/context/chapterSummaryService';
 import { contextRecordService } from '../../services/context/contextRecordService';
 
@@ -31,7 +32,7 @@ function ContextOverviewCard({ novelId }: ContextOverviewCardProps) {
   return (
     <div className="detail-card">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 18 }}>📦</span>
+        <Archive aria-hidden="true" size={18} strokeWidth={1.8} />
         <span style={{ fontSize: 16, fontWeight: 600 }}>上下文记录</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 12 }}>

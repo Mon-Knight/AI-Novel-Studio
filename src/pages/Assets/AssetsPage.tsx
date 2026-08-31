@@ -2,6 +2,18 @@
  * AI Novel Studio - 创作资产中心页面
  */
 import { useState, useEffect } from 'react';
+import {
+  BookOpenText,
+  Boxes,
+  FileText,
+  Import,
+  Map,
+  Palette,
+  Sparkles,
+  UsersRound,
+  Waypoints,
+  type LucideIcon,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import { novelRepository } from '../../services/database/novelRepository';
@@ -17,7 +29,7 @@ import type { Novel } from '../../types/novel';
 
 interface AssetCard {
   title: string;
-  icon: string;
+  icon: LucideIcon;
   count: string;
   desc: string;
   path: string;
@@ -69,56 +81,56 @@ function AssetsPage() {
   const assetCards: AssetCard[] = [
     {
       title: '基础设定',
-      icon: '📖',
+      icon: BookOpenText,
       count: selectedNovel ? '1' : '0',
       desc: '作品信息、世界背景',
       path: selectedNovelId ? `/novels/${selectedNovelId}` : '',
     },
     {
       title: '角色库',
-      icon: '👥',
+      icon: UsersRound,
       count: stats.chars || '0',
       desc: '已确认角色与状态',
       path: selectedNovelId ? `/novels/${selectedNovelId}` : '',
     },
     {
       title: '风格方案',
-      icon: '🎨',
+      icon: Palette,
       count: stats.styles || '0',
       desc: '文风与节奏控制',
       path: '/styles',
     },
     {
       title: '章节总结',
-      icon: '📝',
+      icon: FileText,
       count: stats.sums || '0',
       desc: '已总结章节',
       path: selectedNovelId ? `/novels/${selectedNovelId}` : '',
     },
     {
       title: '上下文记录',
-      icon: '📦',
+      icon: Boxes,
       count: stats.ctx || '0',
       desc: '前文摘要与伏笔',
       path: selectedNovelId ? `/novels/${selectedNovelId}` : '',
     },
     {
       title: '设定库 AI 推演',
-      icon: '◇',
+      icon: Sparkles,
       count: stats.suggestions || '0',
       desc: '待确认候选设定',
       path: selectedNovelId ? `/novels/${selectedNovelId}/setting-suggestions` : '',
     },
     {
       title: '势力与地点',
-      icon: '🗺️',
+      icon: Map,
       count: stats.storyAssets || '0',
       desc: '正式资产与跨章事务',
       path: selectedNovelId ? `/novels/${selectedNovelId}/story-assets` : '',
     },
     {
       title: '导入资产',
-      icon: '📥',
+      icon: Import,
       count: stats.importedAssets || '0',
       desc: '外部导入素材',
       path: '/import-export',
@@ -128,8 +140,19 @@ function AssetsPage() {
   return (
     <div className="page-container" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回工作台" to="/" />
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>
-        📦 创作资产中心
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 22,
+          fontWeight: 700,
+          marginBottom: 8,
+          marginTop: 12,
+        }}
+      >
+        <Waypoints aria-hidden="true" size={22} strokeWidth={1.8} />
+        创作资产中心
       </div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
         聚合当前作品所有创作资产，提供统一管理入口
@@ -138,7 +161,7 @@ function AssetsPage() {
       {/* 作品选择器 */}
       <div className="detail-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 16 }}>📖</span>
+          <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 15, fontWeight: 600 }}>选择作品</span>
         </div>
         {novels.length === 0 ? (
@@ -176,34 +199,37 @@ function AssetsPage() {
       {/* 资产卡片 */}
       {selectedNovel && (
         <div className="asset-card-grid">
-          {assetCards.map((card) => (
-            <div
-              key={card.title}
-              className="detail-card"
-              style={{
-                cursor: card.path ? 'pointer' : 'default',
-                textAlign: 'center',
-                opacity: card.path ? 1 : 0.5,
-              }}
-              onClick={() => {
-                if (card.path) navigate(card.path);
-              }}
-            >
-              <div style={{ fontSize: 28, marginBottom: 8 }}>{card.icon}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{card.title}</div>
+          {assetCards.map((card) => {
+            const Icon = card.icon;
+            return (
               <div
+                key={card.title}
+                className="detail-card"
                 style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: 'var(--color-primary)',
-                  marginBottom: 4,
+                  cursor: card.path ? 'pointer' : 'default',
+                  textAlign: 'center',
+                  opacity: card.path ? 1 : 0.5,
+                }}
+                onClick={() => {
+                  if (card.path) navigate(card.path);
                 }}
               >
-                {card.count}
+                <Icon aria-hidden="true" size={28} strokeWidth={1.8} style={{ marginBottom: 8 }} />
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{card.title}</div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: 'var(--color-primary)',
+                    marginBottom: 4,
+                  }}
+                >
+                  {card.count}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{card.desc}</div>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{card.desc}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

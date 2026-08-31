@@ -228,7 +228,7 @@ function OutlinePanel({
         });
         // 通知父组件刷新章节状态
         onChapterOutlineApplied?.(chapter.id);
-        setApplyMsg(`✅ 已应用到当前章节：${candidate.title}`);
+        setApplyMsg(`已应用到当前章节：${candidate.title}`);
         setTimeout(() => setApplyMsg(''), 4000);
       } catch (e: unknown) {
         setApplyError(describeUnknownError(e, '保存章节大纲失败'));
@@ -272,10 +272,10 @@ function OutlinePanel({
       clearCachedChapterOutlineDraft(chapter.id);
       onChapterOutlineApplied?.(chapter.id);
       setIsEditingChapterOutline(false);
-      setChapterOutlineSaveMsg('✅ 已保存');
+      setChapterOutlineSaveMsg('已保存');
       setTimeout(() => setChapterOutlineSaveMsg(''), 3000);
     } catch (e: unknown) {
-      setChapterOutlineSaveMsg('❌ 保存失败');
+      setChapterOutlineSaveMsg('保存失败');
       setTimeout(() => setChapterOutlineSaveMsg(''), 3000);
     }
   }, [chapter, chapterOutlineDraft, onChapterOutlineApplied]);
@@ -309,10 +309,10 @@ function OutlinePanel({
       );
       updateChapterGoalDirty(false);
       onChapterOutlineApplied?.(chapter.id);
-      setChapterGoalSaveMsg('✅ 已保存');
+      setChapterGoalSaveMsg('已保存');
       setTimeout(() => setChapterGoalSaveMsg(''), 3000);
     } catch (e: unknown) {
-      setChapterGoalSaveMsg(`❌ ${describeUnknownError(e, '保存失败，输入已保留')}`);
+      setChapterGoalSaveMsg(describeUnknownError(e, '保存失败，输入已保留'));
       setTimeout(() => setChapterGoalSaveMsg(''), 4000);
     }
   }, [chapter, chapterGoalDraft, onChapterOutlineApplied, updateChapterGoalDirty]);

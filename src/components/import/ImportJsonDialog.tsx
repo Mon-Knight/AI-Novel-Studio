@@ -2,6 +2,7 @@
  * AI Novel Studio - JSON 导入确认弹窗
  */
 import { useState, useRef } from 'react';
+import { CircleCheck, FileJson, FolderOpen, LoaderCircle, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { styleProfileService } from '../../services/styles/styleProfileService';
@@ -198,12 +199,20 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
             marginBottom: 16,
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 700 }}>📋 导入 JSON</span>
+          <span
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700 }}
+          >
+            <FileJson aria-hidden="true" size={18} strokeWidth={1.8} />
+            导入 JSON
+          </span>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="关闭 JSON 导入"
+            title="关闭"
             style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
           >
-            ✕
+            <X aria-hidden="true" size={20} strokeWidth={1.8} />
           </button>
         </div>
 
@@ -222,7 +231,12 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+              <FolderOpen
+                aria-hidden="true"
+                size={32}
+                strokeWidth={1.8}
+                style={{ marginBottom: 8 }}
+              />
               <div style={{ fontSize: 14 }}>点击选择 JSON 文件</div>
             </div>
             <input
@@ -301,7 +315,17 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
                 onClick={handleImport}
                 disabled={importing || (isProjectBackupCandidate && !hasValidProjectBackup)}
               >
-                {importing ? '⏳ 导入中...' : '✅ 确认导入'}
+                {importing ? (
+                  <>
+                    <LoaderCircle aria-hidden="true" size={15} strokeWidth={1.8} />
+                    导入中...
+                  </>
+                ) : (
+                  <>
+                    <CircleCheck aria-hidden="true" size={15} strokeWidth={1.8} />
+                    确认导入
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -309,7 +333,12 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
 
         {step === 'done' && (
           <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <CircleCheck
+              aria-hidden="true"
+              size={40}
+              strokeWidth={1.8}
+              style={{ marginBottom: 12, color: 'var(--color-success)' }}
+            />
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>
               {resultMsg}
             </div>

@@ -19,5 +19,23 @@ describe('Sidebar', () => {
     expect(currentLink.getAttribute('title')).toBe('小说作品');
     expect(within(navigation).getAllByRole('link')).toHaveLength(8);
     expect(navigation.querySelectorAll('.nav-icon svg')).toHaveLength(8);
+
+    const preservedIcons = [
+      ['创作工作台', 'lucide-sparkles'],
+      ['小说作品', 'lucide-book-open-text'],
+      ['创作资产', 'lucide-boxes'],
+      ['风格方案', 'lucide-palette'],
+      ['模板中心', 'lucide-layout-template'],
+      ['AI任务记录', 'lucide-bot'],
+      ['导入导出', 'lucide-arrow-down-to-line'],
+      ['设置中心', 'lucide-settings-2'],
+    ] as const;
+    preservedIcons.forEach(([label, iconClass]) => {
+      const icon = within(navigation).getByRole('link', { name: label }).querySelector('svg');
+      expect(icon?.classList.contains(iconClass)).toBe(true);
+      expect(icon?.getAttribute('width')).toBe('18');
+      expect(icon?.getAttribute('stroke-width')).toBe('1.8');
+      expect(icon?.getAttribute('fill')).toBe('none');
+    });
   });
 });

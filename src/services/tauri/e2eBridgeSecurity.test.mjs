@@ -11,6 +11,7 @@ test('closed-loop E2E additions expose queries but not adoption mutations', () =
     'get_review_authorization',
     'get_e2e_agent_closed_loop_state',
     'get_task_conversation',
+    'get_task_turn_run_projection',
     'dsh_get_task_runtime_status',
     'get_result_artifact',
     'get_latest_chapter_generation_snapshot',

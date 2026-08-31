@@ -30,6 +30,7 @@ export function WorkbenchPreparingState({ label, testId }: { label: string; test
         <LoaderCircle
           className="workbench-readiness-icon is-spinning"
           aria-hidden="true"
+          strokeWidth={1.8}
           size={17}
         />
         <span>{label}</span>

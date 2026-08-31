@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import type { ChapterDraft } from '../../types/ai';
 
@@ -15,6 +17,8 @@ const isDraftSaveResultForDocument =
   editorModule.isDraftSaveResultForDocument as typeof import('./EditorArea').isDraftSaveResultForDocument;
 const getEditorDocumentSourceKey =
   editorModule.getEditorDocumentSourceKey as typeof import('./EditorArea').getEditorDocumentSourceKey;
+const statusBarModule = await vite.ssrLoadModule('/src/components/workspace/StatusBar.tsx');
+const StatusBar = statusBarModule.default as typeof import('./StatusBar').default;
 
 after(async () => {
   await vite.close();
@@ -140,4 +144,35 @@ test('the same review artifact keeps a stable load identity across parent rerend
     }),
     firstKey,
   );
+});
+
+test('formal save errors outrank recovery feedback in the stable status region', () => {
+  const markup = renderToStaticMarkup(
+    createElement(StatusBar, {
+      draftVersion: 'v2',
+      isDirty: true,
+      recoverySaveStatus: 'saved',
+      documentSaveState: 'error',
+      documentSaveMessage: '磁盘写入失败',
+    }),
+  );
+
+  assert.match(markup, /data-save-state="error"/);
+  assert.match(markup, /role="alert"/);
+  assert.match(markup, /磁盘写入失败/);
+  assert.doesNotMatch(markup, /恢复快照已更新/);
+});
+
+test('a recovery snapshot remains explicitly unsaved until a formal save succeeds', () => {
+  const markup = renderToStaticMarkup(
+    createElement(StatusBar, {
+      draftVersion: 'v2',
+      isDirty: true,
+      recoverySaveStatus: 'saved',
+      documentSaveState: 'editing',
+    }),
+  );
+
+  assert.match(markup, /未保存 · 恢复快照已更新/);
+  assert.doesNotMatch(markup, />已保存</);
 });

@@ -105,13 +105,24 @@ test('registry manifest and hash are deterministic across definition order', asy
 });
 
 test('production registry exposes executable read/verification/candidate contracts and no hidden writes', async () => {
-  const { productionToolRegistry } = await import('./productionToolRegistry');
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { PRODUCTION_TOOL_REGISTRY_HASH, productionToolRegistry } =
+    await import('./productionToolRegistry');
   const manifest = await productionToolRegistry.getManifest();
   assert.equal(manifest.tools.length, 19);
-  assert.equal(
-    manifest.registryHash,
-    '82672d8347a8143a716e590014b9cf61fc576c0556c8683027d51528243c5192',
-  );
+  assert.equal(manifest.registryHash, PRODUCTION_TOOL_REGISTRY_HASH);
+  for (const relative of [
+    'src-tauri/src/services/ai_task_service.rs',
+    'src-tauri/src/services/agent_plan_service.rs',
+  ]) {
+    const source = readFileSync(join(process.cwd(), relative), 'utf8');
+    assert.equal(
+      source.includes(PRODUCTION_TOOL_REGISTRY_HASH),
+      true,
+      `${relative} must freeze PRODUCTION_TOOL_REGISTRY_HASH=${PRODUCTION_TOOL_REGISTRY_HASH}`,
+    );
+  }
   assert.equal(new Set(manifest.tools.map((tool) => `${tool.name}@${tool.version}`)).size, 19);
   assert.deepEqual(
     manifest.tools

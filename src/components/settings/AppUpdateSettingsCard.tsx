@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowUpCircle } from 'lucide-react';
 import {
   appUpdateService,
   type AppUpdateCapabilities,
@@ -204,7 +205,7 @@ function AppUpdateSettingsCard() {
   return (
     <section className="detail-card settings-card" aria-labelledby="app-update-settings-title">
       <div className="settings-card-heading">
-        <span aria-hidden="true">⬆</span>
+        <ArrowUpCircle aria-hidden="true" size={18} strokeWidth={1.8} />
         <span id="app-update-settings-title">应用更新与发布通道</span>
       </div>
 

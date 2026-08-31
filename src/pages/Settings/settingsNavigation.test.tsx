@@ -132,6 +132,9 @@ test('SettingsPage keeps session API keys fixed to their exact model identity', 
   const modelName = screen.getByPlaceholderText(
     '例如：deepseek-chat / deepseek-reasoner',
   ) as HTMLInputElement;
+  const temperature = screen.getByLabelText('温度参数') as HTMLInputElement;
+  const maxTokens = screen.getByLabelText('最大输出 Token') as HTMLInputElement;
+  const timeoutSeconds = screen.getByLabelText('超时时间（秒）') as HTMLInputElement;
   const saveProvider = screen.getAllByRole('button', { name: /保存设置/ })[0];
   assert.ok(saveProvider);
 
@@ -139,6 +142,9 @@ test('SettingsPage keeps session API keys fixed to their exact model identity', 
     fireEvent.change(baseUrl, { target: { value: 'https://session-provider.invalid/v1' } });
     fireEvent.change(modelName, { target: { value: 'session-model-a' } });
     fireEvent.change(apiKey, { target: { value: 'session-key-model-a' } });
+    fireEvent.change(temperature, { target: { value: '0.5' } });
+    fireEvent.change(maxTokens, { target: { value: '12000' } });
+    fireEvent.change(timeoutSeconds, { target: { value: '600' } });
     fireEvent.click(saveProvider);
   });
   await waitFor(() => assert.equal(apiKey.value, 'session-key-model-a'));
@@ -146,6 +152,10 @@ test('SettingsPage keeps session API keys fixed to their exact model identity', 
   const persistedA = localStorage.getItem('ai_novel_studio_ai_settings') ?? '';
   assert.equal(persistedA.includes('session-key-model-a'), false);
   assert.equal(persistedA.includes('apiKey'), false);
+  const parsedA = JSON.parse(persistedA) as Record<string, unknown>;
+  assert.equal(parsedA.temperature, 0.5);
+  assert.equal(parsedA.maxTokens, 12000);
+  assert.equal(parsedA.timeoutSeconds, 600);
 
   await act(async () => {
     fireEvent.change(modelName, { target: { value: 'session-model-b' } });
@@ -167,4 +177,84 @@ test('SettingsPage keeps session API keys fixed to their exact model identity', 
     fireEvent.change(modelName, { target: { value: 'session-model-a' } });
   });
   assert.equal(apiKey.value, 'session-key-model-a');
+});
+
+test('SettingsPage keeps an active saved model when governance settings are saved', async () => {
+  localStorage.removeItem('ai_novel_studio_ai_settings');
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-ai_models'));
+  });
+  await waitFor(() => assert.ok(screen.getByTestId('settings-tab-pane-ai-models')));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('checkbox', { name: /Mock 模式/ }));
+  });
+
+  await act(async () => {
+    const editor = screen.getByTestId('ai-api-model-editor');
+    const provider = editor.querySelector('#saved-api-model-provider');
+    const baseUrl = editor.querySelector('#saved-api-model-url');
+    const modelName = editor.querySelector('#saved-api-model-name');
+    const maxTokens = editor.querySelector('#saved-api-model-max-tokens');
+    const timeoutSeconds = editor.querySelector('#saved-api-model-timeout');
+    const apiKey = editor.querySelector('#saved-api-model-key');
+    assert.ok(provider && baseUrl && modelName && maxTokens && timeoutSeconds && apiKey);
+    fireEvent.change(provider, {
+      target: { value: 'openai_compatible' },
+    });
+    fireEvent.change(baseUrl, {
+      target: { value: 'http://localhost:12074/v1' },
+    });
+    fireEvent.change(modelName, {
+      target: { value: 'gpt-5.6-luna' },
+    });
+    fireEvent.change(maxTokens, {
+      target: { value: '12000' },
+    });
+    fireEvent.change(timeoutSeconds, {
+      target: { value: '600' },
+    });
+    fireEvent.change(apiKey, {
+      target: { value: 'session-only-card-key' },
+    });
+    fireEvent.click(screen.getByTestId('ai-api-model-save'));
+  });
+
+  await waitFor(() => {
+    const stored = JSON.parse(
+      localStorage.getItem('ai_novel_studio_ai_settings') ?? '{}',
+    ) as Record<string, unknown>;
+    assert.equal(stored.runtimeMode, 'api');
+    assert.equal(stored.provider, 'openai_compatible');
+    assert.equal(stored.modelName, 'gpt-5.6-luna');
+    assert.equal(stored.maxTokens, 12000);
+    assert.equal(stored.timeoutSeconds, 600);
+    assert.equal((stored.savedApiModels as unknown[] | undefined)?.length, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(stored, 'apiKey'), false);
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-governance'));
+  });
+  await waitFor(() => assert.ok(screen.getByTestId('settings-tab-pane-governance')));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '保存调用保护' }));
+  });
+
+  await waitFor(() => {
+    const stored = JSON.parse(
+      localStorage.getItem('ai_novel_studio_ai_settings') ?? '{}',
+    ) as Record<string, unknown>;
+    assert.equal(stored.runtimeMode, 'api');
+    assert.equal(stored.modelName, 'gpt-5.6-luna');
+    assert.equal((stored.savedApiModels as unknown[] | undefined)?.length, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(stored, 'apiKey'), false);
+  });
 });

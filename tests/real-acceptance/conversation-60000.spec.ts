@@ -9,7 +9,6 @@ import {
   clickTestId,
   createProjectThroughUi,
   createVolumeThroughUi,
-  fillTextareaTestId,
   findTestIdByAttribute,
   navigateHash,
   openWorkspace,
@@ -21,9 +20,12 @@ import {
   assertGateInstructionContract,
   buildRealConversationInstructions,
   createRealConversationStoryPlanApplyEvidence,
+  findRealConversationLocalDecisionReply,
   findRealConversationFixtureLeaks,
   isAutomaticSummaryProtocolRecoveryError,
+  isRetryableAutomaticAssetPreflightFailure,
   isRetryableRealAcceptanceRunFailure,
+  isTransientRealAcceptanceProviderFailure,
   parseRealConversationGenerationSnapshot,
   persistedGenerationArtifactCountForFailedRun,
   parseRealConversationStoryPlan,
@@ -44,20 +46,29 @@ import {
   type RealConversationAcceptanceEvidenceOutcome,
   type RealConversationAcceptanceFailureStage,
   type RealConversationAcceptanceScenario,
+  type RealConversationAutomaticSummaryExecutionEvidence,
   type RealConversationAutomaticAssetPostRunProjectionEvidence,
+  type RealConversationAutomaticAssetPreflightRetryEvidence,
   type RealConversationAutomaticAssetProviderRequestEvidence,
   type RealConversationArtifactCandidateIntegrityCheck,
   type RealConversationCreativeUserTurnEvidence,
   type RealConversationGenerationSnapshot,
   type RealConversationGenerationSnapshotBridgeRecord,
   type RealConversationStoryPlanApplyEvidence,
+  type RealConversationSummaryStartRecoveryEvidence,
 } from '../../scripts/e2e/real-conversation-acceptance-profile.ts';
+import { restoreContinuousTaskSurface } from '../../scripts/e2e/continuous-task-surface.ts';
+import {
+  readSequentialLiveConditionSnapshot,
+  waitForLiveCondition,
+} from '../../scripts/e2e/live-condition.ts';
 import { decodeWorkbenchTurnContent } from '../../src/services/conversation/workbenchTurnOrigin.ts';
 import {
   buildCoreAssetGenerationGoal,
   isCoreAssetGenerationGoal,
   type ChapterCoreAsset,
 } from '../../src/services/conversation/chapterAssetReadiness.ts';
+import { parseWorkbenchDecisionIntent } from '../../src/services/conversation/workbenchDecisionIntent.ts';
 import { inspectChapterCandidateIntegrity } from '../../src/services/generation/chapterCandidateIntegrity.ts';
 import {
   isRealAcceptanceLengthControlEvidenceConsistent,
@@ -104,6 +115,7 @@ interface AiTaskDetail {
     attemptId: string;
     providerRequestId?: string;
     status: string;
+    responseMetadataJson?: unknown;
   }>;
   inputSnapshot: {
     inputType: string;
@@ -139,18 +151,30 @@ interface WorkbenchProviderRequestEvidence {
 
 interface TaskConversationBundle {
   conversation: { conversationId: string; novelId: string; status: string };
-  turns: Array<{ turnId: string; role: string; content?: string }>;
+  turns: Array<{
+    turnId: string;
+    role: string;
+    content?: string;
+    createdAt: string;
+  }>;
   runs: Array<{
     runId: string;
     turnId: string;
+    chapterId?: string;
     status: string;
+    workerId?: string;
     error?: string;
+    finishedAt?: string;
     modelSnapshot: {
       providerId: string;
       modelId: string;
       runtimeMode: string;
       baseUrl?: string;
       options?: Record<string, unknown>;
+      runtime?: {
+        adapterProtocol?: string;
+        adapterProvider?: string;
+      };
     };
   }>;
   toolEvents: Array<{
@@ -207,7 +231,13 @@ interface IntegrityRepairAttemptEvidence {
 
 interface DshTaskRuntimeStatus {
   runId: string;
+  sessionId: string;
   status: string;
+}
+
+interface TaskTurnRunProjection {
+  turn: { turnId: string; role: string; content?: string };
+  runs: TaskConversationBundle['runs'];
 }
 
 interface ChapterRecord {
@@ -239,6 +269,22 @@ interface ChapterSummaryRecord {
   chapterId: string;
   adoptedDraftId: string;
   summary: string;
+  keyEvents?: string;
+  characterChanges?: string;
+  relationshipChanges?: string;
+  newForeshadows?: string;
+  resolvedForeshadows?: string;
+  nextChapterHints?: string;
+  coreEvents?: string;
+  protagonistStateChange?: string;
+  importantCharacterChanges?: string;
+  settingChanges?: string;
+  newLocations?: string;
+  newItemsOrAbilities?: string;
+  foreshadowing?: string;
+  unresolvedQuestions?: string;
+  factsMustRemember?: string;
+  nextChapterHook?: string;
   enabled: boolean;
   contentHash?: string;
   draftVersion?: number;
@@ -250,7 +296,9 @@ interface ContextRecord {
   novelId: string;
   chapterId?: string;
   contextType: string;
+  title?: string;
   content: string;
+  importance?: number;
   isActive: boolean;
   isExpired: boolean;
   contentHash?: string;
@@ -296,6 +344,47 @@ interface RuleSystemRecord {
   title: string;
   content: string;
   isActive: boolean;
+}
+
+interface RealConversationAnalysisMaterial {
+  schemaVersion: 'real_conversation_analysis_material_v1';
+  formalAssets: {
+    primaryWorldSettingId: string;
+    worldSettings: Array<{ id: string; title: string; content: string }>;
+    ruleSystems: Array<{ id: string; title: string; content: string }>;
+    protagonists: Array<{ name: string; identity?: string; motivation?: string }>;
+  };
+  chapters: Array<{
+    chapter: number;
+    chapterId: string;
+    summary: {
+      id: string;
+      summary: string;
+      keyEvents: string;
+      characterChanges: string;
+      relationshipChanges: string;
+      newForeshadows: string;
+      resolvedForeshadows: string;
+      nextChapterHints: string;
+      coreEvents: string;
+      protagonistStateChange: string;
+      importantCharacterChanges: string;
+      settingChanges: string;
+      newLocations: string;
+      newItemsOrAbilities: string;
+      foreshadowing: string;
+      unresolvedQuestions: string;
+      factsMustRemember: string;
+      nextChapterHook: string;
+    };
+    contextRecords: Array<{
+      id: string;
+      contextType: string;
+      title: string;
+      content: string;
+      importance: number;
+    }>;
+  }>;
 }
 
 interface ChapterAssetRecord {
@@ -350,12 +439,16 @@ interface ChapterEvidence {
   summaryArtifactId: string;
   summaryApplyTransactionId: string;
   summaryId: string;
+  summaryStartRetryCount: number;
+  summaryStartRecoveries: RealConversationSummaryStartRecoveryEvidence[];
   summaryRetryCount: number;
   summaryAttempts: ChapterRunAttemptEvidence[];
+  summaryExecutionEvidence: RealConversationAutomaticSummaryExecutionEvidence;
   contextRecordCount: number;
   memorySourceTypes: string[];
   retryCount: number;
   attempts: ChapterRunAttemptEvidence[];
+  preflightRetries: ChapterPreflightRetryEvidence[];
   error: string;
   durationMs: number;
 }
@@ -365,6 +458,14 @@ interface ChapterRunAttemptEvidence {
   runId: string;
   status: 'completed' | 'failed' | 'cancelled';
   error: string;
+}
+
+interface ChapterPreflightRetryEvidence {
+  retryAttempt: 1 | 2;
+  turnId: string;
+  model: { providerId: string; modelId: string };
+  errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED';
+  runId: null;
 }
 
 type SparseAssetKind = 'story_plan' | 'world_setting' | 'protagonist' | 'chapter_outline';
@@ -383,6 +484,8 @@ interface SparseAssetPreparationEvidence {
   toolName: 'expand_settings' | 'generate_characters' | 'generate_outline';
   toolAttemptCount: number;
   failedToolAttemptCount: number;
+  retryCount: number;
+  attempts: ChapterRunAttemptEvidence[];
   applyTransactionId: string;
   conflictCode: '';
   postRunProjectionEvidence: RealConversationAutomaticAssetPostRunProjectionEvidence;
@@ -430,6 +533,9 @@ const TARGET_CHAPTER_WORDS = 4100;
 const SPARSE_BOOK_TARGET_WORDS = 60_000;
 const SPARSE_BOOK_MIN_WORDS = 54_000;
 const SPARSE_BOOK_MAX_WORDS = 66_000;
+const APPLY_CURRENT_ASSET_COMMAND = '应用当前资产候选';
+const ADOPT_CURRENT_CHAPTER_COMMAND = '采用本章正文候选';
+const APPLY_CURRENT_SUMMARY_COMMAND = '应用本章总结候选';
 const SPARSE_ASSET_ORDER: SparseAssetKind[] = [
   'world_setting',
   'protagonist',
@@ -474,6 +580,8 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
     const evidencePath = path.join(evidenceDirectory, 'real-conversation-evidence.json');
     const chapters: ChapterEvidence[] = [];
     const assetPreparations: SparseAssetPreparationEvidence[] = [];
+    const automaticAssetPreflightRetries: RealConversationAutomaticAssetPreflightRetryEvidence[] =
+      [];
     let creativeTurnEvidence: RealConversationCreativeUserTurnEvidence[] = [];
     const automaticAssetResumeDiagnostics: AutomaticAssetResumeDiagnostic[] = [];
     let status: 'passed' | 'failed' = 'failed';
@@ -494,6 +602,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
     let plannedTargetWordCount = 0;
     let bookWordGoal: BookWordGoalEvidence | undefined;
     let storyPlanApplyEvidence: RealConversationStoryPlanApplyEvidence | null = null;
+    let analysisMaterial: RealConversationAnalysisMaterial | null = null;
     let runChapterCount = preseedStoryAssets ? preparedRealConversationChapterCount(profile) : 1;
     let instructions = buildRealConversationInstructions(profile, runChapterCount);
     const prompts: string[] = [];
@@ -501,6 +610,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
     try {
       await waitForTestId('app-shell');
       await configureRealModelThroughSettings(profile);
+      await assertRendererReloadRetainsSessionModel(profile);
 
       const novelId = await createProjectThroughUi(
         preseedStoryAssets ? '真实对话验收' : '稀疏创意真实对话验收',
@@ -572,12 +682,20 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
           summaryArtifactId: '',
           summaryApplyTransactionId: '',
           summaryId: '',
+          summaryStartRetryCount: 0,
+          summaryStartRecoveries: [],
           summaryRetryCount: 0,
           summaryAttempts: [],
+          summaryExecutionEvidence: {
+            sessionId: '',
+            messageCounts: [],
+            providerUsage: { unit: 'tokens', input: 0 },
+          },
           contextRecordCount: 0,
           memorySourceTypes: [],
           retryCount: 0,
           attempts: [],
+          preflightRetries: [],
           error: '',
           durationMs: 0,
         };
@@ -600,6 +718,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
             profile,
             evidence,
             assetPreparations,
+            automaticAssetPreflightRetries,
             automaticAssetResumeDiagnostics,
             recordStoryPlanApplyEvidence: (nextEvidence) => {
               storyPlanApplyEvidence = nextEvidence;
@@ -627,9 +746,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
             Boolean(progressBundle),
             'The continuous task conversation disappeared.',
           );
-          observedUserTurnCount = progressBundle!.turns.filter(
-            (turn) => turn.role === 'user' && !isAutomaticWorkbenchTurn(turn),
-          ).length;
+          observedUserTurnCount = creativeUserTurns(progressBundle).length;
           observedAutomaticAssetTurnCount = progressBundle!.turns.filter(
             (turn) => turn.role === 'user' && isAutomaticAssetPreparationTurn(turn),
           ).length;
@@ -652,10 +769,9 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
               'get_task_conversation',
               { conversationId },
             );
-            observedUserTurnCount =
-              progressBundle?.turns.filter(
-                (turn) => turn.role === 'user' && !isAutomaticWorkbenchTurn(turn),
-              ).length ?? observedUserTurnCount;
+            observedUserTurnCount = progressBundle
+              ? creativeUserTurns(progressBundle).length
+              : observedUserTurnCount;
             observedAutomaticAssetTurnCount =
               progressBundle?.turns.filter(
                 (turn) => turn.role === 'user' && isAutomaticAssetPreparationTurn(turn),
@@ -723,6 +839,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
           failedRunArtifactCount +
           assetPreparations.length +
           chapters.length,
+        assetPreparations.reduce((sum, preparation) => sum + preparation.attempts.length, 0),
         assetPreparations.length,
         chapters.reduce((sum, chapter) => sum + chapter.summaryAttempts.length, 0),
       );
@@ -735,6 +852,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
         prompts,
         chapters,
         assetPreparations,
+        automaticAssetPreflightRetries,
         profile.scenario,
       );
       creativeTurnEvidence = buildCreativeUserTurnEvidence(
@@ -742,6 +860,10 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
         prompts,
         profile.scenario,
       );
+      analysisMaterial = await readRealConversationAnalysisMaterial({
+        novelId,
+        chapters,
+      });
       activeFailureStage = 'diagnostics';
       await assertCleanDiagnostics();
       status = 'passed';
@@ -775,6 +897,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
             userTurnCount: observedUserTurnCount,
             automaticAssetPreparationTurnCount: observedAutomaticAssetTurnCount,
             automaticAssetPreparations: assetPreparations,
+            automaticAssetPreflightRetries,
             automaticAssetResumeDiagnostics,
             automaticChapterSummaryTurnCount: observedAutomaticSummaryTurnCount,
             runCount: observedRunCount,
@@ -783,6 +906,7 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
             plannedTargetWordCount,
             bookWordGoal,
             storyPlanApplyEvidence,
+            analysisMaterial,
             chapterCount: runChapterCount,
             completedChapterCount: completed.length,
             totalWordCount: completed.reduce((sum, chapter) => sum + chapter.wordCount, 0),
@@ -801,6 +925,94 @@ describe('explicit real-model short-instruction conversation acceptance', () => 
   });
 });
 
+async function readRealConversationAnalysisMaterial(input: {
+  novelId: string;
+  chapters: readonly ChapterEvidence[];
+}): Promise<RealConversationAnalysisMaterial> {
+  const [worldSettings, ruleSystems, novel, contextRecords, summaries] = await Promise.all([
+    bridgeCall<WorldSettingRecord[]>('get_world_settings', { novelId: input.novelId }),
+    bridgeCall<RuleSystemRecord[]>('get_rule_systems', { novelId: input.novelId }),
+    bridgeCall<NovelRecord | null>('get_novel_by_id', { id: input.novelId }),
+    bridgeCall<ContextRecord[]>('get_context_records', { novelId: input.novelId }),
+    Promise.all(
+      input.chapters.map((chapter) =>
+        bridgeCall<ChapterSummaryRecord | null>('get_chapter_summary', {
+          chapterId: chapter.chapterId,
+        }),
+      ),
+    ),
+  ]);
+  const activeWorldSettings = worldSettings
+    .filter((setting) => setting.isActive && setting.content.trim())
+    .map(({ id, title, content }) => ({ id, title, content }));
+  const activeRuleSystems = ruleSystems
+    .filter((rule) => rule.isActive && rule.content.trim())
+    .map(({ id, title, content }) => ({ id, title, content }));
+  const protagonists = readProtagonistProfiles(novel);
+  requireCondition(
+    activeWorldSettings.length > 0 &&
+      activeRuleSystems.length > 0 &&
+      protagonists.length > 0 &&
+      summaries.every(Boolean),
+    'Final analysis material does not retain the formal world, rules, protagonist, and chapter summaries.',
+  );
+
+  return {
+    schemaVersion: 'real_conversation_analysis_material_v1',
+    formalAssets: {
+      primaryWorldSettingId: activeWorldSettings[0]!.id,
+      worldSettings: activeWorldSettings,
+      ruleSystems: activeRuleSystems,
+      protagonists,
+    },
+    chapters: input.chapters.map((chapter, index) => {
+      const summary = summaries[index]!;
+      const chapterContexts = contextRecords.filter(
+        (record) =>
+          record.chapterId === chapter.chapterId &&
+          record.isActive &&
+          !record.isExpired &&
+          record.content.trim(),
+      );
+      requireCondition(
+        chapterContexts.length > 0,
+        `Chapter ${chapter.chapter} has no active semantic context for final analysis.`,
+      );
+      return {
+        chapter: chapter.chapter,
+        chapterId: chapter.chapterId,
+        summary: {
+          id: summary.id,
+          summary: summary.summary,
+          keyEvents: summary.keyEvents ?? '',
+          characterChanges: summary.characterChanges ?? '',
+          relationshipChanges: summary.relationshipChanges ?? '',
+          newForeshadows: summary.newForeshadows ?? '',
+          resolvedForeshadows: summary.resolvedForeshadows ?? '',
+          nextChapterHints: summary.nextChapterHints ?? '',
+          coreEvents: summary.coreEvents ?? '',
+          protagonistStateChange: summary.protagonistStateChange ?? '',
+          importantCharacterChanges: summary.importantCharacterChanges ?? '',
+          settingChanges: summary.settingChanges ?? '',
+          newLocations: summary.newLocations ?? '',
+          newItemsOrAbilities: summary.newItemsOrAbilities ?? '',
+          foreshadowing: summary.foreshadowing ?? '',
+          unresolvedQuestions: summary.unresolvedQuestions ?? '',
+          factsMustRemember: summary.factsMustRemember ?? '',
+          nextChapterHook: summary.nextChapterHook ?? '',
+        },
+        contextRecords: chapterContexts.map((record) => ({
+          id: record.id,
+          contextType: record.contextType,
+          title: record.title ?? '',
+          content: record.content,
+          importance: record.importance ?? 0,
+        })),
+      };
+    }),
+  };
+}
+
 async function configureRealModelThroughSettings(
   profile: ReturnType<typeof readRealConversationAcceptanceProfile>,
 ): Promise<void> {
@@ -809,28 +1021,47 @@ async function configureRealModelThroughSettings(
   await waitForTestId('settings-tab-pane-ai-models');
 
   const mockMode = await browser.$('#mockMode');
-  if (await mockMode.isSelected()) await mockMode.click();
-  const provider = await browser.$(
-    '//label[normalize-space(.)="Provider"]/following-sibling::select',
-  );
+  if (await mockMode.isSelected()) {
+    await mockMode.click();
+    await browser.waitUntil(async () => !(await mockMode.isSelected()), {
+      timeout: 30_000,
+      timeoutMsg: 'Real API mode did not settle.',
+    });
+  }
+  const provider = await waitForTestId('ai-api-model-provider');
   await provider.selectByAttribute('value', 'openai_compatible');
-
-  await setInputValue('input[placeholder*="api.deepseek.com/v1"]', profile.baseUrl);
-  await setInputValue('input[type="password"][placeholder="sk-..."]', profile.apiKey);
-  await setInputValue('input[placeholder*="deepseek-chat"]', profile.model);
-  await setInputValue(
-    '//label[contains(normalize-space(.), "最大输出 Token")]/following-sibling::input',
-    '12000',
-  );
-  await setInputValue(
-    '//label[contains(normalize-space(.), "超时时间")]/following-sibling::input',
-    '600',
+  await waitForStableSelectValue(
+    provider,
+    'openai_compatible',
+    'The saved API model Provider did not settle.',
   );
 
-  const providerSave = await browser.$('//button[contains(., "保存设置")]');
+  await setInputValue('#saved-api-model-url', profile.baseUrl);
+  await setInputValue('#saved-api-model-name', profile.model);
+  await setInputValue('#saved-api-model-max-tokens', '12000');
+  await setInputValue('#saved-api-model-timeout', '600');
+  // Credentials are bound to the exact Provider/base URL/model identity, so enter the Key last.
+  await setInputValue('#saved-api-model-key', profile.apiKey);
+
+  const providerSave = await waitForTestId('ai-api-model-save');
   await providerSave.waitForClickable({ timeout: 30_000 });
   await providerSave.click();
   await waitForSettingsMessage('AI 设置已保存');
+  await browser.waitUntil(
+    async () => {
+      const card = await browser.$('[data-testid="ai-saved-model-card"][data-active="true"]');
+      return (
+        (await card.isExisting()) &&
+        (await card.getText()).includes(profile.model) &&
+        (await card.getText()).includes('本次会话已绑定')
+      );
+    },
+    {
+      timeout: 30_000,
+      interval: 100,
+      timeoutMsg: 'The saved API model card did not become the active session-bound model.',
+    },
+  );
 
   const credentialPersisted = await browser.execute((credential) => {
     for (let index = 0; index < window.localStorage.length; index += 1) {
@@ -862,6 +1093,29 @@ async function configureRealModelThroughSettings(
   await assertSessionModelForm(profile);
 }
 
+async function assertRendererReloadRetainsSessionModel(
+  profile: ReturnType<typeof readRealConversationAcceptanceProfile>,
+): Promise<void> {
+  await browser.refresh();
+  await waitForTestId('app-shell');
+  await navigateHash('#/settings');
+  await clickTestId('settings-nav-ai_models');
+  await waitForTestId('settings-tab-pane-ai-models');
+  await assertSessionModelForm(profile);
+
+  const credentialPersisted = await browser.execute((credential) => {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key && (window.localStorage.getItem(key) ?? '').includes(credential)) return true;
+    }
+    return false;
+  }, profile.apiKey);
+  requireCondition(
+    credentialPersisted === false,
+    'The renderer reload restored the model credential through persistent browser storage.',
+  );
+}
+
 async function waitForSettingsMessage(expected: string): Promise<void> {
   await browser.waitUntil(async () => (await browser.$('body').getText()).includes(expected), {
     timeout: 30_000,
@@ -873,61 +1127,118 @@ async function waitForPersistedRealSettings(
   profile: ReturnType<typeof readRealConversationAcceptanceProfile>,
   maxRequestsPerMinute: number,
 ): Promise<void> {
-  await browser.waitUntil(
-    async () =>
-      browser.execute(
-        (expected) => {
-          const raw = window.localStorage.getItem('ai_novel_studio_ai_settings');
-          if (!raw) return false;
-          try {
-            const settings = JSON.parse(raw) as Record<string, unknown>;
-            return (
-              settings.runtimeMode === 'api' &&
-              settings.provider === 'openai_compatible' &&
-              settings.baseUrl === expected.baseUrl &&
-              settings.modelName === expected.model &&
-              settings.maxTokens === 12_000 &&
-              settings.timeoutSeconds === 600 &&
-              settings.maxRequestsPerMinute === expected.maxRequestsPerMinute &&
-              !Object.prototype.hasOwnProperty.call(settings, 'apiKey')
-            );
-          } catch {
-            return false;
-          }
-        },
-        { ...profile, apiKey: undefined, maxRequestsPerMinute },
-      ),
-    {
-      timeout: 30_000,
-      interval: 100,
-      timeoutMsg: 'The non-secret real-model settings snapshot did not persist.',
-    },
-  );
+  let observed: Record<string, unknown> = {};
+  try {
+    await browser.waitUntil(
+      async () => {
+        observed = await browser.execute(
+          (expected) => {
+            const raw = window.localStorage.getItem('ai_novel_studio_ai_settings');
+            if (!raw) return { matches: false, present: false };
+            try {
+              const settings = JSON.parse(raw) as Record<string, unknown>;
+              const savedModels = Array.isArray(settings.savedApiModels)
+                ? (settings.savedApiModels as Array<Record<string, unknown>>)
+                : [];
+              const activeModel = savedModels.find(
+                (model) => model.id === settings.activeSavedApiModelId,
+              );
+              const matches =
+                settings.runtimeMode === 'api' &&
+                settings.provider === 'openai_compatible' &&
+                settings.baseUrl === expected.baseUrl &&
+                settings.modelName === expected.model &&
+                settings.maxTokens === 12_000 &&
+                settings.timeoutSeconds === 600 &&
+                settings.maxRequestsPerMinute === expected.maxRequestsPerMinute &&
+                !Object.prototype.hasOwnProperty.call(settings, 'apiKey');
+              return {
+                matches,
+                present: true,
+                runtimeMode: settings.runtimeMode,
+                provider: settings.provider,
+                baseUrlMatches: settings.baseUrl === expected.baseUrl,
+                modelMatches: settings.modelName === expected.model,
+                maxTokens: settings.maxTokens,
+                timeoutSeconds: settings.timeoutSeconds,
+                maxRequestsPerMinute: settings.maxRequestsPerMinute,
+                apiKeyPropertyPresent: Object.prototype.hasOwnProperty.call(settings, 'apiKey'),
+                savedModelCount: savedModels.length,
+                activeModelMatches:
+                  activeModel?.provider === 'openai_compatible' &&
+                  activeModel?.baseUrl === expected.baseUrl &&
+                  activeModel?.modelName === expected.model,
+              };
+            } catch {
+              return { matches: false, present: true, parseable: false };
+            }
+          },
+          { ...profile, apiKey: undefined, maxRequestsPerMinute },
+        );
+        return observed.matches === true;
+      },
+      {
+        timeout: 30_000,
+        interval: 100,
+        timeoutMsg: 'The non-secret real-model settings snapshot did not persist.',
+      },
+    );
+  } catch (error) {
+    throw new Error(`${safeEvidenceError(error)} Observed settings: ${JSON.stringify(observed)}.`);
+  }
 }
 
 async function assertSessionModelForm(
   profile: ReturnType<typeof readRealConversationAcceptanceProfile>,
 ): Promise<void> {
-  const matches = await browser.execute((expected) => {
-    const provider = document.querySelector(
-      'label.panel-field-label + select.panel-select',
-    ) as HTMLSelectElement | null;
-    const baseUrl = document.querySelector(
-      'input[placeholder*="api.deepseek.com/v1"]',
-    ) as HTMLInputElement | null;
-    const apiKey = document.querySelector(
-      'input[type="password"][placeholder="sk-..."]',
-    ) as HTMLInputElement | null;
-    const model = document.querySelector(
-      'input[placeholder*="deepseek-chat"]',
-    ) as HTMLInputElement | null;
-    return {
-      provider: provider?.value === 'openai_compatible',
-      baseUrl: baseUrl?.value === expected.baseUrl,
-      credential: apiKey?.value === expected.apiKey,
-      model: model?.value === expected.model,
-    };
-  }, profile);
+  if (!(await browser.$('[data-testid="ai-api-model-editor"]').isExisting())) {
+    const activeCard = await browser.$('[data-testid="ai-saved-model-card"][data-active="true"]');
+    await activeCard.waitForDisplayed({ timeout: 30_000 });
+    const edit = await activeCard.$('.//button[normalize-space(.)="编辑"]');
+    await edit.waitForClickable({ timeout: 30_000 });
+    await edit.click();
+    await waitForTestId('ai-api-model-editor');
+  }
+  let matches = {
+    provider: false,
+    baseUrl: false,
+    credential: false,
+    model: false,
+    maxTokens: false,
+    timeout: false,
+  };
+  await browser.waitUntil(
+    async () => {
+      matches = await browser.execute((expected) => {
+        const provider = document.querySelector(
+          '#saved-api-model-provider',
+        ) as HTMLSelectElement | null;
+        const baseUrl = document.querySelector('#saved-api-model-url') as HTMLInputElement | null;
+        const apiKey = document.querySelector('#saved-api-model-key') as HTMLInputElement | null;
+        const model = document.querySelector('#saved-api-model-name') as HTMLInputElement | null;
+        const maxTokens = document.querySelector(
+          '#saved-api-model-max-tokens',
+        ) as HTMLInputElement | null;
+        const timeout = document.querySelector(
+          '#saved-api-model-timeout',
+        ) as HTMLInputElement | null;
+        return {
+          provider: provider?.value === 'openai_compatible',
+          baseUrl: baseUrl?.value === expected.baseUrl,
+          credential: apiKey?.value === expected.apiKey,
+          model: model?.value === expected.model,
+          maxTokens: maxTokens?.value === '12000',
+          timeout: timeout?.value === '600',
+        };
+      }, profile);
+      return Object.values(matches).every(Boolean);
+    },
+    {
+      timeout: 30_000,
+      interval: 100,
+      timeoutMsg: 'The session model form did not restore its exact frozen identity.',
+    },
+  );
   requireCondition(
     Object.values(matches).every(Boolean),
     `The session model form did not retain its exact identity: provider=${matches.provider}; baseUrl=${matches.baseUrl}; credential=${matches.credential}; model=${matches.model}.`,
@@ -946,6 +1257,7 @@ interface ChapterRunInput {
   profile: ReturnType<typeof readRealConversationAcceptanceProfile>;
   evidence: ChapterEvidence;
   assetPreparations: SparseAssetPreparationEvidence[];
+  automaticAssetPreflightRetries: RealConversationAutomaticAssetPreflightRetryEvidence[];
   automaticAssetResumeDiagnostics: AutomaticAssetResumeDiagnostic[];
   recordStoryPlanApplyEvidence: (evidence: RealConversationStoryPlanApplyEvidence) => void;
 }
@@ -1016,6 +1328,107 @@ async function appendChapterTurn(input: ChapterRunInput): Promise<string> {
   return conversationId;
 }
 
+async function sendWorkbenchDecisionThroughComposer(input: {
+  chapterNumber: number;
+  novelId: string;
+  conversationId: string;
+  command: string;
+}): Promise<{ turnId: string; runId: string; bundle: TaskConversationBundle }> {
+  requireCondition(
+    Boolean(parseWorkbenchDecisionIntent(input.command)),
+    `Chapter ${input.chapterNumber} decision command is not recognized by the workbench parser.`,
+  );
+  await returnToContinuousTaskForChapter(input);
+  const before = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+    conversationId: input.conversationId,
+  });
+  requireCondition(
+    Boolean(before),
+    `Chapter ${input.chapterNumber} conversation disappeared before its decision command.`,
+  );
+  const existingTurnIds = new Set(before!.turns.map((turn) => turn.turnId));
+
+  await fillControlledTextareaTestId('workbench-composer-input', input.command);
+  const send = await waitForTestId('workbench-send-task');
+  await send.waitForEnabled({ timeout: 120_000 });
+  await send.waitForClickable({ timeout: 30_000 });
+  await send.click();
+
+  let decisionTurnId = '';
+  let decisionRunId = '';
+  let terminalBundle: TaskConversationBundle | null = null;
+  await waitForLiveCondition(
+    async () => {
+      const current = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+        conversationId: input.conversationId,
+      });
+      if (!current) return false;
+      const commandTurns = current.turns.filter(
+        (turn) =>
+          turn.role === 'user' &&
+          !existingTurnIds.has(turn.turnId) &&
+          turn.content === input.command,
+      );
+      requireCondition(
+        commandTurns.length <= 1,
+        `Chapter ${input.chapterNumber} persisted the decision command more than once.`,
+      );
+      const commandTurn = commandTurns[0];
+      if (!commandTurn) return false;
+      const commandRuns = current.runs.filter((run) => run.turnId === commandTurn.turnId);
+      requireCondition(
+        commandRuns.length <= 1,
+        `Chapter ${input.chapterNumber} created duplicate runs for one decision command.`,
+      );
+      const commandRun = commandRuns[0];
+      if (!commandRun || !['completed', 'failed', 'cancelled'].includes(commandRun.status)) {
+        return false;
+      }
+      decisionTurnId = commandTurn.turnId;
+      decisionRunId = commandRun.runId;
+      terminalBundle = current;
+      return true;
+    },
+    {
+      timeout: 60_000,
+      interval: 100,
+      timeoutMessage: `Chapter ${input.chapterNumber} decision command did not complete locally.`,
+    },
+  );
+
+  const bundle = terminalBundle!;
+  const decisionRun = bundle.runs.find((run) => run.runId === decisionRunId)!;
+  const providerRunsForTurn = bundle.runs.filter(
+    (run) => run.turnId === decisionTurnId && run.modelSnapshot.runtimeMode === 'api',
+  );
+  const assistantReply = findRealConversationLocalDecisionReply(
+    bundle.turns,
+    decisionTurnId,
+    decisionRun.finishedAt,
+  );
+  requireCondition(
+    decisionRun.status === 'completed' &&
+      decisionRun.modelSnapshot.providerId === 'ans-local' &&
+      decisionRun.modelSnapshot.modelId === 'workbench-help-v1' &&
+      decisionRun.modelSnapshot.runtimeMode === 'mock' &&
+      decisionRun.modelSnapshot.runtime?.adapterProtocol === 'ans_local_conversation_v1' &&
+      providerRunsForTurn.length === 0 &&
+      bundle.toolEvents.every((event) => event.runId !== decisionRunId) &&
+      bundle.artifacts.every((artifact) => artifact.runId !== decisionRunId) &&
+      assistantReply?.role === 'assistant' &&
+      Boolean(assistantReply.content?.trim()),
+    `Chapter ${input.chapterNumber} decision command was not a completed ans-local, zero-Provider, zero-tool, zero-artifact run${decisionRun.error ? `: ${decisionRun.error}` : '.'}`,
+  );
+  const workbench = await waitForTestId('creative-workbench');
+  const chapterEditor = await browser.$('[data-testid="chapter-editor"]');
+  requireCondition(
+    (await workbench.isDisplayed()) &&
+      (!(await chapterEditor.isExisting()) || !(await chapterEditor.isDisplayed())),
+    `Chapter ${input.chapterNumber} decision command left the conversational workbench.`,
+  );
+  return { turnId: decisionTurnId, runId: decisionRunId, bundle };
+}
+
 async function waitForWorkbenchTargetChapter(
   chapterId: string,
   chapterNumber: number,
@@ -1067,6 +1480,7 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
       expectedPrompts: input.expectedPrompts,
       profile: input.profile,
       evidence: input.assetPreparations,
+      preflightRetries: input.automaticAssetPreflightRetries,
       resumeDiagnostics: input.automaticAssetResumeDiagnostics,
       recordStoryPlanApplyEvidence: input.recordStoryPlanApplyEvidence,
     });
@@ -1081,7 +1495,7 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
     input.chapterId = resolvedChapterId;
   }
   input.evidence.chapterId = input.chapterId;
-  const currentTurnId = await waitForLatestTurnRun(conversationId, input.expectedPrompts);
+  const currentTurnId = await waitForLatestCreativeTurn(conversationId, input.expectedPrompts);
   const fixedModel = await waitForTestId('workbench-model-select');
   requireCondition(
     (await fixedModel.getValue()) === `openai_compatible:${input.profile.model}` &&
@@ -1092,6 +1506,7 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
 
   await waitForChapterRunWithTransientRecovery({
     chapterNumber: input.chapterNumber,
+    novelId: input.novelId,
     conversationId,
     turnId: currentTurnId,
     chapterTimeoutMs: input.profile.chapterTimeoutMs,
@@ -1285,53 +1700,14 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
     `Chapter ${input.chapterNumber} word count ${input.evidence.wordCount} is outside ${acceptedWordRange.minimum}-${acceptedWordRange.maximum} for target ${acceptedWordRange.target} (${acceptedWordRange.source}).`,
   );
 
-  const confirm = await currentCard.$('[data-testid="workbench-artifact-confirm-review"]');
-  await confirm.waitForClickable({ timeout: 30_000 });
-  await confirm.click();
-  await browser.waitUntil(
-    async () => {
-      const hash = await browser.execute(() => window.location.hash);
-      return hash.includes(`chapterId=${input.chapterId}`) && hash.includes('authorizationId=');
-    },
-    { timeout: 30_000, timeoutMsg: `Chapter ${input.chapterNumber} did not enter review.` },
-  );
-
-  const route = await browser.execute(() => window.location.hash);
-  const authorizationId = new URLSearchParams(route.split('?')[1] ?? '').get('authorizationId');
-  requireCondition(Boolean(authorizationId), `Chapter ${input.chapterNumber} has no review grant.`);
-  const editor = await waitForTestIdAttribute('chapter-editor', 'data-chapter-id', input.chapterId);
-  requireCondition(
-    (await editor.getAttribute('data-review-locked')) === 'true',
-    `Chapter ${input.chapterNumber} review was not initially locked.`,
-  );
-  await clickTestId('chapter-review-unlock');
-  const candidateText = await editor.getValue();
-  requireCondition(
-    sha256(candidateText) === artifact.artifact.contentHash,
-    `Chapter ${input.chapterNumber} review content hash changed before editing.`,
-  );
-
-  await fillTextareaTestId('chapter-editor', `${candidateText}\n`);
-  await clickTestId('chapter-save');
-  await browser.waitUntil(async () => (await editor.getAttribute('data-dirty')) === 'false', {
-    timeout: 30_000,
-    timeoutMsg: `Chapter ${input.chapterNumber} did not save.`,
-  });
-  const savedDraftId = await editor.getAttribute('data-draft-id');
-  const savedContent = await editor.getValue();
-  requireCondition(Boolean(savedDraftId), `Chapter ${input.chapterNumber} save has no draft.`);
-
-  await clickTestId('chapter-adopt');
-  await waitForTestId('apply-confirm');
-  await clickTestId('dialog-confirm');
-  await browser.waitUntil(async () => (await editor.getAttribute('data-adopted')) === 'true', {
-    timeout: 30_000,
-    timeoutMsg: `Chapter ${input.chapterNumber} was not adopted.`,
-  });
-
-  const completedBundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+  const providerEvidenceFilesBeforeSummary = snapshotProviderEvidenceFiles();
+  const adoptionDecision = await sendWorkbenchDecisionThroughComposer({
+    chapterNumber: input.chapterNumber,
+    novelId: input.novelId,
     conversationId,
+    command: ADOPT_CURRENT_CHAPTER_COMMAND,
   });
+  const completedBundle = adoptionDecision.bundle;
   requireCondition(
     Boolean(completedBundle),
     `Chapter ${input.chapterNumber} conversation disappeared after adoption.`,
@@ -1344,13 +1720,26 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
     `Chapter ${input.chapterNumber} did not retain exactly one confirmation for its artifact.`,
   );
 
+  const projectedAuthorizations = completedBundle.authorizations.filter(
+    (authorization) => authorization.artifactId === artifactId,
+  );
+  const projectedAuthorization = projectedAuthorizations[0];
+  const authorizationId = projectedAuthorization?.authorizationId ?? '';
+  const savedDraftId = projectedAuthorization?.consumedByDraftId ?? '';
+  requireCondition(
+    projectedAuthorizations.length === 1 &&
+      projectedAuthorization?.status === 'consumed' &&
+      Boolean(authorizationId && savedDraftId),
+    `Chapter ${input.chapterNumber} dialogue adoption did not consume exactly one review grant.`,
+  );
+
   const authorization = await bridgeCall<ReviewAuthorizationRecord | null>(
     'get_review_authorization',
     { authorizationId },
   );
   requireCondition(
     authorization?.status === 'consumed' && authorization.consumedByDraftId === savedDraftId,
-    `Chapter ${input.chapterNumber} review grant was not consumed by the saved draft.`,
+    `Chapter ${input.chapterNumber} review grant was not consumed by the dialogue-created draft.`,
   );
   requireCondition(
     authorization?.artifactId === artifactId,
@@ -1370,8 +1759,10 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
   });
   const adopted = drafts.find((draft) => draft.id === savedDraftId);
   requireCondition(
-    adopted?.isAdopted === true && adopted.content === savedContent,
-    `Chapter ${input.chapterNumber} adopted draft content did not round-trip.`,
+    adopted?.isAdopted === true &&
+      adopted.content === artifact.rawContent &&
+      sha256(adopted.content) === artifact.artifact.contentHash,
+    `Chapter ${input.chapterNumber} dialogue adoption did not preserve the immutable candidate.`,
   );
   const authoritativeWordCount = countTextWords(adopted!.content);
   requireCondition(
@@ -1386,20 +1777,28 @@ async function runChapterClosedLoop(input: ChapterRunInput): Promise<string> {
     novelId: input.novelId,
     chapterId: input.chapterId,
     conversationId,
-    authorizationId: authorizationId!,
+    authorizationId,
     profile: input.profile,
-    adoptedDraftId: savedDraftId!,
+    adoptedDraftId: savedDraftId,
     adoptedDraftVersion: adopted!.versionNo,
     adoptedHash: input.evidence.adoptedHash,
     timeoutMs: input.profile.chapterTimeoutMs,
+    providerEvidenceFilesBefore: providerEvidenceFilesBeforeSummary,
+    recordStartRecoveries: (recoveries) => {
+      input.evidence.summaryStartRecoveries = recoveries;
+      input.evidence.summaryStartRetryCount = recoveries.length;
+    },
   });
   input.evidence.summaryTurnId = contextEvidence.turnId;
   input.evidence.summaryRunId = contextEvidence.runId;
   input.evidence.summaryArtifactId = contextEvidence.artifactId;
   input.evidence.summaryApplyTransactionId = contextEvidence.applyTransactionId;
   input.evidence.summaryId = contextEvidence.summaryId;
+  input.evidence.summaryStartRecoveries = contextEvidence.startRecoveries;
+  input.evidence.summaryStartRetryCount = contextEvidence.startRecoveries.length;
   input.evidence.summaryRetryCount = contextEvidence.retryCount;
   input.evidence.summaryAttempts = contextEvidence.attempts;
+  input.evidence.summaryExecutionEvidence = contextEvidence.executionEvidence;
   input.evidence.contextRecordCount = contextEvidence.contextRecordCount;
   input.evidence.memorySourceTypes = contextEvidence.memorySourceTypes;
   return conversationId;
@@ -1416,52 +1815,32 @@ async function generateAndAssertChapterContextThroughWorkbench(input: {
   adoptedDraftVersion?: number;
   adoptedHash: string;
   timeoutMs: number;
+  providerEvidenceFilesBefore: ReadonlySet<string>;
+  recordStartRecoveries: (recoveries: RealConversationSummaryStartRecoveryEvidence[]) => void;
 }): Promise<{
   turnId: string;
   runId: string;
   artifactId: string;
   applyTransactionId: string;
   summaryId: string;
+  startRecoveries: RealConversationSummaryStartRecoveryEvidence[];
   retryCount: number;
   attempts: ChapterRunAttemptEvidence[];
+  executionEvidence: RealConversationAutomaticSummaryExecutionEvidence;
   contextRecordCount: number;
   memorySourceTypes: string[];
 }> {
-  await navigateHash('#/');
-  await waitForTestId('creative-workbench');
-  const project = await findTestIdByAttribute('workbench-project', 'data-novel-id', input.novelId);
-  await project.click();
-  const task = await findTestIdByAttribute(
-    'workbench-task',
-    'data-conversation-id',
-    input.conversationId,
-  );
-  await task.click();
-  await waitForTestIdAttribute(
-    'workbench-task-header',
-    'data-conversation-id',
-    input.conversationId,
-  );
+  await returnToContinuousTaskForChapter(input);
 
   const turnId = `summary-generation-${input.authorizationId}`;
-  await browser.waitUntil(
-    async () => {
-      const bundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
-        conversationId: input.conversationId,
-      });
-      const turn = bundle?.turns.find((item) => item.turnId === turnId);
-      return Boolean(
-        turn &&
-        isAutomaticChapterSummaryTurn(turn) &&
-        bundle?.runs.some((run) => run.turnId === turnId),
-      );
-    },
-    {
-      timeout: input.timeoutMs,
-      interval: 250,
-      timeoutMsg: `Chapter ${input.chapterNumber} did not start its persisted automatic summary turn.`,
-    },
-  );
+  const startRecoveries = await waitForAutomaticSummaryRunStart({
+    chapterNumber: input.chapterNumber,
+    conversationId: input.conversationId,
+    turnId,
+    timeoutMs: input.timeoutMs,
+    model: { providerId: 'openai_compatible', modelId: input.profile.model },
+    recordStartRecoveries: input.recordStartRecoveries,
+  });
 
   const terminalSummary = await waitForAutomaticSummaryTerminalRun({
     conversationId: input.conversationId,
@@ -1476,6 +1855,16 @@ async function generateAndAssertChapterContextThroughWorkbench(input: {
       `Chapter ${input.chapterNumber} automatic summary failed${error ? `: ${error}` : '.'}`,
     );
   }
+  const runtimeStatus = await bridgeCall<DshTaskRuntimeStatus | null>(
+    'dsh_get_task_runtime_status',
+    { conversationId: input.conversationId },
+  );
+  requireCondition(
+    runtimeStatus?.runId === terminalRun.runId &&
+      runtimeStatus.status === 'idle' &&
+      /^session-summary-[0-9a-f]{32}$/.test(runtimeStatus.sessionId),
+    `Chapter ${input.chapterNumber} automatic summary did not finish in its own idle summary Session.`,
+  );
 
   const bundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
     conversationId: input.conversationId,
@@ -1536,17 +1925,30 @@ async function generateAndAssertChapterContextThroughWorkbench(input: {
       sha256(artifact.rawContent) === artifact.artifact.contentHash,
     `Chapter ${input.chapterNumber} automatic summary artifact is not bound to the adopted draft.`,
   );
+  const messageCounts = readAndAssertAutomaticSummaryProviderMessageCounts({
+    chapterNumber: input.chapterNumber,
+    filesBefore: input.providerEvidenceFilesBefore,
+  });
+  const providerUsage = await readAndAssertAutomaticSummaryProviderUsage({
+    chapterNumber: input.chapterNumber,
+    artifactId,
+    taskId: artifact.artifact.taskId,
+  });
+  const executionEvidence: RealConversationAutomaticSummaryExecutionEvidence = {
+    sessionId: runtimeStatus!.sessionId,
+    messageCounts,
+    providerUsage,
+  };
 
   const runBlock = await findTestIdByAttribute('workbench-run', 'data-run-id', terminalRun.runId);
-  const card = await findChildByAttribute(
-    runBlock,
-    'workbench-artifact-card',
-    'data-artifact-id',
-    artifactId,
-  );
-  const apply = await card.$('[data-testid="workbench-artifact-apply"]');
-  await apply.waitForClickable({ timeout: 30_000 });
-  await apply.click();
+  await findChildByAttribute(runBlock, 'workbench-artifact-card', 'data-artifact-id', artifactId);
+  await waitForTestIdAttribute('workbench-summary-orchestration', 'data-phase', 'awaiting_apply');
+  await sendWorkbenchDecisionThroughComposer({
+    chapterNumber: input.chapterNumber,
+    novelId: input.novelId,
+    conversationId: input.conversationId,
+    command: APPLY_CURRENT_SUMMARY_COMMAND,
+  });
   const applyTransactionId = await waitForAppliedAssetDecision({
     conversationId: input.conversationId,
     artifactId,
@@ -1635,11 +2037,240 @@ async function generateAndAssertChapterContextThroughWorkbench(input: {
     artifactId,
     applyTransactionId,
     summaryId,
+    startRecoveries,
     retryCount: terminalSummary.attempts.length - 1,
     attempts: terminalSummary.attempts,
+    executionEvidence,
     contextRecordCount: chapterContexts.length,
     memorySourceTypes,
   };
+}
+
+function snapshotProviderEvidenceFiles(): ReadonlySet<string> {
+  const directory = requiredEnvironment(REAL_ACCEPTANCE_ENV.providerEvidenceDirectory);
+  return new Set(fs.readdirSync(directory).filter((fileName) => fileName.endsWith('.json')));
+}
+
+function readAndAssertAutomaticSummaryProviderMessageCounts(input: {
+  chapterNumber: number;
+  filesBefore: ReadonlySet<string>;
+}): number[] {
+  const directory = requiredEnvironment(REAL_ACCEPTANCE_ENV.providerEvidenceDirectory);
+  const messageCounts: number[] = [];
+  for (const fileName of fs.readdirSync(directory)) {
+    if (!fileName.endsWith('.json') || input.filesBefore.has(fileName)) continue;
+    let rawEvidence: unknown;
+    try {
+      rawEvidence = JSON.parse(fs.readFileSync(path.join(directory, fileName), 'utf8'));
+    } catch {
+      throw new Error(
+        `Chapter ${input.chapterNumber} automatic summary Provider evidence is not valid JSON.`,
+      );
+    }
+    if (!isPlainRecord(rawEvidence) || rawEvidence.classification !== 'automatic_chapter_summary') {
+      continue;
+    }
+    requireCondition(
+      rawEvidence.schemaVersion === REAL_ACCEPTANCE_PROVIDER_REQUEST_EVIDENCE_SCHEMA_VERSION &&
+        rawEvidence.turnOrigin === 'workbench_chapter_summary' &&
+        typeof rawEvidence.messageCount === 'number' &&
+        Number.isSafeInteger(rawEvidence.messageCount) &&
+        [2, 5, 7].includes(rawEvidence.messageCount) &&
+        rawEvidence.rawMessageContentPersisted === false,
+      `Chapter ${input.chapterNumber} automatic summary Provider evidence has an invalid reset message count.`,
+    );
+    messageCounts.push(rawEvidence.messageCount);
+  }
+  messageCounts.sort((left, right) => left - right);
+  const uniqueMessageCounts = [...new Set(messageCounts)];
+  requireCondition(
+    arraysEqual(uniqueMessageCounts, [2, 5, 7]),
+    `Chapter ${input.chapterNumber} automatic summary Provider messages did not reset to 2/5/7.`,
+  );
+  return messageCounts;
+}
+
+async function readAndAssertAutomaticSummaryProviderUsage(input: {
+  chapterNumber: number;
+  artifactId: string;
+  taskId: string;
+}): Promise<RealConversationAutomaticSummaryExecutionEvidence['providerUsage']> {
+  const taskDetail = await bridgeCall<AiTaskDetail>('get_ai_task', {
+    input: { taskId: input.taskId },
+  });
+  const successfulAttempts = taskDetail.attempts.filter(
+    (attempt) => attempt.status === 'succeeded',
+  );
+  const successfulAttempt = successfulAttempts[0];
+  const responseMetadata = isPlainRecord(successfulAttempt?.responseMetadataJson)
+    ? successfulAttempt.responseMetadataJson
+    : undefined;
+  const providerInput = responseMetadata?.tokenInput;
+  requireCondition(
+    taskDetail.task.taskId === input.taskId &&
+      taskDetail.task.status === 'completed' &&
+      taskDetail.task.resultArtifactId === input.artifactId &&
+      successfulAttempts.length === 1 &&
+      typeof providerInput === 'number' &&
+      Number.isSafeInteger(providerInput) &&
+      providerInput > 0,
+    `Chapter ${input.chapterNumber} automatic summary does not retain positive Provider input-token usage on its successful task Attempt.`,
+  );
+  return { unit: 'tokens', input: providerInput };
+}
+
+async function waitForAutomaticSummaryRunStart(input: {
+  chapterNumber: number;
+  conversationId: string;
+  turnId: string;
+  timeoutMs: number;
+  model: { providerId: string; modelId: string };
+  recordStartRecoveries: (recoveries: RealConversationSummaryStartRecoveryEvidence[]) => void;
+}): Promise<RealConversationSummaryStartRecoveryEvidence[]> {
+  const startTimeoutMs = Math.min(input.timeoutMs, 180_000);
+  let outcome: 'started' | 'retryable_failure' | undefined;
+  await waitForLiveCondition(
+    async () => {
+      const projection = await bridgeCall<TaskTurnRunProjection | null>(
+        'get_task_turn_run_projection',
+        {
+          conversationId: input.conversationId,
+          turnId: input.turnId,
+        },
+      );
+      if (
+        projection?.turn.turnId === input.turnId &&
+        isAutomaticChapterSummaryTurn(projection.turn) &&
+        projection.runs.length > 0
+      ) {
+        outcome = 'started';
+        return true;
+      }
+
+      const turnBlock = await browser.$(
+        `[data-testid="workbench-turn"][data-turn-id="${input.turnId}"]`,
+      );
+      if (!(await turnBlock.isExisting()) || !(await turnBlock.isDisplayed())) return false;
+      const orchestration = await turnBlock.$('[data-testid="workbench-summary-orchestration"]');
+      const retry = await turnBlock.$('[data-testid="workbench-retry-summary-start"]');
+      if (
+        !(await orchestration.isExisting()) ||
+        !(await orchestration.isDisplayed()) ||
+        (await orchestration.getAttribute('data-phase')) !== 'failed' ||
+        !(await retry.isExisting()) ||
+        !(await retry.isDisplayed()) ||
+        !(await retry.isEnabled())
+      ) {
+        return false;
+      }
+      outcome = 'retryable_failure';
+      return true;
+    },
+    {
+      timeout: startTimeoutMs,
+      interval: 250,
+      timeoutMessage: `Chapter ${input.chapterNumber} did not start or expose a recoverable automatic summary failure within ${startTimeoutMs}ms.`,
+    },
+  );
+
+  if (outcome === 'started') return [];
+
+  const [runtimeStatus, projection] = await readSequentialLiveConditionSnapshot(
+    () =>
+      bridgeCall<DshTaskRuntimeStatus | null>('dsh_get_task_runtime_status', {
+        conversationId: input.conversationId,
+      }),
+    () =>
+      bridgeCall<TaskTurnRunProjection | null>('get_task_turn_run_projection', {
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+      }),
+  );
+  const runtimeActive = Boolean(
+    runtimeStatus && ['attesting', 'running', 'cancel_requested'].includes(runtimeStatus.status),
+  );
+  if (
+    projection?.turn.turnId === input.turnId &&
+    isAutomaticChapterSummaryTurn(projection.turn) &&
+    projection.runs.length > 0
+  ) {
+    return [];
+  }
+  requireCondition(
+    projection?.turn.turnId === input.turnId &&
+      isAutomaticChapterSummaryTurn(projection.turn) &&
+      projection.runs.length === 0,
+    `Chapter ${input.chapterNumber} automatic summary retry no longer targets the exact zero-Run turn.`,
+  );
+  requireCondition(
+    !runtimeActive,
+    `Chapter ${input.chapterNumber} automatic summary still has active runtime ownership; explicit retry was not clicked.`,
+  );
+
+  const turnBlock = await findTestIdByAttribute('workbench-turn', 'data-turn-id', input.turnId);
+  const orchestration = await turnBlock.$('[data-testid="workbench-summary-orchestration"]');
+  const retry = await turnBlock.$('[data-testid="workbench-retry-summary-start"]');
+  requireCondition(
+    (await orchestration.isExisting()) &&
+      (await orchestration.isDisplayed()) &&
+      (await orchestration.getAttribute('data-phase')) === 'failed' &&
+      (await retry.isExisting()) &&
+      (await retry.isDisplayed()) &&
+      (await retry.isEnabled()),
+    `Chapter ${input.chapterNumber} automatic summary retry control changed before the bounded click.`,
+  );
+  await retry.waitForClickable({ timeout: 30_000 });
+  await retry.click();
+
+  let recovery: RealConversationSummaryStartRecoveryEvidence = {
+    attempt: 1,
+    turnId: input.turnId,
+    trigger: 'workbench-retry-summary-start',
+    observedPhase: 'failed',
+    runCountBefore: 0,
+    runtimeActiveBefore: false,
+    model: input.model,
+    outcome: 'requested',
+    firstPersistedRunId: null,
+  };
+  input.recordStartRecoveries([recovery]);
+
+  let firstPersistedRunId = '';
+  try {
+    await waitForLiveCondition(
+      async () => {
+        const current = await bridgeCall<TaskTurnRunProjection | null>(
+          'get_task_turn_run_projection',
+          {
+            conversationId: input.conversationId,
+            turnId: input.turnId,
+          },
+        );
+        if (
+          current?.turn.turnId !== input.turnId ||
+          !isAutomaticChapterSummaryTurn(current.turn) ||
+          current.runs.length === 0
+        ) {
+          return false;
+        }
+        firstPersistedRunId = current.runs[0]?.runId ?? '';
+        return Boolean(firstPersistedRunId);
+      },
+      {
+        timeout: startTimeoutMs,
+        interval: 250,
+        timeoutMessage: `Chapter ${input.chapterNumber} automatic summary did not persist a Run after its single explicit start retry.`,
+      },
+    );
+  } catch (error) {
+    recovery = { ...recovery, outcome: 'exhausted' };
+    input.recordStartRecoveries([recovery]);
+    throw error;
+  }
+
+  recovery = { ...recovery, outcome: 'run_started', firstPersistedRunId };
+  input.recordStartRecoveries([recovery]);
+  return [recovery];
 }
 
 async function readAndAssertAutomaticAssetProviderEvidence(input: {
@@ -1870,6 +2501,7 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
   expectedPrompts: readonly string[];
   profile: ReturnType<typeof readRealConversationAcceptanceProfile>;
   evidence: SparseAssetPreparationEvidence[];
+  preflightRetries: RealConversationAutomaticAssetPreflightRetryEvidence[];
   resumeDiagnostics: AutomaticAssetResumeDiagnostic[];
   recordStoryPlanApplyEvidence: (evidence: RealConversationStoryPlanApplyEvidence) => void;
 }): Promise<void> {
@@ -1906,7 +2538,6 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
     const contract = SPARSE_ASSET_CONTRACT[asset];
     const goal = buildCoreAssetGenerationGoal(asset, input.originalGoal);
     const knownTurnIds = new Set(input.evidence.map((item) => item.turnId));
-
     const turnId = await waitForAutomaticAssetTurn({
       conversationId: input.conversationId,
       goal,
@@ -1914,19 +2545,95 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
       expectedPrompts: input.expectedPrompts,
       chapterNumber: input.chapterNumber,
     });
-    const run = await waitForTerminalTurnRun({
-      conversationId: input.conversationId,
-      turnId,
-      minimumAttemptCount: 1,
-      chapterNumber: input.chapterNumber,
-      timeoutMs: input.profile.chapterTimeoutMs,
-    });
-    if (run.status !== 'completed') {
-      const error = await readChapterFailure(input.conversationId, run.runId);
-      throw new Error(
-        `Chapter ${input.chapterNumber} ${asset} preparation failed${error ? `: ${error}` : '.'}`,
+    let run: { runId: string; status: 'completed' | 'failed' | 'cancelled' } | undefined;
+    for (;;) {
+      const outcome = await waitForAutomaticAssetRunOrPreflightFailure({
+        conversationId: input.conversationId,
+        turnId,
+        asset,
+        chapterNumber: input.chapterNumber,
+        timeoutMs: input.profile.chapterTimeoutMs,
+      });
+      if (outcome.kind === 'run') {
+        run = outcome.run;
+        break;
+      }
+
+      const retryAttempt =
+        input.preflightRetries.filter(
+          (item) => item.chapter === input.chapterNumber && item.asset === asset,
+        ).length + 1;
+      if (
+        !isRetryableAutomaticAssetPreflightFailure(outcome.errorCode) ||
+        retryAttempt > REAL_ACCEPTANCE_MAX_RETRYABLE_RUN_RETRIES
+      ) {
+        throw new Error(
+          `Chapter ${input.chapterNumber} ${asset} preflight failed without an allowed retry: ${outcome.errorCode || 'missing_error_code'}.`,
+        );
+      }
+      const failedBundle = await bridgeCall<TaskConversationBundle | null>(
+        'get_task_conversation',
+        { conversationId: input.conversationId },
+      );
+      const failedTurn = failedBundle?.turns.find((item) => item.turnId === turnId);
+      requireCondition(
+        failedTurn?.role === 'user' &&
+          decodeWorkbenchTurnContent(failedTurn.content).content === goal &&
+          decodeWorkbenchTurnContent(failedTurn.content).origin === 'workbench_asset_preparation' &&
+          !failedBundle?.runs.some((item) => item.turnId === turnId),
+        `Chapter ${input.chapterNumber} ${asset} preflight retry did not preserve a no-Run automatic turn.`,
+      );
+      const fixedModel = await waitForTestId('workbench-model-select');
+      requireCondition(
+        (await fixedModel.getValue()) === `openai_compatible:${input.profile.model}` &&
+          (await fixedModel.isEnabled()) === false &&
+          (await fixedModel.getAttribute('data-model-locked')) === 'true',
+        `Chapter ${input.chapterNumber} ${asset} preflight retry changed the task model.`,
+      );
+      input.preflightRetries.push({
+        chapter: input.chapterNumber,
+        asset,
+        goalSha256: sha256(goal),
+        turnId,
+        turnOrigin: 'workbench_asset_preparation',
+        model: { providerId: 'openai_compatible', modelId: input.profile.model },
+        retryAttempt: retryAttempt as 1 | 2,
+        errorCode: outcome.errorCode,
+        runId: null,
+      });
+      const readiness = await waitForTestId('workbench-asset-readiness');
+      const failedAt = await readiness.getAttribute('data-orchestration-updated-at');
+      const retry = await waitForTestId(`workbench-generate-asset-${asset}`);
+      await retry.waitForEnabled({ timeout: 30_000 });
+      await retry.waitForClickable({ timeout: 30_000 });
+      await retry.click();
+      await browser.waitUntil(
+        async () => {
+          const current = await browser.$('[data-testid="workbench-asset-readiness"]');
+          return (
+            (await current.isExisting()) &&
+            (await current.getAttribute('data-preparation-turn-id')) === turnId &&
+            (await current.getAttribute('data-orchestration-updated-at')) !== failedAt
+          );
+        },
+        {
+          timeout: 30_000,
+          interval: 100,
+          timeoutMsg: `Chapter ${input.chapterNumber} ${asset} same-turn preflight retry did not start.`,
+        },
       );
     }
+    requireCondition(Boolean(run), `Chapter ${input.chapterNumber} ${asset} produced no run.`);
+    const terminalAssetRun = await waitForAutomaticAssetRunWithTransientRecovery({
+      chapterNumber: input.chapterNumber,
+      asset,
+      conversationId: input.conversationId,
+      turnId,
+      initialRun: run!,
+      chapterTimeoutMs: input.profile.chapterTimeoutMs,
+      profile: input.profile,
+    });
+    run = terminalAssetRun.run;
 
     const completed = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
       conversationId: input.conversationId,
@@ -2011,25 +2718,30 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
     }
 
     const runBlock = await findTestIdByAttribute('workbench-run', 'data-run-id', run.runId);
-    const card = await findChildByAttribute(
-      runBlock,
-      'workbench-artifact-card',
-      'data-artifact-id',
-      artifactId,
-    );
-    const apply = await card.$('[data-testid="workbench-artifact-apply"]');
-    await apply.waitForClickable({ timeout: 30_000 });
-    requireCondition(
-      (await apply.getText()).includes('应用到作品'),
-      `Chapter ${input.chapterNumber} ${asset} did not expose the structured apply UI.`,
+    await findChildByAttribute(runBlock, 'workbench-artifact-card', 'data-artifact-id', artifactId);
+    const readiness = await waitForTestId('workbench-asset-readiness');
+    await browser.waitUntil(
+      async () =>
+        (await readiness.getAttribute('data-orchestration-phase')) === 'awaiting_apply' &&
+        (await readiness.getAttribute('data-orchestration-asset')) === asset,
+      {
+        timeout: 30_000,
+        interval: 100,
+        timeoutMsg: `Chapter ${input.chapterNumber} ${asset} did not expose its pending conversational decision.`,
+      },
     );
     try {
-      await apply.click();
+      await sendWorkbenchDecisionThroughComposer({
+        chapterNumber: input.chapterNumber,
+        novelId: input.novelId,
+        conversationId: input.conversationId,
+        command: APPLY_CURRENT_ASSET_COMMAND,
+      });
     } catch (error) {
       if (storyPlanEvidence) {
         storyPlanEvidence = recordRealConversationStoryPlanApplyFailure(
           storyPlanEvidence,
-          'APPLY_UI_INTERACTION_FAILED',
+          'APPLY_CONVERSATION_INTERACTION_FAILED',
         );
         input.recordStoryPlanApplyEvidence(storyPlanEvidence);
       }
@@ -2101,6 +2813,8 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
       toolAttemptCount: candidateToolEvents.length,
       failedToolAttemptCount: candidateToolEvents.filter((event) => event.status === 'failed')
         .length,
+      retryCount: terminalAssetRun.attempts.length - 1,
+      attempts: terminalAssetRun.attempts,
       applyTransactionId,
       conflictCode: '',
       postRunProjectionEvidence: providerEvidence.postRunProjectionEvidence,
@@ -2126,8 +2840,9 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
           conversationId: input.conversationId,
         });
         replaceAutomaticAssetResumeDiagnostics(input.resumeDiagnostics, bundle);
-        if (input.resumeDiagnostics.length > expectedPreparations.length) {
-          unexpectedPreparationError = `Expected ${expectedPreparations.length} automatic asset turns, observed ${input.resumeDiagnostics.length}.`;
+        const expectedAutomaticTurnCount = expectedPreparations.length;
+        if (input.resumeDiagnostics.length > expectedAutomaticTurnCount) {
+          unexpectedPreparationError = `Expected ${expectedAutomaticTurnCount} automatic asset turns, observed ${input.resumeDiagnostics.length}.`;
           return true;
         }
         const userTurns = creativeUserTurns(bundle);
@@ -2161,7 +2876,7 @@ async function prepareSparseIdeaAssetsThroughUi(input: {
   }
   requireCondition(
     input.resumeDiagnostics.length === expectedPreparations.length,
-    `Chapter ${input.chapterNumber} did not retain exactly ${expectedPreparations.length} automatic asset preparation turns.`,
+    `Chapter ${input.chapterNumber} did not retain exactly one automatic turn per prepared asset.`,
   );
 
   const [worldSettings, ruleSystems, novel] = await Promise.all([
@@ -2248,6 +2963,68 @@ async function waitForAutomaticAssetTurn(input: {
     },
   );
   return turnId;
+}
+
+async function waitForAutomaticAssetRunOrPreflightFailure(input: {
+  conversationId: string;
+  turnId: string;
+  asset: SparseAssetKind;
+  chapterNumber: number;
+  timeoutMs: number;
+}): Promise<
+  | {
+      kind: 'run';
+      run: { runId: string; status: 'completed' | 'failed' | 'cancelled' };
+    }
+  | { kind: 'preflight_failure'; errorCode: string }
+> {
+  let outcome:
+    | {
+        kind: 'run';
+        run: { runId: string; status: 'completed' | 'failed' | 'cancelled' };
+      }
+    | { kind: 'preflight_failure'; errorCode: string }
+    | undefined;
+  await waitForLiveCondition(
+    async () => {
+      const bundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+        conversationId: input.conversationId,
+      });
+      const turnRuns = bundle?.runs.filter((run) => run.turnId === input.turnId) ?? [];
+      const latestRun = turnRuns.at(-1);
+      if (latestRun && ['completed', 'failed', 'cancelled'].includes(latestRun.status)) {
+        outcome = {
+          kind: 'run',
+          run: {
+            runId: latestRun.runId,
+            status: latestRun.status as 'completed' | 'failed' | 'cancelled',
+          },
+        };
+        return true;
+      }
+      if (turnRuns.length > 0) return false;
+
+      const readiness = await browser.$('[data-testid="workbench-asset-readiness"]');
+      if (!(await readiness.isExisting()) || !(await readiness.isDisplayed())) return false;
+      const matchesAttempt =
+        (await readiness.getAttribute('data-ready')) === 'false' &&
+        (await readiness.getAttribute('data-orchestration-phase')) === 'failed' &&
+        (await readiness.getAttribute('data-orchestration-asset')) === input.asset &&
+        (await readiness.getAttribute('data-preparation-turn-id')) === input.turnId;
+      if (!matchesAttempt) return false;
+      outcome = {
+        kind: 'preflight_failure',
+        errorCode: (await readiness.getAttribute('data-orchestration-error-code')) ?? '',
+      };
+      return true;
+    },
+    {
+      timeout: input.timeoutMs,
+      interval: 250,
+      timeoutMessage: `Chapter ${input.chapterNumber} ${input.asset} did not create a run or expose its preflight failure.`,
+    },
+  );
+  return outcome!;
 }
 
 async function waitForAppliedAssetDecision(input: {
@@ -2399,11 +3176,42 @@ function isAutomaticWorkbenchTurn(turn: { role: string; content?: string }): boo
   return isAutomaticAssetPreparationTurn(turn) || isAutomaticChapterSummaryTurn(turn);
 }
 
+function isLocalDecisionRun(run: TaskConversationBundle['runs'][number]): boolean {
+  return (
+    run.modelSnapshot.providerId === 'ans-local' &&
+    run.modelSnapshot.modelId === 'workbench-help-v1' &&
+    run.modelSnapshot.runtimeMode === 'mock' &&
+    run.modelSnapshot.runtime?.adapterProtocol === 'ans_local_conversation_v1'
+  );
+}
+
+function isLocalDecisionUserTurn(
+  bundle: TaskConversationBundle,
+  turn: { turnId: string; role: string; content?: string },
+): boolean {
+  return Boolean(
+    turn.role === 'user' &&
+    parseWorkbenchDecisionIntent(turn.content ?? '') &&
+    bundle.runs.some((run) => run.turnId === turn.turnId && isLocalDecisionRun(run)),
+  );
+}
+
+function localDecisionUserTurns(
+  bundle: TaskConversationBundle | null,
+): Array<{ turnId: string; role: string; content?: string }> {
+  return (bundle?.turns ?? []).filter((turn) =>
+    bundle ? isLocalDecisionUserTurn(bundle, turn) : false,
+  );
+}
+
 function creativeUserTurns(
   bundle: TaskConversationBundle | null,
 ): Array<{ turnId: string; role: string; content?: string }> {
   return (bundle?.turns ?? []).filter(
-    (turn) => turn.role === 'user' && !isAutomaticWorkbenchTurn(turn),
+    (turn) =>
+      turn.role === 'user' &&
+      !isAutomaticWorkbenchTurn(turn) &&
+      !(bundle && isLocalDecisionUserTurn(bundle, turn)),
   );
 }
 
@@ -2496,7 +3304,7 @@ async function waitForPersistedConversationTurns(
   );
 }
 
-async function waitForLatestTurnRun(
+async function waitForLatestCreativeTurn(
   conversationId: string,
   expectedPrompts: readonly string[],
 ): Promise<string> {
@@ -2512,8 +3320,7 @@ async function waitForLatestTurnRun(
         userTurns.length !== expectedPrompts.length ||
         !currentTurn ||
         sha256(currentTurn.content ?? '') !==
-          sha256(expectedPrompts[expectedPrompts.length - 1] ?? '') ||
-        !bundle?.runs.some((run) => run.turnId === currentTurn.turnId)
+          sha256(expectedPrompts[expectedPrompts.length - 1] ?? '')
       ) {
         return false;
       }
@@ -2523,31 +3330,163 @@ async function waitForLatestTurnRun(
     {
       timeout: 30_000,
       interval: 100,
-      timeoutMsg: `The continuous task did not start the run for user turn ${expectedPrompts.length}.`,
+      timeoutMsg: `The continuous task did not persist creative user turn ${expectedPrompts.length}.`,
     },
   );
   return turnId;
 }
 
-async function waitForChapterRunWithTransientRecovery(input: {
+async function waitForAutomaticAssetRunWithTransientRecovery(input: {
   chapterNumber: number;
+  asset: SparseAssetKind;
   conversationId: string;
   turnId: string;
+  initialRun: { runId: string; status: 'completed' | 'failed' | 'cancelled' };
   chapterTimeoutMs: number;
-  evidence: ChapterEvidence;
-}): Promise<void> {
+  profile: ReturnType<typeof readRealConversationAcceptanceProfile>;
+}): Promise<{
+  run: { runId: string; status: 'completed' | 'failed' | 'cancelled' };
+  attempts: ChapterRunAttemptEvidence[];
+}> {
+  let run = input.initialRun;
+  const attempts: ChapterRunAttemptEvidence[] = [];
   for (
     let attemptNumber = 1;
     attemptNumber <= REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS;
     attemptNumber += 1
   ) {
-    const run = await waitForTerminalTurnRun({
+    const error =
+      run.status === 'completed' ? '' : await readChapterFailure(input.conversationId, run.runId);
+    attempts.push({
+      attempt: attemptNumber,
+      runId: run.runId,
+      status: run.status,
+      error,
+    });
+    if (run.status === 'completed') return { run, attempts };
+
+    const retryable = run.status === 'failed' && isTransientRealAcceptanceProviderFailure(error);
+    if (!retryable || attemptNumber >= REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS) {
+      throw new Error(
+        `Chapter ${input.chapterNumber} ${input.asset} preparation failed${error ? `: ${error}` : '.'}`,
+      );
+    }
+
+    const beforeRetry = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+      conversationId: input.conversationId,
+    });
+    const turnRuns = beforeRetry?.runs.filter((item) => item.turnId === input.turnId) ?? [];
+    requireCondition(
+      turnRuns.length === attemptNumber &&
+        turnRuns.at(-1)?.runId === run.runId &&
+        turnRuns.every(
+          (item) =>
+            item.modelSnapshot.runtimeMode === 'api' &&
+            item.modelSnapshot.providerId === 'openai_compatible' &&
+            item.modelSnapshot.modelId === input.profile.model &&
+            normalizeUrl(item.modelSnapshot.baseUrl) === input.profile.baseUrl,
+        ),
+      `Chapter ${input.chapterNumber} ${input.asset} retry did not retain the same automatic turn and frozen model.`,
+    );
+
+    const runBlock = await findTestIdByAttribute('workbench-run', 'data-run-id', run.runId);
+    const retry = await runBlock.$('[data-testid="workbench-retry-turn"]');
+    await retry.waitForEnabled({ timeout: 30_000 });
+    await retry.waitForClickable({ timeout: 30_000 });
+    await retry.click();
+    run = await waitForTerminalTurnRun({
       conversationId: input.conversationId,
       turnId: input.turnId,
-      minimumAttemptCount: attemptNumber,
+      minimumAttemptCount: attemptNumber + 1,
       chapterNumber: input.chapterNumber,
       timeoutMs: input.chapterTimeoutMs,
     });
+  }
+  throw new Error(
+    `Chapter ${input.chapterNumber} ${input.asset} exhausted its retryable-run budget.`,
+  );
+}
+
+async function waitForChapterRunWithTransientRecovery(input: {
+  chapterNumber: number;
+  novelId: string;
+  conversationId: string;
+  turnId: string;
+  chapterTimeoutMs: number;
+  evidence: ChapterEvidence;
+}): Promise<void> {
+  let firstRun: { runId: string; status: 'completed' | 'failed' | 'cancelled' } | undefined;
+  for (;;) {
+    const outcome = await waitForInitialChapterRunOrPreflightFailure(input);
+    if (outcome.kind === 'run') {
+      firstRun = outcome.run;
+      break;
+    }
+    const retryAttempt = input.evidence.preflightRetries.length + 1;
+    if (
+      !isRetryableAutomaticAssetPreflightFailure(outcome.errorCode) ||
+      retryAttempt > REAL_ACCEPTANCE_MAX_RETRYABLE_RUN_RETRIES
+    ) {
+      throw new Error(
+        `Chapter ${input.chapterNumber} preflight failed without an allowed retry: ${outcome.errorCode || 'missing_error_code'}.`,
+      );
+    }
+    await returnToContinuousTaskForChapter(input);
+    const fixedModel = await waitForTestId('workbench-model-select');
+    requireCondition(
+      (await fixedModel.getValue()) === `openai_compatible:${input.evidence.model.modelId}` &&
+        (await fixedModel.isEnabled()) === false &&
+        (await fixedModel.getAttribute('data-model-locked')) === 'true',
+      `Chapter ${input.chapterNumber} preflight retry unlocked the frozen task model.`,
+    );
+    input.evidence.preflightRetries.push({
+      retryAttempt: retryAttempt as 1 | 2,
+      turnId: input.turnId,
+      model: {
+        providerId: 'openai_compatible',
+        modelId: input.evidence.model.modelId,
+      },
+      errorCode: outcome.errorCode,
+      runId: null,
+    });
+    const readiness = await waitForTestId('workbench-asset-readiness');
+    const failedAt = await readiness.getAttribute('data-orchestration-updated-at');
+    const resume = await waitForTestId('workbench-resume-chapter-goal');
+    await resume.waitForEnabled({ timeout: 30_000 });
+    await resume.waitForClickable({ timeout: 30_000 });
+    await resume.click();
+    await browser.waitUntil(
+      async () => {
+        const current = await browser.$('[data-testid="workbench-asset-readiness"]');
+        if (!(await current.isExisting())) return true;
+        return (
+          (await current.getAttribute('data-source-turn-id')) === input.turnId &&
+          (await current.getAttribute('data-orchestration-updated-at')) !== failedAt
+        );
+      },
+      {
+        timeout: 30_000,
+        interval: 100,
+        timeoutMsg: `Chapter ${input.chapterNumber} same-turn preflight retry did not start.`,
+      },
+    );
+  }
+
+  for (
+    let attemptNumber = 1;
+    attemptNumber <= REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS;
+    attemptNumber += 1
+  ) {
+    const run =
+      attemptNumber === 1
+        ? firstRun!
+        : await waitForTerminalTurnRun({
+            conversationId: input.conversationId,
+            turnId: input.turnId,
+            minimumAttemptCount: attemptNumber,
+            chapterNumber: input.chapterNumber,
+            timeoutMs: input.chapterTimeoutMs,
+          });
     const error =
       run.status === 'completed' ? '' : await readChapterFailure(input.conversationId, run.runId);
     input.evidence.attempts.push({
@@ -2559,6 +3498,7 @@ async function waitForChapterRunWithTransientRecovery(input: {
     input.evidence.retryCount = input.evidence.attempts.length - 1;
 
     if (run.status === 'completed') {
+      await returnToContinuousTaskForChapter(input);
       const status = await waitForTestId('workbench-conversation-status');
       try {
         await browser.waitUntil(
@@ -2577,6 +3517,41 @@ async function waitForChapterRunWithTransientRecovery(input: {
           bundle?.runs.filter((item) =>
             ['queued', 'running', 'cancel_requested'].includes(item.status),
           ).length ?? 0;
+        const activeRuns =
+          bundle?.runs
+            .filter((item) => ['queued', 'running', 'cancel_requested'].includes(item.status))
+            .map((item) => {
+              const turn = bundle.turns.find((candidate) => candidate.turnId === item.turnId);
+              const artifacts = bundle.artifacts.filter(
+                (artifact) => artifact.runId === item.runId || artifact.turnId === item.turnId,
+              );
+              return {
+                runId: item.runId,
+                turnId: item.turnId,
+                chapterId: item.chapterId ?? '',
+                status: item.status,
+                workerId: item.workerId ?? '',
+                model: {
+                  providerId: item.modelSnapshot.providerId,
+                  modelId: item.modelSnapshot.modelId,
+                  runtimeMode: item.modelSnapshot.runtimeMode,
+                  adapterProtocol: item.modelSnapshot.runtime?.adapterProtocol ?? '',
+                },
+                turnRole: turn?.role ?? 'unavailable',
+                turnOrigin: decodeWorkbenchTurnContent(turn?.content).origin ?? 'user',
+                toolNames: [
+                  ...new Set(
+                    bundle.toolEvents
+                      .filter((event) => event.runId === item.runId)
+                      .map((event) => event.toolName),
+                  ),
+                ].sort(),
+                artifacts: artifacts.map((artifact) => ({
+                  artifactId: artifact.artifactId ?? '',
+                  artifactType: artifact.artifactType,
+                })),
+              };
+            }) ?? [];
         const chapterCandidateCount =
           bundle?.artifacts.filter((artifact) => artifact.artifactType === 'chapter_text').length ??
           0;
@@ -2584,6 +3559,7 @@ async function waitForChapterRunWithTransientRecovery(input: {
           domStatus: await status.getAttribute('data-status').catch(() => 'unavailable'),
           conversationStatus: bundle?.conversation.status ?? 'unavailable',
           activeRunCount,
+          activeRuns,
           chapterCandidateCount,
           totalRunCount: bundle?.runs.length ?? 0,
           totalArtifactCount: bundle?.artifacts.length ?? 0,
@@ -2604,6 +3580,7 @@ async function waitForChapterRunWithTransientRecovery(input: {
       );
     }
 
+    await returnToContinuousTaskForChapter(input);
     const runBlock = await findTestIdByAttribute('workbench-run', 'data-run-id', run.runId);
     const retry = await runBlock.$('[data-testid="workbench-retry-turn"]');
     await retry.waitForClickable({ timeout: 30_000 });
@@ -2616,6 +3593,137 @@ async function waitForChapterRunWithTransientRecovery(input: {
     );
   }
   throw new Error(`Chapter ${input.chapterNumber} exhausted its retryable-run budget.`);
+}
+
+async function waitForInitialChapterRunOrPreflightFailure(input: {
+  chapterNumber: number;
+  conversationId: string;
+  turnId: string;
+  chapterTimeoutMs: number;
+}): Promise<
+  | {
+      kind: 'run';
+      run: { runId: string; status: 'completed' | 'failed' | 'cancelled' };
+    }
+  | { kind: 'preflight_failure'; errorCode: string }
+> {
+  let outcome:
+    | {
+        kind: 'run';
+        run: { runId: string; status: 'completed' | 'failed' | 'cancelled' };
+      }
+    | { kind: 'preflight_failure'; errorCode: string }
+    | undefined;
+  await waitForLiveCondition(
+    async () => {
+      const bundle = await bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
+        conversationId: input.conversationId,
+      });
+      const turnRuns = bundle?.runs.filter((run) => run.turnId === input.turnId) ?? [];
+      const latestRun = turnRuns.at(-1);
+      if (latestRun && ['completed', 'failed', 'cancelled'].includes(latestRun.status)) {
+        outcome = {
+          kind: 'run',
+          run: {
+            runId: latestRun.runId,
+            status: latestRun.status as 'completed' | 'failed' | 'cancelled',
+          },
+        };
+        return true;
+      }
+      if (turnRuns.length > 0) return false;
+
+      const readiness = await browser.$('[data-testid="workbench-asset-readiness"]');
+      if (!(await readiness.isExisting()) || !(await readiness.isDisplayed())) return false;
+      const matchesSourceTurn =
+        (await readiness.getAttribute('data-ready')) === 'true' &&
+        (await readiness.getAttribute('data-orchestration-phase')) === 'failed' &&
+        (await readiness.getAttribute('data-source-turn-id')) === input.turnId;
+      if (!matchesSourceTurn) return false;
+      outcome = {
+        kind: 'preflight_failure',
+        errorCode: (await readiness.getAttribute('data-orchestration-error-code')) ?? '',
+      };
+      return true;
+    },
+    {
+      timeout: input.chapterTimeoutMs,
+      interval: 250,
+      timeoutMessage: `Chapter ${input.chapterNumber} did not create its first run or expose its preflight failure.`,
+    },
+  );
+  return outcome!;
+}
+
+async function returnToContinuousTaskForChapter(input: {
+  chapterNumber: number;
+  novelId: string;
+  conversationId: string;
+}): Promise<void> {
+  await restoreContinuousTaskSurface({
+    novelId: input.novelId,
+    conversationId: input.conversationId,
+    controller: {
+      readState: async () => {
+        const workbench = await browser.$('[data-testid="creative-workbench"]');
+        const workbenchVisible = (await workbench.isExisting()) && (await workbench.isDisplayed());
+        const chapterEditor = await browser.$('[data-testid="chapter-editor"]');
+        const conflictingSurfaceVisible =
+          (await chapterEditor.isExisting()) && (await chapterEditor.isDisplayed());
+        if (!workbenchVisible) {
+          return { workbenchVisible: false, conflictingSurfaceVisible, conversationId: '' };
+        }
+        const header = await browser.$('[data-testid="workbench-task-header"]');
+        const conversationId =
+          (await header.isExisting()) && (await header.isDisplayed())
+            ? ((await header.getAttribute('data-conversation-id')) ?? '')
+            : '';
+        return { workbenchVisible: true, conflictingSurfaceVisible, conversationId };
+      },
+      openWorkbench: async () => {
+        await navigateHash('#/');
+        await waitForTestId('creative-workbench');
+        const leaveGuard = await browser.$('[data-testid="workspace-leave-dialog"]');
+        requireCondition(
+          !(await leaveGuard.isExisting()) || !(await leaveGuard.isDisplayed()),
+          `Chapter ${input.chapterNumber} workbench return was blocked by unsaved workspace state.`,
+        );
+        const chapterEditor = await browser.$('[data-testid="chapter-editor"]');
+        requireCondition(
+          !(await chapterEditor.isExisting()) || !(await chapterEditor.isDisplayed()),
+          `Chapter ${input.chapterNumber} writing workspace remained visible after returning to the workbench.`,
+        );
+      },
+      selectProject: async (novelId) => {
+        const project = await findTestIdByAttribute('workbench-project', 'data-novel-id', novelId);
+        await project.click();
+        await browser.waitUntil(
+          async () => (await project.getAttribute('data-selected')) === 'true',
+          {
+            timeout: 30_000,
+            timeoutMsg: `Chapter ${input.chapterNumber} could not restore its project.`,
+          },
+        );
+      },
+      selectConversation: async (conversationId) => {
+        const task = await findTestIdByAttribute(
+          'workbench-task',
+          'data-conversation-id',
+          conversationId,
+        );
+        await task.click();
+        await browser.waitUntil(async () => (await task.getAttribute('data-selected')) === 'true', {
+          timeout: 30_000,
+          timeoutMsg: `Chapter ${input.chapterNumber} could not restore its continuous task selection.`,
+        });
+        await waitForTestIdAttribute(
+          'workbench-task-header',
+          'data-conversation-id',
+          conversationId,
+        );
+      },
+    },
+  });
 }
 
 async function waitForTerminalTurnRun(input: {
@@ -2668,15 +3776,20 @@ async function waitForAutomaticSummaryTerminalRun(input: {
   let attempts: ChapterRunAttemptEvidence[] = [];
   await waitForLiveCondition(
     async () => {
-      const [bundle, runtimeStatus] = await Promise.all([
-        bridgeCall<TaskConversationBundle | null>('get_task_conversation', {
-          conversationId: input.conversationId,
-        }),
-        bridgeCall<DshTaskRuntimeStatus | null>('dsh_get_task_runtime_status', {
-          conversationId: input.conversationId,
-        }),
-      ]);
-      const turnRuns = bundle?.runs.filter((run) => run.turnId === input.turnId) ?? [];
+      // Reading runtime ownership first makes a recovery completion race conservative:
+      // a stale active status triggers one more poll instead of terminalizing an older failed Run.
+      const [runtimeStatus, projection] = await readSequentialLiveConditionSnapshot(
+        () =>
+          bridgeCall<DshTaskRuntimeStatus | null>('dsh_get_task_runtime_status', {
+            conversationId: input.conversationId,
+          }),
+        () =>
+          bridgeCall<TaskTurnRunProjection | null>('get_task_turn_run_projection', {
+            conversationId: input.conversationId,
+            turnId: input.turnId,
+          }),
+      );
+      const turnRuns = projection?.runs ?? [];
       const latestRun = turnRuns.at(-1);
       const runtimeStillOwnsRecovery =
         runtimeStatus &&
@@ -2707,32 +3820,6 @@ async function waitForAutomaticSummaryTerminalRun(input: {
     },
   );
   return { run: terminalRun!, attempts };
-}
-
-async function waitForLiveCondition(
-  condition: () => Promise<boolean>,
-  options: { timeout: number; interval: number; timeoutMessage: string },
-): Promise<void> {
-  const deadline = Date.now() + options.timeout;
-  let lastError = '';
-  while (Date.now() < deadline) {
-    try {
-      if (await condition()) return;
-      lastError = '';
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/no such window|target window already closed|web view not found/i.test(message)) {
-        throw new Error(
-          `The desktop workbench window closed during the real-model run: ${message}`,
-        );
-      }
-      lastError = message;
-    }
-    await new Promise((resolve) => setTimeout(resolve, options.interval));
-  }
-  throw new Error(
-    lastError ? `${options.timeoutMessage} Last error: ${lastError}` : options.timeoutMessage,
-  );
 }
 
 async function waitForTurnRunCount(
@@ -2829,7 +3916,6 @@ async function readAndAssertGenerationSnapshot(input: {
       [...sections.entries()].map(([label, content]) => ({ label, content })),
       [
         { label: 'world', value: WORLD_BACKGROUND },
-        { label: 'protagonist_name', value: PROTAGONIST_NAME },
         { label: 'protagonist_identity', value: PROTAGONIST_IDENTITY },
         { label: 'protagonist_motivation', value: PROTAGONIST_MOTIVATION },
         { label: 'research_title', value: RESEARCH_REFERENCE_TITLE },
@@ -3193,6 +4279,7 @@ function assertFinalContinuousConversation(
   expectedPrompts: readonly string[],
   chapters: readonly ChapterEvidence[],
   assetPreparations: readonly SparseAssetPreparationEvidence[],
+  automaticAssetPreflightRetries: readonly RealConversationAutomaticAssetPreflightRetryEvidence[],
   scenario: RealConversationAcceptanceScenario,
 ): void {
   const userTurns = assertPersistedConversationTurns(bundle, expectedPrompts);
@@ -3203,16 +4290,48 @@ function assertFinalContinuousConversation(
     (sum, chapter) => sum + chapter.summaryAttempts.length,
     0,
   );
+  const totalAssetAttemptCount = assetPreparations.reduce(
+    (sum, preparation) => sum + preparation.attempts.length,
+    0,
+  );
+  const decisionTurns = localDecisionUserTurns(bundle);
+  const decisionRuns = bundle!.runs.filter(isLocalDecisionRun);
+  const expectedDecisionRunCount = assetPreparations.length + chapters.length * 2;
+  const expectedProviderRunCount =
+    totalAttemptCount + totalAssetAttemptCount + totalSummaryAttemptCount;
   requireCondition(
     bundle!.conversation.status === 'completed' &&
       automaticAssetTurns.length === assetPreparations.length &&
       automaticSummaryTurns.length === chapters.length &&
-      bundle!.runs.length ===
-        totalAttemptCount + assetPreparations.length + totalSummaryAttemptCount &&
+      decisionTurns.length === expectedDecisionRunCount &&
+      decisionRuns.length === expectedDecisionRunCount &&
+      bundle!.runs.filter((run) => run.modelSnapshot.runtimeMode === 'api').length ===
+        expectedProviderRunCount &&
+      bundle!.runs.length === expectedProviderRunCount + expectedDecisionRunCount &&
       bundle!.artifacts.length === expectedPrompts.length * 2 + assetPreparations.length &&
       bundle!.decisions.length === expectedPrompts.length * 2 + assetPreparations.length &&
       bundle!.authorizations.length === expectedPrompts.length,
     'The final continuous task does not retain every creative, asset, summary, decision, and authorization fact.',
+  );
+  requireCondition(
+    decisionTurns.filter((turn) => turn.content === APPLY_CURRENT_ASSET_COMMAND).length ===
+      assetPreparations.length &&
+      decisionTurns.filter((turn) => turn.content === ADOPT_CURRENT_CHAPTER_COMMAND).length ===
+        chapters.length &&
+      decisionTurns.filter((turn) => turn.content === APPLY_CURRENT_SUMMARY_COMMAND).length ===
+        chapters.length &&
+      new Set(decisionTurns.map((turn) => turn.turnId)).size === decisionTurns.length &&
+      decisionTurns.every((turn) => {
+        const runs = bundle!.runs.filter((run) => run.turnId === turn.turnId);
+        return (
+          runs.length === 1 &&
+          runs[0]?.status === 'completed' &&
+          isLocalDecisionRun(runs[0]) &&
+          !bundle!.toolEvents.some((event) => event.runId === runs[0]!.runId) &&
+          !bundle!.artifacts.some((artifact) => artifact.runId === runs[0]!.runId)
+        );
+      }),
+    'Conversational decisions did not retain one completed ans-local, zero-Provider, zero-tool, zero-artifact run per command.',
   );
   requireCondition(
     bundle!.runs.every((run) => ['completed', 'failed'].includes(run.status)) &&
@@ -3300,6 +4419,7 @@ function assertFinalContinuousConversation(
       const successfulToolEvents = toolEvents.filter(
         (event) => event.status === 'succeeded' && !event.error,
       );
+      const frozenModelSnapshot = JSON.stringify(runs[0]?.modelSnapshot);
       return (
         decodedTurn.content === asset.goal &&
         decodedTurn.origin === asset.turnOrigin &&
@@ -3313,9 +4433,21 @@ function assertFinalContinuousConversation(
         asset.actualProviderRequestEvidence.creativeBrief.contentSha256 ===
           sha256(REAL_ACCEPTANCE_SPARSE_IDEA) &&
         asset.actualProviderRequestEvidence.matchedPreparedFixtureCanaryIds.length === 0 &&
-        runs.length === 1 &&
-        runs[0]?.runId === asset.runId &&
-        runs[0]?.status === 'completed' &&
+        runs.length === asset.attempts.length &&
+        asset.retryCount === asset.attempts.length - 1 &&
+        asset.attempts.length >= 1 &&
+        asset.attempts.length <= REAL_ACCEPTANCE_MAX_RUN_ATTEMPTS &&
+        asset.attempts.every(
+          (attempt, attemptIndex) =>
+            attempt.attempt === attemptIndex + 1 &&
+            attempt.runId === runs[attemptIndex]?.runId &&
+            attempt.status === runs[attemptIndex]?.status,
+        ) &&
+        new Set(asset.attempts.map((attempt) => attempt.runId)).size === asset.attempts.length &&
+        runs.every((run) => JSON.stringify(run.modelSnapshot) === frozenModelSnapshot) &&
+        runs.slice(0, -1).every((run) => run.status === 'failed') &&
+        runs.at(-1)?.runId === asset.runId &&
+        runs.at(-1)?.status === 'completed' &&
         toolEvents.length === asset.toolAttemptCount &&
         toolEvents.filter((event) => event.status === 'failed').length ===
           asset.failedToolAttemptCount &&
@@ -3328,6 +4460,27 @@ function assertFinalContinuousConversation(
       );
     }),
     'Automatic asset preparation turns do not map one-to-one to completed runs and structured artifacts.',
+  );
+  requireCondition(
+    automaticAssetPreflightRetries.every((retry) => {
+      const turn = automaticAssetTurns.find((item) => item.turnId === retry.turnId);
+      const decodedTurn = decodeWorkbenchTurnContent(turn?.content);
+      const preparation = assetPreparations.find(
+        (item) =>
+          item.chapter === retry.chapter &&
+          item.asset === retry.asset &&
+          item.turnId === retry.turnId,
+      );
+      return (
+        decodedTurn.origin === retry.turnOrigin &&
+        sha256(decodedTurn.content) === retry.goalSha256 &&
+        preparation?.goalSha256 === retry.goalSha256 &&
+        bundle!.runs.filter((run) => run.turnId === retry.turnId).length ===
+          preparation?.attempts.length &&
+        bundle!.runs.some((run) => run.turnId === retry.turnId && run.runId === preparation?.runId)
+      );
+    }),
+    'Automatic asset preflight retries did not reuse the final successful asset turn and frozen goal.',
   );
   requireCondition(
     chapters.every((chapter) => {
@@ -3343,6 +4496,23 @@ function assertFinalContinuousConversation(
       const frozenModelSnapshot = JSON.stringify(runs[0]?.modelSnapshot);
       return (
         decodeWorkbenchTurnContent(turn?.content).content === '总结本章' &&
+        chapter.summaryStartRetryCount === chapter.summaryStartRecoveries.length &&
+        chapter.summaryStartRecoveries.length <= 1 &&
+        chapter.summaryStartRecoveries.every(
+          (recovery, index) =>
+            index === 0 &&
+            recovery.attempt === 1 &&
+            recovery.turnId === chapter.summaryTurnId &&
+            recovery.trigger === 'workbench-retry-summary-start' &&
+            recovery.observedPhase === 'failed' &&
+            recovery.runCountBefore === 0 &&
+            recovery.runtimeActiveBefore === false &&
+            recovery.outcome === 'run_started' &&
+            Boolean(recovery.firstPersistedRunId) &&
+            runs.some((run) => run.runId === recovery.firstPersistedRunId) &&
+            recovery.model.providerId === chapter.model.providerId &&
+            recovery.model.modelId === chapter.model.modelId,
+        ) &&
         runs.length === chapter.summaryAttempts.length &&
         runs.length === chapter.summaryRetryCount + 1 &&
         runs.length >= 1 &&
@@ -3369,6 +4539,26 @@ function assertFinalContinuousConversation(
       );
     }),
     'Automatic chapter summary turns do not retain a bounded failed-run history and exactly one applied summary artifact.',
+  );
+  requireCondition(
+    new Set(chapters.map((chapter) => chapter.summaryExecutionEvidence.sessionId)).size ===
+      chapters.length &&
+      chapters.every((chapter) => {
+        const execution = chapter.summaryExecutionEvidence;
+        const uniqueMessageCounts = [...new Set(execution.messageCounts)].sort(
+          (left, right) => left - right,
+        );
+        return (
+          /^session-summary-[0-9a-f]{32}$/.test(execution.sessionId) &&
+          execution.messageCounts.length >= 3 &&
+          execution.messageCounts.every((count) => [2, 5, 7].includes(count)) &&
+          arraysEqual(uniqueMessageCounts, [2, 5, 7]) &&
+          execution.providerUsage.unit === 'tokens' &&
+          Number.isSafeInteger(execution.providerUsage.input) &&
+          execution.providerUsage.input > 0
+        );
+      }),
+    'Automatic chapter summaries did not use distinct DSH Sessions with reset 2/5/7 Provider history and positive input usage.',
   );
   requireCondition(
     new Set(chapters.map((chapter) => chapter.chapterId)).size === chapters.length &&
@@ -3463,6 +4653,7 @@ function assertClosedLoopDeltas(
   chapterCount: number,
   runCount: number,
   minimumResultArtifactCount: number,
+  assetRunCount: number,
   assetPreparationCount: number,
   summaryRunCount: number,
 ): void {
@@ -3478,7 +4669,7 @@ function assertClosedLoopDeltas(
   };
   const expected = {
     conversations: 1,
-    runs: runCount + assetPreparationCount + summaryRunCount,
+    runs: runCount + assetRunCount + summaryRunCount + chapterCount * 2 + assetPreparationCount,
     resultArtifactsMinimum: minimumResultArtifactCount,
     artifactDecisions: chapterCount * 2 + assetPreparationCount,
     reviewAuthorizations: chapterCount,
@@ -3915,20 +5106,52 @@ async function assertPreparedFormalAssets(
   );
 }
 
-function readProtagonistNames(novel: NovelRecord | null): string[] {
+function readProtagonistProfiles(
+  novel: NovelRecord | null,
+): Array<{ name: string; identity?: string; motivation?: string }> {
   if (!novel) return [];
   if (Array.isArray(novel.protagonists)) {
-    return novel.protagonists.map((profile) => profile.name?.trim() ?? '').filter(Boolean);
+    return novel.protagonists.flatMap((profile) => {
+      const name = profile.name?.trim() ?? '';
+      return name
+        ? [
+            {
+              name,
+              identity: profile.identity?.trim() || undefined,
+              motivation: profile.motivation?.trim() || undefined,
+            },
+          ]
+        : [];
+    });
   }
   if (!novel.protagonistsJson) return [];
   try {
-    const parsed = JSON.parse(novel.protagonistsJson) as Array<{ name?: string }>;
+    const parsed = JSON.parse(novel.protagonistsJson) as Array<{
+      name?: string;
+      identity?: string;
+      motivation?: string;
+    }>;
     return Array.isArray(parsed)
-      ? parsed.map((profile) => profile.name?.trim() ?? '').filter(Boolean)
+      ? parsed.flatMap((profile) => {
+          const name = profile.name?.trim() ?? '';
+          return name
+            ? [
+                {
+                  name,
+                  identity: profile.identity?.trim() || undefined,
+                  motivation: profile.motivation?.trim() || undefined,
+                },
+              ]
+            : [];
+        })
       : [];
   } catch {
     return [];
   }
+}
+
+function readProtagonistNames(novel: NovelRecord | null): string[] {
+  return readProtagonistProfiles(novel).map((profile) => profile.name);
 }
 
 async function createTargetChapterThroughUi(title: string, volumeId: string): Promise<string> {
@@ -4012,6 +5235,18 @@ async function setInputValue(selector: string, value: string): Promise<void> {
   await input.waitForDisplayed({ timeout: 30_000 });
   await input.clearValue();
   await input.setValue(value);
+  let stableReads = 0;
+  await browser.waitUntil(
+    async () => {
+      stableReads = (await input.getValue()) === value ? stableReads + 1 : 0;
+      return stableReads >= 2;
+    },
+    {
+      timeout: 30_000,
+      interval: 50,
+      timeoutMsg: `Controlled settings input ${selector} did not settle.`,
+    },
+  );
 }
 
 async function waitForNewConversationId(

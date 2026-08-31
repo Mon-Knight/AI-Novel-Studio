@@ -1,4 +1,5 @@
 import type { AiSettings } from '../../../types/ai';
+import { Archive, Bot, CheckCircle2, TriangleAlert } from 'lucide-react';
 
 interface AiGenerateStatusSectionsProps {
   settings: AiSettings;
@@ -14,20 +15,27 @@ export function AiGenerateStatusSections({
   return (
     <>
       <div className="panel-section">
-        <div className="panel-section-title">AI 状态</div>
+        <div className="panel-section-title">
+          <Bot aria-hidden="true" size={14} strokeWidth={1.8} />
+          AI 状态
+        </div>
         <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-          <div>模式：{settings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+          <div>模式：{settings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
           {settings.runtimeMode === 'api' && <div>模型：{settings.modelName || '未配置'}</div>}
           {settings.runtimeMode === 'api' && !settings.apiKey && (
             <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-              ⚠️ 未配置 API Key，请先到设置中心配置
+              <TriangleAlert aria-hidden="true" size={13} strokeWidth={1.8} />
+              未配置 API Key，请先到设置中心配置
             </div>
           )}
         </div>
       </div>
 
       <div className="panel-section">
-        <div className="panel-section-title">📦 上下文加载状态</div>
+        <div className="panel-section-title">
+          <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
+          上下文加载状态
+        </div>
         <div style={{ fontSize: 12, lineHeight: 1.8 }}>
           <div
             data-testid="generation-context-count"
@@ -52,7 +60,8 @@ export function AiGenerateStatusSections({
           )}
           {contextCount !== null && contextCount > 0 && (
             <div style={{ color: 'var(--color-success)', marginTop: 2 }}>
-              ✅ 下一章生成时将自动加载以上下文摘要
+              <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
+              下一章生成时将自动加载以上下文摘要
             </div>
           )}
         </div>

@@ -6,6 +6,7 @@ import {
   Globe2,
   History,
   ListChecks,
+  LoaderCircle,
   Save,
   SearchCheck,
   Workflow,
@@ -68,6 +69,43 @@ interface RightToolbarProps {
   onToggleReadiness?: () => void;
   readinessOpen?: boolean;
   documentAvailable?: boolean;
+  reviewLocked?: boolean;
+  documentDirty?: boolean;
+  documentSaving?: boolean;
+  documentAdopting?: boolean;
+  hasCurrentDraft?: boolean;
+  currentDraftAdopted?: boolean;
+  hasReviewCandidate?: boolean;
+}
+
+interface CommandGateState {
+  documentAvailable: boolean;
+  reviewLocked: boolean;
+  documentDirty: boolean;
+  documentSaving: boolean;
+  documentAdopting: boolean;
+  hasCurrentDraft: boolean;
+  currentDraftAdopted: boolean;
+  hasReviewCandidate: boolean;
+}
+
+function commandDisabledReason(command: EditorCommandType, state: CommandGateState): string {
+  if (!state.documentAvailable) return '完整正文不可用';
+  if (state.reviewLocked) return '当前为只读审阅，请先进入编辑';
+  if (state.documentSaving) return '正在保存正文';
+  if (state.documentAdopting) return '正在采用正文';
+  if (command === 'save' && !state.documentDirty && !state.hasReviewCandidate) {
+    return '没有未保存修改';
+  }
+  if (
+    command === 'adopt-current' &&
+    !state.documentDirty &&
+    !state.hasReviewCandidate &&
+    (!state.hasCurrentDraft || state.currentDraftAdopted)
+  ) {
+    return state.currentDraftAdopted ? '当前正文已采用' : '当前没有可采用的草稿';
+  }
+  return '';
 }
 
 function panelTestId(id: Exclude<PanelType, null>): string | undefined {
@@ -86,6 +124,13 @@ function RightToolbar({
   onToggleReadiness,
   readinessOpen = false,
   documentAvailable = true,
+  reviewLocked = false,
+  documentDirty = true,
+  documentSaving = false,
+  documentAdopting = false,
+  hasCurrentDraft = false,
+  currentDraftAdopted = false,
+  hasReviewCandidate = false,
 }: RightToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const e2eEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -130,11 +175,34 @@ function RightToolbar({
       }}
     >
       {buttons.map((btn) => {
-        const Icon = btn.icon;
+        const commandReason =
+          btn.kind === 'command'
+            ? commandDisabledReason(btn.command, {
+                documentAvailable,
+                reviewLocked,
+                documentDirty,
+                documentSaving,
+                documentAdopting,
+                hasCurrentDraft,
+                currentDraftAdopted,
+                hasReviewCandidate,
+              })
+            : '';
         const disabled =
-          !documentAvailable &&
-          ((btn.kind === 'panel' && DOCUMENT_REQUIRED_PANELS.has(btn.id)) ||
-            btn.kind === 'command');
+          btn.kind === 'command'
+            ? Boolean(commandReason)
+            : btn.kind === 'panel' && !documentAvailable && DOCUMENT_REQUIRED_PANELS.has(btn.id);
+        const busy =
+          btn.kind === 'command' &&
+          ((btn.command === 'save' && documentSaving) ||
+            (btn.command === 'adopt-current' && documentAdopting));
+        const Icon = busy ? LoaderCircle : btn.icon;
+        const displayLabel =
+          btn.kind === 'command' && btn.command === 'save' && documentSaving
+            ? '保存中'
+            : btn.kind === 'command' && btn.command === 'adopt-current' && documentAdopting
+              ? '采用中'
+              : btn.label;
         const key =
           btn.kind === 'panel' ? btn.id : btn.kind === 'command' ? btn.command : 'readiness';
         const testId =
@@ -152,33 +220,38 @@ function RightToolbar({
           (btn.kind === 'readiness' && readinessOpen);
         const togglesSurface = btn.kind === 'panel' || btn.kind === 'readiness';
         const accessibleLabel = disabled
-          ? `${btn.label}，完整正文不可用`
+          ? `${displayLabel}，${commandReason || '完整正文不可用'}`
           : togglesSurface
             ? `${active ? '收起' : '打开'}${btn.label}`
-            : btn.label;
+            : displayLabel;
         return (
           <button
             type="button"
             key={key}
             data-testid={testId}
-            className={`right-toolbar-btn ${active ? 'active' : ''}`}
+            className={`right-toolbar-btn ${active ? 'active' : ''} ${busy ? 'is-busy' : ''}`.trim()}
             data-kind={btn.kind}
             onClick={() => {
               if (btn.kind === 'panel') onTogglePanel(btn.id);
               else if (btn.kind === 'command') onRunCommand?.(btn.command);
               else onToggleReadiness?.();
             }}
-            title={disabled ? `${btn.label}：完整正文不可用` : btn.label}
+            title={disabled ? `${btn.label}：${commandReason || '完整正文不可用'}` : btn.label}
             disabled={disabled}
             aria-disabled={disabled}
+            aria-busy={busy || undefined}
             aria-label={accessibleLabel}
             aria-pressed={togglesSurface ? active : undefined}
             aria-expanded={togglesSurface ? active : undefined}
           >
             <span className="tb-icon" aria-hidden="true">
-              <Icon size={18} strokeWidth={1.8} />
+              <Icon
+                className={busy ? 'workspace-spinning-icon' : undefined}
+                size={18}
+                strokeWidth={1.8}
+              />
             </span>
-            <span className="tb-label">{btn.label}</span>
+            <span className="tb-label">{displayLabel}</span>
           </button>
         );
       })}

@@ -184,6 +184,38 @@ test('short creative briefs route to chapter writing without requiring a detaile
   }
 });
 
+test('bare narrative premises can enter empty-project asset preparation', () => {
+  const goals = [
+    '一个人醒来发现全城只有自己有影子',
+    '六万字，海边旅馆每晚少一个房间',
+    '雨停以后所有人都会忘记名字',
+    '陌生小镇，退休侦探发现每位客人都在说同一个谎',
+    '失忆钟表匠追查被偷走的时间',
+  ];
+
+  for (const goal of goals) {
+    assert.equal(classifyTaskIntent(goal), 'chapter_write', goal);
+    assert.equal(selectCandidateTool(goal), undefined, goal);
+    assert.equal(selectCandidateTool(goal, 'ch-1')?.name, 'generate_chapter', goal);
+  }
+});
+
+test('questions and explicit reads that resemble narrative premises stay read-only', () => {
+  const goals = [
+    '六万字大概多少页？',
+    '一个人醒来发现全城只有自己有影子，这个设定怎么样？',
+    '如何写一个失忆侦探追查时间的故事',
+    '读取一个侦探发现秘密的世界设定',
+    '六万字，机器人发现系统故障，需要多少章',
+    '机器人发现系统故障该怎么办？',
+  ];
+
+  for (const goal of goals) {
+    assert.equal(selectCandidateTool(goal, 'ch-1'), undefined, goal);
+    assert.equal(classifyTaskIntent(goal), 'read', goal);
+  }
+});
+
 test('questions about short genre briefs remain read-only', () => {
   const goals = [
     '分析六万字悬疑小说是否可行',

@@ -2,6 +2,7 @@
  * AI Novel Studio - 上下文记录列表组件
  */
 import { useState } from 'react';
+import { Plus, Star } from 'lucide-react';
 import type { ContextRecord } from '../../types/context';
 import { ContextRecordTypeLabels, ContextRecordTypeColors } from '../../types/context';
 
@@ -22,8 +23,6 @@ function ContextRecordList({
 }: ContextRecordListProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const importanceStars = (n: number) => '⭐'.repeat(n);
-
   if (records.length === 0 && !compact) {
     return (
       <div
@@ -33,7 +32,8 @@ function ContextRecordList({
         {onAdd && (
           <div style={{ marginTop: 8 }}>
             <button className="btn btn-secondary btn-sm" onClick={onAdd}>
-              ➕ 手动添加
+              <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+              手动添加
             </button>
           </div>
         )}
@@ -100,7 +100,13 @@ function ContextRecordList({
                 </div>
               )}
               <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                {importanceStars(r.importance)} · 重要度 {r.importance}/5
+                <span
+                  aria-label={`重要度 ${r.importance}/5`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                >
+                  <Star aria-hidden="true" size={11} strokeWidth={1.8} />
+                  {r.importance}/5
+                </span>
               </div>
             </div>
             {!compact && (
@@ -141,7 +147,8 @@ function ContextRecordList({
           onClick={onAdd}
           style={{ marginTop: 4, width: '100%' }}
         >
-          ➕ 手动添加上下文
+          <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+          手动添加上下文
         </button>
       )}
     </div>

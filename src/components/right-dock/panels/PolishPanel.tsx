@@ -1,5 +1,6 @@
 import { appLogger } from '../../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Bot, CheckCircle2, FileText, LoaderCircle, Sparkles, TriangleAlert } from 'lucide-react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
 import type { PolishMode, PolishRequestOptions } from '../../../types/polish';
@@ -272,21 +273,42 @@ function PolishPanel({
     <div>
       {/* AI 模式状态 */}
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
         )}
       </div>
       <div className="panel-section">
-        <div className="panel-section-title">✨ 润色模式</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
+          润色模式
+        </div>
         <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>
           第{chapter.chapterNumber}章 {chapter.title}
         </div>
@@ -326,9 +348,25 @@ function PolishPanel({
           className="btn btn-primary btn-sm"
           onClick={handleRunPolish}
           disabled={loading}
-          style={{ width: '100%' }}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading ? '⏳ 润色中...' : '✨ 开始润色'}
+          {loading ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              润色中...
+            </>
+          ) : (
+            <>
+              <Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
+              开始润色
+            </>
+          )}
         </button>
         {error && (
           <div style={{ fontSize: 12, color: 'var(--color-error)', marginTop: 6 }}>{error}</div>
@@ -342,7 +380,13 @@ function PolishPanel({
 
       {lastPolishResult && (
         <div className="panel-section">
-          <div className="panel-section-title">📄 应用润色结果</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+            应用润色结果
+          </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
             润色结果已保存为草稿 v{lastPolishResult.versionNo}（{lastPolishResult.wordCount} 字）
           </div>
@@ -391,9 +435,20 @@ function PolishPanel({
         style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.6 }}
       >
         <div>润色结果将保存为新的草稿版本，不会覆盖当前正文。</div>
-        <div style={{ marginTop: 4 }}>✔ 保持剧情不变</div>
-        <div>✔ 保持人物关系</div>
-        <div>✔ 保持关键事件</div>
+        {['保持剧情不变', '保持人物关系', '保持关键事件'].map((item, index) => (
+          <div
+            key={item}
+            style={{
+              marginTop: index === 0 ? 4 : undefined,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <CheckCircle2 size={13} strokeWidth={1.8} aria-hidden="true" />
+            {item}
+          </div>
+        ))}
       </div>
     </div>
   );

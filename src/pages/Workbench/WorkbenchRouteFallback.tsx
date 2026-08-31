@@ -1,4 +1,5 @@
 import { useLayoutEffect } from 'react';
+import { Plus } from 'lucide-react';
 import '../../styles/workbench.css';
 
 function markOnce(name: string): void {
@@ -41,7 +42,7 @@ export function WorkbenchRouteFallback() {
             <h1>创作任务</h1>
           </div>
           <span className="workbench-new-task" aria-hidden="true">
-            +
+            <Plus size={17} strokeWidth={1.8} />
           </span>
         </div>
         <div className="workbench-tree-scroll">

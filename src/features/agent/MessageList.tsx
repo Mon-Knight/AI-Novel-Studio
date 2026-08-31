@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Sparkles } from 'lucide-react';
 import type { AgentMessage } from '../../types/agentHarness';
 import { VirtualList } from './VirtualMessageList';
 
@@ -63,7 +64,12 @@ export const MessageList = memo(function MessageList({ messages, isBusy }: Messa
           color: 'var(--color-text-muted, #64748b)',
         }}
       >
-        <div style={{ fontSize: 28, marginBottom: 8 }}>✦</div>
+        <Sparkles
+          aria-hidden="true"
+          size={28}
+          strokeWidth={1.8}
+          style={{ display: 'block', margin: '0 auto 8px' }}
+        />
         <h3
           style={{
             fontSize: 16,

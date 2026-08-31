@@ -53,6 +53,18 @@ const AUTOMATIC_PROTOCOL_RECOVERY_ERROR_CODES: &[&str] = &[
     "DSH_REQUIRED_CONTEXT_READ_MISSING",
     "DSH_REQUIRED_CANDIDATE_TOOL_MISSING",
 ];
+const AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_CODE: &str =
+    "DSH_SUMMARY_STREAM_CLOSED_AFTER_VERIFIED_TOOL_ATTESTATION";
+const AUTOMATIC_SUMMARY_STREAM_CLOSED_RAW_PREFIX: &str = "DSH 回合以错误结束: STREAM_CLOSED | ";
+const MODEL_TOOL_ATTESTATION_TOOL_NAME: &str = "ans_runtime_attest_tool_call_v1";
+const MODEL_TOOL_ATTESTATION_STREAM_CLOSED_TURN_END: &str = "dsh.turn.end: STREAM_CLOSED";
+const AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR: &str = concat!(
+    "DSH_SUMMARY_STREAM_CLOSED_AFTER_VERIFIED_TOOL_ATTESTATION: ",
+    "DSH 回合以错误结束: STREAM_CLOSED | ",
+    "probe responseStats status=200 ",
+    "toolNames=ans_runtime_attest_tool_call_v1 ",
+    "finish=tool_calls done=true | probe done status=200"
+);
 const CONTEXT_READ_TOOLS: &str =
     "novel.read_context,chapter.read_outline,get_character_states,search_memory";
 const WORLD_AND_RULE_SETTINGS_DIRECTIVE: &str = "生成世界与规则设定候选";
@@ -74,11 +86,11 @@ fn workbench_task_instruction(input: &StartTaskTurnInput) -> String {
         .to_string(),
         "story_plan_generate" => {
             let mut instruction = concat!(
-                "由你生成 candidate JSON：根字段为 planKind=story_plan、title、content、正整数 targetWordCount、volumes；",
-                "每卷含 title、summary、goal、mainConflict、outline、chapters，每章含 title、outline、goal、正整数 targetWordCount；",
-                "本章涉及已存在正式角色时，用可选 characterNames 字符串数组写精确姓名，没有角色线索时省略。",
-                "遵守用户明确的总字数和章节数；未给章节数时按完整叙事弧自行决定，根字数与各章合计基本一致。",
-                "字段保持精炼，candidate 前后不加说明或 Markdown；小说级调用不传 chapterId。"
+                "生成 candidate JSON：根含 planKind=story_plan、title、content、正整数 targetWordCount、volumes；",
+                "卷含 title、summary、goal、mainConflict、outline、chapters；章含 title、outline、goal、正整数 targetWordCount。",
+                "涉及已有正式角色时，characterNames 为精确姓名字符串数组；没有角色线索时省略。",
+                "服从用户总字数与章节数；未给章节数时按完整叙事弧决定，根值与章合计一致。",
+                "字段精炼，JSON 前后不加说明或 Markdown；小说级调用不传 chapterId。"
             )
             .to_string();
             if let Some(goal) = &input.book_word_goal {
@@ -162,10 +174,10 @@ fn workbench_turn_prompt_for_attempt(
     let required_reads = if input.required_read_tools.is_empty() {
         "无".to_string()
     } else {
-        input.required_read_tools.join("、")
+        input.required_read_tools.join(" -> ")
     };
     let execution_rule = if input.expected_tool.is_some() {
-        "严格分两阶段执行：第一阶段在同一模型响应中并行调用全部必需读取，严禁调用候选工具；等待全部 Tool Result 返回后，第二阶段必须调用唯一候选工具提交候选。仅工具校验失败时可修正重试，最多 2 次；成功后用一句话确认完成并结束，禁止返回空消息。"
+        "第一阶段在同一模型响应中并行调用全部必需读取，禁止候选工具；全部必需读取成功后，第二阶段必须调用唯一候选工具提交候选。候选校验失败最多修正 2 次；成功后用一句话确认完成并结束，禁止返回空消息。"
     } else if !input.required_read_tools.is_empty() {
         "本轮不得调用候选工具；全部必需读取成功后，必须基于工具结果答复。"
     } else {
@@ -324,7 +336,7 @@ fn validate_turn_contract(input: &StartTaskTurnInput) -> Result<(), String> {
     Ok(())
 }
 
-fn automatic_protocol_recovery_error_code(error: &str) -> Option<&'static str> {
+fn allowlisted_protocol_recovery_error_code(error: &str) -> Option<&'static str> {
     AUTOMATIC_PROTOCOL_RECOVERY_ERROR_CODES
         .iter()
         .copied()
@@ -336,11 +348,72 @@ fn automatic_protocol_recovery_error_code(error: &str) -> Option<&'static str> {
         })
 }
 
+fn model_proxy_diagnostic_field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+    line.split_ascii_whitespace().find_map(|field| {
+        let (field_name, value) = field.split_once('=')?;
+        (field_name == name).then_some(value)
+    })
+}
+
+fn is_verified_attestation_probe_stream_closed_error(error: &str) -> bool {
+    let Some(diagnostics) = error.strip_prefix(AUTOMATIC_SUMMARY_STREAM_CLOSED_RAW_PREFIX) else {
+        return false;
+    };
+    let lines = diagnostics.split(" | ").collect::<Vec<_>>();
+    let Some(last_request_index) = lines
+        .iter()
+        .rposition(|line| line.starts_with("[model-proxy] request "))
+    else {
+        return false;
+    };
+    let tail = &lines[last_request_index..];
+    if tail.len() != 4 {
+        return false;
+    }
+    let request = tail[0];
+    let response = tail[1];
+    let done = tail[2];
+    let turn_end = tail[3];
+    request.starts_with("[model-proxy] request ")
+        && response.starts_with("[model-proxy] responseStats ")
+        && done.starts_with("[model-proxy] done ")
+        && model_proxy_diagnostic_field(request, "tools") == Some("1")
+        && model_proxy_diagnostic_field(response, "status") == Some("200")
+        && model_proxy_diagnostic_field(response, "toolNames")
+            == Some(MODEL_TOOL_ATTESTATION_TOOL_NAME)
+        && model_proxy_diagnostic_field(response, "finish") == Some("tool_calls")
+        && model_proxy_diagnostic_field(response, "done") == Some("true")
+        && model_proxy_diagnostic_field(done, "status") == Some("200")
+        && turn_end == MODEL_TOOL_ATTESTATION_STREAM_CLOSED_TURN_END
+}
+
+fn raw_automatic_protocol_recovery_error_code(error: &str) -> Option<&'static str> {
+    allowlisted_protocol_recovery_error_code(error).or_else(|| {
+        is_verified_attestation_probe_stream_closed_error(error)
+            .then_some(AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_CODE)
+    })
+}
+
+fn persisted_automatic_protocol_recovery_error_code(error: &str) -> Option<&'static str> {
+    allowlisted_protocol_recovery_error_code(error).or_else(|| {
+        (error == AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR)
+            .then_some(AUTOMATIC_SUMMARY_STREAM_CLOSED_RECOVERY_CODE)
+    })
+}
+
+fn runtime_error_for_persistence(error: &str) -> String {
+    if is_verified_attestation_probe_stream_closed_error(error) {
+        AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR.to_string()
+    } else {
+        safe_runtime_error(error)
+    }
+}
+
 fn is_automatic_protocol_recovery_candidate(input: &StartTaskTurnInput, error: &str) -> bool {
     input.task_kind == "chapter_summary"
         && input.expected_tool.as_deref() == Some("summarize_chapter")
         && input.expected_artifact_type.as_deref() == Some("chapter_summary")
-        && automatic_protocol_recovery_error_code(error).is_some()
+        && raw_automatic_protocol_recovery_error_code(error).is_some()
 }
 
 #[derive(Debug)]
@@ -348,6 +421,30 @@ struct ChapterSummaryRecoveryScope {
     novel_id: String,
     chapter_id: String,
     adopted_draft_id: String,
+}
+
+fn task_session_id(
+    input: &StartTaskTurnInput,
+    run_id: &str,
+    summary_scope: Option<&ChapterSummaryRecoveryScope>,
+) -> String {
+    let identity = match summary_scope {
+        Some(scope) => large_text_repository::sha256(&format!(
+            "chapter-summary\0{}\0{}\0{}\0{}\0{}\0{}",
+            input.conversation_id,
+            input.turn_id,
+            scope.novel_id,
+            scope.chapter_id,
+            scope.adopted_draft_id,
+            run_id,
+        )),
+        None => large_text_repository::sha256(&input.conversation_id),
+    };
+    if summary_scope.is_some() {
+        format!("session-summary-{}", &identity[..32])
+    } else {
+        format!("session-{}", &identity[..32])
+    }
 }
 
 fn chapter_summary_recovery_scope(
@@ -501,7 +598,7 @@ fn automatic_protocol_recovery_retry_number(
             row.map_err(|_| "DSH_PROTOCOL_RECOVERY_STATE_READ_FAILED".to_string())?;
         if stored_error
             .as_deref()
-            .and_then(automatic_protocol_recovery_error_code)
+            .and_then(persisted_automatic_protocol_recovery_error_code)
             .is_none()
         {
             continue;
@@ -628,6 +725,7 @@ struct ProviderTransport {
 
 #[derive(Clone)]
 struct ProjectionTarget {
+    session_id: String,
     run_id: String,
     turn_error: Arc<Mutex<Option<String>>>,
     notifier: Option<TaskProjectionObserver>,
@@ -2583,6 +2681,11 @@ fn selected_model_route(input: &StartTaskTurnInput) -> Result<SelectedModelRoute
         "providerId",
         128,
     )?;
+    let logical_provider = if logical_provider == "deepseek" {
+        DEEPSEEK_HARNESS_PROVIDER.to_string()
+    } else {
+        logical_provider
+    };
     let model = exact_model_identity(
         input
             .model_snapshot
@@ -2592,30 +2695,35 @@ fn selected_model_route(input: &StartTaskTurnInput) -> Result<SelectedModelRoute
         "modelId",
         256,
     )?;
-    let adapter_protocol = exact_model_identity(
-        input
-            .model_snapshot
-            .pointer("/runtime/adapterProtocol")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "冻结模型快照缺少 Harness adapterProtocol".to_string())?,
-        "adapterProtocol",
-        128,
-    )?;
+    let adapter_protocol = match input
+        .model_snapshot
+        .pointer("/runtime/adapterProtocol")
+        .and_then(Value::as_str)
+    {
+        Some(value) => exact_model_identity(value, "adapterProtocol", 128)?,
+        None => DSH_PROTOCOL.to_string(),
+    };
     if adapter_protocol != DSH_PROTOCOL {
         return Err(format!(
             "冻结模型快照的 Harness adapterProtocol 不可用: {}",
             adapter_protocol
         ));
     }
-    let adapter_provider = exact_model_identity(
-        input
-            .model_snapshot
-            .pointer("/runtime/adapterProvider")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "冻结模型快照缺少 Harness adapterProvider".to_string())?,
-        "adapterProvider",
-        128,
-    )?;
+    let adapter_provider = match input
+        .model_snapshot
+        .pointer("/runtime/adapterProvider")
+        .and_then(Value::as_str)
+    {
+        Some(value) => {
+            let value = exact_model_identity(value, "adapterProvider", 128)?;
+            if value == "deepseek" {
+                DEEPSEEK_HARNESS_PROVIDER.to_string()
+            } else {
+                value
+            }
+        }
+        None => logical_provider.clone(),
+    };
     if logical_provider != adapter_provider {
         return Err(format!(
             "冻结模型快照 providerId 与 Harness adapterProvider 不一致: {} != {}",
@@ -2671,7 +2779,6 @@ fn spawn_worker_process(
     input: &StartTaskTurnInput,
     descriptor: &RuntimeDescriptor,
     worker_id: &str,
-    session_id: &str,
     identity_hash: String,
     model_route: &SelectedModelRoute,
     upstream_key: &str,
@@ -2747,7 +2854,6 @@ fn spawn_worker_process(
         .launch(&config)
         .map_err(|error| format!("DSH Worker {} 启动失败: {}", worker_id, error))?;
     let observer: SessionEventObserver = {
-        let session_id = session_id.to_string();
         let conversation_id = input.conversation_id.clone();
         Arc::new(move |notification| {
             let target = projection
@@ -2759,7 +2865,7 @@ fn spawn_worker_process(
             };
             project_session_event(
                 notification,
-                &session_id,
+                &target.session_id,
                 &conversation_id,
                 &target.run_id,
                 &target.turn_error,
@@ -2784,7 +2890,6 @@ fn spawn_worker_process(
 fn ensure_worker_process(
     input: &StartTaskTurnInput,
     worker_id: &str,
-    session_id: &str,
     process_holder: &Arc<Mutex<Option<Arc<WorkerProcess>>>>,
     projection: Arc<Mutex<Option<ProjectionTarget>>>,
 ) -> Result<Arc<WorkerProcess>, String> {
@@ -2819,7 +2924,6 @@ fn ensure_worker_process(
         input,
         &descriptor,
         worker_id,
-        session_id,
         transport.identity_hash,
         &transport.route,
         &transport.upstream_key,
@@ -2987,7 +3091,6 @@ fn model_snapshot_with_tool_attestation(
 fn preflight_model_tool_attestation(
     input: &StartTaskTurnInput,
     worker_id: &str,
-    session_id: &str,
     process_holder: &Arc<Mutex<Option<Arc<WorkerProcess>>>>,
     projection: Arc<Mutex<Option<ProjectionTarget>>>,
     cancel: &AtomicBool,
@@ -2995,7 +3098,7 @@ fn preflight_model_tool_attestation(
     if cancel.load(Ordering::SeqCst) {
         return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
     }
-    let process = ensure_worker_process(input, worker_id, session_id, process_holder, projection)?;
+    let process = ensure_worker_process(input, worker_id, process_holder, projection)?;
     if cancel.load(Ordering::SeqCst) {
         process.runtime.kill();
         return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
@@ -3070,6 +3173,7 @@ fn execute(
     *projection
         .lock()
         .map_err(|_| "DSH 事件投影锁失败".to_string())? = Some(ProjectionTarget {
+        session_id: session_id.clone(),
         run_id: run_id.clone(),
         turn_error: turn_error.clone(),
         notifier: notifier.clone(),
@@ -3253,12 +3357,20 @@ pub fn start_with_observer(
     input.goal = authoritative_goal;
     input.book_word_goal = book_word_goal;
     validate_turn_contract(&input)?;
+    let summary_session_scope = if input.task_kind == "chapter_summary" {
+        let connection = crate::db::get_connection()
+            .lock()
+            .map_err(|_| "数据库锁失败".to_string())?;
+        Some(chapter_summary_recovery_scope(&connection, &input)?)
+    } else {
+        None
+    };
     let mut run_id = uuid::Uuid::new_v4().to_string();
     let identity = large_text_repository::sha256(&input.conversation_id);
     let stable_worker_id = format!("worker-{}", &identity[..32]);
-    let stable_session_id = format!("session-{}", &identity[..32]);
+    let initial_session_id = task_session_id(&input, &run_id, summary_session_scope.as_ref());
     let cancel = Arc::new(AtomicBool::new(false));
-    let (worker_id, session_id, process, projection) = {
+    let (worker_id, process, projection) = {
         let mut workers = active()
             .lock()
             .map_err(|_| "Worker 状态锁失败".to_string())?;
@@ -3274,9 +3386,9 @@ pub fn start_with_observer(
             worker.status = "attesting".to_string();
             worker.error = None;
             worker.notifier = notifier.clone();
+            worker.session_id = initial_session_id.clone();
             (
                 worker.worker_id.clone(),
-                worker.session_id.clone(),
                 worker.process.clone(),
                 worker.projection.clone(),
             )
@@ -3287,7 +3399,7 @@ pub fn start_with_observer(
                 input.conversation_id.clone(),
                 ActiveWorker {
                     run_id: run_id.clone(),
-                    session_id: stable_session_id.clone(),
+                    session_id: initial_session_id.clone(),
                     worker_id: stable_worker_id.clone(),
                     cancel: cancel.clone(),
                     process: process.clone(),
@@ -3297,13 +3409,12 @@ pub fn start_with_observer(
                     error: None,
                 },
             );
-            (stable_worker_id, stable_session_id, process, projection)
+            (stable_worker_id, process, projection)
         }
     };
     let (attested_process, model_tool_attestation) = match preflight_model_tool_attestation(
         &input,
         &worker_id,
-        &session_id,
         &process,
         projection.clone(),
         &cancel,
@@ -3327,6 +3438,7 @@ pub fn start_with_observer(
     };
     let mut protocol_recovery_retry = 0usize;
     loop {
+        let run_session_id = task_session_id(&input, &run_id, summary_session_scope.as_ref());
         let run_created = (|| {
             let mut workers = active()
                 .lock()
@@ -3340,6 +3452,7 @@ pub fn start_with_observer(
                 return Err("MODEL_TOOL_ATTESTATION_CANCELLED".to_string());
             }
             worker.run_id = run_id.clone();
+            worker.session_id = run_session_id.clone();
             worker.error = None;
             let mut connection = crate::db::get_connection()
                 .lock()
@@ -3380,7 +3493,7 @@ pub fn start_with_observer(
             input.clone(),
             run_id.clone(),
             worker_id.clone(),
-            session_id.clone(),
+            run_session_id,
             attested_process.clone(),
             projection.clone(),
             cancel.clone(),
@@ -3395,7 +3508,7 @@ pub fn start_with_observer(
             }
             Err(raw_error) => raw_error,
         };
-        let error = safe_runtime_error(&raw_error);
+        let error = runtime_error_for_persistence(&raw_error);
         let cancelled = active()
             .lock()
             .ok()
@@ -3465,7 +3578,7 @@ pub fn start_with_observer(
                 "任务已取消。".to_string()
             } else if let Some(retry_number) = next_protocol_recovery_retry {
                 format!(
-                    "任务运行失败：{}。检测到可恢复的自动总结工具协议错误，正在使用同一回合与冻结模型自动重试（{}/{}）。",
+                    "任务运行失败：{}。检测到可恢复的自动总结运行错误，正在使用同一回合与冻结模型自动重试（{}/{}）。",
                     error,
                     retry_number,
                     MAX_AUTOMATIC_PROTOCOL_RECOVERY_RETRIES
@@ -3827,6 +3940,50 @@ mod workbench_prompt_tests {
         connection
     }
 
+    #[test]
+    fn automatic_summary_sessions_rotate_without_changing_ordinary_task_sessions() {
+        let input = chapter_summary_input();
+        let connection = chapter_summary_recovery_connection();
+        let scope = chapter_summary_recovery_scope(&connection, &input)
+            .expect("authoritative adopted summary scope");
+        let first = task_session_id(&input, "run-summary-1", Some(&scope));
+        let same = task_session_id(&input, "run-summary-1", Some(&scope));
+        let retry = task_session_id(&input, "run-summary-2", Some(&scope));
+
+        assert_eq!(first, same);
+        assert_ne!(first, retry, "a recovery Run must start with clean history");
+        assert!(first.starts_with("session-summary-"));
+        assert!(first
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'));
+
+        let mut changed_scope = ChapterSummaryRecoveryScope {
+            novel_id: scope.novel_id.clone(),
+            chapter_id: scope.chapter_id.clone(),
+            adopted_draft_id: "different-adopted-draft".to_string(),
+        };
+        assert_ne!(
+            first,
+            task_session_id(&input, "run-summary-1", Some(&changed_scope))
+        );
+        changed_scope.adopted_draft_id = scope.adopted_draft_id.clone();
+        changed_scope.chapter_id = "different-chapter".to_string();
+        assert_ne!(
+            first,
+            task_session_id(&input, "run-summary-1", Some(&changed_scope))
+        );
+
+        let mut ordinary = input.clone();
+        ordinary.task_kind = "read".to_string();
+        ordinary.expected_tool = None;
+        ordinary.expected_artifact_type = None;
+        assert_eq!(
+            task_session_id(&ordinary, "run-ordinary-1", None),
+            task_session_id(&ordinary, "run-ordinary-2", None),
+            "ordinary task dialogue remains conversation-persistent"
+        );
+    }
+
     fn insert_recoverable_summary_failure(
         connection: &rusqlite::Connection,
         input: &StartTaskTurnInput,
@@ -3847,6 +4004,22 @@ mod workbench_prompt_tests {
                 ],
             )
             .expect("insert failed summary run");
+    }
+
+    fn verified_attestation_stream_closed_error() -> String {
+        concat!(
+            "DSH 回合以错误结束: STREAM_CLOSED | ",
+            "[model-proxy] request model=gpt-5.6-luna stream=true promptChars=808 ",
+            "messages=2 tools=1 invalidToolNames=0 thinking=disabled effort=unspecified | ",
+            "[model-proxy] responseStats status=200 payloads=24 choices=24 contentChars=0 ",
+            "reasoningChars=0 alternateReasoningChars=0 toolCallParts=23 ",
+            "legacyFunctionCallParts=0 toolNames=ans_runtime_attest_tool_call_v1 ",
+            "messageKeys=role,tool_calls finish=tool_calls done=true | ",
+            "[model-proxy] done model=gpt-5.6-luna status=200 ms=1812 ",
+            "usage={\"tokenInput\":42} | ",
+            "dsh.turn.end: STREAM_CLOSED"
+        )
+        .to_string()
     }
 
     #[test]
@@ -4348,14 +4521,78 @@ mod workbench_prompt_tests {
             &input,
             "DSH_REQUIRED_CANDIDATE_TOOL_MISSING: summarize_chapter"
         ));
+        let stream_closed = verified_attestation_stream_closed_error();
+        assert!(is_automatic_protocol_recovery_candidate(
+            &input,
+            &stream_closed
+        ));
+        assert_eq!(
+            runtime_error_for_persistence(&stream_closed),
+            AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR
+        );
         for error in [
             "DSH_REQUIRED_CONTEXT_READ_MISSING_EXTRA: get_character_states",
             "DSH_REQUIRED_CANDIDATE_TOOL_MISSING_EXTRA: summarize_chapter",
             "prefix DSH_REQUIRED_CONTEXT_READ_MISSING: get_character_states",
             "DSH_TOOL_RESPONSE_METADATA_INVALID: missing step",
+            "DSH 回合以错误结束: STREAM_CLOSED",
+            AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR,
         ] {
             assert!(!is_automatic_protocol_recovery_candidate(&input, error));
         }
+
+        for (from, to) in [
+            ("responseStats status=200", "responseStats status=500"),
+            (
+                "toolNames=ans_runtime_attest_tool_call_v1",
+                "toolNames=summarize_chapter",
+            ),
+            ("finish=tool_calls", "finish=stop"),
+            ("done=true", "done=false"),
+            ("status=200 ms=1812", "status=500 ms=1812"),
+        ] {
+            let invalid = stream_closed.replacen(from, to, 1);
+            assert!(
+                !is_automatic_protocol_recovery_candidate(&input, &invalid),
+                "mutated probe evidence must fail closed: {from}"
+            );
+        }
+        let prefixed = format!("prefix {stream_closed}");
+        assert!(!is_automatic_protocol_recovery_candidate(&input, &prefixed));
+        let missing_turn_end = stream_closed
+            .strip_suffix(" | dsh.turn.end: STREAM_CLOSED")
+            .expect("fixture turn/end suffix");
+        assert!(!is_automatic_protocol_recovery_candidate(
+            &input,
+            missing_turn_end
+        ));
+        let altered_turn_end = stream_closed.replace(
+            "dsh.turn.end: STREAM_CLOSED",
+            "dsh.turn.end: STREAM_COMPLETED",
+        );
+        assert!(!is_automatic_protocol_recovery_candidate(
+            &input,
+            &altered_turn_end
+        ));
+        let extra_tail = format!("{stream_closed} | unexpected-tail");
+        assert!(!is_automatic_protocol_recovery_candidate(
+            &input,
+            &extra_tail
+        ));
+        let later_request = format!(
+            "{stream_closed} | [model-proxy] request model=gpt-5.6-luna stream=true tools=8"
+        );
+        assert!(!is_automatic_protocol_recovery_candidate(
+            &input,
+            &later_request
+        ));
+        let post_probe_request = format!(
+            "{stream_closed}{} | [model-proxy] request model=gpt-5.6-luna stream=true tools=8",
+            "x".repeat(600)
+        );
+        let truncated = runtime_error_for_persistence(&post_probe_request);
+        assert_ne!(truncated, AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR);
+        assert!(persisted_automatic_protocol_recovery_error_code(&truncated).is_none());
 
         input.task_kind = "quality_check".to_string();
         input.expected_tool = Some("check_quality".to_string());
@@ -4364,6 +4601,10 @@ mod workbench_prompt_tests {
             &input,
             "DSH_REQUIRED_CONTEXT_READ_MISSING: get_character_states"
         ));
+        assert!(!is_automatic_protocol_recovery_candidate(
+            &input,
+            &stream_closed
+        ));
     }
 
     #[test]
@@ -4371,8 +4612,9 @@ mod workbench_prompt_tests {
         let input = chapter_summary_input();
         let ordinary = workbench_turn_prompt_for_attempt(&input, 0);
         assert!(!ordinary.contains("协议自动恢复"));
-        assert!(ordinary.contains("必需读取：novel.read_context、chapter.read_outline"));
-        assert!(!ordinary.contains(" -> "));
+        assert!(ordinary.contains(
+            "必需读取：novel.read_context -> chapter.read_outline -> get_character_states -> search_memory"
+        ));
         assert!(ordinary.contains("第一阶段在同一模型响应中并行调用全部必需读取"));
         assert!(ordinary.contains("第二阶段必须调用唯一候选工具"));
 
@@ -4438,6 +4680,70 @@ mod workbench_prompt_tests {
                 .expect("retry budget exhausted"),
             None
         );
+    }
+
+    #[test]
+    fn chapter_summary_verified_attestation_stream_closed_recovery_is_persisted_and_bounded() {
+        let input = chapter_summary_input();
+        let connection = chapter_summary_recovery_connection();
+        let raw_error = verified_attestation_stream_closed_error();
+
+        for attempt in 1..=3 {
+            connection
+                .execute(
+                    "INSERT INTO task_runs
+                     (run_id,conversation_id,turn_id,status,error,model_snapshot_json,created_at)
+                     VALUES (?1,?2,?3,'failed',?4,?5,?6)",
+                    rusqlite::params![
+                        format!("run-stream-closed-{attempt}"),
+                        &input.conversation_id,
+                        &input.turn_id,
+                        AUTOMATIC_SUMMARY_STREAM_CLOSED_PERSISTED_ERROR,
+                        serde_json::to_string(&input.model_snapshot).expect("model snapshot"),
+                        format!("2026-08-29T00:01:0{attempt}Z"),
+                    ],
+                )
+                .expect("insert verified stream-closed summary run");
+            let expected = (attempt <= MAX_AUTOMATIC_PROTOCOL_RECOVERY_RETRIES).then_some(attempt);
+            assert_eq!(
+                automatic_protocol_recovery_retry_number(&connection, &input, &raw_error)
+                    .expect("verified stream-closed retry decision"),
+                expected
+            );
+            if attempt == 1 {
+                let mut model_drift = input.clone();
+                model_drift.model_snapshot["modelId"] = json!("different-model");
+                assert_eq!(
+                    automatic_protocol_recovery_retry_number(
+                        &connection,
+                        &model_drift,
+                        &raw_error,
+                    )
+                    .expect("model drift must fail closed"),
+                    None
+                );
+
+                let mut turn_drift = input.clone();
+                turn_drift.turn_id = "summary-generation-different-authorization".to_string();
+                assert_eq!(
+                    automatic_protocol_recovery_retry_number(&connection, &turn_drift, &raw_error,)
+                        .expect("turn drift must fail closed"),
+                    None
+                );
+
+                let mut chapter_drift = input.clone();
+                chapter_drift.chapter_id = Some("different-chapter".to_string());
+                assert_eq!(
+                    automatic_protocol_recovery_retry_number(
+                        &connection,
+                        &chapter_drift,
+                        &raw_error,
+                    )
+                    .expect_err("chapter drift must fail closed"),
+                    "DSH_PROTOCOL_RECOVERY_SCOPE_INVALID"
+                );
+            }
+        }
     }
 
     #[test]
@@ -4961,6 +5267,38 @@ mod workbench_prompt_tests {
         let probe_route = selected_model_route(&probe).expect("dynamic probe route");
         assert_eq!(probe_route, route);
         assert_eq!(probe.api_key, "session-only-probe-key");
+
+        let mut legacy = api_input(
+            OPENAI_COMPATIBLE_PROVIDER,
+            "gpt-5.6-luna",
+            "http://127.0.0.1:12074/v1",
+        );
+        legacy
+            .model_snapshot
+            .as_object_mut()
+            .unwrap()
+            .remove("runtime");
+        let legacy_route =
+            selected_model_route(&legacy).expect("legacy snapshots default adapterProtocol");
+        assert_eq!(legacy_route.model, "gpt-5.6-luna");
+        let mut missing_url = api_input(
+            OPENAI_COMPATIBLE_PROVIDER,
+            "gpt-5.6-luna",
+            "http://127.0.0.1:12074/v1",
+        );
+        missing_url
+            .model_snapshot
+            .as_object_mut()
+            .expect("object snapshot")
+            .remove("baseUrl");
+        assert!(selected_model_route(&missing_url)
+            .expect_err("openai_compatible still requires baseUrl to start")
+            .contains("baseUrl"),);
+        assert!(
+            read_matching_plugin_probe_health(Some(&missing_url.model_snapshot), None)
+                .expect("catalog matching must not fail closed")
+                .is_none()
+        );
         assert!(!probe
             .model_snapshot
             .to_string()
@@ -5766,7 +6104,10 @@ fn ensure_plugin_probe_health(
 ) -> Result<Option<Value>, String> {
     let input = match probe_input(model_snapshot, api_key) {
         Ok(input) => input,
-        Err(error) if model_snapshot.is_some() => return Err(error),
+        Err(_) if model_snapshot.is_some() => match probe_input(None, api_key) {
+            Ok(input) => input,
+            Err(_) => return Ok(None),
+        },
         Err(_) => return Ok(None),
     };
     let transport = match provider_transport(&input) {
@@ -5802,7 +6143,6 @@ fn ensure_plugin_probe_health(
         &input,
         &descriptor,
         "worker-plugin-probe",
-        "session-plugin-probe",
         transport.identity_hash,
         &transport.route,
         &transport.upstream_key,
@@ -5844,9 +6184,10 @@ fn read_matching_plugin_probe_health(
     api_key: Option<&str>,
 ) -> Result<Option<Value>, String> {
     let desired_identity = match model_snapshot {
-        Some(snapshot) => {
-            Some(provider_transport(&probe_input(Some(snapshot), api_key)?)?.identity_hash)
-        }
+        Some(snapshot) => probe_input(Some(snapshot), api_key)
+            .and_then(|input| provider_transport(&input))
+            .ok()
+            .map(|transport| transport.identity_hash),
         None => None,
     };
     if let Some(existing) = current_plugin_probe() {

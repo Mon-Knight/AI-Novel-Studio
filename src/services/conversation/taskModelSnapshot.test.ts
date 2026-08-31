@@ -38,7 +38,8 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 const { saveAiSettings } = await import('../ai/aiSettingsStore');
-const { captureTaskModelSnapshot } = await import('./taskModelSnapshot');
+const { captureTaskModelSnapshot, hydrateTaskModelSnapshotRuntime } =
+  await import('./taskModelSnapshot');
 const { findAvailableWorkbenchModel } = await import('./workbenchModelAvailability');
 
 const deepseekSettings: AiSettings = {
@@ -106,4 +107,48 @@ test('openai_compatible provider identity remains unchanged', () => {
 
   assert.equal(snapshot.providerId, 'openai_compatible');
   assert.equal(snapshot.runtime?.adapterProvider, snapshot.providerId);
+});
+
+test('legacy API snapshots receive current settings baseUrl and DSH runtime defaults', () => {
+  saveAiSettings({
+    ...deepseekSettings,
+    provider: 'openai_compatible',
+    baseUrl: 'https://provider.invalid/v1',
+    modelName: 'custom-model',
+  });
+
+  const hydrated = hydrateTaskModelSnapshotRuntime({
+    providerId: 'openai_compatible',
+    modelId: 'custom-model',
+    runtimeMode: 'api',
+    capabilities: ['conversation_turn'],
+    options: {},
+    capturedAt: '2026-08-01T00:00:00.000Z',
+  });
+
+  assert.equal(hydrated.baseUrl, 'https://provider.invalid/v1');
+  assert.equal(hydrated.runtime?.adapterProtocol, 'ans_task_session_v2');
+  assert.equal(hydrated.runtime?.adapterProvider, 'openai_compatible');
+});
+
+test('legacy snapshots never borrow a baseUrl from a different frozen model identity', () => {
+  saveAiSettings({
+    ...deepseekSettings,
+    provider: 'openai_compatible',
+    baseUrl: 'https://current-provider.invalid/v1',
+    modelName: 'current-model',
+  });
+
+  const hydrated = hydrateTaskModelSnapshotRuntime({
+    providerId: 'openai_compatible',
+    modelId: 'older-frozen-model',
+    runtimeMode: 'api',
+    capabilities: ['conversation_turn'],
+    options: {},
+    capturedAt: '2026-08-01T00:00:00.000Z',
+  });
+
+  assert.equal(hydrated.baseUrl, undefined);
+  assert.equal(hydrated.modelId, 'older-frozen-model');
+  assert.equal(hydrated.runtime?.adapterProtocol, 'ans_task_session_v2');
 });

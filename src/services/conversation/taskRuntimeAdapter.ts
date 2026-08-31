@@ -404,6 +404,13 @@ async function execute(
             memoryContext: evidence['search_memory'],
             modelSnapshot: currentRun.modelSnapshot ?? run.modelSnapshot,
             signal: controller.signal,
+            onProgress: async (progress) => {
+              const progressEvent = await taskConversationService.updateToolEvent(runningEvent, {
+                status: 'running',
+                result: progress,
+              });
+              onEvent?.({ run: currentRun, toolEvent: progressEvent });
+            },
           });
           args = {
             novelId: input.novelId,

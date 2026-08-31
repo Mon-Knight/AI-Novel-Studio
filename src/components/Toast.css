@@ -24,7 +24,7 @@
   background: var(--color-bg-card, #ffffff);
   box-shadow: var(--shadow-md, 0 2px 8px rgba(0, 0, 0, 0.06));
   pointer-events: auto;
-  animation: toastSlideIn 0.2s ease;
+  animation: toastSlideIn var(--motion-normal, 180ms) var(--ease-enter, ease-out);
   min-width: 240px;
 }
 
@@ -76,7 +76,7 @@
   color: var(--color-text-muted, #9a9ab0);
   font-size: 16px;
   line-height: 1;
-  transition: background var(--transition-fast, 0.15s ease);
+  transition: background-color var(--transition-fast, 120ms ease);
 }
 
 .toast-close:hover {
@@ -98,5 +98,9 @@
 @media (prefers-reduced-motion: reduce) {
   .toast-item {
     animation: none;
+  }
+
+  .toast-close {
+    transition: none;
   }
 }

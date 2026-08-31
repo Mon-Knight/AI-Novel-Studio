@@ -1,5 +1,9 @@
 import { ArrowRight, Database } from 'lucide-react';
-import type { ContextSourceStatus, ToolContextReceipt } from './workbenchContextReceiptModel';
+import type {
+  ContextSourceReceiptItem,
+  ContextSourceStatus,
+  ToolContextReceipt,
+} from './workbenchContextReceiptModel';
 
 const CONTEXT_SOURCE_STATUS_LABELS: Record<ContextSourceStatus, string> = {
   used: '已实际注入',
@@ -46,17 +50,13 @@ const CORE_CONTEXT_DEFINITIONS = [
   { key: 'world_state', label: '世界状态', sourceTypes: ['world_state'] },
   { key: 'controls', label: '风格 / 输出', sourceTypes: ['style_profile', 'output_profile'] },
   {
-    key: 'chapter_assets',
-    label: '章内资产',
-    sourceTypes: [
-      'chapter_character',
-      'character_state',
-      'chapter_event',
-      'faction',
-      'location',
-      'reference_material',
-    ],
+    key: 'chapter_roles',
+    label: '章内角色',
+    sourceTypes: ['chapter_character', 'character_state', 'chapter_event'],
   },
+  { key: 'faction', label: '势力', sourceTypes: ['faction'] },
+  { key: 'location', label: '地点', sourceTypes: ['location'] },
+  { key: 'reference', label: '参考资料', sourceTypes: ['reference_material'] },
 ] as const;
 
 const CORE_CONTEXT_STATUS_LABELS: Record<CoreContextStatus, string> = {
@@ -113,6 +113,16 @@ function providerInclusionStatus(status: CoreContextStatus): 'included' | 'omitt
   if (status === 'used') return 'included';
   if (status === 'omitted') return 'omitted';
   return 'unverified';
+}
+
+function sourceStatusLabel(source: ContextSourceReceiptItem): string {
+  if (source.status === 'omitted' && source.providerStatus === 'omitted_empty') {
+    return '空来源未纳入';
+  }
+  if (source.status === 'omitted' && source.providerStatus === 'omitted_budget') {
+    return '预算未纳入';
+  }
+  return CONTEXT_SOURCE_STATUS_LABELS[source.status];
 }
 
 function coreContextStatuses(
@@ -204,11 +214,12 @@ export function GenerationContextReceipt({ receipt }: { receipt: ToolContextRece
       className="workbench-context-receipt"
       data-testid="workbench-context-receipt"
       data-context-evidence={receipt.evidence}
-      aria-label="本次生成依据"
+      data-context-stage="provider-receipt"
+      aria-label="运行后上下文回执"
     >
       <span className="workbench-context-receipt-title">
         <Database aria-hidden="true" size={12} strokeWidth={1.8} />
-        <span>本次生成依据</span>
+        <span>运行后上下文回执</span>
         {receipt.evidence !== 'unavailable' && (
           <span className="workbench-context-receipt-count">
             {countLabel} {usedCount} 项
@@ -283,8 +294,9 @@ export function GenerationContextReceipt({ receipt }: { receipt: ToolContextRece
                         data-context-source-type={source.type}
                         data-context-group={source.group}
                         data-provider-inclusion={providerInclusionStatus(source.status)}
-                        key={`${source.type}:${source.status}`}
-                        title={`${source.title}：${CONTEXT_SOURCE_STATUS_LABELS[source.status]}`}
+                        data-provider-source-status={source.providerStatus}
+                        key={`${source.type}:${source.status}:${source.providerStatus ?? ''}`}
+                        title={`${source.title}：${sourceStatusLabel(source)}`}
                       >
                         <span className="workbench-context-source-title">
                           {source.title}
@@ -294,7 +306,7 @@ export function GenerationContextReceipt({ receipt }: { receipt: ToolContextRece
                           <span className="workbench-context-source-detail">{source.detail}</span>
                         )}
                         <span className="workbench-context-source-status">
-                          {CONTEXT_SOURCE_STATUS_LABELS[source.status]}
+                          {sourceStatusLabel(source)}
                         </span>
                       </span>
                     ))}

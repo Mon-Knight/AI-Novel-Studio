@@ -13,7 +13,12 @@ import { countTextWords, hashTextContent } from '../../../utils/contentHash';
 import { computeContentSha256 } from '../../../utils/contentIntegrity';
 import { formatDateTime } from '../../../utils/date';
 import { confirmInfo } from '../../../utils/nativeDialog';
-import type { EditorAreaProps, EditorCommandRequest, EditorDocumentState } from './editorAreaTypes';
+import type {
+  DocumentSaveState,
+  EditorAreaProps,
+  EditorCommandRequest,
+  EditorDocumentState,
+} from './editorAreaTypes';
 import {
   getEditorDocumentSourceKey,
   isDraftSaveResultForDocument,
@@ -38,6 +43,20 @@ interface UseEditorDocumentControllerOptions {
   reviewCandidate?: ReviewCandidateDocument | null;
   reviewAuthorizationId?: string;
   reviewArtifactId?: string;
+  reviewLocked?: boolean;
+}
+
+function waitForInlineSaveFeedback(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  return new Promise((resolve) => {
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    } else {
+      window.setTimeout(resolve, 0);
+    }
+  });
 }
 
 export function useEditorDocumentController({
@@ -57,10 +76,12 @@ export function useEditorDocumentController({
   onBeforeAdopt,
   reviewCandidate,
   reviewAuthorizationId,
+  reviewLocked = false,
 }: UseEditorDocumentControllerOptions) {
   const [content, setContent] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [saveState, setSaveState] = useState<DocumentSaveState>('idle');
   const [saving, setSaving] = useState(false);
   const [adopting, setAdopting] = useState(false);
   const [lastSaved, setLastSaved] = useState('');
@@ -124,6 +145,7 @@ export function useEditorDocumentController({
       setContent(safeContent);
       setIsDirty(false);
       setSaveMsg('');
+      setSaveState(resolution.draft ? 'saved' : 'idle');
       setLastSaved(resolution.draft ? formatDateTime(resolution.draft.updatedAt) : '');
       loadedChapterIdRef.current = chapter?.id;
       loadedSourceKeyRef.current = sourceKey;
@@ -143,13 +165,15 @@ export function useEditorDocumentController({
 
   const handleContentChange = useCallback(
     (value: string) => {
-      if (documentState !== 'ready') return;
+      if (documentState !== 'ready' || reviewLocked) return;
       setContent(value);
       const dirty = value !== (currentDraft?.content || '');
       setIsDirty(dirty);
+      setSaveState(dirty ? 'editing' : currentDraft ? 'saved' : 'idle');
+      setSaveMsg('');
       emitContentSnapshot(value, dirty);
     },
-    [currentDraft, documentState, emitContentSnapshot],
+    [currentDraft, documentState, emitContentSnapshot, reviewLocked],
   );
 
   const handleSelectionChange = useCallback(() => {
@@ -224,6 +248,7 @@ export function useEditorDocumentController({
           ? [previousContent.trimEnd(), incoming].filter(Boolean).join('\n\n')
           : incoming;
       setIsDirty(true);
+      setSaveState('editing');
       emitContentSnapshot(nextContent, true);
       return nextContent;
     });
@@ -244,46 +269,42 @@ export function useEditorDocumentController({
   ]);
 
   const performSave = useCallback(async (): Promise<ChapterDraft | null> => {
-    if (!chapter || !novelId || documentState !== 'ready') return null;
+    if (!chapter || !novelId || documentState !== 'ready' || reviewLocked || adopting) return null;
     if (effectiveContentState?.status === 'unavailable') {
       setSaveMsg('正文不可用，已阻止保存');
+      setSaveState('error');
       return null;
     }
+    if (currentDraft && !isDirty && currentDraft.content === content) {
+      setSaveMsg(currentDraft.isAdopted ? '当前正文已采用，无需保存' : '没有未保存修改');
+      setSaveState('saved');
+      return currentDraft;
+    }
     setSaving(true);
+    setSaveState('saving');
+    setSaveMsg('保存中');
     const requestNovelId = novelId;
     const requestChapterId = chapter.id;
     const requestDraftId = currentDraft?.id;
     const requestContent = content;
     try {
-      const savedDraft = await runWithLoading(
-        {
-          title: '正在保存草稿',
-          initialMessage: '正在保存正文……',
-          successMessage: '草稿已保存',
-          errorMessage: '保存失败',
-          successAutoCloseMs: 800,
-        },
-        async ({ setMessage }) => {
-          if (currentDraft && !currentDraft.isAdopted) {
-            setMessage('正在更新草稿……');
-            return await draftVersionService.update(
+      await waitForInlineSaveFeedback();
+      const savedDraft =
+        currentDraft && !currentDraft.isAdopted
+          ? await draftVersionService.update(
               currentDraft.id,
               requestChapterId,
               requestContent,
               'user_edited',
               undefined,
               currentDraft,
-            );
-          }
-          setMessage('正在创建草稿……');
-          return await draftVersionService.create({
-            novelId: requestNovelId,
-            chapterId: requestChapterId,
-            content: requestContent,
-            source: 'user_edited',
-          });
-        },
-      );
+            )
+          : await draftVersionService.create({
+              novelId: requestNovelId,
+              chapterId: requestChapterId,
+              content: requestContent,
+              source: 'user_edited',
+            });
       if (!isDraftSaveResultForDocument(savedDraft, requestNovelId, requestChapterId)) {
         throw new Error('草稿保存结果与当前章节不一致');
       }
@@ -297,11 +318,12 @@ export function useEditorDocumentController({
       }
       if (liveContentRef.current !== requestContent) {
         setSaveMsg('正文已变化，请再次保存');
-        setTimeout(() => setSaveMsg(''), 3000);
+        setSaveState('editing');
         return null;
       }
       setIsDirty(false);
       setSaveMsg('已保存');
+      setSaveState('saved');
       setLastSaved(formatDateTime(new Date()));
       try {
         await onDraftSaved?.(savedDraft);
@@ -317,28 +339,30 @@ export function useEditorDocumentController({
         });
       }
       emitContentSnapshot(savedDraft.content, false, savedDraft);
-      setTimeout(() => setSaveMsg(''), 2000);
       return savedDraft;
     } catch (error) {
       const liveDocument = liveDocumentRef.current;
       if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
         const appError = normalizeAppError(error, '正文保存失败。');
-        setSaveMsg(`❌ ${getAppErrorUserMessage(appError)}`);
-        setTimeout(() => setSaveMsg(''), 3000);
+        setSaveMsg(getAppErrorUserMessage(appError));
+        setSaveState('error');
       }
       return null;
     } finally {
       setSaving(false);
     }
   }, [
+    adopting,
     chapter,
     content,
     currentDraft,
     documentState,
     effectiveContentState,
     emitContentSnapshot,
+    isDirty,
     novelId,
     onDraftSaved,
+    reviewLocked,
   ]);
 
   const handleSave = useCallback((): Promise<ChapterDraft | null> => {
@@ -357,6 +381,7 @@ export function useEditorDocumentController({
       setContent(recoveryContent);
       setIsDirty(true);
       setSaveMsg('未保存（已恢复）');
+      setSaveState('editing');
       emitContentSnapshot(recoveryContent, true);
       window.requestAnimationFrame(() => {
         const textarea = textareaRef.current;
@@ -372,17 +397,21 @@ export function useEditorDocumentController({
   );
 
   const handleFormat = useCallback(() => {
-    if (documentState !== 'ready') return;
+    if (documentState !== 'ready' || reviewLocked || saving || adopting) return;
     handleContentChange(content.replace(/\n{3,}/g, '\n\n').trim());
     setSaveMsg('已排版');
-    setTimeout(() => setSaveMsg(''), 2000);
-  }, [content, documentState, handleContentChange]);
+    setSaveState('editing');
+  }, [adopting, content, documentState, handleContentChange, reviewLocked, saving]);
 
   const handleAdoptCurrent = useCallback(async () => {
-    if (!chapter || !novelId || documentState !== 'ready') return;
+    if (!chapter || !novelId || documentState !== 'ready' || reviewLocked) return;
     if (adopting || saving) return;
     if (effectiveContentState?.status === 'unavailable') {
       setSaveMsg('正文不可用，已阻止采用');
+      return;
+    }
+    if (currentDraft?.isAdopted && !isDirty && currentDraft.content === content) {
+      setSaveMsg('当前正文已采用');
       return;
     }
     const requestNovelId = novelId;
@@ -469,6 +498,7 @@ export function useEditorDocumentController({
         return;
       }
       setSaveMsg('已采用');
+      setSaveState('saved');
       void onDraftSaved?.(adopted);
       emitContentSnapshot(adopted.content, false, adopted);
       onChapterUpdated?.(requestChapterId);
@@ -477,7 +507,7 @@ export function useEditorDocumentController({
       const liveDocument = liveDocumentRef.current;
       if (liveDocument.novelId === requestNovelId && liveDocument.chapterId === requestChapterId) {
         const appError = normalizeAppError(error, '采用失败。');
-        setSaveMsg(`❌ ${getAppErrorUserMessage(appError)}`);
+        setSaveMsg(getAppErrorUserMessage(appError));
         setTimeout(() => setSaveMsg(''), 3000);
       }
     } finally {
@@ -499,6 +529,7 @@ export function useEditorDocumentController({
     onDraftSaved,
     reviewAuthorizationId,
     reviewCandidate?.authorizationId,
+    reviewLocked,
     saving,
   ]);
 
@@ -531,11 +562,13 @@ export function useEditorDocumentController({
     handleContentChange,
     handleSave,
     handleSelectionChange,
+    adopting,
     isDirty,
     lastSaved,
     loadedChapterIdRef,
     restoreRecovery,
     saveMsg,
+    saveState,
     saving,
     textareaRef,
   };

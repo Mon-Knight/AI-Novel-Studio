@@ -149,6 +149,7 @@ test('message stream renders compact progress beside the run without creating an
     assert.match(html, /生成章节候选/);
     assert.match(html, /已用时 2分00秒/);
     assert.match(html, /最后活动 30秒前/);
+    assert.match(html, /原始输入/);
     assert.doesNotMatch(html, /时间线/);
   } finally {
     Date.now = originalNow;
@@ -185,9 +186,35 @@ test('message stream renders persisted artifacts that are not attached to a run'
         artifactType: 'generic_json',
         title: '小说上下文压缩候选',
         summary: '保留人物、剧情和世界规则。',
-        content: '{"compressedText":"压缩后的正式上下文"}',
+        content: JSON.stringify({
+          providerId: 'ans.novel-context.extractive-v1',
+          version: '1.1.0',
+          config: { tokenBudget: 4000 },
+          novelId: 'novel-safe',
+          sourceRevision: 'rev-1234abcd-2',
+          compressedText: '压缩',
+          coverage: {
+            characters: { required: [], present: [], missing: [] },
+            plot: { required: [], present: [], missing: [] },
+            foreshadow: { required: [], present: [], missing: [] },
+            timeline: { required: [], present: [], missing: [] },
+            world: { required: [], present: [], missing: [] },
+            rules: { required: [], present: [], missing: [] },
+            outlines: { required: [], present: [], missing: [] },
+            style: { required: [], present: [], missing: [] },
+            output: { required: [], present: [], missing: [] },
+            tokens: { budget: 4000, used: 2, withinBudget: true },
+          },
+          valid: true,
+        }),
         status: 'candidate',
         createdAt: run.createdAt,
+        artifactEvidence: {
+          sourceNovelId: 'novel-safe',
+          derivationType: 'context_compression',
+          processingStatus: 'valid',
+          validationIssues: [],
+        },
       },
     ],
   };
@@ -216,8 +243,73 @@ test('message stream renders persisted artifacts that are not attached to a run'
   assert.match(html, /data-card-id="card-compression"/);
   assert.match(html, /小说上下文压缩候选/);
   assert.match(html, /保留人物、剧情和世界规则/);
+  assert.match(html, /确定性小说上下文压缩/);
+  assert.match(html, /本地确定性提取 · 不使用当前任务的冻结模型/);
+  assert.match(html, /data-derivation-mode="deterministic-local"/);
   assert.match(html, /查看候选内容/);
-  assert.doesNotMatch(html, /压缩后的正式上下文/);
+  assert.doesNotMatch(html, />压缩</);
+});
+
+test('quality and style reports close as acknowledged decisions without domain apply', () => {
+  for (const artifactType of ['quality_report', 'style_analysis'] as const) {
+    const html = renderToStaticMarkup(
+      createElement(ArtifactCard, {
+        artifact: {
+          cardId: `card-${artifactType}`,
+          conversationId: run.conversationId,
+          artifactId: `artifact-${artifactType}`,
+          artifactType,
+          title: artifactType === 'quality_report' ? '质量检查报告' : '风格分析报告',
+          summary: '报告已经完成。',
+          status: 'candidate',
+          createdAt: run.createdAt,
+        },
+        onDecide: () => undefined,
+      }),
+    );
+
+    assert.match(html, /data-testid="workbench-artifact-acknowledge"/);
+    assert.match(html, /data-decision-kind="confirm"/);
+    assert.match(html, />标记已阅</);
+    assert.match(html, /仅记录报告已阅，不应用到小说正式事实/);
+    assert.doesNotMatch(html, /data-testid="workbench-artifact-apply"/);
+    assert.doesNotMatch(html, />应用到作品</);
+  }
+});
+
+test('acknowledged quality report projects a neutral terminal state', () => {
+  const html = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-quality-acknowledged',
+        conversationId: run.conversationId,
+        artifactId: 'artifact-quality-acknowledged',
+        artifactType: 'quality_report',
+        title: '质量检查报告',
+        summary: '报告已经阅读。',
+        status: 'confirmed',
+        createdAt: run.createdAt,
+        latestDecision: {
+          decisionId: 'decision-quality-acknowledged',
+          artifactId: 'artifact-quality-acknowledged',
+          artifactHash: 'hash-quality-acknowledged',
+          cardId: 'card-quality-acknowledged',
+          conversationId: run.conversationId,
+          decision: 'confirm',
+          idempotencyKey: 'card-quality-acknowledged:confirm',
+          actor: 'user',
+          targetType: 'asset',
+          targetId: 'novel-safe',
+          createdAt: run.createdAt,
+        },
+      },
+      onDecide: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-decision="confirm"/);
+  assert.match(html, /workbench-artifact-status">已阅</);
+  assert.doesNotMatch(html, /workbench-artifact-actions/);
 });
 
 test('artifact card defers failed content details until the disclosure is opened', () => {

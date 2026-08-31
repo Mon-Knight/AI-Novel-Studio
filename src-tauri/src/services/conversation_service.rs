@@ -15,8 +15,8 @@ pub use repository::{
     CreateArtifactCardInput, CreateConversationInput, CreateInitializedConversationInput,
     CreateRunInput, InitializedTaskConversation, RecordArtifactDecisionInput, RecoverRunsInput,
     RenameConversationInput, ReviewAuthorizationRecord, SetConversationArchivedInput,
-    TaskConversationBundle, TaskConversationRecord, TaskRunRecord, ToolCallEventRecord,
-    UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
+    TaskConversationBundle, TaskConversationRecord, TaskRunRecord, TaskTurnRunProjection,
+    ToolCallEventRecord, UpdateConversationModelInput, UpdateRunInput, UpdateToolEventInput,
 };
 
 fn required(value: &str, field: &str) -> Result<(), AppError> {
@@ -97,6 +97,16 @@ pub fn get(
 ) -> Result<Option<TaskConversationBundle>, AppError> {
     required(conversation_id, "conversationId")?;
     repository::get_bundle(connection, conversation_id)
+}
+
+pub fn get_turn_run_projection(
+    connection: &Connection,
+    conversation_id: &str,
+    turn_id: &str,
+) -> Result<Option<TaskTurnRunProjection>, AppError> {
+    required(conversation_id, "conversationId")?;
+    required(turn_id, "turnId")?;
+    repository::get_turn_run_projection(connection, conversation_id, turn_id)
 }
 
 pub fn validate_task_runtime_scope(

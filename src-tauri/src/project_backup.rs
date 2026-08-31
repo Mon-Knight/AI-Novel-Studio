@@ -3834,11 +3834,21 @@ mod tests {
             .expect("confirm temporary database is clear");
         assert_eq!(cleared_novel_count, 0);
         for table in table_names() {
-            let cleared_count: i64 = source
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get(0)
-                })
-                .expect("confirm temporary project table is clear");
+            let cleared_count: i64 = if table == "style_profiles" {
+                source
+                    .query_row(
+                        "SELECT COUNT(*) FROM style_profiles WHERE novel_id = ?1",
+                        params!["novel-source"],
+                        |row| row.get(0),
+                    )
+                    .expect("confirm temporary project styles are clear")
+            } else {
+                source
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .expect("confirm temporary project table is clear")
+            };
             assert_eq!(
                 cleared_count, 0,
                 "temporary table {table} still has records"

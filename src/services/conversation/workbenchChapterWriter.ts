@@ -1,6 +1,6 @@
 import { aiSettingsService } from '../ai/aiClient';
 import {
-  resolveSessionModelApiKey,
+  resolveSessionModelApiKeyAsync,
   type SessionModelCredentialIdentity,
 } from '../ai/aiSettingsStore';
 import { executeChapterGeneration } from '../ai/chapterGenerationExecutionService';
@@ -48,6 +48,26 @@ export interface WorkbenchChapterWriteInput {
   memoryContext?: unknown;
   modelSnapshot: TaskModelSnapshot;
   signal?: AbortSignal;
+  onProgress?: (progress: WorkbenchChapterWriterProgress) => void | Promise<void>;
+}
+
+export type WorkbenchChapterWriterProgressPhase =
+  | 'compiling_context'
+  | 'generating_draft'
+  | 'repairing_length'
+  | 'repairing_integrity'
+  | 'validating_candidate';
+
+export interface WorkbenchChapterWriterProgress {
+  phase: WorkbenchChapterWriterProgressPhase;
+  repairAttempt?: number;
+  repairMaximumAttempts?: number;
+  currentWordCount?: number;
+  acceptedWordRange?: {
+    minimum: number;
+    maximum: number;
+  };
+  timestamp: string;
 }
 
 export interface WorkbenchChapterWriteResult {
@@ -100,7 +120,7 @@ export interface WorkbenchChapterWriterDependencies {
   executeGeneration?: typeof executeChapterGeneration;
   compileContext?: typeof generationContextCompiler.compile;
   getSettings?: () => AiSettings;
-  resolveApiKey?: (identity: SessionModelCredentialIdentity) => string;
+  resolveApiKey?: (identity: SessionModelCredentialIdentity) => string | Promise<string>;
   loadAdoptedPreviousChapter?: (
     novelId: string,
     chapterId: string,
@@ -406,7 +426,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
   const compileCtx =
     deps.compileContext ?? ((input) => generationContextCompiler.compileAndSave(input));
   const getAiSettings = deps.getSettings ?? (() => aiSettingsService.getSettings());
-  const resolveApiKey = deps.resolveApiKey ?? resolveSessionModelApiKey;
+  const resolveApiKey = deps.resolveApiKey ?? resolveSessionModelApiKeyAsync;
   const resolveAdoptedPreviousChapter =
     deps.loadAdoptedPreviousChapter ?? loadAdoptedPreviousChapter;
   const resolveProfiles = deps.resolveGenerationProfiles ?? resolveGenerationProfiles;
@@ -415,6 +435,14 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
     if (!input.modelSnapshot) {
       throw new Error('写章调用缺少必要的 modelSnapshot 冻结快照参数。');
     }
+
+    const reportProgress = async (
+      progress: Omit<WorkbenchChapterWriterProgress, 'timestamp'>,
+    ): Promise<void> => {
+      await input.onProgress?.({ ...progress, timestamp: new Date().toISOString() });
+    };
+
+    await reportProgress({ phase: 'compiling_context' });
 
     const [previousChapterResolution, resolvedProfiles] = await Promise.all([
       resolveAdoptedPreviousChapter(input.novelId, input.chapterId),
@@ -463,6 +491,10 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       requireCoreAssets: true,
       adoptedPreviousChapter,
     });
+    const targetWordCount =
+      snapshot.compiledContext?.baseContext?.targetWordCount ??
+      snapshot.compiledContext?.activeEngineeringState?.chapterCard.targetWordCount;
+    const wordRange = resolveChapterWordRange(targetWordCount);
     const request = buildSnapshotGenerateRequest(snapshot);
     const currentDraftVersion = sourceText ? await computeContentSha256(sourceText) : undefined;
     const compilationSources = buildChapterProviderContextSources({
@@ -483,7 +515,7 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       if (!snapshotModel.baseUrl?.trim()) {
         throw new Error('冻结模型快照缺少 API Base URL，拒绝使用后来修改的全局设置。');
       }
-      apiKey = resolveApiKey({
+      apiKey = await resolveApiKey({
         scope: 'provider',
         providerId: snapshotModel.providerId,
         baseUrl: snapshotModel.baseUrl,
@@ -528,6 +560,18 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
 
     const operationId = 'workbench-write-' + generateId();
 
+    await reportProgress({
+      phase: 'generating_draft',
+      ...(wordRange
+        ? {
+            acceptedWordRange: {
+              minimum: wordRange.hardMinimum,
+              maximum: wordRange.hardMaximum,
+            },
+          }
+        : {}),
+    });
+
     let result = await executeGen({
       novelId: input.novelId,
       chapterId: input.chapterId,
@@ -560,10 +604,6 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       currentDraftVersion,
     );
 
-    const targetWordCount =
-      snapshot.compiledContext?.baseContext?.targetWordCount ??
-      snapshot.compiledContext?.activeEngineeringState?.chapterCard.targetWordCount;
-    const wordRange = resolveChapterWordRange(targetWordCount);
     const originalWordCount = countTextWords(result.text);
     let finalWordCount = originalWordCount;
     let lengthRepairCount = 0;
@@ -581,6 +621,16 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
       const repairSourceText = result.text.trim();
       const repairSourceHash = await computeContentSha256(repairSourceText);
       const repairOperationId = `${operationId}:length-repair:${lengthRepairCount}`;
+      await reportProgress({
+        phase: 'repairing_length',
+        repairAttempt: lengthRepairCount,
+        repairMaximumAttempts: MAX_LENGTH_REPAIR_ATTEMPTS,
+        currentWordCount: finalWordCount,
+        acceptedWordRange: {
+          minimum: wordRange.hardMinimum,
+          maximum: wordRange.hardMaximum,
+        },
+      });
       const repairRequestInput = {
         chapterTitle: snapshot.compiledContext?.baseContext?.chapterTitle ?? '未命名章节',
         text: repairSourceText,
@@ -660,6 +710,16 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
         wordRange?.minimum ?? Math.max(1, Math.floor(integrityTargetWordCount * 0.8));
       const integrityMaximumWordCount =
         wordRange?.hardMaximum ?? Math.max(1, Math.ceil(integrityTargetWordCount * 1.2));
+      await reportProgress({
+        phase: 'repairing_integrity',
+        repairAttempt: integrityRepairCount,
+        repairMaximumAttempts: MAX_INTEGRITY_REPAIR_ATTEMPTS,
+        currentWordCount: finalWordCount,
+        acceptedWordRange: {
+          minimum: wordRange?.hardMinimum ?? integrityMinimumWordCount,
+          maximum: integrityMaximumWordCount,
+        },
+      });
       const repairRequestInput = {
         chapterTitle: snapshot.compiledContext?.baseContext?.chapterTitle ?? '未命名章节',
         text: repairSourceText,
@@ -719,6 +779,19 @@ export function createWorkbenchChapterWriter(deps: WorkbenchChapterWriterDepende
         previousChapterText: adoptedPreviousChapter?.content,
       });
     }
+
+    await reportProgress({
+      phase: 'validating_candidate',
+      currentWordCount: finalWordCount,
+      ...(wordRange
+        ? {
+            acceptedWordRange: {
+              minimum: wordRange.hardMinimum,
+              maximum: wordRange.hardMaximum,
+            },
+          }
+        : {}),
+    });
 
     if (integrityIssues.length > 0) {
       throw workbenchWriterError(

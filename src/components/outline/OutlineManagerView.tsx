@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
+import { BookOpenText, CheckCircle2, ClipboardList, Library, Plus, Save } from 'lucide-react';
 import VolumeCard from './VolumeCard';
 import VolumeFormModal from './VolumeFormModal';
 import ChapterFormModal from './ChapterFormModal';
@@ -101,7 +102,7 @@ export function OutlineManagerView({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>📋</span>
+          <ClipboardList aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 600 }}>大纲与章节管理</span>
           <span className="text-sm text-muted">
             （{volumes.length} 卷 · {chapters.length} 章）
@@ -114,7 +115,8 @@ export function OutlineManagerView({
             setShowVolumeForm(true);
           }}
         >
-          + 新建分卷
+          <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+          新建分卷
         </button>
       </div>
 
@@ -192,8 +194,18 @@ export function OutlineManagerView({
               borderRadius: 6,
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-              📋 生成的总纲（可编辑后保存）
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 6,
+              }}
+            >
+              <ClipboardList aria-hidden="true" size={13} strokeWidth={1.8} />
+              生成的总纲（可编辑后保存）
             </div>
             <textarea
               className="input"
@@ -210,7 +222,8 @@ export function OutlineManagerView({
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-primary btn-sm" onClick={handleSaveNovelOutline}>
-                💾 保存到大纲库
+                <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+                保存到大纲库
               </button>
             </div>
           </div>
@@ -226,8 +239,18 @@ export function OutlineManagerView({
               borderRadius: 6,
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-              📚 已保存的总纲（{masterOutlines.length} 个版本）
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 6,
+              }}
+            >
+              <Library aria-hidden="true" size={13} strokeWidth={1.8} />
+              已保存的总纲（{masterOutlines.length} 个版本）
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <select
@@ -244,13 +267,14 @@ export function OutlineManagerView({
                 <option value="">选择已保存的总纲</option>
                 {masterOutlines.map((o) => (
                   <option key={o.id} value={o.id}>
-                    v{o.version} {o.isActive ? '★ 采用中' : ''} - {o.title}
+                    v{o.version} {o.isActive ? '采用中' : ''} - {o.title}
                   </option>
                 ))}
               </select>
               {selectedMasterOutlineId && (
                 <button className="btn btn-sm btn-secondary" onClick={handleSetActiveMasterOutline}>
-                  ✅ 设为采用
+                  <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                  设为采用
                 </button>
               )}
             </div>
@@ -278,7 +302,12 @@ export function OutlineManagerView({
             borderRadius: 8,
           }}
         >
-          <div style={{ fontSize: 36, marginBottom: 8, opacity: 0.5 }}>📚</div>
+          <BookOpenText
+            aria-hidden="true"
+            size={36}
+            strokeWidth={1.8}
+            style={{ marginBottom: 8, opacity: 0.5 }}
+          />
           <div style={{ fontSize: 15, marginBottom: 8 }}>还没有分卷</div>
           <div style={{ fontSize: 13, marginBottom: 16 }}>
             长篇小说通常从分卷结构开始。你可以先创建第一卷，再添加章节大纲。
@@ -290,7 +319,8 @@ export function OutlineManagerView({
               setShowVolumeForm(true);
             }}
           >
-            + 新建分卷
+            <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+            新建分卷
           </button>
         </div>
       ) : (

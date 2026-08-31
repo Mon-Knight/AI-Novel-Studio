@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { Brain } from 'lucide-react';
 
 export interface CurrentThinkingProps {
   thought?: string;
@@ -45,7 +46,19 @@ export const CurrentThinking = memo(function CurrentThinking({
         margin: '6px 0',
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 4, color: '#334155' }}>🧠 思考与规划中:</div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          fontWeight: 600,
+          marginBottom: 4,
+          color: '#334155',
+        }}
+      >
+        <Brain aria-hidden="true" size={14} strokeWidth={1.8} />
+        思考与规划中:
+      </div>
       <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{localThought}</div>
     </div>
   );

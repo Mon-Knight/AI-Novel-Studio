@@ -1,11 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { $, browser, expect } from '@wdio/globals';
+import { expectUnifiedIconLanguage } from './iconLanguage';
 
 const screenshotDirectory = path.resolve(
   import.meta.dirname,
   '../../test-results/workbench-layout',
 );
+const sourceDirectory = path.resolve(import.meta.dirname, '../../src');
+
+function cssFilesWithTransitionAll(): string[] {
+  const transitionAllPattern = /\btransition\s*:\s*all(?:\s|;|$)/i;
+  return (fs.readdirSync(sourceDirectory, { recursive: true, encoding: 'utf8' }) as string[])
+    .filter((relativePath) => relativePath.endsWith('.css'))
+    .filter((relativePath) =>
+      transitionAllPattern.test(fs.readFileSync(path.join(sourceDirectory, relativePath), 'utf8')),
+    )
+    .map((relativePath) => relativePath.replaceAll('\\', '/'));
+}
 
 async function waitForStartupSplashRemoval(): Promise<void> {
   const splash = await $('#startup-splash');
@@ -208,6 +220,10 @@ describe('creative workbench layout', () => {
     await seedWorkbenchConversation();
   });
 
+  it('keeps source CSS free of transition all', () => {
+    expect(cssFilesWithTransitionAll()).toEqual([]);
+  });
+
   for (const viewport of [
     { width: 1024, height: 700 },
     { width: 1440, height: 900 },
@@ -312,6 +328,274 @@ describe('creative workbench layout', () => {
     });
   }
 
+  it('highlights only artifacts appended to the active task once', async () => {
+    await seedWorkbenchConversation();
+    const initialArtifact = await $(
+      '[data-testid="workbench-artifact-card"][data-card-id="browser-layout-card"]',
+    );
+    expect(await initialArtifact.getAttribute('data-newly-arrived')).toBe(null);
+
+    await browser.execute(() => {
+      const state = JSON.parse(
+        window.localStorage.getItem('ai_novel_studio_task_conversations') ?? '{"bundles":[]}',
+      ) as {
+        bundles: Array<{
+          conversation: { conversationId: string };
+          artifacts: Array<Record<string, unknown>>;
+        }>;
+      };
+      const bundle = state.bundles.find(
+        (candidate) => candidate.conversation.conversationId === 'browser-layout-conversation',
+      );
+      if (!bundle) throw new Error('Active browser fixture bundle missing.');
+      bundle.artifacts.push({
+        cardId: 'browser-layout-card-new',
+        conversationId: 'browser-layout-conversation',
+        turnId: 'browser-layout-turn',
+        runId: 'browser-layout-run-2',
+        artifactId: 'browser-layout-artifact-new',
+        artifactType: 'quality_report',
+        title: '新增推进核对',
+        summary: '这是同一任务运行期间追加的产物。',
+        content: '新增核对内容。',
+        status: 'candidate',
+        createdAt: '2026-08-27T12:00:03.000Z',
+      });
+      window.localStorage.setItem('ai_novel_studio_task_conversations', JSON.stringify(state));
+    });
+
+    await (await $('[data-testid="workbench-artifact-acknowledge"]')).click();
+    const newArtifact = await $(
+      '[data-testid="workbench-artifact-card"][data-card-id="browser-layout-card-new"]',
+    );
+    await newArtifact.waitForDisplayed();
+    await browser.waitUntil(
+      async () => (await newArtifact.getAttribute('data-newly-arrived')) === 'true',
+      {
+        timeout: 2_000,
+        interval: 20,
+        timeoutMsg: 'New artifact did not receive its arrival state.',
+      },
+    );
+    expect(await initialArtifact.getAttribute('data-newly-arrived')).toBe(null);
+    await browser.waitUntil(
+      async () => (await newArtifact.getAttribute('data-newly-arrived')) === null,
+      { timeout: 2_000, interval: 20, timeoutMsg: 'Artifact arrival state did not settle.' },
+    );
+
+    await browser.execute(() => {
+      const state = JSON.parse(
+        window.localStorage.getItem('ai_novel_studio_task_conversations') ?? '{"bundles":[]}',
+      ) as {
+        bundles: Array<{
+          conversation: { conversationId: string };
+          artifacts: Array<Record<string, unknown>>;
+        }>;
+      };
+      const bundle = state.bundles.find(
+        (candidate) => candidate.conversation.conversationId === 'browser-layout-conversation',
+      );
+      const artifact = bundle?.artifacts.find(
+        (candidate) => candidate.cardId === 'browser-layout-card-new',
+      );
+      if (!artifact) throw new Error('New browser fixture artifact missing.');
+      artifact.summary = '同一卡片完成了一次持久化水合。';
+      window.localStorage.setItem('ai_novel_studio_task_conversations', JSON.stringify(state));
+    });
+    await (await newArtifact.$('[data-testid="workbench-artifact-acknowledge"]')).click();
+    await browser.waitUntil(
+      async () => (await newArtifact.getAttribute('data-decision')) === 'confirm',
+      { timeout: 2_000, interval: 20, timeoutMsg: 'Artifact hydration did not complete.' },
+    );
+    expect(await newArtifact.getAttribute('data-newly-arrived')).toBe(null);
+    await seedWorkbenchConversation();
+  });
+
+  it('scrolls task switches immediately without replaying hydrated artifact arrivals', async () => {
+    await seedWorkbenchConversation();
+    await browser.execute(() => {
+      const state = JSON.parse(
+        window.localStorage.getItem('ai_novel_studio_task_conversations') ?? '{"bundles":[]}',
+      ) as {
+        bundles: Array<{
+          conversation: Record<string, unknown> & { conversationId: string; novelId: string };
+          turns: Array<Record<string, unknown>>;
+          runs: Array<Record<string, unknown>>;
+          toolEvents: Array<Record<string, unknown>>;
+          artifacts: Array<Record<string, unknown>>;
+          decisions?: Array<Record<string, unknown>>;
+          authorizations?: Array<Record<string, unknown>>;
+        }>;
+      };
+      const source = state.bundles[0];
+      if (!source) throw new Error('Source browser fixture bundle missing.');
+      const conversationId = 'browser-layout-conversation-secondary';
+      const now = '2026-08-27T11:00:00.000Z';
+      state.bundles.push({
+        conversation: {
+          ...source.conversation,
+          conversationId,
+          title: '次要任务滚动基线',
+          status: 'waiting_user',
+          createdAt: now,
+          updatedAt: now,
+        },
+        turns: Array.from({ length: 12 }, (_, index) => ({
+          turnId: `browser-secondary-turn-${index + 1}`,
+          conversationId,
+          sequence: index,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          content: Array.from(
+            { length: 12 },
+            (__, lineIndex) => `次要任务 ${index + 1} · 进展 ${lineIndex + 1}`,
+          ).join('\n'),
+          createdAt: now,
+        })),
+        runs: [],
+        toolEvents: [],
+        artifacts: [
+          {
+            cardId: 'browser-secondary-card',
+            conversationId,
+            turnId: 'browser-secondary-turn-12',
+            artifactId: 'browser-secondary-artifact',
+            artifactType: 'quality_report',
+            title: '次要任务既有产物',
+            summary: '切换任务时只建立基线，不播放新增提示。',
+            content: '既有产物内容。',
+            status: 'candidate',
+            createdAt: now,
+          },
+        ],
+        decisions: [],
+        authorizations: [],
+      });
+      window.localStorage.setItem('ai_novel_studio_task_conversations', JSON.stringify(state));
+    });
+    await browser.refresh();
+    await waitForStartupSplashRemoval();
+    await (await $('[data-testid="workbench-task-header"]')).waitForDisplayed();
+
+    await browser.execute(() => {
+      type InstrumentedWindow = typeof window & {
+        __workbenchOriginalScrollTo?: typeof HTMLElement.prototype.scrollTo;
+        __workbenchScrollBehaviors?: string[];
+      };
+      const host = window as InstrumentedWindow;
+      host.__workbenchOriginalScrollTo = HTMLElement.prototype.scrollTo;
+      host.__workbenchScrollBehaviors = [];
+      HTMLElement.prototype.scrollTo = function (
+        optionsOrX?: ScrollToOptions | number,
+        y?: number,
+      ) {
+        if (typeof optionsOrX === 'object') {
+          if (this.matches('[data-testid="workbench-message-list"]')) {
+            host.__workbenchScrollBehaviors?.push(optionsOrX.behavior ?? 'auto');
+          }
+          if (typeof optionsOrX.left === 'number') this.scrollLeft = optionsOrX.left;
+          if (typeof optionsOrX.top === 'number') this.scrollTop = optionsOrX.top;
+          return;
+        }
+        if (typeof optionsOrX === 'number') this.scrollLeft = optionsOrX;
+        if (typeof y === 'number') this.scrollTop = y;
+      } as typeof HTMLElement.prototype.scrollTo;
+    });
+
+    const secondaryTask = await $(
+      '[data-testid="workbench-task"][data-conversation-id="browser-layout-conversation-secondary"]',
+    );
+    await secondaryTask.click();
+    await browser.waitUntil(
+      async () => (await secondaryTask.getAttribute('data-selected')) === 'true',
+    );
+    const messageList = await $('[data-testid="workbench-message-list"]');
+    await browser.waitUntil(
+      async () =>
+        browser.execute(
+          (node) => node.scrollHeight - node.scrollTop - node.clientHeight <= 2,
+          messageList,
+        ),
+      { timeout: 2_000, interval: 20, timeoutMsg: 'Task switch did not reach the latest message.' },
+    );
+    const switchState = await browser.execute(() => {
+      const host = window as typeof window & { __workbenchScrollBehaviors?: string[] };
+      return {
+        behaviors: host.__workbenchScrollBehaviors ?? [],
+        artifactArrival: document
+          .querySelector<HTMLElement>('[data-card-id="browser-secondary-card"]')
+          ?.getAttribute('data-newly-arrived'),
+      };
+    });
+    expect(switchState.behaviors).toContain('auto');
+    expect(switchState.behaviors).not.toContain('smooth');
+    expect(switchState.artifactArrival).toBe(null);
+
+    await browser.execute(() => {
+      const host = window as typeof window & {
+        __workbenchOriginalScrollTo?: typeof HTMLElement.prototype.scrollTo;
+        __workbenchScrollBehaviors?: string[];
+      };
+      if (host.__workbenchOriginalScrollTo) {
+        HTMLElement.prototype.scrollTo = host.__workbenchOriginalScrollTo;
+      }
+      delete host.__workbenchOriginalScrollTo;
+      delete host.__workbenchScrollBehaviors;
+    });
+    await seedWorkbenchConversation();
+  });
+
+  it('keeps the spinner singular and disables spatial motion when reduced motion is requested', async () => {
+    await seedWorkbenchConversation();
+    const defaultMotion = await browser.execute(() => {
+      const tool = document.querySelector<HTMLElement>('[data-testid="workbench-tool-event"]');
+      const icon = tool?.querySelector<HTMLElement>('.workbench-tool-icon');
+      const spinner = icon?.querySelector<SVGElement>('svg');
+      const artifact = document.querySelector<HTMLElement>('[data-card-id="browser-layout-card"]');
+      if (!tool || !icon || !spinner || !artifact) {
+        throw new Error('Motion fixture is incomplete.');
+      }
+      tool.classList.add('is-running');
+      artifact.classList.add('is-newly-arrived');
+      return {
+        iconAnimation: getComputedStyle(icon).animationName,
+        iconOpacity: getComputedStyle(icon).opacity,
+        spinnerAnimation: getComputedStyle(spinner).animationName,
+        artifactAnimation: getComputedStyle(artifact).animationName,
+        artifactTransform: getComputedStyle(artifact).transform,
+      };
+    });
+    expect(defaultMotion.iconAnimation).toBe('none');
+    expect(defaultMotion.iconOpacity).toBe('1');
+    expect(defaultMotion.spinnerAnimation).toBe('workbench-spin');
+    expect(defaultMotion.artifactAnimation).toBe('workbench-artifact-arrive');
+    expect(defaultMotion.artifactTransform).toBe('none');
+
+    await browser.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+    });
+    const reducedMotion = await browser.execute(() => {
+      const icon = document.querySelector<HTMLElement>(
+        '.workbench-tool-event.is-running .workbench-tool-icon',
+      );
+      const spinner = icon?.querySelector<SVGElement>('svg');
+      const artifact = document.querySelector<HTMLElement>(
+        '.workbench-artifact-card.is-newly-arrived',
+      );
+      if (!icon || !spinner || !artifact) throw new Error('Reduced motion fixture is incomplete.');
+      return {
+        iconAnimation: getComputedStyle(icon).animationName,
+        spinnerAnimation: getComputedStyle(spinner).animationName,
+        artifactAnimation: getComputedStyle(artifact).animationName,
+      };
+    });
+    expect(reducedMotion.iconAnimation).toBe('none');
+    expect(reducedMotion.spinnerAnimation).toBe('none');
+    expect(reducedMotion.artifactAnimation).toBe('none');
+    await browser.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+    });
+  });
+
   it('keeps the new-task flow usable in the minimum desktop viewport', async () => {
     await browser.setWindowSize(1024, 700);
     const createTaskTrigger = await $('[data-testid="workbench-create-task"]');
@@ -386,6 +670,7 @@ describe('creative workbench layout', () => {
     });
 
     await browser.saveScreenshot(path.join(screenshotDirectory, 'workbench-new-task-1024x700.png'));
+    await expectUnifiedIconLanguage();
     await (await $('button[aria-label="关闭新建任务"]')).click();
     await (await $('[data-testid="workbench-task-creator"]')).waitForExist({ reverse: true });
     await browser.waitUntil(async () => createTaskTrigger.isFocused());

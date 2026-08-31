@@ -113,22 +113,22 @@ describe('OutlineManager edit dialogs', () => {
     );
 
     await screen.findByText('第 1 章');
-    fireEvent.click(screen.getByRole('button', { name: '✏️' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑章节 第 1 章' }));
     const chapterDialog = screen.getByText('编辑章节').closest('.modal-dialog');
     expect(chapterDialog).not.toBeNull();
     fireEvent.click(within(chapterDialog as HTMLElement).getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(state.updateChapter).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(view.container.querySelector('.modal-overlay')).toBeNull());
-    expect(screen.queryByText('新建章节')).toBeNull();
+    expect(screen.queryByText('编辑章节')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '✏️ 编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     const volumeDialog = screen.getByText('编辑分卷').closest('.modal-dialog');
     expect(volumeDialog).not.toBeNull();
     fireEvent.click(within(volumeDialog as HTMLElement).getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(state.updateVolume).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(view.container.querySelector('.modal-overlay')).toBeNull());
-    expect(screen.queryByText('新建分卷')).toBeNull();
+    expect(screen.queryByText('编辑分卷')).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import type { DraftContentState } from '../../types/draftContentState';
+import { TriangleAlert } from 'lucide-react';
 import { getAppErrorUserMessage } from '../../types/appError';
 
 interface ContentUnavailableStateProps {
@@ -26,7 +27,7 @@ function ContentUnavailableState({
   return (
     <div className="content-unavailable-state" role="alert" data-testid="content-unavailable-state">
       <div className="content-unavailable-icon" aria-hidden="true">
-        ⚠️
+        <TriangleAlert size={28} strokeWidth={1.8} />
       </div>
       <div className="content-unavailable-title">正文暂时无法完整读取</div>
       <p>{title}</p>

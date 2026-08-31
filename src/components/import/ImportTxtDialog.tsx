@@ -2,6 +2,7 @@
  * AI Novel Studio - TXT 导入确认弹窗
  */
 import { useState, useRef } from 'react';
+import { CircleCheck, FileText, FolderOpen, LoaderCircle, TriangleAlert, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { volumeRepository } from '../../services/database/volumeRepository';
@@ -129,12 +130,20 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             marginBottom: 16,
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 700 }}>📄 导入 TXT</span>
+          <span
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700 }}
+          >
+            <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
+            导入 TXT
+          </span>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="关闭 TXT 导入"
+            title="关闭"
             style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
           >
-            ✕
+            <X aria-hidden="true" size={20} strokeWidth={1.8} />
           </button>
         </div>
 
@@ -153,7 +162,12 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+              <FolderOpen
+                aria-hidden="true"
+                size={32}
+                strokeWidth={1.8}
+                style={{ marginBottom: 8 }}
+              />
               <div style={{ fontSize: 14 }}>点击选择 TXT 文件</div>
             </div>
             <input
@@ -178,7 +192,13 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
                 border: '1px solid var(--color-info-border)',
               }}
             >
-              📄 {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 ·{' '}
+              <FileText
+                aria-hidden="true"
+                size={16}
+                strokeWidth={1.8}
+                style={{ verticalAlign: 'text-bottom', marginRight: 6 }}
+              />
+              {fileName} · {formatNumber(analyzeResult.totalChars)} 字符 ·{' '}
               {formatNumber(analyzeResult.totalWords)} 字
               {analyzeResult.detectedChapterCount > 0 && (
                 <>
@@ -188,8 +208,19 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
               )}
             </div>
             {analyzeResult.warnings.map((w, i) => (
-              <div key={i} style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 8 }}>
-                ⚠️ {w}
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  color: 'var(--color-warning)',
+                  marginBottom: 8,
+                }}
+              >
+                <TriangleAlert aria-hidden="true" size={15} strokeWidth={1.8} />
+                {w}
               </div>
             ))}
             {analyzeResult.chapters.length <= 6 && (
@@ -251,7 +282,17 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
                 onClick={handleImport}
                 disabled={importing || !novelTitle.trim()}
               >
-                {importing ? '⏳ 导入中...' : '✅ 确认导入'}
+                {importing ? (
+                  <>
+                    <LoaderCircle aria-hidden="true" size={15} strokeWidth={1.8} />
+                    导入中...
+                  </>
+                ) : (
+                  <>
+                    <CircleCheck aria-hidden="true" size={15} strokeWidth={1.8} />
+                    确认导入
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -259,7 +300,12 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
 
         {step === 'done' && (
           <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <CircleCheck
+              aria-hidden="true"
+              size={40}
+              strokeWidth={1.8}
+              style={{ marginBottom: 12, color: 'var(--color-success)' }}
+            />
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success)' }}>
               {resultMsg}
             </div>

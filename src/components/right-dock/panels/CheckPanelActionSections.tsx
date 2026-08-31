@@ -1,3 +1,12 @@
+import {
+  Bot,
+  CheckCircle2,
+  LoaderCircle,
+  Search,
+  Square,
+  TriangleAlert,
+  Wrench,
+} from 'lucide-react';
 import type { CheckPanelViewProps } from './CheckPanelView';
 
 export function CheckPanelActionSections({
@@ -22,14 +31,29 @@ export function CheckPanelActionSections({
   return (
     <>
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
@@ -37,7 +61,13 @@ export function CheckPanelActionSections({
       </div>
 
       <div className="panel-section">
-        <div className="panel-section-title">🔍 质量检查</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Search size={14} strokeWidth={1.8} aria-hidden="true" />
+          质量检查
+        </div>
         <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
           第{chapter.chapterNumber}章 {chapter.title}
         </div>
@@ -51,9 +81,25 @@ export function CheckPanelActionSections({
           data-testid="quality-check-run"
           onClick={onRunCheck}
           disabled={loading || operationPhase !== 'idle'}
-          style={{ width: '100%' }}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading ? '⏳ 检查中...' : '🔍 开始质量检查'}
+          {loading ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              检查中...
+            </>
+          ) : (
+            <>
+              <Search size={14} strokeWidth={1.8} aria-hidden="true" />
+              开始质量检查
+            </>
+          )}
         </button>
         {operationPhase !== 'idle' && (
           <button
@@ -61,13 +107,25 @@ export function CheckPanelActionSections({
             data-testid="quality-operation-stop"
             onClick={onStopOperation}
             disabled={operationPhase !== 'available'}
-            style={{ width: '100%', marginTop: 6 }}
+            style={{
+              width: '100%',
+              marginTop: 6,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
           >
-            {operationPhase === 'committing'
-              ? '正在提交，暂不可停止'
-              : operationPhase === 'cancelling'
-                ? '正在停止...'
-                : '⏹ 停止当前操作'}
+            {operationPhase === 'committing' ? (
+              '正在提交，暂不可停止'
+            ) : operationPhase === 'cancelling' ? (
+              '正在停止...'
+            ) : (
+              <>
+                <Square size={13} strokeWidth={1.8} aria-hidden="true" />
+                停止当前操作
+              </>
+            )}
           </button>
         )}
 
@@ -101,12 +159,16 @@ export function CheckPanelActionSections({
                     gap: 6,
                   }}
                 >
-                  ⏳ {fixStage || '修复中...'}
+                  <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+                  {fixStage || '修复中...'}
                 </span>
               ) : fixRoundUsed ? (
                 '已使用外部修稿轮次'
               ) : (
-                '🤖 AI 修复并复检'
+                <>
+                  <Wrench size={14} strokeWidth={1.8} aria-hidden="true" />
+                  AI 修复并复检
+                </>
               )}
             </button>
             {fixRoundUsed && !fixLoading && (
@@ -137,8 +199,18 @@ export function CheckPanelActionSections({
           </div>
         )}
         {fixStage && !fixLoading && (
-          <div style={{ fontSize: 11, color: 'var(--color-success)', marginTop: 4 }}>
-            ✅ {fixStage}
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--color-success)',
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <CheckCircle2 size={13} strokeWidth={1.8} aria-hidden="true" />
+            {fixStage}
           </div>
         )}
         {fixError && (

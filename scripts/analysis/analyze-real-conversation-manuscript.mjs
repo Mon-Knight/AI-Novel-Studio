@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const EVIDENCE_SCHEMA_VERSION = 'real_conversation_acceptance_evidence_v4';
+const EVIDENCE_SCHEMA_VERSION = 'real_conversation_acceptance_evidence_v6';
 const CANDIDATE_INTEGRITY_CONTRACT_VERSION = 'chapter_candidate_integrity_v4';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const PROVIDER_SOURCE_STATUSES = new Set([
@@ -247,7 +247,79 @@ function validateFinalEvidence(evidence) {
       );
     }
   }
+  validateAnalysisMaterial(evidence.analysisMaterial, chapters);
   return chapters;
+}
+
+function validateAnalysisMaterial(material, chapters) {
+  if (!isRecord(material) || material.schemaVersion !== 'real_conversation_analysis_material_v1') {
+    rejectEvidence(
+      'EVIDENCE_FINAL_ANALYSIS_MATERIAL_MISSING',
+      'Final evidence must retain formal assets and semantic chapter context.',
+    );
+  }
+  const formalAssets = material.formalAssets;
+  const worldSettings = Array.isArray(formalAssets?.worldSettings)
+    ? formalAssets.worldSettings
+    : [];
+  const ruleSystems = Array.isArray(formalAssets?.ruleSystems) ? formalAssets.ruleSystems : [];
+  const protagonists = Array.isArray(formalAssets?.protagonists) ? formalAssets.protagonists : [];
+  const validTextAsset = (asset) =>
+    isRecord(asset) &&
+    typeof asset.id === 'string' &&
+    Boolean(asset.id.trim()) &&
+    typeof asset.title === 'string' &&
+    Boolean(asset.title.trim()) &&
+    typeof asset.content === 'string' &&
+    Boolean(asset.content.trim());
+  if (
+    worldSettings.length === 0 ||
+    ruleSystems.length === 0 ||
+    protagonists.length === 0 ||
+    worldSettings.some((asset) => !validTextAsset(asset)) ||
+    ruleSystems.some((asset) => !validTextAsset(asset)) ||
+    protagonists.some(
+      (profile) => !isRecord(profile) || typeof profile.name !== 'string' || !profile.name.trim(),
+    ) ||
+    typeof formalAssets?.primaryWorldSettingId !== 'string' ||
+    !worldSettings.some((asset) => asset.id === formalAssets.primaryWorldSettingId)
+  ) {
+    rejectEvidence(
+      'EVIDENCE_FINAL_FORMAL_ASSETS_INCOMPLETE',
+      'Formal world, rules, primary world identity, or protagonist material is incomplete.',
+    );
+  }
+  const semanticChapters = Array.isArray(material.chapters) ? material.chapters : [];
+  if (
+    semanticChapters.length !== chapters.length ||
+    semanticChapters.some((row, index) => {
+      const chapter = chapters[index];
+      const contexts = Array.isArray(row?.contextRecords) ? row.contextRecords : [];
+      return (
+        !isRecord(row) ||
+        row.chapter !== chapter.chapter ||
+        row.chapterId !== chapter.chapterId ||
+        !isRecord(row.summary) ||
+        typeof row.summary.summary !== 'string' ||
+        !row.summary.summary.trim() ||
+        contexts.length === 0 ||
+        contexts.some(
+          (context) =>
+            !isRecord(context) ||
+            typeof context.contextType !== 'string' ||
+            !context.contextType.trim() ||
+            typeof context.content !== 'string' ||
+            !context.content.trim(),
+        )
+      );
+    })
+  ) {
+    rejectEvidence(
+      'EVIDENCE_FINAL_SEMANTIC_CHAPTERS_INCOMPLETE',
+      'Every adopted chapter must retain its structured summary and active Context records.',
+    );
+  }
+  return material;
 }
 
 function normalizeProse(value) {
@@ -708,6 +780,97 @@ function styleTics(chapters) {
     .sort((left, right) => right.count - left.count);
 }
 
+function parseStoredSemanticValue(value) {
+  if (typeof value !== 'string') return value ?? null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    return normalized;
+  }
+}
+
+function semanticTerms(value) {
+  return [...new Set(words(value))].filter((term) => term.length >= 2).slice(0, 80);
+}
+
+function formalAssetUsage(material, chapters) {
+  const assets = [
+    ...material.formalAssets.worldSettings.map((asset) => ({ ...asset, type: 'world_setting' })),
+    ...material.formalAssets.ruleSystems.map((asset) => ({ ...asset, type: 'rule_system' })),
+  ];
+  return assets.map((asset) => {
+    const terms = semanticTerms(`${asset.title}\n${asset.content}`);
+    const chapterRows = chapters.map((chapter) => {
+      const contentTerms = new Set(words(chapter.adoptedContent));
+      const matchedTerms = terms.filter((term) => contentTerms.has(term));
+      return {
+        chapter: chapter.chapter,
+        matchedTerms,
+        termCoverage: terms.length ? round(matchedTerms.length / terms.length) : 0,
+      };
+    });
+    return {
+      type: asset.type,
+      id: asset.id,
+      title: asset.title,
+      primary:
+        asset.type === 'world_setting' && asset.id === material.formalAssets.primaryWorldSettingId,
+      terms,
+      chaptersMentioning: chapterRows
+        .filter((chapter) => chapter.matchedTerms.length > 0)
+        .map((chapter) => chapter.chapter),
+      chapters: chapterRows,
+    };
+  });
+}
+
+function semanticEvidenceReview(evidence, chapters) {
+  const material = validateAnalysisMaterial(evidence.analysisMaterial, chapters);
+  const semanticByChapter = new Map(material.chapters.map((row) => [row.chapterId, row]));
+  const chapterStateTimeline = chapters.map((chapter) => {
+    const materialRow = semanticByChapter.get(chapter.chapterId);
+    const summary = materialRow.summary;
+    return {
+      chapter: chapter.chapter,
+      chapterId: chapter.chapterId,
+      protagonistStateChange: parseStoredSemanticValue(summary.protagonistStateChange),
+      importantCharacterChanges: parseStoredSemanticValue(summary.importantCharacterChanges),
+      characterChanges: parseStoredSemanticValue(summary.characterChanges),
+      relationshipChanges: parseStoredSemanticValue(summary.relationshipChanges),
+      settingChanges: parseStoredSemanticValue(summary.settingChanges),
+      newLocations: parseStoredSemanticValue(summary.newLocations),
+      newItemsOrAbilities: parseStoredSemanticValue(summary.newItemsOrAbilities),
+      newForeshadows: parseStoredSemanticValue(summary.newForeshadows),
+      resolvedForeshadows: parseStoredSemanticValue(summary.resolvedForeshadows),
+      foreshadowing: parseStoredSemanticValue(summary.foreshadowing),
+      unresolvedQuestions: parseStoredSemanticValue(summary.unresolvedQuestions),
+      factsMustRemember: parseStoredSemanticValue(summary.factsMustRemember),
+      nextChapterHook: parseStoredSemanticValue(summary.nextChapterHook),
+      activeContextRecords: materialRow.contextRecords.map((context) => ({
+        type: context.contextType,
+        title: context.title,
+        content: context.content,
+        importance: context.importance,
+      })),
+    };
+  });
+  const protagonistNames = material.formalAssets.protagonists.map((profile) => profile.name);
+  return {
+    schemaVersion: 'ans_manuscript_semantic_evidence_v1',
+    formalAssets: material.formalAssets,
+    formalAssetUsage: formalAssetUsage(material, chapters),
+    protagonistUsage: protagonistNames.map((name) => ({
+      name,
+      chaptersMentioning: chapters
+        .filter((chapter) => chapter.adoptedContent.includes(name))
+        .map((chapter) => chapter.chapter),
+    })),
+    chapterStateTimeline,
+  };
+}
+
 function analysisCoverage(sourceChainReport) {
   return {
     schemaVersion: 'ans_manuscript_analysis_coverage_v1',
@@ -734,20 +897,24 @@ function analysisCoverage(sourceChainReport) {
       },
       {
         dimension: 'object_lifecycle',
-        status: 'unavailable_from_v4',
+        status: 'structured_summary_candidate',
+        evidencePath: 'semanticEvidence.chapterStateTimeline[].newItemsOrAbilities',
         scope:
-          'v4 has no structured item-state history; keyword cues are only manual-review navigation.',
+          'Uses persisted chapter-summary item/ability changes to seed a lifecycle review; it does not independently prove possession or location.',
       },
       {
         dimension: 'character_state',
-        status: 'unavailable_from_v4',
-        scope: 'v4 retains state-source receipts but not persisted CharacterState semantics.',
+        status: 'structured_summary_candidate',
+        evidencePath: 'semanticEvidence.chapterStateTimeline',
+        scope:
+          'Exposes persisted protagonist, character, relationship, and Context changes for cross-chapter review.',
       },
       {
         dimension: 'world_rules',
-        status: 'unavailable_from_v4',
+        status: 'heuristic_candidate',
+        evidencePath: 'semanticEvidence.formalAssetUsage',
         scope:
-          'v4 proves source inclusion but omits the formal world and rule text needed for comparison.',
+          'Retains formal world/rule text and reports chapter term coverage; semantic compliance still requires adjudication.',
       },
       {
         dimension: 'cross_chapter_transition',
@@ -758,8 +925,10 @@ function analysisCoverage(sourceChainReport) {
       },
       {
         dimension: 'foreshadowing',
-        status: 'unavailable_from_v4',
-        scope: 'v4 omits structured new/resolved foreshadow records and their semantic content.',
+        status: 'structured_summary_candidate',
+        evidencePath: 'semanticEvidence.chapterStateTimeline',
+        scope:
+          'Exposes persisted new/resolved foreshadows, unresolved questions, and next-chapter hooks for lifecycle review.',
       },
       {
         dimension: 'repetition',
@@ -792,14 +961,14 @@ const ANALYSIS_LIMITATIONS = [
       'v4 retains Provider and compiled-context hashes but not their payloads, so those hashes cannot be independently recomputed by this analyzer.',
   },
   {
-    code: 'semantic_closed_loop_content_unavailable',
+    code: 'structured_summaries_are_model_derived',
     explanation:
-      'v4 retains Summary, Context, and Memory identities/source types but not their semantic content or downstream content hashes.',
+      'Summary and Context semantics are persisted model outputs; use them as review indexes and verify important claims against adopted prose.',
   },
   {
-    code: 'formal_asset_content_unavailable',
+    code: 'formal_asset_overlap_is_not_rule_compliance',
     explanation:
-      'v4 source receipts prove inclusion but do not expose the formal world, rule, style, and output-profile text for semantic comparison.',
+      'Formal world/rule term overlap shows topical use but cannot prove that every causal rule, prohibition, or limit was obeyed.',
   },
   {
     code: 'heuristics_are_not_quality_verdicts',
@@ -818,8 +987,9 @@ function analyze(evidence, evidencePath) {
   const allParagraphs = splitParagraphs(fullText);
   const totalWords = countTextWords(fullText);
   const sourceChainReport = sourceChain(evidence, chapters);
+  const semanticEvidence = semanticEvidenceReview(evidence, chapters);
   return {
-    analyzerVersion: 'ans_manuscript_analysis_v2',
+    analyzerVersion: 'ans_manuscript_analysis_v3',
     sourceEvidenceFile: path.basename(evidencePath),
     evidenceSummary: {
       evidenceSchemaVersion: evidence.evidenceSchemaVersion,
@@ -838,6 +1008,7 @@ function analyze(evidence, evidencePath) {
     coverage: analysisCoverage(sourceChainReport),
     limitations: ANALYSIS_LIMITATIONS,
     sourceChain: sourceChainReport,
+    semanticEvidence,
     corpus: {
       characters: fullText.length,
       wordCount: totalWords,
@@ -881,7 +1052,8 @@ function analyze(evidence, evidencePath) {
       '复核重复段句、相似章节对和高频表达，区分刻意回环、必要回顾与模板化复述。',
       '结合章长、段句长度、对话比例与关键情节密度评估节奏；统计波动本身不是质量问题。',
       '统一叙事视角、语体、比喻密度、人物口吻和悬疑信息控制；自动文风指标只用于发现异常章。',
-      '世界规则的严格符合性需要正式世界/规则原文；当前证据仅证明 Provider 注入及哈希链，不包含可供语义比对的完整规则正文。',
+      '逐条读取 semanticEvidence.formalAssets 中的世界与规则原文，对照 formalAssetUsage 和正文因果链；词项覆盖只能定位，不能替代规则裁决。',
+      '用 chapterStateTimeline 复核角色、关系、物件、伏笔与未决问题；这些字段来自章节总结，重要事实仍须回看采用正文。',
     ],
     manuscript: {
       chapters: chapters.map((chapter) => ({

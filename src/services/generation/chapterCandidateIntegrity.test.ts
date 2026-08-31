@@ -245,7 +245,7 @@ test('detects an explicit final-prose wrapper leaked by the model', () => {
   );
 });
 
-test('detects dense internal verification statuses rendered as editorial prose', () => {
+test('detects dense audit voice distributed across distinct narrative sentences', () => {
   const candidateText = [
     '沈砚把三张照片摊在灯下。第一处盐痕已经确认，门框上的划痕仍待核实。',
     '录音里的脚步不能证明来人身份，缺失的九分钟也不足以确认闸门曾经开启。',
@@ -257,6 +257,28 @@ test('detects dense internal verification statuses rendered as editorial prose',
     inspectChapterCandidateIntegrity({ candidateText }).map((issue) => issue.code),
     ['chapter_audit_voice_leakage'],
   );
+});
+
+test('allows repeated verification language inside investigation dialogue and quoted case files', () => {
+  const candidateText = [
+    '沈砚把照片推到值班员面前。',
+    '“这道划痕不能证明有人撬过门锁。”',
+    '“第二份记录仍待核实，钥匙去向也尚未确认。”',
+    '“所以目前还不能断定林致远说了谎？”',
+    '“对，这只是判断，不是结论。”',
+    '她翻开旧卷宗，页边保留着一行原始批注。',
+    '「现有证据不足以确认闸门开启，结论待复核。」',
+    '值班员移开目光，伸手去拿桌角的车钥匙。',
+  ].join('\n');
+
+  assert.deepEqual(inspectChapterCandidateIntegrity({ candidateText }), []);
+});
+
+test('deduplicates overlapping audit signals within one narrative sentence', () => {
+  const candidateText =
+    '目前仍只能保留这一判断，这点不足以证明来人身份，因此不能据此断定林致远说谎，现有证据仍不足，结论尚待核实，这也不是事实，只是推测。';
+
+  assert.deepEqual(inspectChapterCandidateIntegrity({ candidateText }), []);
 });
 
 test('detects Gate-style audit disclaimers distributed through a full chapter', () => {

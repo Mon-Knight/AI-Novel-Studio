@@ -2385,6 +2385,7 @@ mod tests {
             CREATE TABLE volumes (
                 id TEXT PRIMARY KEY,
                 novel_id TEXT NOT NULL,
+                order_index INTEGER NOT NULL DEFAULT 0,
                 deleted_at TEXT
             );
             CREATE TABLE chapters (
@@ -2394,6 +2395,7 @@ mod tests {
                 adopted_draft_id TEXT,
                 status TEXT NOT NULL,
                 order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT 'before',
                 updated_at TEXT NOT NULL,
                 deleted_at TEXT
             );
@@ -2401,7 +2403,18 @@ mod tests {
                 id TEXT PRIMARY KEY,
                 novel_id TEXT NOT NULL,
                 chapter_id TEXT NOT NULL,
-                is_adopted INTEGER NOT NULL DEFAULT 0
+                title TEXT,
+                content TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'user_edited',
+                version_no INTEGER NOT NULL DEFAULT 1,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                is_adopted INTEGER NOT NULL DEFAULT 0,
+                ai_task_id TEXT,
+                note TEXT,
+                large_text_ref_id TEXT,
+                content_hash TEXT,
+                created_at TEXT NOT NULL DEFAULT 'before',
+                updated_at TEXT NOT NULL DEFAULT 'before'
             );
             CREATE TABLE characters (
                 id TEXT PRIMARY KEY,
@@ -2472,6 +2485,39 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE memory_documents (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                source_version INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                chapter_id TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                invalidated_at TEXT,
+                invalidation_reason TEXT
+            );
+            CREATE TABLE memory_chunks (
+                id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT,
+                ordinal INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                token_count INTEGER NOT NULL,
+                importance REAL NOT NULL,
+                chapter_order_index INTEGER,
+                temporal_start_chapter INTEGER,
+                temporal_end_chapter INTEGER,
+                entity_keys_json TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                content_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             ",
         )?;
         Ok(conn)
@@ -2507,8 +2553,8 @@ mod tests {
             params![&chapter_id, &novel_id, &volume_id, &draft_id, order_index],
         )?;
         conn.execute(
-            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, is_adopted)
-             VALUES (?1, ?2, ?3, 1)",
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, content, is_adopted)
+             VALUES (?1, ?2, ?3, 'fixture body', 1)",
             params![&draft_id, &novel_id, &chapter_id],
         )?;
         conn.execute(
@@ -2556,7 +2602,9 @@ mod tests {
             validation_status: Some("passed".to_string()),
             validation_result: None,
             enabled: Some(true),
-            content_hash: Some("hash".to_string()),
+            content_hash: Some(crate::repositories::large_text_repository::sha256(
+                "fixture body",
+            )),
             draft_version: Some(1),
             ai_task_id: None,
         }
@@ -2578,7 +2626,9 @@ mod tests {
             content: content.to_string(),
             importance: Some(4),
             is_active: Some(true),
-            content_hash: Some("hash".to_string()),
+            content_hash: Some(crate::repositories::large_text_repository::sha256(
+                "fixture body",
+            )),
             draft_version: Some(1),
         }
     }

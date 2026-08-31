@@ -511,4 +511,8 @@ const definitions: ToolDefinition[] = [
   },
 ];
 
+/** Frozen identity required by desktop Provider AI Tasks (Rust PRODUCTION_TOOL_REGISTRY_HASH). */
+export const PRODUCTION_TOOL_REGISTRY_HASH =
+  '82672d8347a8143a716e590014b9cf61fc576c0556c8683027d51528243c5192';
+
 export const productionToolRegistry = new ToolRegistry(definitions);

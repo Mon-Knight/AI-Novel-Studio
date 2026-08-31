@@ -231,12 +231,26 @@ function RightPanel({
   onUpdateToolState,
   documentAvailable = true,
 }: RightPanelProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // v1.0.44: 记住上次活跃面板类型，收起时用 CSS 隐藏而非卸载，保留面板内部状态
   const [lastPanelType, setLastPanelType] = useState<PanelType>(null);
 
   useEffect(() => {
     if (panelType) setLastPanelType(panelType);
+  }, [panelType]);
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    if (panelType) {
+      overlay.removeAttribute('inert');
+      return;
+    }
+    if (overlay.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+    overlay.setAttribute('inert', '');
   }, [panelType]);
 
   // v1.0.45: 检测当前面板的 AI 输出是否基于旧正文
@@ -318,7 +332,7 @@ function RightPanel({
     return () => document.removeEventListener('mousedown', handleDocumentMouseDown, true);
   }, [onClose, panelType]);
 
-  // v1.0.44: 面板收起时使用 display:none 而非卸载，保留 AI 输出等状态
+  // 收起后保留最后一个面板实例，由 CSS 与 inert 隔离可见性和交互。
   if (!effectivePanelType || effectivePanelType === 'draft-history') return null;
   const config = panelConfig[effectivePanelType];
 
@@ -332,13 +346,24 @@ function RightPanel({
   };
 
   return (
-    <div className="right-panel-overlay" style={!panelType ? { display: 'none' } : undefined}>
-      <div ref={panelRef} className="right-panel" onMouseDown={stopAll} onClick={stopAll}>
+    <div
+      ref={overlayRef}
+      className={`right-panel-overlay ${panelType ? 'is-open' : 'is-closed'}`}
+      data-panel-state={panelType ? 'open' : 'closed'}
+      aria-hidden={!panelType}
+    >
+      <div
+        ref={panelRef}
+        className={`right-panel ${panelType ? 'is-open' : 'is-closed'}`}
+        onMouseDown={stopAll}
+        onClick={stopAll}
+      >
         <div className="right-panel-header">
           <span className="right-panel-title">{config.title}</span>
           <button
             type="button"
             className="right-panel-close"
+            data-testid="right-panel-close"
             aria-label={`关闭${config.title}`}
             title="关闭"
             onMouseDown={stopAll}

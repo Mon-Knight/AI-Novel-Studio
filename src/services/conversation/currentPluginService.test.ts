@@ -149,7 +149,8 @@ test('E2E build exposes deterministic Mock only after the exact storage opt-in',
     define: {
       'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
     },
-    server: { middlewareMode: true, hmr: false },
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, hmr: false, watch: null },
   });
   try {
     const e2eModule = (await vite.ssrLoadModule(

@@ -27,6 +27,14 @@ if (!zipPath || !destDir || !existsSync(zipPath)) {
 const destination = path.resolve(destDir);
 const finalRoot = path.join(destination, 'dsh-runtime');
 const runtimeRelative = path.join('packages', 'examples', 'jsonrpc-demo', 'lib', 'bin.js');
+const requiredRelatives = [
+  runtimeRelative,
+  path.join('packages', 'sdk', 'protocol', 'lib', 'index.js'),
+  path.join('packages', 'core', 'agent', 'lib', 'index.js'),
+  path.join('packages', 'llm', 'llm', 'lib', 'index.js'),
+  path.join('packages', 'core', 'session', 'lib', 'index.js'),
+  path.join('packages', 'examples', 'jsonrpc-demo', 'node_modules', '@deepseek-ai', 'dsh-app-boot'),
+];
 const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 function complete(root) {
@@ -34,7 +42,7 @@ function complete(root) {
     const matrix = JSON.parse(readFileSync(path.join(root, 'VERSION_MATRIX.json'), 'utf8'));
     return (
       existsSync(path.join(root, 'JUNCTIONS.json')) &&
-      existsSync(path.join(root, runtimeRelative)) &&
+      requiredRelatives.every((relative) => existsSync(path.join(root, relative))) &&
       sha256(path.join(root, runtimeRelative)) === matrix.runtimeBinSha256
     );
   } catch {
@@ -113,20 +121,8 @@ withUnpackLock(() => {
       throw new Error('tar extraction failed with exit ' + String(extraction.status));
     }
     const stagedRoot = path.join(temporary, 'dsh-runtime');
-    const junctions = JSON.parse(readFileSync(path.join(stagedRoot, 'JUNCTIONS.json'), 'utf8'));
-    if (!Array.isArray(junctions)) throw new Error('JUNCTIONS.json must contain an array');
-    for (const entry of junctions) {
-      const link = inside(stagedRoot, entry?.link);
-      const target = inside(stagedRoot, entry?.target);
-      rmSync(link, { recursive: true, force: true });
-      mkdirSync(path.dirname(link), { recursive: true });
-      symlinkSync(target, link, 'junction');
-      statSync(link);
-    }
-    if (!complete(stagedRoot)) throw new Error('relocated runtime carrier verification failed');
-    if (complete(finalRoot)) {
-      console.log('runtime carrier already verified: ' + finalRoot);
-      return;
+    if (!existsSync(path.join(stagedRoot, 'JUNCTIONS.json'))) {
+      throw new Error('extracted runtime carrier is missing JUNCTIONS.json');
     }
     if (existsSync(finalRoot) && !complete(finalRoot)) {
       rmSync(finalRoot, { recursive: true, force: true });
@@ -134,7 +130,17 @@ withUnpackLock(() => {
     try {
       renameSync(stagedRoot, finalRoot);
     } catch (error) {
-      if (!complete(finalRoot)) throw error;
+      if (!existsSync(finalRoot)) throw error;
+    }
+    const junctions = JSON.parse(readFileSync(path.join(finalRoot, 'JUNCTIONS.json'), 'utf8'));
+    if (!Array.isArray(junctions)) throw new Error('JUNCTIONS.json must contain an array');
+    for (const entry of junctions) {
+      const link = inside(finalRoot, entry?.link);
+      const target = inside(finalRoot, entry?.target);
+      rmSync(link, { recursive: true, force: true });
+      mkdirSync(path.dirname(link), { recursive: true });
+      symlinkSync(target, link, 'junction');
+      statSync(link);
     }
     if (!complete(finalRoot)) throw new Error('installed runtime carrier verification failed');
     console.log('runtime carrier installed: ' + finalRoot);

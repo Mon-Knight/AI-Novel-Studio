@@ -1669,7 +1669,7 @@ fn start_path_two_conversations_cancel_one_without_stopping_the_other() {
     let scratch = ScratchDir::new("start-parallel");
     std::env::set_var("ANS_TASK_WORKER_ROOT", scratch.path());
     std::env::set_var("DSH_GATEWAY_BIN", gateway_bin());
-    let upstream = MockWorkbench::start("delay", 2500);
+    let upstream = MockWorkbench::start("delayed-text", 2500);
     let (first_id, first_novel, first_turn) = seed_task_turn("parallel-a");
     let (second_id, second_novel, second_turn) = seed_task_turn("parallel-b");
 

@@ -116,7 +116,8 @@ test('explicit generation receipts expose formal asset status without source con
   });
 
   const html = renderToStaticMarkup(createElement(GenerationContextReceipt, { receipt }));
-  assert.match(html, /本次生成依据/);
+  assert.match(html, /运行后上下文回执/);
+  assert.match(html, /data-context-stage="provider-receipt"/);
   assert.match(html, /已注入 7 项/);
   assert.match(html, /冻结快照/);
   assert.match(html, /读取 7\/11/);
@@ -267,7 +268,14 @@ for (const snapshotRequestSourceStatus of ['omitted_empty', 'omitted_budget'] as
     const html = renderToStaticMarkup(createElement(GenerationContextReceipt, { receipt }));
     assert.match(html, /总体 Provider 证据显示快照来源未进入本次请求/);
     assert.match(html, /未纳入 1/);
-    assert.match(html, /Provider 请求未纳入/);
+    assert.match(
+      html,
+      new RegExp(`data-provider-source-status="${snapshotRequestSourceStatus}"`, 'u'),
+    );
+    assert.match(
+      html,
+      snapshotRequestSourceStatus === 'omitted_empty' ? /空来源未纳入/ : /预算未纳入/,
+    );
     assert.match(html, /has-error-tone/);
     assert.doesNotMatch(html, /has-warning-tone/);
     assert.doesNotMatch(html, /data-context-status="used"/);
@@ -384,6 +392,7 @@ test('compact context summary shows only core indicators and keeps their evidenc
             generationSourceStatuses: {
               memory_context: 'omitted_budget',
               world_state: 'truncated',
+              reference_material: 'truncated',
             },
           },
           sources: [
@@ -400,6 +409,9 @@ test('compact context summary shows only core indicators and keeps their evidenc
             { type: 'style_profile', status: 'used' },
             { type: 'output_profile', status: 'used' },
             { type: 'chapter_character', status: 'used' },
+            { type: 'faction', status: 'used' },
+            { type: 'location', status: 'missing' },
+            { type: 'reference_material', status: 'used' },
           ],
         },
       },
@@ -409,7 +421,7 @@ test('compact context summary shows only core indicators and keeps their evidenc
   assert.ok(receipt);
   const html = renderToStaticMarkup(createElement(GenerationContextSummary, { receipt }));
   assert.match(html, /data-testid="workbench-context-summary"/);
-  assert.equal(html.match(/data-context-core=/gu)?.length, 12);
+  assert.equal(html.match(/data-context-core=/gu)?.length, 15);
   assert.match(
     html,
     /data-context-core="world"[\s\S]*?data-context-status="used"[\s\S]*?data-provider-inclusion="included"/,
@@ -429,7 +441,10 @@ test('compact context summary shows only core indicators and keeps their evidenc
     /data-context-core="world_state"[\s\S]*?data-context-status="truncated"[\s\S]*?data-provider-inclusion="unverified"/,
   );
   assert.match(html, /data-context-core="controls"[\s\S]*?data-context-status="used"/);
-  assert.match(html, /data-context-core="chapter_assets"[\s\S]*?data-context-status="used"/);
+  assert.match(html, /data-context-core="chapter_roles"[\s\S]*?data-context-status="used"/);
+  assert.match(html, /data-context-core="faction"[\s\S]*?data-context-status="used"/);
+  assert.match(html, /data-context-core="location"[\s\S]*?data-context-status="missing"/);
+  assert.match(html, /data-context-core="reference"[\s\S]*?data-context-status="truncated"/);
   assert.match(html, />正式世界</);
   assert.match(html, />正式规则</);
   assert.match(html, />正式主角</);
@@ -441,7 +456,10 @@ test('compact context summary shows only core indicators and keeps their evidenc
   assert.match(html, />Memory</);
   assert.match(html, />世界状态</);
   assert.match(html, />风格 \/ 输出</);
-  assert.match(html, />章内资产</);
+  assert.match(html, />章内角色</);
+  assert.match(html, />势力</);
+  assert.match(html, />地点</);
+  assert.match(html, />参考资料</);
 
   const receiptHtml = renderToStaticMarkup(createElement(GenerationContextReceipt, { receipt }));
   assert.match(
@@ -453,7 +471,7 @@ test('compact context summary shows only core indicators and keeps their evidenc
     /data-context-source-type="memory_context"[\s\S]*?data-provider-inclusion="omitted"/,
   );
   assert.match(receiptHtml, /已实际注入/);
-  assert.match(receiptHtml, /Provider 请求未纳入/);
+  assert.match(receiptHtml, /预算未纳入/);
 });
 
 test('compact context summary marks unavailable core evidence as unverified', () => {
@@ -461,8 +479,8 @@ test('compact context summary marks unavailable core evidence as unverified', ()
 
   assert.ok(receipt);
   const html = renderToStaticMarkup(createElement(GenerationContextSummary, { receipt }));
-  assert.equal(html.match(/来源未核验/gu)?.length, 12);
-  assert.equal(html.match(/data-context-status="unverified"/gu)?.length, 12);
+  assert.equal(html.match(/来源未核验/gu)?.length, 15);
+  assert.equal(html.match(/data-context-status="unverified"/gu)?.length, 15);
   assert.doesNotMatch(html, /data-context-status="missing"/);
 });
 
@@ -500,6 +518,11 @@ test('expandable tool details compact identities and hide transcript-shaped fiel
     largeTextRefId: fullReferenceId,
     transcript: 'private transcript body',
     prompt: { messages: [{ role: 'user', content: 'private prompt body' }] },
+    originalGoal: '写个六万字左右的悬疑故事。',
+    systemInstruction: '根据原始创意自动生成世界与规则设定候选。',
+    sourceSummary: '失踪者在旧钟楼留下了尚未公开的时间记录。',
+    referenceExcerpt: '这段参考资料正文不应出现在工具详情中。',
+    worldBackground: '临雾港依靠回声档案保存市民记忆。',
     apiKey: 'secret-key-value',
   });
   const serialized = JSON.stringify(visible);
@@ -513,5 +536,10 @@ test('expandable tool details compact identities and hide transcript-shaped fiel
   assert.doesNotMatch(serialized, new RegExp(fullReferenceId, 'u'));
   assert.doesNotMatch(serialized, /private transcript body/);
   assert.doesNotMatch(serialized, /private prompt body/);
+  assert.doesNotMatch(serialized, /六万字左右/);
+  assert.doesNotMatch(serialized, /自动生成世界/);
+  assert.doesNotMatch(serialized, /失踪者在旧钟楼/);
+  assert.doesNotMatch(serialized, /参考资料正文/);
+  assert.doesNotMatch(serialized, /临雾港/);
   assert.doesNotMatch(serialized, /secret-key-value/);
 });

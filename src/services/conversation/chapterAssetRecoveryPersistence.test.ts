@@ -11,6 +11,7 @@ import { buildCoreAssetGenerationGoal, chapterAssetRecoveryStore } from './chapt
 import {
   ensurePersistedChapterGoalTurn,
   recoverPersistedChapterAssetRecovery,
+  resolvePreflightAssetPreparationRetryTurn,
 } from './chapterAssetRecoveryPersistence';
 import { encodeWorkbenchTurnContent } from './workbenchTurnOrigin';
 
@@ -301,6 +302,153 @@ test('persisting a chapter goal reuses the latest unexecuted source turn without
   assert.equal(persisted.turns.filter((turn) => turn.content === sparseGoal).length, 1);
 });
 
+test('preflight retry resolves the same persisted preparation turn when it has no run', async () => {
+  const goal = buildCoreAssetGenerationGoal('world_setting', sparseGoal);
+  const preparation = userTurn(
+    'turn-world-preflight',
+    1,
+    encodeWorkbenchTurnContent(goal, 'workbench_asset_preparation'),
+  );
+
+  const resolved = await resolvePreflightAssetPreparationRetryTurn(
+    {
+      conversationId,
+      asset: 'world_setting',
+      goal,
+      orchestration: {
+        errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED',
+        preparationTurnId: preparation.turnId,
+      },
+    },
+    { getConversation: async () => bundle({ turns: [preparation], runs: [] }) },
+  );
+
+  assert.equal(resolved, preparation);
+});
+
+test('preflight retry fails closed when the original preparation turn id is missing', async () => {
+  let getConversationCalls = 0;
+  await assert.rejects(
+    () =>
+      resolvePreflightAssetPreparationRetryTurn(
+        {
+          conversationId,
+          asset: 'world_setting',
+          goal: buildCoreAssetGenerationGoal('world_setting', sparseGoal),
+          orchestration: { errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED' },
+        },
+        {
+          getConversation: async () => {
+            getConversationCalls += 1;
+            return bundle();
+          },
+        },
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as Error & { code?: string }).code, 'MODEL_TOOL_CALLING_NOT_VERIFIED');
+      assert.match(error.message, /缺少原准备回合身份/);
+      return true;
+    },
+  );
+  assert.equal(getConversationCalls, 0);
+});
+
+test('preflight retry fails closed when the persisted turn identity, goal, or run history differs', async (t) => {
+  const goal = buildCoreAssetGenerationGoal('world_setting', sparseGoal);
+  const preparation = userTurn(
+    'turn-world-preflight',
+    1,
+    encodeWorkbenchTurnContent(goal, 'workbench_asset_preparation'),
+  );
+  const resolve = (persisted: TaskConversationBundle) =>
+    resolvePreflightAssetPreparationRetryTurn(
+      {
+        conversationId,
+        asset: 'world_setting',
+        goal,
+        orchestration: {
+          errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED',
+          preparationTurnId: preparation.turnId,
+        },
+      },
+      { getConversation: async () => persisted },
+    );
+
+  await t.test('rejects a turn from another conversation', async () => {
+    await assert.rejects(
+      () =>
+        resolve(
+          bundle({
+            turns: [{ ...preparation, conversationId: 'conversation-other' }],
+            runs: [],
+          }),
+        ),
+      /回合身份不匹配/,
+    );
+  });
+
+  await t.test('rejects a different preparation goal', async () => {
+    await assert.rejects(
+      () =>
+        resolve(
+          bundle({
+            turns: [
+              {
+                ...preparation,
+                content: encodeWorkbenchTurnContent(
+                  buildCoreAssetGenerationGoal('protagonist', sparseGoal),
+                  'workbench_asset_preparation',
+                ),
+              },
+            ],
+            runs: [],
+          }),
+        ),
+      /资产或创作目标不匹配/,
+    );
+  });
+
+  await t.test('rejects a preparation turn with any run', async () => {
+    await assert.rejects(
+      () =>
+        resolve(
+          bundle({
+            turns: [preparation],
+            runs: [
+              run('run-world-preflight', preparation.turnId, 'failed', '2026-08-28T00:00:02.000Z'),
+            ],
+          }),
+        ),
+      /已经存在运行记录/,
+    );
+  });
+});
+
+test('non-preflight failures do not enter same-turn reuse validation', async () => {
+  let getConversationCalls = 0;
+  const resolved = await resolvePreflightAssetPreparationRetryTurn(
+    {
+      conversationId,
+      asset: 'world_setting',
+      goal: buildCoreAssetGenerationGoal('world_setting', sparseGoal),
+      orchestration: {
+        errorCode: 'WORKBENCH_SERVICE_FAILED',
+        preparationTurnId: 'turn-world-existing',
+      },
+    },
+    {
+      getConversation: async () => {
+        getConversationCalls += 1;
+        return bundle();
+      },
+    },
+  );
+
+  assert.equal(resolved, undefined);
+  assert.equal(getConversationCalls, 0);
+});
+
 test('session parsing preserves a failed post-asset resume for explicit retry', () => {
   const values = new Map<string, string>();
   const storage = {
@@ -329,6 +477,7 @@ test('session parsing preserves a failed post-asset resume for explicit retry', 
       modelSnapshot,
       orchestration: {
         phase: 'failed',
+        errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED',
         error: '正文恢复尚未形成运行，请确认后重试。',
         updatedAt: '2026-08-28T00:00:05.000Z',
       },
@@ -338,6 +487,7 @@ test('session parsing preserves a failed post-asset resume for explicit retry', 
 
     assert.deepEqual(chapterAssetRecoveryStore.get(conversationId)?.orchestration, {
       phase: 'failed',
+      errorCode: 'MODEL_TOOL_CALLING_NOT_VERIFIED',
       error: '正文恢复尚未形成运行，请确认后重试。',
       updatedAt: '2026-08-28T00:00:05.000Z',
     });

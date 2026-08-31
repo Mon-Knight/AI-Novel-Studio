@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { browser } from '@wdio/globals';
 import { config as isolatedE2eConfig } from '../e2e/wdio.conf';
+import { E2E_BRIDGE_CALL_TIMEOUT_MS } from '../e2e/helpers';
 import {
   readRealConversationAcceptanceProfile,
   REAL_ACCEPTANCE_ENV,
@@ -14,6 +16,10 @@ if (!evidenceDirectory) {
 fs.mkdirSync(evidenceDirectory, { recursive: true });
 
 const isolatedOnPrepare = isolatedE2eConfig.onPrepare;
+const isolatedBefore = isolatedE2eConfig.before;
+// Browser bridge calls stop themselves at 15 seconds; keep the driver above that limit while
+// bounding renderer stalls well below the 300-second native-driver timeout.
+const REAL_ACCEPTANCE_WEBDRIVER_SCRIPT_TIMEOUT_MS = E2E_BRIDGE_CALL_TIMEOUT_MS + 15_000;
 
 export const config = {
   ...isolatedE2eConfig,
@@ -44,6 +50,11 @@ export const config = {
     } finally {
       if (credential !== undefined) process.env[REAL_ACCEPTANCE_ENV.apiKey] = credential;
     }
+  },
+
+  async before() {
+    await browser.setTimeout({ script: REAL_ACCEPTANCE_WEBDRIVER_SCRIPT_TIMEOUT_MS });
+    await isolatedBefore();
   },
 };
 

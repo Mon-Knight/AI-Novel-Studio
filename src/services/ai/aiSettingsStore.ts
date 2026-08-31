@@ -1,5 +1,29 @@
-import type { AiSettings, GatewayModelConfig, LocalChapterModelSettings } from '../../types/ai';
+import type {
+  AiSettings,
+  CloudApiProvider,
+  GatewayModelConfig,
+  LocalChapterModelSettings,
+  SavedApiModelProfile,
+  SavedGatewayModelProfile,
+  SavedLocalModelProfile,
+} from '../../types/ai';
+import { createUniqueId } from '../../utils/uniqueId';
+import {
+  persistableSavedApiModel,
+  profileFromActiveSettings,
+  savedApiModelMatchesSettings,
+  upsertSavedApiModel,
+} from './savedApiModels';
+import {
+  optionalModelIdentityKey,
+  persistableSavedGatewayModel,
+  persistableSavedLocalModel,
+  profileFromGatewaySettings,
+  profileFromLocalSettings,
+  upsertByIdentity,
+} from './savedOptionalModels';
 import { lsGet, lsSet } from '../database/db';
+import { isTauriRuntime, tauriInvoke } from '../tauri/runtime';
 
 const AI_SETTINGS_KEY = 'ai_novel_studio_ai_settings';
 const E2E_ENABLED = import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E === '1';
@@ -18,6 +42,7 @@ export interface SessionModelCredentialIdentity {
 }
 
 const sessionModelCredentials = new Map<string, string>();
+let nativeCredentialRestorePromise: Promise<void> | null = null;
 
 function canonicalProviderId(providerId: string): string {
   const normalized = providerId.trim().toLowerCase();
@@ -44,7 +69,7 @@ function rememberSessionModelApiKey(
 ): void {
   const key = credentialIdentityKey(identity);
   if (!key) return;
-  if (apiKey.trim()) sessionModelCredentials.set(key, apiKey);
+  if (apiKey.trim()) sessionModelCredentials.set(key, apiKey.trim());
   else sessionModelCredentials.delete(key);
 }
 
@@ -80,6 +105,108 @@ function gatewayCredentialIdentity(settings: GatewayModelConfig): SessionModelCr
     baseUrl: settings.baseUrl,
     modelId: settings.modelName,
   };
+}
+
+function uniqueCredentialIdentities(
+  identities: SessionModelCredentialIdentity[],
+): SessionModelCredentialIdentity[] {
+  const unique = new Map<string, SessionModelCredentialIdentity>();
+  for (const identity of identities) {
+    const key = credentialIdentityKey(identity);
+    if (key && !unique.has(key)) unique.set(key, identity);
+  }
+  return [...unique.values()];
+}
+
+function persistedModelCredentialIdentities(
+  settings: AiSettings,
+): SessionModelCredentialIdentity[] {
+  const identities: SessionModelCredentialIdentity[] = [];
+  if (settings.runtimeMode === 'api') identities.push(providerCredentialIdentity(settings));
+  if (settings.localChapterModel)
+    identities.push(localCredentialIdentity(settings.localChapterModel));
+  const gateway = settings.gateway ?? settings.remoteWriter;
+  if (gateway) identities.push(gatewayCredentialIdentity(gateway));
+  for (const profile of settings.savedApiModels ?? []) {
+    identities.push({
+      scope: 'provider',
+      providerId: profile.provider,
+      baseUrl: profile.baseUrl,
+      modelId: profile.modelName,
+    });
+  }
+  for (const profile of settings.savedLocalModels ?? []) {
+    identities.push({
+      scope: 'local_chapter_model',
+      providerId: profile.providerId,
+      baseUrl: profile.baseUrl,
+      modelId: profile.modelName,
+    });
+  }
+  for (const profile of settings.savedGatewayModels ?? []) {
+    identities.push({
+      scope: 'gateway',
+      providerId: profile.providerId,
+      baseUrl: profile.baseUrl,
+      modelId: profile.modelName,
+    });
+  }
+  return uniqueCredentialIdentities(identities);
+}
+
+async function setNativeSessionModelApiKey(
+  identity: SessionModelCredentialIdentity,
+  apiKey: string,
+): Promise<void> {
+  await tauriInvoke<void>('set_session_model_credential', {
+    input: { identity, apiKey },
+  });
+}
+
+export async function resolveSessionModelApiKeyAsync(
+  identity: SessionModelCredentialIdentity,
+): Promise<string> {
+  const cached = resolveSessionModelApiKey(identity);
+  if (cached || !isTauriRuntime()) return cached;
+  const apiKey = await tauriInvoke<string>('resolve_session_model_credential', { identity });
+  rememberSessionModelApiKey(identity, apiKey);
+  return resolveSessionModelApiKey(identity);
+}
+
+export async function syncSessionModelCredentialsToNative(settings: AiSettings): Promise<void> {
+  if (!isTauriRuntime()) return;
+  const bindings: Array<{ identity: SessionModelCredentialIdentity; apiKey: string }> = [];
+  if (settings.runtimeMode === 'api') {
+    bindings.push({ identity: providerCredentialIdentity(settings), apiKey: settings.apiKey });
+  }
+  if (settings.localChapterModel) {
+    bindings.push({
+      identity: localCredentialIdentity(settings.localChapterModel),
+      apiKey: settings.localChapterModel.apiKey,
+    });
+  }
+  const gateway = settings.gateway ?? settings.remoteWriter;
+  if (gateway) {
+    bindings.push({ identity: gatewayCredentialIdentity(gateway), apiKey: gateway.apiKey });
+  }
+  await Promise.all(
+    bindings.map(({ identity, apiKey }) => setNativeSessionModelApiKey(identity, apiKey)),
+  );
+}
+
+export function restoreSessionModelCredentialsFromNative(): Promise<void> {
+  if (!isTauriRuntime()) return Promise.resolve();
+  if (!nativeCredentialRestorePromise) {
+    nativeCredentialRestorePromise = Promise.resolve().then(async () => {
+      const settings = getAiSettings();
+      await Promise.all(
+        persistedModelCredentialIdentities(settings).map((identity) =>
+          resolveSessionModelApiKeyAsync(identity).then(() => undefined),
+        ),
+      );
+    });
+  }
+  return nativeCredentialRestorePromise;
 }
 
 export function getDefaultLocalChapterModelSettings(): LocalChapterModelSettings {
@@ -132,6 +259,7 @@ const defaultSettings: AiSettings = {
   maxConcurrentAiRequests: 2,
   budgetWarningPercent: 80,
   mockMode: true,
+  savedApiModels: [],
 };
 
 function normalizeNumber(val: unknown, fallback: number, min: number, max: number): number {
@@ -220,6 +348,278 @@ function normalizeGatewaySettings(
 
 export const normalizeRemoteWriterSettings = normalizeGatewaySettings;
 
+function isCloudApiProvider(value: unknown): value is CloudApiProvider {
+  return value === 'deepseek' || value === 'openai_compatible';
+}
+
+function normalizeSavedApiModelProfile(stored: unknown): SavedApiModelProfile | undefined {
+  if (!stored || typeof stored !== 'object') return undefined;
+  const raw = stored as Partial<SavedApiModelProfile>;
+  if (!isCloudApiProvider(raw.provider)) return undefined;
+  const id = String(raw.id ?? '').trim();
+  const baseUrl = String(raw.baseUrl ?? '').trim();
+  const modelName = String(raw.modelName ?? '').trim();
+  const label = String(raw.label ?? '').trim() || modelName;
+  if (!id || !baseUrl || !modelName) return undefined;
+  return persistableSavedApiModel({
+    id,
+    label,
+    provider: raw.provider,
+    baseUrl,
+    modelName,
+    temperature: normalizeNumber(raw.temperature, 0.7, 0, 2),
+    maxTokens: Math.round(normalizeNumber(raw.maxTokens, 8000, 1, 200000)),
+    timeoutSeconds: Math.round(normalizeNumber(raw.timeoutSeconds, 120, 1, 1800)),
+    inputPricePerMillionTokens: normalizeOptionalPrice(raw.inputPricePerMillionTokens),
+    outputPricePerMillionTokens: normalizeOptionalPrice(raw.outputPricePerMillionTokens),
+    lastTestAt: typeof raw.lastTestAt === 'string' ? raw.lastTestAt : undefined,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : undefined,
+  });
+}
+
+function normalizeSavedApiModels(
+  stored: Partial<AiSettings>,
+  merged: AiSettings,
+): { savedApiModels: SavedApiModelProfile[]; activeSavedApiModelId?: string } {
+  const fromStore = Array.isArray(stored.savedApiModels)
+    ? stored.savedApiModels
+        .map((item) => normalizeSavedApiModelProfile(item))
+        .filter((item): item is SavedApiModelProfile => Boolean(item))
+    : [];
+  const savedApiModels =
+    fromStore.length > 0
+      ? fromStore.filter(
+          (profile, index, list) =>
+            list.findIndex(
+              (item) =>
+                item.id === profile.id ||
+                (item.provider === profile.provider &&
+                  item.baseUrl === profile.baseUrl &&
+                  item.modelName === profile.modelName),
+            ) === index,
+        )
+      : (() => {
+          const seeded = profileFromActiveSettings(merged, 'legacy-cloud');
+          return seeded ? [seeded] : [];
+        })();
+  const requestedId = String(
+    stored.activeSavedApiModelId ?? merged.activeSavedApiModelId ?? '',
+  ).trim();
+  const matched =
+    savedApiModels.find((profile) => profile.id === requestedId) ??
+    savedApiModels.find((profile) => savedApiModelMatchesSettings(profile, merged));
+  return {
+    savedApiModels,
+    activeSavedApiModelId: matched?.id,
+  };
+}
+
+function uniqueOptionalProfiles<
+  T extends { id: string; providerId: string; baseUrl: string; modelName: string },
+>(list: T[]): T[] {
+  return list.filter(
+    (profile, index) =>
+      list.findIndex(
+        (item) =>
+          item.id === profile.id ||
+          optionalModelIdentityKey(item) === optionalModelIdentityKey(profile),
+      ) === index,
+  );
+}
+
+function normalizeSavedLocalModels(
+  stored: Partial<AiSettings>,
+  local: LocalChapterModelSettings | undefined,
+): { savedLocalModels: SavedLocalModelProfile[]; activeSavedLocalModelId?: string } {
+  const fromStore = Array.isArray(stored.savedLocalModels)
+    ? stored.savedLocalModels
+        .map((item) => {
+          if (!item || typeof item !== 'object') return undefined;
+          const raw = item as Partial<SavedLocalModelProfile>;
+          const id = String(raw.id ?? '').trim();
+          const baseUrl = String(raw.baseUrl ?? '').trim();
+          const modelName = String(raw.modelName ?? '').trim();
+          const providerId = String(raw.providerId ?? '').trim();
+          if (!id || !baseUrl || !modelName || !providerId) return undefined;
+          return persistableSavedLocalModel({
+            id,
+            label: String(raw.label ?? '').trim() || modelName,
+            providerId,
+            baseUrl,
+            modelName,
+            timeoutSeconds: normalizeNumber(raw.timeoutSeconds, 120, 1, 1800),
+            temperature: normalizeNumber(raw.temperature, 0.7, 0, 2),
+            topP: normalizeNumber(raw.topP, 0.8, 0, 1),
+            topK: Math.round(normalizeNumber(raw.topK, 20, 0, 4096)),
+            repeatPenalty: normalizeNumber(raw.repeatPenalty, 1.08, 0.01, 3),
+            minTokens: normalizeOptionalInteger(raw.minTokens, 0, 1024),
+            noRepeatNgramSize: normalizeOptionalInteger(raw.noRepeatNgramSize, 0, 32),
+            seed: normalizeOptionalInteger(raw.seed, -2_147_483_648, 2_147_483_647),
+            allowCloudWriterFallback: raw.allowCloudWriterFallback !== false,
+            lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : undefined,
+          });
+        })
+        .filter((item): item is SavedLocalModelProfile => Boolean(item))
+    : [];
+  const savedLocalModels =
+    fromStore.length > 0
+      ? uniqueOptionalProfiles(fromStore)
+      : local
+        ? (() => {
+            const seeded = profileFromLocalSettings(local, 'legacy-local');
+            return seeded ? [seeded] : [];
+          })()
+        : [];
+  const requestedId = String(stored.activeSavedLocalModelId ?? '').trim();
+  const matched =
+    savedLocalModels.find((profile) => profile.id === requestedId) ??
+    (local
+      ? savedLocalModels.find(
+          (profile) => optionalModelIdentityKey(profile) === optionalModelIdentityKey(local),
+        )
+      : undefined);
+  return { savedLocalModels, activeSavedLocalModelId: matched?.id };
+}
+
+function normalizeSavedGatewayModels(
+  stored: Partial<AiSettings>,
+  gateway: GatewayModelConfig | undefined,
+): { savedGatewayModels: SavedGatewayModelProfile[]; activeSavedGatewayModelId?: string } {
+  const fromStore = Array.isArray(stored.savedGatewayModels)
+    ? stored.savedGatewayModels
+        .map((item) => {
+          if (!item || typeof item !== 'object') return undefined;
+          const raw = item as Partial<SavedGatewayModelProfile>;
+          const id = String(raw.id ?? '').trim();
+          const baseUrl = String(raw.baseUrl ?? '').trim();
+          const modelName = String(raw.modelName ?? '').trim();
+          const providerId = String(raw.providerId ?? '').trim();
+          if (!id || !baseUrl || !modelName || !providerId) return undefined;
+          return persistableSavedGatewayModel({
+            id,
+            label: String(raw.label ?? '').trim() || modelName,
+            providerId,
+            baseUrl,
+            modelName,
+            timeoutSeconds: normalizeNumber(raw.timeoutSeconds, 120, 1, 1800),
+            contextTokens: normalizeOptionalInteger(raw.contextTokens, 1024, 200000),
+            maxTokens: normalizeOptionalInteger(raw.maxTokens, 1, 32000),
+            temperature:
+              raw.temperature === undefined
+                ? undefined
+                : normalizeNumber(raw.temperature, 0.7, 0, 2),
+            topP: raw.topP === undefined ? undefined : normalizeNumber(raw.topP, 0.8, 0, 1),
+            topK:
+              raw.topK === undefined
+                ? undefined
+                : Math.round(normalizeNumber(raw.topK, 20, 0, 4096)),
+            repeatPenalty:
+              raw.repeatPenalty === undefined
+                ? undefined
+                : normalizeNumber(raw.repeatPenalty, 1.08, 0.01, 3),
+            minTokens: normalizeOptionalInteger(raw.minTokens, 0, 8000),
+            noRepeatNgramSize: normalizeOptionalInteger(raw.noRepeatNgramSize, 0, 32),
+            seed: normalizeOptionalInteger(raw.seed, -2_147_483_648, 2_147_483_647),
+            lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : undefined,
+          });
+        })
+        .filter((item): item is SavedGatewayModelProfile => Boolean(item))
+    : [];
+  const savedGatewayModels =
+    fromStore.length > 0
+      ? uniqueOptionalProfiles(fromStore)
+      : gateway
+        ? (() => {
+            const seeded = profileFromGatewaySettings(gateway, 'legacy-gateway');
+            return seeded ? [seeded] : [];
+          })()
+        : [];
+  const requestedId = String(stored.activeSavedGatewayModelId ?? '').trim();
+  const matched =
+    savedGatewayModels.find((profile) => profile.id === requestedId) ??
+    (gateway
+      ? savedGatewayModels.find(
+          (profile) => optionalModelIdentityKey(profile) === optionalModelIdentityKey(gateway),
+        )
+      : undefined);
+  return { savedGatewayModels, activeSavedGatewayModelId: matched?.id };
+}
+
+function withUpsertedOptionalModels(settings: AiSettings): AiSettings {
+  let next = settings;
+  if (next.localChapterModel) {
+    const list = next.savedLocalModels ?? [];
+    const matched = list.find(
+      (item) =>
+        optionalModelIdentityKey(item) === optionalModelIdentityKey(next.localChapterModel!),
+    );
+    const profile = profileFromLocalSettings(
+      next.localChapterModel,
+      matched?.id ?? createUniqueId(),
+      matched?.label,
+    );
+    if (profile) {
+      const savedLocalModels = upsertByIdentity(list, profile);
+      next = {
+        ...next,
+        savedLocalModels,
+        activeSavedLocalModelId:
+          savedLocalModels.find(
+            (item) => optionalModelIdentityKey(item) === optionalModelIdentityKey(profile),
+          )?.id ?? profile.id,
+      };
+    }
+  }
+  const gateway = next.gateway ?? next.remoteWriter;
+  if (gateway) {
+    const list = next.savedGatewayModels ?? [];
+    const matched = list.find(
+      (item) => optionalModelIdentityKey(item) === optionalModelIdentityKey(gateway),
+    );
+    const profile = profileFromGatewaySettings(
+      gateway,
+      matched?.id ?? createUniqueId(),
+      matched?.label,
+    );
+    if (profile) {
+      const savedGatewayModels = upsertByIdentity(list, profile);
+      next = {
+        ...next,
+        savedGatewayModels,
+        activeSavedGatewayModelId:
+          savedGatewayModels.find(
+            (item) => optionalModelIdentityKey(item) === optionalModelIdentityKey(profile),
+          )?.id ?? profile.id,
+      };
+    }
+  }
+  return next;
+}
+
+function withUpsertedActiveApiModel(settings: AiSettings): AiSettings {
+  const list = settings.savedApiModels ?? [];
+  const matched = list.find((item) => savedApiModelMatchesSettings(item, settings));
+  const profile = profileFromActiveSettings(
+    settings,
+    matched?.id ?? createUniqueId(),
+    matched?.label,
+  );
+  if (!profile) {
+    return {
+      ...settings,
+      savedApiModels: list,
+    };
+  }
+  const savedApiModels = upsertSavedApiModel(list, profile);
+  const active =
+    savedApiModels.find((item) => savedApiModelMatchesSettings(item, settings)) ?? profile;
+  return {
+    ...settings,
+    savedApiModels,
+    activeSavedApiModelId: active.id,
+  };
+}
+
 export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
   const merged = { ...defaultSettings, ...stored } as AiSettings;
 
@@ -275,6 +675,33 @@ export function normalizeAiSettings(stored: Partial<AiSettings>): AiSettings {
     delete merged.remoteWriter;
   }
 
+  const saved = normalizeSavedApiModels(stored, merged);
+  merged.savedApiModels = saved.savedApiModels;
+  if (saved.activeSavedApiModelId) merged.activeSavedApiModelId = saved.activeSavedApiModelId;
+  else delete merged.activeSavedApiModelId;
+
+  const savedLocal = normalizeSavedLocalModels(stored, merged.localChapterModel);
+  if (savedLocal.savedLocalModels.length > 0) {
+    merged.savedLocalModels = savedLocal.savedLocalModels;
+    if (savedLocal.activeSavedLocalModelId)
+      merged.activeSavedLocalModelId = savedLocal.activeSavedLocalModelId;
+    else delete merged.activeSavedLocalModelId;
+  } else {
+    delete merged.savedLocalModels;
+    delete merged.activeSavedLocalModelId;
+  }
+
+  const savedGateway = normalizeSavedGatewayModels(stored, merged.gateway ?? merged.remoteWriter);
+  if (savedGateway.savedGatewayModels.length > 0) {
+    merged.savedGatewayModels = savedGateway.savedGatewayModels;
+    if (savedGateway.activeSavedGatewayModelId) {
+      merged.activeSavedGatewayModelId = savedGateway.activeSavedGatewayModelId;
+    } else delete merged.activeSavedGatewayModelId;
+  } else {
+    delete merged.savedGatewayModels;
+    delete merged.activeSavedGatewayModelId;
+  }
+
   return merged;
 }
 
@@ -300,6 +727,26 @@ function withoutCredentials(settings: AiSettings): Record<string, unknown> {
     lastTestAt: settings.lastTestAt,
     lastTestOk: settings.lastTestOk,
     lastTestMessage: settings.lastTestMessage,
+    savedApiModels: (settings.savedApiModels ?? []).map((profile) =>
+      persistableSavedApiModel(profile),
+    ),
+    activeSavedApiModelId: settings.activeSavedApiModelId,
+    ...(settings.savedLocalModels?.length
+      ? {
+          savedLocalModels: settings.savedLocalModels.map((profile) =>
+            persistableSavedLocalModel(profile),
+          ),
+          activeSavedLocalModelId: settings.activeSavedLocalModelId,
+        }
+      : {}),
+    ...(settings.savedGatewayModels?.length
+      ? {
+          savedGatewayModels: settings.savedGatewayModels.map((profile) =>
+            persistableSavedGatewayModel(profile),
+          ),
+          activeSavedGatewayModelId: settings.activeSavedGatewayModelId,
+        }
+      : {}),
     ...(local
       ? {
           localChapterModel: {
@@ -394,6 +841,11 @@ function withSessionCredentials(settings: AiSettings): AiSettings {
   };
 }
 
+export function resetSessionModelCredentialsForTests(): void {
+  sessionModelCredentials.clear();
+  nativeCredentialRestorePromise = null;
+}
+
 export function getAiSettings(): AiSettings {
   if (E2E_ENABLED && !REAL_PROVIDER_E2E_ENABLED) return { ...defaultSettings };
   const stored = lsGet<Partial<AiSettings>>(AI_SETTINGS_KEY);
@@ -445,7 +897,9 @@ export function getAiSettings(): AiSettings {
 }
 
 export function saveAiSettings(settings: AiSettings): void {
-  const normalized = normalizeAiSettings(settings);
+  const normalized = withUpsertedOptionalModels(
+    withUpsertedActiveApiModel(normalizeAiSettings(settings)),
+  );
   if (normalized.runtimeMode === 'api') {
     rememberSessionModelApiKey(providerCredentialIdentity(normalized), normalized.apiKey);
   }

@@ -1,4 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  BarChart3,
+  Bot,
+  Eye,
+  FileText,
+  Gauge,
+  LoaderCircle,
+  MessageSquare,
+  Palette,
+  PenLine,
+  Search,
+  TriangleAlert,
+} from 'lucide-react';
 import type { Chapter } from '../../../types/chapter';
 import type { StyleProfile } from '../../../types/style';
 import type { OutputProfile } from '../../../types/output';
@@ -12,6 +25,7 @@ import { formatNumber } from '../../../utils/format';
 import { describeUnknownError } from '../../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../../services/ai/aiCancellation';
 import { showInfo } from '../../../utils/nativeDialog';
+import { StyleAnalysisResultCard } from './StyleAnalysisResultCard';
 
 interface StylePanelProps {
   novelId?: string;
@@ -176,14 +190,29 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
     <div>
       {/* AI 模式状态 */}
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
@@ -192,7 +221,13 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
 
       {/* AI 风格分析 */}
       <div className="panel-section">
-        <div className="panel-section-title">🤖 风格分析</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          风格分析
+        </div>
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
           粘贴参考文本或使用当前章节正文进行风格分析
         </div>
@@ -202,7 +237,8 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
             onClick={loadChapterContent}
             disabled={!chapter}
           >
-            📄 使用当前章节正文
+            <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+            使用当前章节正文
           </button>
         </div>
         <textarea
@@ -220,9 +256,26 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
           className="btn btn-primary btn-sm"
           onClick={handleAnalyzeStyle}
           disabled={analyzeLoading || !analyzeText.trim()}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {analyzeLoading ? '⏳ 分析中...' : '🔍 开始风格分析'}
+          {analyzeLoading ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              分析中...
+            </>
+          ) : (
+            <>
+              <Search size={14} strokeWidth={1.8} aria-hidden="true" />
+              开始风格分析
+            </>
+          )}
         </button>
         {analyzeLoading && (
           <button
@@ -244,62 +297,8 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
           </div>
         )}
 
-        {/* 分析结果 */}
         {analyzeResult && (
-          <div
-            style={{
-              border: '1px solid var(--color-primary-light)',
-              borderRadius: 6,
-              padding: 10,
-              marginTop: 8,
-            }}
-          >
-            <div className="panel-field-label" style={{ fontWeight: 600, marginBottom: 6 }}>
-              📊 分析结果
-            </div>
-            {analyzeResult.narrativePerspective && (
-              <div style={{ fontSize: 12, marginBottom: 3 }}>
-                👁️ 视角：{analyzeResult.narrativePerspective}
-              </div>
-            )}
-            {analyzeResult.tone && (
-              <div style={{ fontSize: 12, marginBottom: 3 }}>🎭 基调：{analyzeResult.tone}</div>
-            )}
-            {analyzeResult.pace && (
-              <div style={{ fontSize: 12, marginBottom: 3 }}>⚡ 节奏：{analyzeResult.pace}</div>
-            )}
-            {analyzeResult.sentenceStyle && (
-              <div style={{ fontSize: 12, marginBottom: 3 }}>
-                ✍️ 句式：{analyzeResult.sentenceStyle}
-              </div>
-            )}
-            <div style={{ fontSize: 12, marginBottom: 3 }}>
-              💬 对话比：{Math.round((analyzeResult.dialogueRatio ?? 0) * 100)}% · 🖊️ 描写比：
-              {Math.round((analyzeResult.descriptionRatio ?? 0) * 100)}%
-            </div>
-            {analyzeResult.styleSummary && (
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--color-text-secondary)',
-                  lineHeight: 1.6,
-                  marginTop: 6,
-                  padding: 6,
-                  background: 'var(--color-bg-primary)',
-                  borderRadius: 4,
-                }}
-              >
-                {analyzeResult.styleSummary}
-              </div>
-            )}
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={handleSaveAsStyle}
-              style={{ marginTop: 8, width: '100%' }}
-            >
-              💾 保存为风格方案
-            </button>
-          </div>
+          <StyleAnalysisResultCard result={analyzeResult} onSave={handleSaveAsStyle} />
         )}
       </div>
 
@@ -326,12 +325,27 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
             }}
           >
             {selectedStyle.narrativePerspective && (
-              <div>👁️ {selectedStyle.narrativePerspective}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Eye size={13} strokeWidth={1.8} aria-hidden="true" />
+                {selectedStyle.narrativePerspective}
+              </div>
             )}
-            {selectedStyle.tone && <div>🎭 {selectedStyle.tone}</div>}
-            {selectedStyle.pace && <div>⚡ {selectedStyle.pace}</div>}
-            <div>
-              💬 {Math.round(selectedStyle.dialogueRatio * 100)}% · 🖊️{' '}
+            {selectedStyle.tone && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Palette size={13} strokeWidth={1.8} aria-hidden="true" />
+                {selectedStyle.tone}
+              </div>
+            )}
+            {selectedStyle.pace && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Gauge size={13} strokeWidth={1.8} aria-hidden="true" />
+                {selectedStyle.pace}
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <MessageSquare size={13} strokeWidth={1.8} aria-hidden="true" />
+              {Math.round(selectedStyle.dialogueRatio * 100)}%
+              <PenLine size={13} strokeWidth={1.8} aria-hidden="true" />
               {Math.round(selectedStyle.descriptionRatio * 100)}%
             </div>
           </div>
@@ -360,15 +374,15 @@ function StylePanel({ novelId, chapter, onStyleChange, onOutputChange }: StylePa
               lineHeight: 1.6,
             }}
           >
-            <div>
-              📊{' '}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <BarChart3 size={13} strokeWidth={1.8} aria-hidden="true" />
               {formatNumber(
                 selectedOutput.targetWordCount ?? selectedOutput.chapterWordRange.default,
               )}{' '}
               字
             </div>
-            <div>
-              ⚡{' '}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Gauge size={13} strokeWidth={1.8} aria-hidden="true" />
               {selectedOutput.paceLevel === 'fast'
                 ? '快节奏'
                 : selectedOutput.paceLevel === 'slow'

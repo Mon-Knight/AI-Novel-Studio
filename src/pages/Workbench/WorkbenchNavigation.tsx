@@ -317,7 +317,7 @@ export function WorkbenchNavigation({
                             disabled={!renameDraft.trim() || isBusy}
                             onClick={() => void submitRename(conversation.conversationId)}
                           >
-                            <Check aria-hidden="true" size={14} strokeWidth={2} />
+                            <Check aria-hidden="true" size={14} strokeWidth={1.8} />
                           </button>
                           <button
                             type="button"
@@ -326,7 +326,7 @@ export function WorkbenchNavigation({
                             disabled={isBusy}
                             onClick={() => setRenamingId('')}
                           >
-                            <X aria-hidden="true" size={14} strokeWidth={2} />
+                            <X aria-hidden="true" size={14} strokeWidth={1.8} />
                           </button>
                         </div>
                       ) : (

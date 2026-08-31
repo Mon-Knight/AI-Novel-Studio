@@ -32,6 +32,48 @@ test('writer core-asset gate requires a formal rule system', () => {
   );
 });
 
+test('critical aggregate sections keep every child asset before Provider budgeting', async () => {
+  const snapshot = await compileGenerationContextSnapshot(
+    {
+      novelId: 'novel-long-critical-context',
+      chapterId: 'chapter-long-critical-context',
+    },
+    {
+      buildBaseContext: async () => ({
+        novelTitle: '未命名悬疑小说',
+        chapterTitle: '第一章',
+        novelDescription: '长简介'.repeat(3_000),
+        worldBackground: 'WORLD_CONTEXT_TAIL_CANARY',
+        ruleSystems: 'RULE_CONTEXT_TAIL_CANARY',
+        protagonist: '主角',
+        protagonistsSummary: '长主角资料'.repeat(2_000),
+        chapterCharacters: 'CHAPTER_CHARACTER_TAIL_CANARY',
+        masterOutline: '长总纲'.repeat(3_000),
+        chapterOutline: 'CHAPTER_OUTLINE_TAIL_CANARY',
+      }),
+      getEngineeringBundle: emptyEngineeringBundle,
+      loadAssetContext: async () => ({ sources: [], warnings: [] }),
+    },
+  );
+
+  const novel = snapshot.compiledContext.sections.find((section) => section.key === 'novel');
+  const protagonist = snapshot.compiledContext.sections.find(
+    (section) => section.key === 'protagonist',
+  );
+  const outline = snapshot.compiledContext.sections.find((section) => section.key === 'outline');
+
+  assert.ok(novel && novel.content.length > 8_000);
+  assert.match(novel.content, /WORLD_CONTEXT_TAIL_CANARY/);
+  assert.match(novel.content, /RULE_CONTEXT_TAIL_CANARY/);
+  assert.doesNotMatch(novel.content, /已截断/);
+  assert.ok(protagonist && protagonist.content.length > 8_000);
+  assert.match(protagonist.content, /CHAPTER_CHARACTER_TAIL_CANARY/);
+  assert.doesNotMatch(protagonist.content, /已截断/);
+  assert.ok(outline && outline.content.length > 8_000);
+  assert.match(outline.content, /CHAPTER_OUTLINE_TAIL_CANARY/);
+  assert.doesNotMatch(outline.content, /已截断/);
+});
+
 test('cross-chapter continuity contract freezes relative deadlines against one story clock', async () => {
   const snapshot = await compileGenerationContextSnapshot(
     {

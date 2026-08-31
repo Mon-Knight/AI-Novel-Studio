@@ -1,6 +1,7 @@
 /**
  * AI Novel Studio - 404 页面
  */
+import { ArrowLeft, SearchX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 function NotFoundPage() {
@@ -17,14 +18,15 @@ function NotFoundPage() {
         justifyContent: 'center',
       }}
     >
-      <div style={{ fontSize: 64, marginBottom: 16 }}>🔍</div>
+      <SearchX aria-hidden="true" size={64} strokeWidth={1.8} style={{ marginBottom: 16 }} />
       <h2 style={{ marginBottom: 8 }}>页面不存在</h2>
       <p style={{ color: 'var(--color-text-muted)', fontSize: 14, marginBottom: 20 }}>
         你访问的路径可能已被移除或地址有误
       </p>
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>
-          ← 返回首页
+          <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+          返回首页
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => navigate(-1)}>
           返回上一页

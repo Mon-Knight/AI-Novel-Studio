@@ -76,6 +76,9 @@ interface TauriAiStreamEvent {
 
 const OUTPUT_TOKEN_TRUNCATION_ERROR =
   'AI 调用失败：模型在输出 Token 上限处停止，响应内容不完整且未采纳；请缩小单次输出或提高最大输出 Token 后重试。';
+const AI_POLICY_SETTLEMENT_TIMEOUT_MS = 15_000;
+const AI_POLICY_SETTLEMENT_TIMEOUT_ERROR =
+  'AI_REQUEST_POLICY_SETTLEMENT_TIMEOUT: AI 请求本地治理结算超时。';
 
 export function buildChatCompletionsUrl(baseUrl: string): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
@@ -346,7 +349,20 @@ export class RealAiClient implements AiClient {
     settings: AiSettings,
     response?: AiGenerateResponse,
   ): Promise<void> {
-    await aiRequestPolicyService.settleRequest(lease, settings, response);
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
+    try {
+      await Promise.race([
+        aiRequestPolicyService.settleRequest(lease, settings, response),
+        new Promise<never>((_resolve, reject) => {
+          timeoutId = globalThis.setTimeout(
+            () => reject(new Error(AI_POLICY_SETTLEMENT_TIMEOUT_ERROR)),
+            AI_POLICY_SETTLEMENT_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId);
+    }
   }
 
   async generate(
@@ -425,8 +441,7 @@ export class RealAiClient implements AiClient {
     policyLease: AiRequestPolicyLease,
   ): Promise<AiGenerateResponse> {
     const signal = options.signal;
-    const requestId =
-      options.requestId?.trim() || (signal ? createProviderTransportRequestId('ai') : undefined);
+    const requestId = options.requestId?.trim() || createProviderTransportRequestId('ai');
     const responsePromise = invoke<TauriAiResponse>('ai_chat_completion', {
       request: {
         requestId,
@@ -452,7 +467,12 @@ export class RealAiClient implements AiClient {
         },
       },
     });
-    const response = await this.awaitTauriResponse(responsePromise, signal, requestId);
+    const response = await this.awaitTauriResponse(
+      responsePromise,
+      signal,
+      requestId,
+      this.config.timeoutSeconds ?? 120,
+    );
 
     return {
       text: response.text,
@@ -467,62 +487,95 @@ export class RealAiClient implements AiClient {
   private async awaitTauriResponse(
     responsePromise: Promise<TauriAiResponse>,
     signal: AbortSignal | undefined,
-    requestId: string | undefined,
+    requestId: string,
+    timeoutSeconds: number,
   ): Promise<TauriAiResponse> {
     let removeAbortListener: () => void = () => {};
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
     try {
-      if (!signal || !requestId) {
-        const response = await responsePromise;
-        throwIfAiRequestCancelled(signal);
-        return response;
-      }
-
       type ResponseOutcome =
         | { kind: 'response'; response: TauriAiResponse }
         | { kind: 'response-error'; error: unknown };
-      type CancellationOutcome = { kind: 'cancellation'; confirmed: boolean };
+      type StopCause = 'caller' | 'timeout';
+      type StopOutcome = { kind: 'stop'; cause: StopCause; confirmed: boolean };
       const responseOutcome = responsePromise.then<ResponseOutcome, ResponseOutcome>(
         (value) => ({ kind: 'response', response: value }),
         (error: unknown) => ({ kind: 'response-error', error }),
       );
-      let abortHandled = false;
-      const cancellationOutcome = new Promise<CancellationOutcome>((resolve) => {
-        const onAbort = () => {
-          if (abortHandled) return;
-          abortHandled = true;
-          void invoke<boolean>('cancel_ai_request', { requestId }).then(
-            () => resolve({ kind: 'cancellation', confirmed: true }),
+      let stopCause: StopCause | undefined;
+      const stopOutcome = new Promise<StopOutcome>((resolve) => {
+        const requestStop = (cause: StopCause) => {
+          if (stopCause) return;
+          stopCause = cause;
+          const cancellation = invoke<boolean>('cancel_ai_request', { requestId });
+          const warnCancellationUnavailable = () => {
+            appLogger.warn(
+              '[RealAiClient] cancel_ai_request could not be confirmed; the provider result will be ignored.',
+            );
+          };
+          if (cause === 'timeout') {
+            // The renderer watchdog must never inherit a second unbounded wait
+            // from the cancellation IPC. Rust still receives the cancellation,
+            // while this request settles as a retryable provider timeout.
+            resolve({ kind: 'stop', cause, confirmed: false });
+            void cancellation.then((cancelled) => {
+              if (!cancelled) warnCancellationUnavailable();
+            }, warnCancellationUnavailable);
+            return;
+          }
+          void cancellation.then(
+            (cancelled) => {
+              if (!cancelled) warnCancellationUnavailable();
+              resolve({ kind: 'stop', cause, confirmed: cancelled });
+            },
             () => {
               appLogger.warn(
                 '[RealAiClient] cancel_ai_request could not be confirmed; waiting for the active request to settle.',
               );
-              resolve({ kind: 'cancellation', confirmed: false });
+              resolve({ kind: 'stop', cause, confirmed: false });
             },
           );
         };
-        signal.addEventListener('abort', onAbort, { once: true });
-        removeAbortListener = () => signal.removeEventListener('abort', onAbort);
-        if (signal.aborted) onAbort();
+        const onAbort = () => requestStop('caller');
+        signal?.addEventListener('abort', onAbort, { once: true });
+        removeAbortListener = () => signal?.removeEventListener('abort', onAbort);
+        if (signal?.aborted) onAbort();
+        timeoutId = globalThis.setTimeout(
+          () => requestStop('timeout'),
+          Math.max(1, Math.round(timeoutSeconds * 1_000)),
+        );
       });
-      const outcome = await Promise.race([responseOutcome, cancellationOutcome]);
-      if (outcome.kind === 'cancellation') {
-        if (!outcome.confirmed) {
+      const outcome = await Promise.race([responseOutcome, stopOutcome]);
+      if (outcome.kind === 'stop') {
+        if (outcome.cause === 'caller' && !outcome.confirmed) {
           // The IPC transport failed, so wait until late results are impossible.
           await responseOutcome;
         }
+        if (outcome.cause === 'timeout') {
+          throw new Error(
+            `AI 调用失败：请求超时（${timeoutSeconds} 秒），请检查网络或增加超时时间。`,
+          );
+        }
         throw new AiRequestCancelledError();
       }
+      if (stopCause === 'timeout') {
+        throw new Error(
+          `AI 调用失败：请求超时（${timeoutSeconds} 秒），请检查网络或增加超时时间。`,
+        );
+      }
+      if (stopCause === 'caller') throw new AiRequestCancelledError();
       if (outcome.kind === 'response-error') {
-        if (signal.aborted) throw new AiRequestCancelledError();
+        if (signal?.aborted) throw new AiRequestCancelledError();
         throw outcome.error;
       }
-      if (signal.aborted) throw new AiRequestCancelledError();
+      if (signal?.aborted) throw new AiRequestCancelledError();
       return outcome.response;
     } catch (error: unknown) {
       if (isAiRequestCancelled(error)) throw new AiRequestCancelledError();
       throw error;
     } finally {
       removeAbortListener();
+      if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId);
     }
   }
 
@@ -592,7 +645,12 @@ export class RealAiClient implements AiClient {
           },
         },
       });
-      const response = await this.awaitTauriResponse(responsePromise, options.signal, requestId);
+      const response = await this.awaitTauriResponse(
+        responsePromise,
+        options.signal,
+        requestId,
+        this.config.timeoutSeconds ?? 120,
+      );
       if (protocolError) throw protocolError;
       throwIfAiRequestCancelled(options.signal);
       emitAiStreamEvent(options.onStreamEvent, {

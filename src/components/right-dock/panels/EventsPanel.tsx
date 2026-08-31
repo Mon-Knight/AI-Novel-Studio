@@ -1,4 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Ban,
+  Bot,
+  CheckCircle2,
+  CircleAlert,
+  ClipboardList,
+  Lightbulb,
+  TriangleAlert,
+} from 'lucide-react';
 import type { Chapter } from '../../../types/chapter';
 import type { ChapterDraft } from '../../../types/ai';
 import type { Character, ChapterCharacter } from '../../../types/character';
@@ -145,14 +154,29 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
     <div>
       {/* AI 模式状态 */}
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
@@ -160,13 +184,30 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
       </div>
       {/* 当前事件列表 */}
       <div className="panel-section">
-        <div className="panel-section-title">📋 本章事件（{events.length}）</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <ClipboardList size={14} strokeWidth={1.8} aria-hidden="true" />
+          本章事件（{events.length}）
+        </div>
         {events.map((ev) => (
           <div key={ev.id} className="event-item">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong style={getStatusStyle(ev.status)}>
-                {ev.status === 'required' && '🔴 '}
-                {ev.status === 'forbidden' && '🚫 '}
+              <strong
+                style={{
+                  ...getStatusStyle(ev.status),
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                {ev.status === 'required' && (
+                  <CircleAlert size={13} strokeWidth={1.8} aria-hidden="true" />
+                )}
+                {ev.status === 'forbidden' && (
+                  <Ban size={13} strokeWidth={1.8} aria-hidden="true" />
+                )}
                 {ev.title}
               </strong>
               <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
@@ -218,7 +259,13 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
 
       {/* AI 建议 */}
       <div className="panel-section">
-        <div className="panel-section-title">🤖 AI 推荐事件</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 推荐事件
+        </div>
         {loading ? (
           <button
             className="btn btn-secondary btn-sm"
@@ -232,9 +279,17 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
             className="btn btn-primary btn-sm"
             onClick={handleSuggestEvents}
             disabled={!chapter}
-            style={{ marginBottom: 8, width: '100%' }}
+            style={{
+              marginBottom: 8,
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
           >
-            💡 生成本章事件建议
+            <Lightbulb size={14} strokeWidth={1.8} aria-hidden="true" />
+            生成本章事件建议
           </button>
         )}
         {statusMessage && (
@@ -270,7 +325,8 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
                 onClick={() => handleAdoptSuggestion(s)}
                 style={{ marginTop: 4 }}
               >
-                ✅ 采用建议
+                <CheckCircle2 size={13} strokeWidth={1.8} aria-hidden="true" />
+                采用建议
               </button>
             )}
           </div>
@@ -291,7 +347,15 @@ function EventsPanel({ novelId, chapter }: EventsPanelProps) {
           borderTop: '1px solid var(--color-border-light)',
         }}
       >
-        💡 事件建议基于分卷大纲、章节大纲、前文总结、当前角色状态和未回收伏笔
+        <span style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <Lightbulb
+            size={13}
+            strokeWidth={1.8}
+            aria-hidden="true"
+            style={{ flexShrink: 0, marginTop: 1 }}
+          />
+          事件建议基于分卷大纲、章节大纲、前文总结、当前角色状态和未回收伏笔
+        </span>
       </div>
     </div>
   );

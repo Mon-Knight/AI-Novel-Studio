@@ -1,5 +1,13 @@
 import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback } from 'react';
+import {
+  BookOpenText,
+  FileJson,
+  FileText,
+  LayoutTemplate,
+  PenLine,
+  type LucideIcon,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { novelRepository } from '../../services/database/novelRepository';
 import { novelService } from '../../services/novels/novelService';
@@ -12,10 +20,13 @@ import { confirmDanger, showError } from '../../utils/nativeDialog';
 import { describeUnknownError } from '../../utils/errorMessage';
 import '../../styles/home.css';
 
-const quickActions = [
-  { icon: '📄', label: '导入 TXT', action: 'import-txt' as const },
-  { icon: '📋', label: '导入 JSON', action: 'import-json' as const },
-  { icon: '🎨', label: '模板中心', path: '/templates' },
+const quickActions: Array<
+  | { icon: LucideIcon; label: string; action: 'import-txt' | 'import-json' }
+  | { icon: LucideIcon; label: string; path: string }
+> = [
+  { icon: FileText, label: '导入 TXT', action: 'import-txt' },
+  { icon: FileJson, label: '导入 JSON', action: 'import-json' },
+  { icon: LayoutTemplate, label: '模板中心', path: '/templates' },
 ];
 
 function HomePage() {
@@ -107,7 +118,9 @@ function HomePage() {
 
       {/* 横幅 */}
       <div className="home-banner">
-        <div className="home-banner-icon">📝</div>
+        <div className="home-banner-icon">
+          <BookOpenText aria-hidden="true" size={28} strokeWidth={1.8} />
+        </div>
         <div className="home-banner-content">
           <div className="home-banner-title">欢迎使用 AI Novel Studio</div>
           <div className="home-banner-desc">
@@ -124,28 +137,35 @@ function HomePage() {
           onClick={() => setShowCreateModal(true)}
           style={{ borderColor: 'var(--color-primary)', background: 'var(--color-primary-light)' }}
         >
-          <div className="qa-icon">✏️</div>
+          <div className="qa-icon">
+            <PenLine aria-hidden="true" size={20} strokeWidth={1.8} />
+          </div>
           <div className="qa-label" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
             新建作品
           </div>
         </div>
-        {quickActions.map((action) => (
-          <div
-            key={action.label}
-            className="quick-action-card"
-            onClick={() => {
-              if ('action' in action) {
-                if (action.action === 'import-txt') setShowTxtImport(true);
-                else if (action.action === 'import-json') setShowJsonImport(true);
-              } else if ('path' in action) {
-                navigate(action.path);
-              }
-            }}
-          >
-            <div className="qa-icon">{action.icon}</div>
-            <div className="qa-label">{action.label}</div>
-          </div>
-        ))}
+        {quickActions.map((action) => {
+          const Icon = action.icon;
+          return (
+            <div
+              key={action.label}
+              className="quick-action-card"
+              onClick={() => {
+                if ('action' in action) {
+                  if (action.action === 'import-txt') setShowTxtImport(true);
+                  else if (action.action === 'import-json') setShowJsonImport(true);
+                } else if ('path' in action) {
+                  navigate(action.path);
+                }
+              }}
+            >
+              <div className="qa-icon">
+                <Icon aria-hidden="true" size={20} strokeWidth={1.8} />
+              </div>
+              <div className="qa-label">{action.label}</div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 作品列表 */}
@@ -157,7 +177,12 @@ function HomePage() {
       <div data-testid="project-list">
         {novels.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 48, color: 'var(--color-text-muted)' }}>
-            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📖</div>
+            <BookOpenText
+              aria-hidden="true"
+              size={48}
+              strokeWidth={1.8}
+              style={{ marginBottom: 16, opacity: 0.3 }}
+            />
             <div style={{ fontSize: 16, marginBottom: 16 }}>
               还没有作品，点击上方「新建作品」开始
             </div>
@@ -185,7 +210,10 @@ function HomePage() {
           onClick={() => setShowCreateModal(false)}
         >
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">✏️ 新建作品</div>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <PenLine aria-hidden="true" size={18} strokeWidth={1.8} />
+              新建作品
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <label className="panel-field-label">作品名称 *</label>

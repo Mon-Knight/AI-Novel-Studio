@@ -32,6 +32,7 @@ export function useWorkbenchChapterAssetRecovery(
     useConversationScopedState<ChapterAssetRecovery | null>(selectedConversationId, null);
   const recoveriesRef = useRef(new Map<string, ChapterAssetRecovery>());
   const mutationRevisionsRef = useRef(new Map<string, number>());
+  const hydratedPersistedConversationsRef = useRef(new Set<string>());
   const persistenceLoadRef = useRef(0);
   const checkingCountsRef = useRef(new Map<string, number>());
   const [checkingConversationIds, setCheckingConversationIds] = useState<Set<string>>(
@@ -104,6 +105,7 @@ export function useWorkbenchChapterAssetRecovery(
     if (!selectedConversationId) return;
     const current = recoveriesRef.current.get(selectedConversationId);
     if (current) {
+      hydratedPersistedConversationsRef.current.add(selectedConversationId);
       updateRecovery(selectedConversationId, current);
       return;
     }
@@ -111,20 +113,29 @@ export function useWorkbenchChapterAssetRecovery(
     persistenceLoadRef.current = loadId;
     const stored = chapterAssetRecoveryStore.get(selectedConversationId);
     if (stored) {
+      hydratedPersistedConversationsRef.current.add(selectedConversationId);
       advanceMutationRevision(selectedConversationId);
       recoveriesRef.current.set(selectedConversationId, stored);
       updateRecovery(selectedConversationId, stored);
       return;
     }
-    advanceMutationRevision(selectedConversationId);
-    recoveriesRef.current.delete(selectedConversationId);
-    updateRecovery(selectedConversationId, null);
     if (
       !persistedBundle ||
       persistedBundle.conversation.conversationId !== selectedConversationId
     ) {
+      advanceMutationRevision(selectedConversationId);
+      recoveriesRef.current.delete(selectedConversationId);
+      updateRecovery(selectedConversationId, null);
       return;
     }
+    if (hydratedPersistedConversationsRef.current.has(selectedConversationId)) {
+      updateRecovery(selectedConversationId, null);
+      return;
+    }
+    hydratedPersistedConversationsRef.current.add(selectedConversationId);
+    const mutationRevision = advanceMutationRevision(selectedConversationId);
+    recoveriesRef.current.delete(selectedConversationId);
+    updateRecovery(selectedConversationId, null);
     void recoverPersistedChapterAssetRecovery(
       {
         conversationId: selectedConversationId,
@@ -135,7 +146,13 @@ export function useWorkbenchChapterAssetRecovery(
       },
     )
       .then((rebuilt) => {
-        if (persistenceLoadRef.current !== loadId || !rebuilt) return;
+        if (
+          persistenceLoadRef.current !== loadId ||
+          readMutationRevision(selectedConversationId) !== mutationRevision ||
+          !rebuilt
+        ) {
+          return;
+        }
         const newer =
           recoveriesRef.current.get(selectedConversationId) ??
           chapterAssetRecoveryStore.get(selectedConversationId);
@@ -153,6 +170,7 @@ export function useWorkbenchChapterAssetRecovery(
     persistRecovery,
     persistedBundle,
     preferredChapterId,
+    readMutationRevision,
     selectedConversationId,
     updateRecovery,
   ]);

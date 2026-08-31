@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Bot, CheckCircle2, Circle, Lightbulb, Target, TriangleAlert, X } from 'lucide-react';
 import type { AgentTaskState, AgentTaskStatus } from '../../types/agentHarness';
 import {
   agentConversationService,
@@ -137,7 +138,7 @@ export function AgentChatWorkspace({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>🤖</span>
+          <Bot aria-hidden="true" size={18} strokeWidth={1.8} />
           <strong>Creative Agent Workspace</strong>
           <span
             data-testid="agent-status-badge"
@@ -181,7 +182,18 @@ export function AgentChatWorkspace({
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ fontWeight: 600, color: '#166534' }}>🎯 任务目标: {taskState.goal}</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                color: '#166534',
+              }}
+            >
+              <Target aria-hidden="true" size={14} strokeWidth={1.8} />
+              任务目标: {taskState.goal}
+            </span>
             <span
               data-testid="agent-progress-percentage"
               style={{ fontWeight: 600, color: '#15803d' }}
@@ -228,7 +240,11 @@ export function AgentChatWorkspace({
                     border: '1px solid #86efac',
                   }}
                 >
-                  {isDone ? '✓ ' : '○ '}
+                  {isDone ? (
+                    <CheckCircle2 aria-hidden="true" size={12} strokeWidth={1.8} />
+                  ) : (
+                    <Circle aria-hidden="true" size={12} strokeWidth={1.8} />
+                  )}
                   {step}
                 </span>
               );
@@ -246,7 +262,8 @@ export function AgentChatWorkspace({
                 fontStyle: 'italic',
               }}
             >
-              💡 自我反思: {taskState.evaluations[taskState.evaluations.length - 1].critique}
+              <Lightbulb aria-hidden="true" size={13} strokeWidth={1.8} />
+              自我反思: {taskState.evaluations[taskState.evaluations.length - 1].critique}
             </div>
           )}
         </div>
@@ -306,7 +323,7 @@ export function AgentChatWorkspace({
                   marginBottom: 6,
                 }}
               >
-                <span>⚠️</span>
+                <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
                 <strong>写操作安全确认申请</strong>
               </div>
               <p style={{ color: '#78350f', margin: '0 0 8px 0' }}>
@@ -336,7 +353,8 @@ export function AgentChatWorkspace({
                   onClick={() => handleResolveConfirmation(conf.confirmationId, true)}
                   style={{ fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}
                 >
-                  ✓ 确认执行
+                  <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
+                  确认执行
                 </button>
                 <button
                   type="button"
@@ -345,7 +363,8 @@ export function AgentChatWorkspace({
                   onClick={() => handleResolveConfirmation(conf.confirmationId, false)}
                   style={{ fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}
                 >
-                  ✕ 拒绝
+                  <X aria-hidden="true" size={13} strokeWidth={1.8} />
+                  拒绝
                 </button>
               </div>
             </div>

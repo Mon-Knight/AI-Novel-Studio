@@ -1,3 +1,14 @@
+import {
+  Activity,
+  ArrowRight,
+  Bot,
+  CircleAlert,
+  CircleCheck,
+  Cloud,
+  FlaskConical,
+  Monitor,
+  Network,
+} from 'lucide-react';
 import type { AiSettings } from '../../types/ai';
 import type { LocalChapterModelHealthResult } from '../../services/ai/localChapterModelHealthService';
 
@@ -17,6 +28,7 @@ export default function AiRuntimeOverviewCard({
   const isLocalOk = isLocalEnabled && Boolean(localHealthResult?.healthOk);
   const gatewayConfig = settings.gateway ?? settings.remoteWriter;
   const isGatewayEnabled = Boolean(gatewayConfig?.enabled);
+  const RuntimeStatusIcon = isMock ? FlaskConical : isCloudOk ? CircleCheck : CircleAlert;
 
   return (
     <div
@@ -37,13 +49,16 @@ export default function AiRuntimeOverviewCard({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 20 }}>⚡</span>
+          <Activity aria-hidden="true" size={20} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)' }}>
             AI 运行时全局概览 (AI Runtime Overview)
           </span>
         </div>
         <span
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
             fontSize: 12,
             padding: '2px 8px',
             borderRadius: 12,
@@ -52,7 +67,8 @@ export default function AiRuntimeOverviewCard({
             fontWeight: 600,
           }}
         >
-          {isMock ? '🔶 Mock 离线仿真' : isCloudOk ? '🟢 运行时就绪' : '🔴 待配置连接'}
+          <RuntimeStatusIcon aria-hidden="true" size={13} strokeWidth={1.8} />
+          {isMock ? 'Mock 离线仿真' : isCloudOk ? '运行时就绪' : '待配置连接'}
         </span>
       </div>
 
@@ -68,16 +84,53 @@ export default function AiRuntimeOverviewCard({
         }}
       >
         <strong style={{ color: 'var(--color-text-secondary)' }}>模型调度优先级：</strong>
-        <span style={{ color: isLocalEnabled ? '#0284c7' : '#94a3b8', fontWeight: 600 }}>
-          ① Local Writer (本地写作)
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            color: isLocalEnabled ? '#0284c7' : '#94a3b8',
+            fontWeight: 600,
+          }}
+        >
+          <Monitor aria-hidden="true" size={13} strokeWidth={1.8} />
+          Local Writer (本地写作)
         </span>
-        <span style={{ margin: '0 6px', color: '#94a3b8' }}>→</span>
-        <span style={{ color: isGatewayEnabled ? '#8b5cf6' : '#94a3b8', fontWeight: 600 }}>
-          ② AI Gateway (模型网关)
+        <ArrowRight
+          aria-hidden="true"
+          size={14}
+          strokeWidth={1.8}
+          style={{ margin: '0 6px', color: '#94a3b8', verticalAlign: 'text-bottom' }}
+        />
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            color: isGatewayEnabled ? '#8b5cf6' : '#94a3b8',
+            fontWeight: 600,
+          }}
+        >
+          <Network aria-hidden="true" size={13} strokeWidth={1.8} />
+          AI Gateway (模型网关)
         </span>
-        <span style={{ margin: '0 6px', color: '#94a3b8' }}>→</span>
-        <span style={{ color: '#16a34a', fontWeight: 600 }}>
-          ③ Cloud Provider (云端保底)
+        <ArrowRight
+          aria-hidden="true"
+          size={14}
+          strokeWidth={1.8}
+          style={{ margin: '0 6px', color: '#94a3b8', verticalAlign: 'text-bottom' }}
+        />
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            color: '#16a34a',
+            fontWeight: 600,
+          }}
+        >
+          <Cloud aria-hidden="true" size={13} strokeWidth={1.8} />
+          Cloud Provider (云端保底)
         </span>
       </div>
 
@@ -101,7 +154,18 @@ export default function AiRuntimeOverviewCard({
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span style={{ fontWeight: 600, color: '#334155' }}>☁️ Cloud Provider</span>
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                color: '#334155',
+              }}
+            >
+              <Cloud aria-hidden="true" size={15} strokeWidth={1.8} />
+              Cloud Provider
+            </span>
             <span
               style={{
                 color: isCloudOk ? '#16a34a' : '#dc2626',
@@ -133,7 +197,18 @@ export default function AiRuntimeOverviewCard({
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span style={{ fontWeight: 600, color: '#334155' }}>💻 Local Writer</span>
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                color: '#334155',
+              }}
+            >
+              <Monitor aria-hidden="true" size={15} strokeWidth={1.8} />
+              Local Writer
+            </span>
             <span
               style={{
                 color: !isLocalEnabled ? '#94a3b8' : isLocalOk ? '#0284c7' : '#dc2626',
@@ -161,7 +236,18 @@ export default function AiRuntimeOverviewCard({
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span style={{ fontWeight: 600, color: '#334155' }}>🌐 AI Gateway</span>
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                color: '#334155',
+              }}
+            >
+              <Network aria-hidden="true" size={15} strokeWidth={1.8} />
+              AI Gateway
+            </span>
             <span
               style={{
                 color: isGatewayEnabled ? '#8b5cf6' : '#94a3b8',
@@ -189,7 +275,18 @@ export default function AiRuntimeOverviewCard({
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span style={{ fontWeight: 600, color: '#334155' }}>🧠 Agent & Memory</span>
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                color: '#334155',
+              }}
+            >
+              <Bot aria-hidden="true" size={15} strokeWidth={1.8} />
+              Agent & Memory
+            </span>
             <span style={{ color: '#16a34a', fontWeight: 600 }}>就绪</span>
           </div>
           <div style={{ color: '#64748b' }}>

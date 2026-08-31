@@ -28,6 +28,7 @@ import { formatWorkbenchTime, statusLabel } from './workbenchHelpers';
 import { hasUsableDshTaskCredential } from '../../services/dsh/taskRuntimeService';
 
 const WORKBENCH_HISTORY_PAGE_SIZE = 8;
+const ARTIFACT_ARRIVAL_CLASS_DURATION_MS = 220;
 const useClientLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 function preferredUserScrollBehavior(): ScrollBehavior {
@@ -97,7 +98,15 @@ export function WorkbenchMessageStream({
   const followFrameRef = useRef<number | null>(null);
   const historyRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
   const collapseToLatestRef = useRef(false);
+  const scrollConversationIdRef = useRef<string | null>(null);
+  const artifactConversationIdRef = useRef<string | null>(null);
+  const seenArtifactCardIdsRef = useRef(new Map<string, Set<string>>());
+  const artifactArrivalTimersRef = useRef(new Map<string, number>());
   const [showLatest, setShowLatest] = useState(false);
+  const [newlyArrivedArtifacts, setNewlyArrivedArtifacts] = useState<{
+    conversationId: string;
+    cardIds: Set<string>;
+  }>(() => ({ conversationId: '', cardIds: new Set() }));
   const [historyWindow, setHistoryWindow] = useState(() => ({
     conversationId: bundle.conversation.conversationId,
     visibleTurnCount: WORKBENCH_HISTORY_PAGE_SIZE,
@@ -147,6 +156,105 @@ export function WorkbenchMessageStream({
     () => bundle.artifacts.filter((artifact) => !artifact.runId),
     [bundle.artifacts],
   );
+
+  useClientLayoutEffect(() => {
+    const conversationId = bundle.conversation.conversationId;
+    if (scrollConversationIdRef.current === conversationId) return;
+    scrollConversationIdRef.current = conversationId;
+    followLatestRef.current = true;
+    historyRestoreRef.current = null;
+    collapseToLatestRef.current = false;
+    if (followFrameRef.current !== null) {
+      window.cancelAnimationFrame?.(followFrameRef.current);
+      window.clearTimeout(followFrameRef.current);
+      followFrameRef.current = null;
+    }
+    const node = scrollRef.current;
+    if (node) scrollToLatest(node, 'auto');
+    setShowLatest(false);
+  }, [bundle.conversation.conversationId]);
+
+  useClientLayoutEffect(() => {
+    const conversationId = bundle.conversation.conversationId;
+    const cardIds = bundle.artifacts.map((artifact) => artifact.cardId);
+    const conversationChanged = artifactConversationIdRef.current !== conversationId;
+    artifactConversationIdRef.current = conversationId;
+
+    let seenCardIds = seenArtifactCardIdsRef.current.get(conversationId);
+    if (!seenCardIds) {
+      seenCardIds = new Set(cardIds);
+      seenArtifactCardIdsRef.current.set(conversationId, seenCardIds);
+      setNewlyArrivedArtifacts({ conversationId: '', cardIds: new Set() });
+      return;
+    }
+
+    if (conversationChanged) {
+      cardIds.forEach((cardId) => seenCardIds.add(cardId));
+      for (const timerId of artifactArrivalTimersRef.current.values()) {
+        window.clearTimeout(timerId);
+      }
+      artifactArrivalTimersRef.current.clear();
+      setNewlyArrivedArtifacts({ conversationId: '', cardIds: new Set() });
+      return;
+    }
+
+    const arrivedCardIds = cardIds.filter((cardId) => !seenCardIds.has(cardId));
+    cardIds.forEach((cardId) => seenCardIds.add(cardId));
+    if (arrivedCardIds.length === 0) return;
+
+    setNewlyArrivedArtifacts((current) => {
+      const nextCardIds =
+        current.conversationId === conversationId ? new Set(current.cardIds) : new Set<string>();
+      arrivedCardIds.forEach((cardId) => nextCardIds.add(cardId));
+      return { conversationId, cardIds: nextCardIds };
+    });
+    arrivedCardIds.forEach((cardId) => {
+      const timerKey = JSON.stringify([conversationId, cardId]);
+      const timerId = window.setTimeout(() => {
+        artifactArrivalTimersRef.current.delete(timerKey);
+        setNewlyArrivedArtifacts((current) => {
+          if (current.conversationId !== conversationId || !current.cardIds.has(cardId)) {
+            return current;
+          }
+          const nextCardIds = new Set(current.cardIds);
+          nextCardIds.delete(cardId);
+          return {
+            conversationId: nextCardIds.size > 0 ? conversationId : '',
+            cardIds: nextCardIds,
+          };
+        });
+      }, ARTIFACT_ARRIVAL_CLASS_DURATION_MS);
+      artifactArrivalTimersRef.current.set(timerKey, timerId);
+    });
+  }, [bundle.artifacts, bundle.conversation.conversationId]);
+
+  useEffect(
+    () => () => {
+      for (const timerId of artifactArrivalTimersRef.current.values()) {
+        window.clearTimeout(timerId);
+      }
+      artifactArrivalTimersRef.current.clear();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!latestRun) return;
+    const activityTurnIndex = bundle.turns.findIndex((turn) => turn.turnId === latestRun.turnId);
+    if (activityTurnIndex < 0) return;
+    const requiredVisibleTurnCount = bundle.turns.length - activityTurnIndex;
+    setHistoryWindow((current) => {
+      if (current.conversationId !== bundle.conversation.conversationId) {
+        return {
+          conversationId: bundle.conversation.conversationId,
+          visibleTurnCount: Math.max(WORKBENCH_HISTORY_PAGE_SIZE, requiredVisibleTurnCount),
+        };
+      }
+      if (current.visibleTurnCount >= requiredVisibleTurnCount) return current;
+      return { ...current, visibleTurnCount: requiredVisibleTurnCount };
+    });
+  }, [bundle.conversation.conversationId, bundle.turns, latestRun]);
+
   const activityKey = [
     bundle.turns.length,
     latestTurn?.turnId,
@@ -203,13 +311,6 @@ export function WorkbenchMessageStream({
     historyRestoreRef.current = null;
     node.scrollTop = restore.scrollTop + Math.max(0, node.scrollHeight - restore.scrollHeight);
   }, [bundle.conversation.conversationId, visibleTurnCount]);
-
-  useEffect(() => {
-    followLatestRef.current = true;
-    historyRestoreRef.current = null;
-    collapseToLatestRef.current = false;
-    setShowLatest(false);
-  }, [bundle.conversation.conversationId]);
 
   const jumpToLatest = () => {
     const node = scrollRef.current;
@@ -292,7 +393,7 @@ export function WorkbenchMessageStream({
         {bundle.turns.length === 0 && !compressionCandidate && !assetRecovery && (
           <div className="workbench-intro">
             <div className="workbench-intro-icon">
-              <MessageSquareText aria-hidden="true" size={18} strokeWidth={1.7} />
+              <MessageSquareText aria-hidden="true" size={18} strokeWidth={1.8} />
             </div>
             <h3>当前任务尚无对话记录</h3>
           </div>
@@ -332,6 +433,9 @@ export function WorkbenchMessageStream({
                         ? 'AI Agent'
                         : '系统'}
                 </span>
+                {!automaticPresentation && turn.role === 'user' && (
+                  <span className="workbench-turn-origin">原始输入</span>
+                )}
                 {automaticPresentation && (
                   <span className="workbench-turn-origin">{automaticPresentation.badge}</span>
                 )}
@@ -361,7 +465,7 @@ export function WorkbenchMessageStream({
                           data-testid="workbench-retry-summary-start"
                           onClick={onRetryChapterSummaryStart}
                         >
-                          <RotateCcw aria-hidden="true" size={14} />
+                          <RotateCcw aria-hidden="true" size={14} strokeWidth={1.8} />
                           重试章节总结
                         </button>
                       )}
@@ -409,6 +513,11 @@ export function WorkbenchMessageStream({
                         artifact={artifact}
                         key={artifact.cardId}
                         busy={decisionBusyCardId === artifact.cardId}
+                        newlyArrived={
+                          newlyArrivedArtifacts.conversationId ===
+                            bundle.conversation.conversationId &&
+                          newlyArrivedArtifacts.cardIds.has(artifact.cardId)
+                        }
                         onReload={onReloadArtifacts}
                         onDecide={(decision) => onDecideArtifact(artifact, decision)}
                       />
@@ -449,11 +558,14 @@ export function WorkbenchMessageStream({
             artifact={artifact}
             key={artifact.cardId}
             busy={decisionBusyCardId === artifact.cardId}
+            newlyArrived={
+              newlyArrivedArtifacts.conversationId === bundle.conversation.conversationId &&
+              newlyArrivedArtifacts.cardIds.has(artifact.cardId)
+            }
             onReload={onReloadArtifacts}
             onDecide={(decision) => onDecideArtifact(artifact, decision)}
           />
         ))}
-
         {assetRecovery && (
           <WorkbenchAssetReadinessCard
             recovery={assetRecovery}

@@ -556,6 +556,93 @@ test('short follow-up writing inherits only explicit task-wide constraints', asy
   assert.doesNotMatch(writerGoal, /钟楼开场|馆长现身/);
 });
 
+test('writer progress replaces the running event result and terminal evidence replaces progress', async () => {
+  (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
+    new MemoryStorage() as unknown as Storage;
+  localStorage.setItem('ai_novel_studio_novels', JSON.stringify(mockNovels));
+  localStorage.setItem(
+    'ai_novel_studio_chapters',
+    JSON.stringify([
+      {
+        id: 'ch-003',
+        novelId: 'novel-001',
+        title: '第三章',
+        outline: '主角发现关键线索。',
+        orderIndex: 2,
+        createdAt: '2026-08-20T00:00:00Z',
+        updatedAt: '2026-08-20T00:00:00Z',
+      },
+    ]),
+  );
+  const conversation = await taskConversationService.create('novel-001', '可见写章进度测试');
+  const turn = await taskConversationService.appendTurn(
+    conversation.conversationId,
+    'user',
+    '继续写',
+  );
+  const projectedProgress: unknown[] = [];
+  const runtime = createTaskRuntimeAdapter({
+    chapterWriter: {
+      generate: async (input) => {
+        await input.onProgress?.({
+          phase: 'generating_draft',
+          acceptedWordRange: { minimum: 2_400, maximum: 3_450 },
+          timestamp: '2026-08-30T00:00:00.000Z',
+        });
+        await input.onProgress?.({
+          phase: 'repairing_length',
+          repairAttempt: 1,
+          repairMaximumAttempts: 3,
+          currentWordCount: 3_526,
+          acceptedWordRange: { minimum: 2_400, maximum: 3_450 },
+          timestamp: '2026-08-30T00:01:00.000Z',
+        });
+        return {
+          text: '这是完成长度收敛后的章节候选正文，仍需用户审阅确认后才能采用。',
+          source: 'writer',
+          finalWordCount: 3_240,
+        };
+      },
+    },
+  });
+
+  const run = await runtime.start(
+    {
+      conversationId: conversation.conversationId,
+      novelId: 'novel-001',
+      chapterId: 'ch-003',
+      turnId: turn.turnId,
+      goal: '继续写',
+      modelSnapshot: mockModel(),
+    },
+    (event) => {
+      if (
+        event.toolEvent?.toolName === 'generate_chapter' &&
+        event.toolEvent.status === 'running' &&
+        event.toolEvent.result !== undefined
+      ) {
+        projectedProgress.push(event.toolEvent.result);
+      }
+    },
+  );
+
+  assert.equal(run.status, 'completed', run.error);
+  assert.deepEqual(
+    projectedProgress.map((result) => (result as { phase?: string }).phase),
+    ['generating_draft', 'repairing_length'],
+  );
+  assert.doesNotMatch(JSON.stringify(projectedProgress), /继续写|候选正文|apiKey/i);
+  const bundle = await taskConversationService.get(conversation.conversationId);
+  const writerEvent = bundle?.toolEvents.find((event) => event.toolName === 'generate_chapter');
+  assert.equal(writerEvent?.status, 'succeeded');
+  assert.equal((writerEvent?.result as { phase?: string } | undefined)?.phase, undefined);
+  assert.equal(
+    (writerEvent?.result as { generationContext?: { finalWordCount?: number } } | undefined)
+      ?.generationContext?.finalWordCount,
+    3_240,
+  );
+});
+
 test('generic continue writing retrieves adopted memory without requiring prompt keywords', async () => {
   (globalThis as typeof globalThis & { localStorage: Storage }).localStorage =
     new MemoryStorage() as unknown as Storage;
@@ -885,6 +972,7 @@ test('browser recovery closes interrupted run and tool facts idempotently', asyn
   const bundle = await taskConversationService.get(conversation.conversationId);
   assert.equal(bundle?.conversation.status, 'failed');
   assert.equal(bundle?.runs[0].status, 'failed');
+  assert.equal(bundle?.runs[0].error, '工作台已重新加载，上一轮运行已中断。请重试本回合。');
   assert.equal(bundle?.toolEvents[0].status, 'cancelled');
 });
 
@@ -1442,6 +1530,37 @@ test('writer tool rows keep a compact summary and defer the expanded receipt pay
   assert.match(html, /风格 \/ 输出/);
   assert.match(html, /data-context-status="fallback"/);
   assert.doesNotMatch(html, /must-not-be-rendered/);
+});
+
+test('running writer tool rows expose safe chapter-generation progress inline', () => {
+  const html = renderToStaticMarkup(
+    createElement(ToolEventRow, {
+      event: {
+        eventId: 'event-writer-progress',
+        runId: 'run-writer-progress',
+        sequence: 2,
+        toolName: 'generate_chapter',
+        argumentsSummary: { novelId: 'novel-001', chapterId: 'chapter-003' },
+        status: 'running',
+        result: {
+          phase: 'repairing_length',
+          repairAttempt: 1,
+          repairMaximumAttempts: 3,
+          currentWordCount: 3_526,
+          acceptedWordRange: { minimum: 2_400, maximum: 3_450 },
+          timestamp: '2026-08-30T00:01:00.000Z',
+        },
+        createdAt: '2026-08-30T00:00:00.000Z',
+      },
+    }),
+  );
+
+  assert.match(html, /data-testid="workbench-writer-progress"/);
+  assert.match(html, /收敛章节长度/);
+  assert.match(html, /1\/3/);
+  assert.match(html, /3,526 字/);
+  assert.match(html, /允许 2,400-3,450 字/);
+  assert.doesNotMatch(html, /运行中|用户提示词|候选正文|apiKey/i);
 });
 
 test('DSH candidate rows report only observed read tools when source details are unavailable', () => {

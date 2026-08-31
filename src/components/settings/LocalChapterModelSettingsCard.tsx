@@ -1,23 +1,39 @@
-import type { AiSettings, LocalChapterModelSettings } from '../../types/ai';
-import {
-  getDefaultLocalChapterModelSettings,
-  resolveSessionModelApiKey,
-} from '../../services/ai/aiSettingsStore';
+import { useState } from 'react';
+import { Puzzle } from 'lucide-react';
+import type { AiSettings, SavedLocalModelProfile } from '../../types/ai';
+import { resolveSessionModelApiKey } from '../../services/ai/aiSettingsStore';
 import type { LocalChapterModelHealthResult } from '../../services/ai/localChapterModelHealthService';
+import {
+  applySavedLocalModel,
+  createLocalModelProfile,
+  upsertByIdentity,
+} from '../../services/ai/savedOptionalModels';
+import { LocalModelEditor } from './LocalModelEditor';
+import {
+  draftFromLocalProfile,
+  emptyLocalModelDraft,
+  type LocalModelEditorDraft,
+} from './optionalModelEditorDraft';
+import { SettingsSavedModelCards } from './SettingsSavedModelCards';
 
 interface LocalChapterModelSettingsCardProps {
   settings: AiSettings;
   onChange: (patch: Partial<AiSettings>) => void;
-  onSave: () => void;
+  onSave: (next?: AiSettings) => void;
   healthResult?: LocalChapterModelHealthResult | null;
   healthChecking: boolean;
   onCheckHealth: () => void;
 }
 
-function optionalInteger(value: string): number | undefined {
-  if (!value.trim()) return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : undefined;
+function localSessionKey(
+  profile: Pick<SavedLocalModelProfile, 'providerId' | 'baseUrl' | 'modelName'>,
+): string {
+  return resolveSessionModelApiKey({
+    scope: 'local_chapter_model',
+    providerId: profile.providerId,
+    baseUrl: profile.baseUrl,
+    modelId: profile.modelName,
+  });
 }
 
 function LocalChapterModelSettingsCard({
@@ -28,247 +44,201 @@ function LocalChapterModelSettingsCard({
   healthChecking,
   onCheckHealth,
 }: LocalChapterModelSettingsCardProps) {
-  const local = settings.localChapterModel ?? getDefaultLocalChapterModelSettings();
-  const update = (patch: Partial<LocalChapterModelSettings>) => {
-    const updated = { ...local, ...patch };
+  const local = settings.localChapterModel;
+  const profiles = settings.savedLocalModels ?? [];
+  const [editorOpen, setEditorOpen] = useState(profiles.length === 0);
+  const [draft, setDraft] = useState<LocalModelEditorDraft>(emptyLocalModelDraft);
+
+  const patchDraft = (next: Partial<LocalModelEditorDraft>) => {
+    const merged = { ...draft, ...next };
     const identityChanged =
-      updated.providerId !== local.providerId ||
-      updated.baseUrl !== local.baseUrl ||
-      updated.modelName !== local.modelName;
-    if (
-      identityChanged &&
-      local.apiKey ===
-        resolveSessionModelApiKey({
-          scope: 'local_chapter_model',
-          providerId: local.providerId,
-          baseUrl: local.baseUrl,
-          modelId: local.modelName,
-        })
-    ) {
-      updated.apiKey =
-        resolveSessionModelApiKey({
-          scope: 'local_chapter_model',
-          providerId: updated.providerId,
-          baseUrl: updated.baseUrl,
-          modelId: updated.modelName,
-        }) || 'local-no-key-required';
+      merged.providerId !== draft.providerId ||
+      merged.baseUrl !== draft.baseUrl ||
+      merged.modelName !== draft.modelName;
+    if (identityChanged && !Object.prototype.hasOwnProperty.call(next, 'apiKey')) {
+      merged.apiKey = localSessionKey(merged) || 'local-no-key-required';
     }
-    onChange({ localChapterModel: updated });
+    setDraft(merged);
+  };
+
+  const persist = (next: AiSettings) => {
+    onChange(next);
+    onSave(next);
+  };
+
+  const useProfile = (id: string) => {
+    const profile = profiles.find((item) => item.id === id);
+    if (!profile) return;
+    persist(applySavedLocalModel(settings, profile, localSessionKey(profile)));
+    setEditorOpen(false);
+  };
+
+  const saveDraft = () => {
+    if (!draft.baseUrl.trim() || !draft.modelName.trim()) return;
+    const profile = createLocalModelProfile({
+      id: draft.id,
+      label: draft.label.trim() || draft.modelName.trim(),
+      providerId: draft.providerId,
+      baseUrl: draft.baseUrl,
+      modelName: draft.modelName,
+      timeoutSeconds: draft.timeoutSeconds,
+      temperature: draft.temperature,
+      topP: draft.topP,
+      topK: draft.topK,
+      repeatPenalty: draft.repeatPenalty,
+      seed: draft.seed,
+      allowCloudWriterFallback: draft.allowCloudWriterFallback,
+    });
+    const next = applySavedLocalModel(
+      { ...settings, savedLocalModels: upsertByIdentity(profiles, profile) },
+      profile,
+      draft.apiKey,
+    );
+    persist(next);
+    setEditorOpen(false);
+  };
+
+  const deleteProfile = (id: string) => {
+    const remaining = profiles.filter((item) => item.id !== id);
+    const nextActive = remaining[0];
+    if (!nextActive) {
+      const cleared: AiSettings = {
+        ...settings,
+        savedLocalModels: undefined,
+        activeSavedLocalModelId: undefined,
+        localChapterModel: local
+          ? { ...local, enabled: false, baseUrl: '', modelName: '' }
+          : undefined,
+      };
+      persist(cleared);
+      setDraft(emptyLocalModelDraft());
+      setEditorOpen(true);
+      return;
+    }
+    persist({
+      ...applySavedLocalModel(settings, nextActive, localSessionKey(nextActive)),
+      savedLocalModels: remaining,
+    });
   };
 
   return (
     <section className="detail-card settings-card" aria-labelledby="local-chapter-model-title">
       <div className="settings-card-heading">
-        <span aria-hidden="true">🧩</span>
+        <Puzzle aria-hidden="true" size={18} strokeWidth={1.8} />
         <span id="local-chapter-model-title">专用本地正文模型（可选）</span>
       </div>
-      <div
-        style={{
-          padding: '10px 12px',
-          marginBottom: 12,
-          borderRadius: 8,
-          background: local.enabled ? 'var(--color-success-bg)' : 'var(--color-bg-hover)',
-          border: '1px solid var(--color-border)',
-          fontSize: 12,
-          lineHeight: 1.7,
-          color: 'var(--color-text-secondary)',
-        }}
-      >
-        <strong>
-          {local.enabled ? '✅ 已启用可选本地作家路由' : '☁️ 云端正文模式（推荐当前使用）'}
-        </strong>
-        <br />
-        未启用或尚未通过 Benchmark 时，世界观、规划和正文均由上方全局 Cloud Provider 完成；已有
-        Scene/Beat 计划仍按 Beat 生成。启用后，本地模型只负责正文，训练、测试、故障或 Context
-        超限时自动由同一云端流程接管，不改变 Scene、Prompt 约束或审核流程。
-      </div>
-
+      <p className="settings-help-text">
+        未启用时正文仍走全局 Cloud Provider。已保存模型以卡片显示，不展示地址、密钥或采样参数。
+      </p>
       <label
         style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 14 }}
       >
         <input
           type="checkbox"
-          checked={local.enabled}
-          onChange={(event) => update({ enabled: event.target.checked })}
+          checked={local?.enabled === true}
+          onChange={(event) => {
+            if (!local) {
+              if (event.target.checked) {
+                setDraft(emptyLocalModelDraft());
+                setEditorOpen(true);
+              }
+              return;
+            }
+            onChange({ localChapterModel: { ...local, enabled: event.target.checked } });
+          }}
           style={{ width: 18, height: 18 }}
         />
         启用已通过 Benchmark 的本地 Scene/Beat 正文模型
       </label>
-
       <label
         style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 14 }}
       >
         <input
           type="checkbox"
-          checked={local.allowCloudWriterFallback !== false}
-          onChange={(event) => update({ allowCloudWriterFallback: event.target.checked })}
+          checked={local?.allowCloudWriterFallback !== false}
+          onChange={(event) =>
+            local &&
+            onChange({
+              localChapterModel: { ...local, allowCloudWriterFallback: event.target.checked },
+            })
+          }
           style={{ width: 18, height: 18 }}
         />
-        本地训练、测试或不可用时由云端代写同一 Beat（不改 Scene/目标）
+        本地训练、测试或不可用时由云端代写同一 Beat
       </label>
 
-      <div className="settings-form-grid">
-        <label className="settings-field">
-          <span>Provider ID</span>
-          <input
-            className="form-input"
-            value={local.providerId}
-            onChange={(event) => update({ providerId: event.target.value })}
-            placeholder="local_llama_cpp"
-          />
-        </label>
-        <label className="settings-field">
-          <span>模型名称</span>
-          <input
-            className="form-input"
-            value={local.modelName}
-            onChange={(event) => update({ modelName: event.target.value })}
-            placeholder="qwen35-9b-novel-v3"
-          />
-        </label>
-        <label className="settings-field" style={{ gridColumn: '1 / -1' }}>
-          <span>OpenAI-Compatible Base URL（仅限本机回环地址）</span>
-          <input
-            className="form-input"
-            value={local.baseUrl}
-            onChange={(event) => update({ baseUrl: event.target.value })}
-            placeholder="http://127.0.0.1:8080/v1"
-          />
-        </label>
-        <label className="settings-field" style={{ gridColumn: '1 / -1' }}>
-          <span>本地 API Key（通常无需真实密钥）</span>
-          <input
-            className="form-input"
-            type="password"
-            value={local.apiKey}
-            onChange={(event) => update({ apiKey: event.target.value })}
-            placeholder="local-no-key-required"
-          />
-        </label>
-        <label className="settings-field">
-          <span>上下文 Token（固定）</span>
-          <input className="form-input" value={local.contextTokens} readOnly />
-        </label>
-        <label className="settings-field">
-          <span>最大输出 Token（固定）</span>
-          <input className="form-input" value={local.maxTokens} readOnly />
-        </label>
-        <label className="settings-field">
-          <span>温度</span>
-          <input
-            className="form-input"
-            type="number"
-            min={0}
-            max={2}
-            step={0.05}
-            value={local.temperature}
-            onChange={(event) => update({ temperature: Number(event.target.value) })}
-          />
-        </label>
-        <label className="settings-field">
-          <span>Top P</span>
-          <input
-            className="form-input"
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={local.topP}
-            onChange={(event) => update({ topP: Number(event.target.value) })}
-          />
-        </label>
-        <label className="settings-field">
-          <span>Top K</span>
-          <input
-            className="form-input"
-            type="number"
-            min={0}
-            max={4096}
-            step={1}
-            value={local.topK}
-            onChange={(event) => update({ topK: Number(event.target.value) })}
-          />
-        </label>
-        <label className="settings-field">
-          <span>Repeat penalty</span>
-          <input
-            className="form-input"
-            type="number"
-            min={0.01}
-            max={3}
-            step={0.01}
-            value={local.repeatPenalty}
-            onChange={(event) => update({ repeatPenalty: Number(event.target.value) })}
-          />
-        </label>
-        <label className="settings-field">
-          <span>Seed（可选）</span>
-          <input
-            className="form-input"
-            type="number"
-            step={1}
-            value={local.seed ?? ''}
-            onChange={(event) => update({ seed: optionalInteger(event.target.value) })}
-            placeholder="留空"
-          />
-        </label>
-        <label className="settings-field">
-          <span>超时时间（秒）</span>
-          <input
-            className="form-input"
-            type="number"
-            min={1}
-            max={1800}
-            value={local.timeoutSeconds}
-            onChange={(event) => update({ timeoutSeconds: Number(event.target.value) })}
-          />
-        </label>
-      </div>
+      <SettingsSavedModelCards
+        listTestId="local-saved-model-list"
+        addTestId="local-saved-model-add"
+        cardTestId="local-saved-model-card"
+        help="可保存多份本机模型，卡片只显示名称与绑定状态。"
+        empty="还没有保存的本地模型。添加后会显示为卡片。"
+        addLabel="添加本地模型"
+        keyBoundLabel="本次会话已绑定"
+        keyMissingLabel="待绑定会话"
+        items={profiles.map((profile) => ({
+          id: profile.id,
+          label: profile.label,
+          badge: '本机 llama-server',
+          active: profile.id === settings.activeSavedLocalModelId,
+          keyBound: Boolean(localSessionKey(profile)),
+          lastTestOk: profile.lastTestOk,
+        }))}
+        onAdd={() => {
+          setDraft(emptyLocalModelDraft());
+          setEditorOpen(true);
+        }}
+        onUse={useProfile}
+        onEdit={(id) => {
+          const profile = profiles.find((item) => item.id === id);
+          if (!profile) return;
+          setDraft(draftFromLocalProfile(profile, localSessionKey(profile)));
+          setEditorOpen(true);
+        }}
+        onDelete={deleteProfile}
+      />
+
+      {editorOpen && (
+        <LocalModelEditor
+          draft={draft}
+          onChange={patchDraft}
+          onSave={saveDraft}
+          onCancel={() => {
+            setEditorOpen(false);
+            const active = profiles.find((item) => item.id === settings.activeSavedLocalModelId);
+            if (active) setDraft(draftFromLocalProfile(active, localSessionKey(active)));
+          }}
+        />
+      )}
 
       <div className="settings-card-actions">
-        <span className="settings-help-text">
-          仅允许 localhost、127.0.0.0/8 或 [::1]；推荐协议：qwen35-9b-novel-v3 · 单 user 消息 · 4096
-          context · 1024 max output。
-        </span>
-        <button type="button" className="btn btn-primary btn-sm" onClick={onSave}>
-          保存可选本地模型设置
-        </button>
         <button
           type="button"
           className="btn btn-secondary btn-sm"
           onClick={onCheckHealth}
           disabled={healthChecking}
         >
-          {healthChecking ? '检查中...' : '检查本地模型'}
+          {healthChecking ? '检查中...' : '检查当前本地模型'}
+        </button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => onSave()}>
+          保存可选本地模型设置
         </button>
       </div>
       {healthResult && (
         <div
+          data-testid="local-model-health-result"
+          className="settings-help-text"
           style={{
             marginTop: 10,
             padding: '9px 12px',
             borderRadius: 8,
-            border: '1px solid var(--color-border)',
             background:
               healthResult.healthOk && healthResult.modelOk && healthResult.smokeOk
                 ? 'var(--color-success-bg)'
                 : 'var(--color-error-bg)',
-            fontSize: 12,
-            lineHeight: 1.7,
           }}
-          data-testid="local-model-health-result"
         >
           <strong>{healthResult.message}</strong>
-          <br />
-          /health：{healthResult.healthOk ? '通过' : '失败'} · /v1/models：
-          {healthResult.modelOk ? '匹配' : '不匹配'} · Beat smoke：
-          {healthResult.smokeOk ? '通过' : '失败'}
-          {healthResult.textPreview && (
-            <>
-              <br />
-              预览：{healthResult.textPreview}
-            </>
-          )}
         </div>
       )}
     </section>

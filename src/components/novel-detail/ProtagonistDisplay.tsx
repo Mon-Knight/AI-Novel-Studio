@@ -1,4 +1,5 @@
 import type { Novel } from '../../types/novel';
+import { Link2, UserRound, Zap } from 'lucide-react';
 import { RELATION_TYPE_LABELS } from './protagonistPresentation';
 
 interface ProtagonistDisplayProps {
@@ -24,8 +25,18 @@ export default function ProtagonistDisplay({ novel }: ProtagonistDisplayProps) {
           key={profile.id}
           style={{ border: '1px solid var(--color-border-light)', borderRadius: 6, padding: 10 }}
         >
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-            {profile.label === 'primary' ? '⭐ 主角A' : '🌟 主角B'}：{profile.name}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: 600,
+              fontSize: 14,
+              marginBottom: 4,
+            }}
+          >
+            <UserRound aria-hidden="true" size={14} strokeWidth={1.8} />
+            {profile.label === 'primary' ? '主角 A' : '主角 B'}：{profile.name}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 13 }}>
             {profile.identity && (
@@ -50,8 +61,17 @@ export default function ProtagonistDisplay({ novel }: ProtagonistDisplayProps) {
             )}
             {(profile.specialAbility || profile.ability) && (
               <div style={{ gridColumn: '1 / -1' }}>
-                <span className="text-sm" style={{ color: 'var(--color-primary)' }}>
-                  ⚡ {(profile.specialAbility || profile.ability).slice(0, 80)}
+                <span
+                  className="text-sm"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: 'var(--color-primary)',
+                  }}
+                >
+                  <Zap aria-hidden="true" size={13} strokeWidth={1.8} />
+                  {(profile.specialAbility || profile.ability).slice(0, 80)}
                   {(profile.specialAbility || profile.ability).length > 80 && '…'}
                 </span>
               </div>
@@ -68,7 +88,19 @@ export default function ProtagonistDisplay({ novel }: ProtagonistDisplayProps) {
             background: 'var(--color-bg-primary)',
           }}
         >
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>🔗 双主角关系</div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: 600,
+              fontSize: 13,
+              marginBottom: 4,
+            }}
+          >
+            <Link2 aria-hidden="true" size={13} strokeWidth={1.8} />
+            双主角关系
+          </div>
           <div style={{ fontSize: 13 }}>
             {RELATION_TYPE_LABELS[novel.dualProtagonistRelation.type] ||
               novel.dualProtagonistRelation.type}

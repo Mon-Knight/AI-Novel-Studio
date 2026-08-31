@@ -1,6 +1,8 @@
 /**
  * AI Novel Studio - 通用加载状态组件
  */
+import { LoaderCircle } from 'lucide-react';
+
 function LoadingState({ text = '加载中...' }: { text?: string }) {
   return (
     <div
@@ -11,7 +13,7 @@ function LoadingState({ text = '加载中...' }: { text?: string }) {
         fontSize: 13,
       }}
     >
-      <div style={{ marginBottom: 8 }}>⏳</div>
+      <LoaderCircle aria-hidden="true" size={20} strokeWidth={1.8} style={{ marginBottom: 8 }} />
       {text}
     </div>
   );

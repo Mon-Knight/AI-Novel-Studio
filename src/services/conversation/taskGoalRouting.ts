@@ -77,6 +77,12 @@ const COMMON_FICTION_GENRE_GOAL =
 const EXPLICIT_WORD_COUNT_GOAL =
   /(?:(?:\d+(?:\.\d+)?|[一二两三四五六七八九十百]+)\s*(?:万|千)\s*字|\d{4,}\s*字)/i;
 const FICTION_FORM_GOAL = /小说|故事/;
+const SPARSE_PREMISE_READ_OR_QUESTION_GOAL =
+  /读取|查看|检索|查询|搜索|阅读|浏览|分析|解读|讨论|评价|评估|复盘|解释|为什么|是什么|怎么样|怎么看|有什么问题|是否|是不是|需不需要|要不要|能否|可否|哪些|怎么|如何|可行|够不够|多少|几(?:页|章|字)|[?？]|(?:吗|呢|么)[！!。.\s]*$/i;
+const SPARSE_PREMISE_SUBJECT_GOAL =
+  /一个|一位|一名|某个|某位|最后一个|唯一的|所有人|全城|全世界|主角|少年|少女|孩子|老人|侦探|记者|医生|警察|作家|学生|钟表匠|旅馆|城市|村庄|学校|人类|机器人|记忆|时间|名字|影子|秘密/;
+const SPARSE_PREMISE_EVENT_GOAL =
+  /醒来|发现|追查|调查|寻找|逃离|逃亡|被困|失去|忘记|消失|复活|穿越|重生|收留|收到|遇见|爱上|背叛|继承|阻止|拯救|破解|揭开|夺回|偷走|改变|循环|倒流|每(?:天|晚|次)|突然/;
 const CHAPTER_GENERATION_DIRECTIVE =
   /生成|创作|续写|继续写|接着写|往下写|再写一章|撰写|写作|(?:^|[，。；：:、\s])(?:(?:请|请帮我|帮我|我想|我要)\s*)?写(?:出|一|这|本|第|篇|章|完整|正文)|\bgenerate\b|\bwrite\b|\bcompose\b|\bcontinue\b/i;
 const CHAPTER_REVISION_DIRECTIVE =
@@ -166,10 +172,16 @@ function isShortCreativeBrief(goal: string): boolean {
   const hasConceptShape =
     /[，,、:：]/.test(text) ||
     /(?:上|下|中|里|内|外|之上|之下|之中)(?:的)?[\u3400-\u9fffA-Za-z0-9]{2,}$/.test(text);
+  const hasNarrativePremise =
+    Array.from(text).length >= 6 &&
+    !SPARSE_PREMISE_READ_OR_QUESTION_GOAL.test(text) &&
+    SPARSE_PREMISE_SUBJECT_GOAL.test(text) &&
+    SPARSE_PREMISE_EVENT_GOAL.test(text);
 
   return (
     (hasWordCount && hasFictionForm) ||
-    (hasGenre && (hasWordCount || hasFictionForm || hasCreativeLead || hasConceptShape))
+    (hasGenre && (hasWordCount || hasFictionForm || hasCreativeLead || hasConceptShape)) ||
+    hasNarrativePremise
   );
 }
 

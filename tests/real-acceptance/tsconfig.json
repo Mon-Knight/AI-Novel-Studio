@@ -12,7 +12,9 @@
     "chapter-word-count-contract.ts",
     "wdio.conf.ts",
     "../../src/vite-env.d.ts",
+    "../../scripts/e2e/continuous-task-surface.ts",
     "../../scripts/e2e/real-conversation-acceptance-profile.ts",
+    "../../scripts/e2e/live-condition.ts",
     "../../scripts/e2e/run-real-conversation-acceptance.ts"
   ]
 }

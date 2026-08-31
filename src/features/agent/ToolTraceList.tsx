@@ -1,4 +1,21 @@
 import { memo, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import {
+  BookOpenText,
+  Brain,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CircleX,
+  ClipboardList,
+  Clapperboard,
+  Landmark,
+  PenLine,
+  Save,
+  SearchCheck,
+  UserRound,
+  Wrench,
+} from 'lucide-react';
 import type { AgentToolExecutionRecord } from '../../types/agentHarness';
 import { AGENT_TOOL_METADATA } from '../../services/agent/agentConversationService';
 
@@ -6,6 +23,18 @@ export interface ToolTraceListProps {
   toolRecords: AgentToolExecutionRecord[];
   onAdoptProse?: (content: string) => void;
 }
+
+const TOOL_ICONS: Record<string, LucideIcon> = {
+  query_world_state: Landmark,
+  query_character_state: UserRound,
+  query_chapter_info: BookOpenText,
+  generate_outline: ClipboardList,
+  generate_scene_plan: Clapperboard,
+  generate_prose: PenLine,
+  quality_check: SearchCheck,
+  update_memory: Brain,
+  save_chapter_version: Save,
+};
 
 export const ToolTraceCard = memo(function ToolTraceCard({
   record,
@@ -17,8 +46,8 @@ export const ToolTraceCard = memo(function ToolTraceCard({
   const [expanded, setExpanded] = useState(false);
   const meta = AGENT_TOOL_METADATA[record.toolName] || {
     label: record.toolName,
-    icon: '⚙️',
   };
+  const ToolIcon = TOOL_ICONS[record.toolName] || Wrench;
   const isProseGen = record.toolName === 'generate_prose';
   const proseText =
     typeof (record.output as Record<string, unknown>)?.prose === 'string'
@@ -52,10 +81,25 @@ export const ToolTraceCard = memo(function ToolTraceCard({
         title={expanded ? '点击折叠详情' : '点击展开参数与返回结果'}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>{meta.icon}</span>
+          <ToolIcon aria-hidden="true" size={14} strokeWidth={1.8} />
           <strong style={{ fontSize: 13 }}>{meta.label}</strong>
           <span style={{ color: '#94a3b8', fontSize: 11 }}>({record.toolName})</span>
-          <span style={{ color: '#64748b', fontSize: 11 }}>{expanded ? '▲ 折叠' : '▼ 详情'}</span>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              color: '#64748b',
+              fontSize: 11,
+            }}
+          >
+            {expanded ? (
+              <ChevronUp aria-hidden="true" size={12} strokeWidth={1.8} />
+            ) : (
+              <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+            )}
+            {expanded ? '折叠' : '详情'}
+          </span>
         </div>
         <span
           style={{
@@ -66,7 +110,16 @@ export const ToolTraceCard = memo(function ToolTraceCard({
             color: record.success ? '#15803d' : '#b91c1c',
           }}
         >
-          {record.success ? `✓ 完成 ${record.durationMs}ms` : `! 失败`}
+          {record.success ? (
+            <>
+              <CheckCircle2 aria-hidden="true" size={12} strokeWidth={1.8} /> 完成{' '}
+              {record.durationMs}ms
+            </>
+          ) : (
+            <>
+              <CircleX aria-hidden="true" size={12} strokeWidth={1.8} /> 失败
+            </>
+          )}
         </span>
       </div>
 

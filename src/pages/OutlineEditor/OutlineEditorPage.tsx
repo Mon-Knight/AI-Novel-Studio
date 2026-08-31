@@ -3,6 +3,7 @@
  * 支持总纲、分卷大纲、章节大纲的查看、编辑、AI 生成和版本管理
  */
 import { useState, useEffect, useCallback } from 'react';
+import { ArrowLeft, BookOpenText, FileText, ListTree, MousePointer2 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import OutlineEditor from '../../components/outline/OutlineEditor';
 import { volumeRepository } from '../../services/database/volumeRepository';
@@ -65,7 +66,8 @@ function OutlineEditorPage() {
         }}
       >
         <button className="back-button" onClick={() => navigate(`/novels/${novelId}`)}>
-          ← 返回作品
+          <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+          返回作品
         </button>
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
           大纲编辑器
@@ -84,7 +86,14 @@ function OutlineEditorPage() {
                 setSelectedTitle('');
               }}
             >
-              {type === 'master' ? '📋 总纲' : type === 'volume' ? '📗 分卷大纲' : '📄 章节大纲'}
+              {type === 'master' ? (
+                <ListTree aria-hidden="true" size={15} strokeWidth={1.8} />
+              ) : type === 'volume' ? (
+                <BookOpenText aria-hidden="true" size={15} strokeWidth={1.8} />
+              ) : (
+                <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+              )}
+              {type === 'master' ? '总纲' : type === 'volume' ? '分卷大纲' : '章节大纲'}
             </button>
           ))}
         </div>
@@ -162,11 +171,23 @@ function OutlineEditorPage() {
           </div>
         ) : outlineType === 'volume' && !selectedVolumeId ? (
           <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 48 }}>
-            👆 请先在上方选择一个分卷
+            <MousePointer2
+              aria-hidden="true"
+              size={24}
+              strokeWidth={1.8}
+              style={{ marginBottom: 8 }}
+            />
+            <div>请先在上方选择一个分卷</div>
           </div>
         ) : outlineType === 'chapter' && !selectedChapterId ? (
           <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 48 }}>
-            👆 请先在上方选择一个章节
+            <MousePointer2
+              aria-hidden="true"
+              size={24}
+              strokeWidth={1.8}
+              style={{ marginBottom: 8 }}
+            />
+            <div>请先在上方选择一个章节</div>
           </div>
         ) : (
           <OutlineEditor

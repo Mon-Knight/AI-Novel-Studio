@@ -47,6 +47,7 @@ const E2E_ALLOWED_COMMANDS = new Set([
   'get_review_authorization',
   'get_e2e_agent_closed_loop_state',
   'get_task_conversation',
+  'get_task_turn_run_projection',
   'dsh_get_task_runtime_status',
 ]);
 

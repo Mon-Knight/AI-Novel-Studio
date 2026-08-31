@@ -1,6 +1,7 @@
 import { assertRequiredCoreAssets } from '../generation/generationContextCompiler';
 import { buildFreshChapterGenerationContext } from '../prompt/contextBuilder';
 import { chapterRepository } from '../database/chapterRepository';
+import { novelRepository } from '../database/novelRepository';
 import { protagonistRepository } from '../database/protagonistRepository';
 import { settingRepository } from '../database/settingRepository';
 import { volumeRepository } from '../database/volumeRepository';
@@ -33,6 +34,7 @@ export interface ChapterAssetOrchestration {
   preparationTurnId?: string;
   preparationRunId?: string;
   candidateArtifactId?: string;
+  errorCode?: string;
   error?: string;
   updatedAt: string;
 }
@@ -57,6 +59,7 @@ interface ChapterAssetReadinessDependencies {
   getWorldSettings?: typeof settingRepository.getWorldSettings;
   getRuleSystems?: typeof settingRepository.getRuleSystems;
   getProtagonist?: typeof protagonistRepository.getByNovelId;
+  getNovel?: typeof novelRepository.getById;
 }
 
 const STORAGE_KEY = 'ai_novel_studio_workbench_asset_recovery_v1';
@@ -165,10 +168,12 @@ export async function inspectChapterAssetReadiness(
       const getWorldSettings = deps.getWorldSettings ?? settingRepository.getWorldSettings;
       const getRuleSystems = deps.getRuleSystems ?? settingRepository.getRuleSystems;
       const getProtagonist = deps.getProtagonist ?? protagonistRepository.getByNovelId;
-      const [worldSettings, ruleSystems, protagonist] = await Promise.all([
+      const getNovel = deps.getNovel ?? novelRepository.getById;
+      const [worldSettings, ruleSystems, protagonist, novel] = await Promise.all([
         getWorldSettings(input.novelId),
         getRuleSystems(input.novelId),
         getProtagonist(input.novelId),
+        getNovel(input.novelId),
       ]);
       const hasWorldSetting = worldSettings.some(
         (setting) => setting.isActive && setting.content.trim(),
@@ -176,7 +181,9 @@ export async function inspectChapterAssetReadiness(
       const hasRuleSystem = ruleSystems.some(
         (ruleSystem) => ruleSystem.isActive && ruleSystem.content.trim(),
       );
-      const hasProtagonist = Boolean(protagonist?.name.trim());
+      const hasProtagonist = Boolean(
+        protagonist?.name.trim() || novel?.protagonists.some((profile) => profile.name.trim()),
+      );
       const missingAssets = normalizeMissingAssets([
         ...(!hasWorldSetting ? (['world_setting'] as const) : []),
         ...(!hasRuleSystem ? (['rule_system'] as const) : []),
@@ -313,6 +320,9 @@ function parseOrchestration(
     return item.phase === 'failed'
       ? {
           phase: 'failed',
+          ...(typeof item.errorCode === 'string' && item.errorCode.trim()
+            ? { errorCode: item.errorCode.trim() }
+            : {}),
           error: typeof item.error === 'string' ? item.error : undefined,
           updatedAt: item.updatedAt,
         }
@@ -329,6 +339,9 @@ function parseOrchestration(
     preparationRunId: typeof item.preparationRunId === 'string' ? item.preparationRunId : undefined,
     candidateArtifactId:
       typeof item.candidateArtifactId === 'string' ? item.candidateArtifactId : undefined,
+    ...(typeof item.errorCode === 'string' && item.errorCode.trim()
+      ? { errorCode: item.errorCode.trim() }
+      : {}),
     error: typeof item.error === 'string' ? item.error : undefined,
     updatedAt: item.updatedAt,
   };

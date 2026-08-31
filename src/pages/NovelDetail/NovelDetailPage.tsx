@@ -1,6 +1,6 @@
 import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, BookOpenText, PenLine } from 'lucide-react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
@@ -196,7 +196,7 @@ function NovelDetailPage() {
     return (
       <div className="novel-detail-page">
         <div className="flex-center" style={{ height: '100%', flexDirection: 'column', gap: 16 }}>
-          <span style={{ fontSize: 48, opacity: 0.3 }}>📖</span>
+          <BookOpenText aria-hidden="true" size={48} strokeWidth={1.8} style={{ opacity: 0.3 }} />
           <span className="text-secondary">{error || '作品未找到'}</span>
           <button className="btn btn-secondary" onClick={() => navigate('/')}>
             返回首页
@@ -209,7 +209,9 @@ function NovelDetailPage() {
   return (
     <div className="novel-detail-page" data-project-id={novel.id} data-project-name={novel.title}>
       <div className="detail-header">
-        <div className="detail-cover">📖</div>
+        <div className="detail-cover">
+          <BookOpenText aria-hidden="true" size={40} strokeWidth={1.8} />
+        </div>
         <div className="detail-info">
           <div className="detail-title">{novel.title}</div>
           <span className="detail-genre">{novel.genre || '未分类'}</span>
@@ -248,7 +250,8 @@ function NovelDetailPage() {
               className="btn btn-primary"
               onClick={() => navigate(`/novels/${novel.id}/workspace`)}
             >
-              ✏️ 进入写作工作台
+              <PenLine aria-hidden="true" size={16} strokeWidth={1.8} />
+              进入写作工作台
             </button>
             <button
               className="btn btn-secondary"

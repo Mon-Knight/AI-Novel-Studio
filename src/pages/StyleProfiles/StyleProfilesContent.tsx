@@ -1,10 +1,19 @@
 import type { Dispatch, SetStateAction } from 'react';
+import {
+  ArrowLeft,
+  BarChart3,
+  Drama,
+  Eye,
+  FileText,
+  Gauge,
+  MessageCircle,
+  Palette,
+  PenLine,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import { importedAssetService } from '../../services/styles/importedAssetService';
-import {
-  getStyleProfileTrace,
-  STYLE_SOURCE_STATE_LABELS,
-} from '../../services/styles/styleProfilePromptProjection';
 import type { ImportedAsset } from '../../types/importedAsset';
 import type { OutputProfile } from '../../types/output';
 import type { StyleProfile, StyleAnalyzeResult } from '../../types/style';
@@ -14,6 +23,7 @@ import type {
   StyleProfileFormValue,
   StyleProfilesTab,
 } from './styleProfilesPageTypes';
+import { StyleSourceTrace } from './StyleSourceTrace';
 
 function sourceTypeLabel(style: StyleProfile): string {
   switch (style.sourceType) {
@@ -28,65 +38,6 @@ function sourceTypeLabel(style: StyleProfile): string {
     case 'system_default':
       return '系统默认';
   }
-}
-
-function sourceStateColor(state: StyleProfile['sourceState']): string {
-  if (state === 'available') return 'var(--color-success)';
-  if (state === 'outdated') return 'var(--color-warning)';
-  if (state === 'missing') return 'var(--color-error)';
-  return 'var(--color-text-secondary)';
-}
-
-function StyleSourceTrace({ profile }: { profile: StyleProfile }) {
-  const trace = getStyleProfileTrace(profile);
-  if (
-    trace.sourceState === 'none' &&
-    !trace.sourceReferenceWorkId &&
-    !trace.sourceReferenceImportId &&
-    !trace.sourceContentHash
-  ) {
-    return null;
-  }
-  return (
-    <div
-      aria-label={`${profile.name} 来源追溯`}
-      data-source-state={trace.sourceState}
-      style={{
-        marginTop: 10,
-        padding: '8px 10px',
-        borderRadius: 6,
-        border: '1px solid var(--color-border)',
-        background: 'var(--color-bg-hover)',
-        color: 'var(--color-text-secondary)',
-        fontSize: 11,
-        lineHeight: 1.6,
-        overflowWrap: 'anywhere',
-      }}
-    >
-      <div style={{ color: sourceStateColor(trace.sourceState), fontWeight: 600 }}>
-        {STYLE_SOURCE_STATE_LABELS[trace.sourceState]}
-      </div>
-      {trace.sourceReferenceWorkId && <div>参考作品：{trace.sourceReferenceWorkId}</div>}
-      {trace.sourceReferenceImportId && <div>导入版本：{trace.sourceReferenceImportId}</div>}
-      {trace.sourceContentHash && (
-        <div title={trace.sourceContentHash}>来源哈希：{trace.sourceContentHash}</div>
-      )}
-      {(trace.analyzerVersion || trace.promptVersion) && (
-        <div>
-          分析协议：{trace.analyzerVersion ?? '未知'} / {trace.promptVersion ?? '未知'}
-        </div>
-      )}
-      {(trace.model?.provider || trace.model?.modelName) && (
-        <div>
-          分析模型：{trace.model.provider ?? '未知'} / {trace.model.modelName ?? '未知'}
-        </div>
-      )}
-      {trace.confidenceOverall !== undefined && (
-        <div>总体置信度：{Math.round(trace.confidenceOverall * 100)}%</div>
-      )}
-      {trace.samples.length > 0 && <div>可重放采样范围：{trace.samples.length} 个</div>}
-    </div>
-  );
 }
 
 interface StyleProfilesContentProps {
@@ -153,8 +104,19 @@ export function StyleProfilesContent({
       style={{ padding: 32, maxWidth: 1000, margin: '0 auto', height: '100%', overflowY: 'auto' }}
     >
       <BackButton label="返回工作台" to="/" />
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>
-        🎨 风格方案管理
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 22,
+          fontWeight: 700,
+          marginBottom: 8,
+          marginTop: 12,
+        }}
+      >
+        <Palette aria-hidden="true" size={22} strokeWidth={1.8} />
+        风格方案管理
       </div>
       <div className="text-sm text-muted" style={{ marginBottom: 20 }}>
         管理可复用的写作风格画像和输出控制方案。
@@ -227,7 +189,8 @@ export function StyleProfilesContent({
                 setShowStyleForm(true);
               }}
             >
-              + 新建风格
+              <Plus aria-hidden="true" size={15} strokeWidth={1.8} />
+              新建风格
             </button>
             <button
               className="btn btn-secondary btn-sm"
@@ -239,7 +202,8 @@ export function StyleProfilesContent({
                 setShowAnalyze(true);
               }}
             >
-              📄 TXT分析
+              <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+              TXT分析
             </button>
           </>
         )}
@@ -258,7 +222,8 @@ export function StyleProfilesContent({
               setShowOutputForm(true);
             }}
           >
-            + 新建方案
+            <Plus aria-hidden="true" size={15} strokeWidth={1.8} />
+            新建方案
           </button>
         )}
       </div>
@@ -311,11 +276,28 @@ export function StyleProfilesContent({
                   lineHeight: 1.6,
                 }}
               >
-                {s.narrativePerspective && <div>👁️ {s.narrativePerspective}</div>}
-                {s.tone && <div>🎭 {s.tone}</div>}
-                {s.pace && <div>⚡ {s.pace}</div>}
-                <div>
-                  💬 {Math.round(s.dialogueRatio * 100)}% · 🖊️{' '}
+                {s.narrativePerspective && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
+                    {s.narrativePerspective}
+                  </div>
+                )}
+                {s.tone && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Drama aria-hidden="true" size={14} strokeWidth={1.8} />
+                    {s.tone}
+                  </div>
+                )}
+                {s.pace && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Gauge aria-hidden="true" size={14} strokeWidth={1.8} />
+                    {s.pace}
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <MessageCircle aria-hidden="true" size={14} strokeWidth={1.8} />
+                  {Math.round(s.dialogueRatio * 100)}% ·
+                  <PenLine aria-hidden="true" size={14} strokeWidth={1.8} />
                   {Math.round(s.descriptionRatio * 100)}%
                 </div>
               </div>
@@ -330,16 +312,23 @@ export function StyleProfilesContent({
                     {activatingStyleId === s.id ? '切换中...' : '设为当前'}
                   </button>
                 )}
-                <button className="btn btn-secondary btn-sm" onClick={() => editStyle(s)}>
-                  ✏️
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => editStyle(s)}
+                  aria-label={`编辑风格 ${s.name}`}
+                  title="编辑风格"
+                >
+                  <PenLine aria-hidden="true" size={15} strokeWidth={1.8} />
                 </button>
                 {s.sourceType !== 'system_default' && (
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => deleteStyle(s.id, s.name)}
                     style={{ color: 'var(--color-error)' }}
+                    aria-label={`删除风格 ${s.name}`}
+                    title="删除风格"
                   >
-                    🗑️
+                    <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
                   </button>
                 )}
               </div>
@@ -376,9 +365,13 @@ export function StyleProfilesContent({
                 )}
               </div>
               <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 8 }}>
-                <div>📊 {formatNumber(o.targetWordCount ?? o.chapterWordRange.default)} 字</div>
-                <div>
-                  ⚡ {o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <BarChart3 aria-hidden="true" size={14} strokeWidth={1.8} />
+                  {formatNumber(o.targetWordCount ?? o.chapterWordRange.default)} 字
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Gauge aria-hidden="true" size={14} strokeWidth={1.8} />
+                  {o.paceLevel === 'fast' ? '快' : o.paceLevel === 'slow' ? '慢' : '中等'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
@@ -393,6 +386,8 @@ export function StyleProfilesContent({
                 )}
                 <button
                   className="btn btn-secondary btn-sm"
+                  aria-label={`编辑输出方案 ${o.name}`}
+                  title="编辑输出方案"
                   onClick={() => {
                     setEditingOutput(o);
                     setOutputForm({
@@ -405,15 +400,17 @@ export function StyleProfilesContent({
                     setShowOutputForm(true);
                   }}
                 >
-                  ✏️
+                  <PenLine aria-hidden="true" size={15} strokeWidth={1.8} />
                 </button>
                 {!o.isDefault && (
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => deleteOutput(o.id, o.name)}
                     style={{ color: 'var(--color-error)' }}
+                    aria-label={`删除输出方案 ${o.name}`}
+                    title="删除输出方案"
                   >
-                    🗑️
+                    <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
                   </button>
                 )}
               </div>
@@ -456,8 +453,10 @@ export function StyleProfilesContent({
                     flash('已删除');
                     importedAssetService.getAll().then(setAssets);
                   }}
+                  aria-label={`删除导入记录 ${a.fileName}`}
+                  title="删除导入记录"
                 >
-                  🗑️
+                  <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
                 </button>
               </div>
             ))
@@ -466,7 +465,8 @@ export function StyleProfilesContent({
       )}
 
       <button className="btn btn-secondary" onClick={onBack} style={{ marginTop: 20 }}>
-        ← 返回首页
+        <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+        返回首页
       </button>
     </div>
   );
