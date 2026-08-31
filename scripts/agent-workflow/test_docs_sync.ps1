@@ -77,6 +77,29 @@ function Assert-MissingArtifactFails {
     Copy-RepositoryFileToFixture $RelativePath
 }
 
+function Move-WorkflowStepBefore {
+    param(
+        [string]$Content,
+        [string]$StepName,
+        [string]$AnchorStepName
+    )
+
+    $stepPattern = "(?ms)^      - name: $([regex]::Escape($StepName))\r?\n.*?(?=^      - |\z)"
+    $stepMatch = [regex]::Match($Content, $stepPattern)
+    if (-not $stepMatch.Success) {
+        throw "Unable to locate workflow step '$StepName'."
+    }
+
+    $withoutStep = $Content.Remove($stepMatch.Index, $stepMatch.Length)
+    $anchorPattern = "(?m)^      - name: $([regex]::Escape($AnchorStepName))\r?$"
+    $anchorMatch = [regex]::Match($withoutStep, $anchorPattern)
+    if (-not $anchorMatch.Success) {
+        throw "Unable to locate workflow anchor '$AnchorStepName'."
+    }
+
+    return $withoutStep.Insert($anchorMatch.Index, $stepMatch.Value)
+}
+
 Write-Host "========================================"
 Write-Host "  Document Sync Regression Tests"
 Write-Host "========================================"
@@ -117,11 +140,41 @@ try {
     Assert-CheckResult "release without desktop dependency" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseWorkflow = Move-WorkflowStepBefore $releaseWorkflow "Run Rust tests" "Checkout pinned DSH runtime source"
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWorkflow -Encoding UTF8
+    Assert-CheckResult "release tests before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseWithoutDshExport = $releaseWorkflow.Replace('"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout"', '"DSH_CHECKOUT_REMOVED"')
+    if ($releaseWithoutDshExport -ceq $releaseWorkflow) {
+        throw "Unable to remove the release DSH_CHECKOUT export fixture."
+    }
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseWithoutDshExport -Encoding UTF8
+    Assert-CheckResult "release without DSH runtime export" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
     $desktopWorkflowPath = Join-Path $FixtureRoot ".github/workflows/windows-desktop-e2e.yml"
     $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
     $desktopWorkflow = $desktopWorkflow -replace 'workflow_call:', 'workflow_call_removed:'
     Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflow -Encoding UTF8
     Assert-CheckResult "desktop workflow without reusable gate" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWorkflow = Move-WorkflowStepBefore $desktopWorkflow "Run Rust tests" "Checkout pinned DSH runtime source"
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflow -Encoding UTF8
+    Assert-CheckResult "desktop tests before DSH runtime" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWithoutDshExport = $desktopWorkflow.Replace('"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout"', '"DSH_CHECKOUT_REMOVED"')
+    if ($desktopWithoutDshExport -ceq $desktopWorkflow) {
+        throw "Unable to remove the desktop DSH_CHECKOUT export fixture."
+    }
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWithoutDshExport -Encoding UTF8
+    Assert-CheckResult "desktop workflow without DSH runtime export" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
 
     $fastCiWorkflowPath = Join-Path $FixtureRoot ".github/workflows/ci.yml"

@@ -58,6 +58,51 @@ function Get-OptionalText {
     return Read-Utf8Text $RelativePath
 }
 
+function Get-WorkflowJobBlock {
+    param(
+        [string]$Content,
+        [string]$JobName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return $null
+    }
+
+    $pattern = "(?ms)^  $([regex]::Escape($JobName)):\s*\r?\n(?<job>.*?)(?=^  [A-Za-z0-9_-]+:\s*\r?\n|\z)"
+    $match = [regex]::Match($Content, $pattern)
+    if (-not $match.Success) {
+        return $null
+    }
+
+    return $match.Groups["job"].Value
+}
+
+function Test-MarkersInOrder {
+    param(
+        [string]$Content,
+        [string[]]$Markers
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return $false
+    }
+
+    $cursor = 0
+    foreach ($marker in $Markers) {
+        $index = $Content.IndexOf($marker, [System.StringComparison]::Ordinal)
+        if ($index -lt $cursor) {
+            return $false
+        }
+        $duplicateIndex = $Content.IndexOf($marker, $index + $marker.Length, [System.StringComparison]::Ordinal)
+        if ($duplicateIndex -ge 0) {
+            return $false
+        }
+        $cursor = $index + $marker.Length
+    }
+
+    return $true
+}
+
 function Get-UniqueCapture {
     param(
         [string]$Label,
@@ -245,6 +290,18 @@ $desktopWorkflowHasReusableGate =
     ([string]$desktopWorkflow).Contains("npm run test:bundle-size")
 Add-CheckResult "reusable desktop release gate" $desktopWorkflowHasReusableGate "workflow_call and bundle-size gate are present"
 
+$desktopQualityJob = Get-WorkflowJobBlock ([string]$desktopWorkflow) "quality"
+$desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob) @(
+    "repository: deepseek-ai/deepseek-harness",
+    "ref: 47f943859bef60e4160492346772ded9b24f765a",
+    "path: .dsh-checkout",
+    "pnpm --dir .dsh-checkout run build:lib:host",
+    '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
+    "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "npm run tauri:build -- --bundles none --ci"
+)
+Add-CheckResult "desktop DSH runtime precedes Rust tests" $desktopQualityHasRuntimeOrder "pinned DSH host is exported before Rust tests and the production Tauri build"
+
 $releaseWorkflow = Get-OptionalText ".github/workflows/release.yml"
 $releaseRequiresDesktopGate =
     ([string]$releaseWorkflow).Contains("uses: ./.github/workflows/windows-desktop-e2e.yml") -and
@@ -252,6 +309,18 @@ $releaseRequiresDesktopGate =
     ([string]$releaseWorkflow).Contains("suite: full") -and
     ([string]$releaseWorkflow).Contains("npm run test:bundle-size")
 Add-CheckResult "release waits for full desktop gate" $releaseRequiresDesktopGate "signed release depends on full reusable desktop E2E and bundle budgets"
+
+$windowsReleaseJob = Get-WorkflowJobBlock ([string]$releaseWorkflow) "windows-release"
+$windowsReleaseHasRuntimeOrder = Test-MarkersInOrder ([string]$windowsReleaseJob) @(
+    "repository: deepseek-ai/deepseek-harness",
+    "ref: 47f943859bef60e4160492346772ded9b24f765a",
+    "path: .dsh-checkout",
+    "pnpm --dir .dsh-checkout run build:lib:host",
+    '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
+    "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "npm run tauri:build:release -- --config"
+)
+Add-CheckResult "release DSH runtime precedes Rust tests" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before Rust tests and signed installer creation"
 
 $releaseNoteFragments = @(Get-ChildItem -LiteralPath (Get-ProjectPath "docs") -File -Filter "release-notes-v*.md" -ErrorAction SilentlyContinue)
 Add-CheckResult "single release history archive" ($releaseNoteFragments.Count -eq 0) $(if ($releaseNoteFragments.Count -eq 0) { "no per-version fragments" } else { ($releaseNoteFragments.Name -join ", ") })
