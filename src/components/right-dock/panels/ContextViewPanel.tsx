@@ -4,6 +4,7 @@ import { appLogger } from '../../../services/observability/appLogger';
  * v1.7.14: 增加卷上下文生成 + 卷完成检查 + 过期联动
  */
 import { useState, useEffect, useCallback } from 'react';
+import { Archive, Clock3, Plus, X } from 'lucide-react';
 import type { Chapter } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
 import type {
@@ -24,6 +25,7 @@ import { cancelLoadingOperation, runWithLoading } from '../../../lib/runWithLoad
 import ContextRecordList from '../../context-records/ContextRecordList';
 import ContextRecordForm from '../../context-records/ContextRecordForm';
 import { describeUnknownError } from '../../../utils/errorMessage';
+import { VolumeContextGenerationSection } from './VolumeContextGenerationSection';
 
 interface ContextViewPanelProps {
   novelId?: string;
@@ -270,11 +272,29 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
             marginBottom: 8,
           }}
         >
-          <div className="panel-section-title" style={{ marginBottom: 0 }}>
-            📦 上下文记录（{filteredRecords.length}）
+          <div
+            className="panel-section-title"
+            style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Archive size={14} strokeWidth={1.8} aria-hidden="true" />
+            上下文记录（{filteredRecords.length}）
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowForm(!showForm)}>
-            {showForm ? '取消' : '➕ 新增'}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowForm(!showForm)}
+            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+          >
+            {showForm ? (
+              <>
+                <X size={13} strokeWidth={1.8} aria-hidden="true" />
+                取消
+              </>
+            ) : (
+              <>
+                <Plus size={13} strokeWidth={1.8} aria-hidden="true" />
+                新增
+              </>
+            )}
           </button>
         </div>
 
@@ -301,142 +321,38 @@ function ContextViewPanel({ novelId, chapter }: ContextViewPanelProps) {
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 8 }}>
           启用 {activeCount} 条 / 共 {filteredRecords.length} 条
           {expiredCount > 0 && (
-            <span style={{ color: 'var(--color-warning-text)', marginLeft: 6 }}>
-              ⏳ {expiredCount} 条已过期
+            <span
+              style={{
+                color: 'var(--color-warning-text)',
+                marginLeft: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <Clock3 size={12} strokeWidth={1.8} aria-hidden="true" />
+              {expiredCount} 条已过期
             </span>
           )}
         </div>
 
-        {/* 卷上下文生成区 */}
         {activeTab === 'volume_context' && (
-          <div style={{ marginBottom: 12 }}>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'var(--color-text-muted)',
-                marginBottom: 6,
-              }}
-            >
-              📚 卷上下文生成
-            </div>
-            {volumes.length === 0 && (
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', padding: 8 }}>
-                暂无分卷。请先在作品详情页创建分卷。
-              </div>
-            )}
-            {volumes.map((vol) => {
-              const check = volumeChecks[vol.id];
-              const isLoading = genLoading[vol.id];
-              const error = genError[vol.id];
-              const result = genResult[vol.id];
-
-              return (
-                <div
-                  key={vol.id}
-                  style={{
-                    padding: 8,
-                    marginBottom: 6,
-                    borderRadius: 6,
-                    border: '1px solid var(--color-border-light)',
-                    background: 'var(--color-bg-primary)',
-                  }}
-                >
-                  <div style={{ fontWeight: 500, fontSize: 12, marginBottom: 4 }}>
-                    📖 {vol.title}
-                    {check && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          marginLeft: 6,
-                          padding: '1px 6px',
-                          borderRadius: 3,
-                          background: check.completed
-                            ? 'color-mix(in srgb, var(--color-success) 13%, transparent)'
-                            : 'color-mix(in srgb, var(--color-warning) 13%, transparent)',
-                          color: check.completed
-                            ? 'var(--color-success)'
-                            : 'var(--color-warning-text)',
-                        }}
-                      >
-                        {check.completed ? '✅ 可生成' : '⏳ 未就绪'}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* 未就绪原因 */}
-                  {check && !check.completed && check.reasons.length > 0 && (
-                    <div
-                      style={{ fontSize: 10, color: 'var(--color-warning-text)', marginBottom: 6 }}
-                    >
-                      {check.reasons.map((r: string, i: number) => (
-                        <div key={i}>• {r}</div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* 生成按钮 */}
-                  {check?.completed && !result && (
-                    <button
-                      className="btn btn-sm btn-primary"
-                      onClick={() => handleGenerateVolumeContext(vol)}
-                      disabled={isLoading}
-                      style={{ width: '100%', fontSize: 11 }}
-                    >
-                      {isLoading ? '⏳ 生成中...' : '🤖 生成卷上下文'}
-                    </button>
-                  )}
-                  {error && (
-                    <div style={{ fontSize: 10, color: 'var(--color-error)', marginTop: 4 }}>
-                      {error}
-                    </div>
-                  )}
-
-                  {/* 生成结果预览 */}
-                  {result && (
-                    <div style={{ marginTop: 6, fontSize: 11 }}>
-                      <div
-                        style={{ fontWeight: 500, color: 'var(--color-success)', marginBottom: 4 }}
-                      >
-                        ✅ {result.summaryTitle}
-                      </div>
-                      <div
-                        style={{
-                          color: 'var(--color-text-secondary)',
-                          lineHeight: 1.5,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {result.volumeMainArc.slice(0, 150)}…
-                      </div>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => handleSaveVolumeContext(vol)}
-                          style={{ flex: 1, fontSize: 10 }}
-                        >
-                          💾 保存为上下文
-                        </button>
-                        <button
-                          className="btn btn-sm btn-secondary"
-                          onClick={() =>
-                            setGenResult((prev) => {
-                              const n = { ...prev };
-                              delete n[vol.id];
-                              return n;
-                            })
-                          }
-                          style={{ flex: 1, fontSize: 10 }}
-                        >
-                          放弃
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <VolumeContextGenerationSection
+            volumes={volumes}
+            volumeChecks={volumeChecks}
+            loadingByVolume={genLoading}
+            errorByVolume={genError}
+            resultByVolume={genResult}
+            onGenerate={handleGenerateVolumeContext}
+            onSave={handleSaveVolumeContext}
+            onDiscard={(volumeId) =>
+              setGenResult((previous) => {
+                const next = { ...previous };
+                delete next[volumeId];
+                return next;
+              })
+            }
+          />
         )}
 
         {showForm && (

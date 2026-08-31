@@ -9,6 +9,11 @@ import { errorResult, notImplemented, resolveNovelId, successResult } from './to
 import { chapterRepository } from '../services/database/chapterRepository';
 import { volumeRepository } from '../services/database/volumeRepository';
 import { draftService } from '../services/database/draftService';
+import { getDbMode } from '../services/database/db';
+
+function dataSource(): 'sqlite' | 'localstorage' {
+  return getDbMode() === 'tauri' ? 'sqlite' : 'localstorage';
+}
 
 /**
  * 读取章节大纲
@@ -19,6 +24,10 @@ import { draftService } from '../services/database/draftService';
 export async function readChapterOutline(
   context: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
+  const novelId = resolveNovelId(context);
+  if (!novelId) {
+    return errorResult('缺少作品 ID（novelId）', { source: 'scope' });
+  }
   const chapterId = context.chapterId;
   if (!chapterId) {
     return errorResult('缺少章节 ID（chapterId）', { source: 'tool-layer' });
@@ -27,7 +36,10 @@ export async function readChapterOutline(
   try {
     const chapter = await chapterRepository.getById(chapterId);
     if (!chapter) {
-      return errorResult(`章节 ${chapterId} 不存在`, { source: 'database' });
+      return errorResult(`章节 ${chapterId} 不存在`, { source: dataSource() });
+    }
+    if (chapter.novelId !== novelId) {
+      return errorResult(`章节 ${chapterId} 不属于当前作品`, { source: 'scope' });
     }
 
     const warnings: string[] = [];
@@ -36,6 +48,11 @@ export async function readChapterOutline(
     let volume: unknown = null;
     try {
       volume = await volumeRepository.getById(chapter.volumeId ?? '');
+      if (volume && (volume as Record<string, unknown>).novelId !== novelId) {
+        return errorResult(`章节 ${chapterId} 引用的分卷不属于当前作品`, {
+          source: 'scope',
+        });
+      }
     } catch {
       warnings.push('无法读取所属分卷信息');
     }
@@ -65,6 +82,7 @@ export async function readChapterOutline(
         volume: volume
           ? {
               id: (volume as Record<string, unknown>).id,
+              novelId: (volume as Record<string, unknown>).novelId,
               title: (volume as Record<string, unknown>).title,
               orderIndex: (volume as Record<string, unknown>).orderIndex,
             }
@@ -72,13 +90,13 @@ export async function readChapterOutline(
         drafts,
       },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`读取章节大纲失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }
@@ -93,6 +111,10 @@ export async function readChapterOutline(
 export async function readChapterContext(
   context: AgentToolContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
+  const novelId = resolveNovelId(context);
+  if (!novelId) {
+    return errorResult('缺少作品 ID（novelId）', { source: 'scope' });
+  }
   const chapterId = context.chapterId;
   if (!chapterId) {
     return errorResult('缺少章节 ID（chapterId）', { source: 'tool-layer' });
@@ -101,10 +123,12 @@ export async function readChapterContext(
   try {
     const chapter = await chapterRepository.getById(chapterId);
     if (!chapter) {
-      return errorResult(`章节 ${chapterId} 不存在`, { source: 'database' });
+      return errorResult(`章节 ${chapterId} 不存在`, { source: dataSource() });
     }
 
-    const novelId = resolveNovelId(context) ?? chapter.novelId;
+    if (chapter.novelId !== novelId) {
+      return errorResult(`章节 ${chapterId} 不属于当前作品`, { source: 'scope' });
+    }
     const warnings: string[] = [];
 
     // 尝试读取出场角色
@@ -113,6 +137,18 @@ export async function readChapterContext(
       const { chapterCharacterService } =
         await import('../services/characters/chapterCharacterService');
       chapterCharacters = await chapterCharacterService.getByChapterId(chapterId);
+      if (
+        Array.isArray(chapterCharacters) &&
+        chapterCharacters.some(
+          (item) =>
+            item &&
+            typeof item === 'object' &&
+            ((item as Record<string, unknown>).novelId !== novelId ||
+              (item as Record<string, unknown>).chapterId !== chapterId),
+        )
+      ) {
+        return errorResult(`章节 ${chapterId} 的角色关联归属不一致`, { source: 'scope' });
+      }
     } catch {
       warnings.push('无法读取本章出场角色');
     }
@@ -122,6 +158,18 @@ export async function readChapterContext(
     try {
       const { chapterEventService } = await import('../services/characters/chapterEventService');
       chapterEvents = await chapterEventService.getByChapterId(chapterId);
+      if (
+        Array.isArray(chapterEvents) &&
+        chapterEvents.some(
+          (item) =>
+            item &&
+            typeof item === 'object' &&
+            ((item as Record<string, unknown>).novelId !== novelId ||
+              (item as Record<string, unknown>).chapterId !== chapterId),
+        )
+      ) {
+        return errorResult(`章节 ${chapterId} 的事件归属不一致`, { source: 'scope' });
+      }
     } catch {
       warnings.push('无法读取本章事件');
     }
@@ -142,13 +190,13 @@ export async function readChapterContext(
         chapterEvents,
       },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`读取章节上下文失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }

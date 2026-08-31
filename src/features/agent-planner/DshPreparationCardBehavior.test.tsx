@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 import React from 'react';
 import type {
   ChapterBaselineRevision,
+  ChapterPreparationPlannerOptions,
   ChapterPreparationProposal,
 } from '../../types/chapterPreparation';
 import { DshPreparationCard } from './DshPreparationCard';
@@ -62,7 +63,7 @@ interface FakeHookState {
   revisionsError: string;
   summary: { runs: number; promptTokens: number; completionTokens: number; durationMs: number };
   summaryError: string;
-  runCalls: { mode: DshPreparationMode; options?: { apiKey?: string; model?: string } }[];
+  runCalls: { mode: DshPreparationMode; options?: ChapterPreparationPlannerOptions }[];
 }
 
 function baseHookState(overrides: Partial<FakeHookState> = {}): FakeHookState {
@@ -85,7 +86,12 @@ function baseHookState(overrides: Partial<FakeHookState> = {}): FakeHookState {
   };
 }
 
-function renderWithHook(state: FakeHookState, apiKey: string | undefined = 'sk-test') {
+function renderWithHook(
+  state: FakeHookState,
+  apiKey: string | undefined = 'sk-test',
+  modelName = 'deepseek-v4-flash',
+  baseUrl?: string,
+) {
   const hook = () => ({
     proposal: state.proposal,
     planner: state.planner,
@@ -97,7 +103,7 @@ function renderWithHook(state: FakeHookState, apiKey: string | undefined = 'sk-t
     revisionsError: state.revisionsError,
     summary: state.summary,
     summaryError: state.summaryError,
-    run: (mode: DshPreparationMode, options?: { apiKey?: string; model?: string }) => {
+    run: (mode: DshPreparationMode, options?: ChapterPreparationPlannerOptions) => {
       state.runCalls.push({ mode, options });
       return Promise.resolve();
     },
@@ -107,7 +113,8 @@ function renderWithHook(state: FakeHookState, apiKey: string | undefined = 'sk-t
       novelId: 'nov-a',
       chapterId: 'ch-a1',
       apiKey,
-      modelName: 'deepseek-v4-flash',
+      baseUrl,
+      modelName,
       hook,
     }),
   );
@@ -159,6 +166,20 @@ test('点击 DSH 按钮携带 apiKey 与 deepseek 模型', () => {
   assert.equal(state.runCalls[0].mode, 'dsh');
   assert.equal(state.runCalls[0].options?.apiKey, 'sk-test');
   assert.equal(state.runCalls[0].options?.model, 'deepseek-v4-flash');
+});
+
+test('点击 DSH 按钮原样携带 OpenAI-compatible Base URL 与非 DeepSeek 模型', () => {
+  const state = baseHookState();
+  renderWithHook(state, 'test-session-key', 'gpt-5.6-luna', 'http://localhost:12074/v1');
+  fireEvent.click(screen.getByTestId('dsh-run-dsh'));
+  assert.deepEqual(state.runCalls[0], {
+    mode: 'dsh',
+    options: {
+      apiKey: 'test-session-key',
+      baseUrl: 'http://localhost:12074/v1',
+      model: 'gpt-5.6-luna',
+    },
+  });
 });
 
 test('点击当前 Planner 按钮走确定性映射', () => {

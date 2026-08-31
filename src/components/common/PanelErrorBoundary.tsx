@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { TriangleAlert } from 'lucide-react';
 import { appLogger } from '../../services/observability/appLogger';
 
 interface PanelErrorBoundaryProps {
@@ -60,9 +61,18 @@ export class PanelErrorBoundary extends Component<
           }}
         >
           <div
-            style={{ fontWeight: 600, marginBottom: '6px', color: 'var(--color-error, #d9534f)' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              fontWeight: 600,
+              marginBottom: '6px',
+              color: 'var(--color-error, #d9534f)',
+            }}
           >
-            ⚠️ {title}渲染出现异常
+            <TriangleAlert aria-hidden="true" size={16} strokeWidth={1.8} />
+            {title}渲染出现异常
           </div>
           <div
             style={{

@@ -152,7 +152,7 @@ AI Agent **绝对不得**：
 
 ### 7.2 当前版本
 
-当前版本为 v3.5.0；机器可读版本以 `package.json`、`src-tauri/Cargo.toml` 和版本同步检查为准。
+当前版本为 v3.6.0；机器可读版本以 `package.json`、`src-tauri/Cargo.toml` 和版本同步检查为准。
 
 ### 7.3 发布流程
 
@@ -163,7 +163,7 @@ git add .
 git commit -m "feat: complete vX.X.X ..."
 git push -u origin codex/vX.Y.Z-release
 
-# 创建 PR，门禁和审查通过后合并；再从 main 创建不可移动的发布 tag
+# 创建 PR，门禁和适用审查条件通过后合并；再从 main 创建不可移动的发布 tag
 git switch main
 git pull --ff-only origin main
 git tag vX.X.X

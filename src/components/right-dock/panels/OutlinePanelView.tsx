@@ -1,12 +1,22 @@
+import {
+  Bot,
+  BookOpenText,
+  CheckCircle2,
+  Clipboard,
+  FileText,
+  ListTree,
+  LoaderCircle,
+  TriangleAlert,
+} from 'lucide-react';
 import type { AiSettings } from '../../../types/ai';
 import type { Chapter } from '../../../types/chapter';
-import { ChapterStatusLabels } from '../../../types/chapter';
 import type { Volume } from '../../../types/volume';
 import type {
   ChapterOutlineCandidate,
   VolumeOutlineCandidate,
 } from '../../../services/ai/outlineGenerateService';
 import { formatNumber } from '../../../utils/format';
+import { ChapterOutlineEditor } from './ChapterOutlineEditor';
 
 export type OutlineGenMode = 'novel' | 'volume' | 'chapter' | null;
 
@@ -80,14 +90,29 @@ export function OutlinePanelView({
   return (
     <div>
       <div className="panel-section" style={{ fontSize: 12, lineHeight: 1.8 }}>
-        <div className="panel-section-title">🤖 AI 状态</div>
-        <div>模式：{aiSettings.runtimeMode === 'mock' ? '🔶 Mock 模式' : '🔷 真实 API'}</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 状态
+        </div>
+        <div>模式：{aiSettings.runtimeMode === 'mock' ? 'Mock 模式' : '真实 API'}</div>
         {aiSettings.runtimeMode === 'api' && (
           <>
             <div>模型：{aiSettings.modelName || '未配置'}</div>
             {!aiSettings.apiKey && (
-              <div style={{ color: 'var(--color-error)', marginTop: 4 }}>
-                ⚠️ 未配置 API Key，请先到设置中心配置
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  marginTop: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                未配置 API Key，请先到设置中心配置
               </div>
             )}
           </>
@@ -95,22 +120,62 @@ export function OutlinePanelView({
       </div>
 
       <div className="panel-section">
-        <div className="panel-section-title">🤖 AI 大纲生成</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Bot size={14} strokeWidth={1.8} aria-hidden="true" />
+          AI 大纲生成
+        </div>
         <button
           className="btn btn-primary btn-sm"
           onClick={onGenerateNovelOutline}
           disabled={loading}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading && genMode === 'novel' ? '⏳ 生成中...' : '📖 生成作品总大纲'}
+          {loading && genMode === 'novel' ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <BookOpenText size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成作品总大纲
+            </>
+          )}
         </button>
         <button
           className="btn btn-primary btn-sm"
           onClick={onGenerateVolumeOutline}
           disabled={loading || !volume}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading && genMode === 'volume' ? '⏳ 生成中...' : '📋 生成本卷大纲'}
+          {loading && genMode === 'volume' ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <ListTree size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成本卷大纲
+            </>
+          )}
         </button>
         {!volume && chapter && (
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
@@ -121,9 +186,26 @@ export function OutlinePanelView({
           className="btn btn-primary btn-sm"
           onClick={onGenerateChapterOutlines}
           disabled={loading || !chapter}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          {loading && genMode === 'chapter' ? '⏳ 生成中...' : '📝 生成章节大纲'}
+          {loading && genMode === 'chapter' ? (
+            <>
+              <LoaderCircle size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成中...
+            </>
+          ) : (
+            <>
+              <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+              生成章节大纲
+            </>
+          )}
         </button>
         {!chapter && (
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 6 }}>
@@ -157,7 +239,13 @@ export function OutlinePanelView({
           className="panel-section"
           style={{ border: '1px solid var(--color-primary-light)', borderRadius: 6, padding: 10 }}
         >
-          <div className="panel-section-title">📖 作品总大纲（可编辑）</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <BookOpenText size={14} strokeWidth={1.8} aria-hidden="true" />
+            作品总大纲（可编辑）
+          </div>
           <textarea
             className="input"
             value={novelOutline}
@@ -172,8 +260,13 @@ export function OutlinePanelView({
             }}
           />
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={onAdoptNovelOutline}>
-              📋 复制大纲
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={onAdoptNovelOutline}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Clipboard size={14} strokeWidth={1.8} aria-hidden="true" />
+              复制大纲
             </button>
           </div>
         </div>
@@ -183,7 +276,13 @@ export function OutlinePanelView({
 
       {chapterOutlines.length > 0 && (
         <div className="panel-section">
-          <div className="panel-section-title">📝 AI 章节大纲候选（{chapterOutlines.length}）</div>
+          <div
+            className="panel-section-title"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+            AI 章节大纲候选（{chapterOutlines.length}）
+          </div>
           {chapterOutlines.map((candidate, index) => (
             <div
               key={index}
@@ -241,7 +340,8 @@ export function OutlinePanelView({
                     onClick={() => onAdoptChapterOutline(candidate)}
                     disabled={loading || !(candidate.rawText || candidate.outline)?.trim()}
                   >
-                    ✅ 应用到当前章节
+                    <CheckCircle2 size={14} strokeWidth={1.8} aria-hidden="true" />
+                    应用到当前章节
                   </button>
                 </div>
               )}
@@ -298,7 +398,13 @@ function VolumeOutlineResult({ outline }: { outline: VolumeOutlineCandidate }) {
       className="panel-section"
       style={{ border: '1px solid var(--color-primary-light)', borderRadius: 6, padding: 10 }}
     >
-      <div className="panel-section-title">📋 分卷大纲</div>
+      <div
+        className="panel-section-title"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        <ListTree size={14} strokeWidth={1.8} aria-hidden="true" />
+        分卷大纲
+      </div>
       <div className="panel-field">
         <div className="panel-field-label">标题</div>
         <div className="panel-field-value">{outline.title}</div>
@@ -345,200 +451,6 @@ function VolumeOutlineResult({ outline }: { outline: VolumeOutlineCandidate }) {
           原始返回：{outline.rawText.slice(0, 500)}
         </div>
       )}
-    </div>
-  );
-}
-
-interface ChapterOutlineEditorProps {
-  chapter: Chapter;
-  isEditing: boolean;
-  outlineDraft: string;
-  outlineSaveMsg: string;
-  goalDraft: string;
-  goalDirty: boolean;
-  goalSaveMsg: string;
-  onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onOutlineDraftChange: (value: string) => void;
-  onSaveOutline: () => void;
-  onGoalChange: (value: string) => void;
-  onSaveGoal: () => void;
-}
-
-function ChapterOutlineEditor(props: ChapterOutlineEditorProps) {
-  const {
-    chapter,
-    isEditing,
-    outlineDraft,
-    outlineSaveMsg,
-    goalDraft,
-    goalDirty,
-    goalSaveMsg,
-    onStartEdit,
-    onCancelEdit,
-    onOutlineDraftChange,
-    onSaveOutline,
-    onGoalChange,
-    onSaveGoal,
-  } = props;
-  return (
-    <>
-      <div className="panel-section">
-        <div className="panel-section-title">当前章节</div>
-        <div className="panel-field">
-          <div className="panel-field-label">标题</div>
-          <div className="panel-field-value">
-            第{chapter.chapterNumber}章：{chapter.title}
-          </div>
-        </div>
-        <div className="panel-field" style={{ marginTop: 8 }}>
-          <div className="panel-field-label">状态</div>
-          <div className="panel-field-value">{ChapterStatusLabels[chapter.status]}</div>
-        </div>
-        {chapter.targetWordCount && (
-          <div className="panel-field" style={{ marginTop: 8 }}>
-            <div className="panel-field-label">目标字数</div>
-            <div className="panel-field-value">{formatNumber(chapter.targetWordCount)} 字</div>
-          </div>
-        )}
-      </div>
-      <div className="panel-section">
-        <div
-          className="panel-section-title"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-        >
-          <span>章节大纲</span>
-          {!isEditing ? (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={onStartEdit}
-              style={{ fontSize: 11 }}
-            >
-              ✏️ 编辑
-            </button>
-          ) : (
-            <span style={{ display: 'flex', gap: 4 }}>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={onSaveOutline}
-                style={{ fontSize: 11 }}
-              >
-                💾 保存
-              </button>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={onCancelEdit}
-                style={{ fontSize: 11 }}
-              >
-                取消
-              </button>
-            </span>
-          )}
-        </div>
-        {isEditing ? (
-          <textarea
-            className="form-textarea"
-            value={outlineDraft}
-            onChange={(event) => onOutlineDraftChange(event.target.value)}
-            style={{
-              width: '100%',
-              height: 140,
-              resize: 'vertical',
-              fontSize: 13,
-              lineHeight: 1.8,
-              fontFamily: 'var(--font-family-editor)',
-              marginTop: 6,
-            }}
-            placeholder="编辑章节大纲..."
-            autoFocus
-          />
-        ) : chapter.outline ? (
-          <div
-            style={{
-              fontSize: 13,
-              color: 'var(--color-text-secondary)',
-              lineHeight: 1.8,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {chapter.outline}
-          </div>
-        ) : (
-          <div className="text-sm text-muted">
-            本章尚未编写大纲
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={onStartEdit}
-              style={{ fontSize: 11, marginLeft: 8 }}
-            >
-              ✏️ 手动编写
-            </button>
-          </div>
-        )}
-        <SaveMessage value={outlineSaveMsg} />
-      </div>
-      <div className="panel-section">
-        <div
-          className="panel-section-title"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-        >
-          <span>本章目标</span>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={onSaveGoal}
-            disabled={!goalDirty}
-            style={{ fontSize: 11 }}
-          >
-            💾 保存本章目标
-          </button>
-        </div>
-        <textarea
-          className="form-textarea"
-          value={goalDraft}
-          onChange={(event) => onGoalChange(event.target.value)}
-          style={{
-            width: '100%',
-            minHeight: 96,
-            resize: 'vertical',
-            fontSize: 13,
-            lineHeight: 1.8,
-            fontFamily: 'var(--font-family-editor)',
-            marginTop: 6,
-          }}
-          placeholder="填写本章真正要达成的剧情目标，例如：系统开服并触发榜一绑定。"
-        />
-        <div
-          style={{
-            fontSize: 11,
-            color: goalDirty ? 'var(--color-warning)' : 'var(--color-text-muted)',
-            marginTop: 4,
-          }}
-        >
-          {goalDirty
-            ? '本章目标有未保存修改。生成正文前请先保存。'
-            : '本章目标按当前章节独立保存，并会进入正文生成上下文。'}
-        </div>
-        <SaveMessage value={goalSaveMsg} />
-      </div>
-    </>
-  );
-}
-
-function SaveMessage({ value }: { value: string }) {
-  if (!value) return null;
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        marginTop: 4,
-        color: value.startsWith('✅')
-          ? 'var(--color-success)'
-          : value.startsWith('❌')
-            ? 'var(--color-error)'
-            : 'var(--color-text-muted)',
-      }}
-    >
-      {value}
     </div>
   );
 }

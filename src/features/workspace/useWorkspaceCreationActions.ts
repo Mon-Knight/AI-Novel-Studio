@@ -90,7 +90,7 @@ export function useWorkspaceCreationActions({
   );
 
   const handleCreateFirstChapter = useCallback(
-    async (chapterTitle?: string) => {
+    async (chapterTitle?: string, targetWordCount?: number) => {
       if (!novelId || creating) {
         appLogger.warn('[Workspace] createFirstChapter skipped', { novelId, creating });
         return;
@@ -99,6 +99,7 @@ export function useWorkspaceCreationActions({
       try {
         const result = await createFirstVolumeAndChapter(novelId, {
           chapterTitle: chapterTitle?.trim() || '第1章',
+          targetWordCount,
         });
         const [volumes, chapters] = await Promise.all([
           volumeRepository.getByNovelId(novelId),
@@ -136,7 +137,7 @@ export function useWorkspaceCreationActions({
   );
 
   const handleCreateChapter = useCallback(
-    async (volumeId: string, title: string) => {
+    async (volumeId: string, title: string, targetWordCount?: number) => {
       if (!novelId) throw new Error('novelId 缺失');
       const decision = await requestWorkspaceLeave({
         reason: 'chapter_create',
@@ -146,8 +147,8 @@ export function useWorkspaceCreationActions({
           const guardedSnapshot = { ...refs.editorSnapshot.current };
           const guardedGoalDirty = refs.chapterGoalDirty.current;
           const result = volumeId
-            ? await createChapterInVolume(novelId, volumeId, title)
-            : await createFirstVolumeAndChapter(novelId, { chapterTitle: title });
+            ? await createChapterInVolume(novelId, volumeId, title, { targetWordCount })
+            : await createFirstVolumeAndChapter(novelId, { chapterTitle: title, targetWordCount });
           const [volumes, chapters] = await Promise.all([
             volumeRepository.getByNovelId(novelId),
             chapterRepository.getByNovelId(novelId),

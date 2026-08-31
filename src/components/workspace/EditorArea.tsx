@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useImperativeHandle, useLayoutEffect } from 'react';
 import EditorAreaView from './editor-area/EditorAreaView';
 import type { EditorAreaHandle, EditorAreaProps } from './editor-area/editorAreaTypes';
 import { useChapterOutlineEditor } from './editor-area/useChapterOutlineEditor';
@@ -12,7 +12,9 @@ export type {
   AiTextApplyRequest,
 } from '../../types/workspaceSafety';
 export type {
+  DocumentSaveState,
   EditorAreaHandle,
+  EditorActionState,
   EditorCommandRequest,
   EditorCommandType,
   EditorDocumentState,
@@ -21,10 +23,13 @@ export type {
 // eslint-disable-next-line react-refresh/only-export-components
 export { isDraftSaveResultForDocument } from './editor-area/editorDocumentSafety';
 // eslint-disable-next-line react-refresh/only-export-components
+export { getEditorDocumentSourceKey } from './editor-area/editorDocumentSafety';
+// eslint-disable-next-line react-refresh/only-export-components
 export { resolveEditorDraftContent } from './editor-area/editorDocumentSafety';
 
 const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function EditorArea(props, ref) {
   const documentState = props.documentState ?? 'ready';
+  const onActionStateChange = props.onActionStateChange;
   const document = useEditorDocumentController({
     chapter: props.chapter,
     novelId: props.novelId,
@@ -34,12 +39,17 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     onDraftChange: props.onDraftChange,
     onEditorContentChange: props.onEditorContentChange,
     onDraftSaved: props.onDraftSaved,
+    onActionStateChange,
     applyTextRequest: props.applyTextRequest,
     onApplyTextConsumed: props.onApplyTextConsumed,
     onApplyTextRejected: props.onApplyTextRejected,
     commandRequest: props.commandRequest,
     onChapterUpdated: props.onChapterUpdated,
     onBeforeAdopt: props.onBeforeAdopt,
+    reviewCandidate: props.reviewCandidate,
+    reviewAuthorizationId: props.reviewAuthorizationId,
+    reviewArtifactId: props.reviewArtifactId,
+    reviewLocked: props.reviewLocked,
   });
   const outline = useChapterOutlineEditor({
     chapter: props.chapter,
@@ -63,6 +73,21 @@ const EditorArea = forwardRef<EditorAreaHandle, EditorAreaProps>(function Editor
     }),
     [document.handleSave, document.restoreRecovery],
   );
+
+  useLayoutEffect(() => {
+    onActionStateChange?.({
+      saving: document.saving,
+      adopting: document.adopting,
+      saveState: document.saveState,
+      saveMessage: document.saveMsg,
+    });
+  }, [
+    document.adopting,
+    document.saveMsg,
+    document.saveState,
+    document.saving,
+    onActionStateChange,
+  ]);
 
   return (
     <EditorAreaView

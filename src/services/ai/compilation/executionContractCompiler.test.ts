@@ -143,6 +143,30 @@ test('context compiler enforces the versioned budget with deterministic truncati
   assert.deepEqual(replay.budgetJson, compiled.budgetJson);
 });
 
+test('context compiler fails closed when a critical source cannot be included in full', async () => {
+  await assert.rejects(
+    compileAiContext({
+      sources: [
+        {
+          ...sources()[1],
+          content: '关键世界规则'.repeat(600),
+          required: true,
+          requireFull: true,
+          maxTokens: 120,
+        },
+      ],
+      modelContextTokens: 1000,
+      reservedOutputTokens: 200,
+      fixedMessageTokens: 200,
+    }),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'AI_CONTEXT_BUDGET_EXCEEDED');
+      assert.match((error as Error).message, /完整包含关键来源 novel:novel-1/);
+      return true;
+    },
+  );
+});
+
 test('source drift verifier reports changed, missing and unexpected identities', async () => {
   const compiled = await compileAiContext({
     sources: sources(),

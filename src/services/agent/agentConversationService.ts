@@ -48,19 +48,16 @@ export const WRITE_SENSITIVE_TOOLS = new Set([
   'save_version',
 ]);
 
-export const AGENT_TOOL_METADATA: Record<
-  string,
-  { label: string; icon: string; isWrite?: boolean }
-> = {
-  query_world_state: { label: '查询世界状态', icon: '🏛️' },
-  query_character_state: { label: '查询人物状态', icon: '👤' },
-  query_chapter_info: { label: '查询章节信息', icon: '📖' },
-  generate_outline: { label: '生成大纲', icon: '📋' },
-  generate_scene_plan: { label: '生成分镜', icon: '🎬' },
-  generate_prose: { label: '正文生成', icon: '✍️' },
-  quality_check: { label: '质量检查', icon: '🔍' },
-  update_memory: { label: '更新记忆', icon: '🧠', isWrite: true },
-  save_chapter_version: { label: '保存版本', icon: '💾', isWrite: true },
+export const AGENT_TOOL_METADATA: Record<string, { label: string; isWrite?: boolean }> = {
+  query_world_state: { label: '查询世界状态' },
+  query_character_state: { label: '查询人物状态' },
+  query_chapter_info: { label: '查询章节信息' },
+  generate_outline: { label: '生成大纲' },
+  generate_scene_plan: { label: '生成分镜' },
+  generate_prose: { label: '正文生成' },
+  quality_check: { label: '质量检查' },
+  update_memory: { label: '更新记忆', isWrite: true },
+  save_chapter_version: { label: '保存版本', isWrite: true },
 };
 
 export class AgentConversationService {
@@ -172,9 +169,7 @@ export class AgentConversationService {
     const conversation = this.getConversation(conversationId);
     if (!conversation) throw new Error('Conversation not found');
 
-    const conf = conversation.pendingConfirmations.find(
-      (c) => c.confirmationId === confirmationId,
-    );
+    const conf = conversation.pendingConfirmations.find((c) => c.confirmationId === confirmationId);
     if (!conf) throw new Error('Confirmation item not found');
 
     conf.status = confirmed ? 'confirmed' : 'rejected';

@@ -1,4 +1,16 @@
 import type { Novel } from '../../types/novel';
+import type { LucideIcon } from 'lucide-react';
+import {
+  ArrowRight,
+  BookOpenText,
+  Building2,
+  Heart,
+  Landmark,
+  Rocket,
+  Sparkles,
+  Sword,
+  Trash2,
+} from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { volumeRepository } from '../../services/database/volumeRepository';
 import { chapterRepository } from '../../services/database/chapterRepository';
@@ -12,13 +24,13 @@ interface NovelCardProps {
   onDelete?: (novelId: string) => void;
 }
 
-const genreIcons: Record<string, string> = {
-  科幻: '🚀',
-  仙侠: '⚔️',
-  都市悬疑: '🌃',
-  奇幻: '🐉',
-  历史: '📜',
-  言情: '💕',
+const genreIcons: Record<string, LucideIcon> = {
+  科幻: Rocket,
+  仙侠: Sword,
+  都市悬疑: Building2,
+  奇幻: Sparkles,
+  历史: Landmark,
+  言情: Heart,
 };
 
 const statusLabels: Record<string, string> = {
@@ -31,7 +43,7 @@ const statusLabels: Record<string, string> = {
 };
 
 function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProps) {
-  const icon = genreIcons[novel.genre || ''] || '📖';
+  const GenreIcon = genreIcons[novel.genre || ''] || BookOpenText;
   const wordCount = novel.totalWordCount ?? novel.totalWords ?? 0;
   const targetCount = novel.targetWordCount ?? novel.targetWords ?? 0;
   const [progressLabel, setProgressLabel] = useState('');
@@ -80,17 +92,20 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
           type="button"
           className="novel-card-delete-btn"
           title="删除作品"
+          aria-label={`删除作品 ${novel.title}`}
           onClick={(e) => {
             e.stopPropagation();
             e.preventDefault();
             onDelete(novel.id);
           }}
         >
-          🗑️
+          <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
         </button>
       )}
       <div className="novel-card-cover">
-        <span className="novel-card-cover-icon">{icon}</span>
+        <span className="novel-card-cover-icon" aria-hidden="true">
+          <GenreIcon size={34} strokeWidth={1.8} />
+        </span>
         <span className="novel-card-genre">{novel.genre || '未分类'}</span>
       </div>
       <div
@@ -130,7 +145,8 @@ function NovelCard({ novel, onClick, onEnterWorkspace, onDelete }: NovelCardProp
               onEnterWorkspace();
             }}
           >
-            进入工作台 →
+            进入工作台
+            <ArrowRight aria-hidden="true" size={14} strokeWidth={1.8} />
           </span>
         </div>
       </div>

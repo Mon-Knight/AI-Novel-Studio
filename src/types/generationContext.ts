@@ -13,10 +13,25 @@ export type GenerationContextSourceType =
   | 'style_profile'
   | 'output_profile'
   | 'chapter_character'
+  | 'character_state'
   | 'chapter_event'
+  | 'faction'
+  | 'location'
+  | 'reference_material'
   | 'context_record'
+  | 'world_state'
+  | 'memory_context'
+  | 'user_instruction'
+  | 'adopted_chapter'
   | 'provisional_candidate'
   | 'current_editor';
+
+export interface AdoptedPreviousChapterContext {
+  chapterId: string;
+  draftId: string;
+  contentHash: string;
+  content: string;
+}
 
 export interface ProvisionalPreviousChapterContext {
   chapterId: string;
@@ -76,6 +91,11 @@ export interface CompileGenerationContextInput {
   styleProfileId?: string;
   outputProfileId?: string;
   userInstruction?: string;
+  /** Retrieved durable facts frozen into the same snapshot as the final prompt. */
+  retrievedMemoryContext?: string;
   currentEditorContent?: string;
+  /** Workbench-only readiness gate. Legacy generation callers remain permissive. */
+  requireCoreAssets?: boolean;
+  adoptedPreviousChapter?: AdoptedPreviousChapterContext;
   provisionalPreviousChapter?: ProvisionalPreviousChapterContext;
 }

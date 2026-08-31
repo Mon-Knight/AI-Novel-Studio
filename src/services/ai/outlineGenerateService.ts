@@ -219,7 +219,7 @@ export const outlineGenerateService = {
         runtimeMode: settings.runtimeMode,
         provider: settings.provider,
         modelName: settings.runtimeMode === 'mock' ? 'Mock' : settings.modelName,
-        inputSummary: `生成分卷大纲：${input.volumeTitle || context.novelTitle}${context.activeMasterOutline ? '（已结合总纲）' : '（⚠️ 缺少总纲）'}`,
+        inputSummary: `生成分卷大纲：${input.volumeTitle || context.novelTitle}${context.activeMasterOutline ? '（已结合总纲）' : '（缺少总纲）'}`,
       })
       .catch(() => null);
     const releaseCancellation = bindAiTaskCancellation(task?.id, options);
@@ -297,7 +297,7 @@ export const outlineGenerateService = {
     const parentInfo: string[] = [];
     if (context.activeMasterOutline) parentInfo.push('有总纲');
     if (context.activeVolumeOutline) parentInfo.push('有分卷大纲');
-    const parentTag = parentInfo.length > 0 ? `（${parentInfo.join('、')}）` : '（⚠️ 无上级大纲）';
+    const parentTag = parentInfo.length > 0 ? `（${parentInfo.join('、')}）` : '（无上级大纲）';
 
     const task = await aiTaskService
       .create('chapter_outline_generate', {

@@ -1,7 +1,23 @@
-import { getAiSettings } from '../ai/aiSettingsStore';
+import {
+  DEFAULT_MAX_REQUESTS_PER_MINUTE,
+  getAiSettings,
+  resolveSessionModelApiKey,
+  resolveSessionModelApiKeyAsync,
+} from '../ai/aiSettingsStore';
+import { isLoopbackAiBaseUrl } from '../ai/realAiClient';
 import { tauriInvoke } from '../tauri/runtime';
-import type { TaskModelSnapshot, TaskRun } from '../../types/conversation';
+import type {
+  ModelToolCallingAttestation,
+  TaskModelSnapshot,
+  TaskRun,
+} from '../../types/conversation';
+import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type {
+  CandidateToolName,
+  ContextReadToolName,
+  DshTaskKind,
+} from '../conversation/taskGoalRouting';
 
 export const DSH_TASK_PROJECTION_EVENT = 'ans://task-runtime-projection';
 
@@ -19,6 +35,10 @@ export interface DshTaskRuntimeInput {
   goal: string;
   chapterId?: string;
   modelSnapshot: TaskModelSnapshot;
+  taskKind: DshTaskKind;
+  expectedTool?: CandidateToolName;
+  expectedArtifactType?: string;
+  requiredReadTools: ContextReadToolName[];
 }
 
 export interface DshTaskRuntimeResult {
@@ -30,6 +50,7 @@ export interface DshTaskRuntimeResult {
   assistantText?: string;
   artifactId?: string;
   sessionLifecycle?: 'created' | 'continued' | 'resumed';
+  modelToolAttestation: ModelToolCallingAttestation;
 }
 
 export interface DshTaskRuntimeStatus {
@@ -43,6 +64,62 @@ export interface DshTaskRuntimeStatus {
 }
 
 const active = new Set<string>();
+
+export function resolveDshTaskApiKey(modelSnapshot: TaskModelSnapshot): string {
+  if (modelSnapshot.runtimeMode !== 'api') return '';
+  const snapshotBaseUrl = modelSnapshot.baseUrl ?? '';
+  const apiKey = resolveSessionModelApiKey({
+    scope: 'provider',
+    providerId: modelSnapshot.providerId,
+    baseUrl: snapshotBaseUrl,
+    modelId: modelSnapshot.modelId,
+  });
+  if (modelSnapshot.runtimeMode === 'api' && !apiKey && !isLoopbackAiBaseUrl(snapshotBaseUrl)) {
+    throw new Error('冻结模型没有本次应用会话内的匹配凭据，已拒绝启动任务。');
+  }
+  return apiKey;
+}
+
+export function hasUsableDshTaskCredential(modelSnapshot: TaskModelSnapshot): boolean {
+  if (modelSnapshot.runtimeMode !== 'api') return true;
+  try {
+    return (
+      Boolean(resolveDshTaskApiKey(modelSnapshot)) ||
+      isLoopbackAiBaseUrl(modelSnapshot.baseUrl ?? '')
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function hasUsableDshTaskCredentialAsync(
+  modelSnapshot: TaskModelSnapshot,
+): Promise<boolean> {
+  if (modelSnapshot.runtimeMode !== 'api') return true;
+  try {
+    return (
+      Boolean(await resolveDshTaskApiKeyAsync(modelSnapshot)) ||
+      isLoopbackAiBaseUrl(modelSnapshot.baseUrl ?? '')
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveDshTaskApiKeyAsync(modelSnapshot: TaskModelSnapshot): Promise<string> {
+  if (modelSnapshot.runtimeMode !== 'api') return '';
+  const snapshotBaseUrl = modelSnapshot.baseUrl ?? '';
+  const apiKey = await resolveSessionModelApiKeyAsync({
+    scope: 'provider',
+    providerId: modelSnapshot.providerId,
+    baseUrl: snapshotBaseUrl,
+    modelId: modelSnapshot.modelId,
+  });
+  if (modelSnapshot.runtimeMode === 'api' && !apiKey && !isLoopbackAiBaseUrl(snapshotBaseUrl)) {
+    throw new Error('冻结模型没有本次应用会话内的匹配凭据，已拒绝启动任务。');
+  }
+  return apiKey;
+}
 
 export const dshTaskRuntimeService = {
   async start(
@@ -64,12 +141,15 @@ export const dshTaskRuntimeService = {
         );
       }
       const settings = getAiSettings();
+      const modelSnapshot = hydrateTaskModelSnapshotRuntime(input.modelSnapshot);
+      const apiKey = await resolveDshTaskApiKeyAsync(modelSnapshot);
       return await tauriInvoke<DshTaskRuntimeResult>('dsh_start_task_turn', {
         input: {
           ...input,
-          apiKey: settings.apiKey,
+          modelSnapshot,
+          apiKey,
           requestPolicy: {
-            maxRequestsPerMinute: settings.maxRequestsPerMinute ?? 12,
+            maxRequestsPerMinute: settings.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE,
             maxConcurrentRequests: settings.maxConcurrentAiRequests ?? 2,
             dailyTokenBudget: settings.dailyTokenBudget,
             dailyCostBudgetUsd: settings.dailyCostBudgetUsd,
@@ -84,8 +164,15 @@ export const dshTaskRuntimeService = {
     }
   },
 
-  cancel(conversationId: string): void {
-    void tauriInvoke('dsh_cancel_task_run', { conversationId }).catch(() => undefined);
+  cancel(conversationId: string): Promise<DshTaskRuntimeStatus> {
+    return tauriInvoke<DshTaskRuntimeStatus>('dsh_cancel_task_run', { conversationId });
+  },
+
+  subscribe(onProjection: (notice: DshTaskProjectionNotice) => void): Promise<UnlistenFn> {
+    return listen<DshTaskProjectionNotice>(DSH_TASK_PROJECTION_EVENT, ({ payload }) => {
+      if (!payload?.conversationId || !payload.runId) return;
+      onProjection(payload);
+    });
   },
 
   isRunning(conversationId: string): boolean {
@@ -106,7 +193,25 @@ export const dshTaskRuntimeService = {
     return tauriInvoke('dsh_describe_runtime');
   },
 
-  listCurrentPlugins(conversationId?: string): Promise<Record<string, unknown>[]> {
-    return tauriInvoke('dsh_list_current_plugins', { conversationId: conversationId ?? null });
+  async listCurrentPlugins(
+    conversationId?: string,
+    modelSnapshot?: TaskModelSnapshot,
+  ): Promise<Record<string, unknown>[]> {
+    let apiKey = '';
+    const probeSnapshot = modelSnapshot
+      ? hydrateTaskModelSnapshotRuntime(modelSnapshot)
+      : undefined;
+    if (probeSnapshot) {
+      try {
+        apiKey = await resolveDshTaskApiKeyAsync(probeSnapshot);
+      } catch {
+        apiKey = '';
+      }
+    }
+    return tauriInvoke<Record<string, unknown>[]>('dsh_list_current_plugins', {
+      conversationId: conversationId ?? null,
+      modelSnapshot: probeSnapshot ?? null,
+      apiKey,
+    });
   },
 };

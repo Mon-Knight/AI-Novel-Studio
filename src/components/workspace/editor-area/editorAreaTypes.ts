@@ -16,6 +16,15 @@ export interface EditorCommandRequest {
   type: EditorCommandType;
 }
 
+export type DocumentSaveState = 'idle' | 'editing' | 'saving' | 'saved' | 'error';
+
+export interface EditorActionState {
+  saving: boolean;
+  adopting: boolean;
+  saveState: DocumentSaveState;
+  saveMessage: string;
+}
+
 export interface EditorLocateTarget {
   startOffset: number;
   endOffset: number;
@@ -47,7 +56,11 @@ export interface EditorAreaProps {
   onBackToChapters?: () => void;
   reviewLocked?: boolean;
   onUnlockReview?: () => void;
+  reviewCandidate?: import('../../../types/conversation').ReviewCandidateDocument | null;
+  reviewAuthorizationId?: string;
+  reviewArtifactId?: string;
   onBeforeAdopt?: (draftId: string) => Promise<void>;
+  onActionStateChange?: (state: EditorActionState) => void;
 }
 
 export interface EditorAreaHandle {

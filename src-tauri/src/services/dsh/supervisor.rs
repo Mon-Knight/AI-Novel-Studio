@@ -21,16 +21,28 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+const FRAME_CHANNEL_DISCONNECTED_MESSAGE: &str = "frame channel disconnected";
+
 /// Supervisor failure with a readable message.
 #[derive(Debug)]
 pub struct SupervisorError(pub String);
+
+impl SupervisorError {
+    pub fn is_frame_channel_disconnected(&self) -> bool {
+        self.0 == FRAME_CHANNEL_DISCONNECTED_MESSAGE
+    }
+
+    fn frame_channel_disconnected() -> Self {
+        Self(FRAME_CHANNEL_DISCONNECTED_MESSAGE.to_string())
+    }
+}
 
 impl std::fmt::Display for SupervisorError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -58,8 +70,6 @@ enum Frame {
     Response(u64, Value),
     /// A response error for a request id.
     Error(u64, Value),
-    /// A server-to-client notification, already folded into session state.
-    Notification,
 }
 
 pub type SessionEventObserver = Arc<dyn Fn(&Value) -> Result<(), String> + Send + Sync>;
@@ -84,6 +94,8 @@ pub struct SessionSnapshot {
     /// Reasoning blocks of the final assistant message (thinking models may
     /// put the answer there).
     pub last_assistant_reasoning: String,
+    /// Sanitized provider/transport failure code from the latest turn.
+    pub last_turn_error_code: Option<String>,
     /// Candidate text returned by the domain gateway, when the carrier emits
     /// a tool result payload containing a text block.
     pub tool_results: Vec<(String, String)>,
@@ -96,11 +108,11 @@ pub struct SessionSnapshot {
 /// Windows Job Object wrapper: closing the handle kills every process in the
 /// job (KILL_ON_JOB_CLOSE), i.e. the runtime and its MCP gateway descendants.
 #[cfg(windows)]
-struct JobObject(windows_sys::Win32::Foundation::HANDLE);
+pub(super) struct JobObject(windows_sys::Win32::Foundation::HANDLE);
 
 #[cfg(windows)]
 impl JobObject {
-    fn create_and_assign(pid: u32) -> Result<Self, SupervisorError> {
+    pub(super) fn create_and_assign(pid: u32) -> Result<Self, String> {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -113,7 +125,7 @@ impl JobObject {
         unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if job == 0 {
-                return Err(SupervisorError("CreateJobObjectW failed".to_string()));
+                return Err("CreateJobObjectW failed".to_string());
             }
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -125,22 +137,18 @@ impl JobObject {
             );
             if set == 0 {
                 CloseHandle(job);
-                return Err(SupervisorError(
-                    "SetInformationJobObject failed".to_string(),
-                ));
+                return Err("SetInformationJobObject failed".to_string());
             }
             let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
             if process == 0 {
                 CloseHandle(job);
-                return Err(SupervisorError("OpenProcess failed".to_string()));
+                return Err("OpenProcess failed".to_string());
             }
             let assigned = AssignProcessToJobObject(job, process);
             CloseHandle(process);
             if assigned == 0 {
                 CloseHandle(job);
-                return Err(SupervisorError(
-                    "AssignProcessToJobObject failed".to_string(),
-                ));
+                return Err("AssignProcessToJobObject failed".to_string());
             }
             Ok(JobObject(job))
         }
@@ -174,6 +182,32 @@ fn apply_session_event(sessions: &mut HashMap<String, SessionSnapshot>, value: &
     snapshot.event_kinds.push(event_type.to_string());
     let data = event.get("data");
     match event_type {
+        "turn/start" => {
+            snapshot.last_turn_error_code = None;
+        }
+        "assistant/chunk" => {
+            let reason = data
+                .and_then(|data| data.get("chunk"))
+                .filter(|chunk| chunk.get("type").and_then(Value::as_str) == Some("finish"))
+                .and_then(|chunk| chunk.get("reason"));
+            if reason
+                .and_then(|reason| reason.get("kind"))
+                .and_then(Value::as_str)
+                == Some("error")
+            {
+                snapshot.last_turn_error_code = reason
+                    .and_then(|reason| reason.pointer("/failure/code"))
+                    .and_then(Value::as_str)
+                    .filter(|code| {
+                        (2..=64).contains(&code.len())
+                            && code.bytes().all(|byte| {
+                                byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                            })
+                    })
+                    .map(str::to_string)
+                    .or_else(|| Some("MODEL_TURN_FAILED".to_string()));
+            }
+        }
         "tool/call" => {
             let name = data
                 .and_then(|data| data.get("name"))
@@ -250,23 +284,81 @@ fn apply_session_event(sessions: &mut HashMap<String, SessionSnapshot>, value: &
     }
 }
 
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn apply(sessions: &mut HashMap<String, SessionSnapshot>, event: Value) {
+        apply_session_event(
+            sessions,
+            &json!({"params":{"sessionId":"session-1","event":event}}),
+        );
+    }
+
+    #[test]
+    fn records_only_sanitized_turn_failure_codes_and_clears_them_on_next_turn() {
+        let mut sessions = HashMap::new();
+        apply(
+            &mut sessions,
+            json!({
+                "type":"assistant/chunk",
+                "data":{"chunk":{"type":"finish","reason":{"kind":"error","failure":{
+                    "message":"private provider detail",
+                    "code":"STREAM_CLOSED"
+                }}}}
+            }),
+        );
+        assert_eq!(
+            sessions["session-1"].last_turn_error_code.as_deref(),
+            Some("STREAM_CLOSED")
+        );
+
+        apply(
+            &mut sessions,
+            json!({"type":"turn/start","data":{"turn":2}}),
+        );
+        assert!(sessions["session-1"].last_turn_error_code.is_none());
+    }
+
+    #[test]
+    fn rejects_untrusted_failure_codes_from_the_snapshot() {
+        let mut sessions = HashMap::new();
+        apply(
+            &mut sessions,
+            json!({
+                "type":"assistant/chunk",
+                "data":{"chunk":{"type":"finish","reason":{"kind":"error","failure":{
+                    "code":"bad detail: credential"
+                }}}}
+            }),
+        );
+        assert_eq!(
+            sessions["session-1"].last_turn_error_code.as_deref(),
+            Some("MODEL_TURN_FAILED")
+        );
+    }
+}
+
 /// A live runtime child plus its protocol plumbing.
 pub struct RuntimeHandle {
     child: Mutex<Option<Child>>,
     stdin: Mutex<Option<ChildStdin>>,
     rx: Receiver<Frame>,
+    request_gate: Mutex<()>,
     next_id: AtomicU64,
     stderr_tail: Arc<Mutex<String>>,
+    stderr_closed: Arc<AtomicBool>,
     sessions: Arc<Mutex<HashMap<String, SessionSnapshot>>>,
     observer_error: Arc<Mutex<Option<String>>>,
+    stdout_closed: Arc<AtomicBool>,
     #[cfg(windows)]
     job: Mutex<Option<JobObject>>,
 }
 
-// The handle's receiver is consumed by the single worker request loop.  The
-// other shared operations (status snapshots and kill) only touch mutex/atomic
-// fields, so the handle can be held by the scoped Worker registry while the
-// worker thread owns the protocol loop.
+// The response receiver is consumed under `request_gate`; status snapshots and
+// kill only touch mutex/atomic fields. This lets the scoped Worker registry
+// share a handle without concurrent callers stealing each other's responses.
 unsafe impl Send for RuntimeHandle {}
 unsafe impl Sync for RuntimeHandle {}
 
@@ -282,7 +374,9 @@ impl RuntimeHandle {
         observer: Option<SessionEventObserver>,
     ) -> Result<Self, SupervisorError> {
         #[cfg(windows)]
-        let job = Mutex::new(Some(JobObject::create_and_assign(child.id())?));
+        let job = Mutex::new(Some(
+            JobObject::create_and_assign(child.id()).map_err(SupervisorError)?,
+        ));
 
         let stdout: ChildStdout = child
             .stdout
@@ -300,7 +394,9 @@ impl RuntimeHandle {
         let (tx, rx) = mpsc::channel::<Frame>();
         let sessions = Arc::new(Mutex::new(HashMap::<String, SessionSnapshot>::new()));
         let stderr_tail = Arc::new(Mutex::new(String::new()));
+        let stderr_closed = Arc::new(AtomicBool::new(false));
         let observer_error = Arc::new(Mutex::new(None));
+        let stdout_closed = Arc::new(AtomicBool::new(false));
 
         // stdout reader: line-framed JSON-RPC frames; exits when the pipe EOFs
         // (the child died), which is the natural teardown signal.
@@ -309,6 +405,7 @@ impl RuntimeHandle {
             let tx = tx.clone();
             let observer_error = observer_error.clone();
             let observer = observer.clone();
+            let stdout_closed = stdout_closed.clone();
             std::thread::spawn(move || {
                 let mut reader = BufReader::new(stdout);
                 let mut line = String::new();
@@ -326,8 +423,7 @@ impl RuntimeHandle {
                                     let id = value.get("id").and_then(Value::as_u64);
                                     match (value.get("method").and_then(Value::as_str), id) {
                                         (Some(_method), Some(_request_id)) => {
-                                            // Server->client request: dead capability; treat as notification.
-                                            let _ = tx.send(Frame::Notification);
+                                            // Server->client requests are unsupported capabilities.
                                         }
                                         (Some(method), None) => {
                                             if method == "session.status" {
@@ -362,7 +458,6 @@ impl RuntimeHandle {
                                                     }
                                                 }
                                             }
-                                            let _ = tx.send(Frame::Notification);
                                         }
                                         (None, Some(response_id)) => {
                                             if let Some(error) = value.get("error") {
@@ -388,12 +483,14 @@ impl RuntimeHandle {
                         Err(_) => break,
                     }
                 }
+                stdout_closed.store(true, Ordering::SeqCst);
             });
         }
 
         // stderr reader: diagnostics buffer (tail-capped).
         {
             let stderr_tail = stderr_tail.clone();
+            let stderr_closed = stderr_closed.clone();
             std::thread::spawn(move || {
                 let mut reader = BufReader::new(stderr);
                 let mut line = String::new();
@@ -405,12 +502,17 @@ impl RuntimeHandle {
                             let mut buffer = stderr_tail.lock().unwrap();
                             buffer.push_str(&line);
                             if buffer.len() > 1_000_000 {
-                                *buffer = buffer[buffer.len() - 600_000..].to_string();
+                                let mut start = buffer.len() - 600_000;
+                                while !buffer.is_char_boundary(start) {
+                                    start += 1;
+                                }
+                                *buffer = buffer[start..].to_string();
                             }
                         }
                         Err(_) => break,
                     }
                 }
+                stderr_closed.store(true, Ordering::SeqCst);
             });
         }
 
@@ -418,10 +520,13 @@ impl RuntimeHandle {
             child: Mutex::new(Some(child)),
             stdin: Mutex::new(Some(stdin)),
             rx,
+            request_gate: Mutex::new(()),
             next_id: AtomicU64::new(1),
             stderr_tail,
+            stderr_closed,
             sessions,
             observer_error,
+            stdout_closed,
             #[cfg(windows)]
             job,
         })
@@ -436,6 +541,10 @@ impl RuntimeHandle {
         params: Option<Value>,
         timeout: Duration,
     ) -> Result<Value, SupervisorError> {
+        let _request_guard = self
+            .request_gate
+            .lock()
+            .map_err(|_| SupervisorError("request gate poisoned".to_string()))?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut payload = json!({ "jsonrpc": "2.0", "id": id, "method": method });
         if let Some(params) = params {
@@ -474,7 +583,7 @@ impl RuntimeHandle {
                 Ok(_) => continue,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(SupervisorError("frame channel disconnected".to_string()))
+                    return Err(SupervisorError::frame_channel_disconnected())
                 }
             }
         }
@@ -495,8 +604,8 @@ impl RuntimeHandle {
 
     /// Wait for one running→idle edge and, when requested by the owning ANS
     /// task, deliver a scoped Harness `Agent.cancel` through the thin carrier.
-    /// This method owns the receiver loop, so no second thread races JSON-RPC
-    /// responses for the same process.
+    /// Session notifications are folded by the stdout reader, so this wait
+    /// never competes with JSON-RPC response ownership.
     pub fn wait_idle_checked_with_cancel(
         &self,
         session_id: &str,
@@ -541,7 +650,7 @@ impl RuntimeHandle {
                 if current == Some("running") {
                     saw_running = true;
                 }
-                if saw_running && current == Some("idle") {
+                if current == Some("idle") && (saw_running || cancel_sent) {
                     return if cancel_sent {
                         Err(SupervisorError("session cancelled".to_string()))
                     } else {
@@ -549,12 +658,10 @@ impl RuntimeHandle {
                     };
                 }
             }
-            match self.rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(_) | Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(SupervisorError("frame channel disconnected".to_string()))
-                }
+            if self.stdout_closed.load(Ordering::SeqCst) {
+                return Err(SupervisorError::frame_channel_disconnected());
             }
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 
@@ -608,14 +715,48 @@ impl RuntimeHandle {
         }
     }
 
+    /// Exit code used only to enrich a confirmed stdout/channel disconnect.
+    /// A short grace period lets the OS publish the status after pipe EOF;
+    /// `None` deliberately carries no untrusted process error detail.
+    pub fn diagnostic_child_exit_code(&self) -> Option<i32> {
+        let deadline = Instant::now() + Duration::from_millis(200);
+        loop {
+            let status = {
+                let mut guard = self.child.lock().ok()?;
+                let child = guard.as_mut()?;
+                child.try_wait().ok()?
+            };
+            if let Some(status) = status {
+                return status.code();
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    pub fn diagnostic_stderr_tail(&self) -> String {
+        let deadline = Instant::now() + Duration::from_millis(100);
+        while !self.stderr_closed.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.stderr_tail()
+    }
+
     /// Tail of the runtime's stderr diagnostics.
     pub fn stderr_tail(&self) -> String {
-        let buffer = self.stderr_tail.lock().unwrap();
-        if buffer.len() > 2000 {
-            buffer[buffer.len() - 2000..].to_string()
-        } else {
-            buffer.clone()
+        let Ok(buffer) = self.stderr_tail.lock() else {
+            return String::new();
+        };
+        let character_count = buffer.chars().count();
+        if character_count <= 2000 {
+            return buffer.clone();
         }
+        buffer
+            .chars()
+            .skip(character_count - 2000)
+            .collect::<String>()
     }
 }
 

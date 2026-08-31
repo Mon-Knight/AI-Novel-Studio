@@ -141,4 +141,24 @@ describe('RightPanel render isolation', () => {
     );
     await waitFor(() => expect(panelProbe.checkRenders).toBe(2));
   });
+
+  it('retains the last panel while making the closed surface inert and unfocusable', async () => {
+    const close = vi.fn();
+    const view = render(<RightPanel panelType="outline" onClose={close} />);
+    const probe = await screen.findByRole('button', { name: 'outline-probe' });
+    const panel = view.container.querySelector('.right-panel');
+    fireEvent.click(screen.getByTestId('right-panel-close'));
+    expect(close).toHaveBeenCalledTimes(1);
+    probe.focus();
+    expect(document.activeElement).toBe(probe);
+
+    view.rerender(<RightPanel panelType={null} onClose={close} />);
+
+    const overlay = view.container.querySelector('.right-panel-overlay');
+    await waitFor(() => expect(overlay?.hasAttribute('inert')).toBe(true));
+    expect(overlay?.classList.contains('is-closed')).toBe(true);
+    expect(overlay?.getAttribute('aria-hidden')).toBe('true');
+    expect(view.container.querySelector('.right-panel')).toBe(panel);
+    expect(document.activeElement).not.toBe(probe);
+  });
 });

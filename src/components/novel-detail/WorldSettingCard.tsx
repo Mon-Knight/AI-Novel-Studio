@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Globe2, Pencil, Save } from 'lucide-react';
 import type { WorldSetting } from '../../types/setting';
 import { formatDate } from '../../utils/date';
 
@@ -48,12 +49,13 @@ function WorldSettingCard({ settings, onSave }: WorldSettingCardProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>🌍</span>
+          <Globe2 aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 600 }}>世界背景</span>
         </div>
         {!editing && (
           <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
-            ✏️ 编辑
+            <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
+            编辑
           </button>
         )}
       </div>
@@ -101,7 +103,14 @@ function WorldSettingCard({ settings, onSave }: WorldSettingCardProps) {
               取消
             </button>
             <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中...' : '💾 保存'}
+              {saving ? (
+                '保存中...'
+              ) : (
+                <>
+                  <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+                  保存
+                </>
+              )}
             </button>
           </div>
         </div>

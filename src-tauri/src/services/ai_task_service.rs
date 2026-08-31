@@ -13,7 +13,370 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const PRODUCTION_TOOL_REGISTRY_HASH: &str =
-    "6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579";
+    "82672d8347a8143a716e590014b9cf61fc576c0556c8683027d51528243c5192";
+const BOOK_WORD_GOAL_CONTRACT_VERSION: &str = "ans_book_word_goal_v1";
+const BOOK_WORD_GOAL_PARSER_VERSION: &str = "zh_book_words_v1";
+const MAX_BOOK_TARGET_WORDS: i64 = 10_000_000;
+const AUTOMATIC_TURN_MARKERS: [&str; 2] = [
+    "[[ANS_WORKBENCH_TURN:v1;origin=workbench_asset_preparation]]",
+    "[[ANS_WORKBENCH_TURN:v1;origin=workbench_chapter_summary]]",
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookWordGoal {
+    pub contract_version: String,
+    pub parser_version: String,
+    pub source_turn_id: String,
+    pub source_turn_sequence: i64,
+    pub source_content_sha256: String,
+    pub target_words: i64,
+    pub comparison: String,
+    pub tolerance_bps: i64,
+    pub minimum_words: i64,
+    pub maximum_words: i64,
+}
+
+fn normalize_book_goal_text(content: &str) -> String {
+    content
+        .chars()
+        .map(|character| match character {
+            '０'..='９' => {
+                char::from_u32(character as u32 - '０' as u32 + '0' as u32).unwrap_or(character)
+            }
+            '．' => '.',
+            '，' => ',',
+            '　' => ' ',
+            _ => character,
+        })
+        .collect()
+}
+
+fn is_book_number_character(character: char) -> bool {
+    character.is_ascii_digit()
+        || matches!(
+            character,
+            '.' | ','
+                | ' '
+                | '\t'
+                | '零'
+                | '〇'
+                | '一'
+                | '二'
+                | '两'
+                | '三'
+                | '四'
+                | '五'
+                | '六'
+                | '七'
+                | '八'
+                | '九'
+                | '十'
+                | '百'
+                | '千'
+                | '万'
+        )
+}
+
+fn parse_arabic_book_number(value: &str) -> Option<i64> {
+    let compact = value.replace([',', ' ', '\t'], "");
+    let (number, multiplier) = compact
+        .strip_suffix('万')
+        .map_or((compact.as_str(), 1_i64), |number| (number, 10_000));
+    if number.is_empty() {
+        return None;
+    }
+    let mut parts = number.split('.');
+    let integer = parts.next()?;
+    let fraction = parts.next();
+    if parts.next().is_some()
+        || integer.is_empty()
+        || !integer.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let integer = integer.parse::<i64>().ok()?;
+    let Some(fraction) = fraction else {
+        return integer.checked_mul(multiplier);
+    };
+    if multiplier == 1
+        || fraction.is_empty()
+        || fraction.len() > 4
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let denominator = 10_i64.checked_pow(fraction.len() as u32)?;
+    let numerator = integer
+        .checked_mul(denominator)?
+        .checked_add(fraction.parse::<i64>().ok()?)?;
+    let scaled = numerator.checked_mul(multiplier)?;
+    (scaled % denominator == 0).then_some(scaled / denominator)
+}
+
+fn chinese_digit(character: char) -> Option<i64> {
+    match character {
+        '零' | '〇' => Some(0),
+        '一' => Some(1),
+        '二' | '两' => Some(2),
+        '三' => Some(3),
+        '四' => Some(4),
+        '五' => Some(5),
+        '六' => Some(6),
+        '七' => Some(7),
+        '八' => Some(8),
+        '九' => Some(9),
+        _ => None,
+    }
+}
+
+fn parse_chinese_book_number(value: &str) -> Option<i64> {
+    let compact = value.replace([' ', '\t'], "");
+    if compact.is_empty() {
+        return None;
+    }
+    let mut total = 0_i64;
+    let mut section = 0_i64;
+    let mut digit = None;
+    for character in compact.chars() {
+        if let Some(value) = chinese_digit(character) {
+            if digit.is_some() {
+                return None;
+            }
+            digit = Some(value);
+            continue;
+        }
+        let unit: i64 = match character {
+            '十' => 10,
+            '百' => 100,
+            '千' => 1_000,
+            '万' => {
+                section = section.checked_add(digit.take().unwrap_or(0))?;
+                if section == 0 {
+                    section = 1;
+                }
+                total = total.checked_add(section.checked_mul(10_000)?)?;
+                section = 0;
+                continue;
+            }
+            _ => return None,
+        };
+        section = section.checked_add(digit.take().unwrap_or(1).checked_mul(unit)?)?;
+    }
+    total.checked_add(section)?.checked_add(digit.unwrap_or(0))
+}
+
+fn parse_book_number(value: &str) -> Option<i64> {
+    let parsed = if value.chars().any(|character| character.is_ascii_digit()) {
+        parse_arabic_book_number(value)
+    } else {
+        parse_chinese_book_number(value)
+    }?;
+    (parsed > 0 && parsed <= MAX_BOOK_TARGET_WORDS).then_some(parsed)
+}
+
+fn local_clause(characters: &[char], start: usize, end: usize) -> String {
+    let is_boundary = |character: char| {
+        matches!(
+            character,
+            '，' | ',' | '。' | '；' | ';' | '！' | '!' | '？' | '?' | '\n' | '\r'
+        )
+    };
+    let clause_start = characters[..start]
+        .iter()
+        .rposition(|character| is_boundary(*character))
+        .map_or(0, |index| index + 1);
+    let clause_end = characters[end..]
+        .iter()
+        .position(|character| is_boundary(*character))
+        .map_or(characters.len(), |offset| end + offset);
+    characters[clause_start..clause_end].iter().collect()
+}
+
+pub(crate) fn parse_book_word_goal(content: &str) -> Option<(i64, &'static str, i64, i64, i64)> {
+    let normalized = normalize_book_goal_text(content);
+    let characters: Vec<char> = normalized.chars().collect();
+    let mut candidates = Vec::new();
+    for (word_index, character) in characters.iter().enumerate() {
+        if *character != '字' {
+            continue;
+        }
+        let mut start = word_index;
+        while start > 0 && is_book_number_character(characters[start - 1]) {
+            start -= 1;
+        }
+        while start < word_index && characters[start].is_whitespace() {
+            start += 1;
+        }
+        if start == word_index {
+            continue;
+        }
+        let number_text: String = characters[start..word_index].iter().collect();
+        let Some(target_words) = parse_book_number(&number_text) else {
+            continue;
+        };
+        let prefix: String = characters[start.saturating_sub(10)..start].iter().collect();
+        let trimmed_prefix = prefix.trim_end();
+        let suffix: String = characters[word_index + 1..characters.len().min(word_index + 7)]
+            .iter()
+            .collect();
+        let range_prefix = ["大约", "大概", "约莫", "约"]
+            .iter()
+            .find_map(|qualifier| trimmed_prefix.strip_suffix(qualifier))
+            .unwrap_or(trimmed_prefix)
+            .trim_end();
+        if ['到', '至', '-', '—', '~', '～']
+            .iter()
+            .any(|separator| range_prefix.ends_with(*separator))
+            || ["以上", "以下", "以内", "起"]
+                .iter()
+                .any(|qualifier| suffix.trim_start().starts_with(qualifier))
+            || ['到', '至', '-', '—', '~', '～']
+                .iter()
+                .any(|separator| suffix.trim_start().starts_with(*separator))
+        {
+            continue;
+        }
+        let clause = local_clause(&characters, start, word_index + 1);
+        if ["至少", "最少", "不少于", "不低于", "不超过", "至多", "最多"]
+            .iter()
+            .any(|qualifier| clause.contains(qualifier))
+        {
+            continue;
+        }
+        if ["每章", "每一章", "本章", "单章", "章节目标"]
+            .iter()
+            .any(|scope| clause.contains(scope))
+        {
+            continue;
+        }
+        let whole_book_scope = ["全书", "整本", "总字数", "小说", "故事"]
+            .iter()
+            .any(|scope| clause.contains(scope));
+        let approximate = ["大约", "大概", "约莫", "左右", "上下", "约"]
+            .iter()
+            .any(|qualifier| clause.contains(qualifier));
+        let comparison = if approximate { "approximate" } else { "exact" };
+        let tolerance_bps = if approximate { 1_000 } else { 0 };
+        let minimum_words = target_words.checked_mul(10_000 - tolerance_bps)? / 10_000;
+        let maximum_words = target_words.checked_mul(10_000 + tolerance_bps)? / 10_000;
+        candidates.push((
+            whole_book_scope,
+            target_words,
+            comparison,
+            tolerance_bps,
+            minimum_words,
+            maximum_words,
+        ));
+    }
+    let has_whole_book_scope = candidates.iter().any(|candidate| candidate.0);
+    let mut selected = candidates
+        .into_iter()
+        .filter(|candidate| !has_whole_book_scope || candidate.0);
+    let first = selected.next()?;
+    if selected.any(|candidate| candidate.1 != first.1) {
+        return None;
+    }
+    Some((first.1, first.2, first.3, first.4, first.5))
+}
+
+fn first_real_user_turn(
+    connection: &Connection,
+    conversation_id: &str,
+) -> Result<Option<(String, i64, String)>, AppError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT turn_id,sequence,content FROM conversation_turns
+             WHERE conversation_id=?1 AND role='user' ORDER BY sequence ASC",
+        )
+        .map_err(AppError::database)?;
+    let turns = statement
+        .query_map(params![conversation_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(AppError::database)?;
+    for turn in turns {
+        let turn = turn.map_err(AppError::database)?;
+        if !AUTOMATIC_TURN_MARKERS
+            .iter()
+            .any(|marker| turn.2.contains(marker))
+        {
+            return Ok(Some(turn));
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn authoritative_book_word_goal(
+    connection: &Connection,
+    conversation_id: &str,
+) -> Result<Option<BookWordGoal>, AppError> {
+    let Some((turn_id, sequence, content)) = first_real_user_turn(connection, conversation_id)?
+    else {
+        return Ok(None);
+    };
+    let Some((target_words, comparison, tolerance_bps, minimum_words, maximum_words)) =
+        parse_book_word_goal(&content)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(BookWordGoal {
+        contract_version: BOOK_WORD_GOAL_CONTRACT_VERSION.to_string(),
+        parser_version: BOOK_WORD_GOAL_PARSER_VERSION.to_string(),
+        source_turn_id: turn_id,
+        source_turn_sequence: sequence,
+        source_content_sha256: large_text_repository::sha256(&content),
+        target_words,
+        comparison: comparison.to_string(),
+        tolerance_bps,
+        minimum_words,
+        maximum_words,
+    }))
+}
+
+pub(crate) fn verify_book_word_goal(
+    connection: &Connection,
+    conversation_id: &str,
+    persisted: &BookWordGoal,
+) -> Result<bool, AppError> {
+    if persisted.contract_version != BOOK_WORD_GOAL_CONTRACT_VERSION
+        || persisted.parser_version != BOOK_WORD_GOAL_PARSER_VERSION
+        || !matches!(persisted.comparison.as_str(), "approximate" | "exact")
+        || (persisted.comparison == "approximate" && persisted.tolerance_bps != 1_000)
+        || (persisted.comparison == "exact" && persisted.tolerance_bps != 0)
+        || persisted.target_words <= 0
+        || persisted.target_words > MAX_BOOK_TARGET_WORDS
+    {
+        return Ok(false);
+    }
+    Ok(authoritative_book_word_goal(connection, conversation_id)?.as_ref() == Some(persisted))
+}
+
+fn merge_authoritative_book_word_goal(
+    connection: &Connection,
+    input: &mut CreateAiTaskInput,
+    conversation_id: &str,
+) -> Result<(), AppError> {
+    let Some(target_hint) = input
+        .target_hint_json
+        .as_mut()
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    target_hint.remove("bookWordGoal");
+    if let Some(goal) = authoritative_book_word_goal(connection, conversation_id)? {
+        target_hint.insert(
+            "bookWordGoal".to_string(),
+            serde_json::to_value(goal).map_err(|_| compilation_error("整书字数契约序列化失败"))?,
+        );
+    }
+    Ok(())
+}
 
 fn connection_test_policy() -> Result<(i64, f64), AppError> {
     let policy: Value = serde_json::from_str(include_str!(
@@ -670,7 +1033,10 @@ fn validate_formal_compilation(input: &CreateAiTaskInput) -> Result<(), AppError
     validate_formal_input_and_hash(input)
 }
 
-fn validate_create_input(input: &CreateAiTaskInput) -> Result<(), AppError> {
+fn validate_create_input(
+    input: &CreateAiTaskInput,
+    dsh_projection_validated: bool,
+) -> Result<(), AppError> {
     ai_fact_security::validate_identifier(&input.operation_id, "operationId", 160)?;
     if input
         .request_hash_version
@@ -797,8 +1163,130 @@ fn validate_create_input(input: &CreateAiTaskInput) -> Result<(), AppError> {
         &input.constraint_snapshot.prompt_template_body,
         "Prompt 模板",
     )?;
-    if requires_formal_compilation(input) {
+    if requires_formal_compilation(input) && !dsh_projection_validated {
         validate_formal_compilation(input)?;
+    }
+    Ok(())
+}
+
+fn validate_dsh_projection_input(
+    input: &CreateAiTaskInput,
+    run_id: &str,
+    turn_id: &str,
+    conversation_id: &str,
+) -> Result<(), AppError> {
+    let expected_pair = match input.task_type.as_str() {
+        "chapter_generate" => "chapter_text",
+        "outline_generate" => "outline",
+        "character_generate" => "character_candidates",
+        "event_suggest" => "event_candidates",
+        "setting_expand" => "setting_candidates",
+        "quality_check" => "quality_report",
+        "chapter_summary" => "chapter_summary",
+        _ => return Err(compilation_error("DSH 投影包含未授权 Task 类型")),
+    };
+    if input.expected_artifact_type != expected_pair || input.expected_artifact_schema_version != 1
+    {
+        return Err(compilation_error("DSH 投影的 Task/Artifact 契约不匹配"));
+    }
+    if run_id.trim().is_empty()
+        || turn_id.trim().is_empty()
+        || conversation_id.trim().is_empty()
+        || input.operation_id != format!("workbench-{run_id}")
+    {
+        return Err(compilation_error(
+            "DSH 投影 operation/run/turn/conversation 身份无效",
+        ));
+    }
+
+    let target_hint = input
+        .target_hint_json
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| compilation_error("DSH 投影缺少 target hint"))?;
+    if target_hint.get("runId").and_then(Value::as_str) != Some(run_id)
+        || target_hint.get("turnId").and_then(Value::as_str) != Some(turn_id)
+        || target_hint.get("conversationId").and_then(Value::as_str) != Some(conversation_id)
+    {
+        return Err(compilation_error("DSH 投影 target hint 身份不匹配"));
+    }
+
+    let input_snapshot = &input.input_snapshot;
+    if input_snapshot.schema_version != 1
+        || input_snapshot.input_type != "workbench_dsh_messages_v1"
+        || input_snapshot
+            .payload_json
+            .get("conversationId")
+            .and_then(Value::as_str)
+            != Some(conversation_id)
+        || input_snapshot
+            .payload_json
+            .get("goal")
+            .and_then(Value::as_str)
+            .map_or(true, |goal| goal.trim().is_empty())
+    {
+        return Err(compilation_error("DSH 投影 Input Snapshot 身份无效"));
+    }
+
+    let context = &input.context_snapshot;
+    let manifest = context
+        .source_manifest_json
+        .as_object()
+        .ok_or_else(|| compilation_error("DSH 投影 Context manifest 必须是对象"))?;
+    let sources = manifest
+        .get("sources")
+        .and_then(Value::as_array)
+        .ok_or_else(|| compilation_error("DSH 投影 Context sources 必须是数组"))?;
+    let compiled_hash = manifest
+        .get("compiledContextHash")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if context.schema_version != 1
+        || context.compiler_version != "workbench_dsh_context_evidence_v1"
+        || manifest.get("contractVersion").and_then(Value::as_str)
+            != Some("workbench_dsh_context_evidence_v1")
+        || manifest.get("compilerVersion").and_then(Value::as_str)
+            != Some("workbench_dsh_context_evidence_v1")
+        || !valid_sha256(compiled_hash)
+        || large_text_repository::sha256(&context.compiled_context) != compiled_hash
+    {
+        return Err(compilation_error(
+            "DSH 投影 Context evidence 身份或 hash 无效",
+        ));
+    }
+    let budget = context
+        .budget_json
+        .as_object()
+        .ok_or_else(|| compilation_error("DSH 投影 Context budget 必须是对象"))?;
+    if budget.get("compiledContextChars").and_then(Value::as_i64)
+        != Some(context.compiled_context.chars().count() as i64)
+        || budget.get("compiledContextBytes").and_then(Value::as_i64)
+            != Some(context.compiled_context.len() as i64)
+        || budget.get("includedSourceCount").and_then(Value::as_i64) != Some(sources.len() as i64)
+        || budget.get("truncatedSourceCount").and_then(Value::as_i64) != Some(0)
+        || budget.get("omittedSourceCount").and_then(Value::as_i64) != Some(0)
+    {
+        return Err(compilation_error(
+            "DSH 投影 Context budget 与 evidence 不一致",
+        ));
+    }
+
+    let constraint = &input.constraint_snapshot;
+    if constraint.schema_version != 1
+        || constraint.prompt_template_id != format!("workbench/{}", input.expected_artifact_type)
+        || constraint.prompt_template_version != "1"
+        || constraint
+            .payload_json
+            .get("candidateOnly")
+            .and_then(Value::as_bool)
+            != Some(true)
+        || constraint
+            .payload_json
+            .get("mayWriteBusinessData")
+            .and_then(Value::as_bool)
+            != Some(false)
+    {
+        return Err(compilation_error("DSH 投影 Constraint 身份或候选边界无效"));
     }
     Ok(())
 }
@@ -935,9 +1423,40 @@ fn insert_snapshot_document(
 
 pub fn create_task(
     connection: &mut Connection,
+    mut input: CreateAiTaskInput,
+) -> Result<ai_task_repository::AiTaskRecord, AppError> {
+    if input.expected_artifact_type == "outline" && input.chapter_id.is_none() {
+        let conversation_id = input
+            .target_hint_json
+            .as_ref()
+            .and_then(|hint| hint.get("conversationId"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(conversation_id) = conversation_id {
+            merge_authoritative_book_word_goal(connection, &mut input, &conversation_id)?;
+        }
+    }
+    validate_create_input(&input, false)?;
+    create_task_after_validation(connection, input)
+}
+
+pub(crate) fn create_dsh_projected_task(
+    connection: &mut Connection,
+    mut input: CreateAiTaskInput,
+    run_id: &str,
+    turn_id: &str,
+    conversation_id: &str,
+) -> Result<ai_task_repository::AiTaskRecord, AppError> {
+    merge_authoritative_book_word_goal(connection, &mut input, conversation_id)?;
+    validate_dsh_projection_input(&input, run_id, turn_id, conversation_id)?;
+    validate_create_input(&input, true)?;
+    create_task_after_validation(connection, input)
+}
+
+fn create_task_after_validation(
+    connection: &mut Connection,
     input: CreateAiTaskInput,
 ) -> Result<ai_task_repository::AiTaskRecord, AppError> {
-    validate_create_input(&input)?;
     let body_hash = large_text_repository::sha256(&input.input_snapshot.body);
     let compiled_hash = large_text_repository::sha256(&input.context_snapshot.compiled_context);
     let actual_template_hash =
@@ -2024,6 +2543,189 @@ pub(crate) mod tests {
         input
     }
 
+    fn dsh_outline_task_input(operation_id: &str, conversation_id: &str) -> CreateAiTaskInput {
+        let prompt = "只返回 story_plan 候选。";
+        let compiled_context = "";
+        let mut input = system_task_input(operation_id, "outline");
+        input.operation_id = operation_id.to_string();
+        input.task_type = "outline_generate".to_string();
+        input.novel_id = "book-goal-novel".to_string();
+        input.scope_type = "novel".to_string();
+        input.target_hint_json = Some(serde_json::json!({
+            "conversationId": conversation_id,
+            "turnId": "book-goal-turn",
+            "runId": "book-goal-run",
+        }));
+        input.input_snapshot = InputSnapshotInput {
+            schema_version: 1,
+            input_type: "workbench_dsh_messages_v1".to_string(),
+            payload_json: serde_json::json!({
+                "goal": "写个六万字左右的悬疑故事。",
+                "conversationId": conversation_id,
+            }),
+            body: "[]".to_string(),
+            source_draft_id: None,
+            source_draft_version: None,
+            base_content_hash: None,
+        };
+        input.context_snapshot = ContextSnapshotInput {
+            schema_version: 1,
+            source_manifest_json: serde_json::json!({
+                "contractVersion": "workbench_dsh_context_evidence_v1",
+                "compilerVersion": "workbench_dsh_context_evidence_v1",
+                "compiledContextHash": large_text_repository::sha256(compiled_context),
+                "sources": [],
+            }),
+            compiled_context: compiled_context.to_string(),
+            budget_json: serde_json::json!({
+                "compiledContextChars": 0,
+                "compiledContextBytes": 0,
+                "includedSourceCount": 0,
+                "truncatedSourceCount": 0,
+                "omittedSourceCount": 0,
+            }),
+            compiler_version: "workbench_dsh_context_evidence_v1".to_string(),
+        };
+        input.constraint_snapshot = ConstraintSnapshotInput {
+            schema_version: 1,
+            payload_json: serde_json::json!({
+                "candidateOnly": true,
+                "mayWriteBusinessData": false,
+            }),
+            prompt_template_id: "workbench/outline".to_string(),
+            prompt_template_version: "1".to_string(),
+            prompt_template_hash: large_text_repository::sha256(prompt),
+            prompt_template_body: prompt.to_string(),
+            provider_options_json: serde_json::json!({}),
+        };
+        input
+    }
+
+    #[test]
+    fn book_word_goal_parser_accepts_supported_sparse_chinese_expressions() {
+        for (content, words, comparison) in [
+            ("写个六万字左右的悬疑故事。", 60_000, "approximate"),
+            ("写一部约6万字的小说", 60_000, "approximate"),
+            ("大约 6 万字的故事", 60_000, "approximate"),
+            ("小说总字数60000字", 60_000, "exact"),
+            ("整本写60,000字", 60_000, "exact"),
+            ("全书写６００００字", 60_000, "exact"),
+            ("故事写六万五千字", 65_000, "exact"),
+            ("小说约6.5万字", 65_000, "approximate"),
+        ] {
+            let parsed = parse_book_word_goal(content).expect(content);
+            assert_eq!(parsed.0, words, "{content}");
+            assert_eq!(parsed.1, comparison, "{content}");
+            let tolerance = if comparison == "approximate" {
+                1_000
+            } else {
+                0
+            };
+            assert_eq!(parsed.2, tolerance, "{content}");
+            assert_eq!(parsed.3, words * (10_000 - tolerance) / 10_000);
+            assert_eq!(parsed.4, words * (10_000 + tolerance) / 10_000);
+        }
+    }
+
+    #[test]
+    fn book_word_goal_parser_rejects_ranges_bounds_chapter_targets_and_ambiguity() {
+        for content in [
+            "每章60000字",
+            "本章目标60000字",
+            "至少六万字的故事",
+            "故事不超过六万字",
+            "故事至少约六万字",
+            "故事六万字以上",
+            "故事五到六万字",
+            "故事五到约六万字",
+            "故事六万字到七万字",
+            "小说写60000",
+            "全书六万字或七万字",
+            "写1001万字的小说",
+        ] {
+            assert_eq!(parse_book_word_goal(content), None, "{content}");
+        }
+        assert_eq!(
+            parse_book_word_goal("每章3000字，全书六万字").map(|parsed| parsed.0),
+            Some(60_000)
+        );
+    }
+
+    #[test]
+    fn dsh_task_persists_first_real_user_book_goal_and_ignores_later_turns(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = connection()?;
+        connection.execute(
+            "INSERT INTO novels (id,title,status,created_at,updated_at)
+             VALUES ('book-goal-novel','字数契约','draft','2026-08-28','2026-08-28')",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO task_conversations
+             (conversation_id,novel_id,title,status,created_at,updated_at)
+             VALUES ('book-goal-conversation','book-goal-novel','字数契约','idle','2026-08-28','2026-08-28')",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO conversation_turns
+             (turn_id,conversation_id,sequence,role,content,created_at)
+             VALUES ('asset-turn','book-goal-conversation',0,'user',?1,'2026-08-28'),
+                    ('book-goal-turn','book-goal-conversation',1,'user','写个六万字左右的悬疑故事。','2026-08-28'),
+                    ('continue-turn','book-goal-conversation',2,'user','继续写七万字','2026-08-28')",
+            params![format!(
+                "生成全书规划\n\n{}\n工作台说明：自动资产准备。",
+                AUTOMATIC_TURN_MARKERS[0]
+            )],
+        )?;
+        let input = dsh_outline_task_input("workbench-book-goal-run", "book-goal-conversation");
+        let mut expected_input = input.clone();
+        merge_authoritative_book_word_goal(
+            &connection,
+            &mut expected_input,
+            "book-goal-conversation",
+        )?;
+        let expected_body_hash = large_text_repository::sha256(&expected_input.input_snapshot.body);
+        let expected_context_hash =
+            large_text_repository::sha256(&expected_input.context_snapshot.compiled_context);
+        let expected_template_hash =
+            large_text_repository::sha256(&expected_input.constraint_snapshot.prompt_template_body);
+        let expected_request_hash = request_hash(
+            &expected_input,
+            &input_snapshot_hash(&expected_input.input_snapshot, &expected_body_hash)?,
+            &context_snapshot_hash(&expected_input.context_snapshot, &expected_context_hash)?,
+            &constraint_snapshot_hash(
+                &expected_input.constraint_snapshot,
+                &expected_template_hash,
+            )?,
+        )?;
+        let task = create_dsh_projected_task(
+            &mut connection,
+            input,
+            "book-goal-run",
+            "book-goal-turn",
+            "book-goal-conversation",
+        )?;
+        let persisted = task
+            .target_hint_json
+            .as_ref()
+            .and_then(|hint| hint.get("bookWordGoal"))
+            .cloned()
+            .expect("persisted book goal");
+        assert_eq!(persisted["targetWords"], 60_000);
+        assert_eq!(persisted["sourceTurnId"], "book-goal-turn");
+        assert_eq!(persisted["sourceTurnSequence"], 1);
+        assert_eq!(persisted["comparison"], "approximate");
+        assert_eq!(persisted["minimumWords"], 54_000);
+        assert_eq!(persisted["maximumWords"], 66_000);
+        assert!(!persisted.to_string().contains("悬疑故事"));
+        assert_eq!(
+            persisted["sourceContentSha256"].as_str().map(str::len),
+            Some(64)
+        );
+        assert_eq!(task.request_hash, expected_request_hash);
+        Ok(())
+    }
+
     #[test]
     fn task08_formal_compilation_contract_fails_closed_before_task_creation(
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2040,6 +2742,18 @@ pub(crate) mod tests {
         legacy.input_snapshot.schema_version = 1;
         let error = create_task(&mut connection, legacy)
             .expect_err("legacy production compilation must fail");
+        assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
+
+        let mut forged_dsh_projection = base.clone();
+        forged_dsh_projection.operation_id = "workbench-forged-run".to_string();
+        forged_dsh_projection.input_snapshot.schema_version = 1;
+        forged_dsh_projection.input_snapshot.input_type = "workbench_dsh_messages_v1".to_string();
+        forged_dsh_projection.context_snapshot.schema_version = 1;
+        forged_dsh_projection.context_snapshot.compiler_version =
+            "workbench_dsh_context_evidence_v1".to_string();
+        forged_dsh_projection.constraint_snapshot.schema_version = 1;
+        let error = create_task(&mut connection, forged_dsh_projection)
+            .expect_err("public task creation must not trust a forged DSH projection identity");
         assert_eq!(error.code, codes::AI_COMPILATION_INPUT_INVALID);
 
         let mut budget = base.clone();

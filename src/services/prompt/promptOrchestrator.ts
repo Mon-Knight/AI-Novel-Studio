@@ -254,7 +254,7 @@ export async function buildGenerateRequest(
   );
 
   // 开发态只输出摘要，不输出完整 prompt 或 API Key。
-  if (import.meta.env.DEV) {
+  if (import.meta.env?.DEV) {
     appLogger.info(
       `[ChapterGenerate] final prompt includes chapterOutline=${promptDebug.includesChapterOutlineText} length=${context.chapterOutline?.length || 0}`,
     );

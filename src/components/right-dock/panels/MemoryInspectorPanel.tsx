@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Brain, Clock3, Landmark, Map, Search, Star, TriangleAlert, X } from 'lucide-react';
 import type { Chapter } from '../../../types/chapter';
 import type { SceneMemoryContext } from '../../../types/novelMemory';
 import { novelMemoryManager } from '../../../services/memory/novelMemoryManager';
@@ -82,13 +83,13 @@ export default function MemoryInspectorPanel({
 
   const hasMemoryData = Boolean(
     context &&
-      (context.longTermMemories.length > 0 ||
-        context.midTermMemories.length > 0 ||
-        context.shortTermMemories.length > 0 ||
-        context.povCharacter ||
-        context.activeCharacters.length > 0 ||
-        context.currentConflict ||
-        context.constraints.length > 0),
+    (context.longTermMemories.length > 0 ||
+      context.midTermMemories.length > 0 ||
+      context.shortTermMemories.length > 0 ||
+      context.povCharacter ||
+      context.activeCharacters.length > 0 ||
+      context.currentConflict ||
+      context.constraints.length > 0),
   );
 
   const displayScene =
@@ -122,7 +123,7 @@ export default function MemoryInspectorPanel({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 16 }}>🧠</span>
+          <Brain size={18} strokeWidth={1.8} aria-hidden="true" />
           <strong style={{ fontSize: 14 }}>Memory Inspector</strong>
         </div>
         {onClose && (
@@ -130,6 +131,8 @@ export default function MemoryInspectorPanel({
             type="button"
             className="right-panel-close"
             onClick={onClose}
+            aria-label="关闭记忆检查器"
+            title="关闭记忆检查器"
             style={{
               background: 'none',
               border: 'none',
@@ -138,20 +141,14 @@ export default function MemoryInspectorPanel({
               color: 'var(--color-text-muted, #64748b)',
             }}
           >
-            ✕
+            <X size={17} strokeWidth={1.8} aria-hidden="true" />
           </button>
         )}
       </div>
 
-      <div
-        className="right-panel-body"
-        style={{ flex: 1, overflowY: 'auto', padding: '16px' }}
-      >
+      <div className="right-panel-body" style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
         {loading ? (
-          <div
-            className="text-sm text-muted"
-            style={{ textAlign: 'center', padding: 24 }}
-          >
+          <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
             检索记忆数据中...
           </div>
         ) : !hasMemoryData ? (
@@ -230,8 +227,18 @@ export default function MemoryInspectorPanel({
 
             {/* 2. Retrieved Fragments (召回碎片) */}
             <section data-testid="inspector-retrieved-fragments">
-              <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                🔍 召回碎片 (Retrieved Fragments · {allRetrievedFragments.length})
+              <h4
+                style={{
+                  fontSize: 13,
+                  marginBottom: 8,
+                  color: 'var(--color-text-primary, #1e293b)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Search size={14} strokeWidth={1.8} aria-hidden="true" />
+                召回碎片 (Retrieved Fragments · {allRetrievedFragments.length})
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {allRetrievedFragments.map((frag) => (
@@ -245,7 +252,9 @@ export default function MemoryInspectorPanel({
                       background: 'var(--color-bg-card, #ffffff)',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <div
+                      style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}
+                    >
                       <span
                         style={{
                           fontSize: 11,
@@ -257,8 +266,18 @@ export default function MemoryInspectorPanel({
                       >
                         {frag.type} · {frag.tier}
                       </span>
-                      <span style={{ fontSize: 11, color: '#eab308' }}>
-                        {'★'.repeat(frag.importance)}
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: '#a16207',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                        aria-label={`重要度 ${frag.importance}`}
+                      >
+                        <Star size={12} strokeWidth={1.8} aria-hidden="true" />
+                        {frag.importance}/5
                       </span>
                     </div>
                     <div style={{ lineHeight: 1.4 }}>{frag.content}</div>
@@ -270,8 +289,18 @@ export default function MemoryInspectorPanel({
             {/* 3. Long-Term Memories (长期记忆) */}
             {context && context.longTermMemories.length > 0 && (
               <section data-testid="inspector-long-term">
-                <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                  🏛️ 长期记忆 (Long-Term · 世界规则/核心设定)
+                <h4
+                  style={{
+                    fontSize: 13,
+                    marginBottom: 8,
+                    color: 'var(--color-text-primary, #1e293b)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Landmark size={14} strokeWidth={1.8} aria-hidden="true" />
+                  长期记忆 (Long-Term · 世界规则/核心设定)
                 </h4>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.5 }}>
                   {context.longTermMemories.map((m) => (
@@ -284,8 +313,18 @@ export default function MemoryInspectorPanel({
             {/* 4. Mid-Term Memories (中期记忆) */}
             {context && context.midTermMemories.length > 0 && (
               <section data-testid="inspector-mid-term">
-                <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                  🗺️ 中期记忆 (Mid-Term · 本卷剧情/人物态势)
+                <h4
+                  style={{
+                    fontSize: 13,
+                    marginBottom: 8,
+                    color: 'var(--color-text-primary, #1e293b)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Map size={14} strokeWidth={1.8} aria-hidden="true" />
+                  中期记忆 (Mid-Term · 本卷剧情/人物态势)
                 </h4>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.5 }}>
                   {context.midTermMemories.map((m) => (
@@ -298,8 +337,18 @@ export default function MemoryInspectorPanel({
             {/* 5. Short-Term Memories (短期记忆) */}
             {context && context.shortTermMemories.length > 0 && (
               <section data-testid="inspector-short-term">
-                <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                  ⚡ 短期记忆 (Short-Term · 工作记忆/前序衔接)
+                <h4
+                  style={{
+                    fontSize: 13,
+                    marginBottom: 8,
+                    color: 'var(--color-text-primary, #1e293b)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Clock3 size={14} strokeWidth={1.8} aria-hidden="true" />
+                  短期记忆 (Short-Term · 工作记忆/前序衔接)
                 </h4>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.5 }}>
                   {context.shortTermMemories.map((m) => (
@@ -312,10 +361,27 @@ export default function MemoryInspectorPanel({
             {/* 6. 硬约束与禁忌 */}
             {context && context.constraints.length > 0 && (
               <section data-testid="inspector-constraints">
-                <h4 style={{ fontSize: 13, marginBottom: 8, color: 'var(--color-text-primary, #1e293b)' }}>
-                  ⚠️ 场景硬约束 (Constraints)
+                <h4
+                  style={{
+                    fontSize: 13,
+                    marginBottom: 8,
+                    color: 'var(--color-text-primary, #1e293b)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <TriangleAlert size={14} strokeWidth={1.8} aria-hidden="true" />
+                  场景硬约束 (Constraints)
                 </h4>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--color-danger, #ef4444)' }}>
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: 18,
+                    fontSize: 12,
+                    color: 'var(--color-danger, #ef4444)',
+                  }}
+                >
                   {context.constraints.map((c, i) => (
                     <li key={i}>{c}</li>
                   ))}

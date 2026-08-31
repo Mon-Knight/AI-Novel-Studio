@@ -16,6 +16,7 @@ mod project_backup;
 mod repositories;
 mod runtime;
 mod services;
+mod session_credentials;
 mod system_accent;
 mod window_state;
 
@@ -30,6 +31,7 @@ macro_rules! generate_app_handler {
             $($command,)*
             runtime::get_e2e_large_text_draft_state,
             runtime::corrupt_e2e_large_text_chunk,
+            runtime::get_e2e_agent_closed_loop_state,
         ]
     };
 }
@@ -193,7 +195,10 @@ fn main() {
         window_state::write_focus_request,
         || {
             db::init_database();
-            runtime::append_e2e_log("startup: database initialized");
+            runtime::append_e2e_log(&format!(
+                "startup: database initialized elapsed_ms={}",
+                startup_at.elapsed().as_millis()
+            ));
             log_workspace_event(WorkspaceLogEvent {
                 level: "info",
                 event: "startup_database_ready",
@@ -219,7 +224,10 @@ fn main() {
     let focus_watch_dir = app_data_dir.clone();
 
     tauri::Builder::default()
+        .manage(session_credentials::SessionCredentialVault::default())
         .invoke_handler(generate_app_handler![
+            session_credentials::set_session_model_credential,
+            session_credentials::resolve_session_model_credential,
             commands::get_all_novels,
             commands::app_update::get_app_update_capabilities,
             commands::app_update::check_app_update,
@@ -230,6 +238,8 @@ fn main() {
             commands::create_novel,
             commands::update_novel,
             commands::delete_novel,
+            commands::delete_novel_cascade,
+            commands::repair_database,
             commands::get_world_settings,
             commands::save_world_setting,
             commands::get_rule_systems,
@@ -318,10 +328,14 @@ fn main() {
             commands::content_transactions::get_location_asset,
             commands::content_transactions::list_location_assets,
             commands::conversations::create_task_conversation,
+            commands::conversations::create_initialized_task_conversation,
             commands::conversations::recover_task_runs,
             commands::conversations::list_task_conversations,
             commands::conversations::get_task_conversation,
+            commands::conversations::get_task_turn_run_projection,
             commands::conversations::update_task_conversation_model,
+            commands::conversations::rename_task_conversation,
+            commands::conversations::set_task_conversation_archived,
             commands::conversations::append_conversation_turn,
             commands::conversations::create_task_run,
             commands::conversations::update_task_run,
@@ -330,8 +344,12 @@ fn main() {
             commands::conversations::create_conversation_artifact_card,
             commands::conversations::publish_structured_candidate,
             commands::conversations::record_artifact_decision,
+            commands::conversations::apply_structured_artifact,
             commands::conversations::issue_review_authorization,
             commands::conversations::consume_review_authorization,
+            commands::conversations::get_review_authorization,
+            commands::conversations::ensure_chapter_summary_follow_up,
+            commands::conversations::adopt_review_authorized_draft,
             commands::recovery::get_workspace_recovery_snapshot,
             commands::recovery::upsert_workspace_recovery_snapshot,
             commands::recovery::delete_workspace_recovery_snapshot,
@@ -474,6 +492,10 @@ fn main() {
             services::dsh::commands::dsh_list_current_plugins,
         ])
         .setup(move |app| {
+            runtime::append_e2e_log(&format!(
+                "startup: tauri setup ready elapsed_ms={}",
+                startup_at.elapsed().as_millis()
+            ));
             log_workspace_event(WorkspaceLogEvent {
                 level: "info",
                 event: "tauri_setup_ready",

@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
+import {
+  ArrowLeft,
+  Bot,
+  Database,
+  Palette,
+  Search,
+  Settings2,
+  ShieldCheck,
+  type LucideIcon,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { confirmInfo } from '../../utils/nativeDialog';
 import { aiSettingsService } from '../../services/ai/aiClient';
-import { novelRepository } from '../../services/database/novelRepository';
 import type { AiSettings } from '../../types/ai';
-import { APP_VERSION, APP_PLATFORM_LABEL } from '../../constants/version';
-import '../../styles/novel-detail.css';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { isAiRequestCancelled } from '../../services/ai/aiCancellation';
 import AppearanceSettingsCard from '../../components/settings/AppearanceSettingsCard';
@@ -13,6 +19,10 @@ import AiGovernanceSettingsCard from '../../components/settings/AiGovernanceSett
 import AiProviderSettingsCard from '../../components/settings/AiProviderSettingsCard';
 import LocalChapterModelSettingsCard from '../../components/settings/LocalChapterModelSettingsCard';
 import AiGatewaySettingsCard from '../../components/settings/AiGatewaySettingsCard';
+import AiRuntimeOverviewCard from '../../components/settings/AiRuntimeOverviewCard';
+import DataStorageSettingsCard from '../../components/settings/DataStorageSettingsCard';
+import SecuritySettingsCard from '../../components/settings/SecuritySettingsCard';
+import AboutSettingsCard from '../../components/settings/AboutSettingsCard';
 import {
   checkLocalChapterModel,
   type LocalChapterModelHealthResult,
@@ -20,8 +30,31 @@ import {
 import DiagnosticsSettingsCard from '../../components/settings/DiagnosticsSettingsCard';
 import AppUpdateSettingsCard from '../../components/settings/AppUpdateSettingsCard';
 
+export type SettingsTabKey = 'general' | 'ai_models' | 'governance' | 'data' | 'diagnostics';
+
+interface SettingsNavTab {
+  key: SettingsTabKey;
+  label: string;
+  icon: LucideIcon;
+  description: string;
+}
+
+const SETTINGS_TABS: SettingsNavTab[] = [
+  { key: 'general', label: '常规与外观', icon: Palette, description: '主题、更新与基本偏好' },
+  {
+    key: 'ai_models',
+    label: 'AI 模型配置',
+    icon: Bot,
+    description: 'Cloud / Local / Gateway 模型',
+  },
+  { key: 'governance', label: '网关与流控', icon: ShieldCheck, description: '预算限制与安全合规' },
+  { key: 'data', label: '数据与存储', icon: Database, description: '数据库、备份与数据修复' },
+  { key: 'diagnostics', label: '诊断与关于', icon: Search, description: '系统诊断与软件信息' },
+];
+
 function SettingsPage() {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>('general');
   const [settings, setSettings] = useState<AiSettings>(aiSettingsService.getSettings());
   const [message, setMessage] = useState('');
   const [testing, setTesting] = useState(false);
@@ -29,31 +62,23 @@ function SettingsPage() {
   const [localHealthResult, setLocalHealthResult] = useState<LocalChapterModelHealthResult | null>(
     null,
   );
-  const [repairMsg, setRepairMsg] = useState('');
   const [policySnapshotVersion, setPolicySnapshotVersion] = useState(0);
   const connectionAbortRef = useRef<AbortController | null>(null);
   const localHealthAbortRef = useRef<AbortController | null>(null);
 
-  const handleRepairData = async () => {
-    if (
-      !(await confirmInfo({
-        title: '数据修复',
-        message: '将尝试修复异常作品数据，修复前会自动备份。是否继续？',
-      }))
-    )
-      return;
-    try {
-      const result = await novelRepository.repairData();
-      setRepairMsg(`✅ 修复完成：${result.before} 条 → ${result.after} 条（已备份原数据）`);
-      setTimeout(() => setRepairMsg(''), 4000);
-    } catch (e: unknown) {
-      setRepairMsg(`❌ 修复失败：${describeUnknownError(e, '未知错误')}`);
-    }
-  };
-
   useEffect(() => {
     setSettings(aiSettingsService.getSettings());
+    let disposed = false;
+    void aiSettingsService
+      .restoreSessionCredentials()
+      .then(() => {
+        if (!disposed) setSettings(aiSettingsService.getSettings());
+      })
+      .catch(() => {
+        if (!disposed) setMessage('本次应用会话的模型凭据恢复失败，请重新填写 API Key');
+      });
     return () => {
+      disposed = true;
       connectionAbortRef.current?.abort();
       localHealthAbortRef.current?.abort();
     };
@@ -103,18 +128,18 @@ function SettingsPage() {
     }
   };
 
-  const handleSave = async () => {
-    // 保存前确保 mockMode 与 runtimeMode 一致
-    const final = { ...settings, mockMode: settings.runtimeMode === 'mock' };
+  const handleSave = async (nextSettings?: AiSettings) => {
+    const source = nextSettings ?? settings;
+    const final = { ...source, mockMode: source.runtimeMode === 'mock' };
     try {
       await aiSettingsService.saveSettings(final);
       setSettings(aiSettingsService.getSettings());
       setPolicySnapshotVersion((version) => version + 1);
-      setMessage('✅ AI 设置已保存，API Key 仅保留到本次应用会话结束');
+      setMessage('AI 设置已保存，API Key 仅保留到本次应用会话结束');
     } catch (error) {
-      setMessage(`❌ AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
+      setMessage(`AI 设置保存失败：${describeUnknownError(error, '未知错误')}`);
     }
-    setTimeout(() => setMessage(''), 2000);
+    setTimeout(() => setMessage(''), 2500);
   };
 
   const handleTestConnection = async () => {
@@ -149,12 +174,12 @@ function SettingsPage() {
       await aiSettingsService.saveSettings(updated);
       setSettings(updated);
       setPolicySnapshotVersion((version) => version + 1);
-      setMessage(result.ok ? `✅ 连接成功！（${latency}ms）` : `❌ 连接失败：${result.message}`);
+      setMessage(result.ok ? `连接成功！（${latency}ms）` : `连接失败：${result.message}`);
     } catch (e: unknown) {
       setMessage(
         controller.signal.aborted || isAiRequestCancelled(e)
           ? '连接测试已停止'
-          : `❌ 连接失败：${describeUnknownError(e, '未知错误')}`,
+          : `连接失败：${describeUnknownError(e, '未知错误')}`,
       );
     } finally {
       if (connectionAbortRef.current === controller) connectionAbortRef.current = null;
@@ -165,7 +190,6 @@ function SettingsPage() {
   const update = (patch: Partial<AiSettings>) => {
     setSettings((s) => {
       const next = { ...s, ...patch };
-      // 保持 mockMode 与 runtimeMode 同步
       if ('runtimeMode' in patch) {
         next.mockMode = next.runtimeMode === 'mock';
         next.provider =
@@ -175,140 +199,262 @@ function SettingsPage() {
               ? 'openai_compatible'
               : next.provider;
       }
+      const modelIdentityChanged =
+        next.provider !== s.provider ||
+        next.baseUrl !== s.baseUrl ||
+        next.modelName !== s.modelName;
+      if (modelIdentityChanged) {
+        const currentSessionKey = aiSettingsService.resolveSessionApiKey({
+          scope: 'provider',
+          providerId: s.provider,
+          baseUrl: s.baseUrl,
+          modelId: s.modelName,
+        });
+        if (s.apiKey === currentSessionKey) {
+          next.apiKey = aiSettingsService.resolveSessionApiKey({
+            scope: 'provider',
+            providerId: next.provider,
+            baseUrl: next.baseUrl,
+            modelId: next.modelName,
+          });
+        }
+      }
       return next;
     });
   };
 
   return (
     <div
-      style={{ padding: 32, maxWidth: 640, margin: '0 auto', height: '100%', overflowY: 'auto' }}
+      className="settings-layout"
+      data-testid="settings-layout"
+      style={{
+        display: 'flex',
+        height: '100%',
+        width: '100%',
+        overflow: 'hidden',
+        background: 'var(--color-bg-app, #ffffff)',
+      }}
     >
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>⚙️ 设置中心</div>
-
-      <AppearanceSettingsCard />
-      <AppUpdateSettingsCard />
-
-      <AiProviderSettingsCard
-        settings={settings}
-        message={message}
-        testing={testing}
-        update={update}
-        handleTestConnection={handleTestConnection}
-        onStopTest={() => connectionAbortRef.current?.abort()}
-        handleSave={handleSave}
-      />
-      <LocalChapterModelSettingsCard
-        settings={settings}
-        onChange={update}
-        onSave={handleSave}
-        healthResult={localHealthResult}
-        healthChecking={localHealthChecking}
-        onCheckHealth={handleCheckLocalHealth}
-      />
-      <AiGatewaySettingsCard
-        settings={settings}
-        onChange={update}
-        onSave={handleSave}
-      />
-      <AiGovernanceSettingsCard
-        settings={settings}
-        onChange={update}
-        onSave={handleSave}
-        refreshVersion={policySnapshotVersion}
-      />
-
-      {/* 安全提示 */}
-      <div
-        className="detail-card"
+      {/* 1. 左侧分类导航栏 */}
+      <aside
+        className="settings-sidebar"
+        data-testid="settings-sidebar"
         style={{
-          marginBottom: 16,
-          border: '1px solid var(--color-error-border)',
-          background: 'var(--color-error-bg)',
+          width: 220,
+          flexShrink: 0,
+          background: 'var(--color-bg-sidebar, #f8fafc)',
+          borderRight: '1px solid var(--color-border, #e2e8f0)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          padding: '20px 12px',
         }}
       >
-        <div style={{ fontSize: 14, color: 'var(--color-error-text)', lineHeight: 1.8 }}>
-          <strong>⚠️ 安全提醒</strong>
-          <ul style={{ paddingLeft: 18, marginTop: 4, fontSize: 13 }}>
-            <li>API Key 仅保存在本地，不会上传到任何服务器</li>
-            <li>请勿将 API Key 提交到 GitHub</li>
-            <li>AI 任务记录不会保存完整 API Key</li>
-          </ul>
-        </div>
-      </div>
-
-      <DiagnosticsSettingsCard />
-
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 18 }}>💾</span>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>数据与存储</span>
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div>存储方式：LocalStorage（浏览器模式）/ SQLite（Tauri 桌面模式）</div>
-          <div>
-            数据目录：<code>C:\Users\...\AppData\Local\AI Novel Studio\</code>
+        <div>
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 700,
+              padding: '0 8px 16px 8px',
+              color: 'var(--color-text-primary, #0f172a)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              borderBottom: '1px solid var(--color-border-light, #f1f5f9)',
+              marginBottom: 12,
+            }}
+          >
+            <Settings2 aria-hidden="true" size={18} strokeWidth={1.8} />
+            <span>设置中心</span>
           </div>
-          <div style={{ marginTop: 8 }}>
-            <strong>📦 备份与恢复：</strong>
-            <br />
-            · 在导入导出中心或作品详情页使用「💾 备份完整 JSON」导出全部数据
-            <br />
-            · 在首页使用「📋 导入 JSON」恢复已备份的作品
-            <br />· 备份文件包含作品、章节、草稿、设定、角色、事件等
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <strong>🔧 数据修复：</strong>
-            <br />
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={handleRepairData}
-              style={{ marginTop: 4 }}
-            >
-              🔧 修复异常作品数据
-            </button>
-            {repairMsg && (
+
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {SETTINGS_TABS.map((tab) => {
+              const isActive = activeTab === tab.key;
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  data-testid={`settings-nav-${tab.key}`}
+                  onClick={() => setActiveTab(tab.key)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '9px 12px',
+                    borderRadius: 6,
+                    border: 'none',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 400,
+                    background: isActive ? 'var(--color-primary-light, #e0e7ff)' : 'transparent',
+                    color: isActive
+                      ? 'var(--color-primary, #4338ca)'
+                      : 'var(--color-text-secondary, #475569)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          data-testid="settings-back-home-btn"
+          onClick={() => navigate('/')}
+          style={{ width: '100%', marginTop: 16 }}
+        >
+          <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+          返回首页
+        </button>
+      </aside>
+
+      {/* 2. 右侧对应分类配置面板 */}
+      <main
+        className="settings-content-pane"
+        data-testid="settings-content-pane"
+        style={{
+          flex: 1,
+          height: '100%',
+          overflowY: 'auto',
+          padding: '28px 36px',
+        }}
+      >
+        <div style={{ maxWidth: 760, margin: '0 auto' }}>
+          {/* 分类 1: 常规与外观 */}
+          {activeTab === 'general' && (
+            <div data-testid="settings-tab-pane-general">
               <div
                 style={{
-                  marginTop: 4,
-                  fontSize: 12,
-                  color: repairMsg.includes('✅') ? 'var(--color-success)' : 'var(--color-error)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  marginBottom: 16,
                 }}
               >
-                {repairMsg}
+                <Palette aria-hidden="true" size={18} strokeWidth={1.8} />
+                常规与外观偏好
               </div>
-            )}
-            <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-              修复缺失字段、异常日期、损坏记录。修复前自动备份。
+              <AppearanceSettingsCard />
+              <AppUpdateSettingsCard />
             </div>
-          </div>
-        </div>
-      </div>
+          )}
 
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 18 }}>ℹ️</span>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>关于软件</span>
-        </div>
-        <div style={{ fontSize: 14, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
-          <div>
-            <strong>AI Novel Studio {APP_VERSION}</strong>
-          </div>
-          <div>{APP_PLATFORM_LABEL} AI 小说创作工作台</div>
-          <div>技术路线：Tauri + React + TypeScript + SQLite</div>
-          <div>本地路径：F:\ai-novel-studio</div>
-          <div>项目定位：逐章辅助完成长篇小说创作</div>
-          <div style={{ marginTop: 8 }}>
-            GitHub：
-            <a href="https://github.com/Mon-Knight/AI-Novel-Studio" target="_blank" rel="noopener">
-              Mon-Knight/AI-Novel-Studio
-            </a>
-          </div>
-        </div>
-      </div>
+          {/* 分类 2: AI 模型与运行时 */}
+          {activeTab === 'ai_models' && (
+            <div data-testid="settings-tab-pane-ai-models">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  marginBottom: 16,
+                }}
+              >
+                <Bot aria-hidden="true" size={18} strokeWidth={1.8} />
+                AI 模型服务与运行时
+              </div>
+              <AiRuntimeOverviewCard settings={settings} localHealthResult={localHealthResult} />
+              <AiProviderSettingsCard
+                settings={settings}
+                message={message}
+                testing={testing}
+                update={update}
+                handleTestConnection={handleTestConnection}
+                onStopTest={() => connectionAbortRef.current?.abort()}
+                handleSave={handleSave}
+              />
+              <LocalChapterModelSettingsCard
+                settings={settings}
+                onChange={update}
+                onSave={handleSave}
+                healthResult={localHealthResult}
+                healthChecking={localHealthChecking}
+                onCheckHealth={handleCheckLocalHealth}
+              />
+              <AiGatewaySettingsCard settings={settings} onChange={update} onSave={handleSave} />
+            </div>
+          )}
 
-      <button className="btn btn-secondary" onClick={() => navigate('/')} style={{ marginTop: 8 }}>
-        ← 返回首页
-      </button>
+          {/* 分类 3: 网关与治理 */}
+          {activeTab === 'governance' && (
+            <div data-testid="settings-tab-pane-governance">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  marginBottom: 16,
+                }}
+              >
+                <ShieldCheck aria-hidden="true" size={18} strokeWidth={1.8} />
+                AI 网关与流控治理
+              </div>
+              <AiGovernanceSettingsCard
+                settings={settings}
+                onChange={update}
+                onSave={handleSave}
+                refreshVersion={policySnapshotVersion}
+              />
+              <SecuritySettingsCard />
+            </div>
+          )}
+
+          {/* 分类 4: 数据与存储 */}
+          {activeTab === 'data' && (
+            <div data-testid="settings-tab-pane-data">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  marginBottom: 16,
+                }}
+              >
+                <Database aria-hidden="true" size={18} strokeWidth={1.8} />
+                本地数据与存储架构
+              </div>
+              <DataStorageSettingsCard />
+            </div>
+          )}
+
+          {/* 分类 5: 诊断与关于 */}
+          {activeTab === 'diagnostics' && (
+            <div data-testid="settings-tab-pane-diagnostics">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  marginBottom: 16,
+                }}
+              >
+                <Search aria-hidden="true" size={18} strokeWidth={1.8} />
+                系统诊断与关于
+              </div>
+              <DiagnosticsSettingsCard />
+              <AboutSettingsCard />
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

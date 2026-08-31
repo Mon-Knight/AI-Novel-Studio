@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BookOpenText, Pencil, Save } from 'lucide-react';
 import type { Novel } from '../../types/novel';
 import { formatNumber } from '../../utils/format';
 import { formatDate } from '../../utils/date';
@@ -99,7 +100,7 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>📖</span>
+          <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 600 }}>作品信息</span>
         </div>
         {!editing ? (
@@ -108,7 +109,8 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
             className="btn btn-secondary btn-sm"
             onClick={() => setEditing(true)}
           >
-            ✏️ 编辑
+            <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
+            编辑
           </button>
         ) : null}
       </div>
@@ -199,7 +201,14 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
               onClick={handleSave}
               disabled={saving}
             >
-              {saving ? '保存中...' : '💾 保存'}
+              {saving ? (
+                '保存中...'
+              ) : (
+                <>
+                  <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+                  保存
+                </>
+              )}
             </button>
           </div>
         </div>

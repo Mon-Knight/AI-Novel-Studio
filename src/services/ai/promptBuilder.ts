@@ -735,7 +735,7 @@ export function buildVolumeOutlineGeneratePrompt(
         ].join('\n')
       : [
           '',
-          '⚠️ 当前作品尚未设置采用总纲',
+          '当前作品尚未设置采用总纲',
           '请根据作品背景、世界设定和已有分卷信息，为当前分卷规划合理的发展方向。',
           '建议用户先生成并采用总纲后再生成分卷大纲，可以提高连贯性。',
         ].join('\n'),
@@ -768,7 +768,7 @@ export function buildChapterOutlineGeneratePrompt(
     // v1.0.35: 总纲优先
     ctx.activeMasterOutline
       ? ['【当前采用总纲】', ctx.activeMasterOutline.slice(0, 3000), ''].join('\n')
-      : '⚠️ 当前作品尚未设置采用总纲，章节大纲可能与主线脱节。',
+      : '当前作品尚未设置采用总纲，章节大纲可能与主线脱节。',
     '',
     // v1.0.35: 分卷大纲其次
     ctx.activeVolumeOutline
@@ -784,11 +784,11 @@ export function buildChapterOutlineGeneratePrompt(
             '【分卷摘要（降级使用）】',
             ctx.volumeSummary.slice(0, 2000),
             '',
-            '⚠️ 当前分卷尚未设置采用分卷大纲，使用分卷摘要替代。',
+            '当前分卷尚未设置采用分卷大纲，使用分卷摘要替代。',
             '建议先完善分卷大纲后再生成章节大纲。',
           ].join('\n')
         : [
-            '⚠️ 当前分卷尚未设置采用分卷大纲，也没有分卷摘要。',
+            '当前分卷尚未设置采用分卷大纲，也没有分卷摘要。',
             '请尽量结合总纲和作品背景生成合理章节大纲。',
           ].join('\n'),
     '',

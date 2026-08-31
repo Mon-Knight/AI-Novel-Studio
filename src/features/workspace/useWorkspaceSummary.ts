@@ -7,7 +7,6 @@ import { appLogger } from '../../services/observability/appLogger';
 import type { ChapterDraft } from '../../types/ai';
 import type { Chapter } from '../../types/chapter';
 import type { ChapterSummarizeResult } from '../../types/chapterSummary';
-import { hashTextContent } from '../../utils/contentHash';
 import { describeUnknownError } from '../../utils/errorMessage';
 import { showError, showInfo } from '../../utils/nativeDialog';
 
@@ -75,7 +74,7 @@ export function useWorkspaceSummary({
     if (!currentDraft.isAdopted) {
       await showInfo({
         title: '请先采用正文',
-        message: '请先在草稿历史中确认采用一个正文草稿，再生成章节总结。',
+        message: '请先点击写作工作台右侧的「采用」，确认当前正文后再生成章节总结。',
       });
       return;
     }
@@ -120,7 +119,6 @@ export function useWorkspaceSummary({
     async (edited: ChapterSummarizeResult) => {
       if (!novelId || !activeChapter || !currentDraft) return;
       try {
-        const contentHash = hashTextContent(currentDraft.content);
         await chapterContextPersistenceService.save({
           novelId,
           chapterId: activeChapter.id,
@@ -147,7 +145,6 @@ export function useWorkspaceSummary({
             unresolvedQuestions: edited.unresolvedQuestions,
             factsMustRemember: edited.factsMustRemember,
             nextChapterHook: edited.nextChapterHook,
-            contentHash,
             draftVersion: currentDraft.versionNo,
           },
           contextRecords: edited.contextRecords.map((record) => ({
@@ -155,7 +152,6 @@ export function useWorkspaceSummary({
             novelId,
             chapterId: activeChapter.id,
             volumeId: activeChapter.volumeId,
-            contentHash,
             draftVersion: currentDraft.versionNo,
           })),
           characterStates: edited.characterChanges.flatMap((change) =>

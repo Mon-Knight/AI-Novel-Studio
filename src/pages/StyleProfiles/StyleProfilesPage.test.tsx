@@ -159,6 +159,130 @@ test('initial load renders persisted styles and output profiles with accurate co
   assert.ok(screen.getByText(/快/));
 });
 
+test('a custom style can be made current and the refreshed state is visible immediately', async () => {
+  let styles = [
+    makeStyle({ id: 'style-current', name: '默认叙事', sourceType: 'system_default' }),
+    makeStyle({ id: 'style-custom', name: '自定义冷峻风', isActive: false }),
+  ];
+  const calls: Array<{ projectId: string; styleProfileId: string }> = [];
+  styleProfileService.getAll = async () => [...styles];
+  styleProfileService.setActive = async (projectId, styleProfileId) => {
+    calls.push({ projectId, styleProfileId });
+    styles = styles.map((style) => ({
+      ...style,
+      isActive: style.id === styleProfileId,
+    }));
+  };
+
+  renderPage();
+  await screen.findByText('自定义冷峻风');
+  const customCard = getCardByTitle('自定义冷峻风');
+  assert.equal(within(customCard).queryByText('当前'), null);
+
+  fireEvent.click(within(customCard).getByRole('button', { name: '设为当前' }));
+
+  await waitFor(() => assert.deepEqual(calls, [{ projectId: '', styleProfileId: 'style-custom' }]));
+  assert.ok(await within(customCard).findByText('当前'));
+  assert.equal(within(customCard).queryByRole('button', { name: '设为当前' }), null);
+  assert.ok(within(getCardByTitle('默认叙事')).getByRole('button', { name: '设为当前' }));
+  assert.ok(screen.getByText('已将「自定义冷峻风」设为当前风格'));
+});
+
+test('a custom output profile can be made default without weakening default deletion protection', async () => {
+  let outputs = [
+    makeOutput({ id: 'output-default', name: '默认章节', isDefault: true }),
+    makeOutput({ id: 'output-custom', name: '自定义长章', isDefault: false }),
+  ];
+  const calls: Array<{ novelId: string | undefined; outputProfileId: string }> = [];
+  outputProfileService.getAll = async () => [...outputs];
+  outputProfileService.setDefault = async (novelId, outputProfileId) => {
+    calls.push({ novelId, outputProfileId });
+    outputs = outputs.map((output) => ({
+      ...output,
+      isDefault: output.id === outputProfileId,
+    }));
+  };
+
+  renderPage();
+  const outputTab = await screen.findByRole('button', { name: /输出控制\s*\(2\)/ });
+  fireEvent.click(outputTab);
+
+  const previousDefaultCard = getCardByTitle('默认章节');
+  const customCard = getCardByTitle('自定义长章');
+  assert.ok(within(previousDefaultCard).getByText('默认'));
+  assert.equal(within(previousDefaultCard).queryByRole('button', { name: /删除输出方案/ }), null);
+
+  fireEvent.click(within(customCard).getByRole('button', { name: '设为默认' }));
+
+  await waitFor(() =>
+    assert.deepEqual(calls, [{ novelId: undefined, outputProfileId: 'output-custom' }]),
+  );
+  assert.ok(await within(customCard).findByText('默认'));
+  assert.equal(within(customCard).queryByRole('button', { name: '设为默认' }), null);
+  assert.equal(within(customCard).queryByRole('button', { name: /删除输出方案/ }), null);
+  assert.ok(within(previousDefaultCard).getByRole('button', { name: /删除输出方案/ }));
+  assert.ok(screen.getByText('已将「自定义长章」设为默认输出方案'));
+});
+
+test('a failed current-style switch keeps the previous state and shows the service error', async () => {
+  styleProfileService.getAll = async () => [
+    makeStyle({ id: 'style-current', name: '当前风格' }),
+    makeStyle({ id: 'style-target', name: '待切换风格', isActive: false }),
+  ];
+  styleProfileService.setActive = async () => {
+    throw new Error('风格方案不属于当前作品');
+  };
+
+  renderPage();
+  await screen.findByText('待切换风格');
+  fireEvent.click(within(getCardByTitle('待切换风格')).getByRole('button', { name: '设为当前' }));
+
+  assert.ok(await screen.findByText('风格方案不属于当前作品'));
+  assert.ok(within(getCardByTitle('当前风格')).getByText('当前'));
+  assert.equal(within(getCardByTitle('待切换风格')).queryByText('当前'), null);
+});
+
+test('browser storage keeps one active shared style and rejects cross-scope activation', async () => {
+  Object.assign(styleProfileService, originalStyleService);
+  localStorage.clear();
+  try {
+    const seeded = await styleProfileService.getAll();
+    assert.equal(seeded.filter((profile) => profile.isActive).length, 1);
+    const custom = await styleProfileService.create({
+      name: '共享自定义风格',
+      sourceType: 'manual',
+      narrativePerspective: '第一人称',
+    });
+    const projectStyle = await styleProfileService.create({
+      novelId: 'novel-a',
+      name: '作品风格',
+      sourceType: 'manual',
+    });
+    assert.equal(custom.isActive, false);
+    assert.equal(projectStyle.isActive, false);
+
+    await styleProfileService.setActive('', custom.id);
+    const shared = await styleProfileService.getAll();
+    assert.deepEqual(
+      shared.filter((profile) => !profile.novelId && profile.isActive).map((profile) => profile.id),
+      [custom.id],
+    );
+
+    const beforeRejectedSwitch = localStorage.getItem('ai_novel_studio_style_profiles');
+    await assert.rejects(
+      styleProfileService.setActive('novel-b', projectStyle.id),
+      /不存在或不属于当前作品/,
+    );
+    await assert.rejects(
+      styleProfileService.setActive('', 'missing-style'),
+      /不存在或不属于当前作品/,
+    );
+    assert.equal(localStorage.getItem('ai_novel_studio_style_profiles'), beforeRejectedSwitch);
+  } finally {
+    localStorage.clear();
+  }
+});
+
 test('layered profiles expose available, outdated and missing source provenance', async () => {
   const hash = 'a'.repeat(64);
   const makeLayered = (
@@ -246,7 +370,7 @@ test('creating a style submits normalized ratios and refreshes the visible list'
 
   renderPage();
   await screen.findByText('夜色叙事');
-  fireEvent.click(screen.getByRole('button', { name: '+ 新建风格' }));
+  fireEvent.click(screen.getByRole('button', { name: '新建风格' }));
 
   const dialog = getOpenDialog();
   assert.ok(within(dialog).getByText('新建风格方案'));
@@ -288,7 +412,9 @@ test('style deletion is denied on cancel and performed only after confirmation',
 
   renderPage();
   await screen.findByText('夜色叙事');
-  const deleteButton = within(getCardByTitle('夜色叙事')).getByRole('button', { name: /🗑/ });
+  const deleteButton = within(getCardByTitle('夜色叙事')).getByRole('button', {
+    name: /删除风格/,
+  });
 
   fireEvent.click(deleteButton);
   await waitFor(() => assert.equal(prompts.length, 1));
@@ -323,7 +449,9 @@ test('output deletion is denied on cancel and performed only after confirmation'
   const outputTab = await screen.findByRole('button', { name: /输出控制\s*\(1\)/ });
   fireEvent.click(outputTab);
   await screen.findByText('冲突章节');
-  const deleteButton = within(getCardByTitle('冲突章节')).getByRole('button', { name: /🗑/ });
+  const deleteButton = within(getCardByTitle('冲突章节')).getByRole('button', {
+    name: /删除输出方案/,
+  });
 
   fireEvent.click(deleteButton);
   await waitFor(() => assert.equal(prompts.length, 1));
@@ -348,7 +476,7 @@ test('a failed deletion keeps the style visible and shows the service error', as
 
   renderPage();
   await screen.findByText('夜色叙事');
-  fireEvent.click(within(getCardByTitle('夜色叙事')).getByRole('button', { name: /🗑/ }));
+  fireEvent.click(within(getCardByTitle('夜色叙事')).getByRole('button', { name: /删除风格/ }));
 
   assert.ok(await screen.findByText('SQLite 写入失败，请稍后重试'));
   assert.ok(screen.getByText('夜色叙事'));
@@ -359,7 +487,7 @@ test('TXT analysis exposes validation feedback before attempting an AI request',
   fireEvent.click(screen.getByRole('button', { name: /TXT分析/ }));
 
   const dialog = getOpenDialog();
-  assert.ok(within(dialog).getByText('📄 TXT 风格分析'));
+  assert.ok(within(dialog).getByText('TXT 风格分析'));
   fireEvent.click(within(dialog).getByRole('button', { name: /分析$/ }));
 
   assert.ok(await within(dialog).findByText('请输入参考文本'));

@@ -1,16 +1,47 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  assertAdoptedContentHashes,
   redactLogText,
   sanitizeArtifactDirectory,
   sanitizeJsonText,
   sanitizeSecrets,
 } from './artifact-sanitizer.ts';
 
+test('adopted novel text remains byte-faithful while surrounding diagnostics are sanitized', () => {
+  const adoptedContent = '线索写着 token: fictional-value。\n旧电脑路径是 C:\\archive\\case.txt。';
+  const adoptedHash = createHash('sha256').update(adoptedContent, 'utf8').digest('hex');
+  const sanitized = sanitizeJsonText(
+    JSON.stringify({
+      apiKey: 'sk-1234567890abcdef',
+      chapters: [{ status: 'passed', adoptedContent, adoptedHash }],
+    }),
+  );
+  const parsed = JSON.parse(sanitized) as {
+    apiKey: string;
+    chapters: Array<{ adoptedContent: string }>;
+  };
+
+  assert.equal(parsed.apiKey, '[REDACTED]');
+  assert.equal(parsed.chapters[0]?.adoptedContent, adoptedContent);
+  assert.doesNotThrow(() => assertAdoptedContentHashes(sanitized));
+  assert.throws(
+    () =>
+      assertAdoptedContentHashes(
+        JSON.stringify({
+          chapters: [{ status: 'passed', adoptedContent: `${adoptedContent}改`, adoptedHash }],
+        }),
+      ),
+    /changed during sanitization/,
+  );
+});
+
 test('structured sanitization preserves multiline JSON while removing secrets and Windows paths', () => {
+  const snapshotCompiledPromptSha256 = 'a'.repeat(64);
   const source = {
     logs: [
       {
@@ -22,6 +53,8 @@ test('structured sanitization preserves multiline JSON while removing secrets an
     apiKey: 'sk-1234567890abcdef',
     nested: {
       prompt: 'sensitive full prompt',
+      snapshotCompiledPromptSha256,
+      invalidSnapshotCompiledPromptSha256: 'not-a-hash',
       databasePath: 'C:\\Users\\writer\\AppData\\Local\\Temp\\e2e\\ai-novel-studio.db',
     },
   };
@@ -32,6 +65,8 @@ test('structured sanitization preserves multiline JSON while removing secrets an
 
   assert.equal(reparsed.apiKey, '[REDACTED]');
   assert.equal(reparsed.nested.prompt, '[REDACTED]');
+  assert.equal(reparsed.nested.snapshotCompiledPromptSha256, snapshotCompiledPromptSha256);
+  assert.equal(reparsed.nested.invalidSnapshotCompiledPromptSha256, '[REDACTED]');
   assert.equal(reparsed.nested.databasePath, '[REDACTED_PATH]');
   assert.equal(
     reparsed.logs[0].message,
@@ -102,5 +137,21 @@ test('plain text redaction does not cross real newline boundaries', () => {
   assert.equal(
     redactLogText('C:\\Users\\writer\\one.txt\nC:\\Users\\writer\\two.txt'),
     '[REDACTED_PATH]\n[REDACTED_PATH]',
+  );
+});
+
+test('plain text redaction removes agt-prefixed credentials from WebDriver diagnostics', () => {
+  const credential = `agt_${'A1_b'.repeat(8)}`;
+
+  const sanitized = redactLogText(`webdriver value=${credential}`);
+
+  assert.equal(sanitized, 'webdriver value=[REDACTED_KEY]');
+  assert.doesNotMatch(sanitized, /agt_/i);
+});
+
+test('plain text redaction preserves model selector diagnostics', () => {
+  assert.equal(
+    redactLogText('data-testid=workbench-new-task-model-status'),
+    'data-testid=workbench-new-task-model-status',
   );
 });

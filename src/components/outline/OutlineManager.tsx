@@ -88,9 +88,9 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       });
       await loadData();
       setShowVolumeForm(false);
-      flash('✅ 分卷创建成功');
+      flash('分卷创建成功');
     } catch (e: unknown) {
-      flash('❌ 创建失败：' + describeUnknownError(e, '未知错误'));
+      flash('创建失败：' + describeUnknownError(e, '未知错误'));
       appLogger.error('[OutlineManager] createVolume error:', e);
     }
   };
@@ -98,6 +98,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   const handleUpdateVolume = async (id: string, input: UpdateVolumeInput) => {
     await volumeRepository.update(id, input);
     await loadData();
+    setShowVolumeForm(false);
     setEditingVolume(null);
     flash('分卷保存成功');
   };
@@ -120,7 +121,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
       const volumeId = input.volumeId || '';
       if (!volumeId) {
         // 无分卷时创建第一卷
-        flash('⏳ 正在创建第一卷和第一章...');
+        flash('正在创建第一卷和第一章...');
         const result = await createFirstVolumeAndChapter(novelId, {
           chapterTitle: input.title,
           outline: input.outline,
@@ -130,7 +131,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
         await loadData();
         setShowChapterForm(false);
         setTargetVolumeId(undefined);
-        flash('✅ 已创建第一卷和第1章（含空草稿）');
+        flash('已创建第一卷和第1章（含空草稿）');
         appLogger.info(
           '[OutlineManager] createFirstVolumeAndChapter done, chapterId=',
           result.chapter.id,
@@ -144,14 +145,14 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
         await loadData();
         setShowChapterForm(false);
         setTargetVolumeId(undefined);
-        flash('✅ 章节创建成功（含空草稿）');
+        flash('章节创建成功（含空草稿）');
         appLogger.info(
           '[OutlineManager] createChapterInVolume done, chapterId=',
           result.chapter.id,
         );
       }
     } catch (e: unknown) {
-      flash('❌ 创建失败：' + describeUnknownError(e, '未知错误'));
+      flash('创建失败：' + describeUnknownError(e, '未知错误'));
       appLogger.error('[OutlineManager] createChapter error:', e);
     }
   };
@@ -159,6 +160,7 @@ function OutlineManager({ novelId }: OutlineManagerProps) {
   const handleUpdateChapter = async (id: string, input: UpdateChapterInput) => {
     await chapterRepository.update(id, input);
     await loadData();
+    setShowChapterForm(false);
     setEditingChapter(null);
     flash('章节保存成功');
   };

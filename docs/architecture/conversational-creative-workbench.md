@@ -1,8 +1,8 @@
 # 对话式并发创作工作台设计
 
-> 状态：v3.5.0 已实现对话工作台、确认/Safe Apply、领域候选工具、上下文压缩与写作工作台审阅收敛  
+> 状态：v3.6.0 当前版本；对话工作台、决定/审阅授权、章节原子采用、五类桌面结构化原子应用与旧 UI 收敛已实现；未列入白名单的结构化类型及浏览器回退仍失败关闭
 > 适用版本：v3.3.0 及后续版本  
-> 当前版本：v3.5.0  
+> 当前版本：v3.6.0
 > Harness 架构分析快照：[`deepseek-ai/deepseek-harness@141eb6f`](https://github.com/deepseek-ai/deepseek-harness/tree/141eb6fef83422698aef7a981029e843e8161534)（2026-08-20，仅作设计参考）  
 > 当前产品载体仍固定 `47f943859bef60e4160492346772ded9b24f765a`；本文不授权升级或替换该依赖  
 > 文档职责：定义对话式创作工作台的产品边界、交互模型、运行时职责与分阶段落地顺序
@@ -38,7 +38,9 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 10. **提供“当前插件”只读视图。** 用户可以按功能插件、模型插件和其他插件查看运行时实际加载的插件、版本、状态与所提供能力，但不能在该视图安装、卸载、启停、更新或配置插件。
 11. **首阶段实现只覆盖 v3.3.0 最小闭环，不修改旧工作台的既有能力边界。**
 
-当前版本已实现：默认创作工作台路由、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影、产物决定/审阅授权、设定与结构化候选 Safe Apply、extractive 小说上下文压缩 Provider，以及写作工作台审阅收敛。生成类 AI 面板不再作为默认写作入口。
+当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影及发送前精确目录重验、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。目录重验只证明条目来自当前 Runtime 投影；进入桌面 DSH 的模型任务会在创建 Run 前另行执行可取消的原生 tool-call nonce 探针，只有精确 `provider/model` 证明通过才冻结证据并继续。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
+
+结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。v3.6.0 还完成了 Canonical 1A-A/B/C/D 的 Catalog、Facade、Projection、共享 Manifest 和漂移门禁，但四项均为 `catalog_only + partial`，模型可见数为 `0`。
 
 ---
 
@@ -86,7 +88,7 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 - **任务（Task）** 是用户可见的工作单元，例如“生成第 18 章”或“审计第 1—10 章人物一致性”。
 - **对话（Conversation）** 是任务的主要交互载体。产品文案可统一称为“任务”，避免让用户区分两个概念。
 - **回合（Turn）** 是一次用户输入以及随后的 AI/工具响应。
-- **运行（Run）** 是一个回合触发的可取消执行。重试会产生新运行，不覆盖旧运行事实。
+- **运行（Run）** 是一个回合触发的可取消执行。线性重试复用原 user Turn 并产生新 Run，不追加重复用户消息、不覆盖旧运行事实；当前以相同 `turnId` 下的稳定 Run 顺序表达 attempt 关系，不伪造显式父子分支。
 - **工具调用（Tool Call）** 是运行中的领域动作记录。
 - **产物（Artifact）** 是可以被审阅、确认或应用的不可变候选结果。
 
@@ -122,6 +124,10 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 ```
 
 界面保持 Windows 桌面应用风格：紧凑、稳定、浅色、克制边框，避免后台管理仪表盘式卡片堆叠。
+
+当前实现把 Codex 式“紧凑任务树 + 居中对话 + 底部常驻 Composer”与 Harness 式“按回合投影运行、工具、错误与产物”组合：应用导航使用 56px 图标轨，任务树保持稳定宽度，正文流设阅读宽度上限，2K 下不把文字拉成超长行。加载骨架、流式点和状态过渡使用 120–180ms 的克制动效，`prefers-reduced-motion` 下关闭非必要运动。
+
+启动与恢复不得再把整个工作台变成等待面。项目/任务恢复、旧上下文整理和模型目录刷新都显示为局部准备状态：任务树和输入框先可见，草稿始终可编辑，弹窗可取消；只精确禁用依赖未就绪上下文/模型的提交动作。本地问候与能力问答不受这两项准备门禁影响，但必须显示和持久化为 `ans-local` 来源。
 
 ### 4.2 左侧项目与任务树
 
@@ -274,13 +280,14 @@ queued/running   → skipped（因前置失败而未执行）
 
 ### 7.3 产物类型与动作
 
-| 产物类型           | 主要处理方式                        | 是否直接写入正式事实 |
-| ------------------ | ----------------------------------- | -------------------- |
-| 章节正文候选       | 确认进入审阅 → 人工审阅/编辑 → 采用 | 只有“采用”后         |
-| 大纲/人物/设定候选 | 查看差异 → 确认并应用               | 通过领域事务应用     |
-| 审计报告           | 查看 → 追问 → 创建修复任务          | 否，报告本身不应用   |
-| 修订建议           | 选择建议 → 生成新候选               | 否                   |
-| 上下文/总结候选    | 查看差异 → 确认并应用               | 通过领域事务应用     |
+| 产物类型           | 主要处理方式                              | 当前是否写入正式事实                  |
+| ------------------ | ----------------------------------------- | ------------------------------------- |
+| 章节正文候选       | 确认进入审阅 → 人工审阅/编辑 → 原子采用   | 只有显式“采用”后                      |
+| 大纲/人物/设定候选 | 查看差异 → 确认 → 请求应用                | 桌面白名单事务成功后写入              |
+| 章节事件/总结候选  | 查看差异 → 确认 → 请求应用                | 桌面白名单事务成功后写入              |
+| 审计报告           | 查看 → 追问 → 创建修复任务                | 否，报告本身不应用                    |
+| 修订建议           | 选择建议 → 生成新候选                     | 否                                    |
+| 小说上下文压缩候选 | 查看 → 确认 → 应用为新 ContextRecord 版本 | 仅精确 `context_compression` 派生类型 |
 
 ### 7.4 确认与应用语义
 
@@ -288,10 +295,13 @@ queued/running   → skipped（因前置失败而未执行）
 
 - **确认**表示用户认可某个不可变候选及其基线，可授权下一阶段处理。
 - **应用**表示系统通过权威领域事务把已确认候选写入正式事实。
-- 章节正文必须先确认进入人工审阅，再由用户显式采用；其他结构化产物可在确认后立即请求应用。
+- 章节正文必须先确认进入人工审阅，再由用户显式采用；桌面采用事务同时复验并消费 `ReviewAuthorization`。
+- 桌面端允许 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 以及精确 `generic_json / context_compression` 申请应用；Rust 在同一 SQLite 事务内完成来源、作用域、基线和幂等校验、领域写入及 append-only 决定。浏览器回退、质量/风格报告、其他 `generic_json` 与未知类型不调用领域写入。
 - 重复点击必须幂等；同一决定不能生成两次正式写入。
 - 若正式对象修订号已变化，应用失败并进入“冲突”状态，不以最后写入覆盖。
 - 修订请求产生新产物或新版本，旧产物保留审计关系但不可被悄然替换。
+- 候选卡片持久化与任务进入 `waiting_user` 必须属于同一事务；未决候选优先于 Run 的完成、失败、取消和重启恢复状态。
+- `reject / request_revision` 在其他候选均已处理后回到待命；章节 `confirm` 在审阅授权签发后仍等待用户，只有真实章节采用事务完成才可收敛为完成；稳定应用冲突收敛为失败。
 
 ---
 
@@ -308,7 +318,7 @@ queued/running   → skipped（因前置失败而未执行）
 → 用户可显式进入人工编辑
 → 用户保存人工修改
 → 用户显式“采用为正式正文”
-→ 系统执行 Safe Apply 与后续上下文事务
+→ Rust/SQLite 单一事务复验并消费 ReviewAuthorization、采用草稿并收敛任务状态
 ```
 
 约束：
@@ -344,7 +354,7 @@ queued/running   → skipped（因前置失败而未执行）
 
 ### 9.3 原写作工作台
 
-原写作工作台更名或重新定位为“章节审阅/编辑器”，保留：
+原写作工作台现已重新定位为“章节审阅/编辑器”，保留：
 
 - 卷章目录和章节定位；
 - 正文阅读；
@@ -354,14 +364,14 @@ queued/running   → skipped（因前置失败而未执行）
 - 显式采用候选为正式正文；
 - 必要的阅读显示设置。
 
-在对话工作台具备功能等价、迁移验证和回退路径后，删除以下旧 UI：
+当前生产写作工作台已经删除以下旧 UI：
 
 - 草稿版本查看；
 - AI 生成、大纲生成、人物推演、事件推理、设定整理；
 - 风格、输出控制、上下文、总结、检查、润色的独立 AI 面板；
 - Multi-Agent 或 DSH 的独立实验面板。
 
-“删除旧 UI”不等于删除底层领域服务。底层能力优先转为工具、任务模板或产物处理器，确认没有调用方后再由独立版本决定清理。
+“删除旧 UI”不等于删除底层领域服务或审计事实。历史草稿、领域 helper 和遗留组件文件可以继续存在，但不能据此宣称生产入口仍可见或通用结构化应用已开放；后续清理由独立任务决定。
 
 ---
 
@@ -372,6 +382,7 @@ queued/running   → skipped（因前置失败而未执行）
 - 同一小说可以同时运行多个任务。
 - 不同任务拥有独立模型、消息、运行、取消控制和产物。
 - 用户切换任务不会取消后台运行。
+- 草稿、Composer 错误、压缩候选和局部忙碌状态按任务隔离；后台完成或失败只能写回发起它的任务。
 - 任务列表实时显示运行、等待用户、失败和完成状态。
 - 应用关闭后，持久任务按明确策略恢复、暂停或标记中断，不伪造成功。
 
@@ -441,18 +452,26 @@ Profile / Bundle / Patch
 
 AI Novel Studio 映射时，一个任务对话对应一个持续 Session/Agent；小说 ID 构成领域 scope；不同任务可以驻留并并发。当前步骤冻结模型和 Provider，切换选择只影响后续步骤或回合，不能拆分已经发出的请求。
 
+模型凭据不进入 Session Event、任务对话或冻结快照。当前应用进程只在内存中按 `scope + providerId + baseUrl + modelId` 保存精确绑定；旧 Run 必须使用其冻结模型身份解析同一会话凭据，任一字段不匹配即失败关闭。退出应用后凭据自然失效，设置切换不得把已加载 Key 携带到另一模型。
+
 Harness 式追加日志承担执行重放与 UI 重建，但不能成为小说事实源。章节、大纲、人物、设定、Memory 和采用状态继续以 ANS 领域服务与 SQLite 为权威；事件只保存稳定引用、安全摘要和必要快照。
 
 ### 11.3 能力与 Provider 接口
 
 工具、模型、上下文组装和压缩应遵循“能力定义 → Provider 实现 → Runtime 消费”的稳定接口。插件可以提供或替换实现，任务运行必须冻结实际使用的能力 ID、Provider、版本和配置摘要。
 
+模型目录不是 tool-calling 能力证明。桌面 DSH 启动模型任务时，ANS 必须先在同一 Worker 和 governed proxy 上对精确 `provider/model` 执行一次无副作用 nonce 工具 schema 探针。只接受唯一原生 `tool-call`、参数精确回显 nonce 且 finish kind 为 `tool-calls` 的正证据；失败不缓存、不创建 TaskRun/Turn/Tool/Artifact/Session 领域事实，取消必须终止 Worker 并结算请求治理租约。成功证据可在同 Worker 内缓存 10 分钟，Worker 重启后必须重新探测；Rust 严格验证后只把协议、身份、时间、缓存与 finish/调用计数证据冻结进 `modelSnapshot.runtime.toolCallingAttestation`，不持久化 nonce、usage、原始错误或凭据。探针仍使用 `ai_request_reservations` 执行必需的请求预留与结算审计；这项治理事实不得冒充任务运行事实。
+
 首批领域工具仍是 `novel.read_context`、`chapter.read_outline`、`search_memory` 与 `generate_chapter`。只读工具可以受限并发；候选生成形成 Result Artifact；正式写入保持排他并经过 Decision、revision CAS 与 Safe Apply。工具结果及其产物引用来自结构化结果，不从 AI 回复正文中解析。
+
+这里的旧 Workbench 工具名属于现有 legacy 执行链，不等于 v3.6.0 Canonical `novel.read / structure.read / context.read / memory.search` 已向模型暴露。Canonical 四项当前只完成宿主验证，`modelVisibleToolIdentities=[]`。
 
 上下文压缩必须区分：
 
 - **任务对话压缩**：压缩某个 Session 的历史，用于控制模型输入，可以采用 Runtime 的自动 compaction；
-- **小说上下文压缩**：处理正式人物、剧情、伏笔、世界观等知识，Provider 只生成可验证候选，用户确认后才能通过 Safe Apply 应用，旧版本继续保留。
+- **小说上下文压缩**：处理正式人物、剧情、伏笔、世界观等知识。Provider 生成带 `derivationType=context_compression` 的可验证 `generic_json` 候选；桌面端按正式来源重算覆盖与基线，并在单一 Rust/SQLite 事务中停用旧活动版本、写入新 ContextRecord 与 append-only 决定。其他 `generic_json` 仍不具备该权限。
+
+“小说 Memory”还必须区分两类实现：migration 026 的 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs` 是桌面 SQLite 长期事实；`NovelMemoryManager`/`NovelMemoryStateUpdater` 的 `Map` 是进程内兼容/实验状态，重启即丢失。后者不能作为长期 Memory、重启恢复或 Canonical `memory.search` 已稳定的证据。
 
 因此后续更换小说上下文压缩方法时，应替换对应 Provider，而不是改写 Agent Loop、工作台或小说权威写入链路。
 
@@ -487,7 +506,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 - Runtime 负责任务生命周期、事件顺序、取消与恢复，不拥有小说正式事实。
 - Tool Registry 是能力白名单，不允许对话直接调用任意服务或 SQL。
 - Artifact Service 负责不可变候选、来源、基线与验证证据。
-- Safe Apply 和领域服务负责正式写入、CAS、幂等与审计。
+- Safe Apply 和领域服务负责正式写入、CAS、幂等与审计；当前已完成章节授权采用与五类白名单结构化原子事务，未列入白名单的类型不得借用这些入口。
 - SQLite 是桌面端权威事实；LocalStorage 只用于明确的浏览器开发回退。
 - DSH 或其他外部 Agent Runtime 可以负责规划与工具编排，但不成为事实权威、预算权威或最终采用者。
 
@@ -533,22 +552,18 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 
 ---
 
-## 13. 当前实现与目标差距
+## 13. v3.6.0 现状与剩余差距
 
-v3.2.1 已提供可复用的 Planner、Tool Registry、执行事实、Result Artifact、Safe Apply、全局 AI 请求治理、Multi-Agent 和 DSH 章节准备基础，但当前交互仍以旧页面和功能面板为中心。
+工作台交互目标已经落地：应用默认进入任务工作台，任务/回合/运行/工具事件/产物卡片可持久化，模型快照与任务隔离存在，工具/错误/产物在对话内展示，当前插件来自 Runtime Registry；同一 user Turn 的多次 Run 逐次保留，未决候选可靠投影为等待用户，任务切换不会串用草稿、错误或压缩候选。写作工作台已收敛为章节审阅/编辑器，旧 AI 面板和草稿历史生产入口已移除。
 
-主要差距：
+剩余差距是运行时、自主编排与未覆盖类型的正式写入门禁，而不是 UI 回迁：
 
-- 启动入口不是对话任务工作台；
-- 小说下缺少可持久、可并行的任务对话模型；
-- 模型选择主要是全局配置，不是任务级快照；
-- 工具调用和错误没有统一投影到对话消息；
-- 产物确认分散在旧页面，缺少统一产物卡片与决定协议；
-- 原写作工作台仍同时承担阅读、编辑、AI 控制和实验入口；
-- DSH 当前聚焦章节准备提案，不是通用的多任务工作台 Runtime。
-- 当前没有从实际 Runtime Registry 生成的“当前插件”只读视图。
-
-这些差距用于安排未来版本，不表示 v3.2.1 已实现本文件中的新界面或数据模型。
+- 五类领域产物及精确 `generic_json / context_compression` 已具备领域写入与 append-only 决定同事务；质量/风格报告、其他 `generic_json`、未知类型及浏览器结构化应用仍失败关闭；
+- 短口令单章 Writer 已能读取世界、规则、主角、全书/分卷/章节大纲、风格、输出、研究资料和紧邻前章采用稿；空白项目会进入有序资产恢复，依次生成候选并等待用户显式应用世界与规则、主角和全书规划，规划应用后原子建卷建章并恢复最初正文目标，后续“继续写”在章节审阅、采用和自动总结闭环后推进到下一章；这仍是 ANS 确定性编排，不等同于真实 Main Agent 或 Writing SubAgent 自主运行；
+- Canonical 1A-A/B/C/D 虽已完成共享契约和宿主门禁，四个只读 identity 仍为 `catalog_only + partial`，模型可见数为 `0`；
+- `novel.read` 的多事实源、`structure.read` 的 version/active/CAS、`context.read` 的 summary/context bundle、`memory.search` 的 embedding/混合检索证据仍分别阻断 exposure；
+- legacy Workbench/DSH 工具链尚未被 Canonical 投影替代；
+- R4 真实 Main Agent Runtime、Writing/Context/Quality SubAgent 仍未放行；当前真实章节证据属于确定性 Writer 路径，不能据此宣称 DSH 结构化任务或自主整书编排已经验收。
 
 ---
 
@@ -566,10 +581,11 @@ v3.2.1 已提供可复用的 Planner、Tool Registry、执行事实、Result Art
 - 固定 Harness 集成基线，建立 ANS DSH Adapter、最小 Headless Bundle 和任务 Session/Agent 映射；
 - 旧写作工作台和旧入口保持可回退，不在此版本大规模删除。
 
-### 14.2 v3.4.0：确认、应用与审阅闭环
+### 14.2 v3.4.0：决定与章节审阅闭环（章节完成；通用结构化应用未开放）
 
-- 结构化产物的确认、冲突检测、幂等 Safe Apply；
-- 章节候选“确认进入审阅 → 显式编辑/保存/采用”；
+- append-only 产物决定与审阅授权已实现；
+- 章节候选“确认进入审阅 → 显式编辑/保存 → 原子采用”已实现；
+- 通用结构化申请应用在同事务迁移前固定失败关闭且零领域写入；
 - 审计报告与修订任务衔接；
 - 任务恢复、失败重试与更完整的 Provider/预算反馈；
 - 在能力等价验证后，移除导航和作品详情中的重复待确认入口。
@@ -578,8 +594,15 @@ v3.2.1 已提供可复用的 Planner、Tool Registry、执行事实、Result Art
 
 - 扩展大纲、人物、设定、风格、上下文、总结、检查和润色任务；
 - 增强同项目并发调度、目标锁与跨任务冲突提示；
-- 在迁移清单、使用数据和回退测试通过后，删减旧写作工作台的 AI 面板；
+- 旧写作工作台的生成类 AI 面板、独立实验面板和草稿历史入口已删除；
 - 原写作工作台稳定收敛为人工审阅/编辑器。
+
+### 14.4 v3.6.0：Canonical 准入（当前版本）
+
+- 1A-A Catalog、1A-B Facade、1A-C Projection、1A-D portable Manifest/漂移门禁已验证；
+- 四个 Canonical read Tool 仍为 `catalog_only + partial`，模型可见数为 `0`；
+- 下一门禁是逐项关闭四个 Facade blocker，再通过独立 exposure 变更验证 scoped manifest、DSH Tool projection、权限、负例和重启；
+- 只有 exposure 通过后才进入 **R4：真实 Main Agent Runtime 验证**，之后再评估 Writing SubAgent。
 
 各版本必须独立提交、验证和发布。下一版本不能以“最终形态”为理由同时实现后续阶段。
 
@@ -602,6 +625,7 @@ v3.2.1 已提供可复用的 Planner、Tool Registry、执行事实、Result Art
 11. 刷新或重启后能恢复任务、工具终态、产物和用户决定。
 12. 全局并发、预算、凭据和 SQLite 权威边界保持有效。
 13. “当前插件”视图与 Runtime Registry 一致，可查看功能、模型和其他插件，但不存在安装、卸载、启停、配置、更新或市场操作。
+14. 重试不会新增重复用户回合；刷新后仍能看到原回合下每次 Run 各自的模型、工具、错误和产物。
 
 ---
 

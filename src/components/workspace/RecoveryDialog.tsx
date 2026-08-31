@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ArchiveRestore, TriangleAlert } from 'lucide-react';
 import type { RecoveryPromptState } from '../../types/workspaceRecovery';
 import { formatDateTime } from '../../utils/date';
 import { countTextWords } from '../../utils/contentHash';
@@ -46,7 +47,12 @@ function RecoveryDialog({
         data-testid="workspace-recovery-dialog"
       >
         <div className="modal-title" id="workspace-recovery-title">
-          {conflict ? '⚠️ 发现旧版本恢复内容' : '🛟 发现未保存正文'}
+          {conflict ? (
+            <TriangleAlert aria-hidden="true" size={18} strokeWidth={1.8} />
+          ) : (
+            <ArchiveRestore aria-hidden="true" size={18} strokeWidth={1.8} />
+          )}
+          {conflict ? '发现旧版本恢复内容' : '发现未保存正文'}
         </div>
         <p>这是上次未保存的编辑内容，它尚未成为正式草稿；恢复后仍需再次保存。</p>
         {conflict && (

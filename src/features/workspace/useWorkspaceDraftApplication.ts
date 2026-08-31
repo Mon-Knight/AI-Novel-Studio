@@ -78,7 +78,8 @@ export function useWorkspaceDraftApplication({
       if (draft.contentState?.status === 'unavailable') {
         void showInfo({
           title: '完整正文不可用',
-          message: '该草稿只能读取预览，已阻止载入编辑器。请在草稿历史中重试读取。',
+          message:
+            '该草稿只能读取预览，已阻止载入编辑器。请重新读取正文或返回创作工作台重新生成候选。',
         });
         return false;
       }
@@ -96,7 +97,8 @@ export function useWorkspaceDraftApplication({
         ) {
           void showInfo({
             title: 'AI 候选已保存',
-            message: '当前正文存在未保存修改，候选结果仍可在草稿历史中查看，编辑器内容未被覆盖。',
+            message:
+              '当前正文存在未保存修改，候选结果已保存，编辑器内容未被覆盖。请先处理当前修改，再重新进入审阅。',
           });
           return false;
         }
@@ -112,7 +114,7 @@ export function useWorkspaceDraftApplication({
         if (!applicationDecision.ok) {
           void showInfo({
             title: 'AI 候选已保存',
-            message: `${applicationDecision.message}\n结果仍可在原章节草稿历史中查看，当前正文未被覆盖。`,
+            message: `${applicationDecision.message}\n候选结果已保存，当前正文未被覆盖。请返回创作工作台重新进入审阅。`,
           });
           return false;
         }
@@ -120,7 +122,8 @@ export function useWorkspaceDraftApplication({
         if (metadata.sourceDraftId && liveDraft?.id !== metadata.sourceDraftId) {
           void showInfo({
             title: 'AI 候选已保存',
-            message: '基础草稿已切换，结果仍可在原章节草稿历史中查看，当前正文未被覆盖。',
+            message:
+              '基础草稿已切换，候选结果已保存，当前正文未被覆盖。请返回创作工作台重新进入审阅。',
           });
           return false;
         }
@@ -130,7 +133,8 @@ export function useWorkspaceDraftApplication({
         ) {
           void showInfo({
             title: 'AI 候选已保存',
-            message: '基础草稿版本已变化，结果仍可在原章节草稿历史中查看，当前正文未被覆盖。',
+            message:
+              '基础草稿版本已变化，候选结果已保存，当前正文未被覆盖。请返回创作工作台重新进入审阅。',
           });
           return false;
         }

@@ -8,6 +8,7 @@ import { lsGet, generateId, nowISO, dbCall, getDbMode } from '../database/db';
 import type { ContextRecord, CreateContextRecordInput } from '../../types/context';
 
 const KEY = 'ai_novel_studio_context_records';
+const CONTEXT_COMPRESSION_TITLE_PREFIX = '小说上下文压缩';
 
 function getAllLocal(): ContextRecord[] {
   return lsGet<ContextRecord[]>(KEY) ?? [];
@@ -63,9 +64,24 @@ export const contextRecordService = {
     const active = await this.getActiveByNovelId(input.novelId);
     const filtered =
       input.excludeExpired !== false ? active.filter((record) => !record.isExpired) : active;
-    return [...filtered]
+    const ordered = [...filtered]
       .sort((left, right) => right.importance - left.importance)
       .slice(0, input.maxCount || 15);
+    const compression = filtered
+      .filter(isContextCompressionRecord)
+      .sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+      )[0];
+    if (!compression) return ordered;
+    return [
+      compression,
+      ...ordered.filter(
+        (record) =>
+          !isContextCompressionRecord(record) &&
+          record.updatedAt.localeCompare(compression.createdAt) > 0,
+      ),
+    ].slice(0, input.maxCount || 15);
   },
 
   async create(input: CreateContextRecordInput): Promise<ContextRecord> {
@@ -209,14 +225,40 @@ export function mapContextRecordFromTauriDto(dto: unknown): ContextRecord {
   };
 }
 
+export function isContextCompressionRecord(record: ContextRecord): boolean {
+  return record.title.startsWith(CONTEXT_COMPRESSION_TITLE_PREFIX);
+}
+
+/**
+ * 新版压缩记录直接保存 compressedText。旧版保存了整个候选 JSON，
+ * 读取时只投影其 compressedText，不把 provider/coverage 审计外壳喂给模型。
+ */
+export function contextRecordPromptContent(record: ContextRecord): string {
+  if (!isContextCompressionRecord(record)) return record.content;
+  const raw = record.content.trim();
+  if (!raw.startsWith('{')) return record.content;
+  try {
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const compressedText = payload.compressedText;
+    return typeof compressedText === 'string' && compressedText.trim()
+      ? compressedText
+      : record.content;
+  } catch {
+    return record.content;
+  }
+}
+
 export function buildContextSummary(records: ContextRecord[], maxLength = 1200): string {
   if (records.length === 0) return '';
   const lines = records
     .filter((record) => !record.isExpired)
     .map((record) => {
       const prefix = `[${record.title}]`;
+      const content = contextRecordPromptContent(record);
       const short =
-        record.content.length > 200 ? `${record.content.slice(0, 200)}…` : record.content;
+        !isContextCompressionRecord(record) && content.length > 200
+          ? `${content.slice(0, 200)}…`
+          : content;
       return `${prefix}${short}`;
     });
   let result = lines.join('\n');

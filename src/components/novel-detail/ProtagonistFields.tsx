@@ -1,4 +1,5 @@
 import type { ProtagonistProfile } from '../../types/novel';
+import { Zap } from 'lucide-react';
 
 interface ProtagonistFieldsProps {
   profile: ProtagonistProfile;
@@ -96,9 +97,18 @@ export default function ProtagonistFields({ profile, label, onChange }: Protagon
         style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 8, marginTop: 8 }}
       >
         <div
-          style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)', marginBottom: 6 }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--color-primary)',
+            marginBottom: 6,
+          }}
         >
-          ⚡ 能力与限制
+          <Zap aria-hidden="true" size={13} strokeWidth={1.8} />
+          能力与限制
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>

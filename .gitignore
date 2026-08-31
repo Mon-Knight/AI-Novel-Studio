@@ -45,7 +45,5 @@ src-tauri/.payload-verify/
 
 # Local WebDriver binaries and desktop E2E artifacts
 .e2e-tools/
-test-results/e2e/
-test-results/browser-theme/
-test-results/production-exe-smoke-*/
+test-results/
 tmp/

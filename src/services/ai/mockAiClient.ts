@@ -174,7 +174,10 @@ function extractInfo(messages: { role: string; content: string }[]) {
   const novelTitle = allText.match(/作品：《(.+?)》/)?.[1] || '未命名作品';
   const protagonist = allText.match(/主角：(.+)/)?.[1] || '主角';
   const chapterTitle =
-    allText.match(/当前章节：(.+)/)?.[1] || allText.match(/章节：(.+)/)?.[1] || '未命名章节';
+    allText.match(/完整性修复《(.+?)》正文/)?.[1] ||
+    allText.match(/^当前章节[：:]\s*(.+)$/m)?.[1] ||
+    allText.match(/^章节[：:]\s*(.+)$/m)?.[1] ||
+    '未命名章节';
   const genre = allText.match(/题材：(.+)/)?.[1];
   const targetWords = parseInt(allText.match(/目标字数：约 (\d+)/)?.[1] || '4000');
   const chapterOutline =
@@ -182,12 +185,31 @@ function extractInfo(messages: { role: string; content: string }[]) {
       .match(
         /【当前章节大纲】\s*([\s\S]+?)(?:\n\n|【章节大纲执行清单】|【本章必须直接出场角色】)/,
       )?.[1]
-      ?.trim() || allText.match(/章节大纲：(.+)/)?.[1];
+      ?.trim() ||
+    allText
+      .match(
+        /(?:^|\r?\n)章节大纲[：:][ \t]*\r?\n([\s\S]+?)(?=\r?\n(?:执行清单|本章目标|本章事件)[：:]|\r?\n\r?\n---(?:\r?\n|$)|$)/,
+      )?.[1]
+      ?.trim() ||
+    allText.match(/章节大纲[：:]([^\r\n]+)/)?.[1]?.trim();
   const outlineChecklist = allText
     .match(
       /【章节大纲执行清单】\s*([\s\S]+?)(?:\n\n|【本章必须直接出场角色】|【修正要求】|请直接输出)/,
     )?.[1]
     ?.trim();
+  const userInstruction = allText
+    .match(/## 本轮用户创作指令\s*([\s\S]+?)(?:\n\n---|\n\n【待修改\/润色原正文】|$)/)?.[1]
+    ?.trim();
+  const rewriteSource =
+    allText.match(/【待修改\/润色原正文】\s*([\s\S]+)$/)?.[1]?.trim() ||
+    allText.match(/## Current chapter repair draft\s*([\s\S]+?)(?=\n\n## |$)/)?.[1]?.trim() ||
+    allText.match(/## 当前正文修改\s*([\s\S]+?)(?=\n\n## |$)/)?.[1]?.trim();
+  const integrityIssueCodes =
+    allText
+      .match(/issue_codes[：:]\s*([a-z0-9_,\s-]+)/i)?.[1]
+      ?.split(',')
+      .map((code) => code.trim())
+      .filter(Boolean) ?? [];
   return {
     novelTitle,
     protagonist,
@@ -196,11 +218,97 @@ function extractInfo(messages: { role: string; content: string }[]) {
     targetWords,
     chapterOutline,
     outlineChecklist,
+    userInstruction,
+    rewriteSource,
+    integrityIssueCodes,
   };
 }
 
+function replaceMockChapterOpening(source: string, replacement: string): string {
+  const paragraphs = source
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const minimumRemovedCharacters = Array.from(replacement).length;
+  let removedCharacters = 0;
+  let firstPreservedParagraph = 0;
+
+  while (
+    firstPreservedParagraph < paragraphs.length - 1 &&
+    removedCharacters < minimumRemovedCharacters
+  ) {
+    removedCharacters += Array.from(paragraphs[firstPreservedParagraph]).length;
+    firstPreservedParagraph += 1;
+  }
+
+  const preserved = paragraphs.slice(firstPreservedParagraph).join('\n\n');
+  return preserved ? `${replacement}\n\n${preserved}` : replacement;
+}
+
 function mockChapterGenerate(info: ReturnType<typeof extractInfo>): string {
-  const { protagonist: protag, chapterOutline, outlineChecklist, targetWords } = info;
+  const {
+    protagonist: protag,
+    chapterTitle,
+    chapterOutline,
+    outlineChecklist,
+    targetWords,
+    userInstruction,
+    rewriteSource,
+    integrityIssueCodes,
+  } = info;
+  const instructionSeed = Array.from(
+    [chapterTitle, chapterOutline, userInstruction].filter(Boolean).join('|'),
+  ).reduce(
+    (total, character) => (Math.imul(total, 31) + (character.codePointAt(0) ?? 0)) >>> 0,
+    2_166_136_261,
+  );
+  if (rewriteSource) {
+    if (integrityIssueCodes.includes('chapter_opening_rollback')) {
+      const replacementOpenings = [
+        [
+          `冷光沿着地面缓缓移过，${protag}在边界外停住脚步，把纷乱声响逐一分开。`,
+          '近处有细微震颤持续传来，原先松散的注意力随之收紧，眼前的变化也显出清楚层次。',
+          '他顺着最新出现的迹象向前，没有回到已经结束的场面，也没有让迟疑拖慢此刻的判断。',
+          '周围人的反应悄然改变，新的压力从沉默里浮现，迫使他接住正在发生的后果。',
+        ],
+        [
+          `短促的回声越过空处，${protag}抬眼确认前方动静，呼吸随脚下节奏逐渐稳定。`,
+          '光线在几处棱角间跳动，藏起的细节被重新照亮，人群却比刚才更加安静。',
+          '他从这份异常里选定方向，随即靠近关键位置，让尚未落定的局面继续向前推进。',
+          '第一道阻力很快迎面而来，旁观者的目光同时聚拢，等待他给出实际回应。',
+        ],
+        [
+          `空气里残留着微弱的震感，${protag}越过遮挡处，先看清正在变化的轮廓。`,
+          '远近声息彼此错开，紧张感没有消散，反而随着几次短暂碰撞变得更加具体。',
+          '他避开来路留下的干扰，将注意力放在眼前的新动向上，并及时调整了站位。',
+          '局势由这一小步发生偏移，沉默的人群开始交换眼神，迫近的压力也随之显形。',
+        ],
+        [
+          `低沉的响动贴近四周，${protag}穿过明暗交界处，目光落在刚刚出现的变化上。`,
+          '某种细小却连续的征兆正在累积，附近每一次停顿都让危险显得更为清晰。',
+          '他没有重复先前的动作，而是顺着新的因果继续靠近，使自己的选择真正作用于现场。',
+          '下一刻，原本维持平衡的力量骤然偏转，所有等待中的视线都被牵向同一处。',
+        ],
+      ];
+      return replaceMockChapterOpening(
+        rewriteSource,
+        replacementOpenings[instructionSeed % replacementOpenings.length].join(''),
+      );
+    }
+    const revisionLeads = [
+      `风声贴着墙根缓慢游走，${protag}没有立刻动作，只让压在胸口的情绪一点点沉入呼吸。`,
+      `四周的声音仿佛被拉远了，${protag}在短暂的停顿里重新看清眼前每一道细微变化。`,
+      `空气比先前更沉，${protag}放慢脚步，任由尚未说出口的话在寂静中积蓄重量。`,
+      `光影从${protag}脸上缓缓移过，原本急促的片刻被拉长，危险也因此显得更加清晰。`,
+    ];
+    const revisionAnchor = chapterOutline
+      ?.replace(/\s+/g, ' ')
+      .replace(/[。！？!?…]+$/u, '')
+      .slice(0, 32)
+      .trim();
+    const anchoredLead = revisionAnchor ? `当${revisionAnchor}逐步显出后果时，` : '';
+    return `${anchoredLead}${revisionLeads[instructionSeed % revisionLeads.length]}\n\n${rewriteSource}`;
+  }
   const hasOutline = !!chapterOutline;
   const paragraphs: string[] = [];
 

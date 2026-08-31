@@ -1,4 +1,5 @@
 import type { AiGenerateRequest, AiSettings, AiStreamEvent } from '../../types/ai';
+import type { AiContextSourceInput } from '../../types/aiCompilation';
 import type { RouteDecision } from '../../types/modelRuntime';
 import type { AiExecutionResult } from './aiExecutionPipeline';
 import type { AiSceneExecutionResult } from './aiExecutionPipeline';
@@ -26,6 +27,8 @@ export interface ChapterGenerationExecutionInput {
   request: AiGenerateRequest;
   sourceId: string;
   sourceVersion: string;
+  /** Frozen chapter assets compiled as independently budgeted Provider sources. */
+  compilationSources?: AiContextSourceInput[];
   taskInput: Record<string, unknown>;
   targetHintJson?: unknown;
   signal?: AbortSignal;

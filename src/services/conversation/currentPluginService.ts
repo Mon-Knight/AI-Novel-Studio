@@ -1,4 +1,5 @@
 import type { AiSettings } from '../../types/ai';
+import type { TaskModelSnapshot } from '../../types/conversation';
 import type { ToolDescriptorV1, ToolRegistryManifestV1 } from '../../types/toolRegistry';
 import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import { getAiSettings } from '../ai/aiSettingsStore';
@@ -37,6 +38,7 @@ export interface CurrentPluginProjectionInput {
 export const WORKBENCH_TOOLS = [
   'novel.read_context',
   'chapter.read_outline',
+  'get_character_states',
   'search_memory',
   'generate_chapter',
   'generate_outline',
@@ -47,6 +49,36 @@ export const WORKBENCH_TOOLS = [
   'check_quality',
   'summarize_chapter',
 ] as const;
+
+const E2E_WORKBENCH_MODEL_STORAGE_KEY = 'ai_novel_studio_e2e_workbench_model';
+
+function deterministicE2eModelEnabled(): boolean {
+  if (import.meta.env?.VITE_AI_NOVEL_STUDIO_E2E !== '1') return false;
+  try {
+    return (
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(E2E_WORKBENCH_MODEL_STORAGE_KEY) === 'enabled'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function deterministicE2eModelProjection(): CurrentPluginProjection {
+  return {
+    id: 'model:mock:Mock',
+    name: 'Mock',
+    category: 'model',
+    version: 'e2e-deterministic',
+    description: 'Deterministic Workbench model exposed only by an explicitly enabled E2E test.',
+    status: 'loaded',
+    availability: 'available',
+    initialization: 'initialized',
+    health: 'healthy',
+    source: 'e2e-deterministic-runtime',
+    capabilities: ['conversation_turn', 'chapter_generate'],
+  };
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -68,9 +100,17 @@ function safeText(value: unknown, fallback: string, max = 240): string {
     )
     .replace(/\bbearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]')
+    .replace(/\bagt_[A-Za-z0-9_-]{16,}\b/g, '[REDACTED]')
     .trim()
     .slice(0, max);
   return normalized || fallback;
+}
+
+export function safePluginErrorText(error: unknown, fallback: string): string {
+  if (error instanceof Error) return safeText(error.message, fallback, 300);
+  if (typeof error === 'string') return safeText(error, fallback, 300);
+  const message = record(error)?.message;
+  return safeText(message, fallback, 300);
 }
 
 function stringList(value: unknown): string[] {
@@ -234,7 +274,7 @@ function configuredModel(settings: AiSettings, desktop: boolean): CurrentPluginP
     initialization: 'not_initialized',
     health: 'unknown',
     source: 'provider-settings',
-    capabilities: ['conversation_turn', 'chapter_generate', 'tool_calling'],
+    capabilities: ['conversation_turn', 'chapter_generate', 'settings-only'],
   };
 }
 
@@ -278,6 +318,7 @@ export function buildCurrentPluginProjection(
 
 export async function getCurrentPluginProjection(
   conversationId?: string,
+  modelSnapshot?: TaskModelSnapshot,
 ): Promise<CurrentPluginProjection[]> {
   const settings = getAiSettings();
   let manifest: ToolRegistryManifestV1 | undefined;
@@ -285,7 +326,7 @@ export async function getCurrentPluginProjection(
   try {
     manifest = await productionToolRegistry.getManifest();
   } catch (error) {
-    manifestError = error instanceof Error ? error.message : 'Tool Registry manifest 不可读取。';
+    manifestError = safePluginErrorText(error, 'Tool Registry manifest 不可读取。');
   }
 
   const desktop = isTauri();
@@ -293,10 +334,13 @@ export async function getCurrentPluginProjection(
   let runtimeError: string | undefined;
   if (desktop) {
     try {
-      runtimeRows = await dshTaskRuntimeService.listCurrentPlugins(conversationId);
+      runtimeRows = await dshTaskRuntimeService.listCurrentPlugins(conversationId, modelSnapshot);
     } catch (error) {
-      runtimeError = error instanceof Error ? error.message : 'DSH Runtime Projection 不可读取。';
+      runtimeError = safePluginErrorText(error, 'DSH Runtime Projection 不可读取。');
     }
+  }
+  if (deterministicE2eModelEnabled()) {
+    runtimeRows.push(deterministicE2eModelProjection());
   }
   return buildCurrentPluginProjection({
     desktop,

@@ -20,8 +20,8 @@ const visualBaseline = JSON.parse(
 const visualMetrics = new Map<string, PngVisualMetrics>();
 
 const routes = [
-  { name: 'home', hash: '/#/', selector: '.home-page' },
-  { name: 'settings', hash: '/#/settings', selector: '.detail-card' },
+  { name: 'home', hash: '/#/novels', selector: '.home-page' },
+  { name: 'settings', hash: '/#/settings', selector: '.settings-sidebar' },
   {
     name: 'story-assets',
     hash: '/#/novels/browser-fixture/story-assets',

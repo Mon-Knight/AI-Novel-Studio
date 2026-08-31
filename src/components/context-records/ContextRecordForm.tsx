@@ -2,6 +2,7 @@
  * AI Novel Studio - 上下文记录新建表单
  */
 import { useState } from 'react';
+import { FilePlus2, Save } from 'lucide-react';
 import type { ContextRecordType } from '../../types/context';
 import { ContextRecordTypeLabels } from '../../types/context';
 
@@ -60,7 +61,19 @@ function ContextRecordForm({ novelId, chapterId, onSave, onCancel }: ContextReco
         marginBottom: 12,
       }}
     >
-      <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>📝 新上下文记录</div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontWeight: 500,
+          marginBottom: 8,
+          fontSize: 13,
+        }}
+      >
+        <FilePlus2 aria-hidden="true" size={14} strokeWidth={1.8} />
+        新上下文记录
+      </div>
       <div style={{ display: 'grid', gap: 8 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>
@@ -120,7 +133,8 @@ function ContextRecordForm({ novelId, chapterId, onSave, onCancel }: ContextReco
             onClick={handleSubmit}
             disabled={!title.trim() || !content.trim()}
           >
-            ✅ 保存
+            <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+            保存
           </button>
           <button className="btn btn-secondary btn-sm" onClick={onCancel}>
             取消

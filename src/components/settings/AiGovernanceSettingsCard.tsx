@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { Gauge } from 'lucide-react';
 import type { AiSettings } from '../../types/ai';
 import { aiRequestPolicyService } from '../../services/ai/aiRequestPolicyService';
 import { appLogger } from '../../services/observability/appLogger';
+import { DEFAULT_MAX_REQUESTS_PER_MINUTE } from '../../services/ai/aiSettingsStore';
 
 interface AiGovernanceSettingsCardProps {
   settings: AiSettings;
@@ -64,7 +66,7 @@ function AiGovernanceSettingsCard({
   return (
     <section className="detail-card settings-card" aria-labelledby="ai-governance-title">
       <div className="settings-card-heading">
-        <span aria-hidden="true">⏱</span>
+        <Gauge aria-hidden="true" size={18} strokeWidth={1.8} />
         <span id="ai-governance-title">调用保护与每日预算</span>
       </div>
       <div className="settings-form-grid">
@@ -75,7 +77,7 @@ function AiGovernanceSettingsCard({
             type="number"
             min={1}
             max={120}
-            value={settings.maxRequestsPerMinute ?? 12}
+            value={settings.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE}
             onChange={(event) => onChange({ maxRequestsPerMinute: Number(event.target.value) })}
           />
         </label>
@@ -164,7 +166,7 @@ function AiGovernanceSettingsCard({
         <span className="settings-help-text">
           发起请求前会预留最坏情况预算；完成后按 Provider 实际 Token 结算。
         </span>
-        <button type="button" className="btn btn-primary btn-sm" onClick={onSave}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => onSave()}>
           保存调用保护
         </button>
       </div>

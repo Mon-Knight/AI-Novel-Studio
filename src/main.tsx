@@ -1,17 +1,15 @@
-import './services/tauri/e2eBridge';
+import '@/services/tauri/e2eBridge';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { createHashRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import ToastProvider from './components/ToastProvider';
-import { generationJobService } from './services/generation/generationJobService';
-import { legacyChapterContextMigrationService } from './services/context/legacyChapterContextMigrationService';
 import { tauriInvoke } from './services/tauri/runtime';
 import { describeUnknownError } from './utils/errorMessage';
 import { initializeTheme } from './store/themeStore';
 import { appLogger, installGlobalErrorHandlers } from './services/observability/appLogger';
-import { autonomousSchedulerWorker } from './services/autonomous-creation/autonomousSchedulerWorker';
-import { taskConversationService } from './services/conversation/taskConversationService';
+import { startupCoordinator } from './services/startup/startupCoordinator';
+import { restoreSessionModelCredentialsFromNative } from './services/ai/aiSettingsStore';
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/theme.css';
@@ -19,10 +17,7 @@ import './styles/theme.css';
 performance.mark('app-script-start');
 initializeTheme();
 installGlobalErrorHandlers();
-void autonomousSchedulerWorker.recoverStartup();
 
-const startupScriptStartedAt = performance.now();
-const MIN_STARTUP_SPLASH_MS = 700;
 const STARTUP_SPLASH_FADE_MS = 220;
 
 function markStartup(name: string) {
@@ -35,29 +30,27 @@ function logStartupTimings() {
     const entries = performance.getEntriesByName(name);
     return entries.length > 0 ? entries[entries.length - 1].startTime : 0;
   };
+  const htmlStart = get('app-html-start');
   const scriptStart = get('app-script-start');
-  const reactMounted = get('react-mounted');
-  const firstReady = get('first-page-ready');
+  const shellReady = get('react-shell-ready');
   appLogger.info(
-    `[Startup] script start -> React mounted: ${Math.round(reactMounted - scriptStart)} ms`,
+    `[Startup] HTML start -> React shell ready: ${Math.round(shellReady - htmlStart)} ms`,
   );
   appLogger.info(
-    `[Startup] React mounted -> first page ready: ${Math.round(firstReady - reactMounted)} ms`,
+    `[Startup] script start -> React shell ready: ${Math.round(shellReady - scriptStart)} ms`,
   );
-  appLogger.info(`[Startup] total startup: ${Math.round(firstReady - scriptStart)} ms`);
+  appLogger.info(`[Startup] visible shell startup: ${Math.round(shellReady - scriptStart)} ms`);
 }
 
 function hideStartupSplash() {
   const splash = document.getElementById('startup-splash');
   if (!splash) return;
+  markStartup('startup-splash-hide-requested');
   splash.classList.add('is-hidden');
-  window.setTimeout(() => splash.remove(), STARTUP_SPLASH_FADE_MS);
-}
-
-function scheduleHideStartupSplash() {
-  const elapsed = performance.now() - startupScriptStartedAt;
-  const delay = Math.max(0, MIN_STARTUP_SPLASH_MS - elapsed);
-  window.setTimeout(hideStartupSplash, delay);
+  window.setTimeout(() => {
+    splash.remove();
+    markStartup('startup-splash-removed');
+  }, STARTUP_SPLASH_FADE_MS);
 }
 
 // Native Feel P1: 禁用 WebView 默认右键菜单（保留输入框和编辑区的原生右键）
@@ -91,78 +84,58 @@ async function applySystemAccentColor() {
   }
 }
 
-async function bootstrapApplication() {
-  try {
-    await taskConversationService.recoverInterruptedRuns();
-  } catch (error) {
-    appLogger.error('[STARTUP_CONVERSATION_RECOVERY_FAILED]', {
-      message: describeUnknownError(error, '任务对话恢复检查失败'),
-    });
-  }
-
-  let startupContextMigration;
-  try {
-    startupContextMigration = await legacyChapterContextMigrationService.migrate();
-  } catch (error) {
-    const message = describeUnknownError(error, '旧章节上下文迁移失败');
-    appLogger.error('[STARTUP_CONTEXT_MIGRATION_FAILED]', { message });
-    startupContextMigration = {
-      performed: false,
-      chapterSummaries: { inserted: 0, matched: 0, skipped: 0 },
-      contextRecords: { inserted: 0, matched: 0, skipped: 0 },
-      characterStates: { inserted: 0, matched: 0, skipped: 0 },
-      idMap: {},
-      warnings: [],
-      localRecordsRemoved: { chapterSummaries: 0, contextRecords: 0, characterStates: 0 },
-      error: message,
-    };
-  }
-
-  let startupRecovery;
-  try {
-    startupRecovery = await generationJobService.recoverInterruptedAtStartup();
-  } catch (error) {
-    const message = describeUnknownError(error, '生成任务恢复检查失败');
-    appLogger.error('[STARTUP_TASK_RECOVERY_FAILED]', { message });
-    startupRecovery = {
-      recoveredJobs: 0,
-      recoveredAt: new Date().toISOString(),
-      error: message,
-    };
-  }
-
+function createAppRouter() {
   // Keep hash-based desktop URLs while opting into React Router's data-router
   // transition coordinator. The workspace Leave Guard relies on its blocker to
   // cover Link, navigate(), browser history and direct hash transitions.
-  const router = createHashRouter([
+  return createHashRouter([
     {
       path: '*',
       element: (
         <ToastProvider>
-          <App
-            startupRecovery={startupRecovery}
-            startupContextMigration={startupContextMigration}
-          />
+          <App startupCoordinator={startupCoordinator} onShellReady={handleShellReady} />
         </ToastProvider>
       ),
     },
   ]);
+}
 
+function startAutonomousSchedulerRecovery(): void {
+  void import('./services/autonomous-creation/autonomousSchedulerWorker')
+    .then(({ autonomousSchedulerWorker }) => autonomousSchedulerWorker.recoverStartup())
+    .catch((error: unknown) => {
+      appLogger.error('[STARTUP_AUTONOMOUS_RECOVERY_FAILED]', {
+        message: describeUnknownError(error, '自主创作调度恢复失败'),
+      });
+    });
+}
+
+let shellReadyReported = false;
+
+function handleShellReady(): void {
+  if (shellReadyReported) return;
+  shellReadyReported = true;
+  markStartup('react-mounted');
+  markStartup('react-shell-ready');
+  hideStartupSplash();
+  logStartupTimings();
+  window.setTimeout(startAutonomousSchedulerRecovery, 0);
+}
+
+function bootstrapApplication() {
+  // Establish recovery gates synchronously, while every recovery task itself
+  // remains asynchronous and does not delay the first React render.
+  void startupCoordinator.start();
+  void restoreSessionModelCredentialsFromNative().catch(() => {
+    appLogger.warn('[SESSION_CREDENTIAL_RESTORE_FAILED]');
+  });
+  const router = createAppRouter();
   markStartup('react-before-render');
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <RouterProvider router={router} />
     </React.StrictMode>,
   );
-
-  requestAnimationFrame(() => {
-    markStartup('react-mounted');
-    requestAnimationFrame(() => {
-      markStartup('first-page-ready');
-      scheduleHideStartupSplash();
-      logStartupTimings();
-    });
-  });
 
   void applySystemAccentColor();
 }

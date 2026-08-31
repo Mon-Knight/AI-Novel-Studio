@@ -31,7 +31,7 @@ export function redactDiagnosticText(value: unknown): string {
   }
 
   return text
-    .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
     .replace(/\bbearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/https?:\/\/[^\s"']+/gi, '[REDACTED_URL]')
     .replace(/[A-Za-z]:\\[^\n"']+/g, '[REDACTED_PATH]')

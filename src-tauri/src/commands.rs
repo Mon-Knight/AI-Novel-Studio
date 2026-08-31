@@ -424,6 +424,13 @@ mod tests {
     fn create_chapter_draft_test_schema(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(
             "
+            CREATE TABLE novels (
+                id TEXT PRIMARY KEY,
+                total_word_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT
+            );
+
             CREATE TABLE chapters (
                 id TEXT PRIMARY KEY,
                 novel_id TEXT NOT NULL,
@@ -506,6 +513,11 @@ mod tests {
         status: &str,
         deleted_at: Option<&str>,
     ) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT OR IGNORE INTO novels (id, total_word_count, updated_at)
+             VALUES (?1, 0, 'before')",
+            params![novel_id],
+        )?;
         conn.execute(
             "INSERT INTO chapters (id, novel_id, adopted_draft_id, word_count, status, updated_at, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, novel_id, adopted_draft_id, word_count, status, "before", deleted_at],
@@ -931,6 +943,7 @@ mod tests {
             "PRAGMA foreign_keys = ON;
              CREATE TABLE novels (
                  id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL,
+                 total_word_count INTEGER NOT NULL DEFAULT 0,
                  updated_at TEXT NOT NULL, deleted_at TEXT
              );
              CREATE TABLE chapters (
@@ -2372,6 +2385,7 @@ mod tests {
             CREATE TABLE volumes (
                 id TEXT PRIMARY KEY,
                 novel_id TEXT NOT NULL,
+                order_index INTEGER NOT NULL DEFAULT 0,
                 deleted_at TEXT
             );
             CREATE TABLE chapters (
@@ -2381,6 +2395,7 @@ mod tests {
                 adopted_draft_id TEXT,
                 status TEXT NOT NULL,
                 order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT 'before',
                 updated_at TEXT NOT NULL,
                 deleted_at TEXT
             );
@@ -2388,7 +2403,18 @@ mod tests {
                 id TEXT PRIMARY KEY,
                 novel_id TEXT NOT NULL,
                 chapter_id TEXT NOT NULL,
-                is_adopted INTEGER NOT NULL DEFAULT 0
+                title TEXT,
+                content TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'user_edited',
+                version_no INTEGER NOT NULL DEFAULT 1,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                is_adopted INTEGER NOT NULL DEFAULT 0,
+                ai_task_id TEXT,
+                note TEXT,
+                large_text_ref_id TEXT,
+                content_hash TEXT,
+                created_at TEXT NOT NULL DEFAULT 'before',
+                updated_at TEXT NOT NULL DEFAULT 'before'
             );
             CREATE TABLE characters (
                 id TEXT PRIMARY KEY,
@@ -2459,6 +2485,39 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE memory_documents (
+                id TEXT PRIMARY KEY,
+                novel_id TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                source_version INTEGER NOT NULL,
+                source_hash TEXT NOT NULL,
+                adopted_draft_id TEXT,
+                chapter_id TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                invalidated_at TEXT,
+                invalidation_reason TEXT
+            );
+            CREATE TABLE memory_chunks (
+                id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                novel_id TEXT NOT NULL,
+                chapter_id TEXT,
+                ordinal INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                token_count INTEGER NOT NULL,
+                importance REAL NOT NULL,
+                chapter_order_index INTEGER,
+                temporal_start_chapter INTEGER,
+                temporal_end_chapter INTEGER,
+                entity_keys_json TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                content_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             ",
         )?;
         Ok(conn)
@@ -2494,8 +2553,8 @@ mod tests {
             params![&chapter_id, &novel_id, &volume_id, &draft_id, order_index],
         )?;
         conn.execute(
-            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, is_adopted)
-             VALUES (?1, ?2, ?3, 1)",
+            "INSERT INTO chapter_drafts (id, novel_id, chapter_id, content, is_adopted)
+             VALUES (?1, ?2, ?3, 'fixture body', 1)",
             params![&draft_id, &novel_id, &chapter_id],
         )?;
         conn.execute(
@@ -2543,7 +2602,9 @@ mod tests {
             validation_status: Some("passed".to_string()),
             validation_result: None,
             enabled: Some(true),
-            content_hash: Some("hash".to_string()),
+            content_hash: Some(crate::repositories::large_text_repository::sha256(
+                "fixture body",
+            )),
             draft_version: Some(1),
             ai_task_id: None,
         }
@@ -2565,7 +2626,9 @@ mod tests {
             content: content.to_string(),
             importance: Some(4),
             is_active: Some(true),
-            content_hash: Some("hash".to_string()),
+            content_hash: Some(crate::repositories::large_text_repository::sha256(
+                "fixture body",
+            )),
             draft_version: Some(1),
         }
     }
@@ -2935,13 +2998,19 @@ mod tests {
     }
 
     #[test]
-    fn legacy_migration_reconciles_character_current_state_using_stable_latest_order(
+    fn legacy_migration_reconciles_character_current_state_using_chapter_sequence(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = create_chapter_context_test_database()?;
         let fixture = seed_chapter_context_fixture(&conn, 10, 0)?;
         let lower_id = "00000000-0000-0000-0000-00000000ca01".to_string();
         let higher_id = "00000000-0000-0000-0000-00000000ca02".to_string();
-        let tied_created_at = "2026-07-26T08:00:00Z";
+        let later_chapter_id = "00000000-0000-0000-0000-00000000ca03".to_string();
+        conn.execute(
+            "INSERT INTO chapters
+             (id, novel_id, volume_id, status, order_index, updated_at)
+             VALUES (?1, ?2, ?3, 'summarized', 1, 'before')",
+            params![&later_chapter_id, &fixture.novel_id, &fixture.volume_id],
+        )?;
         conn.execute(
             "INSERT INTO character_states
              (id, novel_id, character_id, chapter_id, state_summary,
@@ -2952,8 +3021,8 @@ mod tests {
                 &higher_id,
                 &fixture.novel_id,
                 &fixture.character_id,
-                &fixture.chapter_id,
-                tied_created_at
+                &later_chapter_id,
+                "2026-07-25T08:00:00Z"
             ],
         )?;
         conn.execute(
@@ -2969,7 +3038,7 @@ mod tests {
                     Some(lower_id.clone()),
                     "lower id state",
                 ),
-                created_at: Some(tied_created_at.to_string()),
+                created_at: Some("2026-07-26T08:00:00Z".to_string()),
             }],
         };
 

@@ -1,4 +1,5 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Construction } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import { APP_VERSION } from '../../constants/version';
 import '../../styles/coming-soon.css';
@@ -34,7 +35,9 @@ function ComingSoonPage() {
     <div className="coming-soon-page">
       <BackButton label="返回首页" to="/" />
       <div className="coming-soon-card">
-        <div className="coming-soon-icon">🚧</div>
+        <div className="coming-soon-icon">
+          <Construction aria-hidden="true" size={42} strokeWidth={1.8} />
+        </div>
         <div className="coming-soon-title">{info.title}</div>
         <div className="coming-soon-desc">
           {info.desc}
@@ -44,7 +47,8 @@ function ComingSoonPage() {
         <div className="coming-soon-version">{APP_VERSION} · 即将开放</div>
         <div style={{ marginTop: 24 }}>
           <button className="btn btn-secondary" onClick={() => navigate('/')}>
-            ← 返回首页
+            <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+            返回首页
           </button>
         </div>
       </div>

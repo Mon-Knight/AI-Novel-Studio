@@ -145,7 +145,11 @@ pub fn start_policy_server(
     let thread = thread::spawn(move || {
         while !thread_stop.load(Ordering::Acquire) {
             match listener.accept() {
-                Ok((stream, _)) => handle_connection(stream, &thread_state),
+                Ok((stream, _)) => {
+                    if stream.set_nonblocking(false).is_ok() {
+                        handle_connection(stream, &thread_state);
+                    }
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(20));
                 }

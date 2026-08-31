@@ -1,12 +1,48 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'vite';
 import type { AiSettings } from '../../types/ai';
 import type { ToolDescriptorV1, ToolRegistryManifestV1 } from '../../types/toolRegistry';
+import { productionToolRegistry } from '../agent-tools/productionToolRegistry';
 import {
   buildCurrentPluginProjection,
+  getCurrentPluginProjection,
+  safePluginErrorText,
   WORKBENCH_TOOLS,
   type CurrentPluginProjection,
 } from './currentPluginService';
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>();
+
+  get length(): number {
+    return this.values.size;
+  }
+
+  clear(): void {
+    this.values.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+}
+
+const storage = new MemoryStorage();
+Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+const E2E_WORKBENCH_MODEL_STORAGE_KEY = 'ai_novel_studio_e2e_workbench_model';
 
 function settings(overrides: Partial<AiSettings> = {}): AiSettings {
   return {
@@ -61,6 +97,15 @@ function runtimeRow(overrides: Partial<CurrentPluginProjection> = {}): CurrentPl
   };
 }
 
+test('production Tool Registry manifest covers every Workbench tool', async () => {
+  const manifest = await productionToolRegistry.getManifest();
+  const names = new Set(manifest.tools.map((item) => item.name));
+  assert.deepEqual(
+    WORKBENCH_TOOLS.filter((name) => !names.has(name)),
+    [],
+  );
+});
+
 test('browser fallback never presents DSH tools as loaded', () => {
   const rows = buildCurrentPluginProjection({
     desktop: false,
@@ -82,6 +127,71 @@ test('browser fallback never presents DSH tools as loaded', () => {
   assert.ok(
     rows.some((row) => row.id === 'dsh-carrier:unavailable' && row.status === 'unavailable'),
   );
+});
+
+test('non-E2E builds ignore the deterministic model storage opt-in', async () => {
+  storage.clear();
+  storage.setItem(E2E_WORKBENCH_MODEL_STORAGE_KEY, 'enabled');
+
+  const rows = await getCurrentPluginProjection();
+
+  assert.equal(
+    rows.some((row) => row.id === 'model:mock:Mock'),
+    false,
+  );
+  assert.equal(rows.find((row) => row.id === 'model:browser-fallback:Mock')?.status, 'loaded');
+});
+
+test('E2E build exposes deterministic Mock only after the exact storage opt-in', async () => {
+  storage.clear();
+  const vite = await createServer({
+    appType: 'custom',
+    define: {
+      'import.meta.env.VITE_AI_NOVEL_STUDIO_E2E': JSON.stringify('1'),
+    },
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, hmr: false, watch: null },
+  });
+  try {
+    const e2eModule = (await vite.ssrLoadModule(
+      '/src/services/conversation/currentPluginService.ts',
+    )) as typeof import('./currentPluginService');
+
+    let rows = await e2eModule.getCurrentPluginProjection();
+    assert.equal(
+      rows.some((row) => row.id === 'model:mock:Mock'),
+      false,
+    );
+
+    storage.setItem(E2E_WORKBENCH_MODEL_STORAGE_KEY, 'true');
+    rows = await e2eModule.getCurrentPluginProjection();
+    assert.equal(
+      rows.some((row) => row.id === 'model:mock:Mock'),
+      false,
+    );
+
+    storage.setItem(E2E_WORKBENCH_MODEL_STORAGE_KEY, 'enabled');
+    rows = await e2eModule.getCurrentPluginProjection();
+    const deterministic = rows.find((row) => row.id === 'model:mock:Mock');
+    assert.deepEqual(deterministic, {
+      id: 'model:mock:Mock',
+      name: 'Mock',
+      category: 'model',
+      version: 'e2e-deterministic',
+      description: 'Deterministic Workbench model exposed only by an explicitly enabled E2E test.',
+      status: 'loaded',
+      availability: 'available',
+      initialization: 'initialized',
+      health: 'healthy',
+      source: 'e2e-deterministic-runtime',
+      capabilities: ['conversation_turn', 'chapter_generate'],
+    });
+    assert.equal(rows.filter((row) => row.id === 'model:mock:Mock').length, 1);
+    assert.equal(rows.find((row) => row.id === 'model:browser-fallback:Mock')?.status, 'loaded');
+  } finally {
+    await vite.close();
+    storage.clear();
+  }
 });
 
 test('desktop carrier files remain available but not initialized without health', () => {
@@ -191,6 +301,37 @@ test('malformed runtime rows are ignored and cannot manufacture loaded state', (
   assert.ok(rows.every((row) => row.status !== 'loaded'));
 });
 
+test('catalog-only canonical runtime rows cannot manufacture loaded function state', () => {
+  const rows = buildCurrentPluginProjection({
+    desktop: true,
+    settings: settings(),
+    manifest: manifest(),
+    runtimeRows: [
+      runtimeRow({
+        id: 'tool:novel.read@1',
+        name: 'novel.read',
+        category: 'function',
+        version: '1',
+        status: 'loaded',
+        initialization: 'initialized',
+        health: 'healthy',
+      }),
+    ],
+  });
+
+  const functions = rows.filter((row) => row.category === 'function');
+  assert.equal(functions.length, WORKBENCH_TOOLS.length);
+  assert.equal(
+    functions.some((row) => row.id === 'tool:novel.read@1'),
+    false,
+  );
+  assert.equal(
+    functions.some((row) => row.name === 'novel.read'),
+    false,
+  );
+  assert.ok(functions.every((row) => row.status !== 'loaded'));
+});
+
 test('credential-shaped projection text is redacted', () => {
   const rows = buildCurrentPluginProjection({
     desktop: true,
@@ -206,4 +347,21 @@ test('credential-shaped projection text is redacted', () => {
   const serialized = JSON.stringify(rows);
   assert.doesNotMatch(serialized, /runtime-super-secret|settings-super-secret|sk-abcdefghijklmnop/);
   assert.match(serialized, /\[REDACTED\]/);
+});
+
+test('Tauri string rejections retain a sanitized runtime reason', () => {
+  assert.equal(
+    safePluginErrorText(
+      '代理进程树隔离失败: AssignProcessToJobObject failed',
+      'DSH Runtime Projection 不可读取。',
+    ),
+    '代理进程树隔离失败: AssignProcessToJobObject failed',
+  );
+  assert.equal(
+    safePluginErrorText(
+      'runtime failed with agt_example_session_credential',
+      'DSH Runtime Projection 不可读取。',
+    ),
+    'runtime failed with [REDACTED]',
+  );
 });

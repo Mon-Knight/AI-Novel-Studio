@@ -31,7 +31,10 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
   color: var(--color-text-secondary);
   font: inherit;
   cursor: pointer;
@@ -39,7 +42,23 @@
   position: relative;
 }
 
-.right-toolbar-btn:hover {
+.right-toolbar-btn::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 20px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-primary);
+  content: '';
+  opacity: 0;
+  transform: translateY(-50%) scaleY(0.55);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.right-toolbar-btn:hover:not(:disabled) {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
@@ -49,14 +68,32 @@
   color: var(--color-primary);
 }
 
+.right-toolbar-btn.active::before {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+}
+
 .right-toolbar-btn:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: -2px;
 }
 
+.right-toolbar-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
 .right-toolbar-btn .tb-icon {
-  font-size: 18px;
-  line-height: 1;
+  display: flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.right-toolbar-btn .tb-icon svg {
+  display: block;
 }
 
 .right-toolbar-btn .tb-label {
@@ -89,20 +126,33 @@
   display: flex;
   flex-direction: column;
   z-index: var(--z-right-panel);
-  animation: panelSlideIn 0.2s ease;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity var(--motion-panel) var(--ease-enter),
+    transform var(--motion-panel) var(--ease-enter);
   /* v1.0.24: 恢复面板内部交互 */
   pointer-events: auto;
 }
 
-@keyframes panelSlideIn {
-  from {
+.right-panel.is-open {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+@starting-style {
+  .right-panel.is-open {
     opacity: 0;
     transform: translateX(8px);
   }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+}
+
+.right-panel.is-closed {
+  opacity: 0;
+  transform: translateX(8px);
+  transition-timing-function: var(--ease-exit);
+  pointer-events: none;
 }
 
 .right-panel-header {
@@ -115,6 +165,9 @@
 }
 
 .right-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
@@ -129,7 +182,9 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   font-size: 18px;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .right-panel-close:hover {
@@ -149,6 +204,9 @@
 }
 
 .panel-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
@@ -157,6 +215,17 @@
   margin-bottom: var(--spacing-sm);
   padding-bottom: var(--spacing-xs);
   border-bottom: 1px solid var(--color-border-light);
+}
+
+.panel-section-title--icon,
+.panel-inline-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-inline-status svg {
+  flex: 0 0 auto;
 }
 
 .panel-field {
@@ -215,7 +284,11 @@
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   text-align: center;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
   margin-bottom: var(--spacing-sm);
 }
 
@@ -319,7 +392,7 @@
   height: 100%;
   border-radius: inherit;
   background: var(--color-primary);
-  transition: width 160ms ease;
+  transition: width var(--motion-normal) var(--ease-standard);
 }
 
 .agent-plan-steps {
@@ -492,7 +565,9 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .engineering-tab:hover {
@@ -807,7 +882,7 @@
   color: var(--color-error-text);
   font-size: var(--font-size-xs);
   line-height: 1.5;
-  animation: panelErrorShake 0.3s ease;
+  animation: panelErrorShake var(--motion-emphasis) var(--ease-standard);
 }
 
 .panel-error-icon {
@@ -869,25 +944,6 @@
   }
   100% {
     background-position: -200% 0;
-  }
-}
-
-/* --- 加载指示器 --- */
-.panel-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--color-border-light);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: panelSpin 0.6s linear infinite;
-  vertical-align: middle;
-  margin-right: 6px;
-}
-
-@keyframes panelSpin {
-  to {
-    transform: rotate(360deg);
   }
 }
 
@@ -974,7 +1030,13 @@
   }
 
   .right-toolbar-btn .tb-icon {
-    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+
+  .right-toolbar-btn .tb-icon svg {
+    width: 20px;
+    height: 20px;
   }
 
   .right-toolbar-btn .tb-label {
@@ -1354,7 +1416,7 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
   margin-bottom: var(--spacing-sm);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast);
 }
 
 .character-item:hover {
@@ -1449,7 +1511,10 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
   margin-bottom: var(--spacing-sm);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
@@ -1463,4 +1528,34 @@
   border-color: var(--color-primary);
   background: var(--color-primary-light);
   color: var(--color-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-error,
+  .panel-loading-bar {
+    animation: none;
+  }
+
+  .right-panel,
+  .right-toolbar-btn,
+  .right-toolbar-btn::before,
+  .right-panel-close,
+  .panel-btn,
+  .agent-plan-progress__track > span,
+  .engineering-tab,
+  .character-item,
+  .event-item,
+  .polish-option {
+    transition: none;
+  }
+
+  .right-panel,
+  .right-panel.is-open,
+  .right-panel.is-closed {
+    transform: none;
+  }
+
+  .panel-loading-bar {
+    background-position: 0 0;
+  }
 }

@@ -3,7 +3,7 @@ use crate::domain::writing::{
     CHAPTER_STATUSES,
 };
 use crate::repositories::chapter_repository;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 pub fn validate_chapter_update_input(input: &UpdateChapterInput) -> Result<(), String> {
     if let Some(status) = input.status.as_deref() {
@@ -70,6 +70,31 @@ pub fn update_chapter(
     chapter_repository::find_by_id(conn, id)?.ok_or_else(|| format!("未找到指定章节: {}", id))
 }
 
+fn refresh_novel_total_word_count(
+    conn: &Connection,
+    novel_id: &str,
+    updated_at: &str,
+) -> Result<(), String> {
+    let affected = conn
+        .execute(
+            "UPDATE novels
+             SET total_word_count = COALESCE((
+                 SELECT SUM(word_count) FROM chapters
+                 WHERE novel_id = ?1 AND deleted_at IS NULL
+             ), 0), updated_at = ?2
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![novel_id, updated_at],
+        )
+        .map_err(|error| format!("novel_word_count_refresh_failed: {error}"))?;
+    if affected != 1 {
+        return Err(format!(
+            "novel_word_count_refresh_conflict: expected one novel for id={}, affected_rows={}",
+            novel_id, affected
+        ));
+    }
+    Ok(())
+}
+
 pub fn delete_chapter(conn: &mut Connection, id: &str) -> Result<(), String> {
     let transaction = conn.transaction().map_err(|e| e.to_string())?;
     let novel_id: String = transaction
@@ -102,6 +127,7 @@ pub fn delete_chapter(conn: &mut Connection, id: &str) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
     }
+    refresh_novel_total_word_count(&transaction, &novel_id, &now)?;
     transaction.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -286,18 +312,14 @@ fn expire_chapter_context_rows(
     Ok(())
 }
 
-pub fn adopt_chapter_draft(
-    conn: &mut Connection,
+pub(crate) fn adopt_chapter_draft_in_transaction(
+    conn: &Transaction<'_>,
     draft_id: &str,
     chapter_id: &str,
+    now: &str,
 ) -> Result<ChapterDraftDto, String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let transaction = conn
-        .transaction()
-        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
-
-    let word_count = validate_live_draft_target(&transaction, draft_id, chapter_id)?;
-    let (chapter_novel_id, previous_adopted_draft_id) = transaction
+    let word_count = validate_live_draft_target(conn, draft_id, chapter_id)?;
+    let (chapter_novel_id, previous_adopted_draft_id) = conn
         .query_row(
             "SELECT novel_id, adopted_draft_id FROM chapters
              WHERE id = ?1 AND deleted_at IS NULL",
@@ -307,16 +329,15 @@ pub fn adopt_chapter_draft(
         .map_err(|e| format!("adopt_previous_draft_lookup_failed: {}", e))?;
     let adopted_draft_changed = previous_adopted_draft_id.as_deref() != Some(draft_id);
 
-    transaction
-        .execute(
-            "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
-            params![&now, chapter_id],
-        )
-        .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
+    conn.execute(
+        "UPDATE chapter_drafts SET is_adopted = 0, updated_at = ?1 WHERE chapter_id = ?2",
+        params![now, chapter_id],
+    )
+    .map_err(|e| format!("adopt_clear_previous_failed: {}", e))?;
 
-    let adopted_rows = transaction.execute(
+    let adopted_rows = conn.execute(
         "UPDATE chapter_drafts SET is_adopted = 1, updated_at = ?1 WHERE id = ?2 AND chapter_id = ?3 AND EXISTS (SELECT 1 FROM chapters AS c WHERE c.id = chapter_drafts.chapter_id AND c.novel_id = chapter_drafts.novel_id AND c.deleted_at IS NULL)",
-        params![&now, draft_id, chapter_id],
+        params![now, draft_id, chapter_id],
     ).map_err(|e| format!("adopt_target_update_failed: {}", e))?;
     if adopted_rows != 1 {
         return Err(format!(
@@ -325,9 +346,9 @@ pub fn adopt_chapter_draft(
         ));
     }
 
-    let chapter_rows = transaction.execute(
+    let chapter_rows = conn.execute(
         "UPDATE chapters SET adopted_draft_id = ?1, word_count = ?2, status = 'adopted', updated_at = ?3 WHERE id = ?4 AND deleted_at IS NULL AND novel_id = (SELECT novel_id FROM chapter_drafts WHERE id = ?1 AND chapter_id = ?4)",
-        params![draft_id, word_count, &now, chapter_id],
+        params![draft_id, word_count, now, chapter_id],
     ).map_err(|e| format!("adopt_chapter_update_failed: {}", e))?;
     if chapter_rows != 1 {
         return Err(format!(
@@ -336,24 +357,23 @@ pub fn adopt_chapter_draft(
         ));
     }
 
+    refresh_novel_total_word_count(conn, &chapter_novel_id, now)?;
+
     if adopted_draft_changed {
-        expire_chapter_context_rows(&transaction, chapter_id, &now)?;
+        expire_chapter_context_rows(conn, chapter_id, now)?;
         crate::services::memory_service::invalidate_for_adopted_draft_change(
-            &transaction,
+            conn,
             &chapter_novel_id,
             chapter_id,
             draft_id,
-            &now,
+            now,
         )
         .map_err(|e| format!("adopt_memory_invalidation_failed: {}", e))?;
     }
 
-    let adopted = chapter_repository::get_draft_by_id_and_chapter_internal(
-        &transaction,
-        draft_id,
-        chapter_id,
-    )
-    .map_err(|e| format!("adopt_readback_failed: {}", e))?;
+    let adopted =
+        chapter_repository::get_draft_by_id_and_chapter_internal(conn, draft_id, chapter_id)
+            .map_err(|e| format!("adopt_readback_failed: {}", e))?;
     if !adopted.is_adopted {
         return Err(format!(
             "adopt_readback_conflict: draft '{}' is not marked adopted",
@@ -361,6 +381,19 @@ pub fn adopt_chapter_draft(
         ));
     }
 
+    Ok(adopted)
+}
+
+pub fn adopt_chapter_draft(
+    conn: &mut Connection,
+    draft_id: &str,
+    chapter_id: &str,
+) -> Result<ChapterDraftDto, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = conn
+        .transaction()
+        .map_err(|e| format!("adopt_transaction_begin_failed: {}", e))?;
+    let adopted = adopt_chapter_draft_in_transaction(&transaction, draft_id, chapter_id, &now)?;
     transaction
         .commit()
         .map_err(|e| format!("adopt_transaction_commit_failed: {}", e))?;
@@ -541,8 +574,124 @@ mod tests {
         let ch = get_chapter(&conn, &chapter.id).unwrap().unwrap();
         assert_eq!(ch.status, "adopted");
         assert_eq!(ch.adopted_draft_id.as_deref(), Some(draft.id.as_str()));
+        let total_after_adoption: i64 = conn
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id = 'novel-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total_after_adoption, draft.word_count);
 
         delete_chapter(&mut conn, &chapter.id).unwrap();
         assert!(get_chapter(&conn, &chapter.id).unwrap().is_none());
+        let total_after_deletion: i64 = conn
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id = 'novel-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total_after_deletion, 0);
+    }
+
+    #[test]
+    fn adoption_replaces_each_live_chapter_contribution_in_novel_total() {
+        let mut conn = setup_test_db();
+        let first_chapter = create_chapter(
+            &conn,
+            CreateChapterInput {
+                novel_id: "novel-1".to_string(),
+                volume_id: None,
+                title: "第一章".to_string(),
+                outline: None,
+                goal: None,
+                target_word_count: None,
+                order_index: Some(1),
+            },
+        )
+        .unwrap();
+        let second_chapter = create_chapter(
+            &conn,
+            CreateChapterInput {
+                novel_id: "novel-1".to_string(),
+                volume_id: None,
+                title: "第二章".to_string(),
+                outline: None,
+                goal: None,
+                target_word_count: None,
+                order_index: Some(2),
+            },
+        )
+        .unwrap();
+        let first_draft = create_chapter_draft(
+            &conn,
+            CreateChapterDraftInput {
+                novel_id: "novel-1".to_string(),
+                chapter_id: first_chapter.id.clone(),
+                title: None,
+                content: "第一版正文".to_string(),
+                source: "user_edited".to_string(),
+                ai_task_id: None,
+                note: None,
+                large_text_ref_id: None,
+            },
+        )
+        .unwrap();
+        let second_draft = create_chapter_draft(
+            &conn,
+            CreateChapterDraftInput {
+                novel_id: "novel-1".to_string(),
+                chapter_id: second_chapter.id.clone(),
+                title: None,
+                content: "第二章正式正文".to_string(),
+                source: "user_edited".to_string(),
+                ai_task_id: None,
+                note: None,
+                large_text_ref_id: None,
+            },
+        )
+        .unwrap();
+        adopt_chapter_draft(&mut conn, &first_draft.id, &first_chapter.id).unwrap();
+        adopt_chapter_draft(&mut conn, &second_draft.id, &second_chapter.id).unwrap();
+
+        let replacement = create_chapter_draft(
+            &conn,
+            CreateChapterDraftInput {
+                novel_id: "novel-1".to_string(),
+                chapter_id: first_chapter.id.clone(),
+                title: None,
+                content: "第一章替换后的更长正式正文".to_string(),
+                source: "user_edited".to_string(),
+                ai_task_id: None,
+                note: None,
+                large_text_ref_id: None,
+            },
+        )
+        .unwrap();
+        adopt_chapter_draft(&mut conn, &replacement.id, &first_chapter.id).unwrap();
+        adopt_chapter_draft(&mut conn, &replacement.id, &first_chapter.id).unwrap();
+
+        let total_after_replacement: i64 = conn
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id = 'novel-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            total_after_replacement,
+            replacement.word_count + second_draft.word_count
+        );
+
+        delete_chapter(&mut conn, &second_chapter.id).unwrap();
+        let total_after_deletion: i64 = conn
+            .query_row(
+                "SELECT total_word_count FROM novels WHERE id = 'novel-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total_after_deletion, replacement.word_count);
     }
 }

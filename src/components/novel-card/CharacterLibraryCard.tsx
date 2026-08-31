@@ -2,6 +2,7 @@
  * AI Novel Studio - 角色库管理卡片组件
  */
 import { useState, useEffect, useCallback } from 'react';
+import { CheckCircle2, Plus, UsersRound } from 'lucide-react';
 import type { Character, CreateCharacterInput, CharacterRoleType } from '../../types/character';
 import { CharacterRoleLabels } from '../../types/character';
 import { characterService } from '../../services/characters/characterService';
@@ -42,11 +43,18 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
     <div className="detail-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>👥</span>
+          <UsersRound aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 600 }}>角色库（{characters.length}）</span>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => setEditing(!editing)}>
-          {editing ? '取消' : '➕ 添加角色'}
+          {editing ? (
+            '取消'
+          ) : (
+            <>
+              <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+              添加角色
+            </>
+          )}
         </button>
       </div>
 
@@ -178,7 +186,8 @@ function CharacterLibraryCard({ novelId }: CharacterLibraryCardProps) {
               onClick={handleCreate}
               disabled={!form.name.trim()}
             >
-              ✅ 确认创建
+              <CheckCircle2 aria-hidden="true" size={14} strokeWidth={1.8} />
+              确认创建
             </button>
           </div>
         </div>

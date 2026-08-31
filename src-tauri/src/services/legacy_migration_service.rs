@@ -6,14 +6,15 @@ use crate::repositories::chapter_summary_repository::{
     chapter_summary_select_sql, map_chapter_summary_row, upsert_chapter_summary,
 };
 use crate::repositories::character_state_repository::{
-    character_state_select_sql, map_character_state_row,
+    character_state_select_sql, map_character_state_row, reproject_character_current_state,
+    CharacterCurrentStateProjectionError,
 };
 use crate::repositories::context_record_repository::{
     context_record_select_sql, map_context_record_row,
 };
 use crate::services::chapter_summary_service::{validate_summary_ownership, validate_uuid};
 use crate::services::context_record_service::validate_context_record_input;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, TransactionBehavior};
 use std::collections::HashSet;
 
 fn migration_timestamp(value: Option<&str>, fallback: &str) -> String {
@@ -508,26 +509,21 @@ pub fn migrate_legacy_chapter_context(
     let mut affected_characters: Vec<_> = affected_characters.into_iter().collect();
     affected_characters.sort();
     for (novel_id, character_id) in affected_characters {
-        let latest_state = transaction
-            .query_row(
-                "SELECT state_summary FROM character_states
-                 WHERE novel_id = ?1 AND character_id = ?2
-                 ORDER BY created_at DESC, id DESC LIMIT 1",
-                params![&novel_id, &character_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|error| format!("legacy_character_latest_state_read_failed: {error}"))?
-            .ok_or_else(|| "legacy_character_latest_state_missing".to_string())?;
-        let affected = transaction
-            .execute(
-                "UPDATE characters SET current_state = ?1, updated_at = ?2
-                 WHERE id = ?3 AND novel_id = ?4",
-                params![&latest_state, &now, &character_id, &novel_id],
-            )
-            .map_err(|error| format!("legacy_character_current_state_update_failed: {error}"))?;
-        if affected != 1 {
-            return Err("legacy_character_current_state_update_conflict".to_string());
+        let has_state =
+            reproject_character_current_state(&transaction, &novel_id, &character_id, &now)
+                .map_err(|error| match error {
+                    CharacterCurrentStateProjectionError::LatestStateRead(error) => {
+                        format!("legacy_character_latest_state_read_failed: {error}")
+                    }
+                    CharacterCurrentStateProjectionError::CharacterUpdate(error) => {
+                        format!("legacy_character_current_state_update_failed: {error}")
+                    }
+                    CharacterCurrentStateProjectionError::CharacterUpdateConflict => {
+                        "legacy_character_current_state_update_conflict".to_string()
+                    }
+                })?;
+        if !has_state {
+            return Err("legacy_character_latest_state_missing".to_string());
         }
     }
 

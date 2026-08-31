@@ -36,11 +36,24 @@ git push -u origin codex/vX.Y.Z-short-scope
 
 仓库管理员应在 GitHub Branch protection / Rulesets 中为 `main` 配置：
 
-1. 必须通过 Pull Request 合并，至少 1 名非作者审查者批准。
+1. 必须通过 Pull Request 合并；常规情况下至少 1 名非作者审查者批准。
 2. 新提交到来时撤销过期批准，所有 review conversation 必须解决。
 3. 必须通过快速浏览器 CI、Windows 桌面 smoke 和依赖安全门禁；数据库、桌面壳或发布文件变更时运行对应完整门禁。
 4. 要求分支在合并前与 `main` 保持最新，禁止 force push 和删除 `main`。
 5. 管理员仅在 GitHub 或 CI 故障的紧急场景旁路；旁路原因必须记录在后续 PR / CHANGELOG。
+
+### 3.1 单人维护仓库例外
+
+当 GitHub 协作者中只有 1 名具备写权限的维护者，因平台不允许作者批准自己的 PR 而无法取得
+非作者 `APPROVED` 时，可以用单人维护例外替代第 1 条中的非作者批准，但必须同时满足：
+
+1. 仍通过 Pull Request 合并，不直接提交到 `main`，也不使用管理员旁路合并。
+2. 当前 PR head 的全部适用门禁均为成功，且提交后没有过期检查。
+3. 不存在 `CHANGES_REQUESTED`，所有 review conversation 均已解决。
+4. PR 中记录完整验证证据、回滚方式，以及“仓库仅有一名写权限维护者”的例外原因。
+5. 发布 tag 仍只能在 PR 合入 `main` 并同步后创建，不得提前创建或移动既有 tag。
+
+一旦仓库存在其他具备审查资格的维护者，本例外自动失效，恢复至少 1 名非作者批准的常规规则。
 
 仓库内的 [快速 CI](../../.github/workflows/ci.yml)、
 [Windows 桌面 E2E](../../.github/workflows/windows-desktop-e2e.yml) 和

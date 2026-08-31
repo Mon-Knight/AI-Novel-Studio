@@ -1,119 +1,22 @@
-import {
-  useCallback,
-  useMemo,
-  useState,
-  type MouseEvent,
-  type MutableRefObject,
-  type ReactNode,
-} from 'react';
-import type { NavigateFunction } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CircleAlert, LoaderCircle, NotebookPen, RefreshCw, Square, X } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import ChapterSummaryDialog from '../../components/chapter-summary/ChapterSummaryDialog';
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import RightPanel from '../../components/right-dock/RightPanel';
 import RightToolbar from '../../components/right-dock/RightToolbar';
 import { ChapterReadinessPlanCard } from '../../features/agent-planner/ChapterReadinessPlanCard';
-import EditorArea, {
-  type EditorAreaHandle,
-  type EditorContentSnapshot,
-} from '../../components/workspace/EditorArea';
+import EditorArea, { type EditorActionState } from '../../components/workspace/EditorArea';
 import GlobalAiTaskModal from '../../components/workspace/GlobalAiTaskModal';
 import RecoveryDialog from '../../components/workspace/RecoveryDialog';
 import StatusBar from '../../components/workspace/StatusBar';
 import VolumeTree from '../../components/workspace/VolumeTree';
 import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
-import type { useWorkspaceChapterLoader } from '../../features/workspace/useWorkspaceChapterLoader';
-import type { useWorkspaceCreationActions } from '../../features/workspace/useWorkspaceCreationActions';
-import type { useWorkspaceDraftApplication } from '../../features/workspace/useWorkspaceDraftApplication';
-import type { useWorkspaceRecoveryActions } from '../../features/workspace/useWorkspaceRecoveryActions';
-import type { useWorkspaceSummary } from '../../features/workspace/useWorkspaceSummary';
-import type { PanelToolState, RightSidebarState } from '../../store/rightSidebarStore';
-import type { WorkspaceSessionState } from '../../store/workspaceSessionStore';
-import type { QualityCheckItem, QualityCheckReport } from '../../types/qualityCheck';
-import type { PanelType } from '../../types/rightSidebar';
-import type {
-  RecoveryPromptState,
-  WorkspaceRecoverySaveStatus,
-} from '../../types/workspaceRecovery';
 import { hashTextContent } from '../../utils/contentHash';
 import { showInfo } from '../../utils/nativeDialog';
-import type { WritingContext } from '../../utils/writingContext';
-
-type ChapterLoader = ReturnType<typeof useWorkspaceChapterLoader>;
-type DraftApplication = ReturnType<typeof useWorkspaceDraftApplication>;
-type CreationActions = ReturnType<typeof useWorkspaceCreationActions>;
-type RecoveryActions = ReturnType<typeof useWorkspaceRecoveryActions>;
-type WorkspaceSummary = ReturnType<typeof useWorkspaceSummary>;
-type ViewSession = Pick<
-  WorkspaceSessionState,
-  | 'novel'
-  | 'volumes'
-  | 'chapters'
-  | 'activeChapterId'
-  | 'currentDraft'
-  | 'editorSnapshot'
-  | 'draftWordCount'
-  | 'isDirty'
-  | 'qcReport'
-  | 'qcItems'
-  | 'aiModal'
->;
-
-interface WorkspaceViewRefs {
-  editor: MutableRefObject<EditorAreaHandle | null>;
-  activeChapterId: MutableRefObject<string>;
-  editorSnapshot: MutableRefObject<EditorContentSnapshot>;
-}
-
-interface WorkspaceViewActions {
-  selectChapter(chapterId: string): Promise<void>;
-  togglePanel(panel: PanelType): Promise<void>;
-  closePanel(): Promise<void>;
-  editorClick(event: MouseEvent<HTMLDivElement>): void;
-  editorContentChange(snapshot: EditorContentSnapshot): void;
-  chapterOutlineApplied(chapterId: string): Promise<void>;
-  confirmEditorLeave(): Promise<boolean>;
-  openSidebarTool(panel: Exclude<PanelType, null>): void;
-  closeSidebar(): void;
-  setChapterGoalDirty(dirty: boolean): void;
-  bumpContextVersion(): void;
-  locateText(start: number, end: number, quote?: string, paragraphIndex?: number): void;
-  locateDone(): void;
-  setQuality(report: QualityCheckReport | null, items: QualityCheckItem[]): void;
-  showAiModal(title: string, subtitle?: string): void;
-  updateAiModal(stage: string, progress: number): void;
-  hideAiModal(): void;
-  updateSidebarTool(toolKey: string, patch: Partial<PanelToolState>): void;
-  dismissRecoveryPrompt(): void;
-}
-
-interface WritingWorkspaceViewProps {
-  novelId?: string;
-  navigate: NavigateFunction;
-  session: ViewSession;
-  sidebarState: RightSidebarState;
-  chapterLoader: ChapterLoader;
-  draftApplication: DraftApplication;
-  creationActions: CreationActions;
-  recoveryActions: RecoveryActions;
-  summary: WorkspaceSummary;
-  recoveryPrompt: RecoveryPromptState;
-  recoverySaveStatus: WorkspaceRecoverySaveStatus;
-  refs: WorkspaceViewRefs;
-  actions: WorkspaceViewActions;
-  contextVersion: number;
-  locateTarget: {
-    startOffset: number;
-    endOffset: number;
-    quote?: string;
-    paragraphIndex?: number;
-  } | null;
-  writingContext: WritingContext;
-  leaveGuardDialog: ReactNode;
-  reviewLocked?: boolean;
-  onUnlockReview?: () => void;
-  onBeforeAdopt?: (draftId: string) => Promise<void>;
-}
+import type { WritingWorkspaceViewProps } from './WritingWorkspaceView.types';
+import { isWorkspaceAiPanelRetired } from '../../types/rightSidebar';
+import { WorkspaceDocumentSkeleton } from './WorkspaceDocumentSkeleton';
 
 export default function WritingWorkspaceView({
   novelId,
@@ -135,6 +38,9 @@ export default function WritingWorkspaceView({
   leaveGuardDialog,
   reviewLocked = false,
   onUnlockReview,
+  reviewCandidate,
+  reviewAuthorizationId,
+  reviewArtifactId,
   onBeforeAdopt,
 }: WritingWorkspaceViewProps) {
   const {
@@ -151,12 +57,31 @@ export default function WritingWorkspaceView({
     aiModal,
   } = session;
   const activePanel = sidebarState.activeTool;
+  const e2ePanelsEnabled = import.meta.env.VITE_AI_NOVEL_STUDIO_E2E === '1';
+  const visibleActivePanel = isWorkspaceAiPanelRetired(activePanel, e2ePanelsEnabled)
+    ? null
+    : activePanel;
   const [readinessOpen, setReadinessOpen] = useState(false);
+  const [editorActionState, setEditorActionState] = useState<EditorActionState>({
+    saving: false,
+    adopting: false,
+    saveState: 'idle',
+    saveMessage: '',
+  });
   const activeChapter = useMemo(
     () => chapters.find((chapter) => chapter.id === activeChapterId),
     [activeChapterId, chapters],
   );
   const activeDraft = currentDraft?.chapterId === activeChapterId ? currentDraft : null;
+  const activeReviewCandidate = reviewCandidate ?? chapterLoader.reviewCandidate;
+  useEffect(() => {
+    setEditorActionState({
+      saving: false,
+      adopting: false,
+      saveState: 'idle',
+      saveMessage: '',
+    });
+  }, [activeChapterId]);
   const activeContentState = chapterLoader.contentLoadError ?? activeDraft?.contentState;
   const contentAvailable = activeContentState?.status !== 'unavailable';
   const activeQcReport = qcReport?.chapterId === activeChapterId ? qcReport : null;
@@ -175,6 +100,9 @@ export default function WritingWorkspaceView({
     retryingContent,
     loadChapterDraft,
   } = chapterLoader;
+  const novelMissing = !pageLoading && loadState === 'novel_not_found';
+  const pageFailed = !pageLoading && Boolean(pageError) && !novelMissing;
+  const workspaceAvailable = !pageLoading && !pageFailed && !novelMissing;
   const {
     applyTextRequest,
     editorCommandRequest,
@@ -203,54 +131,11 @@ export default function WritingWorkspaceView({
   }, [loadChapterDraft, refs.activeChapterId, refs.editorSnapshot]);
 
   return (
-    <div
-      className={`workspace-page${!isChapterDocumentBlocked && activePanel && activePanel !== 'draft-history' ? ' has-right-panel' : ''}`}
-      data-summary-exists={summary.exists ? 'true' : 'false'}
-    >
-      {pageLoading && (
-        <div className="workspace-full-state">
-          <div className="workspace-full-state-content workspace-muted">
-            <div className="workspace-state-icon">⏳</div>
-            <div>正在加载写作工作台...</div>
-          </div>
-        </div>
-      )}
-      {pageError && !pageLoading && (
-        <div className="workspace-full-state">
-          <div className="workspace-full-state-content">
-            <div className="workspace-state-icon">❌</div>
-            <div className="workspace-error-message">{pageError}</div>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => navigate(`/novels/${novelId}`)}
-            >
-              ← 返回作品详情
-            </button>
-          </div>
-        </div>
-      )}
-      {loadState === 'novel_not_found' && !pageLoading && (
-        <div className="workspace-full-state">
-          <div className="workspace-full-state-content">
-            <div className="workspace-empty-icon">📖</div>
-            <div className="workspace-muted workspace-state-copy">作品不存在或本地数据已损坏</div>
-            <div className="workspace-state-actions">
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>
-                ← 返回首页
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => navigate('/settings')}>
-                🔧 修复本地数据
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+    <div className="workspace-page" data-summary-exists={summary.exists ? 'true' : 'false'}>
       <div className="workspace-sidebar">
-        <div className="workspace-sidebar-header">
-          <BackButton label="返回作品详情" to={`/novels/${novelId}`} />
+        <div className={`workspace-novel-title${pageLoading ? ' is-loading' : ''}`}>
+          {novel?.title || (pageLoading ? '正在载入作品' : '未选择作品')}
         </div>
-        {novel && <div className="workspace-novel-title">📖 {novel.title}</div>}
         {novelId && (
           <PanelErrorBoundary panelTitle="卷章目录">
             <VolumeTree
@@ -258,6 +143,9 @@ export default function WritingWorkspaceView({
               chapters={chapters}
               activeChapterId={activeChapterId}
               loading={pageLoading}
+              unavailableMessage={
+                novelMissing ? '作品目录不可用' : pageFailed ? '目录载入失败' : undefined
+              }
               onSelectChapter={actions.selectChapter}
               onCreateVolume={creationActions.handleCreateVolume}
               onCreateChapter={creationActions.handleCreateChapter}
@@ -271,8 +159,7 @@ export default function WritingWorkspaceView({
         <GlobalAiTaskModal state={aiModal} />
         <div className="workspace-topbar">
           <div className="workspace-topbar-title">
-            <BackButton label="返回作品" to={`/novels/${novelId}`} />
-            <span>{novel?.title || '未选择作品'}</span>
+            <BackButton label="返回创作工作台" to="/" />
           </div>
           {activeChapter && (
             <div className="workspace-current-chapter">
@@ -280,30 +167,51 @@ export default function WritingWorkspaceView({
             </div>
           )}
           <div className="workspace-topbar-spacer" aria-hidden="true" />
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            data-testid="workspace-open-workbench"
-            onClick={() => navigate('/')}
-          >
-            创作工作台
-          </button>
         </div>
-        <p className="workspace-workbench-notice" data-testid="workspace-ai-migrated-notice">
-          生成、大纲、角色、事件、设定、检查和润色请在创作工作台以任务对话完成；这里保留审阅、编辑、保存和采用。
-        </p>
 
-        {loadState === 'ready' && chapters.length === 0 && !pageLoading ? (
+        {pageLoading ? (
+          <WorkspaceDocumentSkeleton />
+        ) : novelMissing ? (
+          <div className="workspace-empty-state" role="alert" data-testid="workspace-missing-state">
+            <div className="workspace-empty-content">
+              <div className="workspace-empty-title">无法打开作品</div>
+              <div className="workspace-empty-copy">作品不存在或本地数据已损坏。</div>
+              <div className="workspace-state-actions">
+                <button className="btn btn-primary btn-sm" onClick={() => navigate('/')}>
+                  返回首页
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => navigate('/settings')}>
+                  检查本地数据
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : pageFailed ? (
+          <div className="workspace-empty-state" role="alert" data-testid="workspace-error-state">
+            <div className="workspace-empty-content">
+              <div className="workspace-empty-title">写作工作台载入失败</div>
+              <div className="workspace-error-message">{pageError}</div>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => navigate(`/novels/${novelId}`)}
+              >
+                返回作品详情
+              </button>
+            </div>
+          </div>
+        ) : loadState === 'ready' && chapters.length === 0 ? (
           <div data-testid="workspace-empty-state" className="workspace-empty-state">
             <div className="workspace-empty-content">
-              <div className="workspace-empty-icon">📝</div>
+              <div className="workspace-empty-icon">
+                <NotebookPen aria-hidden="true" size={36} strokeWidth={1.8} />
+              </div>
               <div className="workspace-empty-title">当前作品还没有章节</div>
               <div className="workspace-empty-copy">你可以在左侧目录先创建分卷，再创建第一章。</div>
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => navigate(`/novels/${novelId}`)}
               >
-                ← 返回作品详情
+                返回作品详情
               </button>
             </div>
           </div>
@@ -346,11 +254,17 @@ export default function WritingWorkspaceView({
                 onLocateDone={actions.locateDone}
                 onRetryContent={() => void retryActiveChapterContent()}
                 retryingContent={retryingContent}
-                onOpenDraftHistory={() => actions.openSidebarTool('draft-history')}
+                onOpenDraftHistory={
+                  e2ePanelsEnabled ? () => actions.openSidebarTool('draft-history') : undefined
+                }
                 onBackToChapters={() => navigate(`/novels/${novelId}`)}
                 reviewLocked={reviewLocked}
                 onUnlockReview={onUnlockReview}
+                reviewCandidate={activeReviewCandidate}
+                reviewAuthorizationId={reviewAuthorizationId}
+                reviewArtifactId={reviewArtifactId}
                 onBeforeAdopt={onBeforeAdopt}
+                onActionStateChange={setEditorActionState}
               />
             </PanelErrorBoundary>
             <StatusBar
@@ -360,46 +274,61 @@ export default function WritingWorkspaceView({
               draftVersion={activeDraft ? `v${activeDraft.versionNo}` : 'v0 占位'}
               contentAvailable={contentAvailable}
               recoverySaveStatus={recoverySaveStatus}
+              documentSaveState={editorActionState.saveState}
+              documentSaveMessage={editorActionState.saveMessage}
             />
           </>
         )}
       </div>
 
-      <RightToolbar
-        activePanel={activePanel}
-        onTogglePanel={actions.togglePanel}
-        onRunCommand={runEditorCommand}
-        onToggleReadiness={() => setReadinessOpen((open) => !open)}
-        readinessOpen={readinessOpen}
-        documentAvailable={contentAvailable}
-      />
+      {pageLoading ? (
+        <div className="right-toolbar workspace-toolbar-skeleton" aria-hidden="true" />
+      ) : workspaceAvailable ? (
+        <RightToolbar
+          activePanel={visibleActivePanel}
+          onTogglePanel={actions.togglePanel}
+          onRunCommand={runEditorCommand}
+          onToggleReadiness={() => setReadinessOpen((open) => !open)}
+          readinessOpen={readinessOpen}
+          documentAvailable={contentAvailable}
+          reviewLocked={reviewLocked}
+          documentDirty={isDirty}
+          documentSaving={editorActionState.saving}
+          documentAdopting={editorActionState.adopting}
+          hasCurrentDraft={Boolean(activeDraft)}
+          currentDraftAdopted={Boolean(activeDraft?.isAdopted)}
+          hasReviewCandidate={Boolean(activeReviewCandidate)}
+        />
+      ) : null}
 
-      {readinessOpen && novelId && activeChapter && (
+      {workspaceAvailable && readinessOpen && novelId && activeChapter && (
         <div className="workspace-readiness-dock" data-testid="chapter-readiness-dock">
           <ChapterReadinessPlanCard novelId={novelId} chapterId={activeChapter.id} />
         </div>
       )}
 
-      {!isChapterDocumentBlocked && activePanel === 'draft-history' && (
-        <DraftHistoryPanel
-          chapterId={activeChapterId}
-          currentDraftId={activeDraft?.id}
-          onBeforeDocumentChange={actions.confirmEditorLeave}
-          onLoadDraft={(draft) => {
-            handleDraftApplied(draft);
-            actions.closeSidebar();
-          }}
-          onDraftAdopted={(draft) => {
-            handleDraftApplied(draft);
-            void actions.chapterOutlineApplied(draft.chapterId);
-          }}
-          onClose={actions.closePanel}
-        />
-      )}
+      {workspaceAvailable &&
+        !isChapterDocumentBlocked &&
+        visibleActivePanel === 'draft-history' && (
+          <DraftHistoryPanel
+            chapterId={activeChapterId}
+            currentDraftId={activeDraft?.id}
+            onBeforeDocumentChange={actions.confirmEditorLeave}
+            onLoadDraft={(draft) => {
+              handleDraftApplied(draft);
+              actions.closeSidebar();
+            }}
+            onDraftAdopted={(draft) => {
+              handleDraftApplied(draft);
+              void actions.chapterOutlineApplied(draft.chapterId);
+            }}
+            onClose={actions.closePanel}
+          />
+        )}
 
-      {!isChapterDocumentBlocked && (
+      {workspaceAvailable && !isChapterDocumentBlocked && (
         <RightPanel
-          panelType={activePanel === 'draft-history' ? null : activePanel}
+          panelType={visibleActivePanel === 'draft-history' ? null : visibleActivePanel}
           onClose={actions.closePanel}
           novelId={novelId}
           chapter={activeChapter}
@@ -474,9 +403,22 @@ export default function WritingWorkspaceView({
           <div className="right-panel-overlay" onClick={summary.stop} />
           <div className="right-panel workspace-summary-panel">
             <div className="right-panel-header">
-              <span className="right-panel-title">⏳ 生成章节总结</span>
-              <button className="right-panel-close" onClick={summary.stop} title="停止生成">
-                ■
+              <span className="right-panel-title">
+                <LoaderCircle
+                  className="workspace-spinning-icon"
+                  aria-hidden="true"
+                  size={16}
+                  strokeWidth={1.8}
+                />
+                <span>生成章节总结</span>
+              </span>
+              <button
+                className="right-panel-close"
+                onClick={summary.stop}
+                aria-label="停止生成"
+                title="停止生成"
+              >
+                <Square aria-hidden="true" size={13} strokeWidth={1.8} />
               </button>
             </div>
             <div className="right-panel-body">
@@ -496,16 +438,25 @@ export default function WritingWorkspaceView({
           <div className="right-panel-overlay" onClick={() => summary.setError('')} />
           <div className="right-panel workspace-summary-panel">
             <div className="right-panel-header">
-              <span className="right-panel-title">❌ 总结失败</span>
-              <button className="right-panel-close" onClick={() => summary.setError('')}>
-                ✕
+              <span className="right-panel-title">
+                <CircleAlert aria-hidden="true" size={16} strokeWidth={1.8} />
+                <span>总结失败</span>
+              </span>
+              <button
+                className="right-panel-close"
+                onClick={() => summary.setError('')}
+                aria-label="关闭错误"
+                title="关闭"
+              >
+                <X aria-hidden="true" size={17} strokeWidth={1.8} />
               </button>
             </div>
             <div className="right-panel-body">
               <div className="workspace-summary-error">{summary.error}</div>
               <div className="workspace-summary-actions">
                 <button className="btn btn-primary btn-sm" onClick={summary.regenerate}>
-                  🔄 重试
+                  <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>重试</span>
                 </button>
               </div>
             </div>

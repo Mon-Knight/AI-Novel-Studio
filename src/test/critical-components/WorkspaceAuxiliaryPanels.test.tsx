@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import VolumeTree from '../../components/workspace/VolumeTree';
@@ -37,9 +37,8 @@ vi.mock('../../services/database/draftVersionService', () => ({
       services.getAdoptedByChapterIdCalls(chapterId);
       return services.adoptedDraft;
     },
-    delete: async (draftId: string, chapterId: string) => {
-      services.deleteDraftCalls(draftId, chapterId);
-    },
+    delete: async (draftId: string, chapterId: string) =>
+      services.deleteDraftCalls(draftId, chapterId),
   },
 }));
 
@@ -192,6 +191,68 @@ describe('DraftHistoryPanel', () => {
     view.rerender(<DraftHistoryPanel chapterId="" onLoadDraft={vi.fn()} onClose={vi.fn()} />);
     await screen.findByText(/暂无草稿/);
   });
+
+  it('clears a pending draft-history message timer when the panel unmounts', async () => {
+    services.drafts = [draft(1)];
+    const view = render(
+      <DraftHistoryPanel chapterId="chapter-1" onLoadDraft={vi.fn()} onClose={vi.fn()} />,
+    );
+    await screen.findByTestId('draft-history-item');
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '废弃' }));
+        for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+      });
+
+      expect(services.deleteDraftCalls).toHaveBeenCalledWith('draft-1', 'chapter-1');
+      expect(screen.getByText('v1 已废弃')).not.toBeNull();
+      expect(vi.getTimerCount()).toBe(1);
+
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => vi.runAllTimers()).not.toThrow();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule a message timer when draft deletion finishes after unmount', async () => {
+    services.drafts = [draft(1)];
+    let resolveDelete: () => void = () => {};
+    services.deleteDraftCalls.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = () => resolve();
+        }),
+    );
+    const view = render(
+      <DraftHistoryPanel chapterId="chapter-1" onLoadDraft={vi.fn()} onClose={vi.fn()} />,
+    );
+    await screen.findByTestId('draft-history-item');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '废弃' }));
+      await act(async () => {
+        for (let tick = 0; tick < 3; tick += 1) await Promise.resolve();
+      });
+      expect(services.deleteDraftCalls).toHaveBeenCalledWith('draft-1', 'chapter-1');
+
+      view.unmount();
+      await act(async () => {
+        resolveDelete();
+        for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('VolumeTree', () => {
@@ -215,7 +276,7 @@ describe('VolumeTree', () => {
       target: { value: '  第一章  ' },
     });
     fireEvent.keyDown(screen.getByTestId('chapter-title-input'), { key: 'Enter' });
-    await waitFor(() => expect(createFirst).toHaveBeenCalledWith('第一章'));
+    await waitFor(() => expect(createFirst).toHaveBeenCalledWith('第一章', 4000));
 
     fireEvent.click(screen.getByTestId('volume-create'));
     fireEvent.change(screen.getByTestId('volume-title-input'), { target: { value: '  第一卷  ' } });
@@ -242,24 +303,32 @@ describe('VolumeTree', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByTestId('chapter-item')[0]);
+    const firstChapterItem = screen.getAllByTestId('chapter-item')[0];
+    expect(firstChapterItem.tagName).toBe('BUTTON');
+    expect(firstChapterItem.getAttribute('aria-current')).toBe('page');
+    fireEvent.click(firstChapterItem);
     expect(onSelectChapter).toHaveBeenCalled();
     const nextWindow = screen.getAllByRole('button', { name: '下一批' });
     fireEvent.click(nextWindow[0]);
     fireEvent.click(nextWindow[1]);
 
     const headers = document.querySelectorAll<HTMLElement>('.tree-volume-header');
+    expect(headers[0].tagName).toBe('BUTTON');
+    expect(headers[0].getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(headers[0]);
     fireEvent.click(headers[0]);
-    fireEvent.click(screen.getAllByText('+ 在本卷新建章节')[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '在本卷新建章节' })[0]);
     fireEvent.change(screen.getByTestId('chapter-volume-select'), {
       target: { value: 'volume-2' },
     });
     fireEvent.change(screen.getByTestId('chapter-title-input'), {
       target: { value: '  新章节  ' },
     });
+    fireEvent.change(screen.getByTestId('chapter-target-word-count'), {
+      target: { value: '4300' },
+    });
     fireEvent.click(screen.getByTestId('chapter-create-submit'));
-    await waitFor(() => expect(onCreateChapter).toHaveBeenCalledWith('volume-2', '新章节'));
+    await waitFor(() => expect(onCreateChapter).toHaveBeenCalledWith('volume-2', '新章节', 4300));
     expect(screen.getAllByText('暂无章节').length).toBeGreaterThan(0);
   });
 

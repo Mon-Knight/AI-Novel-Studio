@@ -2,6 +2,7 @@
 // 遵循桌面写作风格：复用 agent-plan-card 样式族，浅色克制，无后台管理感。
 
 import type { ChapterPreparationProposal } from '../../types/chapterPreparation';
+import { CheckCircle2, CircleHelp, TriangleAlert } from 'lucide-react';
 import { useDshPreparation } from './useDshPreparation';
 
 export interface DshPreparationCardProps {
@@ -9,6 +10,7 @@ export interface DshPreparationCardProps {
   chapterId?: string;
   /** 用户配置的 Provider Key（runtimeMode === 'api' 时传入；不落盘）。 */
   apiKey?: string;
+  baseUrl?: string;
   modelName?: string;
   /** 测试注入点。 */
   hook?: typeof useDshPreparation;
@@ -32,7 +34,8 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
               data-testid="dsh-coercion-mark"
               style={{ color: 'var(--color-warning)', marginLeft: 8 }}
             >
-              ⚠ planner 枚举已归一（原始：{coercion.original}）
+              <TriangleAlert aria-hidden="true" size={13} strokeWidth={1.8} />
+              planner 枚举已归一（原始：{coercion.original}）
             </span>
           ) : null}
         </div>
@@ -49,7 +52,7 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
         <ul className="agent-plan-steps" style={{ marginTop: 4 }}>
           {proposal.chapterGoals.map((goal) => (
             <li key={goal} className="agent-plan-step agent-plan-step--completed">
-              <span aria-hidden="true">✓</span>
+              <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
               <span>{goal}</span>
             </li>
           ))}
@@ -103,7 +106,10 @@ function ProposalSummary({ proposal }: { proposal: ChapterPreparationProposal })
           <div style={{ fontWeight: 600, fontSize: 12 }}>未决问题</div>
           <div style={{ fontSize: 12, lineHeight: 1.6 }}>
             {proposal.unresolvedQuestions.map((question) => (
-              <div key={question}>？ {question}</div>
+              <div key={question} style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                <CircleHelp aria-hidden="true" size={13} strokeWidth={1.8} />
+                {question}
+              </div>
             ))}
           </div>
         </div>
@@ -128,6 +134,7 @@ export function DshPreparationCard({
   novelId,
   chapterId,
   apiKey,
+  baseUrl,
   modelName,
   hook = useDshPreparation,
 }: DshPreparationCardProps) {
@@ -145,8 +152,8 @@ export function DshPreparationCard({
     summaryError,
     run,
   } = preparation;
-  const dshModel =
-    modelName && modelName.toLowerCase().includes('deepseek') ? modelName : undefined;
+  const dshModel = modelName?.trim() || undefined;
+  const dshBaseUrl = baseUrl?.trim() || undefined;
   const revisionsReady = !revisionsLoading && revisions !== null;
   const dshDisabled = running || !novelId || !chapterId || !apiKey || !revisionsReady;
 
@@ -186,7 +193,13 @@ export function DshPreparationCard({
           type="button"
           data-testid="dsh-run-dsh"
           disabled={dshDisabled}
-          onClick={() => void run('dsh', { apiKey: apiKey ?? '', model: dshModel })}
+          onClick={() =>
+            void run('dsh', {
+              apiKey: apiKey ?? '',
+              baseUrl: dshBaseUrl,
+              model: dshModel,
+            })
+          }
         >
           {planner === 'dsh' && running ? '生成中…' : 'DSH 大脑（真实 API）'}
         </button>
@@ -229,7 +242,7 @@ export function DshPreparationCard({
       )}
       {!apiKey && (
         <div className="agent-plan-card__notice is-warning" data-testid="dsh-no-key">
-          未配置 API Key，DSH 大脑不可用；请先在设置中心配置 DeepSeek Provider。
+          未配置 API Key，DSH 大脑不可用；请先在设置中心配置 Cloud Provider。
         </div>
       )}
       {running && (

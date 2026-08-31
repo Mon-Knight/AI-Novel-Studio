@@ -13,20 +13,26 @@ fn secret_key(key: &str) -> bool {
         .filter(|character| character.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "apikey"
-            | "authorization"
-            | "accesstoken"
-            | "refreshtoken"
-            | "password"
-            | "secret"
-            | "clientsecret"
-            | "credential"
-            | "cookie"
-            | "setcookie"
-            | "privatekey"
-    )
+    [
+        "apikey",
+        "authorization",
+        "accesstoken",
+        "refreshtoken",
+        "authtoken",
+        "apitoken",
+        "bearertoken",
+        "sessiontoken",
+        "password",
+        "passphrase",
+        "secret",
+        "credential",
+        "credentials",
+        "cookie",
+        "cookies",
+        "privatekey",
+    ]
+    .iter()
+    .any(|suffix| normalized.ends_with(suffix))
 }
 
 pub fn contains_secret_value(value: &Value) -> bool {
@@ -45,7 +51,14 @@ pub fn contains_secret_text(text: &str) -> bool {
     if lower.contains("bearer ")
         || lower.contains("authorization:")
         || lower.contains("x-api-key")
+        || lower.contains("x_api_key")
+        || lower.contains("xapikey")
+        || lower.contains("openaiapikey")
         || lower.contains("api_key=")
+        || lower.contains("apikey=")
+        || lower.contains("api-key=")
+        || lower.contains("credentials=")
+        || lower.contains("\"credentials\"")
         || lower.contains("-----begin private key-----")
     {
         return true;
@@ -71,12 +84,17 @@ mod tests {
             "authorization",
             "accesstoken",
             "refreshtoken",
+            "authtoken",
+            "apitoken",
+            "bearertoken",
+            "sessiontoken",
             "password",
+            "passphrase",
             "secret",
-            "clientsecret",
             "credential",
+            "credentials",
             "cookie",
-            "setcookie",
+            "cookies",
             "privatekey",
         ] {
             assert!(
@@ -93,8 +111,19 @@ mod tests {
         assert!(contains_secret_text("Authorization: x"));
         assert!(contains_secret_text("sk-123456789012345678"));
         assert!(contains_secret_text("AKIA1234567890123456"));
+        assert!(contains_secret_text("openaiApiKey=hidden"));
         assert!(!contains_secret_text("普通正文，没有任何凭据。"));
-        let value = serde_json::json!({"novelId": "n1", "apiKey": "sk-x"});
-        assert!(contains_secret_value(&value));
+        for key in [
+            "apiKey",
+            "x-api-key",
+            "xApiKey",
+            "openaiApiKey",
+            "credentials",
+        ] {
+            let mut value = serde_json::Map::new();
+            value.insert("novelId".to_string(), serde_json::json!("n1"));
+            value.insert(key.to_string(), serde_json::json!("sk-x"));
+            assert!(contains_secret_value(&Value::Object(value)));
+        }
     }
 }

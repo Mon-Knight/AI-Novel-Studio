@@ -7,6 +7,12 @@ import {
   sanitizeArtifactDirectory,
   sanitizeSecrets,
 } from '../../scripts/e2e/artifact-sanitizer.ts';
+import {
+  clearDriverExitReport,
+  resolveDriverExitReportPath,
+  writeUnexpectedDriverExitReport,
+  type DriverExitKind,
+} from '../../scripts/e2e/driver-liveness-guard.ts';
 import { bridgeDiagnostics } from './helpers';
 
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
@@ -34,6 +40,10 @@ fs.mkdirSync(artifactRoot, { recursive: true });
 
 let driver: ReturnType<typeof spawn> | undefined;
 let driverLog: fs.WriteStream | undefined;
+let driverReady = false;
+let driverShutdownRequested = false;
+let driverExitReported = false;
+const driverExitReportPath = resolveDriverExitReportPath(artifactRoot);
 
 function normalizeDiagnosticPath(value: string): string {
   let normalized = fs.realpathSync.native(value);
@@ -94,6 +104,10 @@ export const config = {
       throw new Error('Desktop E2E requires a unique AI_NOVEL_STUDIO_E2E_DATA_DIR.');
     }
     fs.mkdirSync(process.env.AI_NOVEL_STUDIO_E2E_DATA_DIR, { recursive: true });
+    clearDriverExitReport(driverExitReportPath);
+    driverReady = false;
+    driverShutdownRequested = false;
+    driverExitReported = false;
     const logPath = path.join(artifactRoot, 'tauri-driver.log');
     driverLog = fs.createWriteStream(logPath, { flags: 'w' });
     const driverArgs = ['--port', String(driverPort), '--native-port', String(driverPort + 1000)];
@@ -116,14 +130,33 @@ export const config = {
       const currentDriver = driver;
       let driverStartFailure: Error | undefined;
       currentDriver.once('error', (error) => {
-        driverStartFailure = error;
+        if (!driverReady) {
+          driverStartFailure = error;
+          return;
+        }
+        recordUnexpectedDriverExit('process_error', null, null);
       });
       currentDriver.once('exit', (code, signal) => {
-        driverStartFailure = new Error(
-          `tauri-driver exited before becoming ready (code ${String(code)}, signal ${String(signal)})`,
-        );
+        if (!driverReady) {
+          driverStartFailure = new Error(
+            `tauri-driver exited before becoming ready (code ${String(code)}, signal ${String(signal)})`,
+          );
+          return;
+        }
+        recordUnexpectedDriverExit('process_exit', code, signal);
       });
       await waitForDriver(driverPort, () => driverStartFailure);
+      if (
+        driverStartFailure ||
+        currentDriver.exitCode !== null ||
+        currentDriver.signalCode !== null
+      ) {
+        throw (
+          driverStartFailure ??
+          new Error('tauri-driver exited while its readiness response was being verified.')
+        );
+      }
+      driverReady = true;
     } catch (error) {
       await stopDriver();
       await closeDriverLog();
@@ -172,6 +205,9 @@ export const config = {
   async beforeSession() {
     if (process.env.AI_NOVEL_STUDIO_E2E_DATA_DIR) {
       fs.mkdirSync(process.env.AI_NOVEL_STUDIO_E2E_DATA_DIR, { recursive: true });
+    }
+    if (process.env.AI_NOVEL_STUDIO_E2E_STARTUP_TIMING === '1') {
+      await startStartupWindowWatcher();
     }
   },
 
@@ -365,6 +401,8 @@ function browserHealthError(value: unknown): Error | undefined {
 }
 
 async function stopDriver(): Promise<void> {
+  driverShutdownRequested = true;
+  driverReady = false;
   const currentDriver = driver;
   driver = undefined;
   if (!currentDriver || currentDriver.exitCode !== null || currentDriver.signalCode !== null)
@@ -389,6 +427,28 @@ async function stopDriver(): Promise<void> {
   await waitForChildExit(currentDriver, 5000);
 }
 
+function recordUnexpectedDriverExit(
+  kind: DriverExitKind,
+  exitCode: number | null,
+  signal: NodeJS.Signals | null,
+): void {
+  driverExitReported =
+    driverExitReported ||
+    writeUnexpectedDriverExitReport(
+      driverExitReportPath,
+      {
+        ready: driverReady,
+        shutdownRequested: driverShutdownRequested,
+        exitReported: driverExitReported,
+      },
+      {
+        kind,
+        exitCode,
+        signal,
+      },
+    );
+}
+
 async function waitForChildExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve) => {
@@ -408,3 +468,68 @@ async function closeDriverLog(): Promise<void> {
 }
 
 export default config;
+
+async function startStartupWindowWatcher(): Promise<void> {
+  if (process.platform !== 'win32') {
+    throw new Error('Desktop startup window timing currently requires Windows.');
+  }
+  if (!e2eDataDir) throw new Error('Startup timing requires the isolated E2E data directory.');
+  const outputPath = path.join(e2eDataDir, 'startup-window-timing.json');
+  const readyPath = path.join(e2eDataDir, 'startup-window-watcher.ready');
+  fs.rmSync(outputPath, { force: true });
+  fs.rmSync(readyPath, { force: true });
+  let watcherFailure: Error | undefined;
+  const watcher = spawn(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      path.join(import.meta.dirname, 'watch-visible-window.ps1'),
+      '-ApplicationPath',
+      appPath,
+      '-OutputPath',
+      outputPath,
+      '-ReadyPath',
+      readyPath,
+      '-TimeoutMs',
+      '30000',
+      '-PollIntervalMs',
+      '15',
+    ],
+    {
+      cwd: workspaceRoot,
+      windowsHide: true,
+      stdio: 'ignore',
+    },
+  );
+  watcher.once('error', (error) => {
+    watcherFailure = error;
+    fs.writeFileSync(
+      outputPath,
+      JSON.stringify({ schemaVersion: 1, error: `window watcher failed: ${error.message}` }),
+      'utf8',
+    );
+  });
+  watcher.once('exit', (code, signal) => {
+    if (fs.existsSync(readyPath)) return;
+    watcherFailure = new Error(
+      `window watcher exited before readiness (code ${String(code)}, signal ${String(signal)})`,
+    );
+  });
+
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(readyPath)) return;
+    if (watcherFailure) throw watcherFailure;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  try {
+    watcher.kill();
+  } catch {
+    /* already exited */
+  }
+  throw new Error('The startup window watcher did not become ready within 10 seconds.');
+}

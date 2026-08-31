@@ -1,3 +1,12 @@
+import {
+  CheckCircle2,
+  ClipboardList,
+  LoaderCircle,
+  Palette,
+  Save,
+  Search,
+  TriangleAlert,
+} from 'lucide-react';
 import type {
   AiSettings,
   ChapterGenerationContext,
@@ -16,6 +25,7 @@ import type { GenerationValidationState } from './aiGenerateValidation';
 import type { StreamPreviewStatus } from './useGenerationStreamPreview';
 import { AiGenerateResultsView } from './AiGenerateResultsView';
 import { AiGenerateStatusSections } from './AiGenerateStatusSections';
+import { AiGenerateContextDetails } from './AiGenerateContextDetails';
 
 interface AiGeneratePanelViewProps {
   novelId?: string;
@@ -114,6 +124,7 @@ export function AiGeneratePanelView({
         novelId={novelId}
         chapterId={chapter.id}
         apiKey={settings.runtimeMode === 'api' ? settings.apiKey : undefined}
+        baseUrl={settings.runtimeMode === 'api' ? settings.baseUrl : undefined}
         modelName={settings.modelName}
       />
 
@@ -171,8 +182,24 @@ export function AiGeneratePanelView({
                 borderRadius: 4,
                 whiteSpace: 'nowrap',
               }}
+              aria-label={wordCountSaving ? '保存中' : wordCountSaved ? '已保存' : '保存目标字数'}
             >
-              {wordCountSaving ? '⏳' : wordCountSaved ? '✓ 已保存' : '保存'}
+              {wordCountSaving ? (
+                <>
+                  <LoaderCircle size={13} strokeWidth={1.8} aria-hidden="true" />
+                  保存中
+                </>
+              ) : wordCountSaved ? (
+                <>
+                  <CheckCircle2 size={13} strokeWidth={1.8} aria-hidden="true" />
+                  已保存
+                </>
+              ) : (
+                <>
+                  <Save size={13} strokeWidth={1.8} aria-hidden="true" />
+                  保存
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -205,7 +232,13 @@ export function AiGeneratePanelView({
 
       {/* v1.0.26 风格方案与输出控制选择 */}
       <div className="panel-section">
-        <div className="panel-section-title">🎨 风格与输出配置</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Palette size={14} strokeWidth={1.8} aria-hidden="true" />
+          风格与输出配置
+        </div>
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>
           选择本章生成时的写作风格和输出控制方案
         </div>
@@ -254,10 +287,10 @@ export function AiGeneratePanelView({
               const s = availableStyles.find((x) => x.id === selectedStyleId);
               if (!s) return null;
               return [
-                s.narrativePerspective && `👁️ ${s.narrativePerspective}`,
-                s.tone && `🎭 ${s.tone}`,
-                s.pace && `⚡ ${s.pace}`,
-                `💬${Math.round(s.dialogueRatio * 100)}% 🖊️${Math.round(s.descriptionRatio * 100)}%`,
+                s.narrativePerspective && `视角 ${s.narrativePerspective}`,
+                s.tone && `基调 ${s.tone}`,
+                s.pace && `节奏 ${s.pace}`,
+                `对话 ${Math.round(s.dialogueRatio * 100)}% · 描写 ${Math.round(s.descriptionRatio * 100)}%`,
               ]
                 .filter(Boolean)
                 .join(' · ');
@@ -280,7 +313,13 @@ export function AiGeneratePanelView({
 
       {/* v1.0.25 上下文摘要预览 */}
       <div className="panel-section">
-        <div className="panel-section-title">📋 本次将使用的上下文</div>
+        <div
+          className="panel-section-title"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <ClipboardList size={14} strokeWidth={1.8} aria-hidden="true" />
+          本次将使用的上下文
+        </div>
         {/* v1.0.42 内联摘要：始终显示出场角色和字数 */}
         {contextSummary && (
           <div
@@ -294,15 +333,15 @@ export function AiGeneratePanelView({
               borderRadius: 4,
             }}
           >
-            <span>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</span>
+            <span>目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</span>
             <span style={{ marginLeft: 12 }}>
-              📝 章节大纲：{contextSummary.chapterOutline ? '有' : '无'}
+              章节大纲：{contextSummary.chapterOutline ? '有' : '无'}
             </span>
             <span style={{ marginLeft: 12 }}>
-              ✅ 大纲关键点：{contextSummary.outlineKeyPoints?.length || 0} 项
+              大纲关键点：{contextSummary.outlineKeyPoints?.length || 0} 项
             </span>
             <span style={{ marginLeft: 12 }}>
-              👥 出场角色：
+              出场角色：
               {(() => {
                 const nameList = getChapterCharacterNames(contextSummary);
                 return nameList.length > 0
@@ -311,7 +350,7 @@ export function AiGeneratePanelView({
               })()}
             </span>
             <span style={{ marginLeft: 12 }}>
-              ⚠️ 必须出场：
+              必须出场：
               {(() => {
                 const nameList = getRequiredCharacterNames(contextSummary);
                 return nameList.length > 0
@@ -325,120 +364,75 @@ export function AiGeneratePanelView({
           className="btn btn-secondary btn-sm"
           onClick={onPreviewContext}
           disabled={generating}
-          style={{ width: '100%', marginBottom: 6 }}
+          style={{
+            width: '100%',
+            marginBottom: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
         >
-          🔍 查看上下文摘要
+          <Search size={14} strokeWidth={1.8} aria-hidden="true" />
+          查看上下文摘要
         </button>
         {contextSummary && !contextSummary.chapterOutline?.trim() && (
-          <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
-            ⚠️ 当前章节大纲为空，建议先生成或填写章节大纲
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--color-warning)',
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <TriangleAlert size={13} strokeWidth={1.8} aria-hidden="true" />
+            当前章节大纲为空，建议先生成或填写章节大纲
           </div>
         )}
         {contextSummary &&
           contextSummary.chapterOutline?.trim() &&
           contextSummary.chapterOutline.trim().length < 30 && (
-            <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
-              ⚠️ 当前章节大纲过短，生成正文可能不遵循规划
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--color-warning)',
+                marginTop: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              <TriangleAlert size={13} strokeWidth={1.8} aria-hidden="true" />
+              当前章节大纲过短，生成正文可能不遵循规划
             </div>
           )}
         {contextSummary && (contextSummary.outlineKeyPoints?.length || 0) === 0 && (
-          <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
-            ⚠️ 未能从章节大纲中提取关键剧情点，建议补充更明确的大纲
-          </div>
-        )}
-        {showContext && contextSummary && (
           <div
             style={{
               fontSize: 11,
-              lineHeight: 1.7,
-              color: 'var(--color-text-secondary)',
-              marginTop: 8,
-              padding: 8,
-              background: 'var(--color-bg-primary)',
-              borderRadius: 4,
+              color: 'var(--color-warning)',
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
             }}
           >
-            <div>
-              📖 总大纲：
-              {contextSummary.masterOutline || contextSummary.novelOutline
-                ? `✅ 有（${(contextSummary.masterOutline || contextSummary.novelOutline)!.length} 字）`
-                : '❌ 无'}
-            </div>
-            <div>
-              📋 分卷大纲：
-              {contextSummary.volumeOutline
-                ? `✅ 有（${contextSummary.volumeOutline.length} 字）`
-                : '❌ 无'}
-            </div>
-            <div>
-              📝 章节大纲：
-              {contextSummary.chapterOutline
-                ? `✅ 有（${contextSummary.chapterOutline.length} 字）`
-                : '❌ 无'}
-            </div>
-            <div>🧭 大纲来源：{contextSummary.chapterOutlineSource || 'empty'}</div>
-            <div>✅ 大纲执行清单：{contextSummary.outlineKeyPoints?.length || 0} 项</div>
-            <div>
-              🎯 本章目标：
-              {contextSummary.chapterGoal
-                ? `✅ 有（${contextSummary.chapterGoal.length} 字）`
-                : '❌ 无'}
-            </div>
-            <div>
-              👥 出场角色：
-              {(() => {
-                const nameList = getChapterCharacterNames(contextSummary);
-                return nameList.length > 0
-                  ? `${nameList.length} 个（${nameList.join('、')}）`
-                  : '0 个';
-              })()}
-            </div>
-            <div>
-              ⚠️ 必须出场角色：
-              {(() => {
-                const nameList = getRequiredCharacterNames(contextSummary);
-                return nameList.length > 0
-                  ? `${nameList.length} 个（${nameList.join('、')}）`
-                  : '0 个';
-              })()}
-            </div>
-            <div>
-              ⚡ 本章事件：
-              {contextSummary.chapterEvents
-                ? contextSummary.chapterEvents.match(/\n- /g)?.length || 1
-                : 0}{' '}
-              个
-            </div>
-            <div>🌍 世界设定：{contextSummary.worldBackground ? '✅ 有' : '❌ 无'}</div>
-            <div>📦 前文总结：{contextSummary.previousContext ? '✅ 有' : '❌ 无'}</div>
-            <div>
-              🎨 风格方案：{contextSummary.styleProfile ? '✅ 有' : '❌ 无（使用默认）'}{' '}
-              {availableStyles.find((s) => s.id === selectedStyleId)?.name
-                ? `→ ${availableStyles.find((s) => s.id === selectedStyleId)!.name}`
-                : ''}
-            </div>
-            <div>
-              ⚙️ 输出控制：{availableOutputs.find((o) => o.id === selectedOutputId)?.name || '默认'}
-            </div>
-            <div>📊 目标字数：{contextSummary.targetWordCount || wordCountDraft} 字</div>
-            {promptDebug && (
-              <>
-                <div>🧪 最终 prompt 模板：{promptDebug.templateSource}</div>
-                <div>
-                  🧪 包含角色块：{promptDebug.hasRequiredCharactersBlock ? '是' : '否'}（
-                  {promptDebug.requiredCharactersCount} 个）
-                </div>
-                <div>🧪 包含章节大纲：{promptDebug.includesChapterOutlineText ? '是' : '否'}</div>
-                <div>
-                  🧪 包含大纲执行清单：{promptDebug.includesOutlineChecklistText ? '是' : '否'}（
-                  {promptDebug.outlineKeyPointCount} 项）
-                </div>
-                <div>🧪 包含分卷大纲：{promptDebug.includesVolumeOutlineText ? '是' : '否'}</div>
-                <div>🧪 包含总纲：{promptDebug.includesMasterOutlineText ? '是' : '否'}</div>
-                <div>🧪 prompt 长度：{promptDebug.promptLength} 字符</div>
-              </>
-            )}
+            <TriangleAlert size={13} strokeWidth={1.8} aria-hidden="true" />
+            未能从章节大纲中提取关键剧情点，建议补充更明确的大纲
           </div>
+        )}
+        {showContext && contextSummary && (
+          <AiGenerateContextDetails
+            context={contextSummary}
+            promptDebug={promptDebug}
+            styles={availableStyles}
+            selectedStyleId={selectedStyleId}
+            outputs={availableOutputs}
+            selectedOutputId={selectedOutputId}
+            wordCount={wordCountDraft}
+          />
         )}
         <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
           点击「查看上下文摘要」可预览 AI 将收到的全部配置信息

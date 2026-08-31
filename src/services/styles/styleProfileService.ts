@@ -13,7 +13,7 @@ const STYLE_KEY = 'ai_novel_studio_style_profiles';
 
 interface StyleProfileDto {
   id: string;
-  projectId: string;
+  projectId?: string | null;
   name: string;
   description?: string;
   narrativePerspective?: string;
@@ -51,7 +51,7 @@ function fromDto(dto: StyleProfileDto): StyleProfile {
   }
   return {
     id: dto.id,
-    novelId: dto.projectId,
+    novelId: dto.projectId?.trim() || undefined,
     name: dto.name,
     sourceType: dto.sourceType as StyleProfile['sourceType'],
     sourceAssetId: dto.sourceAssetId,
@@ -122,11 +122,15 @@ const defaultSeed: CreateStyleProfileInput[] = [
   },
 ];
 
+function getLocalStoredAll(): StyleProfile[] {
+  return lsGet<StyleProfile[]>(STYLE_KEY) ?? [];
+}
+
 function getLocalAll(): StyleProfile[] {
-  let list = lsGet<StyleProfile[]>(STYLE_KEY) ?? [];
+  let list = getLocalStoredAll();
   if (list.length === 0) {
     const now = nowISO();
-    list = defaultSeed.map((s) => ({
+    list = defaultSeed.map((s, index) => ({
       ...s,
       id: generateId(),
       sourceType: 'system_default' as StyleProfile['sourceType'],
@@ -140,7 +144,7 @@ function getLocalAll(): StyleProfile[] {
       dialogueRatio: s.dialogueRatio || 0.35,
       descriptionRatio: s.descriptionRatio || 0.4,
       prohibitedStyles: [],
-      isActive: true,
+      isActive: index === 0,
       createdAt: now,
       updatedAt: now,
     }));
@@ -150,13 +154,15 @@ function getLocalAll(): StyleProfile[] {
 }
 
 export const styleProfileService = {
-  async getAll(novelId?: string): Promise<StyleProfile[]> {
+  async getAll(novelId?: string, options: { initialize?: boolean } = {}): Promise<StyleProfile[]> {
+    const initialize = options.initialize !== false;
+    const readLocal = initialize ? getLocalAll : getLocalStoredAll;
     try {
       const dtos = await dbCall<StyleProfileDto[]>(
         'list_style_profiles',
         { projectId: novelId },
         () => {
-          return getLocalAll().map((s): StyleProfileDto => ({
+          return readLocal().map((s): StyleProfileDto => ({
             id: s.id,
             projectId: s.novelId || '',
             name: s.name,
@@ -190,15 +196,14 @@ export const styleProfileService = {
       );
       const profiles = dtos.map(fromDto);
       if (profiles.length > 0)
-        return novelId ? profiles.filter((s) => s.novelId === novelId) : profiles;
+        return novelId ? profiles.filter((s) => !s.novelId || s.novelId === novelId) : profiles;
+      if (getDbMode() === 'tauri') return [];
       return novelId
-        ? getLocalAll().filter((profile) => !profile.novelId || profile.novelId === novelId)
-        : getLocalAll();
+        ? readLocal().filter((profile) => !profile.novelId || profile.novelId === novelId)
+        : readLocal();
     } catch (error) {
       if (getDbMode() === 'tauri') throw error;
-      return novelId
-        ? getLocalAll().filter((s) => !s.novelId || s.novelId === novelId)
-        : getLocalAll();
+      return novelId ? readLocal().filter((s) => !s.novelId || s.novelId === novelId) : readLocal();
     }
   },
 
@@ -212,8 +217,14 @@ export const styleProfileService = {
       return dto ? fromDto(dto) : null;
     } catch (error) {
       if (getDbMode() === 'tauri') throw error;
-      const local = getLocalAll().filter((s) => s.novelId === novelId);
-      return local.find((s) => s.isActive) || local[0] || null;
+      const local = getLocalAll();
+      return (
+        local.find((profile) => profile.novelId === novelId && profile.isActive) ??
+        local.find((profile) => !profile.novelId && profile.isActive) ??
+        local.find((profile) => profile.novelId === novelId) ??
+        local.find((profile) => !profile.novelId) ??
+        null
+      );
     }
   },
 
@@ -280,7 +291,7 @@ export const styleProfileService = {
         dialogueRatio: input.dialogueRatio || 0.35,
         descriptionRatio: input.descriptionRatio || 0.4,
         prohibitedStyles: input.forbiddenStyles || [],
-        isActive: true,
+        isActive: false,
         createdAt: now,
         updatedAt: now,
       };
@@ -294,7 +305,10 @@ export const styleProfileService = {
     id: string,
     input: UpdateStyleProfileInput & { projectId?: string; novelId?: string },
   ): Promise<StyleProfile | null> {
-    const pid = input.projectId || input.novelId || '';
+    const existing = await this.getById(id);
+    if (!existing) return null;
+    const requestedOwner = input.projectId ?? input.novelId;
+    const pid = requestedOwner?.trim() ?? existing.novelId ?? '';
     try {
       const dto = await dbCall<StyleProfileDto>(
         'save_style_profile',
@@ -302,27 +316,31 @@ export const styleProfileService = {
           id,
           input: {
             projectId: pid,
-            name: input.name || '',
-            narrativePerspective: input.narrativePerspective,
-            tone: input.tone,
-            pace: input.pace,
-            sentenceStyle: input.sentenceStyle,
-            dialogueRatio: input.dialogueRatio,
-            descriptionRatio: input.descriptionRatio,
-            psychologicalRatio: input.psychologicalRatio,
-            battleStyle: input.battleStyle,
-            battleIntensity: input.battleIntensity,
-            emotionTendency: input.emotionTendency,
-            chapterEnding: input.chapterEnding,
-            forbiddenStyles: input.forbiddenStyles,
-            styleSummary: input.styleSummary,
-            sourceType: input.sourceType || undefined,
-            sourceAssetId: input.sourceAssetId,
-            sourceReferenceWorkId: input.sourceReferenceWorkId,
-            sourceReferenceImportId: input.sourceReferenceImportId,
-            sourceContentHash: input.sourceContentHash,
-            sourceState: input.sourceState,
-            analysisMetadataJson: input.analysisMetadataJson,
+            name: input.name ?? existing.name,
+            description: existing.description,
+            narrativePerspective: input.narrativePerspective ?? existing.narrativePerspective,
+            tone: input.tone ?? existing.tone,
+            pace: input.pace ?? existing.pace,
+            sentenceStyle: input.sentenceStyle ?? existing.sentenceStyle,
+            dialogueRatio: input.dialogueRatio ?? existing.dialogueRatio,
+            descriptionRatio: input.descriptionRatio ?? existing.descriptionRatio,
+            psychologicalRatio: input.psychologicalRatio ?? existing.psychologicalRatio,
+            battleStyle: input.battleStyle ?? existing.battleStyle,
+            battleIntensity: input.battleIntensity ?? existing.battleIntensity,
+            emotionTendency: input.emotionTendency ?? existing.emotionTendency,
+            chapterEnding: input.chapterEnding ?? existing.chapterEnding,
+            forbiddenStyles:
+              input.forbiddenStyles ?? existing.forbiddenStyles ?? existing.prohibitedStyles,
+            styleSummary: input.styleSummary ?? existing.styleSummary,
+            rawConfigJson: existing.rawConfigJson,
+            sourceType: input.sourceType ?? existing.sourceType,
+            sourceAssetId: input.sourceAssetId ?? existing.sourceAssetId,
+            sourceReferenceWorkId: input.sourceReferenceWorkId ?? existing.sourceReferenceWorkId,
+            sourceReferenceImportId:
+              input.sourceReferenceImportId ?? existing.sourceReferenceImportId,
+            sourceContentHash: input.sourceContentHash ?? existing.sourceContentHash,
+            sourceState: input.sourceState ?? existing.sourceState,
+            analysisMetadataJson: input.analysisMetadataJson ?? existing.analysisMetadataJson,
           },
         },
         () => {
@@ -343,25 +361,31 @@ export const styleProfileService = {
   },
 
   async setActive(projectId: string, styleProfileId: string): Promise<void> {
-    try {
-      await dbCall<void>(
-        'set_active_style_profile',
-        { input: { projectId, styleProfileId } },
-        () => {},
-      );
-    } catch (error) {
-      if (getDbMode() === 'tauri') throw error;
-      const list = getLocalAll();
-      for (const s of list) {
-        if (s.novelId === projectId) s.isActive = s.id === styleProfileId;
-      }
-      lsSet(STYLE_KEY, list);
-    }
+    const normalizedProjectId = projectId.trim();
+    await dbCall<void>(
+      'set_active_style_profile',
+      { input: { projectId: normalizedProjectId, styleProfileId } },
+      () => {
+        const list = getLocalAll();
+        const target = list.find((profile) => profile.id === styleProfileId);
+        if (!target || (target.novelId ?? '').trim() !== normalizedProjectId) {
+          throw new Error('风格方案不存在或不属于当前作品');
+        }
+        for (const profile of list) {
+          if ((profile.novelId ?? '').trim() === normalizedProjectId) {
+            profile.isActive = profile.id === styleProfileId;
+          }
+        }
+        lsSet(STYLE_KEY, list);
+      },
+    );
   },
 
   async remove(projectIdOrId: string, id?: string): Promise<void> {
-    const pid = id ? projectIdOrId : '';
     const sid = id || projectIdOrId;
+    const existing = id ? null : await this.getById(sid);
+    if (!id && !existing) return;
+    const pid = id ? projectIdOrId : (existing?.novelId ?? '');
     await dbCall<void>('delete_style_profile', { projectId: pid, styleProfileId: sid }, () => {
       lsSet(
         STYLE_KEY,

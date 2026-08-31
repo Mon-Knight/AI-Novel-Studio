@@ -331,9 +331,16 @@ test('application entry owns scheduler recovery instead of the lazy route hook',
 
   assert.match(
     mainSource,
-    /import \{ autonomousSchedulerWorker \} from '\.\/services\/autonomous-creation\/autonomousSchedulerWorker';/,
+    /import\('\.\/services\/autonomous-creation\/autonomousSchedulerWorker'\)/,
   );
-  assert.match(mainSource, /void autonomousSchedulerWorker\.recoverStartup\(\);/);
+  assert.match(
+    mainSource,
+    /\.then\(\(\{ autonomousSchedulerWorker \}\) => autonomousSchedulerWorker\.recoverStartup\(\)\)/,
+  );
+  assert.ok(
+    mainSource.indexOf('void startupCoordinator.start();') <
+      mainSource.indexOf('ReactDOM.createRoot'),
+  );
   assert.doesNotMatch(hookSource, /recoverStartup/);
 });
 

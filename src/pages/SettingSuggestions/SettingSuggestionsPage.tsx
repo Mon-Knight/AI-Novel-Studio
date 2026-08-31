@@ -2,6 +2,7 @@
  * AI Novel Studio - 设定库 AI 推演页面
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import { novelRepository } from '../../services/database/novelRepository';
@@ -371,7 +372,9 @@ function SettingSuggestionsPage() {
 
           {filteredSuggestions.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-state-icon">◇</div>
+              <div className="empty-state-icon">
+                <Sparkles aria-hidden="true" size={40} strokeWidth={1.8} />
+              </div>
               <div className="empty-state-text">暂无候选记录</div>
             </div>
           ) : (

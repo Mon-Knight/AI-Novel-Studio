@@ -1,15 +1,16 @@
 import type { ResultArtifactBundle } from '../../types/result-artifact';
 import type { CharacterCandidate, CharacterRoleType } from '../../types/character';
 import { characterService } from '../characters/characterService';
+import { chapterCharacterService } from '../characters/chapterCharacterService';
 import { chapterEventService } from '../characters/chapterEventService';
 import { chapterOutlineService, masterOutlineService } from '../outlines/outlineService';
 import { chapterSummaryService } from '../context/chapterSummaryService';
 import { isTauri } from '../database/db';
+import { draftVersionService } from '../database/draftVersionService';
 import { placementRuntimeService } from '../placements/placementRuntimeService';
 import {
   CONTEXT_COMPRESSION_TITLE_PREFIX,
   isContextCompressionCandidate,
-  novelContextCompressionProvider,
   type NovelContextCompressionCandidate,
 } from '../context/novelContextCompressionProvider';
 export interface ArtifactApplyInput {
@@ -95,6 +96,7 @@ function characterFromUnknown(value: unknown): CharacterCandidate | undefined {
     behaviorLimits: asText(object?.behaviorLimits) || undefined,
     forbiddenBehaviors: asText(object?.forbiddenBehaviors) || undefined,
     currentState: asText(object?.currentState) || undefined,
+    chapterFunction: asText(object?.chapterFunction) || undefined,
   };
 }
 
@@ -160,6 +162,7 @@ async function applyOutline(
         sourceType: 'ai_generated',
         saveAsNewVersion: true,
       });
+      await chapterOutlineService.setActive(saved.id, input.novelId);
       return { applyTransactionId: saved.id };
     }
     const saved = await masterOutlineService.save({
@@ -169,6 +172,7 @@ async function applyOutline(
       sourceType: 'workbench_apply',
       saveAsNewVersion: true,
     });
+    await masterOutlineService.setActive(saved.id, input.novelId);
     return { applyTransactionId: saved.id };
   } catch (error) {
     return {
@@ -189,30 +193,51 @@ async function applyCharacters(
   const unique = [...new Map(candidates.map((candidate) => [candidate.name, candidate])).values()];
   if (unique.length === 0) return { conflictCode: 'EMPTY_CANDIDATE' };
   const existing = await characterService.getByNovelId(input.novelId);
-  const existingNames = new Set(existing.map((character) => character.name));
+  const charactersByName = new Map(existing.map((character) => [character.name, character]));
+  const existingBindings = input.chapterId
+    ? await chapterCharacterService.getByChapterId(input.chapterId)
+    : [];
+  const boundCharacterIds = new Set(existingBindings.map((binding) => binding.characterId));
   const createdIds: string[] = [];
+  const bindingIds: string[] = [];
   for (const candidate of unique) {
-    if (existingNames.has(candidate.name)) continue;
-    const created = await characterService.create({
-      novelId: input.novelId,
-      name: candidate.name,
-      roleType: candidate.roleType,
-      identity: candidate.identity,
-      faction: candidate.faction,
-      relationToProtagonist: candidate.relationToProtagonist,
-      goal: candidate.goal,
-      personality: candidate.personality,
-      behaviorLimits: candidate.behaviorLimits,
-      forbiddenBehaviors: candidate.forbiddenBehaviors,
-      currentState: candidate.currentState,
-    });
-    existingNames.add(created.name);
-    createdIds.push(created.id);
+    let character = charactersByName.get(candidate.name);
+    if (!character) {
+      character = await characterService.create({
+        novelId: input.novelId,
+        name: candidate.name,
+        roleType: candidate.roleType,
+        identity: candidate.identity,
+        faction: candidate.faction,
+        relationToProtagonist: candidate.relationToProtagonist,
+        goal: candidate.goal,
+        personality: candidate.personality,
+        behaviorLimits: candidate.behaviorLimits,
+        forbiddenBehaviors: candidate.forbiddenBehaviors,
+        currentState: candidate.currentState,
+        isProtagonist: candidate.roleType === 'protagonist',
+      });
+      charactersByName.set(character.name, character);
+      createdIds.push(character.id);
+    }
+    if (input.chapterId && !boundCharacterIds.has(character.id)) {
+      const binding = await chapterCharacterService.add({
+        novelId: input.novelId,
+        chapterId: input.chapterId,
+        characterId: character.id,
+        characterName: character.name,
+        roleInChapter: candidate.roleType === 'protagonist' ? 'main' : 'supporting',
+        mustAppear: true,
+        note: candidate.chapterFunction || '由本章角色候选应用建立',
+      });
+      boundCharacterIds.add(character.id);
+      bindingIds.push(binding.id);
+    }
   }
-  if (createdIds.length === 0) {
+  if (createdIds.length === 0 && bindingIds.length === 0) {
     return { conflictCode: 'CHARACTER_CANDIDATES_ALREADY_APPLIED' };
   }
-  return { applyTransactionId: createdIds.join(',') };
+  return { applyTransactionId: [...createdIds, ...bindingIds].join(',') };
 }
 
 async function applyEvents(
@@ -258,6 +283,13 @@ async function applyChapterSummary(
   bundle: ResultArtifactBundle,
 ): Promise<ArtifactApplyOutcome> {
   if (!input.chapterId) return { conflictCode: 'CHAPTER_TARGET_REQUIRED' };
+  const adoptedDraft = await draftVersionService.getAdoptedByChapterId(input.chapterId);
+  if (!adoptedDraft) {
+    return { conflictCode: 'CHAPTER_SUMMARY_ADOPTED_DRAFT_REQUIRED' };
+  }
+  if (bundle.artifact.sourceDraftId && bundle.artifact.sourceDraftId !== adoptedDraft.id) {
+    return { conflictCode: 'CHAPTER_SUMMARY_ADOPTED_DRAFT_MISMATCH' };
+  }
   const payload = record(extractCandidatePayload(bundle));
   const nested = record(payload?.data);
   const parsed = record(parseJsonValue(extractCandidateText(bundle)));
@@ -270,11 +302,12 @@ async function applyChapterSummary(
   const saved = await chapterSummaryService.create({
     novelId: input.novelId,
     chapterId: input.chapterId,
-    adoptedDraftId: bundle.artifact.sourceDraftId || input.baseRevision || 'workbench-unadopted',
+    adoptedDraftId: adoptedDraft.id,
     summary,
     enabled: true,
     aiTaskId: bundle.artifact.taskId,
     contentHash: bundle.artifact.contentHash,
+    draftVersion: adoptedDraft.versionNo,
   });
   return { applyTransactionId: saved.id };
 }
@@ -296,8 +329,9 @@ async function applyCompressedContext(
   if (candidate.novelId !== input.novelId) {
     return { conflictCode: 'CONTEXT_COMPRESSION_SCOPE_MISMATCH' };
   }
-  const applied = await novelContextCompressionProvider.apply(candidate);
-  return { applyTransactionId: applied.recordId };
+  return {
+    conflictCode: isTauri() ? 'STRUCTURED_APPLY_ATOMIC_REQUIRED' : 'BROWSER_APPLY_UNSUPPORTED',
+  };
 }
 
 export async function applyArtifactBundle(

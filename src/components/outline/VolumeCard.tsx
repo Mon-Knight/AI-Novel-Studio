@@ -1,4 +1,14 @@
 import { useNavigate } from 'react-router-dom';
+import {
+  ArrowRight,
+  BookOpenText,
+  FileText,
+  Pencil,
+  Plus,
+  Target,
+  Trash2,
+  Zap,
+} from 'lucide-react';
 import type { Volume } from '../../types/volume';
 import type { Chapter } from '../../types/chapter';
 import { ChapterStatusLabels } from '../../types/chapter';
@@ -63,7 +73,18 @@ function VolumeCard({
       >
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16, fontWeight: 600 }}>📘 {volume.title}</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 16,
+                fontWeight: 600,
+              }}
+            >
+              <BookOpenText aria-hidden="true" size={16} strokeWidth={1.8} />
+              {volume.title}
+            </span>
             <span
               style={{
                 fontSize: 11,
@@ -87,20 +108,23 @@ function VolumeCard({
               }}
             >
               {volume.summary && (
-                <div>
-                  📝 {volume.summary.slice(0, 100)}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                  <FileText aria-hidden="true" size={13} strokeWidth={1.8} />
+                  {volume.summary.slice(0, 100)}
                   {volume.summary.length > 100 ? '...' : ''}
                 </div>
               )}
               {volume.goal && (
-                <div style={{ marginTop: 2 }}>
-                  🎯 分卷目标：{volume.goal.slice(0, 80)}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, marginTop: 2 }}>
+                  <Target aria-hidden="true" size={13} strokeWidth={1.8} />
+                  分卷目标：{volume.goal.slice(0, 80)}
                   {volume.goal.length > 80 ? '...' : ''}
                 </div>
               )}
               {volume.mainConflict && (
-                <div style={{ marginTop: 2 }}>
-                  ⚡ 主要矛盾：{volume.mainConflict.slice(0, 80)}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, marginTop: 2 }}>
+                  <Zap aria-hidden="true" size={13} strokeWidth={1.8} />
+                  主要矛盾：{volume.mainConflict.slice(0, 80)}
                   {volume.mainConflict.length > 80 ? '...' : ''}
                 </div>
               )}
@@ -109,17 +133,20 @@ function VolumeCard({
         </div>
         <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginLeft: 12 }}>
           <button className="btn btn-secondary btn-sm" onClick={onEdit}>
-            ✏️ 编辑
+            <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
+            编辑
           </button>
           <button
             className="btn btn-secondary btn-sm"
             onClick={onDelete}
+            aria-label={`删除分卷 ${volume.title}`}
             style={{ color: 'var(--color-error)' }}
           >
-            🗑️
+            <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
           </button>
           <button className="btn btn-primary btn-sm" onClick={onAddChapter}>
-            + 新章
+            <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+            新章
           </button>
         </div>
       </div>
@@ -171,22 +198,25 @@ function VolumeCard({
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => onEditChapter(ch)}
+                aria-label={`编辑章节 ${ch.title}`}
                 style={{ marginRight: 4 }}
               >
-                ✏️
+                <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
               </button>
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => onDeleteChapter(ch.id)}
+                aria-label={`删除章节 ${ch.title}`}
                 style={{ marginRight: 4, color: 'var(--color-error)' }}
               >
-                🗑️
+                <Trash2 aria-hidden="true" size={14} strokeWidth={1.8} />
               </button>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => navigate(`/novels/${ch.novelId}/workspace?chapterId=${ch.id}`)}
               >
-                进入工作台 →
+                进入工作台
+                <ArrowRight aria-hidden="true" size={14} strokeWidth={1.8} />
               </button>
             </div>
           ))}
@@ -209,7 +239,8 @@ function VolumeCard({
             style={{ marginTop: 8 }}
             onClick={onAddChapter}
           >
-            + 新建章节
+            <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+            新建章节
           </button>
         </div>
       )}

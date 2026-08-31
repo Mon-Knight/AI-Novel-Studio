@@ -69,7 +69,7 @@
 
 ## Tag 与推送
 
-- [ ] 版本分支已通过 PR 审查并合入 `main`
+- [ ] 版本分支已满足适用 PR 审查条件并合入 `main`
 - [ ] 本地 `main` 已使用 `git pull --ff-only origin main` 同步
 - [ ] `git tag vX.X.X` 已创建
 - [ ] `git push origin vX.X.X` 已推送

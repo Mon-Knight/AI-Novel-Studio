@@ -364,6 +364,26 @@ test('tracked pipeline persists safe snapshots, response identity and one artifa
   );
   assert.equal(observations.created?.constraintSnapshot.providerOptionsJson.providerId, 'deepseek');
   assert.equal(observations.created?.constraintSnapshot.providerOptionsJson.maxTokens, 8);
+  assert.deepEqual(result.providerRequestEvidence, {
+    schemaVersion: 'provider_request_evidence_v1',
+    hashAlgorithm: 'sha256',
+    messagesSerialization: 'json_stringify_messages_v1',
+    messagesSha256: (observations.created?.inputSnapshot.payloadJson as { requestBodyHash: string })
+      .requestBodyHash,
+    messageCount: 2,
+    compiledContextSha256: (
+      observations.created?.contextSnapshot.sourceManifestJson as {
+        compiledContextHash: string;
+      }
+    ).compiledContextHash,
+    sources: [],
+    requestContextSources: [],
+  });
+  const serializedEvidence = JSON.stringify(result.providerRequestEvidence);
+  assert.equal(serializedEvidence.includes(settings.apiKey), false);
+  assert.equal(serializedEvidence.includes(settings.baseUrl), false);
+  assert.equal(serializedEvidence.includes('Reply OK only.'), false);
+  assert.equal(serializedEvidence.includes(providerText), false);
 });
 
 test('tracked pipeline projects the formal task into the task center with the same identity', async () => {
@@ -840,6 +860,7 @@ test('browser fallback remains ephemeral and never fabricates Task or Artifact f
   assert.equal(result.taskId, undefined);
   assert.equal(result.artifactBundle, undefined);
   assert.equal(observations.created, undefined);
+  assert.match(result.providerRequestEvidence?.messagesSha256 ?? '', /^[0-9a-f]{64}$/);
 });
 
 test('invalid artifact replay remains failed and never dispatches the provider again', async () => {

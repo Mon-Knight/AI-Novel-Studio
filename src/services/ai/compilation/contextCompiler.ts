@@ -37,6 +37,7 @@ export interface CompileAiContextInput {
 interface NormalizedSource extends AiContextSourceInput {
   content: string;
   required: boolean;
+  requireFull: boolean;
 }
 
 function boundedInteger(value: number, label: string, minimum: number, maximum: number): number {
@@ -78,11 +79,18 @@ function normalizeSource(source: AiContextSourceInput): NormalizedSource {
     order: boundedInteger(source.order, 'source order', 0, 100_000),
     priority: boundedInteger(source.priority, 'source priority', 0, 100),
     required: source.required === true,
+    requireFull: source.requireFull === true,
     maxTokens:
       source.maxTokens === undefined
         ? undefined
         : boundedInteger(source.maxTokens, 'source maxTokens', 1, 1_000_000),
   };
+  if (normalized.requireFull && !normalized.required) {
+    throw new AiCompilationError(
+      'AI_COMPILATION_INPUT_INVALID',
+      `完整包含来源 ${normalized.sourceType}:${normalized.sourceId} 必须同时标记为 required。`,
+    );
+  }
   if (normalized.required && !normalized.content) {
     throw new AiCompilationError(
       'AI_CONTEXT_SOURCE_REQUIRED',
@@ -223,6 +231,12 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
         renderedSections.push(fullSection);
         consumedTokens = estimateTokens(renderedSections.join('\n\n'));
       } else {
+        if (source.requireFull) {
+          throw new AiCompilationError(
+            'AI_CONTEXT_BUDGET_EXCEEDED',
+            `预算不足以完整包含关键来源 ${sourceKey(source)}。`,
+          );
+        }
         includedContent = truncateToBudget(source, compiledPrefix, sourceLimit, renderSourceLabels);
         if (!includedContent) {
           if (source.required) {
@@ -251,6 +265,7 @@ export async function compileAiContext(input: CompileAiContextInput): Promise<Co
       order: source.order,
       priority: source.priority,
       required: source.required,
+      requireFull: source.requireFull,
       contentHash,
       originalChars,
       originalBytes,

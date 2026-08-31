@@ -167,7 +167,7 @@ function OutlineEditor({
             if (!ctx.activeVolumeOutline) warnings.push('缺少分卷大纲（建议先生成分卷大纲）');
           }
           if (warnings.length > 0) {
-            setStage(`⚠️ ${warnings.join('、')}，将生成简化版`);
+            setStage(`${warnings.join('、')}，将生成简化版`);
           }
 
           setStage('正在调用 AI 生成……');

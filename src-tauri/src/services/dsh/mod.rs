@@ -5,6 +5,7 @@
 //! interpretation, veto, budget, execution, transactions and final adoption.
 
 pub mod baseline_freshness;
+pub mod canonical_manifest;
 pub mod commands;
 pub mod config;
 pub mod governed_proxy;

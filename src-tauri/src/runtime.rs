@@ -48,6 +48,16 @@ const REQUIRED_E2E_TABLES: [&str; 26] = [
     "agent_plan_checkpoints",
 ];
 
+const CONVERSATION_E2E_COUNT_TABLES: [&str; 7] = [
+    "task_conversations",
+    "conversation_turns",
+    "task_runs",
+    "tool_call_events",
+    "conversation_artifact_cards",
+    "artifact_decisions",
+    "review_authorizations",
+];
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct E2eDiagnosticsCounts {
@@ -72,8 +82,20 @@ pub struct E2eDiagnosticsCounts {
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct E2eCanonicalManifestAttestation {
+    pub contract_version: String,
+    pub projection_version: String,
+    pub canonicalization: String,
+    pub projection_hash: String,
+    pub tool_identities: Vec<String>,
+    pub model_visible_tool_identities: Vec<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct E2eDiagnostics {
     pub enabled: bool,
+    pub process_id: u32,
     pub data_dir: String,
     pub database_path: String,
     pub network_blocked: bool,
@@ -83,6 +105,7 @@ pub struct E2eDiagnostics {
     pub schema_ready: bool,
     pub migration_count: i64,
     pub latest_migration_id: Option<String>,
+    pub canonical_manifest: E2eCanonicalManifestAttestation,
     pub counts: E2eDiagnosticsCounts,
 }
 
@@ -210,6 +233,59 @@ pub fn get_e2e_novel_commit_state(novel_id: String) -> Result<E2eNovelCommitStat
         )
     })?;
     read_novel_commit_state(&database_path, &novel_id)
+}
+
+#[cfg(feature = "e2e")]
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eAgentClosedLoopState {
+    pub process_id: u32,
+    pub conversations_count: i64,
+    pub turns_count: i64,
+    pub runs_count: i64,
+    pub tool_events_count: i64,
+    pub result_artifacts_count: i64,
+    pub artifact_decisions_count: i64,
+    pub review_authorizations_count: i64,
+    pub consumed_authorizations_count: i64,
+    pub drafts_count: i64,
+    pub chapters_count: i64,
+    pub adopted_drafts_count: i64,
+}
+
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub fn get_e2e_agent_closed_loop_state() -> Result<E2eAgentClosedLoopState, String> {
+    require_e2e_command_data_dir("agent closed loop diagnostics")?;
+    let conn = crate::db::get_connection()
+        .lock()
+        .map_err(|error| error.to_string())?;
+    Ok(E2eAgentClosedLoopState {
+        process_id: std::process::id(),
+        conversations_count: count_rows(&conn, "task_conversations")?,
+        turns_count: count_rows(&conn, "conversation_turns")?,
+        runs_count: count_rows(&conn, "task_runs")?,
+        tool_events_count: count_rows(&conn, "tool_call_events")?,
+        result_artifacts_count: count_rows(&conn, "result_artifacts")?,
+        artifact_decisions_count: count_rows(&conn, "artifact_decisions")?,
+        review_authorizations_count: count_rows(&conn, "review_authorizations")?,
+        consumed_authorizations_count: conn
+            .query_row(
+                "SELECT COUNT(*) FROM review_authorizations WHERE status = 'consumed'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("count consumed review authorizations failed: {error}"))?,
+        drafts_count: count_rows(&conn, "chapter_drafts")?,
+        chapters_count: count_rows(&conn, "chapters")?,
+        adopted_drafts_count: conn
+            .query_row(
+                "SELECT COUNT(*) FROM chapter_drafts WHERE is_adopted = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("count adopted drafts failed: {error}"))?,
+    })
 }
 
 #[cfg(feature = "e2e")]
@@ -438,8 +514,13 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         None
     };
 
+    let canonical_manifest =
+        crate::services::dsh::canonical_manifest::canonical_manifest_attestation()
+            .map_err(|error| format!("canonical manifest attestation failed: {}", error.message))?;
+
     Ok(E2eDiagnostics {
         enabled: true,
+        process_id: std::process::id(),
         data_dir: data_dir.to_string_lossy().into_owned(),
         database_path: database_path.to_string_lossy().into_owned(),
         network_blocked: true,
@@ -449,6 +530,14 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         schema_ready,
         migration_count,
         latest_migration_id,
+        canonical_manifest: E2eCanonicalManifestAttestation {
+            contract_version: canonical_manifest.contract_version,
+            projection_version: canonical_manifest.projection_version,
+            canonicalization: canonical_manifest.canonicalization,
+            projection_hash: canonical_manifest.projection_hash,
+            tool_identities: canonical_manifest.tool_identities,
+            model_visible_tool_identities: canonical_manifest.model_visible_tool_identities,
+        },
         counts,
     })
 }
@@ -521,7 +610,7 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
 }
 
 fn count_rows(conn: &Connection, table: &str) -> Result<i64, String> {
-    if !REQUIRED_E2E_TABLES.contains(&table) {
+    if !REQUIRED_E2E_TABLES.contains(&table) && !CONVERSATION_E2E_COUNT_TABLES.contains(&table) {
         return Err(format!("unsupported E2E diagnostics table: {}", table));
     }
 
@@ -750,6 +839,17 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_DIRECTORY_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn conversation_e2e_count_tables_are_explicitly_allowlisted() {
+        let connection = Connection::open_in_memory().unwrap();
+        for table in CONVERSATION_E2E_COUNT_TABLES {
+            assert_eq!(count_rows(&connection, table).unwrap(), 0, "{table}");
+        }
+        assert!(count_rows(&connection, "sqlite_master")
+            .unwrap_err()
+            .contains("unsupported E2E diagnostics table"));
+    }
 
     fn create_test_directory(label: &str) -> PathBuf {
         let counter = TEST_DIRECTORY_COUNTER.fetch_add(1, Ordering::Relaxed);

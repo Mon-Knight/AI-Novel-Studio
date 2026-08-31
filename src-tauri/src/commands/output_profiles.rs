@@ -55,7 +55,7 @@ pub struct SaveOutputProfileInput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetDefaultOutputProfileInput {
-    pub novel_id: String,
+    pub novel_id: Option<String>,
     pub output_profile_id: String,
 }
 
@@ -355,6 +355,21 @@ pub fn delete_output_profile(output_profile_id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn set_default_output_profile(input: SetDefaultOutputProfileInput) -> Result<(), String> {
     let mut connection = get_connection().lock().map_err(|error| error.to_string())?;
+    set_default_with(&mut connection, input)
+}
+
+fn set_default_with(
+    connection: &mut Connection,
+    mut input: SetDefaultOutputProfileInput,
+) -> Result<(), String> {
+    input.novel_id = input.novel_id.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
@@ -366,19 +381,30 @@ pub fn set_default_output_profile(input: SetDefaultOutputProfileInput) -> Result
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    if !matches!(owner, Some(Some(ref novel_id)) if novel_id == &input.novel_id) {
+    if owner != Some(input.novel_id.clone()) {
         return Err("输出控制方案不存在或不属于当前作品".to_string());
     }
     let now = chrono::Utc::now().to_rfc3339();
-    transaction
-        .execute(
-            "UPDATE output_profiles
-                SET is_default = CASE WHEN id = ?2 THEN 1 ELSE 0 END,
-                    updated_at = ?3
-              WHERE novel_id = ?1",
-            params![input.novel_id, input.output_profile_id, now],
-        )
-        .map_err(|error| error.to_string())?;
+    match input.novel_id.as_deref() {
+        Some(novel_id) => transaction
+            .execute(
+                "UPDATE output_profiles
+                    SET is_default = CASE WHEN id = ?2 THEN 1 ELSE 0 END,
+                        updated_at = ?3
+                  WHERE novel_id = ?1",
+                params![novel_id, input.output_profile_id, now],
+            )
+            .map_err(|error| error.to_string())?,
+        None => transaction
+            .execute(
+                "UPDATE output_profiles
+                    SET is_default = CASE WHEN id = ?1 THEN 1 ELSE 0 END,
+                        updated_at = ?2
+                  WHERE novel_id IS NULL",
+                params![input.output_profile_id, now],
+            )
+            .map_err(|error| error.to_string())?,
+    };
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -477,5 +503,63 @@ mod tests {
                 .unwrap()
                 .is_default
         );
+    }
+
+    #[test]
+    fn setting_default_supports_shared_scope_and_rejects_owner_mismatch() {
+        let mut connection = connection();
+        save_with(&mut connection, input("shared-first", None, "共享一")).unwrap();
+        save_with(&mut connection, input("shared-second", None, "共享二")).unwrap();
+        save_with(
+            &mut connection,
+            input("project", Some("novel-1"), "作品方案"),
+        )
+        .unwrap();
+
+        set_default_with(
+            &mut connection,
+            SetDefaultOutputProfileInput {
+                novel_id: None,
+                output_profile_id: "shared-second".to_string(),
+            },
+        )
+        .unwrap();
+
+        let shared_default_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM output_profiles WHERE novel_id IS NULL AND is_default = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(shared_default_count, 1);
+        let shared_second_is_default: i64 = connection
+            .query_row(
+                "SELECT is_default FROM output_profiles WHERE id = 'shared-second'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(shared_second_is_default, 1);
+
+        let error = set_default_with(
+            &mut connection,
+            SetDefaultOutputProfileInput {
+                novel_id: Some("novel-2".to_string()),
+                output_profile_id: "project".to_string(),
+            },
+        )
+        .expect_err("cross-owner default switch must fail");
+        assert!(error.contains("不存在或不属于当前作品"));
+
+        let missing_error = set_default_with(
+            &mut connection,
+            SetDefaultOutputProfileInput {
+                novel_id: None,
+                output_profile_id: "missing".to_string(),
+            },
+        )
+        .expect_err("missing default switch must fail");
+        assert!(missing_error.contains("不存在或不属于当前作品"));
     }
 }

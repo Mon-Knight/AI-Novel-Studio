@@ -1,3 +1,7 @@
+use crate::domain::{
+    context::{ChapterSummaryDto, ContextRecordDto},
+    writing::ChapterDraftDto,
+};
 use crate::errors::{codes, AppError};
 use crate::repositories::{draft_repository, large_text_repository, memory_repository};
 use chrono::Utc;
@@ -16,6 +20,7 @@ const MAX_CANDIDATES: i64 = 500;
 const MAX_FETCH_CANDIDATES: i64 = 2000;
 const MAX_TOP_K: i64 = 50;
 const MAX_TOKEN_BUDGET: i64 = 100_000;
+const MATERIALIZED_CHUNK_UTF16_UNITS: usize = 1_800;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,6 +256,12 @@ struct RankedCandidate {
     reason: MemoryScoreReason,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PersistDocumentMode {
+    Strict,
+    ReplaceActiveSource,
+}
+
 fn empty_object() -> Value {
     json!({})
 }
@@ -421,6 +432,41 @@ fn validate_current_adopted_draft(
     Ok(())
 }
 
+fn validate_derived_source_provenance(
+    connection: &Connection,
+    input: &PutMemoryDocumentInput,
+    chapter_id: &str,
+    adopted_draft_id: &str,
+) -> Result<(), AppError> {
+    let draft = draft_repository::find_draft(connection, adopted_draft_id)?
+        .ok_or_else(|| memory_error(codes::MEMORY_SOURCE_INVALID, "Memory 来源采用稿不存在"))?;
+    if draft.novel_id != input.novel_id
+        || draft.chapter_id != chapter_id
+        || !draft.is_adopted
+        || draft.version_no != input.source_version
+    {
+        return Err(memory_error(
+            codes::MEMORY_SOURCE_STALE,
+            "Memory 来源采用稿归属或版本已变化",
+        ));
+    }
+    let verified = crate::services::draft_service::load_full_content(connection, &draft)?;
+    if !verified
+        .content_hash
+        .eq_ignore_ascii_case(&input.source_hash)
+    {
+        return Err(
+            memory_error(codes::MEMORY_HASH_MISMATCH, "Memory 来源采用稿哈希已变化").with_details(
+                json!({
+                    "expectedHash": input.source_hash,
+                    "actualHash": verified.content_hash,
+                }),
+            ),
+        );
+    }
+    Ok(())
+}
+
 fn validate_source(
     connection: &Connection,
     input: &PutMemoryDocumentInput,
@@ -547,7 +593,11 @@ fn validate_source(
         }
         _ => unreachable!(),
     }
-    validate_current_adopted_draft(connection, &input.novel_id, chapter_id, adopted_draft_id)
+    validate_current_adopted_draft(connection, &input.novel_id, chapter_id, adopted_draft_id)?;
+    if input.source_type != "adopted_draft" {
+        validate_derived_source_provenance(connection, input, chapter_id, adopted_draft_id)?;
+    }
+    Ok(())
 }
 
 fn build_chunks(
@@ -650,6 +700,496 @@ fn build_chunks(
     Ok(chunks)
 }
 
+fn split_by_utf16_limit(text: &str, limit: usize) -> Vec<String> {
+    let mut pieces = Vec::new();
+    let mut start = 0usize;
+    let mut units = 0usize;
+    for (index, character) in text.char_indices() {
+        let character_units = character.len_utf16();
+        if units > 0 && units + character_units > limit {
+            pieces.push(text[start..index].to_string());
+            start = index;
+            units = 0;
+        }
+        units += character_units;
+    }
+    if start < text.len() {
+        pieces.push(text[start..].to_string());
+    }
+    pieces
+}
+
+fn chunk_adopted_draft_content(content: &str) -> Vec<String> {
+    let normalized = content.replace("\r\n", "\n");
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let paragraphs = normalized
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|paragraph| !paragraph.is_empty());
+    let mut chunks = Vec::new();
+    let mut buffer = String::new();
+    for paragraph in paragraphs {
+        for (piece_index, piece) in split_by_utf16_limit(paragraph, MATERIALIZED_CHUNK_UTF16_UNITS)
+            .into_iter()
+            .enumerate()
+        {
+            let separator = if piece_index == 0 && !buffer.is_empty() {
+                "\n\n"
+            } else {
+                ""
+            };
+            let combined_len = buffer.encode_utf16().count()
+                + separator.encode_utf16().count()
+                + piece.encode_utf16().count();
+            if !buffer.is_empty() && combined_len > MATERIALIZED_CHUNK_UTF16_UNITS {
+                chunks.push(std::mem::take(&mut buffer));
+            } else {
+                buffer.push_str(separator);
+            }
+            buffer.push_str(&piece);
+        }
+    }
+    if !buffer.is_empty() {
+        chunks.push(buffer);
+    }
+    chunks
+}
+
+fn chunk_derived_memory_content(content: &str) -> Vec<String> {
+    let content = content.trim();
+    if content.is_empty() {
+        Vec::new()
+    } else {
+        split_by_utf16_limit(content, MATERIALIZED_CHUNK_UTF16_UNITS)
+    }
+}
+
+fn memory_token_count(text: &str) -> i64 {
+    let counted_words = crate::repositories::chapter_repository::count_words(text);
+    if counted_words > 0 {
+        counted_words
+    } else {
+        text.chars().count().max(1) as i64
+    }
+}
+
+fn materialization_hash(
+    connection: &Connection,
+    novel_id: &str,
+    source_type: &str,
+    source_id: &str,
+    document_prefix: &str,
+    identity_hash: String,
+) -> Result<String, AppError> {
+    let base_document_id = format!("{document_prefix}{identity_hash}");
+    match memory_repository::find_document(connection, novel_id, &base_document_id)? {
+        Some(document) if document.status == "invalidated" => {
+            let prior_document_count = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM memory_documents
+                     WHERE novel_id=?1 AND source_type=?2 AND source_id=?3",
+                    params![novel_id, source_type, source_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(AppError::database)?;
+            Ok(large_text_repository::sha256(&format!(
+                "{identity_hash}\nmaterialization:{}",
+                prior_document_count.max(1)
+            )))
+        }
+        _ => Ok(identity_hash),
+    }
+}
+
+fn chapter_sequence_index(
+    connection: &Connection,
+    novel_id: &str,
+    chapter_id: &str,
+) -> Result<i64, AppError> {
+    connection
+        .query_row(
+            "WITH ordered AS (
+                SELECT c.id,
+                       ROW_NUMBER() OVER (
+                           ORDER BY
+                               CASE
+                                   WHEN c.volume_id IS NULL THEN -1
+                                   ELSE COALESCE(v.order_index, 2147483647)
+                               END,
+                               COALESCE(v.id, ''),
+                               c.order_index,
+                               c.created_at,
+                               c.id
+                       ) - 1 AS sequence_index
+                  FROM chapters c
+             LEFT JOIN volumes v
+                    ON v.id = c.volume_id
+                   AND v.novel_id = c.novel_id
+                   AND v.deleted_at IS NULL
+                 WHERE c.novel_id = ?1
+                   AND c.deleted_at IS NULL
+            )
+            SELECT sequence_index FROM ordered WHERE id = ?2",
+            params![novel_id, chapter_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::database)
+}
+
+pub(crate) fn put_review_adopted_draft_in_transaction(
+    connection: &Connection,
+    draft: &ChapterDraftDto,
+    full_content: &str,
+    authorization_id: &str,
+    now: &str,
+) -> Result<PutMemoryDocumentOutput, AppError> {
+    validate_id("authorizationId", authorization_id)?;
+    let chapter_sequence_index =
+        chapter_sequence_index(connection, &draft.novel_id, &draft.chapter_id)?;
+    let identity_hash = large_text_repository::sha256(&format!(
+        "review_authorization:{authorization_id}\ndraft:{}",
+        draft.id
+    ));
+    let document_id = format!("mem-adopted-review-{identity_hash}");
+    let pieces = chunk_adopted_draft_content(full_content);
+    let chunks = pieces
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, text)| MemoryChunkInput {
+            id: format!("chk-review-{}-{ordinal}", &identity_hash[..32]),
+            ordinal: ordinal as i64,
+            token_count: memory_token_count(&text),
+            content_hash: large_text_repository::sha256(&text),
+            text,
+            importance: 0.85,
+            chapter_order_index: Some(chapter_sequence_index),
+            temporal_start_chapter: Some(chapter_sequence_index),
+            temporal_end_chapter: None,
+            entity_keys: Vec::new(),
+            metadata: json!({ "source": "adopted_draft" }),
+        })
+        .collect();
+    let input = PutMemoryDocumentInput {
+        trace_id: None,
+        document_id,
+        novel_id: draft.novel_id.clone(),
+        source_type: "adopted_draft".to_string(),
+        source_id: draft.id.clone(),
+        source_version: draft.version_no,
+        source_hash: large_text_repository::sha256(full_content),
+        adopted_draft_id: Some(draft.id.clone()),
+        chapter_id: Some(draft.chapter_id.clone()),
+        metadata: json!({
+            "title": draft.title.clone().unwrap_or_default(),
+            "versionNo": draft.version_no,
+        }),
+        chunks,
+    };
+    persist_document_in_transaction(connection, input, now, PersistDocumentMode::Strict)
+}
+
+fn chapter_summary_memory_text(summary: &ChapterSummaryDto) -> String {
+    let mut sections = vec![format!("章节摘要：{}", summary.summary.trim())];
+    for (label, value) in [
+        ("关键事件", summary.key_events.as_deref()),
+        ("人物变化", summary.character_changes.as_deref()),
+        ("关系变化", summary.relationship_changes.as_deref()),
+        ("新增伏笔", summary.new_foreshadows.as_deref()),
+        ("已回收伏笔", summary.resolved_foreshadows.as_deref()),
+        ("核心事件", summary.core_events.as_deref()),
+        ("主角状态", summary.protagonist_state_change.as_deref()),
+        (
+            "重要人物变化",
+            summary.important_character_changes.as_deref(),
+        ),
+        ("设定变化", summary.setting_changes.as_deref()),
+        ("新地点", summary.new_locations.as_deref()),
+        ("新物品或能力", summary.new_items_or_abilities.as_deref()),
+        ("伏笔", summary.foreshadowing.as_deref()),
+        ("未决问题", summary.unresolved_questions.as_deref()),
+        ("必须记住", summary.facts_must_remember.as_deref()),
+        ("下一章提示", summary.next_chapter_hints.as_deref()),
+        ("下一章钩子", summary.next_chapter_hook.as_deref()),
+    ] {
+        if let Some(value) = value
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && !matches!(*value, "[]" | "{}" | "null"))
+        {
+            sections.push(format!("{label}：{value}"));
+        }
+    }
+    sections.join("\n")
+}
+
+pub(crate) fn invalidate_source_in_transaction(
+    connection: &Connection,
+    novel_id: &str,
+    source_type: &str,
+    source_id: &str,
+    now: &str,
+    reason: &str,
+) -> Result<usize, AppError> {
+    validate_source_type(source_type)?;
+    memory_repository::invalidate_active_source_versions(
+        connection,
+        novel_id,
+        source_type,
+        source_id,
+        "",
+        now,
+        reason,
+    )
+}
+
+pub(crate) fn invalidate_chapter_context_in_transaction(
+    connection: &Connection,
+    chapter_id: &str,
+    now: &str,
+    reason: &str,
+) -> Result<usize, AppError> {
+    connection
+        .execute(
+            "UPDATE memory_documents
+             SET status='invalidated', invalidated_at=?1, invalidation_reason=?2, updated_at=?1
+             WHERE chapter_id=?3 AND source_type IN ('chapter_summary','context_record')
+               AND status='active'",
+            params![now, reason, chapter_id],
+        )
+        .map_err(AppError::database)
+}
+
+pub(crate) fn sync_chapter_summary_in_transaction(
+    connection: &Connection,
+    summary: &ChapterSummaryDto,
+    now: &str,
+) -> Result<Option<PutMemoryDocumentOutput>, AppError> {
+    if !summary.enabled || summary.is_expired {
+        invalidate_source_in_transaction(
+            connection,
+            &summary.novel_id,
+            "chapter_summary",
+            &summary.id,
+            now,
+            "source_not_memory_eligible",
+        )?;
+        return Ok(None);
+    }
+    let (Some(source_hash), Some(source_version)) =
+        (summary.content_hash.as_deref(), summary.draft_version)
+    else {
+        invalidate_source_in_transaction(
+            connection,
+            &summary.novel_id,
+            "chapter_summary",
+            &summary.id,
+            now,
+            "source_not_memory_eligible",
+        )?;
+        return Ok(None);
+    };
+    if source_version < 1 {
+        invalidate_source_in_transaction(
+            connection,
+            &summary.novel_id,
+            "chapter_summary",
+            &summary.id,
+            now,
+            "source_not_memory_eligible",
+        )?;
+        return Ok(None);
+    }
+    put_chapter_summary_in_transaction(
+        connection,
+        &summary.novel_id,
+        &summary.chapter_id,
+        &summary.adopted_draft_id,
+        &summary.id,
+        source_version,
+        source_hash,
+        &chapter_summary_memory_text(summary),
+        "章节总结",
+        now,
+    )
+    .map(Some)
+}
+
+pub(crate) fn put_chapter_summary_in_transaction(
+    connection: &Connection,
+    novel_id: &str,
+    chapter_id: &str,
+    adopted_draft_id: &str,
+    summary_id: &str,
+    source_version: i64,
+    source_hash: &str,
+    summary_text: &str,
+    title: &str,
+    now: &str,
+) -> Result<PutMemoryDocumentOutput, AppError> {
+    let summary_text = summary_text.trim();
+    if summary_text.is_empty() {
+        return Err(memory_error(
+            codes::MEMORY_INPUT_INVALID,
+            "章节总结 Memory 不能为空",
+        ));
+    }
+    let chapter_sequence_index = chapter_sequence_index(connection, novel_id, chapter_id)?;
+    let summary_content_hash = large_text_repository::sha256(summary_text);
+    let identity_hash = materialization_hash(
+        connection,
+        novel_id,
+        "chapter_summary",
+        summary_id,
+        "mem-summary-",
+        large_text_repository::sha256(&format!(
+            "chapter_summary:{summary_id}\nversion:{}\nsource_hash:{source_hash}\ncontent_hash:{summary_content_hash}\ntitle_hash:{}",
+            source_version.max(1),
+            large_text_repository::sha256(title.trim()),
+        )),
+    )?;
+    let chunks = chunk_derived_memory_content(summary_text)
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, text)| MemoryChunkInput {
+            id: format!("chk-summary-{}-{ordinal}", &identity_hash[..32]),
+            ordinal: ordinal as i64,
+            token_count: memory_token_count(&text),
+            content_hash: large_text_repository::sha256(&text),
+            text,
+            importance: 0.95,
+            chapter_order_index: Some(chapter_sequence_index),
+            temporal_start_chapter: Some(chapter_sequence_index),
+            temporal_end_chapter: None,
+            entity_keys: Vec::new(),
+            metadata: json!({ "source": "chapter_summary" }),
+        })
+        .collect();
+    let input = PutMemoryDocumentInput {
+        trace_id: None,
+        document_id: format!("mem-summary-{identity_hash}"),
+        novel_id: novel_id.to_string(),
+        source_type: "chapter_summary".to_string(),
+        source_id: summary_id.to_string(),
+        source_version: source_version.max(1),
+        source_hash: source_hash.to_string(),
+        adopted_draft_id: Some(adopted_draft_id.to_string()),
+        chapter_id: Some(chapter_id.to_string()),
+        metadata: json!({
+            "title": title,
+            "source": "chapter_summary",
+        }),
+        chunks,
+    };
+    persist_document_in_transaction(
+        connection,
+        input,
+        now,
+        PersistDocumentMode::ReplaceActiveSource,
+    )
+}
+
+pub(crate) fn put_context_record_in_transaction(
+    connection: &Connection,
+    record: &ContextRecordDto,
+    adopted_draft_id: &str,
+    now: &str,
+) -> Result<Option<PutMemoryDocumentOutput>, AppError> {
+    if !record.is_active || record.is_expired || record.context_type == "chapter_summary" {
+        invalidate_source_in_transaction(
+            connection,
+            &record.novel_id,
+            "context_record",
+            &record.id,
+            now,
+            "source_not_memory_eligible",
+        )?;
+        return Ok(None);
+    }
+
+    let chapter_id = record
+        .chapter_id
+        .as_deref()
+        .ok_or_else(|| memory_error(codes::MEMORY_SOURCE_INVALID, "上下文 Memory 缺少来源章节"))?;
+    let source_hash = record.content_hash.as_deref().ok_or_else(|| {
+        memory_error(codes::MEMORY_SOURCE_INVALID, "上下文 Memory 缺少采用稿哈希")
+    })?;
+    let source_version = record.draft_version.ok_or_else(|| {
+        memory_error(codes::MEMORY_SOURCE_INVALID, "上下文 Memory 缺少采用稿版本")
+    })?;
+    let context_text = record.content.trim();
+    if context_text.is_empty() {
+        return Err(memory_error(
+            codes::MEMORY_INPUT_INVALID,
+            "上下文 Memory 不能为空",
+        ));
+    }
+
+    let chapter_sequence_index = chapter_sequence_index(connection, &record.novel_id, chapter_id)?;
+    let context_content_hash = large_text_repository::sha256(context_text);
+    let identity_hash = large_text_repository::sha256(&format!(
+        "context_record:{}\nadopted_draft:{adopted_draft_id}\nversion:{}\nsource_hash:{source_hash}\ncontext_type:{}\ntitle_hash:{}\ncontent_hash:{context_content_hash}\nimportance:{}",
+        record.id,
+        source_version.max(1),
+        record.context_type,
+        large_text_repository::sha256(record.title.trim()),
+        record.importance,
+    ));
+    let materialization_hash = materialization_hash(
+        connection,
+        &record.novel_id,
+        "context_record",
+        &record.id,
+        "mem-context-",
+        identity_hash,
+    )?;
+    let importance = f64::from(record.importance.clamp(1, 5) as i32) / 5.0;
+    let metadata = json!({
+        "source": "context_record",
+        "contextType": record.context_type,
+        "title": record.title,
+    });
+    let chunks = chunk_derived_memory_content(context_text)
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, text)| MemoryChunkInput {
+            id: format!("chk-context-{}-{ordinal}", &materialization_hash[..32]),
+            ordinal: ordinal as i64,
+            token_count: memory_token_count(&text),
+            content_hash: large_text_repository::sha256(&text),
+            text,
+            importance,
+            chapter_order_index: Some(chapter_sequence_index),
+            temporal_start_chapter: Some(chapter_sequence_index),
+            temporal_end_chapter: None,
+            entity_keys: Vec::new(),
+            metadata: metadata.clone(),
+        })
+        .collect();
+    let input = PutMemoryDocumentInput {
+        trace_id: None,
+        document_id: format!("mem-context-{materialization_hash}"),
+        novel_id: record.novel_id.clone(),
+        source_type: "context_record".to_string(),
+        source_id: record.id.clone(),
+        source_version: source_version.max(1),
+        source_hash: source_hash.to_string(),
+        adopted_draft_id: Some(adopted_draft_id.to_string()),
+        chapter_id: Some(chapter_id.to_string()),
+        metadata: metadata.clone(),
+        chunks,
+    };
+    persist_document_in_transaction(
+        connection,
+        input,
+        now,
+        PersistDocumentMode::ReplaceActiveSource,
+    )
+    .map(Some)
+}
+
 fn replay_matches(
     persisted: &memory_repository::MemoryDocument,
     persisted_chunks: &[memory_repository::MemoryChunk],
@@ -681,57 +1221,48 @@ fn replay_matches(
         })
 }
 
-pub fn put_document(
-    connection: &mut Connection,
+fn persist_document_in_transaction(
+    connection: &Connection,
     input: PutMemoryDocumentInput,
+    now: &str,
+    mode: PersistDocumentMode,
 ) -> Result<PutMemoryDocumentOutput, AppError> {
-    let trace_id = input.trace_id.as_deref();
-    let result = (|| {
-        validate_id("documentId", &input.document_id)?;
-        validate_id("novelId", &input.novel_id)?;
-        validate_id("sourceId", &input.source_id)?;
-        validate_hash("sourceHash", &input.source_hash)?;
-        validate_source_type(&input.source_type)?;
-        if input.source_version < 1 {
-            return Err(memory_error(
-                codes::MEMORY_INPUT_INVALID,
-                "Memory 来源版本无效",
-            ));
-        }
-        let metadata_json = validate_json_object("document.metadata", &input.metadata, 64 * 1024)?;
-        let now = Utc::now().to_rfc3339();
-        let chunks = build_chunks(&input, &now)?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(AppError::database)?;
-        validate_source(&transaction, &input)?;
+    validate_id("documentId", &input.document_id)?;
+    validate_id("novelId", &input.novel_id)?;
+    validate_id("sourceId", &input.source_id)?;
+    validate_hash("sourceHash", &input.source_hash)?;
+    validate_source_type(&input.source_type)?;
+    if input.source_version < 1 {
+        return Err(memory_error(
+            codes::MEMORY_INPUT_INVALID,
+            "Memory 来源版本无效",
+        ));
+    }
+    let existing_by_id =
+        memory_repository::find_document(connection, &input.novel_id, &input.document_id)?;
+    if existing_by_id
+        .as_ref()
+        .is_some_and(|document| document.status == "invalidated")
+    {
+        return Err(memory_error(
+            codes::MEMORY_DOCUMENT_CONFLICT,
+            "Memory 文档身份已绑定不同内容",
+        ));
+    }
+    let metadata_json = validate_json_object("document.metadata", &input.metadata, 64 * 1024)?;
+    let chunks = build_chunks(&input, now)?;
+    validate_source(connection, &input)?;
 
-        let existing_by_id =
-            memory_repository::find_document(&transaction, &input.novel_id, &input.document_id)?;
-        let existing_by_identity = memory_repository::find_document_by_identity(
-            &transaction,
-            &input.novel_id,
-            &input.source_type,
-            &input.source_id,
-            input.source_version,
-            &input.source_hash,
-        )?;
-        if let Some(existing) = existing_by_id.or(existing_by_identity) {
-            let persisted_chunks =
-                memory_repository::list_chunks(&transaction, &input.novel_id, &existing.id)?;
-            if !replay_matches(
-                &existing,
-                &persisted_chunks,
-                &input,
-                &chunks,
-                &metadata_json,
-            ) {
-                return Err(memory_error(
-                    codes::MEMORY_DOCUMENT_CONFLICT,
-                    "Memory 文档身份已绑定不同内容",
-                ));
-            }
-            transaction.commit().map_err(AppError::database)?;
+    if let Some(existing) = existing_by_id {
+        let persisted_chunks =
+            memory_repository::list_chunks(connection, &input.novel_id, &existing.id)?;
+        if replay_matches(
+            &existing,
+            &persisted_chunks,
+            &input,
+            &chunks,
+            &metadata_json,
+        ) {
             return Ok(PutMemoryDocumentOutput {
                 document: existing,
                 chunks: persisted_chunks,
@@ -739,36 +1270,97 @@ pub fn put_document(
                 invalidated_document_count: 0,
             });
         }
+        return Err(memory_error(
+            codes::MEMORY_DOCUMENT_CONFLICT,
+            "Memory 文档身份已绑定不同内容",
+        ));
+    }
 
-        let document = memory_repository::MemoryDocument {
-            id: input.document_id.clone(),
-            novel_id: input.novel_id.clone(),
-            source_type: input.source_type.clone(),
-            source_id: input.source_id.clone(),
-            source_version: input.source_version,
-            source_hash: input.source_hash.clone(),
-            adopted_draft_id: input.adopted_draft_id.clone(),
-            chapter_id: input.chapter_id.clone(),
-            status: "active".to_string(),
-            metadata_json,
-            created_at: now.clone(),
-            updated_at: now.clone(),
-            invalidated_at: None,
-            invalidation_reason: None,
-        };
-        let invalidated = memory_repository::invalidate_active_source_versions(
-            &transaction,
-            &input.novel_id,
-            &input.source_type,
-            &input.source_id,
-            &input.document_id,
-            &now,
-            "source_rebuilt",
-        )?;
-        memory_repository::insert_document(&transaction, &document)?;
-        for chunk in &chunks {
-            memory_repository::insert_chunk(&transaction, chunk)?;
+    if let Some(existing) = memory_repository::find_document_by_identity(
+        connection,
+        &input.novel_id,
+        &input.source_type,
+        &input.source_id,
+        input.source_version,
+        &input.source_hash,
+    )? {
+        let persisted_chunks =
+            memory_repository::list_chunks(connection, &input.novel_id, &existing.id)?;
+        if replay_matches(
+            &existing,
+            &persisted_chunks,
+            &input,
+            &chunks,
+            &metadata_json,
+        ) {
+            return Ok(PutMemoryDocumentOutput {
+                document: existing,
+                chunks: persisted_chunks,
+                created: false,
+                invalidated_document_count: 0,
+            });
         }
+        if mode == PersistDocumentMode::Strict {
+            return Err(memory_error(
+                codes::MEMORY_DOCUMENT_CONFLICT,
+                "Memory 文档身份已绑定不同内容",
+            ));
+        }
+    }
+
+    let document = memory_repository::MemoryDocument {
+        id: input.document_id.clone(),
+        novel_id: input.novel_id.clone(),
+        source_type: input.source_type.clone(),
+        source_id: input.source_id.clone(),
+        source_version: input.source_version,
+        source_hash: input.source_hash.clone(),
+        adopted_draft_id: input.adopted_draft_id.clone(),
+        chapter_id: input.chapter_id.clone(),
+        status: "active".to_string(),
+        metadata_json,
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+        invalidated_at: None,
+        invalidation_reason: None,
+    };
+    let invalidated = memory_repository::invalidate_active_source_versions(
+        connection,
+        &input.novel_id,
+        &input.source_type,
+        &input.source_id,
+        &input.document_id,
+        now,
+        "source_rebuilt",
+    )?;
+    memory_repository::insert_document(connection, &document)?;
+    for chunk in &chunks {
+        memory_repository::insert_chunk(connection, chunk)?;
+    }
+    Ok(PutMemoryDocumentOutput {
+        document,
+        chunks,
+        created: true,
+        invalidated_document_count: invalidated,
+    })
+}
+
+pub fn put_document(
+    connection: &mut Connection,
+    input: PutMemoryDocumentInput,
+) -> Result<PutMemoryDocumentOutput, AppError> {
+    let trace_id = input.trace_id.clone();
+    let result = (|| {
+        let now = Utc::now().to_rfc3339();
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(AppError::database)?;
+        let output = persist_document_in_transaction(
+            &transaction,
+            input,
+            &now,
+            PersistDocumentMode::Strict,
+        )?;
         transaction.commit().map_err(|error| {
             AppError::new(
                 codes::DATABASE_COMMIT_UNKNOWN,
@@ -777,14 +1369,9 @@ pub fn put_document(
             )
             .with_details(json!({ "sqliteError": error.to_string() }))
         })?;
-        Ok(PutMemoryDocumentOutput {
-            document,
-            chunks,
-            created: true,
-            invalidated_document_count: invalidated,
-        })
+        Ok(output)
     })();
-    result.map_err(|error| with_trace(error, trace_id))
+    result.map_err(|error| with_trace(error, trace_id.as_deref()))
 }
 
 pub fn put_embeddings(
@@ -1615,6 +2202,43 @@ mod tests {
         assert_eq!(replay.document.source_version, 2);
         assert_eq!(replay.chunks.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn public_put_rejects_reuse_of_invalidated_document_id_with_stable_conflict(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut connection = setup()?;
+        let input = document_input("novel-a", "memory-doc-a", "memory-chunk-a");
+        put_document(&mut connection, input.clone())?;
+        invalidate_document(
+            &mut connection,
+            InvalidateMemoryDocumentInput {
+                trace_id: None,
+                novel_id: "novel-a".to_string(),
+                document_id: "memory-doc-a".to_string(),
+                expected_source_hash: input.source_hash.clone(),
+                reason: "test_invalidation".to_string(),
+            },
+        )?;
+
+        let error = put_document(&mut connection, input)
+            .expect_err("invalidated document id must remain immutable");
+        assert_eq!(error.code, codes::MEMORY_DOCUMENT_CONFLICT);
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_single_adopted_paragraph_is_split_into_bounded_chunks() {
+        let paragraph = "界".repeat((MAX_CHUNK_BYTES / "界".len()) + 1);
+        assert!(paragraph.len() > MAX_CHUNK_BYTES);
+
+        let chunks = chunk_adopted_draft_content(&paragraph);
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|chunk| {
+            chunk.len() <= MAX_CHUNK_BYTES
+                && chunk.encode_utf16().count() <= MATERIALIZED_CHUNK_UTF16_UNITS
+        }));
+        assert_eq!(chunks.concat(), paragraph);
     }
 
     #[test]

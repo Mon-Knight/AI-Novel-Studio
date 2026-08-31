@@ -112,6 +112,19 @@ test('fails closed when emitted JavaScript is absent from the manifest', async (
   );
 });
 
+test('fails closed when production JavaScript contains an E2E probe marker', async (t) => {
+  const fixture = await createFixture(t);
+  await writeFile(
+    path.join(fixture.distDirectory, ...ENTRY_FILE.split('/')),
+    'globalThis.runDomainFacadeSqliteSmoke = () => undefined;\n',
+  );
+
+  await assert.rejects(
+    inspectBundle({ distDir: fixture.distDirectory }),
+    /contains forbidden E2E marker: runDomainFacadeSqliteSmoke/,
+  );
+});
+
 test('enforces the entry raw-byte threshold using file contents', async (t) => {
   const fixture = await createFixture(t);
   const strictLimits = {

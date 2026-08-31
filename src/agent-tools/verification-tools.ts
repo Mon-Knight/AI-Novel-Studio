@@ -6,6 +6,11 @@
 
 import type { AgentToolResult, AgentToolContext } from './tool-types';
 import { errorResult, resolveNovelId, successResult } from './tool-types';
+import { getDbMode } from '../services/database/db';
+
+function dataSource(): 'sqlite' | 'localstorage' {
+  return getDbMode() === 'tauri' ? 'sqlite' : 'localstorage';
+}
 
 interface VerificationDetail {
   rule: string;
@@ -120,11 +125,11 @@ export async function checkChapterReadiness(
 
     return successResult(
       { ready, score, missing, warnings: [...new Set(warnings)], summary },
-      { source: 'database' },
+      { source: dataSource() },
     );
   } catch (err) {
     return errorResult(`章节准备度检查失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }
@@ -153,8 +158,8 @@ export async function verifyOutlineCompliance(
   const chapterId = context.chapterId;
   const novelId = resolveNovelId(context);
 
-  if (!chapterId) {
-    return errorResult('缺少章节 ID，无法验证大纲符合度', {
+  if (!novelId || !chapterId) {
+    return errorResult('缺少作品 ID或章节 ID，无法验证大纲符合度', {
       source: 'tool-layer',
     });
   }
@@ -172,10 +177,13 @@ export async function verifyOutlineCompliance(
       return successResult(
         { details, passedCount: 0, failedCount: 1 },
         {
-          source: 'database',
+          source: dataSource(),
           warnings: ['章节不存在'],
         },
       );
+    }
+    if (chapter.novelId !== novelId) {
+      return errorResult(`章节 ${chapterId} 不属于当前作品`, { source: 'scope' });
     }
     details.push({
       rule: '章节存在性',
@@ -286,13 +294,13 @@ export async function verifyOutlineCompliance(
     return successResult(
       { details, passedCount, failedCount },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`大纲符合度验证失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }
@@ -330,7 +338,7 @@ export async function verifyStyleCompliance(
       return successResult(
         { details, passedCount: 0, failedCount: 1 },
         {
-          source: 'database',
+          source: dataSource(),
           warnings: ['正文为空'],
         },
       );
@@ -407,13 +415,13 @@ export async function verifyStyleCompliance(
     return successResult(
       { details, passedCount, failedCount },
       {
-        source: 'database',
+        source: dataSource(),
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     );
   } catch (err) {
     return errorResult(`风格符合度验证失败: ${err instanceof Error ? err.message : String(err)}`, {
-      source: 'database',
+      source: dataSource(),
     });
   }
 }

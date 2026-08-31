@@ -1,6 +1,7 @@
 import { appLogger } from '../../services/observability/appLogger';
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft, BookOpenText, PenLine } from 'lucide-react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
 import { protagonistRepository } from '../../services/database/protagonistRepository';
@@ -32,9 +33,19 @@ const statusLabels: Record<string, string> = {
   archived: '已归档',
 };
 
+const CORE_ASSET_FOCUS_TARGETS: Record<string, string> = {
+  world_setting: 'novel-detail-world-setting',
+  rule_system: 'novel-detail-rule-system',
+  protagonist: 'novel-detail-protagonist',
+  story_plan: 'novel-detail-outline',
+  chapter_outline: 'novel-detail-outline',
+};
+
 function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const focusedRequestRef = useRef('');
 
   const [novel, setNovel] = useState<Novel | null>(null);
   const [worldSettings, setWorldSettings] = useState<WorldSetting[]>([]);
@@ -82,6 +93,25 @@ function NovelDetailPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const focus = searchParams.get('focus') ?? '';
+  const focusTargetId = CORE_ASSET_FOCUS_TARGETS[focus];
+  const returnToWorkbench = searchParams.get('returnTo') === 'workbench';
+
+  useEffect(() => {
+    if (loading || !novel || !focusTargetId) return;
+    const requestKey = `${novel.id}:${focusTargetId}`;
+    if (focusedRequestRef.current === requestKey) return;
+    focusedRequestRef.current = requestKey;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(focusTargetId);
+      if (!target) return;
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+      target.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusTargetId, loading, novel]);
 
   const handleSaveBasicInfo = async (data: {
     title: string;
@@ -166,7 +196,7 @@ function NovelDetailPage() {
     return (
       <div className="novel-detail-page">
         <div className="flex-center" style={{ height: '100%', flexDirection: 'column', gap: 16 }}>
-          <span style={{ fontSize: 48, opacity: 0.3 }}>📖</span>
+          <BookOpenText aria-hidden="true" size={48} strokeWidth={1.8} style={{ opacity: 0.3 }} />
           <span className="text-secondary">{error || '作品未找到'}</span>
           <button className="btn btn-secondary" onClick={() => navigate('/')}>
             返回首页
@@ -179,7 +209,9 @@ function NovelDetailPage() {
   return (
     <div className="novel-detail-page" data-project-id={novel.id} data-project-name={novel.title}>
       <div className="detail-header">
-        <div className="detail-cover">📖</div>
+        <div className="detail-cover">
+          <BookOpenText aria-hidden="true" size={40} strokeWidth={1.8} />
+        </div>
         <div className="detail-info">
           <div className="detail-title">{novel.title}</div>
           <span className="detail-genre">{novel.genre || '未分类'}</span>
@@ -203,11 +235,23 @@ function NovelDetailPage() {
             </div>
           </div>
           <div className="detail-actions">
+            {returnToWorkbench && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                data-testid="novel-detail-return-workbench"
+                onClick={() => navigate('/')}
+              >
+                <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+                返回创作工作台
+              </button>
+            )}
             <button
               className="btn btn-primary"
               onClick={() => navigate(`/novels/${novel.id}/workspace`)}
             >
-              ✏️ 进入写作工作台
+              <PenLine aria-hidden="true" size={16} strokeWidth={1.8} />
+              进入写作工作台
             </button>
             <button
               className="btn btn-secondary"
@@ -236,15 +280,28 @@ function NovelDetailPage() {
           <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
         </PanelErrorBoundary>
 
-        <PanelErrorBoundary panelTitle="世界观设定">
-          <WorldSettingCard
-            novelId={novel.id}
-            settings={worldSettings}
-            onSave={handleSaveWorldSetting}
-          />
-        </PanelErrorBoundary>
+        <div
+          id="novel-detail-world-setting"
+          className={`detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-world-setting"
+          tabIndex={-1}
+        >
+          <PanelErrorBoundary panelTitle="世界观设定">
+            <WorldSettingCard
+              novelId={novel.id}
+              settings={worldSettings}
+              onSave={handleSaveWorldSetting}
+            />
+          </PanelErrorBoundary>
+        </div>
 
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div
+          id="novel-detail-rule-system"
+          className={`detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-rule-system"
+          style={{ gridColumn: '1 / -1' }}
+          tabIndex={-1}
+        >
           <PanelErrorBoundary panelTitle="法则体系">
             <RuleSystemCard
               novelId={novel.id}
@@ -255,33 +312,48 @@ function NovelDetailPage() {
           </PanelErrorBoundary>
         </div>
 
-        <PanelErrorBoundary panelTitle="主角设定">
-          <ProtagonistCard
-            novelId={novel.id}
-            novel={novel}
-            protagonist={protagonist}
-            onSave={async (data) => {
-              if (!novelId) return;
-              try {
-                const updated = await novelService.updateNovelProtagonists(novelId, {
-                  protagonistMode: data.protagonistMode,
-                  protagonists: data.protagonists,
-                  dualProtagonistRelation: data.dualProtagonistRelation,
-                });
-                if (updated) setNovel(updated);
-              } catch (e: unknown) {
-                appLogger.captureError('NOVEL_PROTAGONIST_SAVE_FAILED', e, { novelId: novel.id });
-                await showError({
-                  title: '保存主角设定失败',
-                  message: describeUnknownError(e, '保存主角设定失败'),
-                });
-                throw e; // 重新抛出让卡片组件显示错误
-              }
-            }}
-          />
-        </PanelErrorBoundary>
+        <div
+          id="novel-detail-protagonist"
+          className={`detail-focus-target${focusTargetId === 'novel-detail-protagonist' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-protagonist"
+          tabIndex={-1}
+        >
+          <PanelErrorBoundary panelTitle="主角设定">
+            <ProtagonistCard
+              novelId={novel.id}
+              novel={novel}
+              protagonist={protagonist}
+              onSave={async (data) => {
+                if (!novelId) return;
+                try {
+                  const updated = await novelService.updateNovelProtagonists(novelId, {
+                    protagonistMode: data.protagonistMode,
+                    protagonists: data.protagonists,
+                    dualProtagonistRelation: data.dualProtagonistRelation,
+                  });
+                  if (updated) setNovel(updated);
+                } catch (e: unknown) {
+                  appLogger.captureError('NOVEL_PROTAGONIST_SAVE_FAILED', e, {
+                    novelId: novel.id,
+                  });
+                  await showError({
+                    title: '保存主角设定失败',
+                    message: describeUnknownError(e, '保存主角设定失败'),
+                  });
+                  throw e; // 重新抛出让卡片组件显示错误
+                }
+              }}
+            />
+          </PanelErrorBoundary>
+        </div>
 
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div
+          id="novel-detail-outline"
+          className={`detail-focus-target${focusTargetId === 'novel-detail-outline' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-outline"
+          style={{ gridColumn: '1 / -1' }}
+          tabIndex={-1}
+        >
           <PanelErrorBoundary panelTitle="大纲管理">
             <OutlineManager novelId={novel.id} />
           </PanelErrorBoundary>

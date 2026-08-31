@@ -229,6 +229,8 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
 
   const description = toSafeString(raw.description, '');
   const outline = toSafeString(raw.outline, '');
+  const worldBackground =
+    toSafeString(raw.worldBackground ?? raw.world_background, '') || undefined;
   const subtitle = typeof raw.subtitle === 'string' ? raw.subtitle : undefined;
   const coverPath = toSafeString(raw.coverPath ?? raw.cover_path, '') || undefined;
   const coverUrl = typeof raw.coverUrl === 'string' ? raw.coverUrl : undefined;
@@ -314,6 +316,7 @@ function normalizeNovelInternal(raw: unknown): { novel: Novel | null; repaired: 
     dualProtagonistRelation,
     mainCharacter,
     protagonistAbility,
+    worldBackground,
     coverPath,
     coverUrl,
     status,

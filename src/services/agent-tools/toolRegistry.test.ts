@@ -56,6 +56,29 @@ function invocationContext(overrides = {}) {
   };
 }
 
+test('schema validation rejects prototype-named extras and inherited required fields', async () => {
+  const { validateToolJsonSchema } = await import('./toolRegistry');
+  const schema = descriptor('novel.read_context').inputSchema;
+
+  for (const key of ['constructor', 'toString', '__proto__']) {
+    const argumentsJson = JSON.parse(
+      JSON.stringify({ novelId: 'novel-1', [key]: 'smuggled' }),
+    ) as Record<string, unknown>;
+    assert.ok(
+      validateToolJsonSchema(argumentsJson, schema).some(
+        (error) => error === `$.${key} 是未知字段`,
+      ),
+    );
+  }
+
+  const inheritedRequired = Object.create({ novelId: 'novel-1' }) as Record<string, unknown>;
+  assert.ok(
+    validateToolJsonSchema(inheritedRequired, schema).some(
+      (error) => error === '$.novelId 为必填字段',
+    ),
+  );
+});
+
 test('registry manifest and hash are deterministic across definition order', async () => {
   const left = new ToolRegistry([
     definition('novel.read_context'),
@@ -82,14 +105,26 @@ test('registry manifest and hash are deterministic across definition order', asy
 });
 
 test('production registry exposes executable read/verification/candidate contracts and no hidden writes', async () => {
-  const { productionToolRegistry } = await import('./productionToolRegistry');
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { PRODUCTION_TOOL_REGISTRY_HASH, productionToolRegistry } =
+    await import('./productionToolRegistry');
   const manifest = await productionToolRegistry.getManifest();
-  assert.equal(manifest.tools.length, 18);
-  assert.equal(
-    manifest.registryHash,
-    '6eebed8c176c08fe31af76da44c3d9d704b23ce347b5f3390f7be31f4a60b579',
-  );
-  assert.equal(new Set(manifest.tools.map((tool) => `${tool.name}@${tool.version}`)).size, 18);
+  assert.equal(manifest.tools.length, 19);
+  assert.equal(manifest.registryHash, PRODUCTION_TOOL_REGISTRY_HASH);
+  for (const relative of [
+    'src-tauri/src/services/ai_task_service.rs',
+    'src-tauri/src/services/agent_plan_service.rs',
+    'tests/e2e/chapter-readiness-planner.spec.ts',
+  ]) {
+    const source = readFileSync(join(process.cwd(), relative), 'utf8');
+    assert.equal(
+      source.includes(PRODUCTION_TOOL_REGISTRY_HASH),
+      true,
+      `${relative} must freeze PRODUCTION_TOOL_REGISTRY_HASH=${PRODUCTION_TOOL_REGISTRY_HASH}`,
+    );
+  }
+  assert.equal(new Set(manifest.tools.map((tool) => `${tool.name}@${tool.version}`)).size, 19);
   assert.deepEqual(
     manifest.tools
       .map((tool) => tool.name)

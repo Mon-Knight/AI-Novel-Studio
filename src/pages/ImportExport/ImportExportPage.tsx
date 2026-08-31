@@ -2,6 +2,16 @@
  * AI Novel Studio - 导入导出中心页面
  */
 import { useState, useEffect, useCallback } from 'react';
+import {
+  ArrowDownToLine,
+  ArrowLeft,
+  BookOpenText,
+  FileJson,
+  FileText,
+  Import,
+  Library,
+  Save,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../../components/common/BackButton';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
@@ -81,8 +91,19 @@ function ImportExportPage() {
   return (
     <div className="page-container form-page" style={{ height: '100%', overflowY: 'auto' }}>
       <BackButton label="返回首页" to="/" />
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, marginTop: 12 }}>
-        📥 导入导出中心
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 22,
+          fontWeight: 700,
+          marginBottom: 8,
+          marginTop: 12,
+        }}
+      >
+        <ArrowDownToLine aria-hidden="true" size={22} strokeWidth={1.8} />
+        导入导出中心
       </div>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
         导出已采用章节正文或完整 JSON 备份，导入作品、风格方案和输出控制
@@ -120,7 +141,7 @@ function ImportExportPage() {
       {/* 作品选择 */}
       <div className="detail-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 18 }}>📖</span>
+          <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontWeight: 600 }}>选择作品</span>
         </div>
         {novels.length === 0 ? (
@@ -153,7 +174,7 @@ function ImportExportPage() {
       {/* 导出整本作品 */}
       <div className="detail-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 18 }}>📚</span>
+          <Library aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontWeight: 600 }}>导出整本作品</span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
@@ -168,21 +189,24 @@ function ImportExportPage() {
             disabled={adoptedChapters.length === 0}
             onClick={() => handleExport(() => exportService.exportNovelToTxt(selectedNovelId))}
           >
-            📄 导出 TXT
+            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+            导出 TXT
           </button>
           <button
             className="btn btn-secondary btn-sm"
             disabled={adoptedChapters.length === 0}
             onClick={() => handleExport(() => exportService.exportNovelToMarkdown(selectedNovelId))}
           >
-            📝 导出 Markdown
+            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+            导出 Markdown
           </button>
           <button
             className="btn btn-secondary btn-sm"
             disabled={!selectedNovelId}
             onClick={() => handleExport(() => exportService.exportNovelBackupJson(selectedNovelId))}
           >
-            💾 备份完整 JSON
+            <Save aria-hidden="true" size={15} strokeWidth={1.8} />
+            备份完整 JSON
           </button>
         </div>
       </div>
@@ -190,7 +214,7 @@ function ImportExportPage() {
       {/* 导出章节 */}
       <div className="detail-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 18 }}>📄</span>
+          <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontWeight: 600 }}>导出当前章节</span>
         </div>
         {chapters.length === 0 ? (
@@ -224,7 +248,8 @@ function ImportExportPage() {
             }
             onClick={() => handleExport(() => exportService.exportChapterToTxt(selectedChapterId))}
           >
-            📄 导出 TXT
+            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+            导出 TXT
           </button>
           <button
             className="btn btn-secondary btn-sm"
@@ -235,7 +260,8 @@ function ImportExportPage() {
               handleExport(() => exportService.exportChapterToMarkdown(selectedChapterId))
             }
           >
-            📝 导出 Markdown
+            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+            导出 Markdown
           </button>
         </div>
       </div>
@@ -243,15 +269,17 @@ function ImportExportPage() {
       {/* 导入区域 */}
       <div className="detail-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 18 }}>📥</span>
+          <Import aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontWeight: 600 }}>导入</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <button className="btn btn-primary btn-sm" onClick={() => setShowTxtImport(true)}>
-            📄 导入 TXT
+            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+            导入 TXT
           </button>
           <button className="btn btn-primary btn-sm" onClick={() => setShowJsonImport(true)}>
-            📋 导入 JSON
+            <FileJson aria-hidden="true" size={15} strokeWidth={1.8} />
+            导入 JSON
           </button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 8 }}>
@@ -260,7 +288,8 @@ function ImportExportPage() {
       </div>
 
       <button className="btn btn-secondary btn-sm" onClick={() => navigate('/')}>
-        ← 返回首页
+        <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
+        返回首页
       </button>
 
       {/* 导入弹窗 */}

@@ -37,6 +37,7 @@ const productAppPath = path.join(
 );
 const allSpecs = [
   'app-start.spec.ts',
+  'cold-start.spec.ts',
   'project-create-open.spec.ts',
   'project-edit-save.spec.ts',
   'chapter-save.spec.ts',
@@ -51,6 +52,8 @@ const allSpecs = [
   'chapter-readiness-planner.spec.ts',
   'story-assets-transaction.spec.ts',
   'conversational-workbench.spec.ts',
+  'agent-production-closed-loop.spec.ts',
+  'domain-facade-sqlite.spec.ts',
 ];
 const specs = selectSpecs(process.argv.slice(2));
 
@@ -119,6 +122,7 @@ for (const [index, spec] of specs.entries()) {
     AI_NOVEL_STUDIO_E2E_DRIVER: realDriver,
     ...(nativeDriver ? { AI_NOVEL_STUDIO_E2E_NATIVE_DRIVER: nativeDriver } : {}),
     AI_NOVEL_STUDIO_E2E_APP: appPath,
+    ...(spec === 'cold-start.spec.ts' ? { AI_NOVEL_STUDIO_E2E_STARTUP_TIMING: '1' } : {}),
   };
   console.log(`\n[E2E] ${spec} (isolated data: ${diagnosticPath(specRoot)})`);
   let result: WdioRunResult = { exitCode: 1, signal: null, timedOut: false };

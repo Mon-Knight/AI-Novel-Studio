@@ -1,5 +1,5 @@
 use crate::db::get_connection;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 // ==================== Data Structures ====================
@@ -218,17 +218,31 @@ pub fn get_master_outline_versions(project_id: String) -> Result<Vec<MasterOutli
 
 #[tauri::command]
 pub fn set_active_master_outline(input: SetActiveMasterOutlineInput) -> Result<(), String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE master_outlines SET is_active = 0 WHERE project_id = ?1",
-        params![&input.project_id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE master_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
-        params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
-    ).map_err(|e| e.to_string())?;
-    Ok(())
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    let target_exists: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM master_outlines WHERE id = ?1 AND project_id = ?2)",
+            params![&input.id, &input.project_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !target_exists {
+        return Err("主纲要版本不存在或不属于当前作品".to_string());
+    }
+    transaction
+        .execute(
+            "UPDATE master_outlines SET is_active = 0 WHERE project_id = ?1",
+            params![&input.project_id],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            "UPDATE master_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
+            params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())
 }
 
 // --- Volume Outline ---
@@ -310,17 +324,30 @@ pub fn get_volume_outline_versions(
 
 #[tauri::command]
 pub fn set_active_volume_outline(input: SetActiveVolumeOutlineInput) -> Result<(), String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE volume_outlines SET is_active = 0 WHERE project_id = ?1",
-        params![&input.project_id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE volume_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
-        params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
-    ).map_err(|e| e.to_string())?;
-    Ok(())
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    let volume_id: Option<String> = transaction
+        .query_row(
+            "SELECT volume_id FROM volume_outlines WHERE id = ?1 AND project_id = ?2",
+            params![&input.id, &input.project_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "分卷纲要版本不存在或不属于当前作品".to_string())?;
+    transaction
+        .execute(
+            "UPDATE volume_outlines SET is_active = 0 WHERE project_id = ?1 AND volume_id IS ?2",
+            params![&input.project_id, &volume_id],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            "UPDATE volume_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3 AND volume_id IS ?4",
+            params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id, &volume_id],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())
 }
 
 // --- Chapter Outline ---
@@ -402,17 +429,30 @@ pub fn get_chapter_outline_versions(
 
 #[tauri::command]
 pub fn set_active_chapter_outline(input: SetActiveChapterOutlineInput) -> Result<(), String> {
-    let conn = get_connection().lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE chapter_outlines SET is_active = 0 WHERE project_id = ?1",
-        params![&input.project_id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE chapter_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3",
-        params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id],
-    ).map_err(|e| e.to_string())?;
-    Ok(())
+    let mut conn = get_connection().lock().map_err(|e| e.to_string())?;
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    let chapter_id: Option<String> = transaction
+        .query_row(
+            "SELECT chapter_id FROM chapter_outlines WHERE id = ?1 AND project_id = ?2",
+            params![&input.id, &input.project_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "章节纲要版本不存在或不属于当前作品".to_string())?;
+    transaction
+        .execute(
+            "UPDATE chapter_outlines SET is_active = 0 WHERE project_id = ?1 AND chapter_id IS ?2",
+            params![&input.project_id, &chapter_id],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            "UPDATE chapter_outlines SET is_active = 1, status = 'active', updated_at = ?1 WHERE id = ?2 AND project_id = ?3 AND chapter_id IS ?4",
+            params![&chrono::Utc::now().to_rfc3339(), &input.id, &input.project_id, &chapter_id],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())
 }
 
 // ==================== Context Builder Command ====================
@@ -650,6 +690,90 @@ pub fn build_outline_context(project_id: String) -> Result<OutlineGenerationCont
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{get_connection, init_test_database};
+
+    #[test]
+    fn activating_one_chapter_outline_does_not_clear_another_chapter() {
+        init_test_database();
+        let project_id = uuid::Uuid::new_v4().to_string();
+        let chapter_a = uuid::Uuid::new_v4().to_string();
+        let chapter_b = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        {
+            let conn = get_connection().lock().unwrap();
+            conn.execute(
+                "INSERT INTO novels (id, title, outline, created_at, updated_at) VALUES (?1, 'Outline test', '', ?2, ?2)",
+                rusqlite::params![&project_id, &now],
+            )
+            .unwrap();
+            for chapter_id in [&chapter_a, &chapter_b] {
+                conn.execute(
+                    "INSERT INTO chapters (id, novel_id, title, order_index, status, created_at, updated_at) VALUES (?1, ?2, 'Chapter', 1, 'draft', ?3, ?3)",
+                    rusqlite::params![chapter_id, &project_id, &now],
+                )
+                .unwrap();
+            }
+        }
+
+        let first = save_chapter_outline(SaveChapterOutlineInput {
+            project_id: project_id.clone(),
+            volume_outline_id: None,
+            chapter_id: Some(chapter_a.clone()),
+            chapter_index: Some(1),
+            title: "A".to_string(),
+            content: "A content".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .unwrap();
+        let second = save_chapter_outline(SaveChapterOutlineInput {
+            project_id: project_id.clone(),
+            volume_outline_id: None,
+            chapter_id: Some(chapter_b.clone()),
+            chapter_index: Some(2),
+            title: "B".to_string(),
+            content: "B content".to_string(),
+            source_type: None,
+            context_snapshot: None,
+            save_as_new_version: Some(true),
+        })
+        .unwrap();
+
+        set_active_chapter_outline(SetActiveChapterOutlineInput {
+            id: first.id,
+            project_id: project_id.clone(),
+        })
+        .unwrap();
+        set_active_chapter_outline(SetActiveChapterOutlineInput {
+            id: second.id,
+            project_id: project_id.clone(),
+        })
+        .unwrap();
+
+        let conn = get_connection().lock().unwrap();
+        let active_a: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chapter_outlines WHERE project_id = ?1 AND chapter_id = ?2 AND is_active = 1",
+                rusqlite::params![&project_id, &chapter_a],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let active_b: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chapter_outlines WHERE project_id = ?1 AND chapter_id = ?2 AND is_active = 1",
+                rusqlite::params![&project_id, &chapter_b],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active_a, 1);
+        assert_eq!(active_b, 1);
+    }
+}
+
 // ==================== Database Initialization ====================
 
 pub fn create_outline_tables(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
@@ -753,8 +877,8 @@ fn map_volume_outline_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VolumeOut
         is_active: is_active != 0,
         source_type: row.get(10)?,
         context_snapshot: row.get(11)?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -773,8 +897,8 @@ fn map_chapter_outline_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChapterO
         is_active: is_active != 0,
         source_type: row.get(10)?,
         context_snapshot: row.get(11)?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 

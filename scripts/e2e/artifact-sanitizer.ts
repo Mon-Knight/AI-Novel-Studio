@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const SENSITIVE_KEY = /(api[_-]?key|authorization|token|password|secret|cookie|prompt)/i;
+const VERBATIM_CONTENT_KEYS = new Set(['adoptedContent']);
+const SAFE_HASH_EVIDENCE_KEYS = new Set(['snapshotCompiledPromptSha256']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const SANITIZATION_ERROR = 'Invalid JSON artifact was omitted during sanitization.';
 
 export function redactLogText(value: string): string {
@@ -10,7 +14,8 @@ export function redactLogText(value: string): string {
       /("(?:api[_-]?key|authorization|token|password|secret|cookie|prompt)"\s*:\s*)"[^"]*"/gi,
       '$1"[REDACTED]"',
     )
-    .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
+    .replace(/\bagt_[A-Za-z0-9_-]{16,}/gi, '[REDACTED_KEY]')
     .replace(/(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,"']+/gi, '$1[REDACTED]')
     .replace(/\bbearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(
@@ -29,7 +34,13 @@ export function sanitizeSecrets<T>(value: T): T {
     return Object.fromEntries(
       Object.entries(item).map(([key, child]) => [
         key,
-        SENSITIVE_KEY.test(key) ? '[REDACTED]' : visit(child),
+        SAFE_HASH_EVIDENCE_KEYS.has(key) && typeof child === 'string' && SHA256_PATTERN.test(child)
+          ? child
+          : SENSITIVE_KEY.test(key)
+            ? '[REDACTED]'
+            : VERBATIM_CONTENT_KEYS.has(key) && typeof child === 'string'
+              ? child
+              : visit(child),
       ]),
     );
   };
@@ -38,6 +49,25 @@ export function sanitizeSecrets<T>(value: T): T {
 
 export function sanitizeJsonText(value: string): string {
   return JSON.stringify(sanitizeSecrets(JSON.parse(value) as unknown), null, 2);
+}
+
+export function assertAdoptedContentHashes(value: string | Uint8Array): void {
+  const parsed = JSON.parse(
+    typeof value === 'string' ? value : Buffer.from(value).toString('utf8'),
+  ) as { chapters?: unknown };
+  if (!Array.isArray(parsed.chapters)) return;
+  parsed.chapters.forEach((chapter, index) => {
+    if (!chapter || typeof chapter !== 'object') return;
+    const record = chapter as Record<string, unknown>;
+    if (record.status !== 'passed') return;
+    if (typeof record.adoptedContent !== 'string' || typeof record.adoptedHash !== 'string') {
+      throw new Error(`Chapter ${index + 1} adopted-content evidence is incomplete.`);
+    }
+    const actualHash = createHash('sha256').update(record.adoptedContent, 'utf8').digest('hex');
+    if (actualHash !== record.adoptedHash) {
+      throw new Error(`Chapter ${index + 1} adopted-content evidence changed during sanitization.`);
+    }
+  });
 }
 
 export async function sanitizeArtifactDirectory(root: string): Promise<string[]> {

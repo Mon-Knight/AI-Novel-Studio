@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Pencil, Save, UserRound, UsersRound } from 'lucide-react';
 import type {
   Novel,
   ProtagonistProfile,
@@ -109,12 +110,13 @@ function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>👤</span>
+          <UserRound aria-hidden="true" size={18} strokeWidth={1.8} />
           <span style={{ fontSize: 16, fontWeight: 600 }}>主角设定</span>
         </div>
         {!editing && (
           <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
-            ✏️ 编辑
+            <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
+            编辑
           </button>
         )}
       </div>
@@ -129,21 +131,23 @@ function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
                 className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setMode('single')}
               >
-                👤 单主角
+                <UserRound aria-hidden="true" size={14} strokeWidth={1.8} />
+                单主角
               </button>
               <button
                 className={`btn btn-sm ${mode === 'dual' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setMode('dual')}
               >
-                👥 双主角
+                <UsersRound aria-hidden="true" size={14} strokeWidth={1.8} />
+                双主角
               </button>
             </div>
           </div>
 
-          <ProtagonistFields profile={protA} onChange={setProtA} label="⭐ 主角A" />
+          <ProtagonistFields profile={protA} onChange={setProtA} label="主角 A" />
 
           {mode === 'dual' && (
-            <ProtagonistFields profile={protB} onChange={setProtB} label="🌟 主角B" />
+            <ProtagonistFields profile={protB} onChange={setProtB} label="主角 B" />
           )}
 
           {mode === 'dual' && (
@@ -171,7 +175,14 @@ function ProtagonistCard({ novel, protagonist, onSave }: ProtagonistCardProps) {
               取消
             </button>
             <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
-              {saving ? '保存中...' : '💾 保存'}
+              {saving ? (
+                '保存中...'
+              ) : (
+                <>
+                  <Save aria-hidden="true" size={14} strokeWidth={1.8} />
+                  保存
+                </>
+              )}
             </button>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { SunMoon } from 'lucide-react';
 import { useThemeStore, type ThemePreference } from '../../store/themeStore';
 
 const OPTIONS: Array<{ value: ThemePreference; label: string; description: string }> = [
@@ -14,7 +15,7 @@ function AppearanceSettingsCard() {
   return (
     <section className="detail-card settings-card" aria-labelledby="appearance-settings-title">
       <div className="settings-card-heading">
-        <span aria-hidden="true">◐</span>
+        <SunMoon aria-hidden="true" size={18} strokeWidth={1.8} />
         <span id="appearance-settings-title">外观与主题</span>
       </div>
       <div className="theme-choice-group" role="radiogroup" aria-label="应用主题">

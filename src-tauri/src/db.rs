@@ -3,11 +3,24 @@ use rusqlite::{Connection, Result as SqliteResult};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
+
+fn record_e2e_startup_timing(
+    scope: &str,
+    stage: &str,
+    phase_started_at: Instant,
+    total_started_at: Instant,
+) {
+    crate::runtime::append_e2e_log(&format!(
+        "startup-timing: scope={scope} stage={stage} phase_ms={} total_ms={}",
+        phase_started_at.elapsed().as_millis(),
+        total_started_at.elapsed().as_millis()
+    ));
+}
 
 pub fn get_data_dir() -> PathBuf {
     if let Some(data_dir) = crate::runtime::e2e_data_dir()
@@ -48,12 +61,23 @@ fn dirs_next() -> Option<PathBuf> {
 }
 
 pub fn init_database() {
+    let total_started_at = Instant::now();
+    let mut phase_started_at = total_started_at;
     let data_dir = get_data_dir();
     fs::create_dir_all(&data_dir).expect("Failed to create data directory");
+    record_e2e_startup_timing(
+        "database",
+        "data_directory",
+        phase_started_at,
+        total_started_at,
+    );
 
+    phase_started_at = Instant::now();
     let db_path = get_database_path();
     let mut connection = Connection::open(&db_path).expect("Failed to open database");
+    record_e2e_startup_timing("database", "open", phase_started_at, total_started_at);
 
+    phase_started_at = Instant::now();
     connection
         .busy_timeout(Duration::from_secs(5))
         .expect("Failed to set database busy timeout");
@@ -61,15 +85,36 @@ pub fn init_database() {
     connection
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
         .expect("Failed to set pragmas");
+    record_e2e_startup_timing("database", "pragmas", phase_started_at, total_started_at);
 
+    phase_started_at = Instant::now();
     create_tables(&mut connection).expect("Failed to create tables");
+    record_e2e_startup_timing("database", "schema", phase_started_at, total_started_at);
+
+    phase_started_at = Instant::now();
     crate::services::agent_plan_service::recover_interrupted_plans(&mut connection)
         .expect("Failed to recover interrupted Agent Plans");
+    record_e2e_startup_timing(
+        "database",
+        "agent_plan_recovery",
+        phase_started_at,
+        total_started_at,
+    );
+
+    phase_started_at = Instant::now();
     crate::services::autonomous_scheduler_service::recover_interrupted_runs(&mut connection)
         .expect("Failed to recover interrupted autonomous book runs");
+    record_e2e_startup_timing(
+        "database",
+        "autonomous_recovery",
+        phase_started_at,
+        total_started_at,
+    );
 
+    phase_started_at = Instant::now();
     DB.set(Mutex::new(connection))
         .expect("Database already initialized");
+    record_e2e_startup_timing("database", "publish", phase_started_at, total_started_at);
 
     log_workspace_event(WorkspaceLogEvent {
         level: "info",
@@ -101,11 +146,50 @@ pub(crate) fn init_test_database() {
 }
 
 pub(crate) fn create_tables(conn: &mut Connection) -> Result<(), crate::errors::AppError> {
+    let total_started_at = Instant::now();
+    let mut phase_started_at = total_started_at;
     create_base_tables(conn)?;
+    record_e2e_startup_timing("schema", "base_tables", phase_started_at, total_started_at);
+
+    phase_started_at = Instant::now();
     run_migrations(conn)?;
+    record_e2e_startup_timing(
+        "schema",
+        "legacy_migrations",
+        phase_started_at,
+        total_started_at,
+    );
+
+    phase_started_at = Instant::now();
     create_indexes(conn)?;
+    record_e2e_startup_timing("schema", "indexes", phase_started_at, total_started_at);
+
+    phase_started_at = Instant::now();
     crate::outline_commands::create_outline_tables(conn)?;
+    record_e2e_startup_timing(
+        "schema",
+        "outline_tables",
+        phase_started_at,
+        total_started_at,
+    );
+
+    phase_started_at = Instant::now();
     crate::migrations::run_migrations(conn)?;
+    record_e2e_startup_timing(
+        "schema",
+        "ledger_migrations",
+        phase_started_at,
+        total_started_at,
+    );
+
+    phase_started_at = Instant::now();
+    seed_builtin_style_profiles(conn)?;
+    record_e2e_startup_timing(
+        "schema",
+        "builtin_style_profiles",
+        phase_started_at,
+        total_started_at,
+    );
     Ok(())
 }
 
@@ -747,6 +831,49 @@ fn create_indexes(conn: &Connection) -> SqliteResult<()> {
     Ok(())
 }
 
+fn seed_builtin_style_profiles(conn: &Connection) -> SqliteResult<()> {
+    conn.execute_batch(
+        "
+        INSERT OR IGNORE INTO style_profiles (
+            id, novel_id, name, source_type, source_state, narrative_perspective,
+            tone, pace, dialogue_ratio, description_ratio, forbidden_styles,
+            style_summary, is_active, created_at, updated_at
+        ) VALUES (
+            '00000000-0000-4000-8000-000000000351', NULL, '默认小说风格',
+            'system_default', 'none', '第三人称有限视角', '中性偏沉稳', '中等',
+            0.35, 0.4, '[]', '适合大多数小说的通用风格配置。', 1,
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        );
+
+        INSERT OR IGNORE INTO style_profiles (
+            id, novel_id, name, source_type, source_state, narrative_perspective,
+            tone, pace, dialogue_ratio, description_ratio, battle_style,
+            battle_intensity, emotion_tendency, forbidden_styles, style_summary,
+            is_active, created_at, updated_at
+        ) VALUES (
+            '00000000-0000-4000-8000-000000000352', NULL, '快节奏战斗风',
+            'system_default', 'none', '第三人称', '紧张、压迫', '快', 0.25, 0.45,
+            '重视动作连贯和代价', 'high', '紧张、压迫、爆发', '[]',
+            '适合战斗密集的章节。', 0,
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        );
+
+        INSERT OR IGNORE INTO style_profiles (
+            id, novel_id, name, source_type, source_state, narrative_perspective,
+            tone, pace, dialogue_ratio, description_ratio, psychological_ratio,
+            emotion_tendency, forbidden_styles, style_summary, is_active,
+            created_at, updated_at
+        ) VALUES (
+            '00000000-0000-4000-8000-000000000353', NULL, '抒情日常风',
+            'system_default', 'none', '第三人称有限视角', '温暖、细腻', '慢',
+            0.4, 0.35, 0.25, '柔和、深情', '[]', '适合日常过渡和角色情感发展章节。', 0,
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        );
+        ",
+    )?;
+    Ok(())
+}
+
 fn table_columns(conn: &Connection, table_name: &str) -> SqliteResult<Vec<String>> {
     let quoted_table_name = table_name.replace('"', "\"\"");
     let columns = conn
@@ -793,6 +920,36 @@ fn add_column_if_missing(
 
 fn migrate_style_profiles_table(conn: &Connection) -> SqliteResult<()> {
     ensure_column(conn, "style_profiles", "description", "TEXT")?;
+    ensure_column(conn, "style_profiles", "narrative_perspective", "TEXT")?;
+    ensure_column(conn, "style_profiles", "tone", "TEXT")?;
+    ensure_column(conn, "style_profiles", "pace", "TEXT")?;
+    ensure_column(conn, "style_profiles", "sentence_style", "TEXT")?;
+    ensure_column(
+        conn,
+        "style_profiles",
+        "dialogue_ratio",
+        "REAL NOT NULL DEFAULT 0.35",
+    )?;
+    ensure_column(
+        conn,
+        "style_profiles",
+        "description_ratio",
+        "REAL NOT NULL DEFAULT 0.4",
+    )?;
+    ensure_column(conn, "style_profiles", "psychological_ratio", "REAL")?;
+    ensure_column(conn, "style_profiles", "battle_style", "TEXT")?;
+    ensure_column(conn, "style_profiles", "battle_intensity", "TEXT")?;
+    ensure_column(conn, "style_profiles", "emotion_tendency", "TEXT")?;
+    ensure_column(conn, "style_profiles", "chapter_ending", "TEXT")?;
+    ensure_column(conn, "style_profiles", "forbidden_styles", "TEXT")?;
+    ensure_column(conn, "style_profiles", "style_summary", "TEXT")?;
+    ensure_column(conn, "style_profiles", "raw_config_json", "TEXT")?;
+    ensure_column(
+        conn,
+        "style_profiles",
+        "is_active",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
     ensure_column(conn, "style_profiles", "source_asset_id", "TEXT")?;
     ensure_column(conn, "style_profiles", "source_reference_work_id", "TEXT")?;
     ensure_column(conn, "style_profiles", "source_reference_import_id", "TEXT")?;

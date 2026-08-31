@@ -36,6 +36,23 @@ import {
 export async function executeExternalChapterGeneration(
   input: ChapterGenerationExecutionInput,
 ): Promise<AiExecutionResult> {
+  const compilationSources =
+    input.compilationSources && input.compilationSources.length > 0
+      ? input.compilationSources
+      : [
+          {
+            sourceType: 'request_context' as const,
+            sourceId: input.sourceId,
+            sourceVersion: input.sourceVersion,
+            origin: 'request' as const,
+            label: 'Frozen chapter generation prompt',
+            content: requestSource(input.request),
+            order: 0,
+            priority: 100,
+            required: true,
+            maxTokens: 48_000,
+          },
+        ];
   return executeAiTask({
     operationId: input.operationId,
     traceId: input.traceId ?? input.operationId,
@@ -47,20 +64,7 @@ export async function executeExternalChapterGeneration(
     settings: input.settings,
     compilation: {
       taskInput: input.taskInput,
-      sources: [
-        {
-          sourceType: 'request_context',
-          sourceId: input.sourceId,
-          sourceVersion: input.sourceVersion,
-          origin: 'request',
-          label: 'Frozen chapter generation prompt',
-          content: requestSource(input.request),
-          order: 0,
-          priority: 100,
-          required: true,
-          maxTokens: 48_000,
-        },
-      ],
+      sources: compilationSources,
     },
     signal: input.signal,
     stream: input.stream,

@@ -7,6 +7,7 @@
  * - error: 红色图标 + 错误文案 + 关闭按钮
  */
 import { useEffect, useRef } from 'react';
+import { CircleCheck, CircleX, LoaderCircle } from 'lucide-react';
 import './LoadingModal.css';
 
 export type LoadingModalState = 'loading' | 'success' | 'error';
@@ -73,9 +74,32 @@ function LoadingModal({
       >
         {/* 图标区 */}
         <div className="loading-modal-icon">
-          {state === 'loading' && <div className="loading-modal-spinner" />}
-          {state === 'success' && <div className="loading-modal-check">✅</div>}
-          {state === 'error' && <div className="loading-modal-cross">❌</div>}
+          {state === 'loading' && (
+            <LoaderCircle
+              className="loading-modal-spinner"
+              aria-hidden="true"
+              size={40}
+              strokeWidth={1.8}
+            />
+          )}
+          {state === 'success' && (
+            <CircleCheck
+              className="loading-modal-check"
+              aria-hidden="true"
+              size={40}
+              strokeWidth={1.8}
+              style={{ color: 'var(--color-success)' }}
+            />
+          )}
+          {state === 'error' && (
+            <CircleX
+              className="loading-modal-cross"
+              aria-hidden="true"
+              size={40}
+              strokeWidth={1.8}
+              style={{ color: 'var(--color-error)' }}
+            />
+          )}
         </div>
 
         {/* 标题 */}

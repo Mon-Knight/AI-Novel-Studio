@@ -30,6 +30,8 @@ export interface AiContextSourceInput {
   order: number;
   priority: number;
   required?: boolean;
+  /** Reject compilation when this source cannot be included in full. */
+  requireFull?: boolean;
   maxTokens?: number;
 }
 
@@ -45,6 +47,7 @@ export interface CompiledAiContextSource {
   order: number;
   priority: number;
   required: boolean;
+  requireFull?: boolean;
   contentHash: string;
   originalChars: number;
   originalBytes: number;

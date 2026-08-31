@@ -225,6 +225,30 @@ mod tests {
     }
 
     #[test]
+    fn test_world_setting_list_prioritizes_latest_active_update() {
+        let conn = setup_test_db();
+        conn.execute_batch(
+            "INSERT INTO world_settings
+                (id, novel_id, title, content, is_active, created_at, updated_at)
+             VALUES
+                ('world-old', 'novel-1', '旧世界', '旧世界内容', 1,
+                 '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
+                ('world-latest', 'novel-1', '最新世界', '最新世界内容', 1,
+                 '2026-01-03T00:00:00Z', '2026-01-04T00:00:00Z'),
+                ('world-inactive', 'novel-1', '停用世界', '停用世界内容', 0,
+                 '2026-01-05T00:00:00Z', '2026-01-06T00:00:00Z');",
+        )
+        .unwrap();
+
+        let list = list_world_settings_by_novel(&conn, "novel-1").unwrap();
+        let ids = list
+            .iter()
+            .map(|setting| setting.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["world-latest", "world-old", "world-inactive"]);
+    }
+
+    #[test]
     fn test_rule_system_crud() {
         let conn = setup_test_db();
         let rule = save_rule_system(

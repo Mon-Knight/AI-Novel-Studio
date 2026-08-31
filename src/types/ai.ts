@@ -6,6 +6,59 @@
 
 export type AiRuntimeMode = 'mock' | 'api';
 export type AiProvider = 'mock' | 'deepseek' | 'openai_compatible';
+export type CloudApiProvider = Exclude<AiProvider, 'mock'>;
+
+export interface SavedApiModelProfile {
+  id: string;
+  label: string;
+  provider: CloudApiProvider;
+  baseUrl: string;
+  modelName: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutSeconds?: number;
+  inputPricePerMillionTokens?: number;
+  outputPricePerMillionTokens?: number;
+  lastTestAt?: string;
+  lastTestOk?: boolean;
+}
+
+export interface SavedLocalModelProfile {
+  id: string;
+  label: string;
+  providerId: string;
+  baseUrl: string;
+  modelName: string;
+  timeoutSeconds: number;
+  temperature: number;
+  topP: number;
+  topK: number;
+  repeatPenalty: number;
+  minTokens?: number;
+  noRepeatNgramSize?: number;
+  seed?: number;
+  allowCloudWriterFallback?: boolean;
+  lastTestOk?: boolean;
+}
+
+export interface SavedGatewayModelProfile {
+  id: string;
+  label: string;
+  providerId: string;
+  baseUrl: string;
+  modelName: string;
+  timeoutSeconds: number;
+  contextTokens?: number;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  repeatPenalty?: number;
+  minTokens?: number;
+  noRepeatNgramSize?: number;
+  seed?: number;
+  lastTestOk?: boolean;
+}
 
 export interface AiSettings {
   runtimeMode: AiRuntimeMode;
@@ -13,6 +66,9 @@ export interface AiSettings {
   baseUrl: string;
   apiKey: string;
   modelName: string;
+  /** Saved Cloud API models shown as settings cards. Keys stay in session memory. */
+  savedApiModels?: SavedApiModelProfile[];
+  activeSavedApiModelId?: string;
   temperature?: number;
   maxTokens?: number;
   timeoutSeconds?: number;
@@ -32,8 +88,12 @@ export interface AiSettings {
   budgetWarningPercent?: number;
   /** Optional task-specific local model used only for chapter prose generation. */
   localChapterModel?: LocalChapterModelSettings;
+  savedLocalModels?: SavedLocalModelProfile[];
+  activeSavedLocalModelId?: string;
   /** Optional dedicated AI Model Gateway / Remote OpenAI-compatible model endpoint. */
   gateway?: GatewayModelConfig;
+  savedGatewayModels?: SavedGatewayModelProfile[];
+  activeSavedGatewayModelId?: string;
   /** Deprecated alias for gateway compatibility */
   remoteWriter?: GatewayModelConfig;
   mockMode: boolean; // 兼容旧字段，从 runtimeMode 派生
@@ -375,6 +435,12 @@ export interface ChapterGenerationContext {
   novelOutline?: string;
   masterOutline?: string;
   worldBackground?: string;
+  worldSettingSources?: Array<{
+    id: string;
+    title: string;
+    role: 'primary' | 'supplemental';
+    updatedAt: string;
+  }>;
   ruleSystems?: string;
   protagonist?: string;
   specialAbility?: string;
@@ -403,8 +469,24 @@ export interface ChapterGenerationContext {
   requiredCharacters?: ChapterCharacterContext[];
   requiredCharactersSummary?: string;
   requiredCharacterNames?: string;
+  characterStates?: string;
+  characterStateSources?: Array<{
+    id: string;
+    characterId: string;
+    characterName: string;
+    chapterId?: string;
+    origin: 'character_state' | 'character_current_state';
+  }>;
   chapterEvents?: string;
   chapterSettings?: string;
+  /** Read-time projection from persisted adopted summaries and ContextRecords. */
+  worldStateTimeline?: string;
+  worldStateTimelineSource?: {
+    latestChapterId: string;
+    chapterCount: number;
+    sourceSummaryIds: string[];
+    sourceContextRecordIds: string[];
+  };
   previousContext?: string;
   userInstruction?: string;
   /** 当前草稿正文（重新生成/改写模式时传入） */
@@ -412,4 +494,6 @@ export interface ChapterGenerationContext {
   chapterOutlineSource?: 'active_chapter_outline' | 'chapter_field' | 'draft' | 'empty';
   volumeOutlineSource?: 'active_outline' | 'volume_field' | 'none';
   masterOutlineSource?: 'active_outline' | 'novel_field' | 'novel_description' | 'none';
+  /** Optional context sources that could not be read while this context was built. */
+  contextWarnings?: string[];
 }

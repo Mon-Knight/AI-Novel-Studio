@@ -20,16 +20,22 @@ export type RightDockPanelType = Exclude<PanelType, 'draft-history' | null>;
 
 /** Review-only panels still offered in the writing workspace toolbar. */
 export const WORKSPACE_REVIEW_PANELS = [
-  'draft-history',
   'chapter-summary',
   'memory-inspector',
   'generation-trace',
 ] as const;
 
-/** Desktop E2E still exercises these job/quality/setting surfaces after the AI dock was removed. */
-export const WORKSPACE_E2E_PANELS = ['ai-generate', 'engineering', 'check', 'setting'] as const;
+/** Desktop E2E keeps legacy rollback and AI surfaces testable after their production entry was removed. */
+export const WORKSPACE_E2E_PANELS = [
+  'draft-history',
+  'ai-generate',
+  'engineering',
+  'check',
+  'setting',
+] as const;
 
 export const RETIRED_WORKSPACE_AI_PANELS: ReadonlySet<Exclude<PanelType, null>> = new Set([
+  'draft-history',
   'ai-generate',
   'outline',
   'characters',

@@ -1,7 +1,8 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.5.0
+> 版本：v3.6.0
+> 当前状态：v3.6.0 版本基线
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---
@@ -215,7 +216,7 @@ Task Runtime 负责执行生命周期，不成为小说事实源。Result Artifa
 
 模型、工具、上下文与压缩能力通过稳定定义和可替换 Provider 提供。任务运行冻结实际 Provider、模型、能力版本与配置摘要。Session 的追加事件用于重放与 UI 投影，小说正式事实仍由领域服务和 SQLite 管理。
 
-任务对话压缩与小说上下文压缩是两个不同能力：前者只调整 Session 输入表面；后者必须形成可验证 Result Artifact，并在用户确认后通过 Safe Apply 应用。
+任务对话压缩与小说上下文压缩是两个不同能力：前者只调整 Session 输入表面；后者只能形成可验证 Result Artifact 候选。当前通用结构化 `request_apply` 在“领域写入 + append-only `ArtifactDecision`”完成同事务迁移前固定失败关闭且不产生领域写入；这不能与已完成的章节 `ReviewAuthorization + adopt_review_authorized_draft` 原子采用链路混写。
 
 ### 12.6 当前插件投影
 
@@ -234,7 +235,9 @@ Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少�
 
 较新 Harness 源码只作为架构参考。升级固定 commit 必须先完成 API 差异审计、载体构建、任务隔离和回归验证，不能在工作台版本中顺带升级。
 
-完整设计与版本路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。任务对话、确认、Safe Apply、审阅授权、领域候选工具、上下文压缩和写作工作台审阅收敛已包含在 v3.5.0。
+完整设计与版本路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。任务对话、决定/审阅授权、章节原子采用、领域候选工具、上下文压缩候选和写作工作台审阅收敛已落地；旧生成类 AI 面板、独立实验面板和草稿历史生产入口已经移除。通用结构化 Safe Apply 仍按失败关闭边界处理。
+
+v3.6.0 已经完成 Canonical 1A-A/B/C/D 的 Catalog、Domain Facade、Projection、共享 Manifest 与宿主门禁，但四个只读 identity 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再以独立 exposure 变更验证 scoped manifest、权限、负例和重启行为；只有 exposure 通过后才进入 R4 真实 Main Agent Runtime 验证。
 
 ---
 

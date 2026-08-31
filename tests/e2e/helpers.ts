@@ -30,11 +30,101 @@ export type MockGateMethod =
 
 interface BridgeShape {
   invoke: (command: string, args?: Record<string, unknown>) => unknown;
+  runDomainFacadeSqliteSmoke?: (options: { allowMutation: true }) => unknown;
+  seedChapterCoreAssets?: (options: {
+    allowMutation: true;
+    input: E2eChapterCoreAssetSeedInput;
+  }) => unknown;
   getDiagnostics?: () => unknown;
   getConsoleLogs?: () => unknown;
   getUnhandledErrors?: () => unknown;
   getNetworkAttempts?: () => unknown;
   clearDiagnostics?: () => unknown;
+}
+
+export const E2E_BRIDGE_CALL_TIMEOUT_MS = 15_000;
+
+export interface E2eChapterCoreAssetSeedInput {
+  novelId: string;
+  worldSetting: { title: string; content: string };
+  ruleSystem: { title: string; content: string; forbiddenRules?: string };
+  protagonist: { name: string; identity: string; personality: string; goal: string };
+  chapters: Array<{
+    chapterId: string;
+    title: string;
+    outline: string;
+    targetWordCount: number;
+  }>;
+}
+
+export interface E2eChapterCoreAssetSeedEvidence {
+  storageMode: 'sqlite';
+  novelId: string;
+  worldSettingId: string;
+  ruleSystemId: string;
+  protagonistId: string;
+  chapterOutlineIds: string[];
+  readiness: Array<{ chapterId: string; ready: boolean; missingAssets: string[] }>;
+}
+
+export async function runDomainFacadeSqliteSmoke<T>(): Promise<T> {
+  const response = await browser.executeAsync((done) => {
+    const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: BridgeShape })
+      .__AI_NOVEL_STUDIO_E2E__;
+    if (!bridge?.runDomainFacadeSqliteSmoke) {
+      return done({ ok: false, error: 'Domain Facade SQLite E2E probe is unavailable' });
+    }
+    let settled = false;
+    const finish = (value: { ok: boolean; value?: unknown; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      done(value);
+    };
+    const timer = window.setTimeout(
+      () => finish({ ok: false, error: 'timeout running Domain Facade SQLite E2E probe' }),
+      120000,
+    );
+    Promise.resolve(bridge.runDomainFacadeSqliteSmoke({ allowMutation: true }))
+      .then((value) => finish({ ok: true, value }))
+      .catch((error) => finish({ ok: false, error: String(error) }));
+  });
+  const result = response as { ok: boolean; value?: T; error?: string };
+  if (!result.ok) throw new Error(result.error ?? 'Domain Facade SQLite E2E probe failed');
+  return result.value as T;
+}
+
+export async function seedChapterCoreAssetsForE2e(
+  input: E2eChapterCoreAssetSeedInput,
+): Promise<E2eChapterCoreAssetSeedEvidence> {
+  const response = await browser.executeAsync((fixtureInput, done) => {
+    const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: BridgeShape })
+      .__AI_NOVEL_STUDIO_E2E__;
+    if (!bridge?.seedChapterCoreAssets) {
+      return done({ ok: false, error: 'Core-asset SQLite E2E fixture is unavailable' });
+    }
+    let settled = false;
+    const finish = (value: { ok: boolean; value?: unknown; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      done(value);
+    };
+    const timer = window.setTimeout(
+      () => finish({ ok: false, error: 'timeout seeding Workbench core assets' }),
+      120000,
+    );
+    Promise.resolve(bridge.seedChapterCoreAssets({ allowMutation: true, input: fixtureInput }))
+      .then((value) => finish({ ok: true, value }))
+      .catch((error) => finish({ ok: false, error: String(error) }));
+  }, input);
+  const result = response as {
+    ok: boolean;
+    value?: E2eChapterCoreAssetSeedEvidence;
+    error?: string;
+  };
+  if (!result.ok) throw new Error(result.error ?? 'Core-asset SQLite E2E fixture failed');
+  return result.value!;
 }
 
 let fixtureSequence = 0;
@@ -54,7 +144,7 @@ export async function callMockGate(method: MockGateMethod): Promise<MockAiGateSt
 
 export async function bridgeCall<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const response = await browser.executeAsync(
-    (name, input, done) => {
+    (name, input, timeoutMs, done) => {
       const bridge = (window as unknown as { __AI_NOVEL_STUDIO_E2E__?: BridgeShape })
         .__AI_NOVEL_STUDIO_E2E__;
       if (!bridge?.invoke)
@@ -67,7 +157,7 @@ export async function bridgeCall<T>(command: string, args?: Record<string, unkno
       };
       const timer = window.setTimeout(
         () => finish({ ok: false, error: `timeout invoking ${name}` }),
-        15000,
+        timeoutMs,
       );
       Promise.resolve(bridge.invoke(name, input))
         .then((value) => {
@@ -81,6 +171,7 @@ export async function bridgeCall<T>(command: string, args?: Record<string, unkno
     },
     command,
     args ?? {},
+    E2E_BRIDGE_CALL_TIMEOUT_MS,
   );
   const result = response as { ok: boolean; value?: T; error?: string };
   if (!result.ok)

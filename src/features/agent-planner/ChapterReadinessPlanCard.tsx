@@ -1,4 +1,6 @@
 import type { ChapterReadinessResult } from '../../types/agentPlan';
+import type { LucideIcon } from 'lucide-react';
+import { Ban, CheckCircle2, Circle, CircleX, Clock3, LoaderCircle } from 'lucide-react';
 import { useChapterReadinessPlan } from './useChapterReadinessPlan';
 
 const statusLabels = {
@@ -10,14 +12,14 @@ const statusLabels = {
   cancelled: '已取消',
 } as const;
 
-const stepStatusSymbols = {
-  pending: '○',
-  running: '◉',
-  waiting_retry: '!',
-  completed: '✓',
-  failed: '×',
-  cancelled: '—',
-} as const;
+const stepStatusIcons: Record<string, LucideIcon> = {
+  pending: Circle,
+  running: LoaderCircle,
+  waiting_retry: Clock3,
+  completed: CheckCircle2,
+  failed: CircleX,
+  cancelled: Ban,
+};
 
 export interface ChapterReadinessPlanCardProps {
   novelId?: string;
@@ -71,12 +73,15 @@ export function ChapterReadinessPlanCard({ novelId, chapterId }: ChapterReadines
             </div>
           </div>
           <ol className="agent-plan-steps">
-            {planner.bundle.steps.map((step) => (
-              <li key={step.stepId} className={`agent-plan-step agent-plan-step--${step.status}`}>
-                <span aria-hidden="true">{stepStatusSymbols[step.status]}</span>
-                <span>{step.title}</span>
-              </li>
-            ))}
+            {planner.bundle.steps.map((step) => {
+              const StepStatusIcon = stepStatusIcons[step.status] || Circle;
+              return (
+                <li key={step.stepId} className={`agent-plan-step agent-plan-step--${step.status}`}>
+                  <StepStatusIcon aria-hidden="true" size={13} strokeWidth={1.8} />
+                  <span>{step.title}</span>
+                </li>
+              );
+            })}
           </ol>
         </>
       )}

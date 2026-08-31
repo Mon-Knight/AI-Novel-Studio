@@ -7,6 +7,7 @@ import { qualityCheckService } from '../../../services/quality/qualityCheckServi
 import { formatDateTime } from '../../../utils/date';
 import { formatNumber } from '../../../utils/format';
 import type { QualityCheckReport } from '../../../types/qualityCheck';
+import { CheckCircle2, FileText, History, RotateCcw, X } from 'lucide-react';
 
 interface DraftHistoryPanelProps {
   chapterId: string;
@@ -39,6 +40,8 @@ function DraftHistoryPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const liveChapterIdRef = useRef(chapterId);
   const loadEpochRef = useRef(0);
+  const mountedRef = useRef(true);
+  const messageTimerRef = useRef<number | null>(null);
   liveChapterIdRef.current = chapterId;
   const [drafts, setDrafts] = useState<ChapterDraft[]>([]);
   const [total, setTotal] = useState(0);
@@ -47,6 +50,28 @@ function DraftHistoryPanel({
   const [msg, setMsg] = useState('');
   const [busyDraftId, setBusyDraftId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+
+  const scheduleMessageClear = useCallback((delayMs: number) => {
+    if (!mountedRef.current) return;
+    if (messageTimerRef.current !== null) {
+      window.clearTimeout(messageTimerRef.current);
+    }
+    messageTimerRef.current = window.setTimeout(() => {
+      messageTimerRef.current = null;
+      if (mountedRef.current) setMsg('');
+    }, delayMs);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (messageTimerRef.current !== null) {
+        window.clearTimeout(messageTimerRef.current);
+        messageTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const load = useCallback(
     async (requestedPage: number) => {
@@ -142,7 +167,7 @@ function DraftHistoryPanel({
       if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) {
         setMsg(`v${draft.versionNo} 已采用，当前未保存正文已保留`);
         await load(page);
-        setTimeout(() => setMsg(''), 3000);
+        scheduleMessageClear(3000);
         return;
       }
       onDraftAdopted?.(verifiedDraft);
@@ -154,7 +179,7 @@ function DraftHistoryPanel({
     } finally {
       setBusyDraftId(null);
     }
-    setTimeout(() => setMsg(''), 2000);
+    scheduleMessageClear(2000);
   };
 
   const handleLoad = async (draft: ChapterDraft) => {
@@ -177,7 +202,7 @@ function DraftHistoryPanel({
         return;
       await draftVersionService.delete(draft.id, chapterId);
       setMsg(`v${draft.versionNo} 已废弃`);
-      setTimeout(() => setMsg(''), 2000);
+      scheduleMessageClear(2000);
       await load(page);
     } finally {
       setBusyDraftId(null);
@@ -199,9 +224,18 @@ function DraftHistoryPanel({
         style={{ width: 360 }}
       >
         <div className="right-panel-header">
-          <span className="right-panel-title">📋 草稿历史</span>
-          <button className="right-panel-close" onClick={onClose}>
-            ✕
+          <span className="right-panel-title">
+            <History aria-hidden="true" size={16} strokeWidth={1.8} />
+            <span>草稿历史</span>
+          </span>
+          <button
+            type="button"
+            className="right-panel-close"
+            aria-label="关闭草稿历史"
+            title="关闭"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" size={17} strokeWidth={1.8} />
           </button>
         </div>
         <div className="right-panel-body" data-testid="draft-history">
@@ -226,7 +260,8 @@ function DraftHistoryPanel({
             </div>
           ) : drafts.length === 0 ? (
             <div className="text-sm text-muted" style={{ textAlign: 'center', padding: 24 }}>
-              📄 暂无草稿
+              <FileText aria-hidden="true" size={22} strokeWidth={1.8} />
+              <div>暂无草稿</div>
               <br />
               <span style={{ fontSize: 12 }}>使用 AI 生成或手动保存创建草稿版本</span>
             </div>
@@ -263,7 +298,7 @@ function DraftHistoryPanel({
                         <span
                           style={{ color: 'var(--color-success)', fontSize: 12, marginLeft: 6 }}
                         >
-                          ✅ 已采用
+                          <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} /> 已采用
                         </span>
                       )}
                     </span>
@@ -292,7 +327,8 @@ function DraftHistoryPanel({
                       disabled={!!busyDraftId}
                       style={{ fontSize: 12 }}
                     >
-                      📖 恢复
+                      <RotateCcw aria-hidden="true" size={13} strokeWidth={1.8} />
+                      <span>恢复</span>
                     </button>
                     {!draft.isAdopted && (
                       <button
@@ -301,7 +337,8 @@ function DraftHistoryPanel({
                         disabled={!!busyDraftId}
                         style={{ fontSize: 12 }}
                       >
-                        ✅ 采用
+                        <CheckCircle2 aria-hidden="true" size={13} strokeWidth={1.8} />
+                        <span>采用</span>
                       </button>
                     )}
                     {!draft.isAdopted && (

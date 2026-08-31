@@ -7,7 +7,7 @@
 技术路线：Tauri + React + TypeScript + SQLite  
 开发方式：VS Code + Copilot / Agent 辅助开发
 
-> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0 对话式工作台事实以及后续 v3.4.0/v3.5.0 决定与压缩边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。小说继续是领域数据最高级对象。
+> 文档演进说明：既有表和 migration 章节描述当前事实；第 40 节记录 v3.3.0+ 对话式工作台事实以及 v3.6.0 的决定、采用与 Canonical 边界。首阶段使用 migration 032，并由 migration 033 补充作用域、状态边和不可变事实保护；migration 036 增加 `artifact_decisions` 与 `review_authorizations`。当前完整项目备份 schema 为 11。小说继续是领域数据最高级对象。
 
 ---
 
@@ -1625,7 +1625,7 @@ export interface AiTaskRecord {
 
 ## 36.5 备份与恢复
 
-参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 9 继续包含这些表并追加 Scheduler 与正式故事资产。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
+参考资料首次随完整项目备份 schema 6 加入；schema 7 在此基础上加入混合语义 Memory，当前 schema 11 继续包含这些表并依次追加 Scheduler、正式故事资产、对话工作台和产物决定/审阅授权。导出清空 `source_file_path`；恢复会重映射 work/import/section/operation ID，校验 current 版本唯一性、版本/章节序列、正文 hash、大文本 target 身份和外键，任何篡改均不产生部分写入。schema 2～5 缺少参考表时按空集合兼容恢复。
 
 ---
 
@@ -1674,9 +1674,9 @@ migration 026 `026_hybrid_semantic_memory` 建立 SQLite 权威的长期 Memory 
 
 检索模式显式区分 `hybrid / semantic_structured / fts_structured / lexical_structured / structured`，调用方可以识别降级，而不是把结构化或字面匹配标记成语义成功。
 
-## 37.5 备份 schema 7（历史基线；当前为 schema 9）
+## 37.5 备份 schema 7（历史基线；当前为 schema 11）
 
-完整项目备份 schema 7 首次包含 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`；当前 schema 9 在此基础上继续包含这些表，并追加 Scheduler 与正式故事资产。恢复为新作品时重映射文档、片段、向量和日志引用，并校验：
+完整项目备份 schema 7 首次包含 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`；当前 schema 11 在此基础上继续包含这些表，并依次追加 Scheduler、正式故事资产、对话工作台和产物决定/审阅授权。恢复为新作品时重映射文档、片段、向量和日志引用，并校验：
 
 - 来源、采用稿、章节与作品归属。
 - active 来源唯一性、版本与 SHA-256。
@@ -1685,6 +1685,17 @@ migration 026 `026_hybrid_semantic_memory` 建立 SQLite 权威的长期 Memory 
 - retrieval log 的候选、选中片段、评分原因和 Token 预算。
 
 schema 2～6 缺少四张 Memory 表时按空集合兼容；任何身份、hash、向量或引用篡改都会在恢复事务提交前失败。
+
+## 37.6 SQLite 长期 Memory 与进程内 Novel Memory
+
+当前仓库同时存在两套名称相近但权威性不同的实现：
+
+| 实现                                             | 存储与生命周期                                                                                                  | 当前定位                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `memoryService` / migration 026                  | SQLite 的 `memory_documents / memory_chunks / memory_embeddings / memory_retrieval_logs`；随 schema 11 备份恢复 | 桌面端长期 Memory 权威事实      |
+| `NovelMemoryManager` / `NovelMemoryStateUpdater` | TypeScript 进程内 `Map`；进程退出或 `reset` 后丢失                                                              | 兼容/实验运行态，不是持久事实源 |
+
+进程内 fragment、角色状态、世界状态和 version snapshot 不能写成“已持久化长期记忆”，不能替代采用稿、章节总结、ContextRecord 或 SQLite Memory，也不能作为 Canonical `memory.search` 跨重启稳定性的证据。桌面端 Agent-ready 读取必须以 SQLite 长期事实及其明确降级模式为准；浏览器 LocalStorage 只属于开发回退。
 
 ---
 
@@ -1778,7 +1789,7 @@ CREATE TABLE IF NOT EXISTS settings (
 当前 `AiSettings` 使用以下可选字段：
 
 ```text
-maxRequestsPerMinute       默认 12，范围 1～120
+maxRequestsPerMinute       默认 60，范围 1～120
 maxConcurrentAiRequests    默认 2，范围 1～8
 dailyTokenBudget           可选本地自然日硬预算
 dailyCostBudgetUsd         可选本地自然日估算 USD 硬预算
@@ -2250,18 +2261,21 @@ v0.8.0 建议实现：
 
 ## 25.1 API Key
 
-API Key 不应保存在普通业务表中。
+API Key 只允许存在于当前应用进程内的会话凭据注册表，并按 `scope + providerId + baseUrl + modelId` 精确绑定。应用退出后注册表自然销毁；切换模型、Provider 或 Base URL 时不得沿用其他身份的 Key。
 
-如果早期必须保存，应做到：
+必须做到：
 
 ```text
 1. 不写死在代码里
 2. 不提交 GitHub
 3. 不在日志中输出
 4. UI 中脱敏显示
+5. 不写入 SQLite、LocalStorage、项目备份或应用自有同步服务
+6. TaskConversation.defaultModel 与 TaskRun.modelSnapshot 只保存无凭据模型快照
+7. TypeScript、Rust 与项目备份导入/导出边界递归拒绝 apiKey、x-api-key、openaiApiKey、credentials、Authorization、Token 等凭据形态
 ```
 
-后续可以使用 Tauri 的安全存储插件或系统凭据管理。
+真实模型调用时，鉴权信息只发送到与该会话凭据精确绑定的 Provider Endpoint，不得因当前设置变化而改投其他地址。若后续引入系统凭据管理或云同步，必须另行设计、评审并保持项目数据与凭据隔离。
 
 ---
 
@@ -2711,7 +2725,7 @@ Session 创建、Round/Opinion 追加和终态更新分别在 SQLite `IMMEDIATE`
 
 ## 33.5 完整备份
 
-完整项目备份 schema 4 首次加入三张 Multi-Agent 表，schema 5 额外加入自主计划；当前 schema 9 继续包含这些事实，并依次加入参考资料、混合语义 Memory、跨进程调度及正式故事资产。恢复会重映射 session、opinion、operation 与所有草稿引用。schema 2/3 导入时允许缺少这些表。
+完整项目备份 schema 4 首次加入三张 Multi-Agent 表，schema 5 额外加入自主计划；当前 schema 11 继续包含这些事实，并依次加入参考资料、混合语义 Memory、跨进程调度、正式故事资产、对话工作台及产物决定/审阅授权。恢复会重映射 session、opinion、operation 与所有草稿引用。schema 2/3 导入时允许缺少这些表。
 
 详细协议见 [`architecture/multi-agent-collaboration.md`](architecture/multi-agent-collaboration.md)。
 
@@ -2801,9 +2815,9 @@ running → pending_confirmation → confirmed
 
 `candidate_ready` 不等于正式采用；`pending_confirmation` 不等于正式上下文。正式采用继续以章节/草稿事务为权威，章节总结、上下文和角色状态只有在用户确认分析后才原子写入。
 
-## 34.5 完整备份 schema 5（当前 schema 9 继续包含）
+## 34.5 完整备份 schema 5（当前 schema 11 继续包含）
 
-schema 5 增加 `autonomous_story_plans`；当前 schema 9 在此基础上继续加入参考资料、Memory、Scheduler 与正式故事资产。恢复为新作品时重映射 plan/operation、卷、章、角色、人物节点、世界元素、冲突、节奏阶段、chapter run 和草稿引用，再重算 `request_hash` 与 `plan_hash`。schema 4 备份允许缺少自主计划并恢复为空集合。
+schema 5 增加 `autonomous_story_plans`；当前 schema 11 在此基础上继续加入参考资料、Memory、Scheduler、正式故事资产、对话工作台与产物决定/审阅授权。恢复为新作品时重映射 plan/operation、卷、章、角色、人物节点、世界元素、冲突、节奏阶段、chapter run 和草稿引用，再重算 `request_hash` 与 `plan_hash`。schema 4 备份允许缺少自主计划并恢复为空集合。
 
 ---
 
@@ -3002,6 +3016,8 @@ Workbench（UI 聚合，不是领域父实体）
 
 归档任务只影响任务列表可见性，不删除已经应用的正式事实、产物来源或审计记录。
 
+`waiting_user` 由未决候选和审阅/应用事实归约，不由最近一次 Run 的终态直接覆盖。候选卡片与该状态在桌面端同一 SQLite 事务中提交；Run 完成、失败、取消或重启恢复时都必须先复验是否仍有未决候选。
+
 ## 40.3 `ConversationTurn` 与消息事实
 
 每个回合属于一个任务，并按单调顺序排列。需要区分：
@@ -3015,7 +3031,7 @@ Workbench（UI 聚合，不是领域父实体）
 
 ## 40.4 `TaskRun` 与模型快照
 
-每个用户回合可以产生一个或多个运行；重试创建新运行，不覆盖旧运行。运行至少冻结：
+每个用户回合可以产生一个或多个运行；当前线性重试复用原 user `turn_id` 创建新 Run，不新增重复 Turn，也不覆盖旧 Run。相同 `turn_id` 下按持久顺序排列的 Run 即为 attempt/retry 关系；当前不提供分支父子链，因此不在模型快照或 `conversation_turns.run_id` 中伪造 `retry_of_run_id`。运行至少冻结：
 
 - 所属任务、回合和重试关系；
 - Provider、模型 ID、能力与参数快照；
@@ -3078,10 +3094,19 @@ Workbench（UI 聚合，不是领域父实体）
 
 DSH Plugin Graph 和 Session Log 不新增为小说领域表。Plugin Projection 是运行时即时视图；DSH 事件只有在经过 ANS Adapter 转换并满足既有身份、顺序和终态不变量后，才形成 `TaskRun`、`ToolCallEvent` 或消息事实。
 
-## 40.9 后续版本边界
+## 40.9 v3.6.0 的决定与采用边界
 
-- migration 036 已建立 append-only `artifact_decisions` 与 `review_authorizations`；章节候选确认进入审阅，结构化候选经 Safe Apply 写入领域服务。
-- 章节正文不得由对话卡片直接覆盖正式正文；必须审阅授权后显式采用。
-- 小说上下文压缩候选以 ContextRecord 版本链保存，不删除旧压缩版本。
-- 旧写作工作台仍保留为审阅/编辑器；旧右侧 AI 面板在旧面板 E2E 全部迁移前继续作为回退入口。
+- migration 036 已建立 append-only `artifact_decisions` 与 `review_authorizations`。
+- 章节候选确认进入审阅后，桌面端 `adopt_review_authorized_draft` 在同一个 Rust/SQLite 事务中复验授权、作品/章节、草稿版本与全文 hash，采用草稿、消费授权并收敛任务状态；重复调用只能按同一采用事实幂等读回。
+- 章节正文不得由对话卡片直接覆盖正式正文；必须先获审阅授权，再由用户显式编辑/保存/采用。
+- 桌面端 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 开放；Rust 在同一个 SQLite 事务中复验 Artifact 来源与 hash、作品/章节作用域、目标基线和幂等键，完成对应领域写入并追加 `ArtifactDecision`。冲突决定同样持久化，但不得产生部分领域写入。
+- 小说上下文压缩可以形成精确带 `derivationType=context_compression` 的 `generic_json` 候选；桌面端复验正式来源、基线与覆盖后，可在同一 Rust/SQLite 事务中写入新的 ContextRecord 活动版本及 append-only 决定。其他 `generic_json`、质量/风格报告和未知结构化类型仍不在应用白名单中。
+- 浏览器开发 fallback 以 LocalStorage 镜像候选、append-only 决定和审阅授权的状态归约；章节授权只在草稿采用成功后投影为 consumed，结构化应用仍以稳定冲突失败关闭且不写正式领域事实。该镜像不替代桌面 SQLite 权威事务。
+- 写作工作台继续作为章节审阅/编辑器；旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除，底层领域服务、历史草稿和审计事实继续保留。
 - 不把 Runtime Registry 只读投影扩展为插件安装、卸载、启停、配置、更新或市场。
+
+## 40.10 v3.6.0 Canonical 只读契约边界
+
+Phase 1A-A/B/C/D 已建立 Capability Catalog、Domain Facade、Canonical Projection 以及 TypeScript/Rust/DSH 共享 portable Manifest 与漂移门禁；这一步不新增数据库表。四个 Canonical identity 为 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`，全部仍是 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。
+
+下一步必须先关闭四项事实源/证据 blocker，再通过独立 exposure 变更放行只读 Tool；之后才进入 R4 真实 Main Agent Runtime。legacy `tool_call_events` 或 DSH allowlist 中存在旧工具名，不能证明 Canonical Tool 已进入模型可见集合，也不能反向改写既有运行事实。

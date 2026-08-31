@@ -15,6 +15,8 @@ import {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { verifyReusableCarrier } from './carrier-freshness.mjs';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const srcTauri = path.join(root, 'src-tauri');
 const binDir = path.join(srcTauri, 'bin');
@@ -81,7 +83,23 @@ function capture(command, args, options = {}) {
   return result.stdout.trim();
 }
 
+console.log('[dsh-assets] building read-only gateway');
+run('cargo', ['build', '--release', '-p', 'novel-domain-gateway'], { cwd: srcTauri });
+if (!existsSync(gateway) || statSync(gateway).size === 0) {
+  throw new Error('gateway binary missing after release build: ' + gateway);
+}
+
+const zip = path.join(binDir, 'dsh-runtime.zip');
 if (!checkout || !existsSync(path.join(checkout, 'pnpm-lock.yaml'))) {
+  if (existsSync(zip) && statSync(zip).size > 1_000_000) {
+    const gatewaySha256 = verifyReusableCarrier({
+      zip,
+      currentGateway: gateway,
+      pinnedCommit,
+    });
+    console.log('[dsh-assets] using verified pinned DSH carrier zip; gateway=' + gatewaySha256);
+    process.exit(0);
+  }
   throw new Error('DSH_CHECKOUT must point to a built checkout of the pinned DSH source');
 }
 const actualCommit = capture('git', ['rev-parse', 'HEAD'], { cwd: checkout });
@@ -93,12 +111,6 @@ const trackedChanges = capture('git', ['status', '--porcelain', '--untracked-fil
 });
 if (trackedChanges) {
   throw new Error('DSH_CHECKOUT has tracked changes; use a clean pinned build checkout');
-}
-
-console.log('[dsh-assets] building read-only gateway');
-run('cargo', ['build', '--release', '-p', 'novel-domain-gateway'], { cwd: srcTauri });
-if (!existsSync(gateway) || statSync(gateway).size === 0) {
-  throw new Error('gateway binary missing after release build: ' + gateway);
 }
 
 console.log('[dsh-assets] assembling pinned runtime carrier');
@@ -122,7 +134,6 @@ for (const required of ['VERSION_MATRIX.json', 'JUNCTIONS.json']) {
 }
 
 mkdirSync(binDir, { recursive: true });
-const zip = path.join(binDir, 'dsh-runtime.zip');
 rmSync(zip, { force: true });
 console.log('[dsh-assets] creating zip64 runtime carrier');
 const entries = junctionEntries();
@@ -135,6 +146,12 @@ try {
 if (!existsSync(zip) || statSync(zip).size === 0) {
   throw new Error('runtime carrier zip was not created');
 }
+const gatewaySha256 = verifyReusableCarrier({
+  zip,
+  currentGateway: gateway,
+  pinnedCommit,
+});
+console.log('[dsh-assets] verified carrier Gateway SHA-256: ' + gatewaySha256);
 cpSync(
   path.join(root, 'scripts', 'dsh', 'unpack-payload.mjs'),
   path.join(binDir, 'unpack-payload.mjs'),

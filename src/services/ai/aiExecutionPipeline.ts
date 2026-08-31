@@ -55,10 +55,37 @@ export interface AiExecutionResult {
   externalRepairUsed?: boolean;
   structuredPayloadJson?: unknown;
   provider: ProviderAdapterResult;
+  providerRequestEvidence?: AiProviderRequestEvidence;
   taskId?: string;
   attemptId?: string;
   artifactBundle?: ResultArtifactBundle;
   sceneResults?: AiSceneExecutionResult[];
+}
+
+export interface AiProviderRequestEvidence {
+  schemaVersion: 'provider_request_evidence_v1';
+  hashAlgorithm: 'sha256';
+  messagesSerialization: 'json_stringify_messages_v1';
+  messagesSha256: string;
+  messageCount: number;
+  compiledContextSha256: string;
+  sources?: Array<{
+    sourceType: string;
+    sourceId: string;
+    sourceVersion: string;
+    label: string;
+    required: boolean;
+    requireFull: boolean;
+    contentSha256: string;
+    includedSha256?: string;
+    status: 'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
+  }>;
+  requestContextSources: Array<{
+    sourceVersion: string;
+    contentSha256: string;
+    includedSha256?: string;
+    status: 'included' | 'truncated' | 'omitted_empty' | 'omitted_budget';
+  }>;
 }
 
 export interface AiSceneExecutionResult {
@@ -296,6 +323,53 @@ async function requireSha256(value: string): Promise<string> {
     });
   }
   return hash;
+}
+
+async function buildProviderRequestEvidence(
+  contract: CompiledAiExecutionContractV1,
+): Promise<AiProviderRequestEvidence> {
+  const messagesSha256 = await requireSha256(
+    JSON.stringify({ messages: contract.request.messages }),
+  );
+  const compiledContextSha256 = await requireSha256(contract.contextSnapshot.compiledContext);
+  if (
+    messagesSha256 !== contract.inputPayloadJson.requestBodyHash ||
+    compiledContextSha256 !== contract.contextSnapshot.sourceManifestJson.compiledContextHash
+  ) {
+    throw new AiExecutionError({
+      code: 'AI_COMPILATION_INPUT_INVALID',
+      message: 'Provider 派发证据与编译契约 hash 不一致。',
+      retryable: false,
+    });
+  }
+  const sources = contract.contextSnapshot.sourceManifestJson.sources.map((source) => ({
+    sourceType: source.sourceType,
+    sourceId: source.sourceId,
+    sourceVersion: source.sourceVersion,
+    label: source.label,
+    required: source.required,
+    requireFull: source.requireFull === true,
+    contentSha256: source.contentHash,
+    ...(source.includedHash ? { includedSha256: source.includedHash } : {}),
+    status: source.status,
+  }));
+  return {
+    schemaVersion: 'provider_request_evidence_v1',
+    hashAlgorithm: 'sha256',
+    messagesSerialization: 'json_stringify_messages_v1',
+    messagesSha256,
+    messageCount: contract.request.messages.length,
+    compiledContextSha256,
+    sources,
+    requestContextSources: sources
+      .filter((source) => source.sourceType === 'request_context')
+      .map((source) => ({
+        sourceVersion: source.sourceVersion,
+        contentSha256: source.contentSha256,
+        ...(source.includedSha256 ? { includedSha256: source.includedSha256 } : {}),
+        status: source.status,
+      })),
+  };
 }
 
 function providerMetadata(
@@ -614,6 +688,7 @@ async function executeAiTaskInternal(
       }
     : input.compilation;
   let contract: CompiledAiExecutionContractV1;
+  let providerRequestEvidence: AiProviderRequestEvidence;
   try {
     contract = await dependencies.compileContract({
       taskType: input.taskType,
@@ -640,6 +715,7 @@ async function executeAiTaskInternal(
         retryable: false,
       });
     }
+    providerRequestEvidence = await buildProviderRequestEvidence(contract);
   } catch (error) {
     throw mapProviderError(error, { traceId, operationId });
   }
@@ -658,6 +734,7 @@ async function executeAiTaskInternal(
         text: provider.text,
         structuredPayloadJson: safeStructuredPayload(input.parseStructuredPayload, provider.text),
         provider,
+        providerRequestEvidence,
       };
     } catch (error) {
       throw mapProviderError(error, { traceId, operationId });
@@ -715,7 +792,7 @@ async function executeAiTaskInternal(
         tokenTotal: completedReplay.provider.tokenTotal,
       });
       projectionSettled = true;
-      return completedReplay;
+      return { ...completedReplay, providerRequestEvidence };
     }
     const queued = await withCommitReplay(() =>
       dependencies.runtime.queueAttempt(task!.taskId, traceId),
@@ -801,6 +878,7 @@ async function executeAiTaskInternal(
       text: provider.text,
       structuredPayloadJson,
       provider,
+      providerRequestEvidence,
       taskId: task.taskId,
       attemptId: providerRequestId,
       artifactBundle,

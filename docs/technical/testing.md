@@ -1,6 +1,6 @@
 # 测试策略与用例
 
-> 当前版本：v3.5.0（对话式创作工作台与审阅收敛）
+> 当前版本：v3.6.0（对话式创作工作台与审阅收敛）
 > 适用范围：AI Task/Attempt/Snapshot/Artifact 执行事实、可靠取消与请求治理、真实流式预览、参考资料与分层风格、混合语义 Memory、跨进程三档调度、多目标事务与正式故事资产、正文变更动态回归、性能基准、真实浏览器模式 E2E、Windows 真实 Tauri E2E、签名更新发布、前端构建与 Rust/Tauri 编译。
 
 ---
@@ -688,6 +688,20 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml commands::app_update::t
 - release manifest 测试使用临时 MSI updater/signature fixture，验证静态 Tauri v1 `latest.json`、artifact SHA-256、上一版 HTTPS installer 和 rollback backup 要求；稳定版本不得进入 Beta 索引。
 - release manifest 测试还必须使用含空格的 Tauri bundle 文件名，证明 GitHub Release 规范化后的点号资产名同时写入 `latest.json` URL 与 `release.json` 的 updater、signature、installer 字段，避免发布成功但更新 URL 返回 404。
 - `.github/workflows/release.yml` 只有在 `TAURI_PUBLIC_KEY / TAURI_PRIVATE_KEY` secrets 存在时构建 `msi,updater`，并在发布前检查 `.msi.zip.sig`。普通本地构建不会读取或生成私钥。
+
+---
+
+### 2.24 Canonical Manifest 跨语言漂移门禁
+
+```powershell
+npm run test:canonical-manifest
+npm run test:workbench
+npm run test:e2e -- --spec domain-facade-sqlite.spec.ts
+```
+
+`test:canonical-manifest` 由三套独立实现验证同一个 `contracts/agent/canonical-tool-manifest.v1.json`：Node/DSH 复算 portable hash 并检查 legacy 隔离；TypeScript 校验 Catalog、固定 adapter、动态 projection、版本/hash/exposure/allowlist/permission/schema 门禁；Rust 通过 `include_str!` 嵌入并独立复算 hash。Windows E2E 进一步比较 TS/Rust attestation，并验证四个 host-validation read Tool 进入真实 SQLite Facade 链。
+
+当前必须保持 `modelVisibleToolIdentities=[]`。这只表示 Canonical Tool 尚未向 Agent 放行；既有 DSH Workbench legacy allowlist 仍存在，测试不得把两者混写成“DSH 全局 Tool 数为 0”。共享 artifact 不得自动注入 `productionToolRegistry`、`WORKBENCH_TOOLS`、`ANS_ALLOWED_TOOLS`、DSH `tools/list` 或 Main Agent prompt。
 
 ---
 

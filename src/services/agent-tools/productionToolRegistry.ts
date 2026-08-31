@@ -9,10 +9,14 @@ import type {
   ToolInvocationContext,
   ToolJsonSchema,
 } from '../../types/toolRegistry';
+import type { MemoryRetrievalFilters } from '../../types/memory';
 import { ToolRegistry, type ToolDefinition } from './toolRegistry';
 import { validateCandidateText } from './candidateValidation';
 import { memoryService } from '../memory/memoryService';
 import { isTauri } from '../database/db';
+import { chapterRepository } from '../database/chapterRepository';
+import { volumeRepository } from '../database/volumeRepository';
+import { resolveChapterSequenceIndex } from '../memory/adoptedDraftMemory';
 
 const idSchema: ToolJsonSchema = { type: 'string', minLength: 1, maxLength: 160 };
 const draftSchema: ToolJsonSchema = { type: 'string', minLength: 1, maxLength: 400_000 };
@@ -21,6 +25,42 @@ const candidateTextSchema: ToolJsonSchema = {
   minLength: 1,
   maxLength: 400_000,
 };
+
+const GENERIC_CONTINUITY_MEMORY_QUERY =
+  /^(?:继续写|接着写|往下写|续写|生成(?:本章|下一章)?(?:正文|章节)?|写(?:本章|下一章)?(?:正文|章节)?)[。！？!?]*$/i;
+
+function normalizeMemoryQuery(value: unknown): string {
+  const query = String(value ?? '').trim();
+  return GENERIC_CONTINUITY_MEMORY_QUERY.test(query) ? '' : query;
+}
+
+function emptyMemoryResult(requestId: string) {
+  return {
+    requestId,
+    retrievalMode: 'structured' as const,
+    ftsAvailable: false,
+    semanticCandidateCount: 0,
+    candidateCount: 0,
+    usedTokens: 0,
+    tokenBudget: 4000,
+    offset: 0,
+    nextOffset: 0,
+    hasMore: false,
+    items: [],
+  };
+}
+
+async function resolveMemoryBoundary(
+  novelId: string,
+  chapterId: string | undefined,
+): Promise<number | undefined> {
+  if (!chapterId) return undefined;
+  const [chapters, volumes] = await Promise.all([
+    chapterRepository.getByNovelId(novelId),
+    volumeRepository.getByNovelId(novelId),
+  ]);
+  return resolveChapterSequenceIndex(chapters, volumes, chapterId);
+}
 const resultSchema: ToolJsonSchema = {
   type: 'object',
   required: ['ok'],
@@ -77,6 +117,17 @@ const readinessResultSchema: ToolJsonSchema = {
   },
 };
 
+const chapterCandidateDataSchema: ToolJsonSchema = {
+  type: 'object',
+  required: ['novelId', 'chapterId', 'text'],
+  additionalProperties: false,
+  properties: {
+    novelId: idSchema,
+    chapterId: idSchema,
+    text: candidateTextSchema,
+  },
+};
+
 const chapterCandidateResultSchema: ToolJsonSchema = {
   type: 'object',
   required: ['ok', 'toolVersion', 'artifactType', 'candidateOnly', 'data'],
@@ -86,16 +137,7 @@ const chapterCandidateResultSchema: ToolJsonSchema = {
     toolVersion: { enum: ['v1'] },
     artifactType: { enum: ['chapter_text'] },
     candidateOnly: { enum: [true] },
-    data: {
-      type: 'object',
-      required: ['novelId', 'chapterId', 'text'],
-      additionalProperties: false,
-      properties: {
-        novelId: idSchema,
-        chapterId: idSchema,
-        text: candidateTextSchema,
-      },
-    },
+    data: chapterCandidateDataSchema,
   },
 };
 
@@ -143,7 +185,11 @@ const definitions: ToolDefinition[] = [
       name: 'search_memory',
       description: '在当前小说的长期记忆中检索与任务相关的已采用事实。',
       inputSchema: objectSchema(
-        { novelId: idSchema, query: { type: 'string', minLength: 1, maxLength: 1000 } },
+        {
+          novelId: idSchema,
+          query: { type: 'string', minLength: 1, maxLength: 1000 },
+          targetChapterId: idSchema,
+        },
         ['novelId', 'query'],
       ),
       permissions: ['novel.read'],
@@ -151,20 +197,48 @@ const definitions: ToolDefinition[] = [
       timeoutMs: 20_000,
     }),
     handler: async (args) => {
+      const query = normalizeMemoryQuery(args.query);
+      const novelId = String(args.novelId);
+      const targetChapterId =
+        typeof args.targetChapterId === 'string' ? args.targetChapterId.trim() : undefined;
+      const requestId = `conversation-memory-${Date.now()}`;
+      const filters: MemoryRetrievalFilters = {
+        sourceTypes: ['adopted_draft', 'chapter_summary', 'context_record'],
+      };
       try {
+        const chapterSequenceIndex = await resolveMemoryBoundary(novelId, targetChapterId);
+        if (targetChapterId && chapterSequenceIndex === undefined) {
+          return {
+            ok: false,
+            error: '无法解析目标章节的时间边界，已停止 Memory 检索。',
+            source: 'memory',
+          };
+        }
+        if (chapterSequenceIndex === 0) {
+          return { ok: true, data: emptyMemoryResult(requestId), source: 'memory' };
+        }
+        if (chapterSequenceIndex !== undefined) {
+          filters.chapterEnd = chapterSequenceIndex - 1;
+          filters.temporalChapter = chapterSequenceIndex;
+        }
         const result = await memoryService.retrieve({
-          requestId: `conversation-memory-${Date.now()}`,
-          novelId: String(args.novelId),
-          query: String(args.query),
+          requestId,
+          novelId,
+          query,
           topK: 8,
           candidateLimit: 50,
           tokenBudget: 4000,
-          filters: {},
+          filters,
         });
         return { ok: true, data: result, source: 'memory' };
       } catch (error) {
         if (!isTauri()) {
-          return { ok: true, data: { items: [], total: 0 }, source: 'localstorage' };
+          const { retrieveLocalMemory } = await import('../memory/adoptedDraftMemory');
+          return {
+            ok: true,
+            data: retrieveLocalMemory(novelId, query, 8, filters),
+            source: 'localstorage',
+          };
         }
         return {
           ok: false,
@@ -172,6 +246,35 @@ const definitions: ToolDefinition[] = [
           source: 'memory',
         };
       }
+    },
+  },
+  {
+    descriptor: descriptor({
+      name: 'get_character_states',
+      description: '读取目标章节之前的人物状态、主角设定与本章角色安排。',
+      inputSchema: objectSchema({ novelId: idSchema, chapterId: idSchema }, [
+        'novelId',
+        'chapterId',
+      ]),
+      permissions: ['novel.read', 'chapter.read'],
+      scope: 'chapter',
+      timeoutMs: 20_000,
+    }),
+    handler: async (args) => {
+      const { buildFreshChapterGenerationContext } = await import('../prompt/contextBuilder');
+      const novelId = String(args.novelId);
+      const chapterId = String(args.chapterId);
+      const context = await buildFreshChapterGenerationContext({ novelId, chapterId });
+      return {
+        ok: true,
+        data: {
+          protagonist: context.protagonist,
+          protagonistsSummary: context.protagonistsSummary,
+          chapterCharacters: context.chapterCharacters,
+          characterStates: context.characterStates,
+        },
+        source: 'chapter-generation-context',
+      };
     },
   },
   {
@@ -218,46 +321,59 @@ const definitions: ToolDefinition[] = [
       ['check_quality', 'quality_report', '接收并验证质量检查报告，报告不能直接应用。'],
       ['summarize_chapter', 'chapter_summary', '接收并验证章节总结候选，不写入正式上下文。'],
     ] as const
-  ).map(([name, artifactType, description]) => ({
-    descriptor: {
-      ...descriptor({
-        name,
-        description,
-        inputSchema: objectSchema(
-          {
-            novelId: idSchema,
-            chapterId: idSchema,
-            candidateText: candidateTextSchema,
+  ).map(([name, artifactType, description]) => {
+    const requiresChapter = ![
+      'generate_outline',
+      'generate_characters',
+      'expand_settings',
+    ].includes(name);
+    return {
+      descriptor: {
+        ...descriptor({
+          name,
+          description,
+          inputSchema: objectSchema(
+            {
+              novelId: idSchema,
+              chapterId: idSchema,
+              candidateText: candidateTextSchema,
+            },
+            requiresChapter
+              ? ['novelId', 'chapterId', 'candidateText']
+              : ['novelId', 'candidateText'],
+          ),
+          permissions: ['novel.read', 'chapter.read'],
+          scope: requiresChapter ? ('chapter' as const) : ('novel' as const),
+          timeoutMs: 30_000,
+        }),
+        outputSchema: {
+          ...chapterCandidateResultSchema,
+          properties: {
+            ...chapterCandidateResultSchema.properties,
+            artifactType: { enum: [artifactType] },
+            data: {
+              ...chapterCandidateDataSchema,
+              required: requiresChapter ? ['novelId', 'chapterId', 'text'] : ['novelId', 'text'],
+            },
           },
-          ['novelId', 'candidateText'],
-        ),
-        permissions: ['novel.read', 'chapter.read'],
-        scope: 'chapter' as const,
-        timeoutMs: 30_000,
-      }),
-      outputSchema: {
-        ...chapterCandidateResultSchema,
-        properties: {
-          ...chapterCandidateResultSchema.properties,
-          artifactType: { enum: [artifactType] },
         },
       },
-    },
-    handler: async (args: Record<string, unknown>) => {
-      const text = validateCandidateText(artifactType, String(args.candidateText));
-      return {
-        ok: true,
-        toolVersion: 'v1',
-        artifactType,
-        candidateOnly: true,
-        data: {
-          novelId: String(args.novelId),
-          chapterId: String(args.chapterId ?? ''),
-          text,
-        },
-      };
-    },
-  })),
+      handler: async (args: Record<string, unknown>) => {
+        const text = validateCandidateText(artifactType, String(args.candidateText));
+        return {
+          ok: true,
+          toolVersion: 'v1',
+          artifactType,
+          candidateOnly: true,
+          data: {
+            novelId: String(args.novelId),
+            ...(args.chapterId ? { chapterId: String(args.chapterId) } : {}),
+            text,
+          },
+        };
+      },
+    };
+  }),
   {
     descriptor: {
       ...descriptor({
@@ -394,5 +510,9 @@ const definitions: ToolDefinition[] = [
       verifyStyleCompliance(contextFrom(args, context), String(args.draft)),
   },
 ];
+
+/** Frozen identity required by desktop Provider AI Tasks (Rust PRODUCTION_TOOL_REGISTRY_HASH). */
+export const PRODUCTION_TOOL_REGISTRY_HASH =
+  '82672d8347a8143a716e590014b9cf61fc576c0556c8683027d51528243c5192';
 
 export const productionToolRegistry = new ToolRegistry(definitions);
