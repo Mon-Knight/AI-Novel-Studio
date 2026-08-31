@@ -25,6 +25,7 @@
 
 ### 修复
 
+- **浏览器大纲保存断言稳定化**：Browser E2E 在章节大纲保存反馈可见后继续等待 `data-save-state="saved"` 稳定终态，避免把正常的短暂 `saving` 过程误报为保存失败；生产保存行为与状态契约保持不变。
 - **Windows 发布门禁先准备 DSH Runtime**：Windows 桌面 CI 与签名 Release workflow 现在先检出固定提交、构建 host libraries 并通过 `GITHUB_ENV` 导出 `DSH_CHECKOUT`，再运行依赖 persistent carrier/start path 的 Rust 全测，避免干净 Runner 把载体未准备误判为 9 项 Rust 回归；docs-sync 新增 job 级顺序门禁及提前测试、缺失环境导出的失败关闭夹具，防止发布编排再次倒退。
 - **DSH Rust 测试串行化**：固定发布 workflow 与本地 `verify_project` 使用 `-- --test-threads=1`，隔离共享 persistent carrier、Worker 和 session 状态；PR 验证模板与 docs-sync 同步拒绝并行参数或缺失串行参数，避免远端 Runner 将测试间状态污染误报为产品失败。
 - **跨任务迟到结算隔离**：资产应用和章节采用完成后，只有发起时的作品与任务仍为当前作用域才刷新章节、选择章节或更新当前 Bundle；后台任务继续完成 recovery/settle，但不能让旧任务的迟到回调覆盖新任务的章节、标题或加载状态。手动产物卡、对话式资产决定和正文采用均补齐跨作品 deferred 回归。

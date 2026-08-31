@@ -6,6 +6,7 @@ import {
   createProjectThroughUi,
   createVolumeThroughUi,
   fillTextareaTestId,
+  waitForTestIdAttribute,
   openWorkspace,
 } from '../e2e/helpers';
 import { expectUnifiedIconLanguage } from './iconLanguage';
@@ -345,10 +346,13 @@ describe('writing workspace layout', () => {
       window.addEventListener('ai-novel-studio:loading-modal', probe.listener);
     });
     await (await $('.editor-info-card .btn-primary')).click();
-    await (await $('[data-testid="outline-save-feedback"]')).waitForDisplayed();
-    expect(
-      await (await $('[data-testid="outline-save-feedback"]')).getAttribute('data-save-state'),
-    ).toBe('saved');
+    const outlineSaveFeedback = await waitForTestIdAttribute(
+      'outline-save-feedback',
+      'data-save-state',
+      'saved',
+      3_000,
+    );
+    expect(await outlineSaveFeedback.getAttribute('data-save-state')).toBe('saved');
     const outlineSave = await browser.execute(() => {
       const owner = window as typeof window & {
         __outlineSaveProbe?: { loadingEvents: number; listener: EventListener };
