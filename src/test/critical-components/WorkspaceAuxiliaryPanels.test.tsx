@@ -221,11 +221,11 @@ describe('DraftHistoryPanel', () => {
 
   it('does not schedule a message timer when draft deletion finishes after unmount', async () => {
     services.drafts = [draft(1)];
-    let resolveDelete = () => undefined;
+    let resolveDelete: () => void = () => {};
     services.deleteDraftCalls.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
-          resolveDelete = resolve;
+          resolveDelete = () => resolve();
         }),
     );
     const view = render(
