@@ -138,13 +138,13 @@ jobs:
         run: npm run tauri:build -- --bundles none --ci
 
   desktop-e2e:
-    name: Real Windows Tauri E2E (${{ (github.event_name == 'schedule' && 'full') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.suite) || 'smoke' }})
+    name: Real Windows Tauri E2E (${{ (github.event_name == 'schedule' && 'full') || inputs.suite || 'smoke' }})
     needs: quality
     runs-on: windows-2022
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
-      E2E_SUITE: ${{ (github.event_name == 'schedule' && 'full') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.suite) || 'smoke' }}
+      E2E_SUITE: ${{ (github.event_name == 'schedule' && 'full') || inputs.suite || 'smoke' }}
       MSEDGEDRIVER_TELEMETRY_OPTOUT: '1'
     steps:
       - name: Check out repository
