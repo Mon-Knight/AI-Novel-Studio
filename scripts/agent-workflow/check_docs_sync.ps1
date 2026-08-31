@@ -297,7 +297,7 @@ $desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob
     "path: .dsh-checkout",
     "pnpm --dir .dsh-checkout run build:lib:host",
     '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
-    "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
     "npm run tauri:build -- --bundles none --ci"
 )
 Add-CheckResult "desktop DSH runtime precedes Rust tests" $desktopQualityHasRuntimeOrder "pinned DSH host is exported before Rust tests and the production Tauri build"
@@ -317,10 +317,18 @@ $windowsReleaseHasRuntimeOrder = Test-MarkersInOrder ([string]$windowsReleaseJob
     "path: .dsh-checkout",
     "pnpm --dir .dsh-checkout run build:lib:host",
     '"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout" | Out-File -FilePath $env:GITHUB_ENV',
-    "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
     "npm run tauri:build:release -- --config"
 )
 Add-CheckResult "release DSH runtime precedes Rust tests" $windowsReleaseHasRuntimeOrder "pinned DSH host is exported before Rust tests and signed installer creation"
+
+$verificationScript = Get-OptionalText "scripts/agent-workflow/verify_project.ps1"
+$verificationHasSerialRustTests = ([string]$verificationScript).Contains('Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--", "--test-threads=1")')
+Add-CheckResult "local verification serializes DSH Rust tests" $verificationHasSerialRustTests "verify_project uses the same single-thread Rust test contract as release workflows"
+
+$pullRequestTemplate = Get-OptionalText ".github/pull_request_template.md"
+$pullRequestTemplateHasSerialRustTests = ([string]$pullRequestTemplate).Contains("cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1")
+Add-CheckResult "PR verification template serializes DSH Rust tests" $pullRequestTemplateHasSerialRustTests "PR evidence uses the same single-thread Rust test contract"
 
 $releaseNoteFragments = @(Get-ChildItem -LiteralPath (Get-ProjectPath "docs") -File -Filter "release-notes-v*.md" -ErrorAction SilentlyContinue)
 Add-CheckResult "single release history archive" ($releaseNoteFragments.Count -eq 0) $(if ($releaseNoteFragments.Count -eq 0) { "no per-version fragments" } else { ($releaseNoteFragments.Name -join ", ") })

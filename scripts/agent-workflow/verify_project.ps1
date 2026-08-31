@@ -125,7 +125,7 @@ foreach ($step in $npmSteps) {
 }
 
 Invoke-VerificationStep -Name "cargo check" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("check")
-Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test")
+Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--", "--test-threads=1")
 
 # The complete desktop suite is a release gate, not a substitute for Node or Rust tests.
 Invoke-VerificationStep -Name "npm run test:e2e" -WorkingDirectory $ProjectRoot -Executable $npm -Arguments @("run", "test:e2e")

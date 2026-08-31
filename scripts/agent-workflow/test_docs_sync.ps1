@@ -147,6 +147,12 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/release.yml"
 
     $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
+    $releaseParallelRust = $releaseWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
+    Set-Content -LiteralPath $releaseWorkflowPath -Value $releaseParallelRust -Encoding UTF8
+    Assert-CheckResult "release Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/release.yml"
+
+    $releaseWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $releaseWorkflowPath
     $releaseWithoutDshExport = $releaseWorkflow.Replace('"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout"', '"DSH_CHECKOUT_REMOVED"')
     if ($releaseWithoutDshExport -ceq $releaseWorkflow) {
         throw "Unable to remove the release DSH_CHECKOUT export fixture."
@@ -169,6 +175,12 @@ try {
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
 
     $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopParallelRust = $desktopWorkflow.Replace('-- --test-threads=1', '-- --test-threads=8')
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopParallelRust -Encoding UTF8
+    Assert-CheckResult "desktop Rust tests without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
     $desktopWithoutDshExport = $desktopWorkflow.Replace('"DSH_CHECKOUT=$env:GITHUB_WORKSPACE\.dsh-checkout"', '"DSH_CHECKOUT_REMOVED"')
     if ($desktopWithoutDshExport -ceq $desktopWorkflow) {
         throw "Unable to remove the desktop DSH_CHECKOUT export fixture."
@@ -176,6 +188,20 @@ try {
     Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWithoutDshExport -Encoding UTF8
     Assert-CheckResult "desktop workflow without DSH runtime export" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $verificationScriptPath = Join-Path $FixtureRoot "scripts/agent-workflow/verify_project.ps1"
+    $verificationScript = Get-Content -Raw -Encoding UTF8 -LiteralPath $verificationScriptPath
+    $verificationParallelRust = $verificationScript.Replace('--test-threads=1', '--test-threads=8')
+    Set-Content -LiteralPath $verificationScriptPath -Value $verificationParallelRust -Encoding UTF8
+    Assert-CheckResult "local verification without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture "scripts/agent-workflow/verify_project.ps1"
+
+    $pullRequestTemplatePath = Join-Path $FixtureRoot ".github/pull_request_template.md"
+    $pullRequestTemplate = Get-Content -Raw -Encoding UTF8 -LiteralPath $pullRequestTemplatePath
+    $pullRequestTemplateParallelRust = $pullRequestTemplate.Replace('-- --test-threads=1', '')
+    Set-Content -LiteralPath $pullRequestTemplatePath -Value $pullRequestTemplateParallelRust -Encoding UTF8
+    Assert-CheckResult "PR template without serial DSH guard" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/pull_request_template.md"
 
     $fastCiWorkflowPath = Join-Path $FixtureRoot ".github/workflows/ci.yml"
     $fastCiWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $fastCiWorkflowPath
