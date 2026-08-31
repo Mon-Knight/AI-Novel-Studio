@@ -163,7 +163,7 @@ git add .
 git commit -m "feat: complete vX.X.X ..."
 git push -u origin codex/vX.Y.Z-release
 
-# 创建 PR，门禁和审查通过后合并；再从 main 创建不可移动的发布 tag
+# 创建 PR，门禁和适用审查条件通过后合并；再从 main 创建不可移动的发布 tag
 git switch main
 git pull --ff-only origin main
 git tag vX.X.X

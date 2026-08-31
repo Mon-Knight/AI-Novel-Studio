@@ -883,7 +883,7 @@ git add .
 git commit -m "feat: initialize AI Novel Studio v0.1.0"
 git push -u origin codex/v0.1.0-release
 
-# PR 审查和门禁通过并合并后
+# PR 适用审查条件和门禁通过并合并后
 git switch main
 git pull --ff-only origin main
 git tag v0.1.0

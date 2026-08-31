@@ -108,14 +108,14 @@ git commit -m "feat: complete vX.X.X - 版本描述"
 # 4. 推送版本分支并创建 PR
 git push -u origin codex/vX.Y.Z-release
 
-# 5. 审查和门禁通过、PR 合并后，从 main 创建 Tag
+# 5. 适用审查条件和门禁通过、PR 合并后，从 main 创建 Tag
 git switch main
 git pull --ff-only origin main
 git tag vX.X.X
 git push origin vX.X.X
 ```
 
-不得绕过 `docs/project/git-workflow.md` 中的 `main` 保护和审查要求，也不得移动已发布 tag。
+不得绕过 `docs/project/git-workflow.md` 中的 `main` 保护和适用审查要求，也不得移动已发布 tag。
 
 ### 步骤 8：最终确认
 
