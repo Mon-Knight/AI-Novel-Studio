@@ -72,10 +72,8 @@ pub fn update_novel(
 }
 
 pub fn delete_novel(conn: &mut Connection, id: &str) -> Result<(), String> {
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
-    crate::project_backup::purge_project_in_tx(&tx, id)?;
-    tx.commit().map_err(|error| error.to_string())?;
-    Ok(())
+    let now = chrono::Utc::now().to_rfc3339();
+    novel_repository::soft_delete(conn, id, &now)
 }
 
 /// Physically removes a project and every owned durable fact in one transaction.
@@ -364,6 +362,52 @@ mod tests {
             )
             .unwrap();
         assert_eq!(volume_count, 0);
+    }
+
+    #[test]
+    fn legacy_delete_soft_deletes_project_and_preserves_owned_rows() {
+        let mut conn = setup_test_db();
+        let novel = create_novel(
+            &conn,
+            CreateNovelInput {
+                title: "可恢复作品".to_string(),
+                subtitle: None,
+                description: None,
+                outline: None,
+                genre: None,
+                target_word_count: None,
+            },
+        )
+        .unwrap();
+        let volume_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO volumes
+             (id, novel_id, title, order_index, status, created_at, updated_at)
+             VALUES (?1, ?2, '卷一', 0, 'planned', ?3, ?3)",
+            params![volume_id, novel.id, now],
+        )
+        .unwrap();
+
+        delete_novel(&mut conn, &novel.id).unwrap();
+
+        assert!(get_novel(&conn, &novel.id).unwrap().is_none());
+        let deleted_at: Option<String> = conn
+            .query_row(
+                "SELECT deleted_at FROM novels WHERE id = ?1",
+                params![novel.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(deleted_at.is_some());
+        let volume_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM volumes WHERE id = ?1",
+                params![volume_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(volume_count, 1);
     }
 
     #[test]

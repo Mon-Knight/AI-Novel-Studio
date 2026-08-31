@@ -181,7 +181,9 @@ export default function AiGatewaySettingsCard({
         }}
         onDelete={(id) => {
           const remaining = profiles.filter((item) => item.id !== id);
-          const nextActive = remaining[0];
+          const nextActive =
+            remaining.find((item) => item.id === settings.activeSavedGatewayModelId) ??
+            remaining[0];
           if (!nextActive) {
             persist({
               ...settings,

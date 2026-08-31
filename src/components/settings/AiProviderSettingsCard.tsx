@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Bot } from 'lucide-react';
 import type { AiSettings, SavedApiModelProfile } from '../../types/ai';
 import { aiSettingsService } from '../../services/ai/aiClient';
@@ -25,6 +25,23 @@ interface AiProviderSettingsCardProps {
   handleSave: (next?: AiSettings) => void;
 }
 
+type CloudEditorSettingsSnapshot = Pick<
+  AiSettings,
+  'provider' | 'baseUrl' | 'modelName' | 'temperature' | 'maxTokens' | 'timeoutSeconds' | 'apiKey'
+>;
+
+function snapshotCloudEditorSettings(settings: AiSettings): CloudEditorSettingsSnapshot {
+  return {
+    provider: settings.provider,
+    baseUrl: settings.baseUrl,
+    modelName: settings.modelName,
+    temperature: settings.temperature,
+    maxTokens: settings.maxTokens,
+    timeoutSeconds: settings.timeoutSeconds,
+    apiKey: settings.apiKey,
+  };
+}
+
 function sessionKeyFor(
   profile: Pick<SavedApiModelProfile, 'provider' | 'baseUrl' | 'modelName'>,
 ): string {
@@ -48,8 +65,12 @@ function AiProviderSettingsCard({
   const profiles = settings.savedApiModels ?? [];
   const [editorOpen, setEditorOpen] = useState(profiles.length === 0);
   const [draft, setDraft] = useState<ApiModelEditorDraft>(emptyApiModelDraft);
+  const editorSettingsSnapshotRef = useRef<CloudEditorSettingsSnapshot | null>(null);
 
   const patchDraft = (next: Partial<ApiModelEditorDraft>) => {
+    if (!editorSettingsSnapshotRef.current) {
+      editorSettingsSnapshotRef.current = snapshotCloudEditorSettings(settings);
+    }
     const merged = { ...draft, ...next };
     const identityChanged =
       merged.provider !== draft.provider ||
@@ -73,25 +94,30 @@ function AiProviderSettingsCard({
   };
 
   const openAdd = () => {
+    editorSettingsSnapshotRef.current = null;
     setDraft(emptyApiModelDraft());
     setEditorOpen(true);
   };
 
   const openEdit = (profile: SavedApiModelProfile) => {
+    editorSettingsSnapshotRef.current = null;
     setDraft(draftFromSavedProfile(profile, sessionKeyFor(profile)));
     setEditorOpen(true);
   };
 
   const useProfile = (profile: SavedApiModelProfile) => {
     const next = applySavedApiModel(settings, profile, sessionKeyFor(profile));
+    editorSettingsSnapshotRef.current = null;
     update(next);
     setEditorOpen(false);
     handleSave(next);
   };
 
   const deleteProfile = (profile: SavedApiModelProfile) => {
+    editorSettingsSnapshotRef.current = null;
     const remaining = profiles.filter((item) => item.id !== profile.id);
-    const nextActive = remaining[0];
+    const nextActive =
+      remaining.find((item) => item.id === settings.activeSavedApiModelId) ?? remaining[0];
     if (!nextActive) {
       const cleared: AiSettings = {
         ...settings,
@@ -133,6 +159,7 @@ function AiProviderSettingsCard({
       profile,
       draft.apiKey,
     );
+    editorSettingsSnapshotRef.current = null;
     update(nextSettings);
     setEditorOpen(false);
     handleSave(nextSettings);
@@ -216,11 +243,20 @@ function AiProviderSettingsCard({
           onChange={patchDraft}
           onSave={saveDraftAsCard}
           onCancel={() => {
+            const snapshot = editorSettingsSnapshotRef.current;
+            editorSettingsSnapshotRef.current = null;
             setEditorOpen(false);
-            const active = profiles.find(
-              (profile) => profile.id === settings.activeSavedApiModelId,
-            );
-            if (active) update(applySavedApiModel(settings, active, sessionKeyFor(active)));
+            if (snapshot) {
+              update({
+                ...snapshot,
+                provider:
+                  settings.runtimeMode === 'mock'
+                    ? 'mock'
+                    : snapshot.provider === 'mock'
+                      ? 'openai_compatible'
+                      : snapshot.provider,
+              });
+            }
           }}
         />
       )}

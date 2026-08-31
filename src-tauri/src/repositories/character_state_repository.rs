@@ -1,5 +1,32 @@
 use crate::domain::context::CharacterStateDto;
 use rusqlite::{params, Connection, OptionalExtension};
+use std::fmt;
+
+#[derive(Debug)]
+pub enum CharacterCurrentStateProjectionError {
+    LatestStateRead(String),
+    CharacterUpdate(String),
+    CharacterUpdateConflict,
+}
+
+impl fmt::Display for CharacterCurrentStateProjectionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LatestStateRead(error) => {
+                write!(formatter, "character_state_projection_read_failed: {error}")
+            }
+            Self::CharacterUpdate(error) => {
+                write!(
+                    formatter,
+                    "character_state_projection_update_failed: {error}"
+                )
+            }
+            Self::CharacterUpdateConflict => {
+                formatter.write_str("character_state_projection_update_conflict")
+            }
+        }
+    }
+}
 
 pub fn map_character_state_row(row: &rusqlite::Row) -> rusqlite::Result<CharacterStateDto> {
     Ok(CharacterStateDto {
@@ -18,6 +45,36 @@ pub fn map_character_state_row(row: &rusqlite::Row) -> rusqlite::Result<Characte
 }
 
 pub const CHARACTER_STATE_SELECT: &str = "SELECT id, novel_id, character_id, chapter_id, state_summary, relationship_changes, goal_changes, location, health_state, knowledge_state, created_at FROM character_states";
+
+const CHARACTER_STATE_SEQUENCE_FROM: &str = "FROM character_states AS state
+    LEFT JOIN chapters AS chapter
+           ON chapter.id = state.chapter_id
+          AND chapter.novel_id = state.novel_id
+          AND chapter.deleted_at IS NULL
+    LEFT JOIN volumes AS volume
+           ON volume.id = chapter.volume_id
+          AND volume.novel_id = chapter.novel_id
+          AND volume.deleted_at IS NULL";
+
+const CHARACTER_STATE_SEQUENCE_ORDER: &str = "ORDER BY
+    CASE
+        WHEN state.chapter_id IS NULL THEN 0
+        WHEN chapter.volume_id IS NULL OR volume.id IS NULL THEN 1
+        ELSE 2
+    END DESC,
+    CASE
+        WHEN chapter.volume_id IS NOT NULL AND volume.id IS NOT NULL
+        THEN volume.order_index
+    END DESC,
+    CASE
+        WHEN chapter.volume_id IS NOT NULL AND volume.id IS NOT NULL
+        THEN volume.id
+    END DESC,
+    chapter.order_index DESC,
+    chapter.created_at DESC,
+    chapter.id DESC,
+    state.created_at DESC,
+    state.id DESC";
 
 pub fn character_state_select_sql() -> &'static str {
     CHARACTER_STATE_SELECT
@@ -58,7 +115,13 @@ pub fn find_character_states_by_character(
     character_id: &str,
 ) -> Result<Vec<CharacterStateDto>, String> {
     let sql = format!(
-        "{CHARACTER_STATE_SELECT} WHERE character_id = ?1 ORDER BY created_at DESC, id DESC"
+        "SELECT state.id, state.novel_id, state.character_id, state.chapter_id,
+                state.state_summary, state.relationship_changes, state.goal_changes,
+                state.location, state.health_state, state.knowledge_state, state.created_at
+         {CHARACTER_STATE_SEQUENCE_FROM}
+         WHERE state.character_id = ?1
+           AND (state.chapter_id IS NULL OR chapter.id IS NOT NULL)
+         {CHARACTER_STATE_SEQUENCE_ORDER}"
     );
     let mut stmt = conn
         .prepare(&sql)
@@ -93,15 +156,48 @@ pub fn find_latest_character_state_summary(
     novel_id: &str,
     character_id: &str,
 ) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT state_summary FROM character_states
-         WHERE novel_id = ?1 AND character_id = ?2
-         ORDER BY created_at DESC, id DESC LIMIT 1",
-        params![novel_id, character_id],
-        |row| row.get::<_, String>(0),
+    let sql = format!(
+        "SELECT state.state_summary
+         {CHARACTER_STATE_SEQUENCE_FROM}
+         WHERE state.novel_id = ?1 AND state.character_id = ?2
+           AND (state.chapter_id IS NULL OR chapter.id IS NOT NULL)
+         {CHARACTER_STATE_SEQUENCE_ORDER}
+         LIMIT 1"
+    );
+    let mut statement = conn
+        .prepare(&sql)
+        .map_err(|e| format!("character_state_latest_prepare_failed: {e}"))?;
+    statement
+        .query_row(params![novel_id, character_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()
+        .map_err(|e| format!("character_state_latest_read_failed: {e}"))
+}
+
+pub fn reproject_character_current_state(
+    conn: &Connection,
+    novel_id: &str,
+    character_id: &str,
+    updated_at: &str,
+) -> Result<bool, CharacterCurrentStateProjectionError> {
+    let latest_state = find_latest_character_state_summary(conn, novel_id, character_id)
+        .map_err(CharacterCurrentStateProjectionError::LatestStateRead)?;
+    update_character_current_state(
+        conn,
+        novel_id,
+        character_id,
+        latest_state.as_deref(),
+        updated_at,
     )
-    .optional()
-    .map_err(|e| format!("character_state_latest_read_failed: {e}"))
+    .map_err(|error| {
+        if error == "character_state_character_missing" {
+            CharacterCurrentStateProjectionError::CharacterUpdateConflict
+        } else {
+            CharacterCurrentStateProjectionError::CharacterUpdate(error)
+        }
+    })?;
+    Ok(latest_state.is_some())
 }
 
 #[allow(clippy::too_many_arguments)]

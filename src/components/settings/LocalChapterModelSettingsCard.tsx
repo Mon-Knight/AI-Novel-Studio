@@ -100,7 +100,8 @@ function LocalChapterModelSettingsCard({
 
   const deleteProfile = (id: string) => {
     const remaining = profiles.filter((item) => item.id !== id);
-    const nextActive = remaining[0];
+    const nextActive =
+      remaining.find((item) => item.id === settings.activeSavedLocalModelId) ?? remaining[0];
     if (!nextActive) {
       const cleared: AiSettings = {
         ...settings,

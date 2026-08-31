@@ -105,6 +105,7 @@ export function useWorkspaceChapterLoader({
   const [pageError, setPageError] = useState('');
   const [loadState, setLoadState] = useState<WorkspaceLoadState>('loading');
   const [reviewCandidate, setReviewCandidate] = useState<ReviewCandidateDocument | null>(null);
+  const reviewCandidateRef = useRef<ReviewCandidateDocument | null>(null);
   const [chapterDocumentLoad, setChapterDocumentLoad] = useState<ChapterDocumentLoadState>({
     status: 'ready',
   });
@@ -120,6 +121,11 @@ export function useWorkspaceChapterLoader({
     (chapterDocumentLoad.status === 'error' &&
       chapterDocumentLoad.chapterId === refs.activeChapterId.current);
   documentBlockedRef.current = isChapterDocumentBlocked;
+
+  const updateReviewCandidate = useCallback((candidate: ReviewCandidateDocument | null) => {
+    reviewCandidateRef.current = candidate;
+    setReviewCandidate(candidate);
+  }, []);
 
   const commitActiveChapter = useCallback(
     (chapterId: string) => {
@@ -177,7 +183,7 @@ export function useWorkspaceChapterLoader({
               throw new Error('审阅授权已消费，但采用草稿状态不一致。');
             }
             if (activateOnSuccess) commitActiveChapter(chapterId);
-            setReviewCandidate(null);
+            updateReviewCandidate(null);
             setCurrentDraft(adoptedDraft);
             refs.currentDraft.current = adoptedDraft;
             setDraftWordCount(adoptedDraft.wordCount);
@@ -209,7 +215,7 @@ export function useWorkspaceChapterLoader({
             chapterId,
             novelId: requestNovelId,
           };
-          setReviewCandidate(candidateDoc);
+          updateReviewCandidate(candidateDoc);
           setCurrentDraft(null);
           refs.currentDraft.current = null;
           setDraftWordCount(countTextWords(candidateDoc.content));
@@ -219,7 +225,7 @@ export function useWorkspaceChapterLoader({
           return true;
         }
 
-        setReviewCandidate(null);
+        updateReviewCandidate(null);
         const draftRequest = selectedDraftId
           ? draftVersionService.getById(chapterId, selectedDraftId).then((draft) => {
               if (!draft) throw new Error('指定的候选草稿不存在或不属于当前章节。');
@@ -299,6 +305,7 @@ export function useWorkspaceChapterLoader({
       setCurrentDraft,
       setDirty,
       setDraftWordCount,
+      updateReviewCandidate,
     ],
   );
 
@@ -387,6 +394,7 @@ export function useWorkspaceChapterLoader({
         !cancelled &&
         activeId &&
         !refs.currentDraft.current &&
+        !reviewCandidateRef.current &&
         !refs.editorSnapshot.current.isDirty &&
         !documentBlockedRef.current
       ) {

@@ -32,7 +32,17 @@ const pageModule = (await vite.ssrLoadModule(
 )) as typeof import('./SettingsPage');
 const SettingsPage = pageModule.default;
 
-const { act, cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react');
+const { act, cleanup, fireEvent, render, screen, waitFor, within } =
+  await import('@testing-library/react');
+
+const AI_SETTINGS_STORAGE_KEY = 'ai_novel_studio_ai_settings';
+
+function readStoredSettings(): Record<string, unknown> {
+  return JSON.parse(localStorage.getItem(AI_SETTINGS_STORAGE_KEY) ?? '{}') as Record<
+    string,
+    unknown
+  >;
+}
 
 afterEach(() => cleanup());
 after(async () => {
@@ -256,5 +266,258 @@ test('SettingsPage keeps an active saved model when governance settings are save
     assert.equal(stored.modelName, 'gpt-5.6-luna');
     assert.equal((stored.savedApiModels as unknown[] | undefined)?.length, 1);
     assert.equal(Object.prototype.hasOwnProperty.call(stored, 'apiKey'), false);
+  });
+});
+
+test('SettingsPage keeps each active model when another saved card is deleted', async () => {
+  const cloudProfiles = ['a', 'b', 'c'].map((suffix) => ({
+    id: `cloud-${suffix}`,
+    label: `Cloud ${suffix.toUpperCase()}`,
+    provider: 'openai_compatible',
+    baseUrl: `https://cloud-${suffix}.invalid/v1`,
+    modelName: `cloud-model-${suffix}`,
+    temperature: 0.7,
+    maxTokens: 8000,
+    timeoutSeconds: 120,
+  }));
+  const localProfiles = ['a', 'b', 'c'].map((suffix, index) => ({
+    id: `local-${suffix}`,
+    label: `Local ${suffix.toUpperCase()}`,
+    providerId: 'llama.cpp',
+    baseUrl: `http://127.0.0.1:${9101 + index}/v1`,
+    modelName: `local-model-${suffix}`,
+    timeoutSeconds: 120,
+    temperature: 0.7,
+    topP: 0.8,
+    topK: 20,
+    repeatPenalty: 1.08,
+    allowCloudWriterFallback: true,
+  }));
+  const gatewayProfiles = ['a', 'b', 'c'].map((suffix) => ({
+    id: `gateway-${suffix}`,
+    label: `Gateway ${suffix.toUpperCase()}`,
+    providerId: 'gateway-provider',
+    baseUrl: `https://gateway-${suffix}.invalid/v1`,
+    modelName: `gateway-model-${suffix}`,
+    timeoutSeconds: 120,
+    contextTokens: 32000,
+    maxTokens: 8000,
+    temperature: 0.7,
+  }));
+  localStorage.setItem(
+    AI_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      runtimeMode: 'api',
+      mockMode: false,
+      provider: cloudProfiles[1]!.provider,
+      baseUrl: cloudProfiles[1]!.baseUrl,
+      modelName: cloudProfiles[1]!.modelName,
+      temperature: cloudProfiles[1]!.temperature,
+      maxTokens: cloudProfiles[1]!.maxTokens,
+      timeoutSeconds: cloudProfiles[1]!.timeoutSeconds,
+      savedApiModels: cloudProfiles,
+      activeSavedApiModelId: 'cloud-b',
+      localChapterModel: {
+        enabled: true,
+        providerId: localProfiles[1]!.providerId,
+        baseUrl: localProfiles[1]!.baseUrl,
+        modelName: localProfiles[1]!.modelName,
+        timeoutSeconds: localProfiles[1]!.timeoutSeconds,
+        contextTokens: 4096,
+        maxTokens: 1024,
+        temperature: localProfiles[1]!.temperature,
+        topP: localProfiles[1]!.topP,
+        topK: localProfiles[1]!.topK,
+        repeatPenalty: localProfiles[1]!.repeatPenalty,
+        allowCloudWriterFallback: true,
+      },
+      savedLocalModels: localProfiles,
+      activeSavedLocalModelId: 'local-b',
+      gateway: {
+        enabled: true,
+        providerId: gatewayProfiles[1]!.providerId,
+        baseUrl: gatewayProfiles[1]!.baseUrl,
+        modelName: gatewayProfiles[1]!.modelName,
+        timeoutSeconds: gatewayProfiles[1]!.timeoutSeconds,
+        contextTokens: gatewayProfiles[1]!.contextTokens,
+        maxTokens: gatewayProfiles[1]!.maxTokens,
+        temperature: gatewayProfiles[1]!.temperature,
+      },
+      savedGatewayModels: gatewayProfiles,
+      activeSavedGatewayModelId: 'gateway-b',
+    }),
+  );
+
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-ai_models'));
+  });
+  await waitFor(() => {
+    assert.equal(screen.getAllByTestId('ai-saved-model-card').length, 3);
+    assert.equal(screen.getAllByTestId('local-saved-model-card').length, 3);
+    assert.equal(screen.getAllByTestId('gateway-saved-model-card').length, 3);
+  });
+
+  const deleteCard = async (testId: string, modelId: string) => {
+    const card = screen
+      .getAllByTestId(testId)
+      .find((candidate) => candidate.getAttribute('data-model-id') === modelId);
+    assert.ok(card);
+    await act(async () => {
+      fireEvent.click(within(card).getByRole('button', { name: '删除' }));
+    });
+  };
+  const assertActiveCard = (testId: string, modelId: string) => {
+    const card = screen
+      .getAllByTestId(testId)
+      .find((candidate) => candidate.getAttribute('data-model-id') === modelId);
+    assert.ok(card);
+    assert.equal(card.getAttribute('data-active'), 'true');
+  };
+
+  await deleteCard('ai-saved-model-card', 'cloud-c');
+  await waitFor(() => {
+    const stored = readStoredSettings();
+    assert.equal(stored.activeSavedApiModelId, 'cloud-b');
+    assert.equal(stored.baseUrl, cloudProfiles[1]!.baseUrl);
+    assert.equal(stored.modelName, cloudProfiles[1]!.modelName);
+    assert.deepEqual(
+      (stored.savedApiModels as Array<{ id: string }>).map((profile) => profile.id),
+      ['cloud-a', 'cloud-b'],
+    );
+    assertActiveCard('ai-saved-model-card', 'cloud-b');
+  });
+
+  await deleteCard('local-saved-model-card', 'local-c');
+  await waitFor(() => {
+    const stored = readStoredSettings();
+    const local = stored.localChapterModel as { baseUrl: string; modelName: string };
+    assert.equal(stored.activeSavedLocalModelId, 'local-b');
+    assert.equal(local.baseUrl, localProfiles[1]!.baseUrl);
+    assert.equal(local.modelName, localProfiles[1]!.modelName);
+    assert.deepEqual(
+      (stored.savedLocalModels as Array<{ id: string }>).map((profile) => profile.id),
+      ['local-a', 'local-b'],
+    );
+    assertActiveCard('local-saved-model-card', 'local-b');
+  });
+
+  await deleteCard('gateway-saved-model-card', 'gateway-c');
+  await waitFor(() => {
+    const stored = readStoredSettings();
+    const gateway = stored.gateway as { baseUrl: string; modelName: string };
+    assert.equal(stored.activeSavedGatewayModelId, 'gateway-b');
+    assert.equal(gateway.baseUrl, gatewayProfiles[1]!.baseUrl);
+    assert.equal(gateway.modelName, gatewayProfiles[1]!.modelName);
+    assert.deepEqual(
+      (stored.savedGatewayModels as Array<{ id: string }>).map((profile) => profile.id),
+      ['gateway-a', 'gateway-b'],
+    );
+    assertActiveCard('gateway-saved-model-card', 'gateway-b');
+  });
+});
+
+test('SettingsPage discards a cancelled first model draft before a general save', async () => {
+  const localProfile = {
+    id: 'cancel-test-local',
+    label: 'Cancel test local',
+    providerId: 'llama.cpp',
+    baseUrl: 'http://127.0.0.1:9191/v1',
+    modelName: 'cancel-test-local-model',
+    timeoutSeconds: 120,
+    temperature: 0.7,
+    topP: 0.8,
+    topK: 20,
+    repeatPenalty: 1.08,
+    allowCloudWriterFallback: true,
+  };
+  localStorage.setItem(
+    AI_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      runtimeMode: 'api',
+      mockMode: false,
+      provider: 'openai_compatible',
+      baseUrl: '',
+      modelName: '',
+      savedApiModels: [],
+      localChapterModel: {
+        enabled: false,
+        providerId: localProfile.providerId,
+        baseUrl: localProfile.baseUrl,
+        modelName: localProfile.modelName,
+        timeoutSeconds: localProfile.timeoutSeconds,
+        contextTokens: 4096,
+        maxTokens: 1024,
+        temperature: localProfile.temperature,
+        topP: localProfile.topP,
+        topK: localProfile.topK,
+        repeatPenalty: localProfile.repeatPenalty,
+        allowCloudWriterFallback: true,
+      },
+      savedLocalModels: [localProfile],
+      activeSavedLocalModelId: localProfile.id,
+    }),
+  );
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('settings-nav-ai_models'));
+  });
+  await waitFor(() => assert.ok(screen.getByTestId('ai-api-model-editor')));
+
+  const editor = screen.getByTestId('ai-api-model-editor');
+  const label = editor.querySelector('#saved-api-model-label');
+  const baseUrl = editor.querySelector('#saved-api-model-url');
+  const modelName = editor.querySelector('#saved-api-model-name');
+  const apiKey = editor.querySelector('#saved-api-model-key');
+  assert.ok(label && baseUrl && modelName && apiKey);
+  await act(async () => {
+    fireEvent.change(label, { target: { value: 'Cancelled first model' } });
+    fireEvent.change(baseUrl, { target: { value: 'https://cancelled.invalid/v1' } });
+    fireEvent.change(modelName, { target: { value: 'cancelled-model' } });
+    fireEvent.change(apiKey, { target: { value: 'cancelled-session-key' } });
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('checkbox', { name: /Mock 模式/ }));
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: /启用已通过 Benchmark 的本地 Scene\/Beat 正文模型/,
+      }),
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('ai-api-model-cancel'));
+  });
+  await waitFor(() => assert.equal(screen.queryByTestId('ai-api-model-editor'), null));
+
+  await act(async () => {
+    fireEvent.click(screen.getAllByRole('button', { name: '保存设置' })[0]!);
+  });
+  await waitFor(() => {
+    const stored = readStoredSettings();
+    const local = stored.localChapterModel as { enabled: boolean };
+    assert.equal(stored.runtimeMode, 'mock');
+    assert.equal(stored.mockMode, true);
+    assert.equal(stored.provider, 'mock');
+    assert.equal(local.enabled, true);
+    assert.equal(stored.activeSavedLocalModelId, localProfile.id);
+    assert.equal(stored.baseUrl, '');
+    assert.equal(stored.modelName, '');
+    assert.equal(stored.activeSavedApiModelId, undefined);
+    assert.deepEqual(stored.savedApiModels, []);
+    assert.equal(JSON.stringify(stored).includes('cancelled'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(stored, 'apiKey'), false);
+    assert.match(screen.getByTestId('ai-saved-model-list').textContent ?? '', /还没有保存/);
   });
 });

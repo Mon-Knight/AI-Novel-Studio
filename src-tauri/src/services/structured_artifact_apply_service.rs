@@ -1699,11 +1699,12 @@ fn apply_outline(
     }))
     .map_err(|_| domain_failure("outline_context"))?;
     if let Some(chapter_id) = input.chapter_id.as_deref() {
-        let (volume_id, chapter_index) = connection
+        let chapter_index = connection
             .query_row(
-                "SELECT volume_id, order_index FROM chapters WHERE id=?1 AND novel_id=?2",
+                "SELECT order_index FROM chapters
+                 WHERE id=?1 AND novel_id=?2 AND deleted_at IS NULL",
                 params![chapter_id, input.novel_id],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+                |row| row.get::<_, i64>(0),
             )
             .map_err(AppError::database)?;
         let max_version = connection
@@ -1740,7 +1741,19 @@ fn apply_outline(
                 ],
             )
             .map_err(AppError::database)?;
-        let _ = volume_id;
+        let updated = connection
+            .execute(
+                "UPDATE chapters
+                 SET outline=?1,
+                     status=CASE WHEN status='not_started' THEN 'outline_ready' ELSE status END,
+                     updated_at=?2
+                 WHERE id=?3 AND novel_id=?4 AND deleted_at IS NULL",
+                params![content, input.created_at, chapter_id, input.novel_id],
+            )
+            .map_err(|_| domain_failure("chapter_outline_chapter_update"))?;
+        if updated != 1 {
+            return Err(domain_failure("chapter_outline_chapter_update"));
+        }
     } else {
         let max_version = connection
             .query_row(
@@ -2850,6 +2863,7 @@ mod tests {
     const NOVEL_ID: &str = "00000000-0000-4000-8000-000000000001";
     const CHAPTER_ID: &str = "00000000-0000-4000-8000-000000000002";
     const DRAFT_ID: &str = "00000000-0000-4000-8000-000000000003";
+    const SUMMARY_CHARACTER_ID: &str = "00000000-0000-4000-8000-000000000010";
     const NOW: &str = "2026-08-28T00:00:00Z";
     const CHAPTER_REVISION: &str = "2026-08-28T00:00:00Z";
     const DRAFT_CONTENT: &str = "第一章采用稿正文";
@@ -4134,6 +4148,114 @@ mod tests {
     }
 
     #[test]
+    fn chapter_outline_apply_synchronizes_the_chapter_fact() {
+        let mut connection = connection();
+        let (card, bundle) = publish_simple(
+            &mut connection,
+            "chapter-outline-sync",
+            "outline",
+            Some(CHAPTER_ID),
+            json!({"title":"第一章章纲","content":"林夏从旧航图中发现隐藏航线。"}),
+        );
+        let mut input = apply_input(&card, &bundle);
+        input.created_at = "2026-08-28T01:00:00Z".to_string();
+
+        let decision = apply_structured_artifact(&mut connection, input)
+            .expect("apply chapter outline atomically");
+        assert!(decision.conflict_code.is_none());
+        let chapter: (Option<String>, String, String) = connection
+            .query_row(
+                "SELECT outline,status,updated_at FROM chapters WHERE id=?1",
+                params![CHAPTER_ID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("synchronized chapter fact");
+        assert_eq!(
+            chapter,
+            (
+                Some("林夏从旧航图中发现隐藏航线。".to_string()),
+                "adopted".to_string(),
+                "2026-08-28T01:00:00Z".to_string(),
+            )
+        );
+        let active_outline: (String, i64) = connection
+            .query_row(
+                "SELECT content,is_active FROM chapter_outlines
+                 WHERE project_id=?1 AND chapter_id=?2",
+                params![NOVEL_ID, CHAPTER_ID],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("active structured chapter outline");
+        assert_eq!(
+            active_outline,
+            ("林夏从旧航图中发现隐藏航线。".to_string(), 1)
+        );
+    }
+
+    #[test]
+    fn chapter_outline_apply_advances_only_not_started_status() {
+        let mut connection = connection();
+        connection
+            .execute(
+                "UPDATE chapters SET status='not_started' WHERE id=?1",
+                params![CHAPTER_ID],
+            )
+            .expect("not-started chapter");
+        let (card, bundle) = publish_simple(
+            &mut connection,
+            "chapter-outline-status",
+            "outline",
+            Some(CHAPTER_ID),
+            json!({"title":"第一章章纲","content":"章纲准备完成。"}),
+        );
+
+        apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
+            .expect("apply outline to not-started chapter");
+        let status: String = connection
+            .query_row(
+                "SELECT status FROM chapters WHERE id=?1",
+                params![CHAPTER_ID],
+                |row| row.get(0),
+            )
+            .expect("advanced chapter status");
+        assert_eq!(status, "outline_ready");
+    }
+
+    #[test]
+    fn chapter_outline_apply_rolls_back_when_chapter_sync_misses() {
+        let mut connection = connection();
+        let (card, bundle) = publish_simple(
+            &mut connection,
+            "chapter-outline-sync-miss",
+            "outline",
+            Some(CHAPTER_ID),
+            json!({"title":"不应采用的章纲","content":"该章纲必须随事务回滚。"}),
+        );
+        connection
+            .execute_batch(&format!(
+                "CREATE TRIGGER ignore_chapter_outline_sync
+                 BEFORE UPDATE OF outline ON chapters
+                 WHEN OLD.id='{CHAPTER_ID}'
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ))
+            .expect("chapter update miss trigger");
+
+        let error = apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
+            .expect_err("zero-row chapter synchronization must fail closed");
+        assert_eq!(error.code, "STRUCTURED_APPLY_DOMAIN_WRITE_FAILED");
+        assert_eq!(count(&connection, "chapter_outlines"), 0);
+        assert_eq!(count(&connection, "artifact_decisions"), 0);
+        let outline: Option<String> = connection
+            .query_row(
+                "SELECT outline FROM chapters WHERE id=?1",
+                params![CHAPTER_ID],
+                |row| row.get(0),
+            )
+            .expect("unchanged chapter outline");
+        assert!(outline.is_none());
+    }
+
+    #[test]
     fn applies_all_supported_structured_types_and_replays_idempotently() {
         let mut connection = connection();
         let fixtures = [
@@ -4649,14 +4771,113 @@ mod tests {
     }
 
     #[test]
+    fn historical_summary_backfill_preserves_the_latest_chapter_state() {
+        let mut connection = connection();
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO volumes
+                    (id,novel_id,title,order_index,status,created_at,updated_at)
+                 VALUES
+                    ('00000000-0000-4000-8000-000000000011','{NOVEL_ID}',
+                     '第一卷',-20,'planned','2026-08-20T00:00:00Z','2026-08-20T00:00:00Z'),
+                    ('00000000-0000-4000-8000-000000000012','{NOVEL_ID}',
+                     '第二卷',-10,'planned','2026-08-20T00:00:00Z','2026-08-20T00:00:00Z');
+                 UPDATE chapters
+                    SET volume_id='00000000-0000-4000-8000-000000000011', order_index=1
+                  WHERE id='{CHAPTER_ID}';
+                 INSERT INTO chapters
+                    (id,novel_id,volume_id,title,order_index,status,word_count,created_at,updated_at)
+                 VALUES
+                    ('00000000-0000-4000-8000-000000000013','{NOVEL_ID}',
+                     '00000000-0000-4000-8000-000000000012','第三章',1,'summarized',1000,
+                     '2026-08-22T00:00:00Z','2026-08-22T00:00:00Z'),
+                    ('00000000-0000-4000-8000-000000000015','{NOVEL_ID}',NULL,
+                     '未归卷章节',999,'summarized',1000,
+                     '2026-08-23T00:00:00Z','2026-08-23T00:00:00Z'),
+                    ('00000000-0000-4000-8000-000000000017','{NOVEL_ID}',
+                     '00000000-0000-4000-8000-000000000012','已删除章节',999,'summarized',1000,
+                     '2026-08-24T00:00:00Z','2026-08-24T00:00:00Z');
+                 UPDATE chapters
+                    SET deleted_at='2026-08-25T00:00:00Z'
+                  WHERE id='00000000-0000-4000-8000-000000000017';
+                 INSERT INTO characters
+                    (id,novel_id,name,role_type,current_state,is_active,created_at,updated_at)
+                 VALUES
+                    ('{SUMMARY_CHARACTER_ID}','{NOVEL_ID}','林夏','supporting','第三章后的状态',1,
+                     '2026-08-20T00:00:00Z','2026-08-22T00:00:00Z');
+                 INSERT INTO character_states
+                    (id,novel_id,character_id,chapter_id,state_summary,created_at)
+                 VALUES
+                    ('00000000-0000-4000-8000-000000000014','{NOVEL_ID}',
+                     '{SUMMARY_CHARACTER_ID}','00000000-0000-4000-8000-000000000013',
+                     '第三章后的状态','2026-08-22T00:00:00Z'),
+                    ('00000000-0000-4000-8000-000000000016','{NOVEL_ID}',
+                     '{SUMMARY_CHARACTER_ID}','00000000-0000-4000-8000-000000000015',
+                     '未归卷章节状态','2026-08-23T00:00:00Z'),
+                    ('00000000-0000-4000-8000-000000000018','{NOVEL_ID}',
+                     '{SUMMARY_CHARACTER_ID}','00000000-0000-4000-8000-000000000017',
+                     '软删章节状态','2026-08-24T00:00:00Z'),
+                    ('00000000-0000-4000-8000-000000000019','{NOVEL_ID}',
+                     '{SUMMARY_CHARACTER_ID}',NULL,
+                     '无章节状态','2026-08-25T00:00:00Z');"
+            ))
+            .expect("later formal character state");
+        let (card, bundle) = publish_draft_based(
+            &mut connection,
+            "historical-summary-backfill",
+            "chapter_summary",
+            json!({
+                "summary":"回填第一章总结。",
+                "characterChanges":[{
+                    "characterName":"林夏",
+                    "stateSummary":"第一章后的历史状态"
+                }]
+            }),
+        );
+
+        let decision = apply_structured_artifact(&mut connection, apply_input(&card, &bundle))
+            .expect("apply historical summary");
+        assert!(decision.conflict_code.is_none());
+        let current_state: Option<String> = connection
+            .query_row(
+                "SELECT current_state FROM characters WHERE id=?1",
+                params![SUMMARY_CHARACTER_ID],
+                |row| row.get(0),
+            )
+            .expect("chronological current state");
+        assert_eq!(current_state.as_deref(), Some("第三章后的状态"));
+        let histories =
+            crate::repositories::character_state_repository::find_character_states_by_character(
+                &connection,
+                SUMMARY_CHARACTER_ID,
+            )
+            .expect("chronological character histories");
+        assert_eq!(histories.len(), 4);
+        assert_eq!(
+            histories[0].chapter_id.as_deref(),
+            Some("00000000-0000-4000-8000-000000000013")
+        );
+        assert_eq!(histories[0].state_summary, "第三章后的状态");
+        assert_eq!(histories[1].chapter_id.as_deref(), Some(CHAPTER_ID));
+        assert_eq!(
+            histories[2].chapter_id.as_deref(),
+            Some("00000000-0000-4000-8000-000000000015")
+        );
+        assert!(histories[3].chapter_id.is_none());
+        assert!(histories
+            .iter()
+            .all(|state| state.state_summary != "软删章节状态"));
+    }
+
+    #[test]
     fn summary_decision_failure_rolls_back_context_memory_and_state() {
         let mut connection = connection();
         connection
             .execute(
                 "INSERT INTO characters
                  (id,novel_id,name,role_type,is_active,created_at,updated_at)
-                 VALUES ('summary-character',?1,'林夏','supporting',1,?2,?2)",
-                params![NOVEL_ID, NOW],
+                 VALUES (?1,?2,'林夏','supporting',1,?3,?3)",
+                params![SUMMARY_CHARACTER_ID, NOVEL_ID, NOW],
             )
             .expect("summary character");
         let (card, bundle) = publish_draft_based(
@@ -4705,8 +4926,8 @@ mod tests {
         assert_eq!(chapter_status, "adopted");
         let character_state: Option<String> = connection
             .query_row(
-                "SELECT current_state FROM characters WHERE id='summary-character'",
-                [],
+                "SELECT current_state FROM characters WHERE id=?1",
+                params![SUMMARY_CHARACTER_ID],
                 |row| row.get(0),
             )
             .expect("rolled back character projection");

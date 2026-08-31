@@ -155,13 +155,26 @@ pub fn upsert_bundle_character_state(
         )?;
     }
 
-    character_state_repository::update_active_character_current_state(
-        conn,
-        &input.novel_id,
-        &input.character_id,
-        &input.state_summary,
-        now,
-    )?;
+    if input.chapter_id.is_some() {
+        let has_state = character_state_repository::reproject_character_current_state(
+            conn,
+            &input.novel_id,
+            &input.character_id,
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+        if !has_state {
+            return Err("character_state_latest_missing".to_string());
+        }
+    } else {
+        character_state_repository::update_active_character_current_state(
+            conn,
+            &input.novel_id,
+            &input.character_id,
+            &input.state_summary,
+            now,
+        )?;
+    }
 
     character_state_repository::find_character_state_by_id(conn, &id)?
         .ok_or_else(|| "character_state_bundle_read_failed".to_string())
@@ -341,19 +354,13 @@ pub fn delete_character_state(conn: &mut Connection, id: &str) -> Result<(), Str
 
     character_state_repository::delete_character_state(&transaction, id)?;
 
-    let latest_state = character_state_repository::find_latest_character_state_summary(
+    character_state_repository::reproject_character_current_state(
         &transaction,
         &identity.0,
         &identity.1,
-    )?;
-
-    character_state_repository::update_character_current_state(
-        &transaction,
-        &identity.0,
-        &identity.1,
-        latest_state.as_deref(),
         &chrono::Utc::now().to_rfc3339(),
-    )?;
+    )
+    .map_err(|error| error.to_string())?;
 
     transaction
         .commit()

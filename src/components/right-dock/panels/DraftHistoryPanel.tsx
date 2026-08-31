@@ -40,6 +40,8 @@ function DraftHistoryPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const liveChapterIdRef = useRef(chapterId);
   const loadEpochRef = useRef(0);
+  const mountedRef = useRef(true);
+  const messageTimerRef = useRef<number | null>(null);
   liveChapterIdRef.current = chapterId;
   const [drafts, setDrafts] = useState<ChapterDraft[]>([]);
   const [total, setTotal] = useState(0);
@@ -48,6 +50,28 @@ function DraftHistoryPanel({
   const [msg, setMsg] = useState('');
   const [busyDraftId, setBusyDraftId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+
+  const scheduleMessageClear = useCallback((delayMs: number) => {
+    if (!mountedRef.current) return;
+    if (messageTimerRef.current !== null) {
+      window.clearTimeout(messageTimerRef.current);
+    }
+    messageTimerRef.current = window.setTimeout(() => {
+      messageTimerRef.current = null;
+      if (mountedRef.current) setMsg('');
+    }, delayMs);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (messageTimerRef.current !== null) {
+        window.clearTimeout(messageTimerRef.current);
+        messageTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const load = useCallback(
     async (requestedPage: number) => {
@@ -143,7 +167,7 @@ function DraftHistoryPanel({
       if (onBeforeDocumentChange && !(await onBeforeDocumentChange())) {
         setMsg(`v${draft.versionNo} 已采用，当前未保存正文已保留`);
         await load(page);
-        setTimeout(() => setMsg(''), 3000);
+        scheduleMessageClear(3000);
         return;
       }
       onDraftAdopted?.(verifiedDraft);
@@ -155,7 +179,7 @@ function DraftHistoryPanel({
     } finally {
       setBusyDraftId(null);
     }
-    setTimeout(() => setMsg(''), 2000);
+    scheduleMessageClear(2000);
   };
 
   const handleLoad = async (draft: ChapterDraft) => {
@@ -178,7 +202,7 @@ function DraftHistoryPanel({
         return;
       await draftVersionService.delete(draft.id, chapterId);
       setMsg(`v${draft.versionNo} 已废弃`);
-      setTimeout(() => setMsg(''), 2000);
+      scheduleMessageClear(2000);
       await load(page);
     } finally {
       setBusyDraftId(null);

@@ -76,6 +76,7 @@ function runWithTimeout<T>(
   operation: () => Promise<T>,
   label: string,
   timeoutMs: number,
+  reconcileLateSuccess: (value: T) => void,
 ): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return operation();
   return new Promise<T>((resolve, reject) => {
@@ -96,7 +97,10 @@ function runWithTimeout<T>(
     }
     void pending.then(
       (value) => {
-        if (settled) return;
+        if (settled) {
+          reconcileLateSuccess(value);
+          return;
+        }
         settled = true;
         clearTimeout(timer);
         resolve(value);
@@ -224,6 +228,12 @@ class DefaultStartupCoordinator implements StartupCoordinator {
         recoverAfterRuntimeReconciliation,
         '任务对话恢复检查',
         this.taskTimeoutMs(),
+        (lateRecoveredRuns) => {
+          this.update('conversationRecovery', {
+            status: 'succeeded',
+            result: { recoveredRuns: lateRecoveredRuns },
+          });
+        },
       );
       this.update('conversationRecovery', {
         status: 'succeeded',
@@ -245,6 +255,9 @@ class DefaultStartupCoordinator implements StartupCoordinator {
         this.dependencies.migrateContext,
         '旧章节上下文迁移',
         this.taskTimeoutMs(),
+        (lateResult) => {
+          this.update('contextMigration', { status: 'succeeded', result: lateResult });
+        },
       );
       this.update('contextMigration', { status: 'succeeded', result });
     } catch (error) {
@@ -263,6 +276,9 @@ class DefaultStartupCoordinator implements StartupCoordinator {
         this.dependencies.recoverGeneration,
         '生成任务恢复检查',
         this.taskTimeoutMs(),
+        (lateResult) => {
+          this.update('generationRecovery', { status: 'succeeded', result: lateResult });
+        },
       );
       this.update('generationRecovery', { status: 'succeeded', result });
     } catch (error) {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DraftHistoryPanel from '../../components/right-dock/panels/DraftHistoryPanel';
 import VolumeTree from '../../components/workspace/VolumeTree';
@@ -37,9 +37,8 @@ vi.mock('../../services/database/draftVersionService', () => ({
       services.getAdoptedByChapterIdCalls(chapterId);
       return services.adoptedDraft;
     },
-    delete: async (draftId: string, chapterId: string) => {
-      services.deleteDraftCalls(draftId, chapterId);
-    },
+    delete: async (draftId: string, chapterId: string) =>
+      services.deleteDraftCalls(draftId, chapterId),
   },
 }));
 
@@ -191,6 +190,68 @@ describe('DraftHistoryPanel', () => {
 
     view.rerender(<DraftHistoryPanel chapterId="" onLoadDraft={vi.fn()} onClose={vi.fn()} />);
     await screen.findByText(/暂无草稿/);
+  });
+
+  it('clears a pending draft-history message timer when the panel unmounts', async () => {
+    services.drafts = [draft(1)];
+    const view = render(
+      <DraftHistoryPanel chapterId="chapter-1" onLoadDraft={vi.fn()} onClose={vi.fn()} />,
+    );
+    await screen.findByTestId('draft-history-item');
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '废弃' }));
+        for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+      });
+
+      expect(services.deleteDraftCalls).toHaveBeenCalledWith('draft-1', 'chapter-1');
+      expect(screen.getByText('v1 已废弃')).not.toBeNull();
+      expect(vi.getTimerCount()).toBe(1);
+
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => vi.runAllTimers()).not.toThrow();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule a message timer when draft deletion finishes after unmount', async () => {
+    services.drafts = [draft(1)];
+    let resolveDelete = () => undefined;
+    services.deleteDraftCalls.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
+    const view = render(
+      <DraftHistoryPanel chapterId="chapter-1" onLoadDraft={vi.fn()} onClose={vi.fn()} />,
+    );
+    await screen.findByTestId('draft-history-item');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '废弃' }));
+      await act(async () => {
+        for (let tick = 0; tick < 3; tick += 1) await Promise.resolve();
+      });
+      expect(services.deleteDraftCalls).toHaveBeenCalledWith('draft-1', 'chapter-1');
+
+      view.unmount();
+      await act(async () => {
+        resolveDelete();
+        for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 });
 

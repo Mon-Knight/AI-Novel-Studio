@@ -2998,13 +2998,19 @@ mod tests {
     }
 
     #[test]
-    fn legacy_migration_reconciles_character_current_state_using_stable_latest_order(
+    fn legacy_migration_reconciles_character_current_state_using_chapter_sequence(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = create_chapter_context_test_database()?;
         let fixture = seed_chapter_context_fixture(&conn, 10, 0)?;
         let lower_id = "00000000-0000-0000-0000-00000000ca01".to_string();
         let higher_id = "00000000-0000-0000-0000-00000000ca02".to_string();
-        let tied_created_at = "2026-07-26T08:00:00Z";
+        let later_chapter_id = "00000000-0000-0000-0000-00000000ca03".to_string();
+        conn.execute(
+            "INSERT INTO chapters
+             (id, novel_id, volume_id, status, order_index, updated_at)
+             VALUES (?1, ?2, ?3, 'summarized', 1, 'before')",
+            params![&later_chapter_id, &fixture.novel_id, &fixture.volume_id],
+        )?;
         conn.execute(
             "INSERT INTO character_states
              (id, novel_id, character_id, chapter_id, state_summary,
@@ -3015,8 +3021,8 @@ mod tests {
                 &higher_id,
                 &fixture.novel_id,
                 &fixture.character_id,
-                &fixture.chapter_id,
-                tied_created_at
+                &later_chapter_id,
+                "2026-07-25T08:00:00Z"
             ],
         )?;
         conn.execute(
@@ -3032,7 +3038,7 @@ mod tests {
                     Some(lower_id.clone()),
                     "lower id state",
                 ),
-                created_at: Some(tied_created_at.to_string()),
+                created_at: Some("2026-07-26T08:00:00Z".to_string()),
             }],
         };
 

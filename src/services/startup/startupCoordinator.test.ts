@@ -240,7 +240,7 @@ test('records failures, rejects readiness and keeps other recoveries running', a
   ]);
 });
 
-test('times out stalled startup work and ignores its late completion', async () => {
+test('reconciles a successful startup operation that completes after the timeout', async () => {
   const conversation = createDeferred<number>();
   const coordinator = createStartupCoordinator({
     recoverConversations: () => conversation.promise,
@@ -258,6 +258,38 @@ test('times out stalled startup work and ignores its late completion', async () 
 
   conversation.resolve(3);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(coordinator.getSnapshot().conversationRecovery.status, 'failed');
+  assert.deepEqual(coordinator.getSnapshot().conversationRecovery, {
+    status: 'succeeded',
+    result: { recoveredRuns: 3 },
+  });
   await coordinator.start();
+});
+
+test('allows readiness to be retried after a timed-out operation succeeds late', async () => {
+  const context = createDeferred<LegacyChapterContextMigrationResult>();
+  let migrationCalls = 0;
+  const coordinator = createStartupCoordinator({
+    async recoverConversations() {
+      return 0;
+    },
+    migrateContext() {
+      migrationCalls += 1;
+      return context.promise;
+    },
+    async recoverGeneration() {
+      return EMPTY_GENERATION_RECOVERY;
+    },
+    taskTimeoutMs: 10,
+  });
+
+  await assert.rejects(coordinator.waitForContextMigration(), /超过 10 ms/);
+  context.resolve(EMPTY_CONTEXT_MIGRATION);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  await coordinator.waitForContextMigration();
+  assert.equal(migrationCalls, 1);
+  assert.deepEqual(coordinator.getSnapshot().contextMigration, {
+    status: 'succeeded',
+    result: EMPTY_CONTEXT_MIGRATION,
+  });
 });
