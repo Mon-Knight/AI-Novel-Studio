@@ -2792,7 +2792,7 @@ fn spawn_worker_process(
     let gateway_bin = super::commands::resolve_gateway_bin()?;
     let work = worker_directory(&input.conversation_id);
     std::fs::create_dir_all(&work).map_err(|error| error.to_string())?;
-    let db_path = node_compatible_path(&crate::db::get_database_path())
+    let db_path = node_compatible_path(&super::commands::gateway_database_path())
         .to_string_lossy()
         .to_string();
     let server_path = work.join("ans-task-server.mjs");

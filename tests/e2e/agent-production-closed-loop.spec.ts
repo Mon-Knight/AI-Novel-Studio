@@ -804,10 +804,16 @@ describe('Agent production closed loop & restart verification', () => {
 
     const expectedRounds = roundEvidence.length;
     const expectedRuns = expectedRounds * 2;
+    // A cross-chapter revision may trigger one bounded integrity repair. The immutable
+    // pre-repair artifact remains auditable without becoming a conversation card.
+    const maximumRetainedRepairArtifacts = 1;
     expect({ ...afterState, processId: beforePid }).toEqual(beforeState);
     expect(afterState.conversationsCount).toBe(expectedRounds);
     expect(afterState.runsCount).toBe(expectedRuns);
-    expect(afterState.resultArtifactsCount).toBe(expectedRuns);
+    expect(afterState.resultArtifactsCount).toBeGreaterThanOrEqual(expectedRuns);
+    expect(afterState.resultArtifactsCount).toBeLessThanOrEqual(
+      expectedRuns + maximumRetainedRepairArtifacts,
+    );
     expect(afterState.artifactDecisionsCount).toBe(expectedRounds * 2);
     expect(afterState.reviewAuthorizationsCount).toBe(expectedRounds);
     expect(afterState.consumedAuthorizationsCount).toBe(expectedRounds);
@@ -964,7 +970,10 @@ describe('Agent production closed loop & restart verification', () => {
     expect(persistedTurns).toBe(afterState.turnsCount);
     expect(persistedRuns).toBe(afterState.runsCount);
     expect(persistedToolEvents).toBe(afterState.toolEventsCount);
-    expect(persistedCards).toBe(afterState.resultArtifactsCount);
+    expect(persistedCards).toBe(expectedRuns);
+    expect(afterState.resultArtifactsCount - persistedCards).toBeLessThanOrEqual(
+      maximumRetainedRepairArtifacts,
+    );
     expect(persistedDecisions).toBe(afterState.artifactDecisionsCount);
     expect(persistedAuthorizations).toBe(afterState.reviewAuthorizationsCount);
 

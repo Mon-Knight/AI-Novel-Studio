@@ -10,6 +10,7 @@
 //! supervisor timeout, crash, and two-child isolation without silently
 //! skipping those failure paths when a developer machine lacks the carrier.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -68,6 +69,52 @@ impl ScratchDir {
 impl Drop for ScratchDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+struct EnvironmentGuard {
+    name: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvironmentGuard {
+    fn set(name: &'static str, value: impl AsRef<OsStr>) -> Self {
+        let previous = std::env::var_os(name);
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvironmentGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            std::env::set_var(self.name, previous);
+        } else {
+            std::env::remove_var(self.name);
+        }
+    }
+}
+
+struct StartPathEnvironment {
+    _guards: Vec<EnvironmentGuard>,
+}
+
+impl StartPathEnvironment {
+    fn new(root: &Path, scratch: &ScratchDir) -> Self {
+        let gateway_database = scratch.path().join("gateway.sqlite");
+        let mut connection =
+            Connection::open(&gateway_database).expect("create start-path gateway database");
+        crate::db::create_tables(&mut connection).expect("migrate start-path gateway database");
+        drop(connection);
+
+        Self {
+            _guards: vec![
+                EnvironmentGuard::set("DSH_RUNTIME_ROOT", root),
+                EnvironmentGuard::set("ANS_TASK_WORKER_ROOT", scratch.path()),
+                EnvironmentGuard::set("DSH_GATEWAY_BIN", gateway_bin()),
+                EnvironmentGuard::set("DSH_E2E_GATEWAY_DB_PATH", gateway_database),
+            ],
+        }
     }
 }
 
@@ -1429,10 +1476,8 @@ fn start_path_requires_model_tool_attestation_before_creating_a_run() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let root = carrier_root();
-    std::env::set_var("DSH_RUNTIME_ROOT", &root);
     let scratch = ScratchDir::new("attestation-fail");
-    std::env::set_var("ANS_TASK_WORKER_ROOT", scratch.path());
-    std::env::set_var("DSH_GATEWAY_BIN", gateway_bin());
+    let _environment = StartPathEnvironment::new(&root, &scratch);
     let upstream = MockWorkbench::start("attestation-fail", 0);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("attestation-fail");
 
@@ -1503,10 +1548,8 @@ fn start_path_cancellation_aborts_attestation_without_creating_a_run() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let root = carrier_root();
-    std::env::set_var("DSH_RUNTIME_ROOT", &root);
     let scratch = ScratchDir::new("attestation-cancel");
-    std::env::set_var("ANS_TASK_WORKER_ROOT", scratch.path());
-    std::env::set_var("DSH_GATEWAY_BIN", gateway_bin());
+    let _environment = StartPathEnvironment::new(&root, &scratch);
     let upstream = MockWorkbench::start("attestation-delay", 20_000);
     let (conversation_id, novel_id, turn_id) = seed_task_turn("attestation-cancel");
     let start_handle = std::thread::spawn({
@@ -1576,10 +1619,8 @@ fn start_path_followup_reuses_session_and_resumes_after_child_exit() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let root = carrier_root();
-    std::env::set_var("DSH_RUNTIME_ROOT", &root);
     let scratch = ScratchDir::new("start-followup");
-    std::env::set_var("ANS_TASK_WORKER_ROOT", scratch.path());
-    std::env::set_var("DSH_GATEWAY_BIN", gateway_bin());
+    let _environment = StartPathEnvironment::new(&root, &scratch);
     let upstream = MockWorkbench::start("text-only", 0);
     let (conversation_id, novel_id, first_turn_id) = seed_task_turn("followup-start");
 
@@ -1665,10 +1706,8 @@ fn start_path_two_conversations_cancel_one_without_stopping_the_other() {
         .unwrap_or_else(|error| error.into_inner());
     let started_at = Instant::now();
     let root = carrier_root();
-    std::env::set_var("DSH_RUNTIME_ROOT", &root);
     let scratch = ScratchDir::new("start-parallel");
-    std::env::set_var("ANS_TASK_WORKER_ROOT", scratch.path());
-    std::env::set_var("DSH_GATEWAY_BIN", gateway_bin());
+    let _environment = StartPathEnvironment::new(&root, &scratch);
     let upstream = MockWorkbench::start("delayed-text", 2500);
     let (first_id, first_novel, first_turn) = seed_task_turn("parallel-a");
     let (second_id, second_novel, second_turn) = seed_task_turn("parallel-b");

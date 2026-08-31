@@ -521,7 +521,7 @@ pub(super) fn normalize_model_base_url(value: &str) -> Result<String, String> {
     Ok(trimmed.trim_end_matches('/').to_string())
 }
 
-fn preparation_gateway_database_path() -> PathBuf {
+pub(super) fn gateway_database_path() -> PathBuf {
     #[cfg(test)]
     if let Some(path) = std::env::var_os("DSH_E2E_GATEWAY_DB_PATH") {
         if !path.is_empty() {
@@ -833,7 +833,7 @@ fn prepare(
     })?;
     let runtime_bin = NodeDshRuntime::runtime_bin(&root)?;
     let gateway_bin = resolve_gateway_bin()?;
-    let db_path = node_compatible_path(&preparation_gateway_database_path())
+    let db_path = node_compatible_path(&gateway_database_path())
         .to_string_lossy()
         .to_string();
 
