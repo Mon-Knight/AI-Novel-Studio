@@ -290,6 +290,13 @@ $desktopWorkflowHasReusableGate =
     ([string]$desktopWorkflow).Contains("npm run test:bundle-size")
 Add-CheckResult "reusable desktop release gate" $desktopWorkflowHasReusableGate "workflow_call and bundle-size gate are present"
 
+$desktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || inputs.suite || ''smoke'' }}'
+$desktopSuiteExpressionCount = [regex]::Matches(
+    [string]$desktopWorkflow,
+    [regex]::Escape($desktopSuiteExpression)
+).Count
+Add-CheckResult "reusable desktop suite input propagation" ($desktopSuiteExpressionCount -eq 2) "job name and E2E_SUITE consume workflow_call inputs even when the caller event is push"
+
 $desktopQualityJob = Get-WorkflowJobBlock ([string]$desktopWorkflow) "quality"
 $desktopQualityHasRuntimeOrder = Test-MarkersInOrder ([string]$desktopQualityJob) @(
     "repository: deepseek-ai/deepseek-harness",

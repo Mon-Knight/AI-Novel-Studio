@@ -20,6 +20,8 @@ $SerialRustCommand = "cargo test --locked --manifest-path src-tauri/Cargo.toml -
 $VerificationGatewayClean = 'Invoke-VerificationStep -Name "cargo clean -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("clean", "-p", "novel-domain-gateway")'
 $VerificationGatewayBuild = 'Invoke-VerificationStep -Name "cargo build -p novel-domain-gateway" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("build", "--locked", "-p", "novel-domain-gateway")'
 $VerificationSerialRust = 'Invoke-VerificationStep -Name "cargo test" -WorkingDirectory (Join-Path $ProjectRoot "src-tauri") -Executable $cargo -Arguments @("test", "--locked", "--", "--test-threads=1")'
+$DesktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || inputs.suite || ''smoke'' }}'
+$CallerEventGatedDesktopSuiteExpression = '${{ (github.event_name == ''schedule'' && ''full'') || ((github.event_name == ''workflow_dispatch'' || github.event_name == ''workflow_call'') && inputs.suite) || ''smoke'' }}'
 $RepositoryReadme = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $RepositoryRoot "README.md")
 $CurrentStageMatch = [regex]::Match($RepositoryReadme, '(?m)^\*\*阶段：(?<stage>[^*\r\n]+)\*\*\r?$')
 if (-not $CurrentStageMatch.Success) {
@@ -196,6 +198,15 @@ try {
     $desktopWorkflow = $desktopWorkflow -replace 'workflow_call:', 'workflow_call_removed:'
     Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflow -Encoding UTF8
     Assert-CheckResult "desktop workflow without reusable gate" $false (Invoke-DocsSyncCheck $FixtureRoot)
+    Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
+
+    $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
+    $desktopWorkflowWithCallerEventGate = $desktopWorkflow.Replace($DesktopSuiteExpression, $CallerEventGatedDesktopSuiteExpression)
+    if ($desktopWorkflowWithCallerEventGate -ceq $desktopWorkflow) {
+        throw "Unable to gate the reusable desktop suite input by caller event fixture."
+    }
+    Set-Content -LiteralPath $desktopWorkflowPath -Value $desktopWorkflowWithCallerEventGate -Encoding UTF8
+    Assert-CheckResult "desktop workflow with caller-event-gated suite input" $false (Invoke-DocsSyncCheck $FixtureRoot)
     Copy-RepositoryFileToFixture ".github/workflows/windows-desktop-e2e.yml"
 
     $desktopWorkflow = Get-Content -Raw -Encoding UTF8 -LiteralPath $desktopWorkflowPath
