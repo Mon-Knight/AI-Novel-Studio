@@ -244,6 +244,7 @@ describe('writing workspace layout', () => {
     await fillTextareaTestId('chapter-editor', '正文内联保存验证。\n\n第二段仍保留在编辑器中。');
     await browser.execute(() => {
       const status = document.querySelector<HTMLElement>('[data-testid="document-save-status"]');
+      const saveButton = document.querySelector<HTMLElement>('[data-testid="chapter-save"]');
       const probe = {
         states: [] as string[],
         loadingEvents: 0,
@@ -256,7 +257,6 @@ describe('writing workspace layout', () => {
       const record = () => {
         if (status?.dataset.saveState) probe.states.push(status.dataset.saveState);
         if (document.querySelector('.loading-modal-card')) probe.modalSeen = true;
-        const saveButton = document.querySelector<HTMLElement>('[data-testid="chapter-save"]');
         if (saveButton?.getAttribute('aria-busy') === 'true') probe.toolbarBusySeen = true;
         if (saveButton?.textContent?.includes('保存中')) probe.toolbarSavingLabelSeen = true;
       };
@@ -274,6 +274,26 @@ describe('writing workspace layout', () => {
           ) {
             probe.states.push(mutation.oldValue);
           }
+          if (
+            mutation.type === 'attributes' &&
+            mutation.attributeName === 'aria-busy' &&
+            (mutation.oldValue === 'true' || saveButton?.getAttribute('aria-busy') === 'true')
+          ) {
+            probe.toolbarBusySeen = true;
+          }
+          if (
+            mutation.type === 'characterData' &&
+            (mutation.oldValue?.includes('保存中') ||
+              mutation.target.textContent?.includes('保存中'))
+          ) {
+            probe.toolbarSavingLabelSeen = true;
+          }
+          if (mutation.type === 'childList') {
+            const changedText = [...mutation.addedNodes, ...mutation.removedNodes]
+              .map((node) => node.textContent ?? '')
+              .join('');
+            if (changedText.includes('保存中')) probe.toolbarSavingLabelSeen = true;
+          }
         }
         record();
       });
@@ -284,6 +304,17 @@ describe('writing workspace layout', () => {
           childList: true,
           subtree: true,
           characterData: true,
+        });
+      }
+      if (saveButton) {
+        probe.observer.observe(saveButton, {
+          attributes: true,
+          attributeFilter: ['aria-busy'],
+          attributeOldValue: true,
+          childList: true,
+          subtree: true,
+          characterData: true,
+          characterDataOldValue: true,
         });
       }
       window.addEventListener('ai-novel-studio:loading-modal', listener);
