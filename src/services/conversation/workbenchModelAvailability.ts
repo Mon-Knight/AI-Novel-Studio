@@ -30,6 +30,7 @@ interface WorkbenchModelAvailabilityInput {
   refreshing: boolean;
   refreshError?: string;
   allowLocalFallback?: boolean;
+  selectionLocked?: boolean;
 }
 
 const MODEL_PREFIX = 'model:';
@@ -48,6 +49,14 @@ export class WorkbenchModelUnavailableError extends Error {
 
 export function workbenchModelKey(model: WorkbenchModelSelection): string {
   return `${model.providerId.trim()}:${model.modelId.trim()}`;
+}
+
+export function resolveWorkbenchModelDirectoryTarget<T extends WorkbenchModelSelection>(
+  taskCreatorOpen: boolean,
+  selectedTaskModel: T,
+  newTaskModel: T,
+): T {
+  return taskCreatorOpen ? newTaskModel : selectedTaskModel;
 }
 
 export function isLocalLikeWorkbenchModel(
@@ -134,6 +143,7 @@ export function getWorkbenchModelAvailability({
   refreshing,
   refreshError,
   allowLocalFallback = false,
+  selectionLocked = false,
 }: WorkbenchModelAvailabilityInput): WorkbenchModelAvailability {
   const options = listAvailableWorkbenchModels(plugins);
   const selectedKey = workbenchModelKey(selectedModel);
@@ -196,7 +206,9 @@ export function getWorkbenchModelAvailability({
       status: 'unavailable',
       options,
       canSend: false,
-      message: '所选模型未进入当前 Runtime 模型目录；请选择已加载模型后发送创作任务。',
+      message: selectionLocked
+        ? `当前任务固定模型 ${selectedKey} 未进入 Runtime 模型目录；请使用当前已配置模型新建任务。`
+        : '所选模型未进入当前 Runtime 模型目录；请选择已加载模型后发送创作任务。',
     };
   }
 

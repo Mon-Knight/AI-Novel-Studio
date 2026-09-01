@@ -1,8 +1,8 @@
 # 对话式并发创作工作台设计
 
-> 状态：v3.6.0 当前版本；对话工作台、决定/审阅授权、章节原子采用、五类桌面结构化原子应用与旧 UI 收敛已实现；未列入白名单的结构化类型及浏览器回退仍失败关闭
+> 状态：v3.6.1 当前安全补丁；v3.6.0 功能基线中的对话工作台、决定/审阅授权、章节原子采用、五类桌面结构化原子应用与旧 UI 收敛已实现；未列入白名单的结构化类型及浏览器回退仍失败关闭
 > 适用版本：v3.3.0 及后续版本  
-> 当前版本：v3.6.0
+> 当前版本：v3.6.1
 > Harness 架构分析快照：[`deepseek-ai/deepseek-harness@141eb6f`](https://github.com/deepseek-ai/deepseek-harness/tree/141eb6fef83422698aef7a981029e843e8161534)（2026-08-20，仅作设计参考）  
 > 当前产品载体仍固定 `47f943859bef60e4160492346772ded9b24f765a`；本文不授权升级或替换该依赖  
 > 文档职责：定义对话式创作工作台的产品边界、交互模型、运行时职责与分阶段落地顺序
@@ -597,7 +597,7 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 - 旧写作工作台的生成类 AI 面板、独立实验面板和草稿历史入口已删除；
 - 原写作工作台稳定收敛为人工审阅/编辑器。
 
-### 14.4 v3.6.0：Canonical 准入（当前版本）
+### 14.4 v3.6.0：Canonical 准入（功能基线）
 
 - 1A-A Catalog、1A-B Facade、1A-C Projection、1A-D portable Manifest/漂移门禁已验证；
 - 四个 Canonical read Tool 仍为 `catalog_only + partial`，模型可见数为 `0`；

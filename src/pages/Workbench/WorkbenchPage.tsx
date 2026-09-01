@@ -7,8 +7,11 @@ import {
   type ChapterCoreAsset,
 } from '../../services/conversation/chapterAssetReadiness';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
-import { WorkbenchModelUnavailableError } from '../../services/conversation/workbenchModelAvailability';
-import type { ArtifactDecisionKind, ConversationArtifactCard } from '../../types/conversation';
+import {
+  resolveWorkbenchModelDirectoryTarget,
+  WorkbenchModelUnavailableError,
+} from '../../services/conversation/workbenchModelAvailability';
+import type { StructuredArtifactDecisionInput } from './workbenchHelpers';
 import { PluginPanel } from './WorkbenchPluginPanel';
 import { WorkbenchComposer } from './WorkbenchComposer';
 import { WorkbenchMessageStream } from './WorkbenchMessageStream';
@@ -23,7 +26,7 @@ import {
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
-import { markWorkbenchOnce } from './workbenchHelpers';
+import { markWorkbenchOnce, settleStructuredArtifactDecision } from './workbenchHelpers';
 import { resolveWorkbenchConversationStatus } from './workbenchRunProgress';
 import { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
@@ -146,29 +149,16 @@ export function WorkbenchPage() {
     setStartupDraft('');
   }, [draft, selectedConversationId, setDraft, startupDraft]);
   const handleStructuredArtifactDecision = useCallback(
-    async (input: {
-      artifact: ConversationArtifactCard;
-      decision: ArtifactDecisionKind;
-      applied: boolean;
-    }) => {
-      if (!input.artifact.artifactId) return;
-      const isCurrentScope = () =>
-        selectedConversationRef.current === input.artifact.conversationId &&
-        selectedNovelRef.current === selectedNovelId;
-      let selectedChapterId: string | undefined;
-      if (input.applied && isCurrentScope()) {
-        const refreshed = await reloadChapters(selectedNovelId);
-        selectedChapterId = refreshed?.chapterId;
-        if (selectedChapterId && isCurrentScope()) await selectChapter(selectedChapterId);
-      }
-      await settleAssetCandidateDecision({
-        conversationId: input.artifact.conversationId,
-        artifactId: input.artifact.artifactId,
-        decision: input.decision,
-        applied: input.applied,
-        selectedChapterId,
-      });
-    },
+    (input: StructuredArtifactDecisionInput) =>
+      settleStructuredArtifactDecision({
+        ...input,
+        selectedNovelId,
+        selectedConversationRef,
+        selectedNovelRef,
+        reloadChapters,
+        selectChapter,
+        settleAssetCandidateDecision,
+      }),
     [
       reloadChapters,
       selectChapter,
@@ -200,13 +190,18 @@ export function WorkbenchPage() {
     setDraft,
     onStructuredArtifactDecision: handleStructuredArtifactDecision,
   });
+  const pluginProbeModel = resolveWorkbenchModelDirectoryTarget(
+    taskCreatorOpen,
+    selectedModel,
+    newTaskModel,
+  );
   useEffect(() => {
-    void refreshPlugins(undefined, true, selectedModel).catch(() => undefined);
-  }, [refreshPlugins, selectedModel]);
+    void refreshPlugins(undefined, true, pluginProbeModel).catch(() => undefined);
+  }, [pluginProbeModel, refreshPlugins]);
   useEffect(() => {
     if (!showPlugins) return;
-    void refreshPlugins(undefined, true, selectedModel).catch(() => undefined);
-  }, [refreshPlugins, selectedModel, showPlugins]);
+    void refreshPlugins(undefined, true, pluginProbeModel).catch(() => undefined);
+  }, [pluginProbeModel, refreshPlugins, showPlugins]);
   const listedSelectedConversation = conversations.find(
     (conversation) => conversation.conversationId === selectedConversationId,
   );
@@ -217,6 +212,16 @@ export function WorkbenchPage() {
   const startupPending = projectsLoading || (conversationsLoading && !selectedConversation);
   const startupFailure = projectsError || (!selectedConversation ? conversationsError : '');
   const visibleDraft = selectedConversationId ? draft || startupDraft : startupDraft;
+  const openTaskCreator = useCallback(
+    (initialGoal?: string) => {
+      setNewTaskGoal(typeof initialGoal === 'string' ? initialGoal : startupDraft);
+      setNewTaskChapterId(chapterId ?? '');
+      setNewTaskModel(captureTaskModelSnapshot());
+      setTaskCreatorError('');
+      setTaskCreatorOpen(true);
+    },
+    [chapterId, startupDraft],
+  );
   const effectiveStatus = resolveWorkbenchConversationStatus({
     runtimeActive: selectedConversationRunning,
     bundleConversation:
@@ -252,6 +257,7 @@ export function WorkbenchPage() {
         void refreshPlugins(undefined, true, selectedModel).catch(() => undefined)
       }
       onOpenModelSettings={() => navigate('/settings')}
+      onCreateTaskWithCurrentModel={() => openTaskCreator(visibleDraft)}
       onSend={() => void sendMessage()}
       onCancel={cancelTask}
       onRefreshAssetScope={() => void assetScope.refresh()}
@@ -265,13 +271,6 @@ export function WorkbenchPage() {
     },
     [assetRecovery, navigate],
   );
-  const openTaskCreator = useCallback(() => {
-    setNewTaskGoal(startupDraft);
-    setNewTaskChapterId(chapterId ?? '');
-    setNewTaskModel(selectedModel);
-    setTaskCreatorError('');
-    setTaskCreatorOpen(true);
-  }, [chapterId, selectedModel, startupDraft]);
   const closeTaskCreator = useCallback(() => {
     if (!creatingTask && !newTaskSubmissionRef.current) setTaskCreatorOpen(false);
   }, [creatingTask]);

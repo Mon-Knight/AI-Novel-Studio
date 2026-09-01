@@ -25,15 +25,15 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v3.6.0**
+**当前版本：v3.6.1**
 
 **阶段：智能体创作平台与长篇小说记忆层**
 
-v3.6.0 是当前版本基线。本节描述已经进入该版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
+v3.6.0 是当前功能基线；v3.6.1 在不扩展产品能力的前提下收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复。本节描述已经进入当前版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
 
 v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统：用户提交小说 Brief 后，Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller 协作生成 12～500 章全书计划；计划确认后，用户可以显式启动、暂停和继续全书候选队列，系统按章生成候选、执行六专家评审，并在用户采用正文后提取人物变化与世界扩展候选。
 
-应用默认进入创作工作台：壳层先显示稳定骨架，恢复任务和旧上下文在后台继续；工作台恢复最近有效任务，并提供搜索、重命名、归档/恢复与“目标 + 模型 + 章节范围”原子新建流程。任务拥有独立模型快照、运行与取消状态，工具、错误和带来源/基线/校验证据的候选产物在对话中内联显示。发送前只允许当前 Runtime 模型目录中的精确模型条目；目录匹配本身只证明条目可选，桌面 DSH 模型任务还会在创建 Run 前经同一 governed proxy 执行精确 `provider/model` 的可取消原生 tool-call nonce 探针；失败不留 Run，成功证据精简冻结到模型快照，同 Worker 最多复用 10 分钟，Worker 重启后重新验证。问候与能力说明使用明确的 `ans-local` 本地来源，不冒充所选模型运行。写作工作台以局部骨架保持卷章树、正文纸张和工具轨稳定，保留章节审阅、编辑、保存、采用、草稿历史、章节准备与总结入口。
+应用默认进入创作工作台：壳层先显示稳定骨架，恢复任务和旧上下文在后台继续；工作台恢复最近有效任务，并提供搜索、重命名、归档/恢复与“目标 + 模型 + 章节范围”原子新建流程。任务拥有独立模型快照、运行与取消状态，工具、错误和带来源/基线/校验证据的候选产物在对话中内联显示。发送前只允许当前 Runtime 模型目录中的精确模型条目；目录匹配本身只证明条目可选，桌面 DSH 模型任务还会在创建 Run 前经同一 governed proxy 执行精确 `provider/model` 的可取消原生 tool-call nonce 探针；失败不留 Run，成功证据精简冻结到模型快照，同 Worker 最多复用 10 分钟，Worker 重启后重新验证。历史任务保持原模型身份，不能借用不同模型的 endpoint 或会话凭据；固定模型不可用时可保留草稿并使用当前设置模型新建任务。问候与能力说明使用明确的 `ans-local` 本地来源，不冒充所选模型运行。写作工作台以局部骨架保持卷章树、正文纸张和工具轨稳定，保留章节审阅、编辑、保存、采用、草稿历史、章节准备与总结入口。
 
 当前生产章节路径仍由确定性意图路由与既有写章管线编排。四个 Canonical 只读能力已经完成共享 Manifest 和宿主门禁，但仍为 `catalog_only + partial`，模型可见数量为 0；真实 Main Agent 尚未放行，非生产 ReAct Harness 不代表生产自主 Agent 已完成。
 
@@ -53,7 +53,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 
 - React 18 + TypeScript
 - Tauri 1.x + Rust
-- SQLite + Migrations（001-036）
+- bundled SQLite 3.51.3（WAL）+ Migrations（001-036）
 - HashRouter + Vite 5
 
 系统不会自动应用全书计划；夜间草稿与质量门禁模式也不会自动采用正文或沉淀章节分析，这些正式副作用继续保留用户确认。全书候选队列必须由用户显式启动，可暂停 / 继续，并由 SQLite Scheduler 通过持久 lease/epoch 在应用重启后接管；只有用户明确选择 `full_auto` 且冻结预算、专家阈值和采用前复验全部通过时，才允许自动采用与确认分析。
@@ -141,7 +141,7 @@ v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统�
 ### 环境要求
 
 - Node.js >= 22.6（`node:test` 需要 Node 内建 TypeScript 类型剔除）
-- Rust（仅 Tauri 桌面模式需要）
+- Rust >= 1.89（仅 Tauri 桌面模式需要）
 - Windows 10/11
 
 运行真实桌面 E2E 还需要 `tauri-driver 0.1.5`、Microsoft Edge WebView2 Runtime，以及与 WebView2 主版本一致的 `msedgedriver.exe`。详细安装与版本匹配见 [Windows 桌面 E2E 自动化](docs/technical/desktop-e2e.md)。
@@ -265,7 +265,8 @@ API Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模
 | v2.6.1                    | 文档规范化版本；未形成独立 Memory 实现                                                                                                                                       |
 | v3.0.0                    | 已完成：全书自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory，以及多目标事务、跨章节批处理和势力 / 地点正式资产 |
 | v3.3.0～v3.5.0            | 已实现并在 v3.5.0 版本条目收敛：对话式创作工作台主界面、任务对话与内联产物、确认/审阅授权，以及写作工作台向人工审阅、编辑、保存和采用收敛                                    |
-| v3.6.0                    | **当前版本**：生产边界纠偏、Canonical 能力资产化、工作台继续收敛与稳定性修复；Canonical 模型可见数量仍为 0，Main Agent 尚未放行                                              |
+| v3.6.0                    | 功能基线：生产边界纠偏、Canonical 能力资产化、工作台继续收敛与稳定性修复；Canonical 模型可见数量仍为 0，Main Agent 尚未放行                                                  |
+| v3.6.1                    | **当前版本**：bundled SQLite WAL 安全补丁、发布 E2E 门禁修复与 Runtime 固定模型恢复；不新增后续版本能力                                                                      |
 | v3.x 后续                 | Canonical 工具模型可见化、真实 Main Agent / Writing SubAgent 验收、结构化产物原子应用、自动语义化与召回评估、系统级无人值守、正文批处理、资产可视化与出版交付                |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
@@ -368,7 +369,7 @@ npm run tauri:build
 powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.ps1
 ```
 
-桌面 E2E 每个 suite 先在独立的 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的 Tauri 应用，再为每个 spec 独立启动真实窗口，并分配独立临时 SQLite、WebView2 用户目录和自动探测的空闲 driver 端口。固定 fixtures 从空库经 UI 建立场景数据，支持 `--spec` 独立复测；长正文规格还逐值核对全文、SQLite 元数据与 SHA-256，并通过仅限 E2E 的损坏注入证明读取失败不会覆盖安全正文。
+桌面 E2E 每个 suite 先在独立的 `.e2e-tools/target` 中构建一次带 Cargo `e2e` feature 的 Tauri 应用，再为每个 spec 独立启动真实窗口，并分配包含中文与空格的独立临时 SQLite 路径、WebView2 用户目录和自动探测的空闲 driver 端口。启动门禁核对实际 SQLite 版本、source ID、WAL、外键、busy timeout、synchronous、FTS5、JSON 与完整性；固定 fixtures 从空库经 UI 建立场景数据，支持 `--spec` 独立复测。长正文规格还逐值核对全文、SQLite 元数据与 SHA-256，并通过仅限 E2E 的损坏注入证明读取失败不会覆盖安全正文。
 
 测试通过 DOM、`data-testid` 和受限 Tauri IPC 操作，不依赖中文文本、屏幕坐标或截图识别。E2E 构建强制使用 Mock Provider，WebView 在请求前阻断外部网络，Rust AI IPC 再做后端阻断；运行器必须从 `frontend-diagnostics.json` 证明无 console error、未处理异常和外部网络尝试。失败截图只用于诊断，且仅在 WebDriver 会话仍可访问时尽力生成。
 

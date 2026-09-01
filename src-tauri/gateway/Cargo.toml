@@ -2,10 +2,10 @@
 name = "novel-domain-gateway"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.89"
 description = "AI Novel Studio v3.1.0 — read-only novel domain gateway (MCP stdio) for the DSH runtime"
 
 [dependencies]
 serde_json = "1.0"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.39", default-features = false, features = ["bundled"] }
 sha2 = "0.10"

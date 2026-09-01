@@ -13,7 +13,7 @@ import {
   writeUnexpectedDriverExitReport,
   type DriverExitKind,
 } from '../../scripts/e2e/driver-liveness-guard.ts';
-import { bridgeDiagnostics } from './helpers';
+import { bridgeDiagnostics, EXPECTED_SQLITE_SOURCE_ID, EXPECTED_SQLITE_VERSION } from './helpers';
 
 const workspaceRoot = path.resolve(import.meta.dirname, '../..');
 const appPath = path.resolve(
@@ -190,6 +190,25 @@ export const config = {
     }
     if (diagnostics.enabled !== true) throw new Error('E2E diagnostics reported enabled=false');
     if (diagnostics.schemaReady !== true) throw new Error('E2E database schema is not ready');
+    if (diagnostics.sqliteVersion !== EXPECTED_SQLITE_VERSION) {
+      throw new Error(
+        `Unexpected SQLite runtime version: ${diagnostics.sqliteVersion ?? '<empty>'}`,
+      );
+    }
+    if (diagnostics.sqliteSourceId !== EXPECTED_SQLITE_SOURCE_ID) {
+      throw new Error('Unexpected SQLite runtime source ID');
+    }
+    if (diagnostics.journalMode !== 'wal') throw new Error('E2E database is not using WAL mode');
+    if (diagnostics.foreignKeysEnabled !== true)
+      throw new Error('E2E database foreign keys are not enabled');
+    if (diagnostics.busyTimeoutMs !== 5000)
+      throw new Error('E2E database busy timeout is not 5000 ms');
+    if (diagnostics.synchronous !== 'full')
+      throw new Error('E2E database synchronous mode is not FULL');
+    if (!diagnostics.compileOptions?.includes('ENABLE_FTS5'))
+      throw new Error('E2E SQLite runtime is missing FTS5');
+    if (diagnostics.jsonEnabled !== true)
+      throw new Error('E2E SQLite runtime is missing JSON support');
     if (diagnostics.integrityCheck !== 'ok') {
       throw new Error(
         `E2E database integrity check failed: ${diagnostics.integrityCheck ?? '<empty>'}`,

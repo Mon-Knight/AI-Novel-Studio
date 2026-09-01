@@ -1,5 +1,6 @@
 use once_cell::sync::OnceCell;
 use rusqlite::{Connection, Result as SqliteResult};
+use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -8,6 +9,47 @@ use std::time::{Duration, Instant};
 use crate::errors::{log_workspace_event, WorkspaceLogEvent};
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseRuntimeDiagnostics {
+    pub sqlite_version: String,
+    pub sqlite_source_id: String,
+    pub journal_mode: String,
+    pub foreign_keys_enabled: bool,
+    pub busy_timeout_ms: i64,
+    pub synchronous: String,
+}
+
+pub fn read_database_runtime_diagnostics(
+    conn: &Connection,
+) -> SqliteResult<DatabaseRuntimeDiagnostics> {
+    let (sqlite_version, sqlite_source_id) =
+        conn.query_row("SELECT sqlite_version(), sqlite_source_id()", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+    let journal_mode = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+    let foreign_keys_enabled =
+        conn.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))? == 1;
+    let busy_timeout_ms = conn.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))?;
+    let synchronous_level = conn.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?;
+    let synchronous = match synchronous_level {
+        0 => "off".to_string(),
+        1 => "normal".to_string(),
+        2 => "full".to_string(),
+        3 => "extra".to_string(),
+        value => value.to_string(),
+    };
+
+    Ok(DatabaseRuntimeDiagnostics {
+        sqlite_version,
+        sqlite_source_id,
+        journal_mode,
+        foreign_keys_enabled,
+        busy_timeout_ms,
+        synchronous,
+    })
+}
 
 fn record_e2e_startup_timing(
     scope: &str,
@@ -83,7 +125,7 @@ pub fn init_database() {
         .expect("Failed to set database busy timeout");
 
     connection
-        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
         .expect("Failed to set pragmas");
     record_e2e_startup_timing("database", "pragmas", phase_started_at, total_started_at);
 

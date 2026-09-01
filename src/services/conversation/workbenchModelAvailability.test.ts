@@ -5,6 +5,7 @@ import {
   assertWorkbenchModelAvailable,
   getWorkbenchModelAvailability,
   listAvailableWorkbenchModels,
+  resolveWorkbenchModelDirectoryTarget,
   WorkbenchModelUnavailableError,
 } from './workbenchModelAvailability';
 
@@ -53,6 +54,24 @@ test('lists only initialized loaded model catalog entries', () => {
       source: 'dsh-runtime-health',
     },
   ]);
+});
+
+test('targets the current settings model only while creating a task', () => {
+  const fixedTaskModel = { providerId: 'openai_compatible', modelId: 'legacy-model' };
+  const currentSettingsModel = { providerId: 'openai_compatible', modelId: 'gpt-5.6-luna' };
+
+  assert.equal(
+    resolveWorkbenchModelDirectoryTarget(false, fixedTaskModel, currentSettingsModel),
+    fixedTaskModel,
+  );
+  assert.equal(
+    resolveWorkbenchModelDirectoryTarget(true, fixedTaskModel, currentSettingsModel),
+    currentSettingsModel,
+  );
+  assert.equal(
+    resolveWorkbenchModelDirectoryTarget(false, fixedTaskModel, currentSettingsModel),
+    fixedTaskModel,
+  );
 });
 
 test('requires an exact provider and model match', () => {
@@ -155,6 +174,17 @@ test('fails closed while the directory refreshes, fails, or misses the selection
   });
   assert.equal(missing.canSend, false);
   assert.match(missing.message, /未进入/);
+
+  const lockedMissing = getWorkbenchModelAvailability({
+    plugins,
+    selectedModel: { providerId: 'openai_compatible', modelId: 'legacy-model' },
+    refreshing: false,
+    selectionLocked: true,
+  });
+  assert.equal(lockedMissing.canSend, false);
+  assert.match(lockedMissing.message, /当前任务固定模型 openai_compatible:legacy-model/);
+  assert.match(lockedMissing.message, /新建任务/);
+  assert.doesNotMatch(lockedMissing.message, /请选择已加载模型/);
 
   const localFallback = getWorkbenchModelAvailability({
     plugins: [

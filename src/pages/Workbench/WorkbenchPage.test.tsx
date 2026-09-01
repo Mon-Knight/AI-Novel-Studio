@@ -5061,11 +5061,32 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
     'ai_novel_studio_ai_settings',
     JSON.stringify({
       runtimeMode: 'api',
-      provider: 'deepseek',
-      baseUrl: 'https://api.deepseek.com',
-      modelName: 'deepseek-chat',
+      provider: 'openai_compatible',
+      baseUrl: 'http://localhost:12074/v1',
+      modelName: 'gpt-5.6-luna',
     }),
   );
+  const legacyModel = {
+    providerId: 'openai_compatible',
+    modelId: 'legacy-model',
+    runtimeMode: 'api' as const,
+    capabilities: ['conversation_turn', 'chapter_generate'],
+    options: {},
+    capturedAt: '2026-08-23T00:00:00.000Z',
+  };
+  taskConversationService.list = async () => [
+    {
+      ...mockConversation,
+      defaultModel: legacyModel,
+    },
+  ];
+  taskConversationService.get = async () => ({
+    ...mockBundle,
+    conversation: {
+      ...mockBundle.conversation,
+      defaultModel: legacyModel,
+    },
+  });
   let directoryReads = 0;
   productionToolRegistry.getManifest = async () => {
     directoryReads += 1;
@@ -5086,10 +5107,17 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
   const textarea = await screen.findByTestId('workbench-composer-input');
   fireEvent.change(textarea, { target: { value: '保留这段尚未发送的创作目标' } });
 
+  await waitFor(() => {
+    assert.equal(
+      (screen.getByTestId('workbench-model-select') as HTMLSelectElement).value,
+      'openai_compatible:legacy-model',
+    );
+  });
   const recovery = await screen.findByTestId('workbench-model-directory-status');
   assert.equal(recovery.getAttribute('role'), 'alert');
   assert.ok(screen.getByRole('button', { name: '重试模型目录' }));
   assert.ok(screen.getByRole('button', { name: '模型设置' }));
+  assert.ok(screen.getByRole('button', { name: '使用当前模型新建任务' }));
 
   const readsBeforeRetry = directoryReads;
   fireEvent.click(screen.getByRole('button', { name: '重试模型目录' }));
@@ -5098,6 +5126,25 @@ test('WorkbenchPage exposes model recovery without discarding the unsent goal', 
     (screen.getByTestId('workbench-composer-input') as HTMLTextAreaElement).value,
     '保留这段尚未发送的创作目标',
   );
+
+  fireEvent.click(screen.getByRole('button', { name: '使用当前模型新建任务' }));
+  await waitFor(() => {
+    assert.equal(
+      (screen.getByTestId('workbench-new-task-goal') as HTMLTextAreaElement).value,
+      '保留这段尚未发送的创作目标',
+    );
+    assert.equal(
+      (screen.getByTestId('workbench-new-task-model-select') as HTMLSelectElement).value,
+      'openai_compatible:gpt-5.6-luna',
+    );
+  });
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  await waitFor(() => {
+    assert.equal(
+      screen.getByTestId('workbench-model-directory-status').getAttribute('role'),
+      'alert',
+    );
+  });
 
   fireEvent.click(screen.getByRole('button', { name: '模型设置' }));
   await waitFor(() => assert.ok(screen.getByTestId('model-settings-destination')));
