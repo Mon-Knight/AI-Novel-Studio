@@ -11,7 +11,7 @@ import {
   resolveWorkbenchModelDirectoryTarget,
   WorkbenchModelUnavailableError,
 } from '../../services/conversation/workbenchModelAvailability';
-import type { ArtifactDecisionKind, ConversationArtifactCard } from '../../types/conversation';
+import type { StructuredArtifactDecisionInput } from './workbenchHelpers';
 import { PluginPanel } from './WorkbenchPluginPanel';
 import { WorkbenchComposer } from './WorkbenchComposer';
 import { WorkbenchMessageStream } from './WorkbenchMessageStream';
@@ -26,7 +26,7 @@ import {
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
-import { markWorkbenchOnce } from './workbenchHelpers';
+import { markWorkbenchOnce, settleStructuredArtifactDecision } from './workbenchHelpers';
 import { resolveWorkbenchConversationStatus } from './workbenchRunProgress';
 import { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
@@ -149,29 +149,16 @@ export function WorkbenchPage() {
     setStartupDraft('');
   }, [draft, selectedConversationId, setDraft, startupDraft]);
   const handleStructuredArtifactDecision = useCallback(
-    async (input: {
-      artifact: ConversationArtifactCard;
-      decision: ArtifactDecisionKind;
-      applied: boolean;
-    }) => {
-      if (!input.artifact.artifactId) return;
-      const isCurrentScope = () =>
-        selectedConversationRef.current === input.artifact.conversationId &&
-        selectedNovelRef.current === selectedNovelId;
-      let selectedChapterId: string | undefined;
-      if (input.applied && isCurrentScope()) {
-        const refreshed = await reloadChapters(selectedNovelId);
-        selectedChapterId = refreshed?.chapterId;
-        if (selectedChapterId && isCurrentScope()) await selectChapter(selectedChapterId);
-      }
-      await settleAssetCandidateDecision({
-        conversationId: input.artifact.conversationId,
-        artifactId: input.artifact.artifactId,
-        decision: input.decision,
-        applied: input.applied,
-        selectedChapterId,
-      });
-    },
+    (input: StructuredArtifactDecisionInput) =>
+      settleStructuredArtifactDecision({
+        ...input,
+        selectedNovelId,
+        selectedConversationRef,
+        selectedNovelRef,
+        reloadChapters,
+        selectChapter,
+        settleAssetCandidateDecision,
+      }),
     [
       reloadChapters,
       selectChapter,
