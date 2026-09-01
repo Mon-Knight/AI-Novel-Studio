@@ -1,13 +1,23 @@
 import { browser, expect } from '@wdio/globals';
 
+export const EXPECTED_SQLITE_VERSION = '3.51.3';
+export const EXPECTED_SQLITE_SOURCE_ID =
+  '2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618';
+
 export interface Diagnostics {
   enabled?: boolean;
   dataDir?: string;
   databasePath?: string;
   networkBlocked?: boolean;
   integrityCheck?: string;
+  sqliteVersion?: string;
+  sqliteSourceId?: string;
   foreignKeysEnabled?: boolean;
   journalMode?: string;
+  busyTimeoutMs?: number;
+  synchronous?: string;
+  compileOptions?: string[];
+  jsonEnabled?: boolean;
   schemaReady?: boolean;
   migrationCount?: number;
   latestMigrationId?: string;
@@ -222,7 +232,14 @@ export async function assertCleanDiagnostics(): Promise<void> {
   const diagnostics = await bridgeDiagnostics();
   expect(diagnostics.enabled).toBe(true);
   expect(diagnostics.schemaReady).toBe(true);
+  expect(diagnostics.sqliteVersion).toBe(EXPECTED_SQLITE_VERSION);
+  expect(diagnostics.sqliteSourceId).toBe(EXPECTED_SQLITE_SOURCE_ID);
   expect(diagnostics.foreignKeysEnabled).toBe(true);
+  expect(diagnostics.journalMode).toBe('wal');
+  expect(diagnostics.busyTimeoutMs).toBe(5000);
+  expect(diagnostics.synchronous).toBe('full');
+  expect(diagnostics.compileOptions).toContain('ENABLE_FTS5');
+  expect(diagnostics.jsonEnabled).toBe(true);
   expect(diagnostics.integrityCheck).toBe('ok');
   expect(diagnostics.networkBlocked).toBe(true);
   expect(diagnostics.webviewNetwork?.installed).toBe(true);

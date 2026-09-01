@@ -5299,6 +5299,11 @@ mod workbench_prompt_tests {
                 .expect("catalog matching must not fail closed")
                 .is_none()
         );
+        assert!(
+            ensure_plugin_probe_health(Some(&missing_url.model_snapshot), None)
+                .expect_err("an exact invalid snapshot must not probe a different default model")
+                .contains("baseUrl")
+        );
         assert!(!probe
             .model_snapshot
             .to_string()
@@ -6104,10 +6109,7 @@ fn ensure_plugin_probe_health(
 ) -> Result<Option<Value>, String> {
     let input = match probe_input(model_snapshot, api_key) {
         Ok(input) => input,
-        Err(_) if model_snapshot.is_some() => match probe_input(None, api_key) {
-            Ok(input) => input,
-            Err(_) => return Ok(None),
-        },
+        Err(error) if model_snapshot.is_some() => return Err(error),
         Err(_) => return Ok(None),
     };
     let transport = match provider_transport(&input) {

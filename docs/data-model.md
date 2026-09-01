@@ -131,6 +131,19 @@ AI Novel Studio 是 Windows 原生桌面软件，早期版本应优先采用本�
 
 后续可扩展云同步，但 v1.0.0 前不作为重点。
 
+### 2.5.1 当前桌面 SQLite 运行时基线
+
+桌面端主数据库继续使用单个 `Mutex<Connection>`，不引入连接池或第二个生产写连接。主应用与只读 Gateway 统一锁定 `rusqlite 0.39.0 / libsqlite3-sys 0.37.0`，由 `bundled` feature 静态链接 SQLite `3.51.3`。生产连接固定为：
+
+```text
+journal_mode = WAL
+foreign_keys = ON
+busy_timeout = 5000 ms
+synchronous = FULL
+```
+
+轻量运行时诊断只读取 SQLite 版本、source ID 和以上连接配置，不执行全库扫描。完整 `integrity_check` 仅用于受控 E2E、用户主动数据库检查、备份恢复验收或故障排查，不进入普通启动主路径。DSH Gateway 继续只读打开同一数据库，不获得生产写权限。
+
 ---
 
 ## 2.6 允许渐进式实现

@@ -32,6 +32,7 @@ export function WorkbenchModelSelect({
     selectedModel,
     refreshing,
     refreshError,
+    selectionLocked: locked,
   });
   const selectedMissing = !availability.selectedOption;
 
@@ -63,7 +64,9 @@ export function WorkbenchModelSelect({
               ? '正在刷新模型目录…'
               : availability.options.length === 0
                 ? '模型目录不可用'
-                : '所选模型未进入 Runtime 目录'}
+                : locked
+                  ? '任务固定模型不可用'
+                  : '所选模型未进入 Runtime 目录'}
           </option>
         )}
         {availability.options.map((option) => (

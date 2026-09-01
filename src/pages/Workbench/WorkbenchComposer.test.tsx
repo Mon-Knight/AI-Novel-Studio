@@ -44,6 +44,7 @@ function renderComposer(
       onDraftChange: () => undefined,
       onRetryModels: () => undefined,
       onOpenModelSettings: () => undefined,
+      onCreateTaskWithCurrentModel: () => undefined,
       onSend: () => undefined,
       onCancel: () => undefined,
       onRefreshAssetScope: () => undefined,

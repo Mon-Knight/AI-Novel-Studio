@@ -1,12 +1,29 @@
 # AI Novel Studio - CHANGELOG
 
-> 当前版本：v3.6.0。本节记录对话式创作工作台、能力资产化、运行时边界与桌面发布基线。
+> 当前版本：v3.6.1。v3.6.0 保持为智能体创作平台与长篇小说记忆层的功能基线；v3.6.1 收口 SQLite 安全、发布门禁与 Runtime 固定模型恢复。
 
 ## Unreleased
 
+暂无未发布变更。
+
+## v3.6.1 (2026-09-01) - 智能体创作平台与长篇小说记忆层
+
 ### 修复
 
+- **Bundled SQLite WAL-reset 风险修复**：主应用与只读 Gateway 从 `rusqlite 0.31.0 / libsqlite3-sys 0.28.0 / SQLite 3.45.0` 升级到最小修复组合 `0.39.0 / 0.37.0 / SQLite 3.51.3`，关闭新增且未使用的默认 statement cache feature，保留单主连接和既有事务拓扑；生产连接显式固定 WAL、外键、5000ms busy timeout 与 `synchronous=FULL`。既有 E2E 诊断复用生产轻量 DTO，精确验证 SQLite version/source ID、FTS5、JSON 和连接配置，并在包含中文与空格的隔离路径启动真实桌面数据库；普通启动不新增完整 `integrity_check`。Rust 清单同步到当前固定锁图实测可用的 1.89。
+- **Runtime 固定模型目录恢复**：旧任务继续冻结原 provider/model，不从身份不同的当前模型借用 endpoint 或会话凭据；显式无效快照不再静默改探默认 DeepSeek。新任务始终捕获设置页当前模型，按该模型刷新 Runtime 目录；旧任务不可用时可保留未发送草稿并使用当前模型新建任务，取消弹窗后目录自动恢复到原任务模型。
 - **签名发布全量桌面 E2E 输入传播**：可复用 Windows 工作流不再按调用方的 `push` 事件遮蔽 `suite: full`；Release tag 调用现在会同时把任务名称与实际 `E2E_SUITE` 解析为 `full`，执行完整 `test:e2e` 后才允许进入签名安装包发布。文档同步门禁新增调用方事件遮蔽的失败关闭回归。
+
+### 验证
+
+- `npm run lint:ci`
+- `npm run build`
+- `npm run test:docs-sync`
+- `npm run test:version-sync`
+- `cargo +1.89.0 fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- `cargo +1.89.0 check --locked --manifest-path src-tauri/Cargo.toml`
+- Runtime 模型目录快速回归、页面恢复用例与精确 Rust 探针测试
+- 回环 `/v1/models` 实测返回 10 个模型并包含 `gpt-5.6-luna`；验证输出与仓库均不保存 API Key
 
 ## v3.6.0 (2026-08-31) - 智能体创作平台与长篇小说记忆层
 

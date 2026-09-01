@@ -54,6 +54,7 @@ interface WorkbenchComposerProps {
   onDraftChange: (value: string) => void;
   onRetryModels: () => void;
   onOpenModelSettings: () => void;
+  onCreateTaskWithCurrentModel: () => void;
   onSend: () => void;
   onCancel: () => void;
   onRefreshAssetScope: () => void;
@@ -84,6 +85,7 @@ export function WorkbenchComposer({
   onDraftChange,
   onRetryModels,
   onOpenModelSettings,
+  onCreateTaskWithCurrentModel,
   onSend,
   onCancel,
   onRefreshAssetScope,
@@ -105,6 +107,7 @@ export function WorkbenchComposer({
     selectedModel,
     refreshing: pluginsLoading,
     refreshError: pluginsError,
+    selectionLocked: true,
   });
   const conversationalDraft = isConversationalGoal(draft);
   const canSendDraft = Boolean(
@@ -203,6 +206,7 @@ export function WorkbenchComposer({
           testId="workbench-model-directory-status"
           onRetry={onRetryModels}
           onOpenSettings={onOpenModelSettings}
+          onCreateTask={onCreateTaskWithCurrentModel}
         />
         {composerError && (
           <div

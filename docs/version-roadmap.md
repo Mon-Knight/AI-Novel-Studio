@@ -3,8 +3,8 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v3.6.0（智能体创作平台与长篇小说记忆层）
-> 当前状态：v3.6.0 版本基线
+> 当前版本：v3.6.1（智能体创作平台与长篇小说记忆层）
+> 当前状态：v3.6.1 SQLite 安全与 Runtime 固定模型恢复补丁；v3.6.0 保持为功能基线
 
 > 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，v3.5.0 完成工作台与旧 UI 收敛，v3.6.0 继续收敛 Canonical 能力契约。
 
@@ -148,7 +148,8 @@ v3.1.0  DSH 进程外大脑接入
 v3.2.0  本地章节正文流水线与 DSH 稳定整合
 v3.2.1  发布资产 URL 热修复
 v3.5.0  对话式创作工作台与审阅收敛
-v3.6.0  智能体创作平台与长篇小说记忆层（当前）
+v3.6.0  智能体创作平台与长篇小说记忆层功能基线
+v3.6.1  SQLite 安全与 Runtime 固定模型恢复补丁（当前）
 ```
 
 ---
@@ -503,7 +504,7 @@ v3.0.0 默认边界仍是“Agent 自动规划和生成候选，正式副作用�
 
 ---
 
-## 7. v3.3.0+ 对话式并发创作工作台路线（v3.6.0 当前版本）
+## 7. v3.3.0+ 对话式并发创作工作台路线（当前版本：v3.6.1；功能基线：v3.6.0）
 
 v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6.0 版本基线完成 Agent 能力契约校准，同时保留后续放行门禁。
 
@@ -552,7 +553,7 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 
 **版本边界：** 底层领域服务、审计事实和历史草稿不因 UI 删减而自动删除。
 
-### v3.6.0：Canonical 只读契约与准入状态（当前版本）
+### v3.6.0：Canonical 只读契约与准入状态（功能基线）
 
 - Phase 1A-A Capability Catalog、1A-B Domain Facade、1A-C Canonical Projection、1A-D 共享 portable Manifest/跨语言漂移门禁均已完成；
 - `novel.read / structure.read / context.read / memory.search` 仍全部是 `catalog_only + partial`，`modelVisibleToolIdentities=[]`，公开 Agent 执行入口失败关闭；
@@ -560,7 +561,14 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 - 四项 blocker 关闭后，必须以独立 exposure 变更和回归证据放行只读 Tool，不能把 legacy DSH allowlist 改名冒充迁移；
 - exposure 门禁通过后才进入 **R4：真实 Main Agent Runtime 验证**；Writing SubAgent 与其他 SubAgent 继续后置。
 
-详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 的真实能力边界，不授权后续版本或 R4 执行。
+### v3.6.1：SQLite 安全与 Runtime 固定模型恢复补丁（当前版本）
+
+- bundled SQLite 升级到 3.51.3，并固定 WAL、外键、5000ms busy timeout 与 `synchronous=FULL`；
+- 历史任务继续冻结原模型身份，显式无效快照不再改探默认模型；
+- 新任务捕获当前设置模型，旧任务不可用时保留草稿并提供安全的新任务恢复路径；
+- Release tag 的复用工作流必须执行完整 Windows 桌面 E2E，补丁不放行 Canonical 或 Main Agent 新能力。
+
+详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 功能基线与 v3.6.1 安全补丁的真实能力边界，不授权后续版本或 R4 执行。
 
 ---
 

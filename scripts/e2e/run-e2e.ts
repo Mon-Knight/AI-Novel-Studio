@@ -80,7 +80,9 @@ fs.mkdirSync(artifactRoot, { recursive: true });
 
 let activeWdioPid: number | undefined;
 let signalCleanupStarted = false;
-const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-studio-e2e-'));
+const runRoot = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'ai-novel-studio-e2e-\u4e2d\u6587 \u8def\u5f84-'),
+);
 let appPath: string;
 try {
   appPath = await ensureE2eApplication(runRoot);

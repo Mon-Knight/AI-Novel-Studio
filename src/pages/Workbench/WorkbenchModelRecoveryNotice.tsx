@@ -1,5 +1,5 @@
 import type { WorkbenchModelDirectoryStatus } from '../../services/conversation/workbenchModelAvailability';
-import { CircleAlert, RefreshCw, Settings } from 'lucide-react';
+import { CircleAlert, Plus, RefreshCw, Settings } from 'lucide-react';
 
 interface WorkbenchModelRecoveryNoticeProps {
   message: string;
@@ -8,6 +8,7 @@ interface WorkbenchModelRecoveryNoticeProps {
   testId: string;
   onRetry: () => void;
   onOpenSettings: () => void;
+  onCreateTask?: () => void;
 }
 
 export function WorkbenchModelRecoveryNotice({
@@ -17,6 +18,7 @@ export function WorkbenchModelRecoveryNotice({
   testId,
   onRetry,
   onOpenSettings,
+  onCreateTask,
 }: WorkbenchModelRecoveryNoticeProps) {
   if (!message) return null;
 
@@ -38,6 +40,17 @@ export function WorkbenchModelRecoveryNotice({
       <span className="workbench-readiness-copy">{message}</span>
       {unavailable && (
         <div className="workbench-recovery-actions">
+          {onCreateTask && (
+            <button
+              type="button"
+              className="workbench-recovery-action"
+              data-testid={`${testId}-create-task`}
+              onClick={onCreateTask}
+            >
+              <Plus aria-hidden="true" size={13} strokeWidth={1.8} />
+              <span>使用当前模型新建任务</span>
+            </button>
+          )}
           <button
             type="button"
             className="workbench-recovery-action"

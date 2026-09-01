@@ -7,7 +7,10 @@ import {
   type ChapterCoreAsset,
 } from '../../services/conversation/chapterAssetReadiness';
 import { isConversationalGoal } from '../../services/conversation/taskGoalRouting';
-import { WorkbenchModelUnavailableError } from '../../services/conversation/workbenchModelAvailability';
+import {
+  resolveWorkbenchModelDirectoryTarget,
+  WorkbenchModelUnavailableError,
+} from '../../services/conversation/workbenchModelAvailability';
 import type { ArtifactDecisionKind, ConversationArtifactCard } from '../../types/conversation';
 import { PluginPanel } from './WorkbenchPluginPanel';
 import { WorkbenchComposer } from './WorkbenchComposer';
@@ -200,13 +203,18 @@ export function WorkbenchPage() {
     setDraft,
     onStructuredArtifactDecision: handleStructuredArtifactDecision,
   });
+  const pluginProbeModel = resolveWorkbenchModelDirectoryTarget(
+    taskCreatorOpen,
+    selectedModel,
+    newTaskModel,
+  );
   useEffect(() => {
-    void refreshPlugins(undefined, true, selectedModel).catch(() => undefined);
-  }, [refreshPlugins, selectedModel]);
+    void refreshPlugins(undefined, true, pluginProbeModel).catch(() => undefined);
+  }, [pluginProbeModel, refreshPlugins]);
   useEffect(() => {
     if (!showPlugins) return;
-    void refreshPlugins(undefined, true, selectedModel).catch(() => undefined);
-  }, [refreshPlugins, selectedModel, showPlugins]);
+    void refreshPlugins(undefined, true, pluginProbeModel).catch(() => undefined);
+  }, [pluginProbeModel, refreshPlugins, showPlugins]);
   const listedSelectedConversation = conversations.find(
     (conversation) => conversation.conversationId === selectedConversationId,
   );
@@ -217,6 +225,16 @@ export function WorkbenchPage() {
   const startupPending = projectsLoading || (conversationsLoading && !selectedConversation);
   const startupFailure = projectsError || (!selectedConversation ? conversationsError : '');
   const visibleDraft = selectedConversationId ? draft || startupDraft : startupDraft;
+  const openTaskCreator = useCallback(
+    (initialGoal?: string) => {
+      setNewTaskGoal(typeof initialGoal === 'string' ? initialGoal : startupDraft);
+      setNewTaskChapterId(chapterId ?? '');
+      setNewTaskModel(captureTaskModelSnapshot());
+      setTaskCreatorError('');
+      setTaskCreatorOpen(true);
+    },
+    [chapterId, startupDraft],
+  );
   const effectiveStatus = resolveWorkbenchConversationStatus({
     runtimeActive: selectedConversationRunning,
     bundleConversation:
@@ -252,6 +270,7 @@ export function WorkbenchPage() {
         void refreshPlugins(undefined, true, selectedModel).catch(() => undefined)
       }
       onOpenModelSettings={() => navigate('/settings')}
+      onCreateTaskWithCurrentModel={() => openTaskCreator(visibleDraft)}
       onSend={() => void sendMessage()}
       onCancel={cancelTask}
       onRefreshAssetScope={() => void assetScope.refresh()}
@@ -265,13 +284,6 @@ export function WorkbenchPage() {
     },
     [assetRecovery, navigate],
   );
-  const openTaskCreator = useCallback(() => {
-    setNewTaskGoal(startupDraft);
-    setNewTaskChapterId(chapterId ?? '');
-    setNewTaskModel(selectedModel);
-    setTaskCreatorError('');
-    setTaskCreatorOpen(true);
-  }, [chapterId, selectedModel, startupDraft]);
   const closeTaskCreator = useCallback(() => {
     if (!creatingTask && !newTaskSubmissionRef.current) setTaskCreatorOpen(false);
   }, [creatingTask]);

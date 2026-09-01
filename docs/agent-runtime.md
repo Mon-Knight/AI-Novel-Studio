@@ -1,8 +1,8 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.6.0
-> 当前状态：v3.6.0 版本基线
+> 版本：v3.6.1
+> 当前状态：v3.6.1 安全补丁；v3.6.0 保持为 Agent Runtime 功能基线
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---

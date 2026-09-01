@@ -100,8 +100,10 @@ pub struct E2eDiagnostics {
     pub database_path: String,
     pub network_blocked: bool,
     pub integrity_check: String,
-    pub foreign_keys_enabled: bool,
-    pub journal_mode: String,
+    #[serde(flatten)]
+    pub database_runtime: crate::db::DatabaseRuntimeDiagnostics,
+    pub compile_options: Vec<String>,
+    pub json_enabled: bool,
     pub schema_ready: bool,
     pub migration_count: i64,
     pub latest_migration_id: Option<String>,
@@ -454,15 +456,23 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
     let integrity_check = conn
         .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
         .map_err(|error| format!("failed to run SQLite integrity check: {}", error))?;
-    append_e2e_log_at(&data_dir, "diagnostics: foreign key pragma");
-    let foreign_keys_enabled = conn
-        .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
-        .map_err(|error| format!("failed to read SQLite foreign_keys pragma: {}", error))?
+    append_e2e_log_at(&data_dir, "diagnostics: database runtime");
+    let database_runtime = crate::db::read_database_runtime_diagnostics(conn)
+        .map_err(|error| format!("failed to read SQLite runtime diagnostics: {}", error))?;
+    append_e2e_log_at(&data_dir, "diagnostics: compile options");
+    let mut compile_options = conn
+        .prepare("PRAGMA compile_options")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(|error| format!("failed to read SQLite compile options: {}", error))?;
+    compile_options.sort_unstable();
+    let json_enabled = conn
+        .query_row("SELECT json_valid('{}')", [], |row| row.get::<_, i64>(0))
+        .map_err(|error| format!("failed to verify SQLite JSON support: {}", error))?
         == 1;
-    append_e2e_log_at(&data_dir, "diagnostics: journal mode pragma");
-    let journal_mode = conn
-        .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
-        .map_err(|error| format!("failed to read SQLite journal_mode pragma: {}", error))?;
     append_e2e_log_at(&data_dir, "diagnostics: schema and row counts");
     let schema_ready = REQUIRED_E2E_TABLES
         .iter()
@@ -525,8 +535,9 @@ fn build_e2e_diagnostics(conn: &Connection, data_dir: PathBuf) -> Result<E2eDiag
         database_path: database_path.to_string_lossy().into_owned(),
         network_blocked: true,
         integrity_check,
-        foreign_keys_enabled,
-        journal_mode,
+        database_runtime,
+        compile_options,
+        json_enabled,
         schema_ready,
         migration_count,
         latest_migration_id,
@@ -1046,8 +1057,24 @@ mod tests {
         assert!(diagnostics.enabled);
         assert!(diagnostics.network_blocked);
         assert_eq!(diagnostics.integrity_check, "ok");
-        assert!(diagnostics.foreign_keys_enabled);
-        assert_eq!(diagnostics.journal_mode, "delete");
+        assert!(diagnostics.database_runtime.foreign_keys_enabled);
+        assert_eq!(diagnostics.database_runtime.journal_mode, "delete");
+        assert_eq!(diagnostics.database_runtime.sqlite_version, "3.51.3");
+        assert_eq!(
+            diagnostics.database_runtime.sqlite_source_id,
+            "2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618"
+        );
+        assert_eq!(diagnostics.database_runtime.busy_timeout_ms, 5_000);
+        assert_eq!(diagnostics.database_runtime.synchronous, "full");
+        assert!(diagnostics
+            .compile_options
+            .windows(2)
+            .all(|pair| pair[0] <= pair[1]));
+        assert!(diagnostics
+            .compile_options
+            .iter()
+            .any(|option| option == "ENABLE_FTS5"));
+        assert!(diagnostics.json_enabled);
         assert!(diagnostics.schema_ready);
         assert_eq!(diagnostics.data_dir, canonical_data_dir.to_string_lossy());
         assert_eq!(
