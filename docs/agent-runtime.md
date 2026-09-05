@@ -1,8 +1,8 @@
 # AI Novel Studio — Agent Runtime 文档
 
 > 文件：`docs/agent-runtime.md`  
-> 版本：v3.6.1
-> 当前状态：v3.6.1 安全补丁；v3.6.0 保持为 Agent Runtime 功能基线
+> 版本：v3.6.2
+> 当前状态：v3.6.2 Canonical 只读链路收口补丁；v3.6.0 保持为 Agent Runtime 功能基线
 > 用途：说明历史 Planner Lite、Chapter Readiness Planner 与自主创作 Runtime 的边界
 
 ---
@@ -216,11 +216,13 @@ Task Runtime 负责执行生命周期，不成为小说事实源。Result Artifa
 
 模型、工具、上下文与压缩能力通过稳定定义和可替换 Provider 提供。任务运行冻结实际 Provider、模型、能力版本与配置摘要。Session 的追加事件用于重放与 UI 投影，小说正式事实仍由领域服务和 SQLite 管理。
 
-任务对话压缩与小说上下文压缩是两个不同能力：前者只调整 Session 输入表面；后者只能形成可验证 Result Artifact 候选。当前通用结构化 `request_apply` 在“领域写入 + append-only `ArtifactDecision`”完成同事务迁移前固定失败关闭且不产生领域写入；这不能与已完成的章节 `ReviewAuthorization + adopt_review_authorized_draft` 原子采用链路混写。
+任务对话压缩与小说上下文压缩是两个不同能力：前者只调整 Session 输入表面；后者只能形成可验证 Result Artifact 候选。桌面端结构化 `request_apply` 仅对白名单领域产物及精确 `generic_json`+`context_compression` 执行“领域写入 + append-only `ArtifactDecision`”同事务；其余类型失败关闭。这不能与章节 `ReviewAuthorization + adopt_review_authorized_draft` 原子采用链路混写。
 
 ### 12.6 当前插件投影
 
 Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少包含稳定插件 ID、名称、分类、版本、说明、加载状态和能力摘要。分类仅用于查看功能插件、模型插件和其他插件；该投影不承担安装、卸载、启停、配置、更新、权限、市场或项目绑定，也不保存为第二套插件事实。
+
+无任务快照时的 DeepSeek 插件探测（`probe_input(None)` / 会话 `__ans_plugin_probe__`）只用于加载健康与 Plugin Graph 投影：它可以合成 `deepseek-official/deepseek-chat` 与 `DSH_PROXY_UPSTREAM`（缺省 loopback `127.0.0.1:9`）。它不是用户任务，不得创建 Turn/Run/Artifact，也不得作为真实任务的默认路由。用户 DSH 任务必须携带冻结快照中的显式非空 `baseUrl`，缺失或空白时失败关闭，不得回落到该目录探测或任何 Provider 默认地址。
 
 ### 12.7 DSH Headless Adapter
 
@@ -237,7 +239,7 @@ Runtime 对 UI 提供当前 Plugin/Capability Registry 的只读投影，至少�
 
 完整设计与版本路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。任务对话、决定/审阅授权、章节原子采用、领域候选工具、上下文压缩候选和写作工作台审阅收敛已落地；旧生成类 AI 面板、独立实验面板和草稿历史生产入口已经移除。通用结构化 Safe Apply 仍按失败关闭边界处理。
 
-v3.6.0 已经完成 Canonical 1A-A/B/C/D 的 Catalog、Domain Facade、Projection、共享 Manifest 与宿主门禁，但四个只读 identity 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再以独立 exposure 变更验证 scoped manifest、权限、负例和重启行为；只有 exposure 通过后才进入 R4 真实 Main Agent Runtime 验证。
+在 Canonical 1A-A/B/C/D 基础之上，4 项 Canonical 只读工具（`novel.read@1`, `structure.read@1`, `context.read@1`, `memory.search@1`）已解除 blocker，健康度 `working`，exposure `stable`，Catalog/Manifest 的 `modelVisibleToolIdentities` 长度为 4。真实 R4 是 Canonical-only DSH 只读回合：工作台 `read` intent 请求无版本号的 `novel.read / structure.read / context.read / memory.search`；Gateway 仅在 `ANS_ALLOWED_TOOLS` 含这些名时把它们列入 `tools/list`。宿主 `task_runtime` 仍固定注入 legacy allowlist，生产 `tools/list` 尚未切到 Canonical。`mainAgentRuntimeService` 是未接入发送路径的启发式脚手架，不是 R4 VERIFIED。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。
 
 ---
 

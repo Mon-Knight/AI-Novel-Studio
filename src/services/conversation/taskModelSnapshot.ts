@@ -8,6 +8,17 @@ function normalizeApiProviderId(providerId: string): string {
     : normalized;
 }
 
+/**
+ * Restores runtime-only defaults for snapshots written by older releases.
+ *
+ * Endpoint rebinding is intentionally narrow: an explicit snapshot endpoint
+ * always wins; a missing endpoint may borrow only the current settings'
+ * endpoint when the normalized provider and model IDs match exactly. Saved
+ * model cards and endpoints belonging to another identity are not searched,
+ * because doing so could silently route an old task to a different service.
+ * An unresolved remote snapshot remains endpoint-less and is rejected by the
+ * credential/runtime gate; loopback snapshots may still run without a key.
+ */
 export function hydrateTaskModelSnapshotRuntime(snapshot: TaskModelSnapshot): TaskModelSnapshot {
   if (snapshot.runtimeMode !== 'api') return snapshot;
   const settings = getAiSettings();

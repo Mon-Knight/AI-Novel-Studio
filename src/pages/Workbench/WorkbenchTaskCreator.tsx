@@ -9,6 +9,7 @@ import type { TaskTemplate } from './WorkbenchComposer';
 import { isWorkbenchTaskTemplateEnabled } from './workbenchTaskTemplates';
 import { WorkbenchModelSelect } from './WorkbenchModelSelect';
 import { WorkbenchModelRecoveryNotice } from './WorkbenchModelRecoveryNotice';
+import { useWorkbenchModelCredential } from './hooks/useWorkbenchModelCredential';
 
 interface WorkbenchTaskCreatorProps {
   novelTitle: string;
@@ -63,12 +64,14 @@ export function WorkbenchTaskCreator({
   const onCancelRef = useRef(onCancel);
   const conversationalGoal = isConversationalGoal(goal);
   const contextBlocksSubmit = (contextPending || contextFailed) && !conversationalGoal;
+  const { credentialAvailable } = useWorkbenchModelCredential(selectedModel, pluginsLoading);
   const modelAvailability = getWorkbenchModelAvailability({
     plugins,
     selectedModel,
     refreshing: pluginsLoading,
     refreshError: pluginsError,
     allowLocalFallback: true,
+    credentialAvailable,
   });
   const modelBlocksSubmit = !modelAvailability.canSend && !conversationalGoal;
   const modelDirectoryMessage =

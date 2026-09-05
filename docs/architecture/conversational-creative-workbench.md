@@ -38,9 +38,9 @@ AI Novel Studio 的未来主界面将从“作品管理首页 + 章节编辑器�
 10. **提供“当前插件”只读视图。** 用户可以按功能插件、模型插件和其他插件查看运行时实际加载的插件、版本、状态与所提供能力，但不能在该视图安装、卸载、启停、更新或配置插件。
 11. **首阶段实现只覆盖 v3.3.0 最小闭环，不修改旧工作台的既有能力边界。**
 
-当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影及发送前精确目录重验、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。目录重验只证明条目来自当前 Runtime 投影；进入桌面 DSH 的模型任务会在创建 Run 前另行执行可取消的原生 tool-call nonce 探针，只有精确 `provider/model` 证明通过才冻结证据并继续。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
+当前版本已实现：默认创作工作台路由、启动骨架与后台恢复协调、最近有效任务恢复、任务搜索/重命名/归档/恢复、目标与首回合原子创建、任务对话/回合/运行/工具事件/产物卡片持久层、领域候选工具内联投影、任务级模型快照、按任务隔离的 Worker/取消边界、切换任务时后台运行隔离、重启后中断运行事实收敛、Runtime Registry 只读插件投影及发送前精确目录重验、产物来源/基线/校验证据、产物决定/审阅授权、章节候选的授权审阅与原子采用、`outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 五类桌面结构化原子应用、精确 `generic_json / context_compression` 上下文压缩应用，以及写作工作台审阅收敛。目录重验只证明条目来自当前 Runtime 投影；进入桌面 DSH 的模型任务会在创建 Run 前另行执行可取消的原生 tool-call nonce 探针，只有精确 `provider/model` 证明通过才冻结证据并继续。无任务快照的插件探测只用于当前插件只读投影，可以合成目录用 DeepSeek 身份，但不是用户任务，也不得填补缺失的冻结 `baseUrl`。旧生成类 AI 面板、独立实验面板和草稿历史生产入口已移除。
 
-结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。v3.6.0 还完成了 Canonical 1A-A/B/C/D 的 Catalog、Facade、Projection、共享 Manifest 和漂移门禁，但四项均为 `catalog_only + partial`，模型可见数为 `0`。
+结构化应用不是任意类型的通用入口：桌面端对五类领域产物及精确匹配 `artifactType=generic_json`、`derivationType=context_compression` 的候选执行“领域写入 + append-only `ArtifactDecision`”单一 Rust/SQLite 事务；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续稳定拒绝并保持零领域写入。章节正文仍使用独立的 `ReviewAuthorization + adopt_review_authorized_draft` 原子链路。Canonical Catalog/Manifest 已将 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 放行为 `stable`，`modelVisibleToolIdentities` 长度为 4。真实 R4 是 Canonical-only DSH 只读回合：`read` intent 请求无版本号 Canonical 名，Gateway 可按该 allowlist 列出它们；宿主启动仍注入 legacy `ALLOWED_TOOLS`，生产 `tools/list` 尚未切过去。Writing SubAgent 与 `chapter_write` 不走 DSH。
 
 ---
 
@@ -464,7 +464,7 @@ Harness 式追加日志承担执行重放与 UI 重建，但不能成为小说�
 
 首批领域工具仍是 `novel.read_context`、`chapter.read_outline`、`search_memory` 与 `generate_chapter`。只读工具可以受限并发；候选生成形成 Result Artifact；正式写入保持排他并经过 Decision、revision CAS 与 Safe Apply。工具结果及其产物引用来自结构化结果，不从 AI 回复正文中解析。
 
-这里的旧 Workbench 工具名属于现有 legacy 执行链，不等于 v3.6.0 Canonical `novel.read / structure.read / context.read / memory.search` 已向模型暴露。Canonical 四项当前只完成宿主验证，`modelVisibleToolIdentities=[]`。
+这里的旧 Workbench 工具名属于现有 legacy 执行链。Canonical Catalog/Manifest 已把 `novel.read@1` 等标为模型可见（长度为 4）。DSH Gateway 在 Canonical allowlist 下会列出无版本号的 `novel.read / structure.read / context.read / memory.search`；宿主 `task_runtime` 仍把 legacy `ALLOWED_TOOLS` 写入 Worker，生产读回合因此仍见 legacy 名。R4 只在生产 DSH 只读回合实际列出并被模型调用 Canonical 名后才算 VERIFIED；Writing SubAgent 后置。
 
 上下文压缩必须区分：
 
@@ -560,10 +560,11 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 
 - 五类领域产物及精确 `generic_json / context_compression` 已具备领域写入与 append-only 决定同事务；质量/风格报告、其他 `generic_json`、未知类型及浏览器结构化应用仍失败关闭；
 - 短口令单章 Writer 已能读取世界、规则、主角、全书/分卷/章节大纲、风格、输出、研究资料和紧邻前章采用稿；空白项目会进入有序资产恢复，依次生成候选并等待用户显式应用世界与规则、主角和全书规划，规划应用后原子建卷建章并恢复最初正文目标，后续“继续写”在章节审阅、采用和自动总结闭环后推进到下一章；这仍是 ANS 确定性编排，不等同于真实 Main Agent 或 Writing SubAgent 自主运行；
-- Canonical 1A-A/B/C/D 虽已完成共享契约和宿主门禁，四个只读 identity 仍为 `catalog_only + partial`，模型可见数为 `0`；
-- `novel.read` 的多事实源、`structure.read` 的 version/active/CAS、`context.read` 的 summary/context bundle、`memory.search` 的 embedding/混合检索证据仍分别阻断 exposure；
-- legacy Workbench/DSH 工具链尚未被 Canonical 投影替代；
-- R4 真实 Main Agent Runtime、Writing/Context/Quality SubAgent 仍未放行；当前真实章节证据属于确定性 Writer 路径，不能据此宣称 DSH 结构化任务或自主整书编排已经验收。
+- Canonical Catalog/Manifest 已将四个只读 identity 放行为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4；不得再把 `catalog_only` 或可见数为 0 写成当前状态；
+- 宿主 `mainAgentRuntimeService` 只读脚手架存在（默认启发式选工具），未接入生产发送路径，也不能代替 DSH Agent Loop；
+- 宿主对 `read` 回合已在三处一致注入 Canonical-only allowlist（DSH start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS`、宿主侧工具授权与必需读取），Gateway `tools/list` 随之列出 `novel.read / structure.read / context.read / memory.search`；候选生成与审计回合继续注入 legacy `ALLOWED_TOOLS`；
+- R4 仓内只读闭环已完成：Rust loopback E2E（`canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts`）经真实 Worker 启动链证明只读回合记录四个 Canonical 工具名、不调用 `generate_chapter` 或 legacy 只读别名、零 `result_artifacts`、零产物卡片、零采用草稿、章节字数不变，且证据不含凭据；live 云端 Provider 仍 NOT VERIFIED，判定标准见 §14.5；
+- 当前门禁是 R4 live 云端验收。Writing/Context/Quality SubAgent 与 `chapter_write` 走 DSH 仍后置；当前真实章节证据属于确定性 Writer 路径。
 
 ---
 
@@ -600,9 +601,19 @@ Novel Domain Services / Artifact / Safe Apply / SQLite
 ### 14.4 v3.6.0：Canonical 准入（功能基线）
 
 - 1A-A Catalog、1A-B Facade、1A-C Projection、1A-D portable Manifest/漂移门禁已验证；
-- 四个 Canonical read Tool 仍为 `catalog_only + partial`，模型可见数为 `0`；
-- 下一门禁是逐项关闭四个 Facade blocker，再通过独立 exposure 变更验证 scoped manifest、DSH Tool projection、权限、负例和重启；
-- 只有 exposure 通过后才进入 **R4：真实 Main Agent Runtime 验证**，之后再评估 Writing SubAgent。
+- 该发布候选当时四个 Canonical read Tool 仍为 `catalog_only + partial`，模型可见数为 `0`（历史基线，不是当前状态）。
+
+### 14.5 v3.6.2：Catalog exposure 与 R4 仓内只读闭环已完成，live 云端验收为当前门禁
+
+- 四个 Canonical 只读 Tool 现为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4；
+- `read` intent 请求 Canonical-only allowlist；宿主在 start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS` 与工具授权三处一致注入；Gateway 按该 allowlist 列出 `novel.read / structure.read / context.read / memory.search`；候选与审计回合保持 legacy `ALLOWED_TOOLS` 不变；
+- R4 仓内只读闭环已证明：单测固定 allowlist 选择与提示词暴露，Rust loopback E2E 经真实 Worker 启动链证明模型自主调用四个 Canonical 只读工具、零候选产物、零正式写入、零凭据泄漏；`mainAgentRuntimeService` 启发式脚手架不是 R4 证据；
+- live 云端 Provider 仍 NOT VERIFIED，不得宣称 R4 VERIFIED。live 验收判定标准：
+  1. 前置：使用者在当前应用会话内为真实远程模型填入有效凭据；验收通过 opt-in 环境变量开启，默认 CI 与 `npm test` 不运行、不需要任何 Key；
+  2. 执行：设置 `DSH_E2E_BASE_URL` 为真实 Provider endpoint 并显式开启 cloud profile 后运行 `npm run test:agent-runtime:real`（当前脚本对非回环地址失败关闭，cloud profile 执行路径待单独实现；实现并完成真实运行前，本标准不产生 VERIFIED 结论）；
+  3. 通过条件：真实模型只读回合自主调用 `novel.read / structure.read / context.read / memory.search` 完成作品与章节上下文读取，不调用 `generate_chapter` 与 legacy 只读别名，零 `result_artifacts`、零产物卡片、零采用草稿、章节字数不变；
+  4. 证据：只留存工具名、计数、状态码与内容 hash 等脱敏标量；不保存提示词、正文、完整路径与任何形式的凭据；
+- Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。
 
 各版本必须独立提交、验证和发布。下一版本不能以“最终形态”为理由同时实现后续阶段。
 

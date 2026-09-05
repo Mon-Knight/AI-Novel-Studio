@@ -224,7 +224,7 @@ fn main() {
     let focus_watch_dir = app_data_dir.clone();
 
     tauri::Builder::default()
-        .manage(session_credentials::SessionCredentialVault::default())
+        .manage(session_credentials::SessionCredentialVault::from_app_data_dir(&app_data_dir))
         .invoke_handler(generate_app_handler![
             session_credentials::set_session_model_credential,
             session_credentials::resolve_session_model_credential,

@@ -89,7 +89,6 @@ function NovelBasicInfoCard({ novel, onSave }: NovelBasicInfoCardProps) {
       data-project-name={novel.title}
       data-saving={saving ? 'true' : 'false'}
       data-editing={editing ? 'true' : 'false'}
-      style={{ gridColumn: '1 / -1' }}
     >
       <div
         style={{

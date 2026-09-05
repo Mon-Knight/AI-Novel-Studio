@@ -336,3 +336,78 @@ test('artifact card defers failed content details until the disclosure is opened
   assert.doesNotMatch(html, />重新读取</);
   assert.doesNotMatch(html, /候选内容正在载入/);
 });
+
+test('structured artifact cards show selectable options instead of dumping JSON', () => {
+  const html = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-characters',
+        conversationId: run.conversationId,
+        artifactId: 'artifact-characters',
+        artifactType: 'character_candidates',
+        title: '人物候选',
+        summary: '生成了人物候选。',
+        content: JSON.stringify({
+          characters: [{ name: '林夏', roleType: 'protagonist', goal: '查明真相' }],
+        }),
+        status: 'candidate',
+        createdAt: run.createdAt,
+      },
+      onDecide: () => undefined,
+    }),
+  );
+
+  assert.match(html, /林夏/);
+  assert.match(html, /查明真相/);
+  assert.match(html, /原始数据/);
+  assert.match(html, /type="checkbox"/);
+  assert.match(html, /checked/);
+  assert.match(html, /修改/);
+  assert.match(html, />修订</);
+  assert.doesNotMatch(html, /查看候选内容/);
+  assert.doesNotMatch(html, /<pre>/);
+});
+
+test('chapter summaries show readable paragraphs and chapter text keeps prose disclosure', () => {
+  const summaryHtml = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-summary',
+        conversationId: run.conversationId,
+        artifactId: 'artifact-summary',
+        artifactType: 'chapter_summary',
+        title: '章节总结候选',
+        summary: '总结已生成。',
+        content: JSON.stringify({
+          summary: '主角在雨夜查明旧案。',
+          nextChapterHook: '密信未拆。',
+        }),
+        status: 'candidate',
+        createdAt: run.createdAt,
+      },
+    }),
+  );
+  const chapterHtml = renderToStaticMarkup(
+    createElement(ArtifactCard, {
+      artifact: {
+        cardId: 'card-chapter',
+        conversationId: run.conversationId,
+        artifactId: 'artifact-chapter',
+        artifactType: 'chapter_text',
+        title: '章节正文候选',
+        summary: '正文已生成。',
+        content: JSON.stringify({ characters: [{ name: '不应当作候选项' }] }),
+        status: 'candidate',
+        createdAt: run.createdAt,
+      },
+    }),
+  );
+
+  assert.match(summaryHtml, /章节摘要/);
+  assert.match(summaryHtml, /主角在雨夜查明旧案。/);
+  assert.match(summaryHtml, /data-mode="paragraphs"/);
+  assert.doesNotMatch(summaryHtml, /type="checkbox"/);
+  assert.match(chapterHtml, /查看候选内容/);
+  assert.doesNotMatch(chapterHtml, /不应当作候选项/);
+  assert.doesNotMatch(chapterHtml, /原始数据/);
+});

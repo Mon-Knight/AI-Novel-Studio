@@ -1750,7 +1750,7 @@ mod tests {
     #[test]
     fn ai_task_delete_rejects_completed_quality_report_references(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        for action in ["single", "batch", "clear"] {
+        for action in ["single", "batch"] {
             let conn = Connection::open_in_memory()?;
             create_runtime_ai_task_table(&conn)?;
             for task_id in [
@@ -1780,7 +1780,6 @@ mod tests {
                     ],
                     "memory".to_string(),
                 ),
-                "clear" => clear_ai_task_records_internal(&conn, "memory".to_string()),
                 _ => unreachable!(),
             };
 
@@ -1800,6 +1799,39 @@ mod tests {
                 1
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn ai_task_clear_all_unlinks_completed_quality_reports(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = Connection::open_in_memory()?;
+        create_runtime_ai_task_table(&conn)?;
+        for task_id in [
+            "quality-task-protected",
+            "quality-task-free-a",
+            "quality-task-free-b",
+        ] {
+            insert_runtime_ai_task(&conn, task_id)?;
+        }
+        conn.execute(
+            "INSERT INTO quality_check_reports (id, ai_task_id, status)
+             VALUES ('quality-report-completed', 'quality-task-protected', 'completed')",
+            [],
+        )?;
+
+        let result = clear_ai_task_records_internal(&conn, "memory".to_string())?;
+        assert_eq!(result.deleted_count, 3);
+        assert_eq!(count_ai_task_records_in_conn(&conn)?, 0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM quality_check_reports
+                 WHERE id = 'quality-report-completed' AND ai_task_id IS NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            1
+        );
         Ok(())
     }
 

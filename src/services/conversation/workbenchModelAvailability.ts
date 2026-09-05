@@ -31,19 +31,35 @@ interface WorkbenchModelAvailabilityInput {
   refreshError?: string;
   allowLocalFallback?: boolean;
   selectionLocked?: boolean;
+  /**
+   * Whether the selected model's process-scoped credential can be resolved.
+   * `undefined` means the asynchronous check has not settled yet, so the
+   * directory result remains authoritative until it does.
+   */
+  credentialAvailable?: boolean;
 }
 
 const MODEL_PREFIX = 'model:';
 const BROWSER_MOCK_PLUGIN_ID = 'model:browser-fallback:Mock';
 
 export class WorkbenchModelUnavailableError extends Error {
-  readonly code = 'WORKBENCH_MODEL_NOT_IN_RUNTIME_DIRECTORY';
+  readonly code: string = 'WORKBENCH_MODEL_NOT_IN_RUNTIME_DIRECTORY';
 
   constructor(model: WorkbenchModelSelection) {
     super(
       `模型 ${workbenchModelKey(model)} 不在当前 Runtime 模型目录中，请刷新目录或选择已加载模型。`,
     );
     this.name = 'WorkbenchModelUnavailableError';
+  }
+}
+
+export class WorkbenchModelCredentialUnavailableError extends WorkbenchModelUnavailableError {
+  readonly code = 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE';
+
+  constructor(model: WorkbenchModelSelection) {
+    super(model);
+    this.name = 'WorkbenchModelCredentialUnavailableError';
+    this.message = `当前任务固定模型 ${workbenchModelKey(model)} 的本次会话凭据不可用；请重新配置模型或使用当前已配置模型新建任务。`;
   }
 }
 
@@ -144,6 +160,7 @@ export function getWorkbenchModelAvailability({
   refreshError,
   allowLocalFallback = false,
   selectionLocked = false,
+  credentialAvailable,
 }: WorkbenchModelAvailabilityInput): WorkbenchModelAvailability {
   const options = listAvailableWorkbenchModels(plugins);
   const selectedKey = workbenchModelKey(selectedModel);
@@ -175,6 +192,33 @@ export function getWorkbenchModelAvailability({
     };
   }
 
+  const localFallback =
+    allowLocalFallback && isLocalLikeWorkbenchModel(selectedModel)
+      ? options.find((option) => !isLocalLikeWorkbenchModel(option) && option.providerId !== 'mock')
+      : undefined;
+
+  if (credentialAvailable === false) {
+    if (!localFallback) {
+      return {
+        status: 'unavailable',
+        options,
+        selectedOption,
+        canSend: false,
+        message: selectionLocked
+          ? `当前任务固定模型 ${selectedKey} 的本次会话凭据不可用；请重新配置模型或使用当前已配置模型新建任务。`
+          : '当前模型的本次会话凭据不可用，请重新配置模型后重试。',
+      };
+    }
+    return {
+      status: 'available',
+      options,
+      selectedOption,
+      fallbackOption: localFallback,
+      canSend: true,
+      message: '本地模型的本次会话凭据不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
+    };
+  }
+
   if (options.length === 0) {
     return {
       status: 'unavailable',
@@ -187,17 +231,11 @@ export function getWorkbenchModelAvailability({
   }
 
   if (!selectedOption) {
-    const cloudFallback =
-      allowLocalFallback && isLocalLikeWorkbenchModel(selectedModel)
-        ? options.find(
-            (option) => !isLocalLikeWorkbenchModel(option) && option.providerId !== 'mock',
-          )
-        : undefined;
-    if (cloudFallback) {
+    if (localFallback) {
       return {
         status: 'available',
         options,
-        fallbackOption: cloudFallback,
+        fallbackOption: localFallback,
         canSend: true,
         message: '本地模型当前不可用；创建任务时将先改用当前 API 模型，再冻结任务模型。',
       };

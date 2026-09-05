@@ -40,9 +40,9 @@ test('runtime fails closed on manifest, version, exposure, allowlist and permiss
   });
   assert.equal(missingInvocation.error?.code, 'INVALID_ARGUMENT');
 
+  // novel.read@1 is now released to Main Agent and passes the exposure gate
   const agentAudience = await executeCanonicalTool(call, context);
-  assert.equal(agentAudience.error?.code, 'PERMISSION_DENIED');
-  assert.match(agentAudience.error?.message ?? '', /尚未向 Main Agent 放行/);
+  assert.notEqual(agentAudience.error?.message?.includes('尚未向 Main Agent 放行'), true);
 
   const absentFromRunAllowlist = await executeCanonicalToolForHostValidation(call, {
     ...context,

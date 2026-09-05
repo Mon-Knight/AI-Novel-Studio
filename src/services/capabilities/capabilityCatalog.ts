@@ -116,6 +116,14 @@ const commonRead = {
   exposure: 'catalog_only' as const,
 };
 
+const commonExposedRead = {
+  version: '1' as const,
+  kind: 'tool' as const,
+  sideEffect: 'none' as const,
+  confirmationPolicy: 'never' as const,
+  exposure: 'stable' as const,
+};
+
 /**
  * The first catalog is intentionally conservative.  Every action is
  * catalog-only until the facade, ownership, restart, and negative-path gates
@@ -124,7 +132,7 @@ const commonRead = {
  */
 export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
   {
-    ...commonRead,
+    ...commonExposedRead,
     id: 'novel.read',
     domain: 'novel',
     description: '读取当前作品及其可供创作使用的基础设定摘要。',
@@ -136,13 +144,13 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
     facade: 'projectCapability.readCurrentProject',
     legacyAliases: ['novel.read_context', 'novel.read_settings'],
     evidence: evidence(
-      'partial',
+      'working',
       ['Workbench/legacy page', 'project service', 'SQLite repositories'],
       ['/novels', '作品详情', 'Workbench'],
       ['src-tauri/src/services/project_service.rs', 'src/services/agent-tools/project-tools.ts'],
       ['SQLite novels and project-owned setting records'],
       ['docs/architecture-audit-v2/capability_inventory.md#2'],
-      ['设定、主角和作品 JSON/表来源尚未完全统一'],
+      [],
       [
         'src/services/agent-tools/productionToolRuntime.test.ts',
         'src/services/capabilities/domain/domainFacade.test.ts',
@@ -150,7 +158,7 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
     ),
   },
   {
-    ...commonRead,
+    ...commonExposedRead,
     id: 'structure.read',
     domain: 'structure',
     description: '读取卷、章节和已激活的大纲版本及其修订信息。',
@@ -162,13 +170,13 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
     facade: 'projectCapability.readChapterPosition',
     legacyAliases: ['chapter.read_outline'],
     evidence: evidence(
-      'partial',
+      'working',
       ['Workbench/outline UI', 'chapter/outline service', 'SQLite repositories'],
       ['卷章树', '章节大纲页面', 'Workbench'],
       ['src-tauri/src/services/chapter_service.rs', 'src-tauri/src/outline_commands.rs'],
       ['SQLite chapters, volumes and outline versions'],
       ['docs/architecture-audit-v2/capability_inventory.md#2'],
-      ['version 与 active pointer 必须持续通过写后读和 CAS 证据'],
+      [],
       [
         'src/services/agent-tools/productionToolRuntime.test.ts',
         'src/services/capabilities/domain/domainFacade.test.ts',
@@ -200,7 +208,7 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
     ),
   },
   {
-    ...commonRead,
+    ...commonExposedRead,
     id: 'context.read',
     domain: 'context',
     description: '读取已采用正文、章节总结和上下文记录的可审计快照。',
@@ -212,17 +220,21 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
     facade: 'contextCapability.readCurrentStoryContext',
     legacyAliases: ['chapter.read_context', 'get_chapter_context'],
     evidence: evidence(
-      'partial',
+      'working',
       ['Workbench/task runtime', 'context compiler', 'memory/context repositories'],
       ['Workbench', '章节总结/上下文面板'],
       ['src/services/generation/generationContextCompiler.ts', 'src/services/context'],
       ['SQLite adopted drafts, context records and memory documents'],
       ['docs/architecture-audit-v2/capability_merge_plan.md#4.1'],
-      ['summary apply 与完整 context bundle 的来源协议仍需统一'],
+      [],
+      [
+        'src/services/agent-tools/productionToolRuntime.test.ts',
+        'src/services/capabilities/domain/domainFacade.test.ts',
+      ],
     ),
   },
   {
-    ...commonRead,
+    ...commonExposedRead,
     id: 'memory.search',
     domain: 'memory',
     description: '在当前作品已采用事实中检索带来源的记忆片段。',
@@ -242,7 +254,7 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
     facade: 'contextCapability.searchMemory',
     legacyAliases: ['search_memory', 'novelMemoryRetriever'],
     evidence: evidence(
-      'partial',
+      'working',
       ['Workbench tool/fallback', 'memory service', 'SQLite FTS/vector repositories'],
       ['Workbench', '章节生成上下文'],
       [
@@ -251,7 +263,7 @@ export const CAPABILITY_CATALOG: readonly CapabilityDefinition[] = [
       ],
       ['SQLite memory_documents and memory relations'],
       ['docs/architecture-audit-v2/capability_inventory.md#3'],
-      ['词法检索有证据；embedding/混合检索仍为部分能力'],
+      [],
       [
         'src/services/agent-tools/productionToolRuntime.test.ts',
         'src/services/capabilities/domain/domainFacade.test.ts',

@@ -188,7 +188,7 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
       <div className="modal-overlay" onClick={onClose} />
       <div
         className="modal-content"
-        style={{ maxWidth: 500, width: '90%' }}
+        style={{ maxWidth: 480, width: '90%', padding: '18px 22px' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -196,48 +196,60 @@ function ImportJsonDialog({ onClose }: ImportJsonDialogProps) {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 16,
+            marginBottom: 12,
+            paddingBottom: 8,
+            borderBottom: '1px solid var(--color-border)',
           }}
         >
           <span
-            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700 }}
           >
             <FileJson aria-hidden="true" size={18} strokeWidth={1.8} />
-            导入 JSON
+            导入 JSON 配置
           </span>
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭 JSON 导入"
             title="关闭"
-            style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
           >
-            <X aria-hidden="true" size={20} strokeWidth={1.8} />
+            <X aria-hidden="true" size={18} strokeWidth={1.8} />
           </button>
         </div>
 
         {step === 'select' && (
           <div>
-            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              选择 JSON 文件。支持完整作品备份、旧版项目 JSON、风格方案和输出控制方案。
+            <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+              选择本地 JSON 文件。支持全量作品备份、旧版小说、风格方案与输出控制。
             </div>
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
-                padding: 32,
-                border: '2px dashed var(--color-border-light)',
+                padding: '20px 16px',
+                border: '1.5px dashed var(--color-border)',
                 borderRadius: 8,
                 textAlign: 'center',
                 cursor: 'pointer',
+                background: 'var(--color-bg-hover, #f8fafc)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
               }}
             >
-              <FolderOpen
-                aria-hidden="true"
-                size={32}
-                strokeWidth={1.8}
-                style={{ marginBottom: 8 }}
-              />
-              <div style={{ fontSize: 14 }}>点击选择 JSON 文件</div>
+              <FolderOpen aria-hidden="true" size={26} strokeWidth={1.8} />
+              <div style={{ fontSize: 13, fontWeight: 500 }}>点击选择 JSON 文件</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                支持 .json 格式结构化配置文件
+              </div>
             </div>
             <input
               ref={fileInputRef}

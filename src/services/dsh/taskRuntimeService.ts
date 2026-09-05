@@ -13,10 +13,14 @@ import type {
 } from '../../types/conversation';
 import { hydrateTaskModelSnapshotRuntime } from '../conversation/taskModelSnapshot';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type {
-  CandidateToolName,
-  ContextReadToolName,
-  DshTaskKind,
+import { CANONICAL_TOOL_IDS } from '../capabilities/canonical/canonicalToolTypes';
+import {
+  buildDshTurnContract,
+  classifyTaskIntent,
+  type CandidateToolName,
+  type ContextReadToolName,
+  type DshTaskKind,
+  type DshTurnContract,
 } from '../conversation/taskGoalRouting';
 
 export const DSH_TASK_PROJECTION_EVENT = 'ans://task-runtime-projection';
@@ -39,6 +43,34 @@ export interface DshTaskRuntimeInput {
   expectedTool?: CandidateToolName;
   expectedArtifactType?: string;
   requiredReadTools: ContextReadToolName[];
+  /**
+   * Read-intent turns request the Canonical-only tool allowlist.
+   * Structured write/audit omit this field so DSH keeps the legacy allowlist.
+   */
+  allowedTools?: readonly string[];
+}
+
+/** Canonical-only tools requested by desktop read-intent DSH turns. */
+export const CANONICAL_READ_ALLOWED_TOOLS: readonly string[] = [...CANONICAL_TOOL_IDS];
+
+export type DshTaskStartContract = DshTurnContract & {
+  allowedTools?: readonly string[];
+};
+
+/**
+ * Build the DSH start contract for a Workbench turn.
+ * Read intent requests Canonical-only tools; structured_write/audit stay on the
+ * legacy DSH allowlist. chapter_write never reaches this helper.
+ */
+export function buildDshTaskStartContract(goal: string, chapterId?: string): DshTaskStartContract {
+  const contract = buildDshTurnContract(goal, chapterId);
+  if (classifyTaskIntent(goal) === 'read') {
+    return {
+      ...contract,
+      allowedTools: [...CANONICAL_READ_ALLOWED_TOOLS],
+    };
+  }
+  return contract;
 }
 
 export interface DshTaskRuntimeResult {
@@ -67,12 +99,18 @@ const active = new Set<string>();
 
 export function resolveDshTaskApiKey(modelSnapshot: TaskModelSnapshot): string {
   if (modelSnapshot.runtimeMode !== 'api') return '';
-  const snapshotBaseUrl = modelSnapshot.baseUrl ?? '';
+  // Resolve against the same compatibility-hydrated snapshot used when a
+  // task starts.  This matters for pre-v3.6 snapshots that did not persist an
+  // endpoint: hydration may restore the active endpoint only for an exact
+  // provider/model match.  An ambiguous legacy snapshot stays endpoint-less
+  // and therefore fails closed for remote providers.
+  const resolvedSnapshot = hydrateTaskModelSnapshotRuntime(modelSnapshot);
+  const snapshotBaseUrl = resolvedSnapshot.baseUrl ?? '';
   const apiKey = resolveSessionModelApiKey({
     scope: 'provider',
-    providerId: modelSnapshot.providerId,
+    providerId: resolvedSnapshot.providerId,
     baseUrl: snapshotBaseUrl,
-    modelId: modelSnapshot.modelId,
+    modelId: resolvedSnapshot.modelId,
   });
   if (modelSnapshot.runtimeMode === 'api' && !apiKey && !isLoopbackAiBaseUrl(snapshotBaseUrl)) {
     throw new Error('冻结模型没有本次应用会话内的匹配凭据，已拒绝启动任务。');
@@ -83,9 +121,10 @@ export function resolveDshTaskApiKey(modelSnapshot: TaskModelSnapshot): string {
 export function hasUsableDshTaskCredential(modelSnapshot: TaskModelSnapshot): boolean {
   if (modelSnapshot.runtimeMode !== 'api') return true;
   try {
+    const resolvedSnapshot = hydrateTaskModelSnapshotRuntime(modelSnapshot);
     return (
-      Boolean(resolveDshTaskApiKey(modelSnapshot)) ||
-      isLoopbackAiBaseUrl(modelSnapshot.baseUrl ?? '')
+      Boolean(resolveDshTaskApiKey(resolvedSnapshot)) ||
+      isLoopbackAiBaseUrl(resolvedSnapshot.baseUrl ?? '')
     );
   } catch {
     return false;
@@ -97,9 +136,10 @@ export async function hasUsableDshTaskCredentialAsync(
 ): Promise<boolean> {
   if (modelSnapshot.runtimeMode !== 'api') return true;
   try {
+    const resolvedSnapshot = hydrateTaskModelSnapshotRuntime(modelSnapshot);
     return (
-      Boolean(await resolveDshTaskApiKeyAsync(modelSnapshot)) ||
-      isLoopbackAiBaseUrl(modelSnapshot.baseUrl ?? '')
+      Boolean(await resolveDshTaskApiKeyAsync(resolvedSnapshot)) ||
+      isLoopbackAiBaseUrl(resolvedSnapshot.baseUrl ?? '')
     );
   } catch {
     return false;
@@ -108,12 +148,16 @@ export async function hasUsableDshTaskCredentialAsync(
 
 export async function resolveDshTaskApiKeyAsync(modelSnapshot: TaskModelSnapshot): Promise<string> {
   if (modelSnapshot.runtimeMode !== 'api') return '';
-  const snapshotBaseUrl = modelSnapshot.baseUrl ?? '';
+  // Keep async readiness checks identical to the synchronous/runtime path;
+  // otherwise the composer can report a missing credential that sending can
+  // actually recover from (or vice versa).
+  const resolvedSnapshot = hydrateTaskModelSnapshotRuntime(modelSnapshot);
+  const snapshotBaseUrl = resolvedSnapshot.baseUrl ?? '';
   const apiKey = await resolveSessionModelApiKeyAsync({
     scope: 'provider',
-    providerId: modelSnapshot.providerId,
+    providerId: resolvedSnapshot.providerId,
     baseUrl: snapshotBaseUrl,
-    modelId: modelSnapshot.modelId,
+    modelId: resolvedSnapshot.modelId,
   });
   if (modelSnapshot.runtimeMode === 'api' && !apiKey && !isLoopbackAiBaseUrl(snapshotBaseUrl)) {
     throw new Error('冻结模型没有本次应用会话内的匹配凭据，已拒绝启动任务。');
@@ -202,11 +246,10 @@ export const dshTaskRuntimeService = {
       ? hydrateTaskModelSnapshotRuntime(modelSnapshot)
       : undefined;
     if (probeSnapshot) {
-      try {
-        apiKey = await resolveDshTaskApiKeyAsync(probeSnapshot);
-      } catch {
-        apiKey = '';
-      }
+      // Keep credential failures visible to the projection caller.  A remote
+      // snapshot without its session credential must not be probed as though
+      // it were a credential-free local runtime.
+      apiKey = await resolveDshTaskApiKeyAsync(probeSnapshot);
     }
     return tauriInvoke<Record<string, unknown>[]>('dsh_list_current_plugins', {
       conversationId: conversationId ?? null,

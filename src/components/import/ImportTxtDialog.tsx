@@ -119,7 +119,13 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
       <div className="modal-overlay" onClick={onClose} />
       <div
         className="modal-content"
-        style={{ maxWidth: 580, width: '90%', maxHeight: '80vh', overflowY: 'auto' }}
+        style={{
+          maxWidth: 540,
+          width: '90%',
+          maxHeight: '85vh',
+          overflowY: 'auto',
+          padding: '18px 22px',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -127,48 +133,60 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 16,
+            marginBottom: 12,
+            paddingBottom: 8,
+            borderBottom: '1px solid var(--color-border)',
           }}
         >
           <span
-            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, fontWeight: 700 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700 }}
           >
             <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
-            导入 TXT
+            导入 TXT 小说
           </span>
           <button
             type="button"
             onClick={onClose}
             aria-label="关闭 TXT 导入"
             title="关闭"
-            style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
           >
-            <X aria-hidden="true" size={20} strokeWidth={1.8} />
+            <X aria-hidden="true" size={18} strokeWidth={1.8} />
           </button>
         </div>
 
         {step === 'select' && (
           <div>
-            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              选择要导入的 TXT 文件，支持 UTF-8 编码的中文小说文本。
+            <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+              选择本地 TXT 文件，系统将自动识别章节标题并智能划分卷章结构。
             </div>
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
-                padding: 32,
-                border: '2px dashed var(--color-border-light)',
+                padding: '20px 16px',
+                border: '1.5px dashed var(--color-border)',
                 borderRadius: 8,
                 textAlign: 'center',
                 cursor: 'pointer',
+                background: 'var(--color-bg-hover, #f8fafc)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
               }}
             >
-              <FolderOpen
-                aria-hidden="true"
-                size={32}
-                strokeWidth={1.8}
-                style={{ marginBottom: 8 }}
-              />
-              <div style={{ fontSize: 14 }}>点击选择 TXT 文件</div>
+              <FolderOpen aria-hidden="true" size={26} strokeWidth={1.8} />
+              <div style={{ fontSize: 13, fontWeight: 500 }}>点击选择 TXT 文件</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                支持 UTF-8 编码文本
+              </div>
             </div>
             <input
               ref={fileInputRef}
@@ -243,37 +261,49 @@ function ImportTxtDialog({ onClose }: ImportTxtDialogProps) {
               </div>
             )}
             <div style={{ display: 'grid', gap: 8 }}>
-              <div>
-                <label style={{ fontSize: 12 }}>作品名称 *</label>
-                <input
-                  className="input"
-                  value={novelTitle}
-                  onChange={(e) => setNovelTitle(e.target.value)}
-                  style={{ width: '100%' }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div>
+                  <label
+                    style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 3 }}
+                  >
+                    作品名称 *
+                  </label>
+                  <input
+                    className="input"
+                    value={novelTitle}
+                    onChange={(e) => setNovelTitle(e.target.value)}
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px' }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 3 }}
+                  >
+                    题材
+                  </label>
+                  <input
+                    className="input"
+                    value={genre}
+                    onChange={(e) => setGenre(e.target.value)}
+                    placeholder="如：玄幻/科幻/都市"
+                    style={{ width: '100%', fontSize: 12, padding: '5px 8px' }}
+                  />
+                </div>
               </div>
               <div>
-                <label style={{ fontSize: 12 }}>题材</label>
-                <input
-                  className="input"
-                  value={genre}
-                  onChange={(e) => setGenre(e.target.value)}
-                  placeholder="如：玄幻/科幻/都市"
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 12 }}>简介</label>
+                <label style={{ fontSize: 11, fontWeight: 500, display: 'block', marginBottom: 3 }}>
+                  简介
+                </label>
                 <textarea
                   className="input"
                   value={desc}
                   onChange={(e) => setDesc(e.target.value)}
                   rows={2}
-                  style={{ width: '100%', resize: 'vertical' }}
+                  style={{ width: '100%', resize: 'vertical', fontSize: 12, padding: '5px 8px' }}
                 />
               </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
               <button className="btn btn-secondary btn-sm" onClick={onClose}>
                 取消
               </button>

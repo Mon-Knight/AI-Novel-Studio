@@ -47,3 +47,6 @@ src-tauri/.payload-verify/
 .e2e-tools/
 test-results/
 tmp/
+
+# WorkBuddy local agent data
+.workbuddy/

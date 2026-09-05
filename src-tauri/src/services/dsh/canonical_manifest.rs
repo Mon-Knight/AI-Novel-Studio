@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 const CONTRACT_VERSION: &str = "canonical_tool_manifest_v1";
 const PROJECTION_VERSION: &str = "1";
 const CANONICALIZATION: &str = "ans_canonical_json_v1";
-const EXPECTED_MODEL_VISIBLE_TOOL_COUNT: usize = 0;
+const EXPECTED_MODEL_VISIBLE_TOOL_COUNT: usize = 4;
 const MANIFEST_ERROR: &str = "CANONICAL_TOOL_MANIFEST_INVALID";
 const MANIFEST_JSON: &str =
     include_str!("../../../../contracts/agent/canonical-tool-manifest.v1.json");
@@ -287,7 +287,7 @@ fn attest_manifest(raw: &str) -> Result<CanonicalManifestAttestation, AppError> 
         ));
     }
     if manifest.model_visible_tool_identities.len() != EXPECTED_MODEL_VISIBLE_TOOL_COUNT {
-        return Err(invalid("本阶段 Canonical Tool 模型可见数量必须保持为 0"));
+        return Err(invalid("本阶段 Canonical Tool 模型可见数量必须为 4"));
     }
 
     Ok(CanonicalManifestAttestation {
@@ -326,14 +326,14 @@ mod tests {
     }
 
     #[test]
-    fn embedded_manifest_has_valid_hash_schema_and_zero_canonical_model_tools() {
+    fn embedded_manifest_has_valid_hash_schema_and_canonical_model_tools() {
         let attestation = canonical_manifest_attestation().expect("valid canonical manifest");
         assert_eq!(attestation.contract_version, CONTRACT_VERSION);
         assert_eq!(attestation.projection_version, PROJECTION_VERSION);
         assert_eq!(attestation.canonicalization, CANONICALIZATION);
         assert!(valid_sha256(&attestation.projection_hash));
         assert_eq!(attestation.tool_identities.len(), 4);
-        assert!(attestation.model_visible_tool_identities.is_empty());
+        assert_eq!(attestation.model_visible_tool_identities.len(), 4);
     }
 
     #[test]

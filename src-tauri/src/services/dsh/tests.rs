@@ -126,6 +126,10 @@ struct MockWorkbench {
 
 impl MockWorkbench {
     fn start(mode: &str, delay_ms: u64) -> Self {
+        Self::start_with_scope(mode, delay_ms, INTEGRATION_NOVEL_ID, INTEGRATION_CHAPTER_ID)
+    }
+
+    fn start_with_scope(mode: &str, delay_ms: u64, novel_id: &str, chapter_id: &str) -> Self {
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("workspace root")
@@ -140,8 +144,8 @@ impl MockWorkbench {
             .env("MOCK_WORKBENCH_PORT", "0")
             .env("MOCK_WORKBENCH_MODE", mode)
             .env("MOCK_WORKBENCH_DELAY_MS", delay_ms.to_string())
-            .env("MOCK_WORKBENCH_NOVEL_ID", "integration-novel")
-            .env("MOCK_WORKBENCH_CHAPTER_ID", "integration-chapter")
+            .env("MOCK_WORKBENCH_NOVEL_ID", novel_id)
+            .env("MOCK_WORKBENCH_CHAPTER_ID", chapter_id)
             .env("MOCK_WORKBENCH_GOAL", "生成只供人工审阅的章节候选")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -1254,6 +1258,40 @@ fn seed_task_turn(tag: &str) -> (String, String, String) {
     (conversation_id, novel_id, turn_id)
 }
 
+fn seed_chapter(novel_id: &str, chapter_id: &str) {
+    let connection = crate::db::get_connection()
+        .lock()
+        .expect("test database lock");
+    connection
+        .execute(
+            "INSERT INTO chapters (
+                id, novel_id, title, order_index, status, word_count, created_at, updated_at
+             ) VALUES (?1, ?2, 'Canonical read chapter', 1, 'not_started', 0, ?3, ?3)",
+            rusqlite::params![chapter_id, novel_id, "2026-08-21T00:00:00Z"],
+        )
+        .expect("seed chapter");
+}
+
+fn seed_gateway_scope(scratch: &ScratchDir, novel_id: &str, chapter_id: &str) {
+    let connection = Connection::open(scratch.path().join("gateway.sqlite"))
+        .expect("open start-path gateway database");
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO novels (id, title, outline, created_at, updated_at)
+             VALUES (?1, 'Canonical read novel', '', ?2, ?2)",
+            rusqlite::params![novel_id, "2026-08-21T00:00:00Z"],
+        )
+        .expect("seed gateway novel");
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO chapters (
+                id, novel_id, title, order_index, status, word_count, created_at, updated_at
+             ) VALUES (?1, ?2, 'Canonical read chapter', 1, 'not_started', 0, ?3, ?3)",
+            rusqlite::params![chapter_id, novel_id, "2026-08-21T00:00:00Z"],
+        )
+        .expect("seed gateway chapter");
+}
+
 fn start_task_snapshot(upstream: &str, model: &str) -> Value {
     json!({
         "providerId": "deepseek-official",
@@ -1789,4 +1827,154 @@ fn start_path_two_conversations_cancel_one_without_stopping_the_other() {
         started_at.elapsed() < Duration::from_secs(60),
         "scoped cancellation must not wait for the 480-second session timeout"
     );
+}
+
+fn is_canonical_read_tool_name(name: &str) -> bool {
+    if name.contains("read_context") || name.contains("generate_") {
+        return false;
+    }
+    [
+        ("novel.read", "novel_read"),
+        ("structure.read", "structure_read"),
+        ("context.read", "context_read"),
+        ("memory.search", "memory_search"),
+    ]
+    .iter()
+    .any(|(canonical, underscored)| {
+        name == *canonical
+            || name == *underscored
+            || name.ends_with(canonical)
+            || name.contains(&format!("{underscored}_"))
+            || name.contains(&format!("__{underscored}"))
+    })
+}
+
+#[test]
+fn canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts() {
+    let _guard = START_PATH_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let root = carrier_root();
+    let scratch = ScratchDir::new("canonical-read-turn");
+    let _environment = StartPathEnvironment::new(&root, &scratch);
+    let (conversation_id, novel_id, turn_id) = seed_task_turn("canonical-read");
+    let chapter_id = format!("chapter-canonical-read-{}", uuid::Uuid::new_v4());
+    seed_chapter(&novel_id, &chapter_id);
+    seed_gateway_scope(&scratch, &novel_id, &chapter_id);
+    let upstream = MockWorkbench::start_with_scope("normal", 0, &novel_id, &chapter_id);
+
+    let result = task_runtime::start(StartTaskTurnInput {
+        conversation_id: conversation_id.clone(),
+        novel_id: novel_id.clone(),
+        turn_id: turn_id.clone(),
+        goal: "读取当前作品与章节上下文，给出下一步创作建议".to_string(),
+        chapter_id: Some(chapter_id.clone()),
+        task_kind: "read".to_string(),
+        expected_tool: None,
+        expected_artifact_type: None,
+        required_read_tools: Vec::new(),
+        book_word_goal: None,
+        model_snapshot: start_task_snapshot(&upstream.upstream_base_url, "canonical-read-model"),
+        request_policy: default_request_policy(),
+        api_key: String::new(),
+    })
+    .unwrap_or_else(|error| {
+        panic!(
+            "canonical_read_turn: {error}; upstream={}; policy={}",
+            upstream.snapshot(),
+            request_policy_diagnostics()
+        )
+    });
+    assert!(
+        result.run.status == "completed" || result.run.status == "failed",
+        "canonical read turn must be terminal, got {}",
+        result.run.status
+    );
+    if let Some(error) = &result.run.error {
+        assert!(
+            !error.contains("DSH_TASK_CONTRACT_INVALID"),
+            "canonical read turn failed with contract error: {error}"
+        );
+    }
+    assert_eq!(result.artifact_id, None);
+    let run_id = result.run.run_id.clone();
+
+    let connection = crate::db::get_connection()
+        .lock()
+        .expect("test database lock");
+    let tool_names = connection
+        .prepare("SELECT tool_name FROM tool_call_events WHERE run_id=?1 ORDER BY sequence")
+        .expect("prepare tool events")
+        .query_map(rusqlite::params![run_id], |row| row.get::<_, String>(0))
+        .expect("query tool events")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect tool events");
+    let workbench_tools = tool_names
+        .iter()
+        .filter(|name| !name.starts_with("dsh."))
+        .cloned()
+        .collect::<Vec<_>>();
+    for expected in [
+        "novel.read",
+        "structure.read",
+        "context.read",
+        "memory.search",
+    ] {
+        assert!(
+            workbench_tools.iter().any(|name| {
+                name == expected
+                    || name.ends_with(expected)
+                    || is_canonical_read_tool_name(name)
+                        && name.contains(&expected.replace('.', "_"))
+            }),
+            "canonical_read_turn must record {expected}: {tool_names:?}"
+        );
+    }
+    assert!(
+        workbench_tools
+            .iter()
+            .all(|name| { !name.contains("generate_chapter") && !name.contains("read_context") }),
+        "canonical_read_turn must not call generate_chapter or legacy read aliases: {tool_names:?}"
+    );
+    let artifacts: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM result_artifacts WHERE source_novel_id=?1",
+            rusqlite::params![novel_id],
+            |row| row.get(0),
+        )
+        .expect("count result artifacts");
+    assert_eq!(artifacts, 0);
+    let cards: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM conversation_artifact_cards WHERE conversation_id=?1",
+            rusqlite::params![conversation_id],
+            |row| row.get(0),
+        )
+        .expect("count artifact cards");
+    assert_eq!(cards, 0);
+    let (word_count, adopted_draft_id): (i64, Option<String>) = connection
+        .query_row(
+            "SELECT word_count, adopted_draft_id FROM chapters WHERE id=?1",
+            rusqlite::params![chapter_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read chapter snapshot");
+    assert_eq!(word_count, 0);
+    assert_eq!(adopted_draft_id, None);
+    let adopted_drafts: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM chapter_drafts WHERE chapter_id=?1 AND is_adopted=1",
+            rusqlite::params![chapter_id],
+            |row| row.get(0),
+        )
+        .expect("count adopted drafts");
+    assert_eq!(adopted_drafts, 0);
+    drop(connection);
+
+    let snapshot = upstream.snapshot();
+    let snapshot_text = snapshot.to_string();
+    assert!(!snapshot_text.contains("sk-"));
+    assert!(!snapshot_text.contains("Bearer"));
+    assert!(!snapshot_text.contains("api_key"));
+    task_runtime::debug_kill_worker(&conversation_id);
 }

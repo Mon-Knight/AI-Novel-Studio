@@ -1316,7 +1316,7 @@ v0.1.0 完成后，应满足：
 
 ## 21.3 用户确认与章节审阅
 
-- 结构化候选可以在对话中确认并申请应用，但当前通用 `request_apply` 在原子迁移完成前固定失败关闭且不写入领域事实。
+- 结构化候选可以在对话中确认并申请应用。桌面端 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 以及精确 `generic_json`+`context_compression` 在同一 Rust/SQLite 事务中写入领域事实并追加 `ArtifactDecision`；质量/风格报告、其他 `generic_json`、未知类型和浏览器回退继续失败关闭且零领域写入。章节正文仍走 `ReviewAuthorization` 原子采用，不经 `request_apply`。
 - 审计报告只提供结论与后续任务入口，本身不写入小说事实。
 - 章节正文采用双阶段流程：对话中确认进入审阅，再由人工审阅/编辑器显式编辑、保存和采用；桌面端由单一 Rust/SQLite 事务复验并消费 `ReviewAuthorization`、采用草稿并收敛任务状态。
 - 未确认的 AI 候选不能进入章节采用路径；打开审阅不等于保存或采用。
@@ -1336,9 +1336,11 @@ v0.1.0 完成后，应满足：
 
 该入口只解释“当前软件加载了哪些插件以及各自提供什么能力”。它直接读取 Runtime Registry，不维护前端静态名单，也不提供安装、卸载、启停、配置、更新、权限、市场或项目绑定功能。任务中的实际工具调用仍在对应对话内显示，不新增独立工具或执行面板。
 
-## 21.6 v3.6.0 Canonical 准入边界
+## 21.6 Canonical 准入与 R4 边界
 
-Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成，但 `novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 仍全部为 `catalog_only + partial`，模型可见数为 `0`。下一步必须先关闭四项 Facade blocker，再通过独立 exposure 变更；只有该门禁通过后才进入 R4 真实 Main Agent Runtime 验证。本文不授权 exposure、R4、Writing SubAgent 或新版本开发。
+Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主执行门禁已经完成。四个 Canonical 只读 identity（`novel.read@1 / structure.read@1 / context.read@1 / memory.search@1`）现为 `stable` + `working`，`modelVisibleToolIdentities` 长度为 4。这只是 Catalog/Manifest exposure。
+
+真实 R4 是 Canonical-only DSH 只读回合。工作台 `read` intent 已请求 `novel.read / structure.read / context.read / memory.search`；Gateway 在该 allowlist 下会把它们列入 `tools/list`。宿主 `task_runtime` 仍注入 legacy `ALLOWED_TOOLS`，生产读回合尚未切到 Canonical 名。`mainAgentRuntimeService` 启发式脚手架不是 R4 VERIFIED。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。本文不授权 Writing SubAgent 或新版本开发。
 
 完整的布局、工具状态、产物协议、并发规则、数据边界和分阶段路线见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。
 

@@ -1,10 +1,41 @@
 # AI Novel Studio - CHANGELOG
 
-> 当前版本：v3.6.1。v3.6.0 保持为智能体创作平台与长篇小说记忆层的功能基线；v3.6.1 收口 SQLite 安全、发布门禁与 Runtime 固定模型恢复。
+> 当前版本：v3.6.2。v3.6.0 保持为智能体创作平台与长篇小说记忆层的功能基线；v3.6.1 收口 SQLite 安全、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径。
 
 ## Unreleased
 
-暂无未发布变更。
+## v3.6.2 (2026-09-05) - Canonical 只读链路与桌面体验收口补丁
+
+### 新增
+
+- **中心页面与作品详情 UI 风格统一重构**：将模板中心（`TemplatesPage`）、导入导出中心（`ImportExportPage`）与设置中心（`SettingsPage`）的各级结构与设计语言全面对齐风格方案管理（统一 BackButton、22px 图标标题栏、副标题说明、带数量计数的水平 Tab 栏、统一圆角 10px 网格卡片与编辑表单）；作品详情页（`NovelDetailPage`）重构为紧凑直观布局，封面适度紧凑（96x128）并与字数/状态指标紧凑对齐，下方卡片重新编排为“核心设定体系”、“大纲架构与卷章体系”、“角色档案与上下文沉淀”、“数据归档与备份导出”四大直观业务分区，彻底消除无休止向下拖拽的不良体验，所有组件严格恪守 500 行上限。
+- **工作台产物卡片候选选项**：人物/事件/设定/大纲/章节总结不再把 `artifact.content` 以原始 JSON 倾倒展示；按与 Rust apply 相同的数组与 `characters` / `events` / `settings` / `data.*` 等键解析为默认可选、可本地修改的候选项，章节总结展示可读段落，章节正文仍为散文 `<pre>`，完整 JSON 收入折叠「原始数据」。
+- **会话模型凭据 DPAPI 持久化**：Windows 上将 `SessionCredentialVault` 用 CryptProtectData / CryptUnprotectData 写入应用数据目录的本地保护文件，并在 vault 创建时加载；空密钥删除对应条目。localStorage / `ai_settings` JSON 仍不保存 `apiKey`。
+- **Novel Domain Gateway Canonical 只读 Tool**：当 `ANS_ALLOWED_TOOLS` 含 Canonical 名时，gateway `tools/list` 以无 @version 的 `novel.read` / `structure.read` / `context.read` / `memory.search` 列出只读工具，`tools/call` 映射到既有 `get_metadata` / `get_chapter_context` / `search_memory` 并拒绝 legacy alias；legacy/candidate allowlist 保持原列表以免破坏 structured_write。
+- **Canonical catalog/manifest exposure（4 项 stable）**：`novel.read@1 / structure.read@1 / context.read@1 / memory.search@1` 已关闭 Facade blocker，健康度 `working`，exposure `stable`，共享 Manifest 的 `modelVisibleToolIdentities` 为上述 4 个只读 identity。这只证明 Catalog/Manifest 放行。
+- **Canonical-only Main Agent read 回合确定性证明**：mock DSH upstream 在只广告 Canonical 只读工具时调用 `novel.read` / `structure.read` / `context.read` / `memory.search` 并返回建议、不调用 `generate_chapter`；legacy CONTEXT_TOOLS + `generate_chapter` 行为保持不变。Rust 载体测试 `canonical_read_turn_uses_canonical_tools_and_writes_no_artifacts` 证明只读回合记录 Canonical 工具名、不写 `result_artifacts`、不采用草稿、不改章节字数。
+- **DSH 只读回合改走 Canonical Tool allowlist**：`taskKind=read` 的 Main Agent 回合启动时 `allowed_tools`、必需读取、系统/回合提示与 tool 投影只保留 `novel.read` / `structure.read` / `context.read` / `memory.search`，`normalize_tool_name` 不再把 `novel.read` 映射成 `novel.read_context`，legacy 别名在 Canonical-only 回合失败关闭。结构化候选与带候选的审计仍使用既有 legacy `ALLOWED_TOOLS`；写章不进 DSH；插件探测与缺 `baseUrl` 仍失败关闭。
+- **R4 真实 DSH Main Agent Runtime（进行中，未 VERIFIED）**：工作台 `read` intent 的 DSH start payload 请求 Canonical-only 工具；`chapter_write` 仍走 `taskRuntimeAdapter`，`structured_write`/audit 省略 allowlist 以保持 legacy。`mainAgentRuntimeService` 是启发式脚手架，不是 R4 证据。opt-in `test:agent-runtime:real` 未设置 `DSH_E2E_BASE_URL` 时打印 `NOT_RUN` 并以 0 退出；回环 URL 运行仓内 `canonical_read_turn`（loopback mock DSH Canonical read-turn，不发云端请求）；非回环 URL 失败关闭且不发网（默认 `NOT_RUN` 退出 0，`DSH_E2E_FORCE_CLOUD=1` 时退出 2）。该 mock 回合是仓内 R4 runtime 证明，live 云端 Provider 仍 NOT VERIFIED。不得宣称 R4 VERIFIED，也不得宣称 Writing SubAgent / `chapter_write` 走 DSH。
+
+### 修复
+
+- **R4 文档口径收口与 live 云端验收标准定义**：架构文档与版本路线图不再把“宿主仍注入 legacy `ALLOWED_TOOLS`”写作当前状态；明确 `read` 回合在 DSH start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS` 与宿主工具授权三处一致注入 Canonical-only allowlist，Gateway `tools/list` 随之列出四项 Canonical 只读工具，Rust loopback E2E 已证明零产物、零采用、章节字数不变与零凭据泄漏。R4 剩余门禁收窄为 live 云端 Provider 验收，并在架构文档 §14.5 定义前置凭据、opt-in cloud profile、通过条件与脱敏证据标准；标准满足前不得宣称 R4 VERIFIED，cloud profile 执行路径待单独实现。
+- **作品详情页新建作品异常与网格对齐修复**：移除了 `NovelBasicInfoCard` 硬编码的 `gridColumn: 1 / -1`，将其与主角设定并列，修复了法则体系卡片右侧留白空洞；在 `RuleSystemCard` 中补充了空状态提示（“尚未添加规则体系，点击上方新增规则开始创建”），解决新建作品时卡片底部大面积空白的异常显示；在作品详情页操作区为非工作台跳转场景提供“返回作品列表”按钮，解除新建作品后无法返回作品列表的导航阻断；修复基本信息保存时丢弃 `subtitle` 和 `status` 的问题。
+- **AI 任务记录清空**：全部清空不再因已完成质量检查报告绑定 `ai_task_id` 而整体失败；清空时先解除子表引用并保留质量报告，再删除任务历史。单条/批量删除仍保护已完成质量报告绑定。
+- **工作台路由与发送校验加固**：为 `taskGoalRouting` 增加中英金样例，覆盖写章/结构化/审计/只读/寒暄，避免正则改执行器；将发送前 hydrate → 会话凭据 → 后台 Runtime 目录刷新抽到 `validateWorkbenchModelForSend` 并补失败关闭与 loopback 回归。
+- **文档权威边界收口**：默认 `/` 为创作工作台；结构化 `request_apply` 按白名单写入、其余失败关闭；无快照 DeepSeek 插件探测仅用于目录投影，不是用户任务。
+- **可维护性第一刀**：`useWorkbenchTaskRunner` 抽取 `validateWorkbenchModelForSend` 与 `useWorkbenchRuntimeHeartbeat`，解耦凭据校验与运行时轮询/事件投影；`task_runtime` 测试模块按 `#[path]` 抽出至 `task_runtime_tests.rs`，不改生产行为；Gateway 增加与 app repository 的列名漂移门禁，不抽取共享 crate、不改 SQL。
+
+### 验证
+
+- `npm run test:docs-sync`
+- `npm run test:version-sync`
+- `npx prettier --check`（改动文档）
+- `git diff --check`
+- `npm run lint:ci`
+- `npm run build`
+- `cargo +1.89.0 check --locked --manifest-path src-tauri/Cargo.toml`
+- `cargo +1.89.0 test --locked --manifest-path src-tauri/Cargo.toml canonical -- --test-threads=1`（R4 仓内只读闭环证据复核：12/12 通过）
 
 ## v3.6.1 (2026-09-01) - 智能体创作平台与长篇小说记忆层
 
@@ -13,7 +44,8 @@
 - **Bundled SQLite WAL-reset 风险修复**：主应用与只读 Gateway 从 `rusqlite 0.31.0 / libsqlite3-sys 0.28.0 / SQLite 3.45.0` 升级到最小修复组合 `0.39.0 / 0.37.0 / SQLite 3.51.3`，关闭新增且未使用的默认 statement cache feature，保留单主连接和既有事务拓扑；生产连接显式固定 WAL、外键、5000ms busy timeout 与 `synchronous=FULL`。既有 E2E 诊断复用生产轻量 DTO，精确验证 SQLite version/source ID、FTS5、JSON 和连接配置，并在包含中文与空格的隔离路径启动真实桌面数据库；普通启动不新增完整 `integrity_check`。Rust 清单同步到当前固定锁图实测可用的 1.89。
 - **Runtime 固定模型目录恢复**：旧任务继续冻结原 provider/model，不从身份不同的当前模型借用 endpoint 或会话凭据；显式无效快照不再静默改探默认 DeepSeek。新任务始终捕获设置页当前模型，按该模型刷新 Runtime 目录；旧任务不可用时可保留未发送草稿并使用当前模型新建任务，取消弹窗后目录自动恢复到原任务模型。
 - **签名发布全量桌面 E2E 输入传播**：可复用 Windows 工作流不再按调用方的 `push` 事件遮蔽 `suite: full`；Release tag 调用现在会同时把任务名称与实际 `E2E_SUITE` 解析为 `full`，执行完整 `test:e2e` 后才允许进入签名安装包发布。文档同步门禁新增调用方事件遮蔽的失败关闭回归。
-- **工作台页面职责收口**：将结构化产物决定后的章节刷新与资产状态结算协调逻辑移入无 DOM 辅助模块，保持任务作用域与异步竞态校验不变，并使生产页面组件满足 500 行大小门禁。
+- **工作台模型目录竞态与会话凭据恢复**：后台任务按冻结模型刷新 Runtime 目录时不再覆盖新任务创建器的前台模型投影；远程模型缺失本次应用会话凭据时，探测与发送均失败关闭并保留恢复入口，loopback 无密钥模型仍可用。
+- **结构化产物结算模块边界**：将结构化产物决定后的章节刷新、作用域复验与资产状态结算从页面抽到 `src/features/workbench/` 无 DOM 模块，保持任务作用域与异步竞态校验不变，补齐竞态与空产物回归，并使生产页面组件满足 500 行大小门禁。
 
 ### 验证
 
@@ -23,7 +55,9 @@
 - `npm run test:version-sync`
 - `cargo +1.89.0 fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
 - `cargo +1.89.0 check --locked --manifest-path src-tauri/Cargo.toml`
-- Runtime 模型目录快速回归、页面恢复用例与精确 Rust 探针测试
+- `npm run test:workbench`
+- `npm run test:component-size`
+- Runtime 模型目录快速回归、页面恢复用例、会话凭据失败关闭与精确 Rust 探针测试
 - 回环 `/v1/models` 实测返回 10 个模型并包含 `gpt-5.6-luna`；验证输出与仓库均不保存 API Key
 
 ## v3.6.0 (2026-08-31) - 智能体创作平台与长篇小说记忆层

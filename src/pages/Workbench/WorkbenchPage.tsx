@@ -11,7 +11,10 @@ import {
   resolveWorkbenchModelDirectoryTarget,
   WorkbenchModelUnavailableError,
 } from '../../services/conversation/workbenchModelAvailability';
-import type { StructuredArtifactDecisionInput } from './workbenchHelpers';
+import {
+  settleStructuredArtifactDecision,
+  type StructuredArtifactDecisionInput,
+} from '../../features/workbench/structuredArtifactDecisionSettlement';
 import { PluginPanel } from './WorkbenchPluginPanel';
 import { WorkbenchComposer } from './WorkbenchComposer';
 import { WorkbenchMessageStream } from './WorkbenchMessageStream';
@@ -26,7 +29,7 @@ import {
 import { WorkbenchTaskCreator } from './WorkbenchTaskCreator';
 import { WorkbenchTaskHeader } from './WorkbenchTaskHeader';
 import { WORKBENCH_TASK_TEMPLATES } from './workbenchTaskTemplates';
-import { markWorkbenchOnce, settleStructuredArtifactDecision } from './workbenchHelpers';
+import { markWorkbenchOnce } from './workbenchHelpers';
 import { resolveWorkbenchConversationStatus } from './workbenchRunProgress';
 import { useWorkbenchArtifacts } from './hooks/useWorkbenchArtifacts';
 import { useWorkbenchAssetScope } from './hooks/useWorkbenchAssetScope';
@@ -38,14 +41,14 @@ import { useWorkbenchTaskRunner } from './hooks/useWorkbenchTaskRunner';
 
 export function WorkbenchPage() {
   const navigate = useNavigate();
-  const { plugins, pluginsLoading, pluginsError, showPlugins, setShowPlugins, refreshPlugins } =
-    useWorkbenchPlugins();
-  const { contextPending, contextFailed } = useWorkbenchStartupReadiness();
   const [taskCreatorOpen, setTaskCreatorOpen] = useState(false);
   const [newTaskGoal, setNewTaskGoal] = useState('');
   const [newTaskChapterId, setNewTaskChapterId] = useState('');
   const [newTaskModel, setNewTaskModel] = useState(() => captureTaskModelSnapshot());
   const [taskCreatorError, setTaskCreatorError] = useState('');
+  const { plugins, pluginsLoading, pluginsError, showPlugins, setShowPlugins, refreshPlugins } =
+    useWorkbenchPlugins(taskCreatorOpen);
+  const { contextPending, contextFailed } = useWorkbenchStartupReadiness();
   const [startupDraft, setStartupDraft] = useState('');
   const newTaskSubmissionRef = useRef(false);
 
@@ -494,5 +497,4 @@ export function WorkbenchPage() {
     </div>
   );
 }
-
 export default WorkbenchPage;

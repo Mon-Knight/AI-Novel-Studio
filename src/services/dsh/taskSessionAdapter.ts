@@ -5,14 +5,14 @@ import {
   type TaskRuntimeInput,
 } from '../conversation/taskRuntimeAdapter';
 import type { TaskModelSnapshot, TaskRun } from '../../types/conversation';
-import { dshTaskRuntimeService, type DshTaskProjectionNotice } from './taskRuntimeService';
+import {
+  buildDshTaskStartContract,
+  dshTaskRuntimeService,
+  type DshTaskProjectionNotice,
+} from './taskRuntimeService';
 import { captureTaskModelSnapshot } from '../conversation/taskModelSnapshot';
 import { taskConversationService } from '../conversation/taskConversationService';
-import {
-  buildDshTurnContract,
-  classifyTaskIntent,
-  isConversationalGoal,
-} from '../conversation/taskGoalRouting';
+import { classifyTaskIntent, isConversationalGoal } from '../conversation/taskGoalRouting';
 
 export const WORKBENCH_CONVERSATIONAL_REPLY =
   '我是创作工作台助手。你可以用自然语言让我读取作品上下文、检索记忆，或生成章节、大纲、角色、事件、设定候选，以及润色、质量检查和章节总结。候选不会直接写入正式正文，需要你确认后才会进入审阅或应用。问候和能力询问不会调用生成工具。';
@@ -129,12 +129,13 @@ export const taskSessionAdapter = {
       return completeConversationalTurn(input, onEvent);
     }
     const session = sessionFor(input);
+    const intent = classifyTaskIntent(input.goal);
     // Chapter write goes through the ANS writer, not the DSH candidate sink.
-    if (!isTauri() || classifyTaskIntent(input.goal) === 'chapter_write') {
+    if (!isTauri() || intent === 'chapter_write') {
       return taskRuntimeAdapter.start({ ...input, workerId: session.workerId }, onEvent);
     }
     if (isTauri()) {
-      const contract = buildDshTurnContract(input.goal, input.chapterId);
+      const contract = buildDshTaskStartContract(input.goal, input.chapterId);
       return dshTaskRuntimeService
         .start(
           {

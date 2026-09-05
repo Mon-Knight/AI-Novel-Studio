@@ -8,6 +8,7 @@ import type { TaskModelSnapshot } from '../../types/conversation';
 import { WorkbenchModelSelect } from './WorkbenchModelSelect';
 import { WorkbenchModelRecoveryNotice } from './WorkbenchModelRecoveryNotice';
 import { WorkbenchAssetScopePanel } from './WorkbenchAssetScopePanel';
+import { useWorkbenchModelCredential } from './hooks/useWorkbenchModelCredential';
 import {
   isWorkbenchTaskTemplateEnabled,
   type WorkbenchTaskTemplate,
@@ -102,12 +103,14 @@ export function WorkbenchComposer({
   const composerDisabled = composerState === 'archived';
   const executionLocked = composerState !== 'idle';
   const templatesDisabled = executionLocked || chaptersLoading;
+  const { credentialAvailable } = useWorkbenchModelCredential(selectedModel, pluginsLoading);
   const modelAvailability = getWorkbenchModelAvailability({
     plugins,
     selectedModel,
     refreshing: pluginsLoading,
     refreshError: pluginsError,
     selectionLocked: true,
+    credentialAvailable,
   });
   const conversationalDraft = isConversationalGoal(draft);
   const canSendDraft = Boolean(

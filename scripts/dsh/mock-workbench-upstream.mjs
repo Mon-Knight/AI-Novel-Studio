@@ -52,10 +52,26 @@ const CONTEXT_TOOLS = [
   'get_character_states',
   'search_memory',
 ];
+const CANONICAL_READ_TOOLS = Object.freeze([
+  'novel.read',
+  'structure.read',
+  'context.read',
+  'memory.search',
+]);
+const CANONICAL_READ_UNDERSCORED = Object.freeze([
+  ['novel.read', 'novel_read'],
+  ['structure.read', 'structure_read'],
+  ['context.read', 'context_read'],
+  ['memory.search', 'memory_search'],
+]);
 const GENERATE_TOOL = 'generate_chapter';
 const MODEL_TOOL_ATTESTATION_NAME = 'ans_runtime_attest_tool_call_v1';
 
 const TOOL_MARKERS = new Map([
+  ['novel.read', ['novel.read', 'mcp__novel__novel.read', 'novel.read@1']],
+  ['structure.read', ['structure.read', 'mcp__novel__structure.read', 'structure.read@1']],
+  ['context.read', ['context.read', 'mcp__novel__context.read', 'context.read@1']],
+  ['memory.search', ['memory.search', 'mcp__novel__memory.search', 'memory.search@1']],
   ['novel.read_context', ['novel_read_context', 'get_metadata']],
   ['chapter.read_outline', ['chapter_read_outline', 'get_chapter_context']],
   ['get_character_states', ['get_character_states']],
@@ -177,9 +193,38 @@ function normalizedToolName(value) {
   return typeof value === 'string' ? value.toLowerCase().replaceAll(/[^a-z0-9_-]/g, '_') : '';
 }
 
-function canonicalToolName(value) {
+function stripMcpPrefixAndVersion(value) {
+  if (typeof value !== 'string') return '';
+  let name = value.trim();
+  if (name.startsWith('mcp__novel__')) name = name.slice('mcp__novel__'.length);
+  else if (name.startsWith('novel__')) name = name.slice('novel__'.length);
+  const at = name.lastIndexOf('@');
+  if (at > 0 && /^\d+$/.test(name.slice(at + 1))) name = name.slice(0, at);
+  return name;
+}
+
+function hashedCanonicalReadName(name) {
+  for (const [canonical, underscored] of CANONICAL_READ_UNDERSCORED) {
+    if (name === underscored) return canonical;
+    if (name.startsWith(`${underscored}_`)) {
+      const suffix = name.slice(underscored.length + 1);
+      if (suffix !== '' && /^[0-9a-f]+$/iu.test(suffix)) return canonical;
+    }
+  }
+  return undefined;
+}
+
+/** Map a wire tool name to its Workbench canonical identity. */
+export function canonicalToolName(value) {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const stripped = stripMcpPrefixAndVersion(value);
+  if (CANONICAL_READ_TOOLS.includes(stripped)) return stripped;
+  const hashed =
+    hashedCanonicalReadName(stripped) ?? hashedCanonicalReadName(normalizedToolName(stripped));
+  if (hashed !== undefined) return hashed;
   const normalized = normalizedToolName(value);
   for (const [canonical, markers] of TOOL_MARKERS) {
+    if (CANONICAL_READ_TOOLS.includes(canonical)) continue;
     if (markers.some((marker) => normalized.includes(marker))) return canonical;
   }
   return undefined;
@@ -248,14 +293,31 @@ function summarizeMessages(messages) {
   return { roles, promptChars, lastUserChars, toolResultCount };
 }
 
+function chapterScopedArguments(options) {
+  const args = { novelId: options.novelId };
+  if (typeof options.chapterId === 'string' && options.chapterId.trim() !== '') {
+    args.chapterId = options.chapterId;
+  }
+  return args;
+}
+
 function toolArguments(canonical, options, { invalid = false } = {}) {
   if (invalid) return { novelId: options.novelId };
   switch (canonical) {
+    case 'novel.read':
     case 'novel.read_context':
       return { novelId: options.novelId };
+    case 'structure.read':
+    case 'context.read':
+      return chapterScopedArguments(options);
     case 'chapter.read_outline':
     case 'get_character_states':
       return { novelId: options.novelId, chapterId: options.chapterId };
+    case 'memory.search':
+      return {
+        novelId: options.novelId,
+        query: '章节创作上下文',
+      };
     case 'search_memory':
       return {
         novelId: options.novelId,
@@ -349,6 +411,29 @@ function createPlan(body, options, sequence) {
       kind: 'text',
       phase: 'tool-error-final',
       text: '工具调用按预期失败，未生成章节候选，也未修改正式小说事实。',
+      advertisedToolNames: actualNames,
+    };
+  }
+
+  const advertisedCanonicalReads = CANONICAL_READ_TOOLS.filter((name) => byCanonical.has(name));
+  const canonicalOnly =
+    advertisedCanonicalReads.length > 0 &&
+    !byCanonical.has('novel.read_context') &&
+    !byCanonical.has(GENERATE_TOOL);
+  if (canonicalOnly) {
+    const missingCanonical = advertisedCanonicalReads.filter((name) => !alreadyCalled.has(name));
+    if (missingCanonical.length > 0) {
+      return {
+        kind: 'tools',
+        phase: 'canonical-read-tools',
+        calls: createToolCalls(missingCanonical, byCanonical, options, sequence),
+        advertisedToolNames: actualNames,
+      };
+    }
+    return {
+      kind: 'text',
+      phase: 'canonical-read-final',
+      text: '已读取当前作品与章节上下文。建议下一步先确认本章冲突与人物动机，再决定创作方向。',
       advertisedToolNames: actualNames,
     };
   }

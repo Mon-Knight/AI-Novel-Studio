@@ -1,18 +1,9 @@
 /**
  * AI Novel Studio - 导入导出中心页面
+ * 统一风格方案管理 UI 结构设计
  */
 import { useState, useEffect, useCallback } from 'react';
-import {
-  ArrowDownToLine,
-  ArrowLeft,
-  BookOpenText,
-  FileJson,
-  FileText,
-  Import,
-  Library,
-  Save,
-} from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { ArrowDownToLine, FileJson, Upload } from 'lucide-react';
 import BackButton from '../../components/common/BackButton';
 import ImportTxtDialog from '../../components/import/ImportTxtDialog';
 import ImportJsonDialog from '../../components/import/ImportJsonDialog';
@@ -22,9 +13,12 @@ import { exportService } from '../../services/export/exportService';
 import type { Novel } from '../../types/novel';
 import type { Chapter } from '../../types/chapter';
 import { describeUnknownError } from '../../utils/errorMessage';
+import { NovelExportSection, NovelImportSection } from './ImportExportSections';
+
+type ImportExportTab = 'export' | 'import';
 
 function ImportExportPage() {
-  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<ImportExportTab>('export');
   const [novels, setNovels] = useState<Novel[]>([]);
   const [selectedNovelId, setSelectedNovelId] = useState('');
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -85,12 +79,17 @@ function ImportExportPage() {
     }
   };
 
-  const adoptedChapters = chapters.filter(
-    (c) => c.status === 'adopted' || c.status === 'summarized',
-  );
   return (
-    <div className="page-container form-page" style={{ height: '100%', overflowY: 'auto' }}>
-      <BackButton label="返回首页" to="/" />
+    <div
+      style={{
+        padding: 32,
+        maxWidth: 1000,
+        margin: '0 auto',
+        height: '100%',
+        overflowY: 'auto',
+      }}
+    >
+      <BackButton label="返回工作台" to="/" />
       <div
         style={{
           display: 'flex',
@@ -105,19 +104,19 @@ function ImportExportPage() {
         <ArrowDownToLine aria-hidden="true" size={22} strokeWidth={1.8} />
         导入导出中心
       </div>
-      <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
-        导出已采用章节正文或完整 JSON 备份，导入作品、风格方案和输出控制
+      <div className="text-sm text-muted" style={{ marginBottom: 20 }}>
+        导出已采用章节正文、Markdown 排版与完整 JSON 备份；导入外部小说原稿与配置资产。
       </div>
 
       {msg && (
         <div
           style={{
-            padding: '8px 16px',
-            marginBottom: 16,
-            background: 'var(--color-primary-light)',
-            borderRadius: 6,
             fontSize: 13,
-            color: 'var(--color-primary)',
+            padding: '6px 12px',
+            background: 'var(--color-primary-light, #e0e7ff)',
+            borderRadius: 6,
+            marginBottom: 16,
+            color: 'var(--color-primary, #4338ca)',
           }}
         >
           {msg}
@@ -126,173 +125,120 @@ function ImportExportPage() {
       {err && (
         <div
           style={{
-            padding: '8px 16px',
-            marginBottom: 16,
-            background: 'var(--color-error-bg)',
-            borderRadius: 6,
             fontSize: 13,
-            color: 'var(--color-error)',
+            padding: '6px 12px',
+            background: 'var(--color-error-bg, #fee2e2)',
+            borderRadius: 6,
+            marginBottom: 16,
+            color: 'var(--color-error, #b91c1c)',
           }}
         >
           {err}
         </div>
       )}
 
-      {/* 作品选择 */}
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <BookOpenText aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontWeight: 600 }}>选择作品</span>
-        </div>
-        {novels.length === 0 ? (
-          <div
+      {/* 统一 Tab 导航条 */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 0,
+          marginBottom: 20,
+          borderBottom: '2px solid var(--color-border)',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <div style={{ display: 'flex' }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('export')}
             style={{
-              textAlign: 'center',
-              padding: 16,
-              color: 'var(--color-text-muted)',
-              fontSize: 13,
+              padding: '8px 20px',
+              fontSize: 14,
+              fontWeight: activeTab === 'export' ? 600 : 400,
+              color:
+                activeTab === 'export' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              borderBottom:
+                activeTab === 'export' ? '2px solid var(--color-primary)' : '2px solid transparent',
+              marginBottom: -2,
+              background: 'none',
+              cursor: 'pointer',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
             }}
           >
-            暂无作品，请先在首页创建
+            作品导出 ({novels.length > 0 ? 3 : 0})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('import')}
+            style={{
+              padding: '8px 20px',
+              fontSize: 14,
+              fontWeight: activeTab === 'import' ? 600 : 400,
+              color:
+                activeTab === 'import' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+              borderBottom:
+                activeTab === 'import' ? '2px solid var(--color-primary)' : '2px solid transparent',
+              marginBottom: -2,
+              background: 'none',
+              cursor: 'pointer',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+            }}
+          >
+            数据导入 (2)
+          </button>
+        </div>
+
+        {activeTab === 'import' && (
+          <div style={{ display: 'flex', gap: 8, paddingBottom: 6 }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setShowTxtImport(true)}
+            >
+              <Upload aria-hidden="true" size={15} strokeWidth={1.8} />
+              导入 TXT
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowJsonImport(true)}
+            >
+              <FileJson aria-hidden="true" size={15} strokeWidth={1.8} />
+              导入 JSON
+            </button>
           </div>
-        ) : (
-          <select
-            className="input"
-            value={selectedNovelId}
-            onChange={(e) => setSelectedNovelId(e.target.value)}
-            style={{ width: '100%' }}
-          >
-            {novels.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.title}
-              </option>
-            ))}
-          </select>
         )}
       </div>
 
-      {/* 导出整本作品 */}
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <Library aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontWeight: 600 }}>导出整本作品</span>
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>
-          已采用章节：{adoptedChapters.length} / {chapters.length} 章
-          {adoptedChapters.length === 0 && (
-            <span style={{ color: 'var(--color-warning)' }}> — 没有已采用章节可导出</span>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={adoptedChapters.length === 0}
-            onClick={() => handleExport(() => exportService.exportNovelToTxt(selectedNovelId))}
-          >
-            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
-            导出 TXT
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={adoptedChapters.length === 0}
-            onClick={() => handleExport(() => exportService.exportNovelToMarkdown(selectedNovelId))}
-          >
-            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
-            导出 Markdown
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={!selectedNovelId}
-            onClick={() => handleExport(() => exportService.exportNovelBackupJson(selectedNovelId))}
-          >
-            <Save aria-hidden="true" size={15} strokeWidth={1.8} />
-            备份完整 JSON
-          </button>
-        </div>
-      </div>
+      {activeTab === 'export' && (
+        <NovelExportSection
+          novels={novels}
+          selectedNovelId={selectedNovelId}
+          onSelectNovelId={setSelectedNovelId}
+          chapters={chapters}
+          selectedChapterId={selectedChapterId}
+          onSelectChapterId={setSelectedChapterId}
+          onExport={handleExport}
+          exportNovelToTxt={exportService.exportNovelToTxt}
+          exportNovelToMarkdown={exportService.exportNovelToMarkdown}
+          exportNovelBackupJson={exportService.exportNovelBackupJson}
+          exportChapterToTxt={exportService.exportChapterToTxt}
+          exportChapterToMarkdown={exportService.exportChapterToMarkdown}
+        />
+      )}
 
-      {/* 导出章节 */}
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontWeight: 600 }}>导出当前章节</span>
-        </div>
-        {chapters.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', padding: 8 }}>暂无章节</div>
-        ) : (
-          <select
-            className="input"
-            value={selectedChapterId}
-            onChange={(e) => setSelectedChapterId(e.target.value)}
-            style={{ width: '100%', marginBottom: 8 }}
-          >
-            {adoptedChapters.map((c) => (
-              <option key={c.id} value={c.id}>
-                第{c.chapterNumber}章 {c.title}（已采用）
-              </option>
-            ))}
-            {chapters
-              .filter((c) => !adoptedChapters.includes(c))
-              .map((c) => (
-                <option key={c.id} value={c.id} disabled>
-                  第{c.chapterNumber}章 {c.title}（未采用，无法导出）
-                </option>
-              ))}
-          </select>
-        )}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={
-              !selectedChapterId || !adoptedChapters.some((c) => c.id === selectedChapterId)
-            }
-            onClick={() => handleExport(() => exportService.exportChapterToTxt(selectedChapterId))}
-          >
-            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
-            导出 TXT
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            disabled={
-              !selectedChapterId || !adoptedChapters.some((c) => c.id === selectedChapterId)
-            }
-            onClick={() =>
-              handleExport(() => exportService.exportChapterToMarkdown(selectedChapterId))
-            }
-          >
-            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
-            导出 Markdown
-          </button>
-        </div>
-      </div>
+      {activeTab === 'import' && (
+        <NovelImportSection
+          onOpenTxt={() => setShowTxtImport(true)}
+          onOpenJson={() => setShowJsonImport(true)}
+        />
+      )}
 
-      {/* 导入区域 */}
-      <div className="detail-card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <Import aria-hidden="true" size={18} strokeWidth={1.8} />
-          <span style={{ fontWeight: 600 }}>导入</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowTxtImport(true)}>
-            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
-            导入 TXT
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowJsonImport(true)}>
-            <FileJson aria-hidden="true" size={15} strokeWidth={1.8} />
-            导入 JSON
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 8 }}>
-          支持导入 TXT 小说文件（自动识别章节标题切分）和 JSON 配置文件（风格方案/输出控制）
-        </div>
-      </div>
-
-      <button className="btn btn-secondary btn-sm" onClick={() => navigate('/')}>
-        <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
-        返回首页
-      </button>
-
-      {/* 导入弹窗 */}
       {showTxtImport && (
         <ImportTxtDialog
           onClose={() => {

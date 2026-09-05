@@ -3,8 +3,8 @@
 > 项目仓库：`AI-Novel-Studio`
 > 技术路线：Tauri + React + TypeScript + SQLite
 > 目标平台：Windows 桌面端
-> 当前版本：v3.6.1（智能体创作平台与长篇小说记忆层）
-> 当前状态：v3.6.1 SQLite 安全与 Runtime 固定模型恢复补丁；v3.6.0 保持为功能基线
+> 当前版本：v3.6.2（Canonical 只读链路与桌面体验收口补丁）
+> 当前状态：v3.6.2 Canonical 只读链路放行、桌面体验与 R4 文档口径收口；v3.6.0 保持为功能基线
 
 > 路线演进说明：v3.2.1 以前的章节工程与 Autonomous 路线作为历史基线保留；v3.3.0 起的方向是“工作台 → 小说项目 → 任务对话”，v3.5.0 完成工作台与旧 UI 收敛，v3.6.0 继续收敛 Canonical 能力契约。
 
@@ -149,7 +149,8 @@ v3.2.0  本地章节正文流水线与 DSH 稳定整合
 v3.2.1  发布资产 URL 热修复
 v3.5.0  对话式创作工作台与审阅收敛
 v3.6.0  智能体创作平台与长篇小说记忆层功能基线
-v3.6.1  SQLite 安全与 Runtime 固定模型恢复补丁（当前）
+v3.6.1  SQLite 安全与 Runtime 固定模型恢复补丁
+v3.6.2  Canonical 只读链路与桌面体验收口补丁（当前）
 ```
 
 ---
@@ -494,8 +495,8 @@ v3.0.0 参考资料 / 分层风格 / 混合语义 Memory ✅
 v3.0.0 migration 027 持久后台调度 / 三档无人值守策略 ✅
 v3.0.0 migration 028 多目标事务 / 跨章节批处理 / 势力与地点正式资产 ✅
 v3.6.0 Phase 1A-A/B/C/D Catalog / Facade / Projection / Manifest ✅
-v3.6.0 Canonical Agent exposure：0（未放行）
-R4 真实 Main Agent Runtime：NOT RELEASED
+Canonical Agent exposure：4 项只读 Tool 放行（health: working, exposure: stable）✅
+R4 真实 Main Agent Runtime：仓内只读闭环已证明；live 云端验收 IN PROGRESS（NOT VERIFIED）
 ```
 
 v3.0.0 默认边界仍是“Agent 自动规划和生成候选，正式副作用由用户审核”。只有用户显式选择 `full_auto` 且冻结预算、专家阈值、lease/CAS 和采用前目标复验全部通过时，调度器才可正式采用；夜间草稿和质量门禁策略不越过确认边界。多目标事务同样要求冻结候选与显式批准集合。
@@ -504,7 +505,7 @@ v3.0.0 默认边界仍是“Agent 自动规划和生成候选，正式副作用�
 
 ---
 
-## 7. v3.3.0+ 对话式并发创作工作台路线（当前版本：v3.6.1；功能基线：v3.6.0）
+## 7. v3.3.0+ 对话式并发创作工作台路线（当前版本：v3.6.2；功能基线：v3.6.0）
 
 v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6.0 版本基线完成 Agent 能力契约校准，同时保留后续放行门禁。
 
@@ -561,14 +562,30 @@ v3.3.0、v3.4.0 与 v3.5.0 的工作台、审阅和 UI 收敛已经落地；v3.6
 - 四项 blocker 关闭后，必须以独立 exposure 变更和回归证据放行只读 Tool，不能把 legacy DSH allowlist 改名冒充迁移；
 - exposure 门禁通过后才进入 **R4：真实 Main Agent Runtime 验证**；Writing SubAgent 与其他 SubAgent 继续后置。
 
-### v3.6.1：SQLite 安全与 Runtime 固定模型恢复补丁（当前版本）
+### v3.6.1：SQLite 安全与 Runtime 固定模型恢复补丁
 
 - bundled SQLite 升级到 3.51.3，并固定 WAL、外键、5000ms busy timeout 与 `synchronous=FULL`；
 - 历史任务继续冻结原模型身份，显式无效快照不再改探默认模型；
 - 新任务捕获当前设置模型，旧任务不可用时保留草稿并提供安全的新任务恢复路径；
+- 后台按冻结模型刷新 Runtime 目录时不得覆盖新任务创建器的前台模型投影；远程模型缺失本次应用会话凭据时探测与发送失败关闭并保留恢复入口，loopback 无密钥模型仍可用；
+- 结构化产物决定后的章节刷新与资产结算位于 `src/features/workbench/`，生产页面满足 500 行门禁；
 - Release tag 的复用工作流必须执行完整 Windows 桌面 E2E，补丁不放行 Canonical 或 Main Agent 新能力。
 
-详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 功能基线与 v3.6.1 安全补丁的真实能力边界，不授权后续版本或 R4 执行。
+### v3.6.2：Canonical 只读链路与桌面体验收口补丁（当前版本）
+
+- 会话模型凭据 DPAPI 持久化、产物卡片候选选项解析、中心页面与作品详情 UI 风格统一、AI 任务清空外键修复、作品详情新建异常修复；
+- Canonical catalog/manifest 四项只读 Tool 放行 `stable` + `working`；DSH `read` 回合在 start 契约、Worker 环境与工具授权三处一致注入 Canonical-only allowlist，Gateway `tools/list` 随之列出四项 Canonical 名；
+- 仓内 loopback E2E 证明只读回合零产物、零采用、章节字数不变、零凭据泄漏；R4 文档口径同步收口，live 云端验收仍 NOT VERIFIED，判定标准见架构文档 §14.5；
+- 不放行 Writing SubAgent / `chapter_write` 走 DSH；结构化写入维持 Safe Apply 失败关闭与显式审核不变式。
+
+### Next / R4：Canonical Catalog 已放行；仓内只读闭环已证明，live 云端验收进行中
+
+- **Canonical catalog/manifest exposure（已完成）**：4 项只读能力（`novel.read@1`, `structure.read@1`, `context.read@1`, `memory.search@1`）健康度 `working`，exposure `stable`，共享 Manifest 的 `modelVisibleToolIdentities` 长度为 4。v3.6.0 基线当时仍是 `catalog_only` + 可见数为 0，那是历史状态。
+- **R4 仓内只读闭环（已证明）**：`read` intent 请求 Canonical-only allowlist；宿主 `dsh_start_task_turn` 在 start 契约 `allowedTools`、Worker 环境 `ANS_ALLOWED_TOOLS` 与工具授权三处一致注入 Canonical 名，Gateway `tools/list` 随之列出 `novel.read / structure.read / context.read / memory.search`；Rust loopback E2E 经真实 Worker 启动链证明模型自主调用四个 Canonical 只读工具、零产物、零采用、章节字数不变、零凭据泄漏。候选与审计回合保持 legacy `ALLOWED_TOOLS` 不变；`mainAgentRuntimeService` 启发式脚手架不是 R4 证据。
+- **R4 live 云端验收（进行中，NOT VERIFIED）**：真实云端 Provider 只读回合尚未验收；判定标准（前置凭据、opt-in cloud profile 执行、通过条件与脱敏证据要求）见 `docs/architecture/conversational-creative-workbench.md` §14.5。标准满足前不得宣称 R4 VERIFIED。
+- **后续规划**：Writing SubAgent、`chapter_write` 走 DSH 与其余状态变更 SubAgent 继续后置；结构化写入继续维持 Safe Apply 失败关闭与显式审核不变式。
+
+详细产品、UI、运行时和数据边界见 [`architecture/conversational-creative-workbench.md`](architecture/conversational-creative-workbench.md)。当前文档记录 v3.6.0 功能基线、v3.6.1 安全补丁、Canonical catalog exposure、R4 仓内只读闭环证据，以及 live 云端验收仍未完成的真实边界。
 
 ---
 

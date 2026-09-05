@@ -76,6 +76,19 @@ test('classifies unsafe retry targets as persisted data failures', () => {
   }
 });
 
+test('classifies missing frozen-model credentials as a recoverable service failure', () => {
+  const failure = classifyWorkbenchFailure(
+    Object.assign(
+      new Error('当前任务固定模型 openai_compatible:gpt-5.6-luna 的本次会话凭据不可用。'),
+      { code: 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE' },
+    ),
+  );
+  assert.equal(failure.layer, 'service');
+  assert.equal(failure.code, 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE');
+  assert.match(failure.hint, /本次应用会话/);
+  assert.doesNotMatch(failure.hint, /API Key\s*[:=]/i);
+});
+
 test('classifies normalized transient Provider failures as retryable service problems', () => {
   for (const message of [
     'AI 调用失败：模型服务错误（502），请稍后重试。',

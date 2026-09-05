@@ -1,6 +1,6 @@
 # R4：真实 Main Agent Runtime 验证方案（Canonical exposure 后置设计稿）
 
-> **状态：WAITING_FOR_CANONICAL_EXPOSURE。** v3.6.0 候选已经完成 Phase 1A-A/B/C/D，但四个 Canonical Tool 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再通过独立 exposure 变更；此前不得执行本方案，也不得把它写成当前已授权下一步。
+> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 DSH 验证。** 四个 Canonical 只读 Tool 已是 `stable` + `working`，共享 Manifest 的 `modelVisibleToolIdentities` 长度为 4。不得再把 `catalog_only` 或空可见集合写成当前状态。Gateway 已能在 Canonical allowlist 下列出 `novel.read` 等；宿主启动仍注入 legacy `ALLOWED_TOOLS`。R4 仍未 VERIFIED：必须在真实 DSH 只读回合把 Canonical 名注入 Worker `tools/list` 并由模型自主调用。宿主 `mainAgentRuntimeService` 脚手架不能代替该证据。Writing SubAgent 与 `chapter_write` 不在本方案范围内。
 
 > 本文只定义 exposure 通过后的 R4 验证证据，不代表 R4 已通过。验证必须使用显式真实 Provider profile；默认 Mock E2E 不变。
 
@@ -189,18 +189,16 @@ npm run test:agent-runtime:real
 
 ## 结论
 
-当前不能执行 R4。Capability Catalog、Domain Facade、Canonical Projection、共享 portable Manifest 与宿主门禁已经完成，但四个 Canonical Tool 仍为 `catalog_only + partial`，模型可见数为 `0`。执行顺序固定为：
+Canonical catalog/manifest exposure 已完成。Gateway 与工作台 `read` contract 已按 Canonical-only allowlist 设计；宿主 `task_runtime` 仍注入 legacy `ALLOWED_TOOLS`，生产 `tools/list` 因此仍是 legacy 名。R4 尚未 VERIFIED。当前门禁是把 Canonical-only allowlist 真正注入 DSH 只读回合，而不是再等 catalog exposure。执行顺序固定为：
 
 ```text
-Phase 1A-A/B/C/D：Canonical 宿主基础 VERIFIED，visible=0
+Phase 1A-A/B/C/D：Canonical 宿主基础 VERIFIED
         ↓
-关闭 novel/structure/context/memory 四项 Facade blocker
+Canonical catalog/manifest exposure（4 项 stable，已完成）
         ↓
-独立 Canonical exposure 与 scoped Tool 投影验证
-        ↓
-R4：真实 Main Agent Runtime 验证（本方案）
+R4：真实 Main Agent Runtime 验证（本方案；当前门禁）
         ↓
 legacy runtime/入口隔离与 Writing SubAgent 后续门禁
 ```
 
-本文不创建新版本、不创建新任务书，也不授权 exposure、R4、提交、tag 或发布。
+本文不创建新版本、不把宿主脚手架写成 R4 VERIFIED，也不授权 Writing SubAgent、`chapter_write` 走 DSH、提交、tag 或发布。

@@ -15,6 +15,8 @@ import {
   hideContextReceiptInternals,
   resolveToolContextReceipt,
 } from './workbenchContextReceiptModel';
+import { ArtifactCandidateList } from './ArtifactCandidateList';
+import { isStructuredCandidateArtifactType } from './artifactCandidateOptions';
 import { TOOL_LABELS, statusLabel } from './workbenchHelpers';
 
 export { MemoryInspectorCard } from './WorkbenchMemoryInspectorCard';
@@ -303,6 +305,10 @@ export const ArtifactCard = memo(function ArtifactCard({
   );
   const canApply = supportsStructuredApply && !decision;
   const applyUnavailable = canApply && !structuredApplyAvailable;
+  const showStructuredOptions =
+    isStructuredCandidateArtifactType(artifact.artifactType) &&
+    Boolean(artifact.content) &&
+    !artifact.contentLoadError;
   return (
     <article
       className={`workbench-artifact-card ${isChapter ? 'is-chapter' : ''} ${
@@ -384,8 +390,15 @@ export const ArtifactCard = memo(function ArtifactCard({
           </details>
         </div>
       )}
+      {showStructuredOptions && artifact.content ? (
+        <ArtifactCandidateList
+          artifactType={artifact.artifactType}
+          content={artifact.content}
+          onDecide={canAct && onDecide ? (decision) => onDecide(decision) : undefined}
+        />
+      ) : null}
       <details onToggle={(event) => setContentExpanded(event.currentTarget.open)}>
-        <summary>查看候选内容</summary>
+        <summary>{showStructuredOptions ? '原始数据' : '查看候选内容'}</summary>
         {contentExpanded &&
           (artifact.contentLoadError ? (
             <div className="workbench-artifact-load-error" role="alert">

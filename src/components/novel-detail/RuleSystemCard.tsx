@@ -202,6 +202,12 @@ function RuleSystemCard({ ruleSystems, onSave, onDelete }: RuleSystemCardProps) 
         ),
       )}
 
+      {ruleSystems.length === 0 && !isNew && (
+        <div style={{ color: 'var(--color-text-muted)', fontSize: 14, fontStyle: 'italic' }}>
+          尚未添加规则体系，点击上方“新增规则”开始创建
+        </div>
+      )}
+
       {/* 新建表单 */}
       {isNew && (
         <RuleEditForm

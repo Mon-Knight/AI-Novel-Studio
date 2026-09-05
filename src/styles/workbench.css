@@ -1561,6 +1561,121 @@ div.workbench-tool-event,
   margin-top: 10px;
 }
 
+.workbench-artifact-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workbench-artifact-candidates-empty {
+  margin: 10px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workbench-artifact-candidate {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+}
+
+.workbench-artifact-candidate.is-deselected {
+  opacity: 0.62;
+}
+
+.workbench-artifact-candidate-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workbench-artifact-candidate-select {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.workbench-artifact-candidate-select input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.workbench-artifact-candidate-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.workbench-artifact-card p.workbench-artifact-candidate-summary,
+.workbench-artifact-card p.workbench-artifact-candidate-notes {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.workbench-artifact-card p.workbench-artifact-candidate-notes {
+  color: var(--color-text-muted);
+}
+
+.workbench-artifact-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.workbench-artifact-candidate-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.workbench-artifact-candidate-editor {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.workbench-artifact-candidate-editor label {
+  display: grid;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.workbench-artifact-candidate-editor input,
+.workbench-artifact-candidate-editor textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.workbench-artifact-candidate-editor input:focus,
+.workbench-artifact-candidate-editor textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
 .workbench-asset-readiness {
   width: 100%;
   max-width: var(--workbench-content-width);

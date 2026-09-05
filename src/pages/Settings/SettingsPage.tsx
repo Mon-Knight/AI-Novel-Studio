@@ -1,14 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import {
-  ArrowLeft,
-  Bot,
-  Database,
-  Palette,
-  Search,
-  Settings2,
-  ShieldCheck,
-  type LucideIcon,
-} from 'lucide-react';
+import { Bot, Database, Palette, Search, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { aiSettingsService } from '../../services/ai/aiClient';
 import type { AiSettings } from '../../types/ai';
@@ -29,28 +20,9 @@ import {
 } from '../../services/ai/localChapterModelHealthService';
 import DiagnosticsSettingsCard from '../../components/settings/DiagnosticsSettingsCard';
 import AppUpdateSettingsCard from '../../components/settings/AppUpdateSettingsCard';
+import { SettingsSidebar, type SettingsTabKey } from './SettingsSidebar';
 
-export type SettingsTabKey = 'general' | 'ai_models' | 'governance' | 'data' | 'diagnostics';
-
-interface SettingsNavTab {
-  key: SettingsTabKey;
-  label: string;
-  icon: LucideIcon;
-  description: string;
-}
-
-const SETTINGS_TABS: SettingsNavTab[] = [
-  { key: 'general', label: '常规与外观', icon: Palette, description: '主题、更新与基本偏好' },
-  {
-    key: 'ai_models',
-    label: 'AI 模型配置',
-    icon: Bot,
-    description: 'Cloud / Local / Gateway 模型',
-  },
-  { key: 'governance', label: '网关与流控', icon: ShieldCheck, description: '预算限制与安全合规' },
-  { key: 'data', label: '数据与存储', icon: Database, description: '数据库、备份与数据修复' },
-  { key: 'diagnostics', label: '诊断与关于', icon: Search, description: '系统诊断与软件信息' },
-];
+export type { SettingsTabKey };
 
 function SettingsPage() {
   const navigate = useNavigate();
@@ -236,85 +208,11 @@ function SettingsPage() {
       }}
     >
       {/* 1. 左侧分类导航栏 */}
-      <aside
-        className="settings-sidebar"
-        data-testid="settings-sidebar"
-        style={{
-          width: 220,
-          flexShrink: 0,
-          background: 'var(--color-bg-sidebar, #f8fafc)',
-          borderRight: '1px solid var(--color-border, #e2e8f0)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          padding: '20px 12px',
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 16,
-              fontWeight: 700,
-              padding: '0 8px 16px 8px',
-              color: 'var(--color-text-primary, #0f172a)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              borderBottom: '1px solid var(--color-border-light, #f1f5f9)',
-              marginBottom: 12,
-            }}
-          >
-            <Settings2 aria-hidden="true" size={18} strokeWidth={1.8} />
-            <span>设置中心</span>
-          </div>
-
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {SETTINGS_TABS.map((tab) => {
-              const isActive = activeTab === tab.key;
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  data-testid={`settings-nav-${tab.key}`}
-                  onClick={() => setActiveTab(tab.key)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '9px 12px',
-                    borderRadius: 6,
-                    border: 'none',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    fontWeight: isActive ? 600 : 400,
-                    background: isActive ? 'var(--color-primary-light, #e0e7ff)' : 'transparent',
-                    color: isActive
-                      ? 'var(--color-primary, #4338ca)'
-                      : 'var(--color-text-secondary, #475569)',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <Icon aria-hidden="true" size={18} strokeWidth={1.8} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          data-testid="settings-back-home-btn"
-          onClick={() => navigate('/')}
-          style={{ width: '100%', marginTop: 16 }}
-        >
-          <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
-          返回首页
-        </button>
-      </aside>
+      <SettingsSidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        onBackHome={() => navigate('/')}
+      />
 
       {/* 2. 右侧对应分类配置面板 */}
       <main
@@ -328,21 +226,46 @@ function SettingsPage() {
         }}
       >
         <div style={{ maxWidth: 760, margin: '0 auto' }}>
+          {message && (
+            <div
+              style={{
+                fontSize: 13,
+                padding: '8px 14px',
+                background: message.includes('失败')
+                  ? 'var(--color-error-bg, #fee2e2)'
+                  : 'var(--color-primary-light, #e0e7ff)',
+                borderRadius: 6,
+                marginBottom: 16,
+                color: message.includes('失败')
+                  ? 'var(--color-error, #b91c1c)'
+                  : 'var(--color-primary, #4338ca)',
+              }}
+            >
+              {message}
+            </div>
+          )}
+
           {/* 分类 1: 常规与外观 */}
           {activeTab === 'general' && (
             <div data-testid="settings-tab-pane-general">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 18,
-                  fontWeight: 700,
-                  marginBottom: 16,
-                }}
-              >
-                <Palette aria-hidden="true" size={18} strokeWidth={1.8} />
-                常规与外观偏好
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 20,
+                    fontWeight: 700,
+                    marginBottom: 6,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <Palette aria-hidden="true" size={20} strokeWidth={1.8} />
+                  常规与外观偏好
+                </div>
+                <div className="text-sm text-muted">
+                  配置桌面写作环境外观主题、版本更新以及基础交互偏好。
+                </div>
               </div>
               <AppearanceSettingsCard />
               <AppUpdateSettingsCard />
@@ -352,18 +275,24 @@ function SettingsPage() {
           {/* 分类 2: AI 模型与运行时 */}
           {activeTab === 'ai_models' && (
             <div data-testid="settings-tab-pane-ai-models">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 18,
-                  fontWeight: 700,
-                  marginBottom: 16,
-                }}
-              >
-                <Bot aria-hidden="true" size={18} strokeWidth={1.8} />
-                AI 模型服务与运行时
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 20,
+                    fontWeight: 700,
+                    marginBottom: 6,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <Bot aria-hidden="true" size={20} strokeWidth={1.8} />
+                  AI 模型服务与运行时
+                </div>
+                <div className="text-sm text-muted">
+                  配置云端 API、本地离线模型与网关服务，管理模型凭据与运行健康。
+                </div>
               </div>
               <AiRuntimeOverviewCard settings={settings} localHealthResult={localHealthResult} />
               <AiProviderSettingsCard
@@ -390,18 +319,24 @@ function SettingsPage() {
           {/* 分类 3: 网关与治理 */}
           {activeTab === 'governance' && (
             <div data-testid="settings-tab-pane-governance">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 18,
-                  fontWeight: 700,
-                  marginBottom: 16,
-                }}
-              >
-                <ShieldCheck aria-hidden="true" size={18} strokeWidth={1.8} />
-                AI 网关与流控治理
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 20,
+                    fontWeight: 700,
+                    marginBottom: 6,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <ShieldCheck aria-hidden="true" size={20} strokeWidth={1.8} />
+                  AI 网关与流控治理
+                </div>
+                <div className="text-sm text-muted">
+                  配置调用预算阈值、请求速率并发限制与安全审计规则。
+                </div>
               </div>
               <AiGovernanceSettingsCard
                 settings={settings}
@@ -416,18 +351,24 @@ function SettingsPage() {
           {/* 分类 4: 数据与存储 */}
           {activeTab === 'data' && (
             <div data-testid="settings-tab-pane-data">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 18,
-                  fontWeight: 700,
-                  marginBottom: 16,
-                }}
-              >
-                <Database aria-hidden="true" size={18} strokeWidth={1.8} />
-                本地数据与存储架构
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 20,
+                    fontWeight: 700,
+                    marginBottom: 6,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <Database aria-hidden="true" size={20} strokeWidth={1.8} />
+                  本地数据与存储架构
+                </div>
+                <div className="text-sm text-muted">
+                  管理 SQLite 数据库健康、自动备份机制与数据完整性修复。
+                </div>
               </div>
               <DataStorageSettingsCard />
             </div>
@@ -436,18 +377,24 @@ function SettingsPage() {
           {/* 分类 5: 诊断与关于 */}
           {activeTab === 'diagnostics' && (
             <div data-testid="settings-tab-pane-diagnostics">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 18,
-                  fontWeight: 700,
-                  marginBottom: 16,
-                }}
-              >
-                <Search aria-hidden="true" size={18} strokeWidth={1.8} />
-                系统诊断与关于
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 20,
+                    fontWeight: 700,
+                    marginBottom: 6,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <Search aria-hidden="true" size={20} strokeWidth={1.8} />
+                  系统诊断与关于
+                </div>
+                <div className="text-sm text-muted">
+                  查看运行环境诊断报告、系统组件版本与软件发行信息。
+                </div>
               </div>
               <DiagnosticsSettingsCard />
               <AboutSettingsCard />

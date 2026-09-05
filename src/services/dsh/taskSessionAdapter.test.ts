@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { TaskModelSnapshot, TaskRun } from '../../types/conversation';
+import type {
+  ModelToolCallingAttestation,
+  TaskModelSnapshot,
+  TaskRun,
+} from '../../types/conversation';
 import { taskConversationService } from '../conversation/taskConversationService';
 import {
   captureLocalConversationalSnapshot,
@@ -8,7 +12,12 @@ import {
   taskSessionAdapter,
   WORKBENCH_CONVERSATIONAL_REPLY,
 } from './taskSessionAdapter';
-import { dshTaskRuntimeService } from './taskRuntimeService';
+import {
+  CANONICAL_READ_ALLOWED_TOOLS,
+  dshTaskRuntimeService,
+  type DshTaskRuntimeInput,
+  type DshTaskRuntimeResult,
+} from './taskRuntimeService';
 
 test('local conversational replies record their real ANS source instead of the selected model', async () => {
   const originalCreateRun = taskConversationService.createRun;
@@ -167,6 +176,132 @@ test('native cancellation does not report success without a cancel-requested ack
       configurable: true,
       value: originalWindow,
     });
+  }
+});
+
+function mockTauriWindow(): PropertyDescriptor | undefined {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: {} },
+  });
+  return originalWindow;
+}
+
+function restoreWindow(originalWindow: PropertyDescriptor | undefined): void {
+  if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+  else Reflect.deleteProperty(globalThis, 'window');
+}
+
+const readModelSnapshot: TaskModelSnapshot = {
+  providerId: 'deepseek-official',
+  modelId: 'deepseek-chat',
+  runtimeMode: 'api',
+  capabilities: ['conversation_turn', 'tool_calling'],
+  options: {},
+  capturedAt: '2026-08-28T00:00:00.000Z',
+};
+
+const modelToolAttestation: ModelToolCallingAttestation = {
+  protocol: 'ans_model_tool_attestation_v1',
+  provider: 'deepseek-official',
+  model: 'deepseek-chat',
+  verified: true,
+  cached: false,
+  verifiedAt: '2026-08-28T00:00:00.000Z',
+  expiresAt: '2026-08-28T00:10:00.000Z',
+  cacheTtlMs: 600_000,
+  finishKind: 'tool-calls',
+  observedToolCalls: 1,
+};
+
+function fakeDshStartResult(
+  input: DshTaskRuntimeInput,
+  conversationId: string,
+): DshTaskRuntimeResult {
+  return {
+    run: {
+      runId: 'run-dsh-read',
+      conversationId,
+      turnId: input.turnId,
+      status: 'completed',
+      modelSnapshot: input.modelSnapshot,
+      workerId: 'worker-dsh',
+      createdAt: '2026-08-28T00:00:00.000Z',
+      updatedAt: '2026-08-28T00:00:01.000Z',
+    },
+    sessionId: 'session-dsh',
+    agentId: 'agent-dsh',
+    workerId: 'worker-dsh',
+    runtime: 'dsh-headless-persistent',
+    modelToolAttestation,
+  };
+}
+
+test('read-intent desktop startTurn requests Canonical-only DSH tools', async () => {
+  const originalWindow = mockTauriWindow();
+  const originalStart = dshTaskRuntimeService.start;
+  const captured: DshTaskRuntimeInput[] = [];
+  dshTaskRuntimeService.start = async (input) => {
+    captured.push(input);
+    return fakeDshStartResult(input, input.conversationId);
+  };
+
+  try {
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-read-canonical',
+      novelId: 'novel-1',
+      turnId: 'turn-read',
+      goal: '读取当前世界设定',
+      chapterId: 'ch-1',
+      modelSnapshot: readModelSnapshot,
+    });
+
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].taskKind, 'read');
+    assert.deepEqual([...captured[0].allowedTools!], [...CANONICAL_READ_ALLOWED_TOOLS]);
+    assert.deepEqual(
+      [...captured[0].allowedTools!],
+      ['novel.read', 'structure.read', 'context.read', 'memory.search'],
+    );
+    assert.equal(
+      captured[0].allowedTools?.some((tool) =>
+        ['novel.read_context', 'generate_chapter', 'expand_settings'].includes(tool),
+      ),
+      false,
+    );
+  } finally {
+    taskSessionAdapter.clear('conversation-read-canonical');
+    dshTaskRuntimeService.start = originalStart;
+    restoreWindow(originalWindow);
+  }
+});
+
+test('structured-write desktop startTurn keeps the legacy DSH allowlist', async () => {
+  const originalWindow = mockTauriWindow();
+  const originalStart = dshTaskRuntimeService.start;
+  const captured: DshTaskRuntimeInput[] = [];
+  dshTaskRuntimeService.start = async (input) => {
+    captured.push(input);
+    return fakeDshStartResult(input, input.conversationId);
+  };
+
+  try {
+    await taskSessionAdapter.startTurn({
+      conversationId: 'conversation-structured-legacy',
+      novelId: 'novel-1',
+      turnId: 'turn-structured',
+      goal: '为本作品生成角色候选',
+      modelSnapshot: readModelSnapshot,
+    });
+
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].taskKind, 'character_generate');
+    assert.equal(captured[0].allowedTools, undefined);
+  } finally {
+    taskSessionAdapter.clear('conversation-structured-legacy');
+    dshTaskRuntimeService.start = originalStart;
+    restoreWindow(originalWindow);
   }
 });
 

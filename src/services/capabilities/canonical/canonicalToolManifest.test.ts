@@ -41,7 +41,12 @@ test('shared artifact is the portable, immutable source for both manifest projec
   assert.equal(first.projectionVersion, '1');
   assert.equal(first.canonicalization, CANONICAL_TOOL_MANIFEST_CANONICALIZATION);
   assert.match(first.projectionHash, /^[0-9a-f]{64}$/);
-  assert.deepEqual(first.modelVisibleToolIdentities, []);
+  assert.deepEqual(first.modelVisibleToolIdentities, [
+    'context.read@1',
+    'memory.search@1',
+    'novel.read@1',
+    'structure.read@1',
+  ]);
   assert.deepEqual(
     first.tools.map((tool) => tool.id),
     ['context.read', 'memory.search', 'novel.read', 'structure.read'],
@@ -66,9 +71,9 @@ test('shared artifact is the portable, immutable source for both manifest projec
   for (const tool of first.tools) {
     assert.deepEqual(Object.keys(tool).sort(), expectedToolKeys);
     assert.equal(tool.id, tool.name);
-    assert.equal(tool.exposure, 'catalog_only');
-    assert.equal(tool.projectionState, 'catalog_only');
-    assert.equal(tool.health, 'partial');
+    assert.equal(tool.exposure, 'stable');
+    assert.equal(tool.projectionState, 'stable');
+    assert.equal(tool.health, 'working');
     for (const forbidden of ['facade', 'executor', 'evidence', 'legacyAliases']) {
       assert.equal(forbidden in tool, false, `${tool.id} leaked ${forbidden}`);
     }
@@ -85,8 +90,8 @@ test('shared artifact is the portable, immutable source for both manifest projec
   const agentManifest = await getCanonicalAgentManifest();
   assert.equal(agentManifest.projectionHash, reread.projectionHash);
   assert.equal(agentManifest.canonicalization, reread.canonicalization);
-  assert.deepEqual(agentManifest.tools, []);
-  assert.deepEqual(await listCanonicalToolsForAgent(), []);
+  assert.equal(agentManifest.tools.length, 4);
+  assert.equal((await listCanonicalToolsForAgent()).length, 4);
 });
 
 test('shared artifact rejects shape, hash, ordering and safe-integer violations', async (t) => {
@@ -144,9 +149,7 @@ test('shared artifact rejects catalog, binding and explicit visibility drift', a
 
   await t.test('visible identities do not match stable stable working derivation', async () => {
     const artifact = mutableArtifact();
-    artifact.tools[0].exposure = 'stable';
-    artifact.tools[0].projectionState = 'stable';
-    artifact.tools[0].health = 'working';
+    artifact.modelVisibleToolIdentities = [];
     await refreshHash(artifact);
     await assert.rejects(
       validateCanonicalToolManifestArtifact(artifact, descriptors),

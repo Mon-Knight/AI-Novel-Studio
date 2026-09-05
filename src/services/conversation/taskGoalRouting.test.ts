@@ -49,11 +49,11 @@ test('DSH turn contracts freeze the candidate sink and required grounding reads'
   });
   assert.deepEqual(buildDshTurnContract('读取当前世界设定', 'ch-1'), {
     taskKind: 'read',
-    requiredReadTools: ['novel.read_context'],
+    requiredReadTools: ['novel.read'],
   });
   assert.deepEqual(buildDshTurnContract('风格分析当前章节', 'ch-1'), {
     taskKind: 'read',
-    requiredReadTools: ['novel.read_context', 'chapter.read_outline'],
+    requiredReadTools: ['novel.read', 'structure.read'],
   });
 });
 
@@ -67,7 +67,7 @@ test('project asset reads are grounded without broadening generic creative advic
   for (const goal of groundedGoals) {
     assert.deepEqual(buildDshTurnContract(goal, 'ch-1'), {
       taskKind: 'read',
-      requiredReadTools: ['novel.read_context'],
+      requiredReadTools: ['novel.read'],
     });
   }
 
@@ -89,19 +89,19 @@ test('project asset reads are grounded without broadening generic creative advic
   });
   assert.deepEqual(buildDshTurnContract('风格分析当前章节', 'ch-1'), {
     taskKind: 'read',
-    requiredReadTools: ['novel.read_context', 'chapter.read_outline'],
+    requiredReadTools: ['novel.read', 'structure.read'],
   });
   assert.deepEqual(buildDshTurnContract('分析第二章的人物动机', 'ch-1'), {
     taskKind: 'read',
-    requiredReadTools: ['novel.read_context', 'chapter.read_outline', 'get_character_states'],
+    requiredReadTools: ['novel.read', 'structure.read', 'context.read'],
   });
   assert.deepEqual(buildDshTurnContract('查看主角设定', 'ch-1'), {
     taskKind: 'read',
-    requiredReadTools: ['novel.read_context', 'get_character_states'],
+    requiredReadTools: ['novel.read', 'context.read'],
   });
   assert.deepEqual(buildDshTurnContract('分析本章伏笔是否回收', 'ch-1'), {
     taskKind: 'read',
-    requiredReadTools: ['novel.read_context', 'chapter.read_outline', 'search_memory'],
+    requiredReadTools: ['novel.read', 'structure.read', 'memory.search'],
   });
 });
 
@@ -409,6 +409,91 @@ test('chapter story facts cannot override an explicit generation directive', () 
   assert.equal(selectCandidateTool(goal, 'ch-2')?.name, 'generate_chapter');
   assert.equal(selectCandidateTool('请改写本章完整正文，修复节奏', 'ch-2')?.name, 'polish_chapter');
   assert.equal(selectCandidateTool('请生成本章正文，再润色语句', 'ch-2')?.name, 'generate_chapter');
+});
+
+test('bilingual golden cases keep chapter, structured, audit, read and greeting intents stable', () => {
+  const cases: Array<{
+    goal: string;
+    intent: ReturnType<typeof classifyTaskIntent>;
+    tool?: ReturnType<typeof selectCandidateTool> extends infer T ? T : never;
+    conversational?: boolean;
+  }> = [
+    {
+      goal: '生成下一章',
+      intent: 'chapter_write',
+      tool: { name: 'generate_chapter', artifactType: 'chapter_text' },
+    },
+    {
+      goal: 'write the next chapter',
+      intent: 'chapter_write',
+      tool: { name: 'generate_chapter', artifactType: 'chapter_text' },
+    },
+    {
+      goal: 'generate chapter 2',
+      intent: 'chapter_write',
+      tool: { name: 'generate_chapter', artifactType: 'chapter_text' },
+    },
+    {
+      goal: 'continue writing',
+      intent: 'chapter_write',
+      tool: { name: 'generate_chapter', artifactType: 'chapter_text' },
+    },
+    {
+      goal: '润色本章正文',
+      intent: 'chapter_write',
+      tool: { name: 'polish_chapter', artifactType: 'chapter_text' },
+    },
+    {
+      goal: 'polish this chapter',
+      intent: 'chapter_write',
+      tool: { name: 'polish_chapter', artifactType: 'chapter_text' },
+    },
+    {
+      goal: '为本作品生成角色候选',
+      intent: 'structured_write',
+      tool: { name: 'generate_characters', artifactType: 'character_candidates' },
+    },
+    {
+      goal: 'generate character candidates',
+      intent: 'structured_write',
+      tool: { name: 'generate_characters', artifactType: 'character_candidates' },
+    },
+    {
+      goal: 'generate outline',
+      intent: 'structured_write',
+      tool: { name: 'generate_outline', artifactType: 'outline' },
+    },
+    {
+      goal: '审计人物一致性',
+      intent: 'audit',
+      tool: { name: 'check_quality', artifactType: 'quality_report' },
+    },
+    {
+      goal: 'audit character consistency',
+      intent: 'structured_write',
+      tool: { name: 'generate_characters', artifactType: 'character_candidates' },
+    },
+    {
+      goal: 'check quality',
+      intent: 'audit',
+      tool: { name: 'check_quality', artifactType: 'quality_report' },
+    },
+    { goal: '读取当前世界设定', intent: 'read' },
+    { goal: 'read the current world setting', intent: 'read' },
+    { goal: 'search memory', intent: 'read' },
+    { goal: '你好', intent: 'read', conversational: true },
+    { goal: 'hello', intent: 'read', conversational: true },
+    { goal: 'hi', intent: 'read', conversational: true },
+    { goal: '你能做什么', intent: 'read', conversational: true },
+    { goal: 'what can you do', intent: 'read' },
+    { goal: 'thanks', intent: 'read', conversational: true },
+  ];
+
+  for (const item of cases) {
+    assert.equal(classifyTaskIntent(item.goal), item.intent, item.goal);
+    assert.equal(isConversationalGoal(item.goal), Boolean(item.conversational), item.goal);
+    assert.deepEqual(selectCandidateTool(item.goal, 'ch-1'), item.tool, item.goal);
+  }
 });
 
 test('write tasks on the same novel warn without blocking concurrency', () => {

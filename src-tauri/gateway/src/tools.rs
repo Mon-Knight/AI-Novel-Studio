@@ -1,5 +1,10 @@
 //! Novel-domain read tools plus a candidate-only validation sink.
 //!
+//! Canonical MCP read names (novel.read, structure.read, context.read,
+//! memory.search) are disjoint from the legacy catalog. They are listed only
+//! when the task allowlist contains a Canonical name, and they dispatch to the
+//! existing read implementations without rewriting SQL.
+//!
 //! SQL and column semantics mirror the app's Rust schema (`src-tauri/src/db.rs`,
 //! `src/outline_commands.rs`, `src/migrations.rs`) and the read semantics of
 //! the production tool registry (`novel.read_context@1`, `chapter.read_*@1`,
@@ -16,6 +21,7 @@ pub const TOOL_VERSION: &str = "v1";
 
 const ID_MAX: usize = 160;
 const QUERY_MAX: usize = 2000;
+const CANONICAL_QUERY_MAX: usize = 1000;
 const CANDIDATE_TEXT_MAX: usize = 400_000;
 const CANDIDATE_ITEM_MAX: usize = 200;
 const CANDIDATE_NAME_MAX: usize = 240;
@@ -154,6 +160,17 @@ fn resolve_allowed_tools(
 
 fn allowed_tools_from_env() -> Result<Option<HashSet<String>>, String> {
     resolve_allowed_tools(std::env::var("ANS_ALLOWED_TOOLS"))
+}
+
+fn is_canonical_read_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "novel.read" | "structure.read" | "context.read" | "memory.search"
+    )
+}
+
+fn allowlist_selects_canonical(allowed: &HashSet<String>) -> bool {
+    allowed.iter().any(|name| is_canonical_read_tool(name))
 }
 
 fn canonical_policy_word_count(value: &str) -> Option<u64> {
@@ -306,7 +323,11 @@ fn bind_novel_candidate_target(
 
 /// The `tools/list` payload.
 pub fn tool_list() -> Vec<Value> {
-    let tools = vec![
+    list_tools_for_allowlist(allowed_tools_from_env())
+}
+
+fn legacy_tool_catalog() -> Vec<Value> {
+    vec![
         json!({
             "name": "novel.read_context",
             "description": "读取小说上下文与章节结构。只读。",
@@ -467,8 +488,78 @@ pub fn tool_list() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
-    ];
-    filter_tool_list(tools, allowed_tools_from_env())
+    ]
+}
+
+fn canonical_tool_catalog() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "novel.read",
+            "description": "读取当前作品及其可供创作使用的基础设定摘要。只读。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX}
+                },
+                "required": ["novelId"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "structure.read",
+            "description": "读取卷、章节和已激活的大纲版本及其修订信息。只读。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX}
+                },
+                "required": ["novelId", "chapterId"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "context.read",
+            "description": "读取已采用正文、章节总结和上下文记录的可审计快照。只读。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "chapterId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "query": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": CANONICAL_QUERY_MAX,
+                        "description": "可选的记忆检索词"
+                    }
+                },
+                "required": ["novelId", "chapterId"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "memory.search",
+            "description": "在当前作品已采用事实中检索带来源的记忆片段。只读。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "novelId": {"type": "string", "minLength": 1, "maxLength": ID_MAX},
+                    "query": {"type": "string", "minLength": 1, "maxLength": CANONICAL_QUERY_MAX}
+                },
+                "required": ["novelId", "query"],
+                "additionalProperties": false
+            }
+        }),
+    ]
+}
+
+fn list_tools_for_allowlist(allowed_tools: Result<Option<HashSet<String>>, String>) -> Vec<Value> {
+    match allowed_tools {
+        Ok(Some(allowed)) if allowlist_selects_canonical(&allowed) => {
+            filter_tool_list(canonical_tool_catalog(), Ok(Some(allowed)))
+        }
+        other => filter_tool_list(legacy_tool_catalog(), other),
+    }
 }
 
 fn filter_tool_list(
@@ -510,12 +601,17 @@ fn call_tool_with_security_context(
         return Err("suspicious credential-like input rejected".to_string());
     }
     if let Some(allowed) = &security_context.allowed_tools {
-        if !allowed.contains(name) {
+        let allowed_for_task = if allowlist_selects_canonical(allowed) {
+            is_canonical_read_tool(name) && allowed.contains(name)
+        } else {
+            allowed.contains(name)
+        };
+        if !allowed_for_task {
             return Err(format!("tool not allowed for this task: {}", name));
         }
     }
     let scoped_arguments = match name {
-        "search_memory" => Some(bind_search_memory_target(
+        "search_memory" | "memory.search" => Some(bind_search_memory_target(
             security_context.scope.as_ref(),
             arguments,
         )?),
@@ -527,12 +623,12 @@ fn call_tool_with_security_context(
     let arguments = scoped_arguments.as_ref().unwrap_or(arguments);
     validate_task_scope(security_context.scope.as_ref(), arguments)?;
     match name {
-        "novel.read_context" => get_metadata(connection, arguments, false),
+        "novel.read" | "novel.read_context" => get_metadata(connection, arguments, false),
         "get_metadata" => get_metadata(connection, arguments, true),
-        "chapter.read_outline" | "get_chapter_context" => {
+        "structure.read" | "context.read" | "chapter.read_outline" | "get_chapter_context" => {
             get_chapter_context(connection, arguments)
         }
-        "search_memory" => search_memory(connection, arguments),
+        "memory.search" | "search_memory" => search_memory(connection, arguments),
         "get_character_states" => get_character_states(connection, arguments),
         "generate_chapter" => {
             generate_chapter(connection, arguments, security_context.candidate_policy)
@@ -5922,5 +6018,299 @@ mod tests {
                 .expect("summary candidate should validate")["artifactType"],
             "chapter_summary"
         );
+    }
+
+    fn canonical_allowlist() -> HashSet<String> {
+        HashSet::from([
+            "novel.read".to_string(),
+            "structure.read".to_string(),
+            "context.read".to_string(),
+            "memory.search".to_string(),
+        ])
+    }
+
+    fn canonical_security_context() -> TaskSecurityContext {
+        TaskSecurityContext {
+            allowed_tools: Some(canonical_allowlist()),
+            scope: None,
+            candidate_policy: None,
+        }
+    }
+
+    fn listed_names(tools: &[Value]) -> Vec<&str> {
+        tools
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+            .collect()
+    }
+
+    #[test]
+    fn unrestricted_tool_list_stays_legacy_and_omits_canonical_names() {
+        let tools = tool_list();
+        let names = listed_names(&tools);
+        assert!(names.contains(&"novel.read_context"));
+        assert!(names.contains(&"chapter.read_outline"));
+        assert!(names.contains(&"search_memory"));
+        assert!(names.contains(&"generate_chapter"));
+        for canonical in [
+            "novel.read",
+            "structure.read",
+            "context.read",
+            "memory.search",
+        ] {
+            assert!(
+                !names.contains(&canonical),
+                "unrestricted list must not replace legacy names with {canonical}"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_only_allowlist_omits_legacy_from_tool_list() {
+        let listed = list_tools_for_allowlist(Ok(Some(canonical_allowlist())));
+        assert_eq!(
+            listed_names(&listed),
+            vec![
+                "novel.read",
+                "structure.read",
+                "context.read",
+                "memory.search"
+            ]
+        );
+        for legacy in [
+            "novel.read_context",
+            "chapter.read_outline",
+            "get_chapter_context",
+            "search_memory",
+            "generate_chapter",
+            "generate_outline",
+            "get_metadata",
+        ] {
+            assert!(
+                listed
+                    .iter()
+                    .all(|tool| tool.get("name").and_then(Value::as_str) != Some(legacy)),
+                "canonical-only list leaked legacy name {legacy}"
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_allowlist_with_any_canonical_name_lists_only_allowed_canonical_tools() {
+        let listed = list_tools_for_allowlist(Ok(Some(HashSet::from([
+            "novel.read".to_string(),
+            "generate_chapter".to_string(),
+            "search_memory".to_string(),
+        ]))));
+        assert_eq!(listed_names(&listed), vec!["novel.read"]);
+    }
+
+    #[test]
+    fn legacy_candidate_allowlist_keeps_current_legacy_list_behavior() {
+        let listed = list_tools_for_allowlist(Ok(Some(HashSet::from([
+            "generate_chapter".to_string(),
+            "novel.read_context".to_string(),
+            "search_memory".to_string(),
+        ]))));
+        let names = listed_names(&listed);
+        assert_eq!(
+            names,
+            vec!["novel.read_context", "generate_chapter", "search_memory"]
+        );
+        for canonical in [
+            "novel.read",
+            "structure.read",
+            "context.read",
+            "memory.search",
+        ] {
+            assert!(!names.contains(&canonical));
+        }
+    }
+
+    #[test]
+    fn canonical_read_names_dispatch_to_existing_read_implementations() {
+        let connection = fixture_connection();
+        let novel_arguments = json!({"novelId": "novel-1"});
+        let chapter_arguments = json!({"novelId": "novel-1", "chapterId": "chapter-1"});
+        let memory_arguments = json!({"novelId": "novel-1", "query": "雾城"});
+
+        let novel = call_tool(&connection, "novel.read", &novel_arguments)
+            .expect("novel.read should dispatch");
+        let read_context = call_tool(&connection, "novel.read_context", &novel_arguments)
+            .expect("legacy novel.read_context should still dispatch");
+        assert_eq!(novel, read_context);
+        assert_eq!(novel["data"]["novel"]["id"], "novel-1");
+
+        let structure = call_tool(&connection, "structure.read", &chapter_arguments)
+            .expect("structure.read should dispatch");
+        let outline = call_tool(&connection, "chapter.read_outline", &chapter_arguments)
+            .expect("legacy chapter.read_outline should still dispatch");
+        assert_eq!(structure, outline);
+
+        let context = call_tool(
+            &connection,
+            "context.read",
+            &json!({
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "query": "雾城"
+            }),
+        )
+        .expect("context.read should accept an optional query");
+        let chapter_context = call_tool(&connection, "get_chapter_context", &chapter_arguments)
+            .expect("legacy get_chapter_context should still dispatch");
+        assert_eq!(context, chapter_context);
+
+        let memory = call_tool(&connection, "memory.search", &memory_arguments)
+            .expect("memory.search should dispatch");
+        let search = call_tool(&connection, "search_memory", &memory_arguments)
+            .expect("legacy search_memory should still dispatch");
+        assert_eq!(memory, search);
+    }
+
+    #[test]
+    fn canonical_only_allowlist_rejects_legacy_aliases() {
+        let connection = fixture_connection();
+        for name in [
+            "novel.read_context",
+            "chapter.read_outline",
+            "get_chapter_context",
+            "search_memory",
+            "generate_chapter",
+            "generate_outline",
+        ] {
+            let error = call_tool_with_security_context(
+                &connection,
+                name,
+                &json!({
+                    "novelId": "novel-1",
+                    "chapterId": "chapter-1",
+                    "query": "雾城",
+                    "candidateText": "候选正文足够长",
+                    "candidate": {"title": "大纲", "content": "内容"}
+                }),
+                Ok(canonical_security_context()),
+            )
+            .expect_err("legacy alias must fail closed under a canonical-only allowlist");
+            assert!(
+                error.contains("tool not allowed") || error.contains("unknown tool"),
+                "{name} should fail closed, got {error}"
+            );
+        }
+
+        call_tool_with_security_context(
+            &connection,
+            "novel.read",
+            &json!({"novelId": "novel-1"}),
+            Ok(canonical_security_context()),
+        )
+        .expect("canonical names on a canonical-only allowlist must still dispatch");
+    }
+
+    #[test]
+    fn canonical_read_tools_fail_closed_without_required_ids() {
+        let connection = fixture_connection();
+        let novel_error = call_tool(&connection, "novel.read", &json!({}))
+            .expect_err("novel.read requires novelId");
+        assert!(novel_error.contains("novelId"));
+
+        let structure_error = call_tool(
+            &connection,
+            "structure.read",
+            &json!({"novelId": "novel-1"}),
+        )
+        .expect_err("structure.read requires chapterId");
+        assert!(structure_error.contains("chapterId"));
+
+        let context_error = call_tool(&connection, "context.read", &json!({"novelId": "novel-1"}))
+            .expect_err("context.read requires chapterId");
+        assert!(context_error.contains("chapterId"));
+
+        let memory_error = call_tool(&connection, "memory.search", &json!({"novelId": "novel-1"}))
+            .expect_err("memory.search requires query");
+        assert!(memory_error.contains("query"));
+    }
+
+    #[test]
+    fn canonical_read_tools_keep_secret_guard_and_task_scope() {
+        let connection = fixture_connection();
+        let secret_error = call_tool_with_security_context(
+            &connection,
+            "memory.search",
+            &json!({
+                "novelId": "novel-1",
+                "query": "Bearer abcdef"
+            }),
+            Ok(canonical_security_context()),
+        )
+        .expect_err("credential-like canonical input must be rejected");
+        assert!(secret_error.contains("suspicious credential-like input rejected"));
+
+        let scope_error = call_tool_with_security_context(
+            &connection,
+            "novel.read",
+            &json!({"novelId": "novel-cross-scope"}),
+            Ok(TaskSecurityContext {
+                allowed_tools: Some(canonical_allowlist()),
+                scope: Some(TaskScope {
+                    novel_id: "novel-1".to_string(),
+                    chapter_id: None,
+                }),
+                candidate_policy: None,
+            }),
+        )
+        .expect_err("canonical reads must honor task novel scope");
+        assert_eq!(scope_error, TASK_NOVEL_SCOPE_REJECTED);
+
+        let bound = call_tool_with_security_context(
+            &connection,
+            "memory.search",
+            &json!({"novelId": "novel-1", "query": "雾城"}),
+            Ok(TaskSecurityContext {
+                allowed_tools: Some(canonical_allowlist()),
+                scope: Some(TaskScope {
+                    novel_id: "novel-1".to_string(),
+                    chapter_id: Some("chapter-1".to_string()),
+                }),
+                candidate_policy: None,
+            }),
+        )
+        .expect("memory.search should bind the authoritative chapter target");
+        assert_eq!(bound["ok"], true);
+    }
+
+    #[test]
+    fn canonical_schemas_freeze_required_fields_and_optional_context_query() {
+        let tools = canonical_tool_catalog();
+        let novel = listed_tool(&tools, "novel.read");
+        assert_eq!(novel["inputSchema"]["required"], json!(["novelId"]));
+        assert!(novel["inputSchema"]["properties"]
+            .get("chapterId")
+            .is_none());
+
+        let structure = listed_tool(&tools, "structure.read");
+        assert_eq!(
+            structure["inputSchema"]["required"],
+            json!(["novelId", "chapterId"])
+        );
+
+        let context = listed_tool(&tools, "context.read");
+        assert_eq!(
+            context["inputSchema"]["required"],
+            json!(["novelId", "chapterId"])
+        );
+        assert_eq!(
+            context["inputSchema"]["properties"]["query"]["maxLength"],
+            CANONICAL_QUERY_MAX
+        );
+
+        let memory = listed_tool(&tools, "memory.search");
+        assert_eq!(
+            memory["inputSchema"]["required"],
+            json!(["novelId", "query"])
+        );
+        assert!(memory["name"]
+            .as_str()
+            .is_some_and(|name| !name.contains('@')));
     }
 }

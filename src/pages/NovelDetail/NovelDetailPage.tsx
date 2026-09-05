@@ -1,6 +1,6 @@
 import { appLogger } from '../../services/observability/appLogger';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, BookOpenText, PenLine } from 'lucide-react';
+import { ArrowLeft, BookOpenText, Compass, FileText, PenLine, Sparkles } from 'lucide-react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { novelService } from '../../services/novels/novelService';
 import { settingRepository } from '../../services/database/settingRepository';
@@ -17,7 +17,7 @@ import ContextOverviewCard from '../../components/novel-card/ContextOverviewCard
 import ExportCard from '../../components/novel-card/ExportCard';
 import PanelErrorBoundary from '../../components/common/PanelErrorBoundary';
 import type { Novel } from '../../types/novel';
-import type { WorldSetting, RuleSystem } from '../../types/setting';
+import type { WorldSetting, RuleSystem, RuleCategory } from '../../types/setting';
 import type { Protagonist } from '../../types/protagonist';
 import { formatNumber } from '../../utils/format';
 import { describeUnknownError } from '../../utils/errorMessage';
@@ -59,7 +59,6 @@ function NovelDetailPage() {
     setLoading(true);
     setError('');
     try {
-      // 分阶段加载：先加载核心数据，再加载次要数据
       const n = await novelService.getNovelById(novelId);
       if (!n) {
         setError('作品未找到');
@@ -67,9 +66,8 @@ function NovelDetailPage() {
         return;
       }
       setNovel(n);
-      setLoading(false); // 核心数据完成，立即渲染
+      setLoading(false);
 
-      // 次要数据独立加载，失败不阻塞页面
       Promise.all([
         settingRepository.getWorldSettings(novelId),
         settingRepository.getRuleSystems(novelId),
@@ -122,15 +120,24 @@ function NovelDetailPage() {
     targetWordCount: number;
   }) => {
     if (!novelId) return;
-    const updated = await novelService.updateNovel(novelId, {
-      title: data.title,
-      subtitle: data.subtitle,
-      genre: data.genre,
-      description: data.description,
-      status: data.status as Novel['status'],
-      targetWordCount: data.targetWordCount,
-    });
-    if (updated) setNovel(updated);
+    try {
+      const updated = await novelService.updateNovel(novelId, {
+        title: data.title,
+        subtitle: data.subtitle,
+        genre: data.genre,
+        description: data.description,
+        status: data.status as Novel['status'],
+        targetWordCount: data.targetWordCount,
+      });
+      if (updated) setNovel(updated);
+    } catch (e: unknown) {
+      appLogger.captureError('NOVEL_DETAIL_SAVE_BASIC_FAILED', e, { novelId });
+      await showError({
+        title: '保存基本信息失败',
+        message: describeUnknownError(e, '保存基本信息失败'),
+      });
+      throw e;
+    }
   };
 
   const handleSaveWorldSetting = async (
@@ -138,55 +145,91 @@ function NovelDetailPage() {
     data: { title: string; content: string },
   ) => {
     if (!novelId) return;
-    const result = await settingRepository.saveWorldSetting(id, {
-      novelId,
-      title: data.title,
-      content: data.content,
-    });
-    setWorldSettings((prev) => {
-      const idx = prev.findIndex((s) => s.id === result.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = result;
-        return next;
-      }
-      return [...prev, result];
-    });
+    try {
+      const result = await settingRepository.saveWorldSetting(id, {
+        novelId,
+        title: data.title,
+        content: data.content,
+      });
+      setWorldSettings((prev) => {
+        const idx = prev.findIndex((s) => s.id === result.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = result;
+          return next;
+        }
+        return [result, ...prev];
+      });
+    } catch (e: unknown) {
+      appLogger.captureError('NOVEL_DETAIL_SAVE_SETTING_FAILED', e, { novelId });
+      await showError({
+        title: '保存世界观设定失败',
+        message: describeUnknownError(e, '保存世界观设定失败'),
+      });
+      throw e;
+    }
   };
 
   const handleSaveRuleSystem = async (
     id: string | null,
-    data: { title: string; category?: string; content: string; forbiddenRules?: string },
+    data: {
+      title: string;
+      category?: string;
+      content: string;
+      forbiddenRules?: string;
+    },
   ) => {
     if (!novelId) return;
-    const result = await settingRepository.saveRuleSystem(id, {
-      novelId,
-      title: data.title,
-      category: data.category as RuleSystem['category'],
-      content: data.content,
-      forbiddenRules: data.forbiddenRules,
-    });
-    setRuleSystems((prev) => {
-      const idx = prev.findIndex((r) => r.id === result.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = result;
-        return next;
-      }
-      return [...prev, result];
-    });
+    try {
+      const result = await settingRepository.saveRuleSystem(id, {
+        novelId,
+        title: data.title,
+        category: data.category as RuleCategory | undefined,
+        content: data.content,
+        forbiddenRules: data.forbiddenRules,
+      });
+      setRuleSystems((prev) => {
+        const idx = prev.findIndex((s) => s.id === result.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = result;
+          return next;
+        }
+        return [result, ...prev];
+      });
+    } catch (e: unknown) {
+      appLogger.captureError('NOVEL_DETAIL_SAVE_RULE_FAILED', e, { novelId });
+      await showError({
+        title: '保存法则体系失败',
+        message: describeUnknownError(e, '保存法则体系失败'),
+      });
+      throw e;
+    }
   };
 
   const handleDeleteRuleSystem = async (id: string) => {
-    await settingRepository.deleteRuleSystem(id);
-    setRuleSystems((prev) => prev.filter((r) => r.id !== id));
+    if (!novelId) return;
+    try {
+      await settingRepository.deleteRuleSystem(id);
+      const reloaded = await settingRepository.getRuleSystems(novelId);
+      setRuleSystems(reloaded);
+    } catch (e: unknown) {
+      appLogger.captureError('NOVEL_DETAIL_DELETE_RULE_FAILED', e, { novelId });
+      await showError({
+        title: '删除法则体系失败',
+        message: describeUnknownError(e, '删除法则体系失败'),
+      });
+      throw e;
+    }
   };
 
-  if (loading) {
+  if (loading && !novel) {
     return (
       <div className="novel-detail-page">
-        <div className="flex-center" style={{ height: '100%' }}>
-          <span className="text-secondary">加载中...</span>
+        <div
+          style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}
+        >
+          <span className="text-secondary">正在载入作品详情...</span>
         </div>
       </div>
     );
@@ -195,10 +238,17 @@ function NovelDetailPage() {
   if (error || !novel) {
     return (
       <div className="novel-detail-page">
-        <div className="flex-center" style={{ height: '100%', flexDirection: 'column', gap: 16 }}>
-          <BookOpenText aria-hidden="true" size={48} strokeWidth={1.8} style={{ opacity: 0.3 }} />
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 12,
+            padding: 40,
+          }}
+        >
           <span className="text-secondary">{error || '作品未找到'}</span>
-          <button className="btn btn-secondary" onClick={() => navigate('/')}>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate('/')}>
             返回首页
           </button>
         </div>
@@ -208,14 +258,18 @@ function NovelDetailPage() {
 
   return (
     <div className="novel-detail-page" data-project-id={novel.id} data-project-name={novel.title}>
+      {/* 紧凑详情头部 */}
       <div className="detail-header">
         <div className="detail-cover">
-          <BookOpenText aria-hidden="true" size={40} strokeWidth={1.8} />
+          <BookOpenText aria-hidden="true" size={32} strokeWidth={1.8} />
         </div>
         <div className="detail-info">
-          <div className="detail-title">{novel.title}</div>
-          <span className="detail-genre">{novel.genre || '未分类'}</span>
-          <div className="detail-desc">{novel.description || '暂无简介'}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className="detail-title">{novel.title}</div>
+            <span className="detail-genre">{novel.genre || '未分类'}</span>
+          </div>
+          <div className="detail-desc">{novel.description || '暂无作品简介'}</div>
+
           <div className="detail-progress">
             <div className="detail-progress-item">
               <div className="detail-progress-value">{formatNumber(novel.totalWordCount)}</div>
@@ -234,83 +288,70 @@ function NovelDetailPage() {
               <div className="detail-progress-label">状态</div>
             </div>
           </div>
+
           <div className="detail-actions">
-            {returnToWorkbench && (
+            {returnToWorkbench ? (
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary btn-sm"
                 data-testid="novel-detail-return-workbench"
                 onClick={() => navigate('/')}
               >
-                <ArrowLeft aria-hidden="true" size={15} strokeWidth={1.8} />
-                返回创作工作台
+                <ArrowLeft aria-hidden="true" size={13} strokeWidth={1.8} />
+                返回工作台
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                data-testid="novel-detail-back-novels"
+                onClick={() => navigate('/novels')}
+              >
+                <ArrowLeft aria-hidden="true" size={13} strokeWidth={1.8} />
+                返回作品列表
               </button>
             )}
             <button
-              className="btn btn-primary"
+              type="button"
+              className="btn btn-primary btn-sm"
               onClick={() => navigate(`/novels/${novel.id}/workspace`)}
             >
-              <PenLine aria-hidden="true" size={16} strokeWidth={1.8} />
+              <PenLine aria-hidden="true" size={13} strokeWidth={1.8} />
               进入写作工作台
             </button>
             <button
-              className="btn btn-secondary"
+              type="button"
+              className="btn btn-secondary btn-sm"
               onClick={() => navigate(`/novels/${novel.id}/setting-suggestions`)}
             >
-              设定库 AI 推演
+              <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
+              设定推演
             </button>
             <button
-              className="btn btn-secondary"
+              type="button"
+              className="btn btn-secondary btn-sm"
               onClick={() => navigate(`/novels/${novel.id}/autonomous-planning`)}
             >
-              自主创作规划
+              <Compass aria-hidden="true" size={13} strokeWidth={1.8} />
+              自主规划
             </button>
             <button
-              className="btn btn-secondary"
+              type="button"
+              className="btn btn-secondary btn-sm"
               onClick={() => navigate(`/novels/${novel.id}/references`)}
             >
-              参考资料库
+              <FileText aria-hidden="true" size={13} strokeWidth={1.8} />
+              参考资料
             </button>
           </div>
         </div>
       </div>
 
+      {/* 紧凑双列无缝网格（无冗余留白） */}
       <div className="detail-cards-grid">
         <PanelErrorBoundary panelTitle="作品基本信息">
           <NovelBasicInfoCard novel={novel} onSave={handleSaveBasicInfo} />
         </PanelErrorBoundary>
-
-        <div
-          id="novel-detail-world-setting"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
-          data-testid="novel-detail-world-setting"
-          tabIndex={-1}
-        >
-          <PanelErrorBoundary panelTitle="世界观设定">
-            <WorldSettingCard
-              novelId={novel.id}
-              settings={worldSettings}
-              onSave={handleSaveWorldSetting}
-            />
-          </PanelErrorBoundary>
-        </div>
-
-        <div
-          id="novel-detail-rule-system"
-          className={`detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
-          data-testid="novel-detail-rule-system"
-          style={{ gridColumn: '1 / -1' }}
-          tabIndex={-1}
-        >
-          <PanelErrorBoundary panelTitle="法则体系">
-            <RuleSystemCard
-              novelId={novel.id}
-              ruleSystems={ruleSystems}
-              onSave={handleSaveRuleSystem}
-              onDelete={handleDeleteRuleSystem}
-            />
-          </PanelErrorBoundary>
-        </div>
 
         <div
           id="novel-detail-protagonist"
@@ -340,9 +381,40 @@ function NovelDetailPage() {
                     title: '保存主角设定失败',
                     message: describeUnknownError(e, '保存主角设定失败'),
                   });
-                  throw e; // 重新抛出让卡片组件显示错误
+                  throw e;
                 }
               }}
+            />
+          </PanelErrorBoundary>
+        </div>
+
+        <div
+          id="novel-detail-world-setting"
+          className={`detail-focus-target${focusTargetId === 'novel-detail-world-setting' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-world-setting"
+          tabIndex={-1}
+        >
+          <PanelErrorBoundary panelTitle="世界观设定">
+            <WorldSettingCard
+              novelId={novel.id}
+              settings={worldSettings}
+              onSave={handleSaveWorldSetting}
+            />
+          </PanelErrorBoundary>
+        </div>
+
+        <div
+          id="novel-detail-rule-system"
+          className={`detail-focus-target${focusTargetId === 'novel-detail-rule-system' ? ' is-focused' : ''}`}
+          data-testid="novel-detail-rule-system"
+          tabIndex={-1}
+        >
+          <PanelErrorBoundary panelTitle="法则体系">
+            <RuleSystemCard
+              novelId={novel.id}
+              ruleSystems={ruleSystems}
+              onSave={handleSaveRuleSystem}
+              onDelete={handleDeleteRuleSystem}
             />
           </PanelErrorBoundary>
         </div>

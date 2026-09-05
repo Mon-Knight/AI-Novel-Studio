@@ -11,6 +11,7 @@ const CHAPTER_REQUIRED = 'WORKBENCH_CHAPTER_REQUIRED';
 const CORE_ASSETS_MISSING = 'GENERATION_CORE_ASSETS_MISSING';
 const PREVIOUS_CHAPTER_NOT_ADOPTED = 'WORKBENCH_PREVIOUS_CHAPTER_NOT_ADOPTED';
 const PREVIOUS_CHAPTER_CONTENT_UNAVAILABLE = 'WORKBENCH_PREVIOUS_CHAPTER_CONTENT_UNAVAILABLE';
+const MODEL_CREDENTIAL_UNAVAILABLE = 'WORKBENCH_MODEL_CREDENTIAL_UNAVAILABLE';
 const RETRY_TARGET_FAILURES = new Set([
   'WORKBENCH_RETRY_TARGET_MISSING',
   'WORKBENCH_RETRY_TARGET_CONFLICT',
@@ -111,6 +112,14 @@ export function classifyWorkbenchFailure(error: unknown): WorkbenchFailure {
       code: code || 'MODEL_TOOL_CALLING_NOT_VERIFIED',
       message: '所选模型未通过当前 Runtime 的工具调用能力验证。',
       hint: '可重试验证，或在模型设置中选择支持原生工具调用的模型后再发送。',
+    };
+  }
+  if (code === MODEL_CREDENTIAL_UNAVAILABLE) {
+    return {
+      layer: 'service',
+      code,
+      message: message.trim() || '固定模型的本次会话凭据不可用。',
+      hint: 'API Key 只保留在本次应用会话；请在模型设置中重新配置，或使用当前模型新建任务。',
     };
   }
   if (RETRYABLE_PROVIDER_FAILURE_CODES.has(code) || TRANSIENT_PROVIDER_FAILURE_PATTERN.test(text)) {

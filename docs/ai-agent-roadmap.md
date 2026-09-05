@@ -206,32 +206,28 @@ Phase 1A-A / R0.75  Capability Catalog                VERIFIED
 Phase 1A-B / R1     Domain Facade                     VERIFIED
 Phase 1A-C / R1.5   Canonical Tool Projection         VERIFIED
 Phase 1A-D / R3     Portable Manifest + Drift Gate    VERIFIED
-Canonical model-visible identities                   0
-R4 真实 Main Agent Runtime                            NOT RELEASED
-Writing/Context/Quality SubAgent                      NOT RELEASED
+Canonical catalog/manifest exposure                   DONE（4 项 stable）
+Canonical model-visible identities                    4（Catalog/Manifest）
+R4 真实 DSH Main Agent Runtime                         IN PROGRESS（未 VERIFIED）
+Writing/Context/Quality SubAgent                      POSTPONED
 ```
 
-四个只读 Canonical Tool 仍是 `catalog_only + partial`，后续门禁固定为：
+四个只读 Canonical Tool 已是 `stable` + `working`，共享 Manifest 的 `modelVisibleToolIdentities` 为 `context.read@1 / memory.search@1 / novel.read@1 / structure.read@1`。不得再把 `catalog_only` 或可见数为 0 写成当前状态。
 
-1. `novel.read`：统一作品、设定、主角 JSON/表事实源。
-2. `structure.read`：补足 version、active pointer、写后读与 CAS 证据。
-3. `context.read`：统一 summary apply 与完整 context bundle 的 adopted-draft/source 协议。
-4. `memory.search`：补足真实 embedding、混合检索、降级和重启证据；进程内 `NovelMemoryManager` 不计入。
-
-四项 blocker 关闭后，必须另做一次显式、可回滚的 exposure 变更，证明 scoped manifest、DSH `tools/list/tools.call`、权限、负例和重启行为。只有该门禁通过后，才进入 **R4：真实 Main Agent Runtime 验证**。Canonical Registry/Projection 是 R4 的前置条件，不能再排到 Main Agent 或 Writing SubAgent 之后。
+当前门禁是 **R4：Canonical-only DSH 只读回合**。Gateway 在 Canonical allowlist 下会列出 `novel.read / structure.read / context.read / memory.search`；宿主 `task_runtime` 仍注入 legacy `ALLOWED_TOOLS`，生产 `tools/list` 尚未切过去。`mainAgentRuntimeService` 脚手架不能代替真实模型在 DSH Agent Loop 中自主选择 Canonical Tool。Writing SubAgent 与 `chapter_write` 走 DSH 继续后置。
 
 ---
 
 ## 6. 关键技术能力演进
 
-| 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                                        |
-| ------------ | ---------------- | ---------------- | -------------------------------------------------------------- |
-| Rules        | 静态文档         | 动态检查         | 自动执行                                                       |
-| Planning     | 人工拆解         | 固定持久 Planner | 全书创作 Agent 规划已实现                                      |
-| Memory       | 章节上下文       | 持久摘要与状态   | SQLite 长期/混合检索已实现；自动 embedding 与 Agent 准入待建设 |
-| Tool Calling | 无               | 工具注册         | legacy 编排可运行；Canonical 模型可见数为 0，R4 待验证         |
-| Multi-Agent  | 无               | 无               | 全书规划 + 六专家评审已实现                                    |
-| Verification | 人工             | 自动化           | 持续验证                                                       |
+| 能力         | v1.x（基础设施） | v2.x（Agent 化） | v3.x（当前 Autonomous）                                                        |
+| ------------ | ---------------- | ---------------- | ------------------------------------------------------------------------------ |
+| Rules        | 静态文档         | 动态检查         | 自动执行                                                                       |
+| Planning     | 人工拆解         | 固定持久 Planner | 全书创作 Agent 规划已实现                                                      |
+| Memory       | 章节上下文       | 持久摘要与状态   | SQLite 长期/混合检索已实现；自动 embedding 与 Agent 准入待建设                 |
+| Tool Calling | 无               | 工具注册         | Catalog 可见 4 项 Canonical 只读 Tool；生产 DSH 仍用 legacy 名，R4 未 VERIFIED |
+| Multi-Agent  | 无               | 无               | 全书规划 + 六专家评审已实现                                                    |
+| Verification | 人工             | 自动化           | 持续验证                                                                       |
 
 ---
 

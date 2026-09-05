@@ -165,3 +165,32 @@ test('focused detail view returns to the creative workbench', async () => {
 
   assert.ok(await screen.findByTestId('workbench-route'));
 });
+
+test('default detail view shows back to novels list and empty state placeholders', async () => {
+  render(
+    React.createElement(
+      MemoryRouter,
+      {
+        initialEntries: [`/novels/${novel.id}`],
+        future: { v7_startTransition: true, v7_relativeSplatPath: true },
+      },
+      React.createElement(
+        Routes,
+        null,
+        React.createElement(Route, {
+          path: '/novels/:novelId',
+          element: React.createElement(NovelDetailPage),
+        }),
+        React.createElement(Route, {
+          path: '/novels',
+          element: React.createElement('div', { 'data-testid': 'novels-route' }, '小说作品列表'),
+        }),
+      ),
+    ),
+  );
+
+  const back = await screen.findByTestId('novel-detail-back-novels');
+  assert.ok(back);
+  fireEvent.click(back);
+  assert.ok(await screen.findByTestId('novels-route'));
+});

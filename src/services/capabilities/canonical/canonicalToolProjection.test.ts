@@ -161,8 +161,8 @@ test('projection contains only fixed low-risk facade candidates', async () => {
     assert.equal(descriptor.executor, 'domain_facade');
     assert.equal(descriptor.sideEffect, 'none');
     assert.equal(descriptor.confirmationPolicy, 'never');
-    assert.equal(descriptor.exposure, 'catalog_only');
-    assert.equal(descriptor.projectionState, 'catalog_only');
+    assert.equal(descriptor.exposure, 'stable');
+    assert.equal(descriptor.projectionState, 'stable');
     assert.equal(descriptor.id.includes('chapter.read_outline'), false);
     assert.ok(descriptor.facade.includes('Capability'));
     assert.equal(descriptor.evidence.capabilityId, descriptor.id);
@@ -191,10 +191,10 @@ test('projection contains only fixed low-risk facade candidates', async () => {
     getCanonicalProjectionDiagnostics().map((diagnostic) => diagnostic.included),
     [true, true, true, true],
   );
-  assert.deepEqual(await listCanonicalToolsForAgent(), []);
+  assert.equal((await listCanonicalToolsForAgent()).length, 4);
 
   const agentManifest = await getCanonicalAgentManifest();
-  assert.deepEqual(agentManifest.tools, []);
+  assert.equal(agentManifest.tools.length, 4);
 });
 
 test('manifest hash is deterministic and projection does not replace the legacy registry', async () => {

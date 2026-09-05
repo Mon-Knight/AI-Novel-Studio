@@ -19,6 +19,8 @@
 //!   novel-domain-gateway --db <novel.sqlite> --smoke   # one-shot self check
 
 mod secret_guard;
+#[cfg(test)]
+mod sql_column_contract;
 mod tools;
 
 use rusqlite::{Connection, OpenFlags};

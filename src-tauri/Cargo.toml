@@ -1,6 +1,6 @@
 [package]
 name = "ai-novel-studio"
-version = "3.6.1"
+version = "3.6.2"
 description = "AI Novel Studio - Windows 桌面端 AI 小说创作工作台"
 authors = ["Mon-Knight"]
 license = ""
@@ -23,7 +23,7 @@ sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [workspace]
 members = ["gateway"]

@@ -127,9 +127,10 @@ ContextRecord（上下文记录）
 ## 6. 路由架构
 
 ```text
-/                          → Home（作品管理首页）
+/                          → Workbench（创作工作台）
+/novels                    → Home（作品管理）
 /novels/:novelId           → NovelDetail（作品详情）
-/novels/:novelId/workspace → WritingWorkspace（写作工作台）
+/novels/:novelId/workspace → WritingWorkspace（章节审阅/编辑器）
 /styles                    → StyleProfiles（风格方案管理）
 /settings                  → Settings（设置中心）
 /coming-soon               → ComingSoon（未开放功能提示）

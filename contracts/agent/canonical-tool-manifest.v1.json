@@ -2,7 +2,13 @@
   "contractVersion": "canonical_tool_manifest_v1",
   "projectionVersion": "1",
   "canonicalization": "ans_canonical_json_v1",
-  "modelVisibleToolIdentities": [],
+  "projectionHash": "5618416f51b761ff6a9089bc46be7b468bb46c95351aa0690d92e384a83b3e93",
+  "modelVisibleToolIdentities": [
+    "context.read@1",
+    "memory.search@1",
+    "novel.read@1",
+    "structure.read@1"
+  ],
   "tools": [
     {
       "id": "context.read",
@@ -106,9 +112,9 @@
       "sideEffect": "none",
       "confirmationPolicy": "never",
       "timeoutMs": 30000,
-      "exposure": "catalog_only",
-      "projectionState": "catalog_only",
-      "health": "partial"
+      "exposure": "stable",
+      "projectionState": "stable",
+      "health": "working"
     },
     {
       "id": "memory.search",
@@ -205,9 +211,9 @@
       "sideEffect": "none",
       "confirmationPolicy": "never",
       "timeoutMs": 20000,
-      "exposure": "catalog_only",
-      "projectionState": "catalog_only",
-      "health": "partial"
+      "exposure": "stable",
+      "projectionState": "stable",
+      "health": "working"
     },
     {
       "id": "novel.read",
@@ -299,9 +305,9 @@
       "sideEffect": "none",
       "confirmationPolicy": "never",
       "timeoutMs": 20000,
-      "exposure": "catalog_only",
-      "projectionState": "catalog_only",
-      "health": "partial"
+      "exposure": "stable",
+      "projectionState": "stable",
+      "health": "working"
     },
     {
       "id": "structure.read",
@@ -399,10 +405,9 @@
       "sideEffect": "none",
       "confirmationPolicy": "never",
       "timeoutMs": 15000,
-      "exposure": "catalog_only",
-      "projectionState": "catalog_only",
-      "health": "partial"
+      "exposure": "stable",
+      "projectionState": "stable",
+      "health": "working"
     }
-  ],
-  "projectionHash": "36023c1b7e573dddc8b741c6a383e47ff72a7ead67d43b2f0159fd32c43d140c"
+  ]
 }

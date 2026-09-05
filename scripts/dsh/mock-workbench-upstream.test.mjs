@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { startMockWorkbenchUpstream } from './mock-workbench-upstream.mjs';
+import { canonicalToolName, startMockWorkbenchUpstream } from './mock-workbench-upstream.mjs';
 
 const running = [];
 
@@ -113,6 +113,28 @@ test('explicit Fetch-forbidden ports fail before the mock starts', async () => {
   );
 });
 
+test('canonicalToolName recognizes legacy markers and exact Canonical names', () => {
+  assert.equal(canonicalToolName('novel.read'), 'novel.read');
+  assert.equal(canonicalToolName('mcp__novel__novel.read'), 'novel.read');
+  assert.equal(canonicalToolName('novel.read@1'), 'novel.read');
+  assert.equal(canonicalToolName('mcp__novel__novel.read@1'), 'novel.read');
+  assert.equal(canonicalToolName('novel_read_1e2b3adf9a19'), 'novel.read');
+  assert.equal(canonicalToolName('structure.read'), 'structure.read');
+  assert.equal(canonicalToolName('mcp__novel__structure.read'), 'structure.read');
+  assert.equal(canonicalToolName('context.read@1'), 'context.read');
+  assert.equal(canonicalToolName('mcp__novel__memory.search'), 'memory.search');
+  assert.equal(canonicalToolName('memory.search@1'), 'memory.search');
+  assert.equal(
+    canonicalToolName('mcp__novel__novel_read_context_111111111111'),
+    'novel.read_context',
+  );
+  assert.equal(canonicalToolName('novel.read_context'), 'novel.read_context');
+  assert.equal(canonicalToolName('mcp__novel__search_memory_333333333333'), 'search_memory');
+  assert.equal(canonicalToolName('mcp__novel__generate_chapter_444444444444'), 'generate_chapter');
+  assert.notEqual(canonicalToolName('novel.read_context'), 'novel.read');
+  assert.notEqual(canonicalToolName('mcp__novel__novel_read_context_abc'), 'novel.read');
+});
+
 test('normal mode derives three Workbench phases from actual wire tool names', async () => {
   const server = await start();
   const initial = [{ role: 'user', content: 'private prompt must not be recorded' }];
@@ -181,6 +203,84 @@ test('normal mode derives three Workbench phases from actual wire tool names', a
   assert.doesNotMatch(snapshotText, /private prompt must not be recorded/u);
   assert.doesNotMatch(snapshotText, /夜雨刚停/u);
   assert.doesNotMatch(snapshotText, /authorization/iu);
+});
+
+test('Canonical-only advertised tools call read tools and skip generate_chapter', async () => {
+  const canonicalNames = Object.freeze({
+    'novel.read': 'mcp__novel__novel.read',
+    'structure.read': 'structure.read@1',
+    'context.read': 'context.read',
+    'memory.search': 'mcp__novel__memory.search@1',
+  });
+  const canonicalTools = Object.values(canonicalNames).map((name) => ({
+    type: 'function',
+    function: { name, description: `fixture ${name}`, parameters: { type: 'object' } },
+  }));
+  const server = await start();
+  const initial = [{ role: 'user', content: 'private canonical read prompt' }];
+  const body = requestBody(initial);
+  body.tools = canonicalTools;
+
+  const firstResponse = await fetch(server.chatCompletionsUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const firstEvents = parseSse(await firstResponse.text());
+  const firstCalls = toolCalls(firstEvents);
+  assert.equal(finishReason(firstEvents), 'tool_calls');
+  assert.deepEqual(
+    firstCalls.map((call) => call.function.name),
+    [
+      canonicalNames['novel.read'],
+      canonicalNames['structure.read'],
+      canonicalNames['context.read'],
+      canonicalNames['memory.search'],
+    ],
+  );
+  assert.deepEqual(JSON.parse(firstCalls[0].function.arguments), { novelId: 'novel-fixture' });
+  assert.deepEqual(JSON.parse(firstCalls[1].function.arguments), {
+    novelId: 'novel-fixture',
+    chapterId: 'chapter-fixture',
+  });
+  assert.deepEqual(JSON.parse(firstCalls[2].function.arguments), {
+    novelId: 'novel-fixture',
+    chapterId: 'chapter-fixture',
+  });
+  assert.deepEqual(JSON.parse(firstCalls[3].function.arguments), {
+    novelId: 'novel-fixture',
+    query: '章节创作上下文',
+  });
+
+  const afterContext = [...initial, assistantToolMessage(firstCalls), ...toolResults(firstCalls)];
+  const secondBody = requestBody(afterContext);
+  secondBody.tools = canonicalTools;
+  const secondRaw = await (
+    await fetch(server.chatCompletionsUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(secondBody),
+    })
+  ).text();
+  const secondEvents = parseSse(secondRaw);
+  assert.equal(finishReason(secondEvents), 'stop');
+  assert.equal(toolCalls(secondEvents).length, 0);
+  const secondText = secondEvents
+    .filter((event) => event !== '[DONE]')
+    .map((event) => event.choices?.[0]?.delta?.content ?? '')
+    .join('');
+  assert.match(secondText, /已读取当前作品与章节上下文/u);
+  assert.match(secondText, /建议下一步/u);
+  assert.doesNotMatch(secondRaw, /generate_chapter/u);
+  assert.doesNotMatch(secondRaw, /候选/u);
+  assert.doesNotMatch(secondRaw, /正式正文/u);
+
+  const snapshot = await (await fetch(server.requestsUrl)).json();
+  assert.deepEqual(
+    snapshot.requests.map((request) => request.phase),
+    ['canonical-read-tools', 'canonical-read-final'],
+  );
+  assert.doesNotMatch(JSON.stringify(snapshot), /private canonical read prompt/u);
 });
 
 test('text-only and tool-error modes remain deterministic', async () => {

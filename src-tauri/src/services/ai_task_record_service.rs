@@ -573,7 +573,8 @@ pub fn clear_ai_task_records(
     ensure_ai_task_records_table(conn, &db_path)?;
     let before_count = ai_task_record_repository::count_total_ai_task_records(conn)?;
     ensure_ai_tasks_are_terminal(conn, None)?;
-    ensure_ai_tasks_are_not_bound_to_completed_quality_reports(conn, None)?;
+    // Clear-all unlinks child rows (including completed quality reports) then
+    // deletes task history. Reports themselves stay; only the AI task list is wiped.
 
     conn.execute_batch("BEGIN TRANSACTION")
         .map_err(|e| format!("Failed to begin transaction: {}", e))?;

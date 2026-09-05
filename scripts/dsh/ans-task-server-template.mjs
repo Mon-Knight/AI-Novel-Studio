@@ -87,6 +87,36 @@ const NOVEL_MCP_TOOL_IDENTITIES = [
   { canonical: 'get_character_states', publicName: 'mcp__novel__get_character_states' },
   { canonical: 'generate_chapter', publicName: 'mcp__novel__generate_chapter' },
 ];
+const CANONICAL_MCP_TOOL_IDENTITIES = [
+  { canonical: 'novel.read', dottedSuffix: 'novel.read', underscored: 'novel_read' },
+  { canonical: 'structure.read', dottedSuffix: 'structure.read', underscored: 'structure_read' },
+  { canonical: 'context.read', dottedSuffix: 'context.read', underscored: 'context_read' },
+  { canonical: 'memory.search', dottedSuffix: 'memory.search', underscored: 'memory_search' },
+];
+
+function registeredToolMatchesCanonical(tool, identity) {
+  if (typeof tool !== 'string') return false;
+  if (tool === identity.dottedSuffix || tool.startsWith(`${identity.dottedSuffix}@`)) return true;
+  const dotted = `mcp__novel__${identity.dottedSuffix}`;
+  if (tool === dotted || tool.startsWith(`${dotted}@`)) return true;
+  const underscored = `mcp__novel__${identity.underscored}`;
+  if (tool === underscored || tool === identity.underscored) return true;
+  if (tool.startsWith(`${underscored}_`)) {
+    const suffix = tool.slice(underscored.length + 1);
+    return suffix !== '' && /^[0-9a-f]+$/iu.test(suffix);
+  }
+  if (tool.startsWith(`${identity.underscored}_`)) {
+    const suffix = tool.slice(identity.underscored.length + 1);
+    return suffix !== '' && /^[0-9a-f]+$/iu.test(suffix);
+  }
+  return false;
+}
+
+function hasCanonicalNovelTools(registeredTools) {
+  return CANONICAL_MCP_TOOL_IDENTITIES.every((identity) =>
+    registeredTools.some((tool) => registeredToolMatchesCanonical(tool, identity)),
+  );
+}
 const AGENT_SPINE_SERVICES = [
   'agents',
   'agentLoop',
@@ -540,6 +570,9 @@ class AnsTaskServer {
         ? !registeredTools.some((tool) => tool.startsWith(identity.publicNamePrefix))
         : !registeredTools.includes(identity.publicName),
     ).map((identity) => identity.canonical);
+    const mcpNovelLoaded =
+      toolDirectory.available &&
+      (missingNovelTools.length === 0 || hasCanonicalNovelTools(registeredTools));
     return [
       {
         id: 'sdk-jsonrpc-server',
@@ -588,9 +621,9 @@ class AnsTaskServer {
         id: 'mcp-novel',
         plugin: 'mcp-client',
         kind: 'tool',
-        status: status(toolDirectory.available && missingNovelTools.length === 0),
+        status: status(mcpNovelLoaded),
         checks: ['tools.schemas'],
-        ...(missingNovelTools.length === 0 ? {} : { missingTools: missingNovelTools }),
+        ...(mcpNovelLoaded ? {} : { missingTools: missingNovelTools }),
       },
     ];
   }

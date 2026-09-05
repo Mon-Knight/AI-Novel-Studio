@@ -8,8 +8,13 @@ export type CandidateToolName =
   | 'check_quality'
   | 'summarize_chapter';
 
-export type ContextReadToolName =
+export type LegacyContextReadToolName =
   'novel.read_context' | 'chapter.read_outline' | 'get_character_states' | 'search_memory';
+
+export type CanonicalReadToolName =
+  'novel.read' | 'structure.read' | 'context.read' | 'memory.search';
+
+export type ContextReadToolName = LegacyContextReadToolName | CanonicalReadToolName;
 
 export type DshTaskKind =
   | 'read'
@@ -147,15 +152,15 @@ function requiresFormalNovelContextRead(goal: string): boolean {
 function buildRequiredReadTools(goal: string, chapterId?: string): ContextReadToolName[] {
   if (!requiresFormalNovelContextRead(goal)) return [];
   const directive = routingDirectiveText(goal.toLowerCase());
-  const tools: ContextReadToolName[] = ['novel.read_context'];
+  const tools: ContextReadToolName[] = ['novel.read'];
   if (chapterId && CHAPTER_CONTEXT_READ_GOAL.test(directive)) {
-    tools.push('chapter.read_outline');
+    tools.push('structure.read');
   }
   if (chapterId && CHARACTER_STATE_READ_GOAL.test(directive)) {
-    tools.push('get_character_states');
+    tools.push('context.read');
   }
   if (CONTINUITY_MEMORY_READ_GOAL.test(directive)) {
-    tools.push('search_memory');
+    tools.push('memory.search');
   }
   return [...new Set(tools)];
 }

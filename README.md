@@ -25,11 +25,11 @@ AI Novel Studio 是面向长篇小说创作的 **Windows 桌面端 AI 写作工�
 
 ## 2. 当前版本与定位
 
-**当前版本：v3.6.1**
+**当前版本：v3.6.2**
 
-**阶段：智能体创作平台与长篇小说记忆层**
+**阶段：Canonical 只读链路与桌面体验收口补丁**
 
-v3.6.0 是当前功能基线；v3.6.1 在不扩展产品能力的前提下收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复。本节描述已经进入当前版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
+v3.6.0 是当前功能基线；v3.6.1 收口 bundled SQLite、发布门禁与 Runtime 固定模型恢复；v3.6.2 放行 Canonical 只读链路并收口桌面体验与 R4 文档口径，不扩展后续版本能力。本节描述已经进入当前版本的能力与仍然关闭的边界；后续能力是否放行继续以对应版本任务和验证证据为准。
 
 v3.0.0 从“单章协作评审”扩展为受审核的长篇自主创作系统：用户提交小说 Brief 后，Plot Planner、Character Evolution、World Builder、Conflict Generator 和 Pacing Controller 协作生成 12～500 章全书计划；计划确认后，用户可以显式启动、暂停和继续全书候选队列，系统按章生成候选、执行六专家评审，并在用户采用正文后提取人物变化与世界扩展候选。
 
@@ -266,7 +266,8 @@ API Key 仅保留在当前应用进程内存，并按 Provider、Base URL 与模
 | v3.0.0                    | 已完成：全书自主规划、六专家评审、跨进程三档调度、可靠取消 / 流式预览 / 成本硬预算、参考资料 / 分层风格 / 混合语义 Memory，以及多目标事务、跨章节批处理和势力 / 地点正式资产 |
 | v3.3.0～v3.5.0            | 已实现并在 v3.5.0 版本条目收敛：对话式创作工作台主界面、任务对话与内联产物、确认/审阅授权，以及写作工作台向人工审阅、编辑、保存和采用收敛                                    |
 | v3.6.0                    | 功能基线：生产边界纠偏、Canonical 能力资产化、工作台继续收敛与稳定性修复；Canonical 模型可见数量仍为 0，Main Agent 尚未放行                                                  |
-| v3.6.1                    | **当前版本**：bundled SQLite WAL 安全补丁、发布 E2E 门禁修复与 Runtime 固定模型恢复；不新增后续版本能力                                                                      |
+| v3.6.1                    | 已完成：bundled SQLite WAL 安全补丁、发布 E2E 门禁修复与 Runtime 固定模型恢复                                                                                                |
+| v3.6.2                    | **当前版本**：Canonical 只读链路放行（4 项 stable Tool、DSH read 回合 Canonical-only allowlist）、DPAPI 会话凭据持久化与桌面体验收口；R4 live 云端验收仍未完成               |
 | v3.x 后续                 | Canonical 工具模型可见化、真实 Main Agent / Writing SubAgent 验收、结构化产物原子应用、自动语义化与召回评估、系统级无人值守、正文批处理、资产可视化与出版交付                |
 
 完整历史见 [docs/version-roadmap.md](docs/version-roadmap.md)。
@@ -381,7 +382,7 @@ powershell -ExecutionPolicy Bypass -File scripts/agent-workflow/verify_project.p
 
 ## 12. 当前限制
 
-- 通用结构化产物的 `request_apply` 在领域写入与 `ArtifactDecision` 尚未纳入同一 Rust/SQLite 事务前保持失败关闭，不会产生部分领域写入；章节正文的审阅授权与 SQLite 原子采用链路仍可正常使用。
+- 桌面端结构化 `request_apply` 仅对白名单 `outline / character_candidates / event_candidates / setting_candidates / chapter_summary` 以及精确 `generic_json`+`context_compression` 与 `ArtifactDecision` 同事务写入；其余结构化类型和浏览器回退失败关闭且零领域写入。章节正文仍走审阅授权与 SQLite 原子采用。
 - 四个 Canonical 只读能力当前均为 `catalog_only + partial`，模型可见数量为 0；生产 Main Agent 与 Writing SubAgent 尚未放行，旧 ReAct Harness 仅是非生产实验底座。
 - 三层 Novel Memory 的片段、状态与版本快照目前保存在进程内，不能替代 SQLite `memory_documents`、正式章节上下文及其跨重启持久化语义。
 - migration 028 的通用多目标事务当前覆盖章节 metadata、势力、地点及其正式关系；跨章节正文批量改写仍必须先生成候选、逐目标审核，不能绕过草稿与采用边界。

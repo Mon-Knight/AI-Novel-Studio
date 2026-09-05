@@ -1,6 +1,6 @@
 # R4：真实 Main Agent Runtime 验证任务书（Canonical exposure 后置）
 
-> **状态：WAITING_FOR_CANONICAL_EXPOSURE。** v3.6.0 候选已完成 Phase 1A-A/B/C/D（Capability Catalog、Domain Facade、Canonical Projection、portable Manifest/漂移门禁），但四个 Canonical Tool 仍为 `catalog_only + partial`，`modelVisibleToolIdentities=[]`。必须先关闭四项 Facade blocker，再通过独立 exposure 变更；此前不得执行本任务书，也不得把它写成当前已授权下一步。
+> **状态：CANONICAL_EXPOSURE_DONE；当前门禁是 R4 DSH 验证。** Catalog/Manifest 已将 4 项 Canonical 只读 Tool 放行为 `stable` + `working`，`modelVisibleToolIdentities` 为 `context.read@1 / memory.search@1 / novel.read@1 / structure.read@1`。不得再把 `catalog_only` 或空可见集合写成当前状态。Gateway 在 Canonical allowlist 下会把无版本号的 `novel.read` 等列入 `tools/list`；工作台 `read` intent 已请求该 allowlist。宿主 `task_runtime` 仍固定注入 legacy `ALLOWED_TOOLS`，生产读回合尚未把 Canonical 名交给模型，R4 未 VERIFIED。Writing SubAgent 与 `chapter_write` 不走 DSH。
 
 ## 1. 阶段定位
 
@@ -36,7 +36,7 @@ Tool Call / Tool Result
 
 ## 3. 实现范围
 
-只有独立 exposure 门禁已通过后，才建议新增显式 opt-in 的 ignored/integration 验证入口，优先复用：
+Canonical catalog/manifest exposure 已完成。R4 验证应新增显式 opt-in 的 ignored/integration 入口，优先复用：
 
 ```text
 src/services/dsh/taskSessionAdapter.ts
@@ -133,19 +133,17 @@ docs/audit-v2/agent_runtime_validation.md
 ## 7. 后续顺序
 
 ```text
-R3 portable Manifest / 宿主门禁（已验证，visible=0）
+R3 portable Manifest / 宿主门禁（已验证）
         ↓
-逐项关闭 novel/structure/context/memory 四项 Facade blocker
+Canonical catalog/manifest exposure（4 项 stable，已完成）
         ↓
-独立 Canonical exposure 变更与 scoped Tool 投影验证
-        ↓
-R4 真实 Main Agent Runtime 验证（本任务书）
+R4 真实 Main Agent Runtime 验证（本任务书；当前门禁：Canonical-only DSH 只读回合）
         ↓
 R5 legacy runtime/入口隔离
         ↓
-R6 Writing SubAgent（独立 Prompt/模型/上下文/预算）
+R6 Writing SubAgent（独立 Prompt/模型/上下文/预算；后置）
         ↓
 Workbench chapter_write 真实闭环；其余 SubAgent 按独立任务放行
 ```
 
-Canonical Registry/Projection/Facade 是 R4 的前置条件，不能再排在 Main Agent 或 Writing SubAgent 之后。本任务书只定义后置验证证据，不创建新版本、不授权 exposure/R4 执行，也不授权提交、tag 或发布。
+Canonical Registry/Projection/Facade 与 catalog exposure 是 R4 的前置条件，已经完成。本任务书只定义 R4 DSH 后置验证证据，不把宿主启发式脚手架写成 VERIFIED，不授权 Writing SubAgent 或 `chapter_write` 走 DSH，也不授权提交、tag 或发布。

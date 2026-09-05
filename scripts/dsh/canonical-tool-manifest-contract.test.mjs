@@ -83,7 +83,7 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
-test('shared canonical Tool manifest has a stable independent DSH hash and zero exposure', () => {
+test('shared canonical Tool manifest has a stable independent DSH hash and stable exposure', () => {
   const manifest = readManifest();
   assert.deepEqual(Object.keys(manifest).sort(), [
     'canonicalization',
@@ -101,7 +101,12 @@ test('shared canonical Tool manifest has a stable independent DSH hash and zero 
   const { projectionHash, ...hashPayload } = manifest;
   assert.equal(sha256(canonicalJson(hashPayload)), projectionHash);
 
-  assert.deepEqual(manifest.modelVisibleToolIdentities, []);
+  assert.deepEqual(manifest.modelVisibleToolIdentities, [
+    'context.read@1',
+    'memory.search@1',
+    'novel.read@1',
+    'structure.read@1',
+  ]);
   assert.equal(Array.isArray(manifest.tools), true);
   assert.deepEqual(
     manifest.tools.map((tool) => assertRecord(tool, 'manifest.tools[]').id),
@@ -112,7 +117,7 @@ test('shared canonical Tool manifest has a stable independent DSH hash and zero 
   for (const tool of manifest.tools) {
     assert.equal(tool.name, tool.id);
     assert.equal(tool.version, '1');
-    assert.equal(tool.exposure, 'catalog_only');
+    assert.equal(tool.exposure, 'stable');
     assert.equal(tool.sideEffect, 'none');
     assert.equal(tool.confirmationPolicy, 'never');
     const inputSchema = assertRecord(tool.inputSchema, `${tool.id}.inputSchema`);
@@ -138,7 +143,7 @@ test('shared manifest and existing DSH template do not auto-connect legacy alias
 
   const taskServerTemplate = readFileSync(taskServerTemplatePath, 'utf8');
   for (const canonicalId of EXPECTED_TOOL_IDS) {
-    assert.doesNotMatch(
+    assert.match(
       taskServerTemplate,
       new RegExp(`['\"]${escapeRegex(canonicalId)}['\"]`, 'u'),
       `DSH template must not register catalog-only canonical Tool ${canonicalId}`,

@@ -12,7 +12,6 @@ import {
   taskSessionAdapter,
 } from '../../../services/dsh/taskSessionAdapter';
 import { hasUsableDshTaskCredentialAsync } from '../../../services/dsh/taskRuntimeService';
-import { captureTaskModelSnapshot } from '../../../services/conversation/taskModelSnapshot';
 import { chapterSummaryService } from '../../../services/context/chapterSummaryService';
 import {
   classifyTaskIntent,
@@ -36,11 +35,8 @@ import {
   formatWorkbenchFailure,
 } from '../../../services/conversation/workbenchFailure';
 import type { CurrentPluginProjection } from '../../../services/conversation/currentPluginService';
-import {
-  assertWorkbenchModelAvailable,
-  isLocalLikeWorkbenchModel,
-  WorkbenchModelUnavailableError,
-} from '../../../services/conversation/workbenchModelAvailability';
+import { WorkbenchModelUnavailableError } from '../../../services/conversation/workbenchModelAvailability';
+import { validateWorkbenchModelForSend } from './validateWorkbenchModelForSend';
 import {
   resolveWorkbenchChapterTarget,
   shouldResolveWorkbenchChapterTarget,
@@ -63,10 +59,9 @@ import { buildArtifactRevisionDraft } from '../artifactRevisionPrompt';
 import { executeWorkbenchTurnAfterContextReady } from '../workbenchExecutionGate';
 import { useConversationScopedState } from './useConversationScopedState';
 import { useWorkbenchChapterAssetRecovery } from './useWorkbenchChapterAssetRecovery';
-import {
-  createTrailingRefreshQueue,
-  shouldRefreshRuntimeBundleAfterPoll,
-} from './trailingRefreshQueue';
+import { createTrailingRefreshQueue } from './trailingRefreshQueue';
+import { setsEqual, useWorkbenchRuntimeHeartbeat } from './useWorkbenchRuntimeHeartbeat';
+import type { WorkbenchPluginRefreshSource } from './useWorkbenchPlugins';
 
 const STORY_PLAN_COMPLETE_MESSAGE =
   '全书规划中的最后一章已经采用，当前故事已写到规划终点。请先扩展全书规划，再继续生成新章节。';
@@ -105,15 +100,6 @@ function isCurrentAssetPreparation(
   );
 }
 
-function setsEqual(a: Set<string>, b: Set<string>): boolean {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  for (const item of a) {
-    if (!b.has(item)) return false;
-  }
-  return true;
-}
-
 function formatModelDirectoryFailure(error: unknown): string {
   if (error instanceof WorkbenchModelUnavailableError) return error.message;
   return 'Runtime 模型目录刷新失败，草稿已保留，请稍后重试。';
@@ -139,6 +125,7 @@ export function useWorkbenchTaskRunner(input: {
     conversationId?: string,
     allowProbe?: boolean,
     modelSnapshot?: TaskModelSnapshot,
+    source?: WorkbenchPluginRefreshSource,
   ) => Promise<CurrentPluginProjection[]>;
 }) {
   const {
@@ -169,10 +156,8 @@ export function useWorkbenchTaskRunner(input: {
     beginOperation: beginComposerErrorOperation,
     commitOperation: commitComposerErrorOperation,
   } = useConversationScopedState(selectedConversationId, '');
-  const [runningConversationIds, setRunningConversationIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [runtimeStatusReady, setRuntimeStatusReady] = useState(false);
+  const selectedConversationIdRef = useRef(selectedConversationId);
+  selectedConversationIdRef.current = selectedConversationId;
   const [chapterSummaryOrchestration, setChapterSummaryOrchestration] =
     useState<ChapterSummaryOrchestrationState>({ phase: 'none' });
   const refreshRuntimeBundle = useMemo(
@@ -203,6 +188,15 @@ export function useWorkbenchTaskRunner(input: {
     bundle.conversation.conversationId === selectedConversationId &&
     bundle.runs.some((run) => ['queued', 'running', 'cancel_requested'].includes(run.status)),
   );
+  const { runningConversationIds, setRunningConversationIds, runtimeStatusReady } =
+    useWorkbenchRuntimeHeartbeat({
+      selectedNovelRef,
+      selectedConversationIdRef,
+      selectedConversationId,
+      persistedSelectedRunActive,
+      refreshRuntimeBundle,
+      loadConversations,
+    });
 
   const targetConflict = useMemo(
     () =>
@@ -232,7 +226,6 @@ export function useWorkbenchTaskRunner(input: {
 
   const runningCountRef = useRef(runningConversationIds.size);
   runningCountRef.current = runningConversationIds.size;
-  const observedRuntimeIdsRef = useRef(new Set<string>());
   const pendingSendConversationIdsRef = useRef(new Set<string>());
   const [pendingReleaseEpoch, setPendingReleaseEpoch] = useState(0);
   const summaryOperationTurnIdsRef = useRef(new Set<string>());
@@ -246,9 +239,7 @@ export function useWorkbenchTaskRunner(input: {
   const settleAssetCandidateDecisionRef = useRef<
     (input: AssetDecisionSettlementInput) => Promise<void>
   >(async () => undefined);
-  const selectedConversationIdRef = useRef(selectedConversationId);
   const selectedChapterIdRef = useRef(chapterId);
-  selectedConversationIdRef.current = selectedConversationId;
   selectedChapterIdRef.current = chapterId;
   chapterSummaryOrchestrationRef.current = chapterSummaryOrchestration;
 
@@ -266,139 +257,13 @@ export function useWorkbenchTaskRunner(input: {
   }, []);
 
   const validateModelForSend = useCallback(
-    async (
+    (
       modelSnapshot: TaskModelSnapshot,
       options: { allowLocalFallback?: boolean } = {},
-    ): Promise<TaskModelSnapshot> => {
-      const currentPlugins = await refreshPlugins(undefined, true, modelSnapshot);
-      try {
-        assertWorkbenchModelAvailable(currentPlugins, modelSnapshot);
-        return modelSnapshot;
-      } catch (error) {
-        if (!options.allowLocalFallback || !isLocalLikeWorkbenchModel(modelSnapshot)) throw error;
-        const fallback = captureTaskModelSnapshot();
-        if (fallback.runtimeMode !== 'api' || !(await hasUsableDshTaskCredentialAsync(fallback))) {
-          throw error;
-        }
-        const fallbackPlugins = await refreshPlugins(undefined, true, fallback);
-        assertWorkbenchModelAvailable(fallbackPlugins, fallback);
-        return fallback;
-      }
-    },
+    ): Promise<TaskModelSnapshot> =>
+      validateWorkbenchModelForSend(modelSnapshot, refreshPlugins, options),
     [refreshPlugins],
   );
-
-  useEffect(() => {
-    let disposed = false;
-    let retryTimer: number | undefined;
-    let unlisten: (() => void) | undefined;
-
-    const handleProjection = (notice: {
-      conversationId: string;
-      kind: 'run' | 'tool' | 'assistant' | 'artifact' | 'terminal';
-    }) => {
-      if (disposed) return;
-      setRuntimeStatusReady(true);
-      const terminal = notice.kind === 'terminal';
-      const observed = new Set(observedRuntimeIdsRef.current);
-      if (terminal) observed.delete(notice.conversationId);
-      else observed.add(notice.conversationId);
-      observedRuntimeIdsRef.current = observed;
-      setRunningConversationIds((current) => {
-        const next = new Set(current);
-        if (terminal) next.delete(notice.conversationId);
-        else next.add(notice.conversationId);
-        return setsEqual(current, next) ? current : next;
-      });
-
-      if (selectedConversationIdRef.current === notice.conversationId) {
-        void refreshRuntimeBundle(notice.conversationId);
-      }
-      if ((notice.kind === 'run' || terminal) && selectedNovelRef.current) {
-        void loadConversations(selectedNovelRef.current);
-      }
-    };
-
-    const subscribe = async () => {
-      try {
-        const release = await taskSessionAdapter.subscribeToRuntimeProjections(handleProjection);
-        if (disposed) release();
-        else unlisten = release;
-      } catch {
-        if (!disposed) retryTimer = window.setTimeout(() => void subscribe(), 1_000);
-      }
-    };
-
-    void subscribe();
-    return () => {
-      disposed = true;
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
-      unlisten?.();
-    };
-  }, [loadConversations, refreshRuntimeBundle, selectedNovelRef]);
-
-  // Renderer reloads lose JS workers. Keep polling until Rust and persisted
-  // conversation facts agree on a terminal state; projection events accelerate it.
-  useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
-    let refreshInFlight = false;
-
-    const refreshRunning = async () => {
-      if (refreshInFlight) return;
-      refreshInFlight = true;
-      try {
-        const ids = await taskSessionAdapter.listRunningConversationIds();
-        if (!cancelled) {
-          setRuntimeStatusReady(true);
-          const next = new Set(ids);
-          const previous = observedRuntimeIdsRef.current;
-          const changed = !setsEqual(previous, next);
-          observedRuntimeIdsRef.current = next;
-          setRunningConversationIds((current) => {
-            current.forEach((id) => {
-              if (taskSessionAdapter.isRunning(id)) next.add(id);
-            });
-            if (setsEqual(current, next)) return current;
-            return next;
-          });
-
-          const selectedId = selectedConversationIdRef.current;
-          if (shouldRefreshRuntimeBundleAfterPoll(previous, next, selectedId)) {
-            await refreshRuntimeBundle(selectedId);
-          }
-          if (changed && selectedNovelRef.current) {
-            await loadConversations(selectedNovelRef.current);
-          }
-        }
-      } catch {
-        // A transient IPC failure must not permanently stop reload recovery.
-      } finally {
-        refreshInFlight = false;
-      }
-    };
-
-    void refreshRunning();
-
-    if (!runtimeStatusReady || runningConversationIds.size > 0 || persistedSelectedRunActive) {
-      timer = window.setInterval(() => void refreshRunning(), 1500);
-    }
-
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        window.clearInterval(timer);
-      }
-    };
-  }, [
-    loadConversations,
-    persistedSelectedRunActive,
-    refreshRuntimeBundle,
-    runningConversationIds.size,
-    runtimeStatusReady,
-    selectedConversationId,
-    selectedNovelRef,
-  ]);
 
   const executePersistedTurn = useCallback(
     async (request: {
@@ -484,7 +349,12 @@ export function useWorkbenchTaskRunner(input: {
         if (request.throwOnFailure) throw error;
         return undefined;
       } finally {
-        void refreshPlugins(request.conversationId, false, request.modelSnapshot);
+        void refreshPlugins(
+          request.conversationId,
+          false,
+          request.modelSnapshot,
+          'background',
+        ).catch(() => undefined);
         releaseRuntimeProjection();
       }
     },
@@ -497,6 +367,7 @@ export function useWorkbenchTaskRunner(input: {
       runningConversationIds,
       selectedNovelRef,
       setConversations,
+      setRunningConversationIds,
     ],
   );
 

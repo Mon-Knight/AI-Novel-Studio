@@ -23,7 +23,13 @@ test('capability catalog has unique canonical ids and explicit evidence', () => 
     assert.ok(capability.evidence.implementationEntrypoints.length > 0);
     assert.ok(capability.evidence.sourceOfTruth.length > 0);
     assert.ok(capability.evidence.references.length > 0);
-    assert.equal(capability.exposure, 'catalog_only');
+    const isExposedRead = [
+      'novel.read',
+      'structure.read',
+      'context.read',
+      'memory.search',
+    ].includes(capability.id);
+    assert.equal(capability.exposure, isExposedRead ? 'stable' : 'catalog_only');
   }
 
   for (const id of [
@@ -52,7 +58,10 @@ test('catalog preserves the distinction between capability health and agent expo
   assert.equal(adopt.kind, 'host_protocol');
   assert.equal(adopt.confirmationPolicy, 'user_required');
   assert.equal(adopt.sideEffect, 'write');
-  assert.deepEqual(listAgentExposedCapabilities(), []);
+  assert.deepEqual(
+    listAgentExposedCapabilities().map((c) => c.id),
+    ['novel.read', 'structure.read', 'context.read', 'memory.search'],
+  );
 });
 
 test('catalog selectors return canonical domain groupings without aliases', () => {
@@ -65,12 +74,15 @@ test('catalog selectors return canonical domain groupings without aliases', () =
   assert.equal(getCapability('missing.capability'), undefined);
 });
 
-test('Phase 1A-B facade metadata is recorded without opening model exposure', () => {
+test('Canonical read tools are exposed with working facades and stable exposure', () => {
   assert.equal(getCapability('novel.read')?.facade, 'projectCapability.readCurrentProject');
   assert.equal(getCapability('structure.read')?.facade, 'projectCapability.readChapterPosition');
   assert.equal(getCapability('context.read')?.facade, 'contextCapability.readCurrentStoryContext');
   assert.equal(getCapability('memory.search')?.facade, 'contextCapability.searchMemory');
   assert.equal(getCapability('writing.generate')?.facade, 'writingCapability.generateCandidate');
   assert.equal(getCapability('artifact.review')?.facade, 'artifactCapability.requestReview');
-  assert.deepEqual(listAgentExposedCapabilities(), []);
+  assert.deepEqual(
+    listAgentExposedCapabilities().map((c) => c.id),
+    ['novel.read', 'structure.read', 'context.read', 'memory.search'],
+  );
 });
